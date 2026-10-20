@@ -1,0 +1,19 @@
+# Secrets and local settings
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Runtime data: database (users, documents, memories), uploaded files.
+# Confidential — never commit.
+data/
+
+# Evaluation gold sets and run outputs contain document content.
+eval/gold/
+runs/
+
+# Training data and model outputs contain document content.
+training/out/

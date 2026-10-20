@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block body %}
+<header class="topbar">
+  <strong>{{ assistant_name }}</strong>
+  <span class="muted">Signed in as {{ user.username }}{% if is_admin %} (admin){% endif %}</span>
+  <form method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
+</header>
+<main class="inbox">
+  <section>
+    <h2>Your collections</h2>
+    <ul class="collections">
+      {% for c in collections %}
+      <li><span class="tag {{ c.kind }}">{{ 'Inbox' if c.kind == 'private' else 'Library' }}</span> {{ c.name }}</li>
+      {% endfor %}
+    </ul>
+    <p class="muted">Uploading files and asking questions arrive in the next milestones.</p>
+  </section>
+</main>
+{% endblock %}
