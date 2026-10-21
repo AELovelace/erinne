@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from mnemerynne import graph as graph_mod
 from mnemerynne import memory, permissions, users, worker
+from mnemerynne.clients.llm import BadModelOutput
 from mnemerynne.ingest import store
 from mnemerynne.web.app import Services, create_app
 from fakes import KeywordEmbedder
@@ -24,11 +25,14 @@ class FakeLLM:
         self.general_prompts = []
         self.memory_calls = 0
         self.fail = False
+        self.condense_fails = False
 
     async def chat_json(self, messages, schema, **kwargs):
         content = messages[-1]["content"]
         if schema is graph_mod.CONDENSE_SCHEMA:
             self.condense_calls.append(content)
+            if self.condense_fails:   # e.g. a thinking model used up the token budget
+                raise BadModelOutput("The model didn't return JSON: it hit the 120-token limit")
             latest = content.rsplit("Latest message:", 1)[1].strip()
             return {"question": f"{latest} (night audit)" if "what about" in latest.lower() else latest}
         if schema is memory.MEMORY_SCHEMA:
@@ -146,6 +150,15 @@ def test_follow_up_is_condensed_using_history(chat_client, llm):
     assert len(llm.condense_calls) == 1 and "How do I run the night audit?" in llm.condense_calls[0]
     assert final["standalone"].endswith("(night audit)")
     assert len(chat_client.get(f"/api/conversations/{cid}").json()["messages"]) == 4
+
+
+def test_follow_up_is_still_answered_when_condensing_fails(chat_client, llm):
+    _login(chat_client, "alice")
+    cid = _ask(chat_client, "How do I run the night audit?")[0]["conversation_id"]
+    llm.condense_fails = True
+    final = _final(_ask(chat_client, "night audit after midnight", cid))
+    assert final["standalone"] == "night audit after midnight"   # searched as asked
+    assert final["status"] == "answered"
 
 
 def test_conversations_are_private(chat_client):

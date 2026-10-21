@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import logging
 import operator
 import os
 import sqlite3
@@ -30,8 +31,10 @@ from langgraph.graph import END, START, StateGraph  # noqa: E402
 
 from mnemerynne import answer as answer_mod  # noqa: E402
 from mnemerynne import db, retrieval  # noqa: E402
-from mnemerynne.clients.llm import LLM  # noqa: E402
+from mnemerynne.clients.llm import LLM, ThinkFilter  # noqa: E402
 from mnemerynne.config import Settings  # noqa: E402
+
+log = logging.getLogger("mnemerynne.graph")
 
 HISTORY_TURNS = 4          # earlier turns the condense step sees
 MAX_MEMORIES = 10
@@ -124,10 +127,14 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
             return {"standalone": question}
         history = "\n".join(f"User: {t['question']}\n{answer_mod.ASSISTANT_NAME}: {t['answer'][:400]}"
                             for t in turns[-HISTORY_TURNS:])
-        out = await deps.llm.chat_json(
-            [{"role": "user", "content": _CONDENSE_PROMPT.format(history=history, question=question)}],
-            CONDENSE_SCHEMA, temperature=0.0, max_tokens=120)
-        standalone = (out.get("question") or "").strip() or question
+        try:
+            out = await deps.llm.chat_json(
+                [{"role": "user", "content": _CONDENSE_PROMPT.format(history=history, question=question)}],
+                CONDENSE_SCHEMA, temperature=0.0, max_tokens=120)
+            standalone = str(out.get("question") or "").strip() or question
+        except ValueError as exc:   # BadModelOutput: rewriting only helps search, so carry on
+            log.warning("Couldn't rewrite a follow-up; searching with it as asked. %s", exc)
+            standalone = question
         return {"standalone": standalone}
 
     @_timed("retrieve")
@@ -181,9 +188,15 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
         writer = get_stream_writer()
         writer({"type": "sources", "sources": []})
         parts = []
+        # Reasoning models may think first; people only see the reply.
+        visible = ThinkFilter()
         async for delta in deps.llm.stream(messages, temperature=0.6, max_tokens=900):
-            parts.append(delta)
-            writer({"type": "delta", "text": delta})
+            if shown := visible.feed(delta):
+                parts.append(shown)
+                writer({"type": "delta", "text": shown})
+        if shown := visible.close():
+            parts.append(shown)
+            writer({"type": "delta", "text": shown})
         text = "".join(parts).strip()
         return {"answer": {"status": "answered", "text": text, "citations": []}}
 

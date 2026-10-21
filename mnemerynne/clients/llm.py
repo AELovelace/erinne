@@ -16,11 +16,53 @@ import httpx
 from mnemerynne.config import Settings
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_OPEN_THINK_RE = re.compile(r"<think>.*\Z", re.DOTALL | re.IGNORECASE)
 
 
 def strip_reasoning(text: str) -> str:
-    """Remove <think>…</think> blocks some models emit inline."""
-    return _THINK_RE.sub("", text or "").strip()
+    """Remove <think>…</think> blocks some models emit inline, and a final
+    one the model never closed (it ran out of tokens while thinking)."""
+    return _OPEN_THINK_RE.sub("", _THINK_RE.sub("", text or "")).strip()
+
+
+class ThinkFilter:
+    """Drops <think>…</think> from streamed text, even when a tag is split
+    across chunks. feed() returns what can be shown so far; close() the rest
+    (nothing, if the model stopped while still thinking)."""
+
+    OPEN, CLOSE = "<think>", "</think>"
+
+    def __init__(self) -> None:
+        self._buf = ""
+        self._thinking = False
+
+    def feed(self, text: str) -> str:
+        self._buf += text
+        out = []
+        while True:
+            tag = self.CLOSE if self._thinking else self.OPEN
+            at = self._buf.lower().find(tag)
+            if at >= 0:
+                if not self._thinking:
+                    out.append(self._buf[:at])
+                self._buf = self._buf[at + len(tag):]
+                self._thinking = not self._thinking
+                continue
+            # Keep back anything that could be the start of a tag.
+            keep = next((n for n in range(min(len(tag) - 1, len(self._buf)), 0, -1)
+                         if tag.startswith(self._buf[-n:].lower())), 0)
+            if not self._thinking:
+                out.append(self._buf[:len(self._buf) - keep])
+            self._buf = self._buf[len(self._buf) - keep:]
+            return "".join(out)
+
+    def close(self) -> str:
+        rest, self._buf = ("" if self._thinking else self._buf), ""
+        return rest
+
+
+class BadModelOutput(ValueError):
+    """A schema-constrained call didn't return a JSON object; the message says why."""
 
 
 def strict_schema(schema: Any) -> Any:
@@ -161,17 +203,41 @@ class LLM:
         response.raise_for_status()
         return response
 
-    async def chat(self, messages: list[dict[str, str]], *, temperature: float = 0.2, max_tokens: int = 512,
-                   json_schema: dict | None = None, thinking: bool = False) -> str:
+    async def _complete(self, messages, temperature, max_tokens, json_schema, thinking) -> tuple[str, dict]:
+        """(content without reasoning, the raw choice)."""
         self._check_budget()
         response = await self._post(self._payload(messages, temperature, max_tokens, json_schema, thinking, False))
         body = response.json()
         self._record_usage(body.get("usage"))
-        return strip_reasoning(body["choices"][0]["message"].get("content") or "")
+        choice = body["choices"][0]
+        return strip_reasoning(choice["message"].get("content") or ""), choice
 
-    async def chat_json(self, messages: list[dict[str, str]], schema: dict, **kwargs) -> dict:
-        """Schema-constrained call; returns the parsed object."""
-        return json.loads(await self.chat(messages, json_schema=schema, **kwargs))
+    async def chat(self, messages: list[dict[str, str]], *, temperature: float = 0.2, max_tokens: int = 512,
+                   json_schema: dict | None = None, thinking: bool = False) -> str:
+        return (await self._complete(messages, temperature, max_tokens, json_schema, thinking))[0]
+
+    async def chat_json(self, messages: list[dict[str, str]], schema: dict, *, temperature: float = 0.2,
+                        max_tokens: int = 512, thinking: bool = False) -> dict:
+        """Schema-constrained call; returns the parsed object, or raises
+        BadModelOutput saying what came back instead."""
+        content, choice = await self._complete(messages, temperature, max_tokens, schema, thinking)
+        try:
+            out = json.loads(content)
+        except json.JSONDecodeError:
+            out = None
+        if isinstance(out, dict):
+            return out
+        message = choice.get("message") or {}
+        reasoning = message.get("reasoning_content") or ""
+        raw = message.get("content") or ""
+        why = []
+        if choice.get("finish_reason") == "length":
+            why.append(f"it hit the {max_tokens}-token limit")
+        if reasoning or "<think>" in raw.lower():
+            why.append(f"it spent {len(reasoning) or len(raw)} characters thinking (a reasoning model, or "
+                       f"a chat template that ignores enable_thinking=false)")
+        raise BadModelOutput("The model didn't return JSON" + (": " + " and ".join(why) if why else "")
+                             + f". Reply began: {content[:120]!r}")
 
     async def stream(self, messages: list[dict[str, str]], *, temperature: float = 0.2, max_tokens: int = 512,
                      json_schema: dict | None = None) -> AsyncIterator[str]:

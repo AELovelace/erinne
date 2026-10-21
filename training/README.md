@@ -106,10 +106,18 @@ training/export_gguf.sh training/out/erynne-merged     # -> training/out/erynne-
 Serve the new GGUF on a spare port, evaluate, compare with the stock model:
 
 ```sh
-llama-server -m erynne-YYYY-MM-DD-q4_k_m.gguf --port 8084 -ngl 99 -c 8192 --jinja
+llama-server -m erynne-YYYY-MM-DD-q4_k_m.gguf --port 8084 -ngl 99 -c 8192 --jinja \
+  --chat-template-file deploy/linux/lfm2-no-think.jinja --reasoning-format none
 mnemerynne eval-answers eval/gold/dev.jsonl --generator http://127.0.0.1:8084 --label mnemerynne-YYYY-MM-DD --out runs/answers-mnemerynne-YYYY-MM-DD.json
 mnemerynne eval-gate runs/answers-lfm2.5-stock.json runs/answers-mnemerynne-YYYY-MM-DD.json
 ```
+
+Serve every LFM2.5-based model (stock or fine-tuned) with those last two
+flags, here and in production. LFM2.5's built-in chat template always opens a
+`<think>` block, but fine-tuning trains on answers without one; with the
+template's version the model thinks first, and llama-server can't apply the
+JSON schemas until it stops (a 120-token follow-up rewrite never got there).
+`scripts/eval_model.sh` does this for you.
 
 The gate fails if any metric drops more than 0.02, if faithfulness or
 refusal F1 gets worse at all, or if under 98 % of answers parse. Use the

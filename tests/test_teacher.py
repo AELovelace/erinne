@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from mnemerynne import permissions, users, worker
-from mnemerynne.clients.llm import LLM, strict_schema
+from mnemerynne.clients.llm import LLM, BadModelOutput, ThinkFilter, strict_schema
 from mnemerynne.ingest import store
 from mnemerynne.sft import generate
 from mnemerynne.teacher import TeacherScopeError, allowed_collections
@@ -32,6 +32,38 @@ def _mock_llm(handler, **kw):
 
 def _ok(content):
     return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+
+def test_think_filter_hides_thinking_split_across_chunks():
+    f = ThinkFilter()
+    shown = [f.feed(c) for c in ["<thi", "nk>The user wants", " a greeting.</th", "ink>\n\nHel", "lo! <", "b>Hi</b>"]]
+    assert "".join(shown) + f.close() == "\n\nHello! <b>Hi</b>"
+    assert "think" not in "".join(shown)
+    stopped = ThinkFilter()
+    assert stopped.feed("Sure. <think>still going") == "Sure. " and stopped.close() == ""
+
+
+def test_chat_json_says_why_a_reply_was_not_json():
+    replies = iter([
+        # llama-server with --reasoning-format: the thinking went to reasoning_content
+        # and the token limit ran out before any answer.
+        {"message": {"content": "", "reasoning_content": "Let me think about this follow-up..."},
+         "finish_reason": "length"},
+        # Thinking inline and never closed.
+        {"message": {"content": "<think>The user asks about"}, "finish_reason": "length"},
+        {"message": {"content": "<think>ok</think>{\"question\": \"night audit\"}"}, "finish_reason": "stop"},
+    ])
+
+    def handler(request):
+        return httpx.Response(200, json={"choices": [next(replies)]})
+
+    llm = LLM("http://local", client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    schema = {"type": "object", "properties": {"question": {"type": "string"}}}
+    with pytest.raises(BadModelOutput, match="120-token limit and it spent .* thinking"):
+        asyncio.run(llm.chat_json([{"role": "user", "content": "q"}], schema, max_tokens=120))
+    with pytest.raises(BadModelOutput, match="thinking"):
+        asyncio.run(llm.chat_json([{"role": "user", "content": "q"}], schema, max_tokens=120))
+    assert asyncio.run(llm.chat_json([{"role": "user", "content": "q"}], schema)) == {"question": "night audit"}
 
 
 def test_openai_request_shape_and_rejected_parameter_fallback():
