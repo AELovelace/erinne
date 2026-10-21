@@ -1,0 +1,23 @@
+# Erinne site for /etc/caddy/Caddyfile (append it; MicroJames's site can sit
+# alongside). Replace the hostname with the one staff use; it must match
+# ERINNE_PUBLIC_URL and resolve to this box.
+#
+# Remove Fedora's default ":80 { root * /usr/share/caddy ... }" block from the
+# Caddyfile, or plain-HTTP and by-IP requests land on Caddy's test page.
+
+erinne.example.internal {
+    # Caddy's own CA issues the certificate; its root goes on staff PCs and
+    # into the Claude extension as ca.pem (see deploy/linux/README.md).
+    tls internal
+
+    # PDFs up to 100 MB (ERINNE_MAX_PDF_BYTES) plus multipart overhead.
+    request_body {
+        max_size 110MB
+    }
+
+    # flush_interval -1: answers (/api/ask) and MCP replies are passed on
+    # as they come, not buffered.
+    reverse_proxy 127.0.0.1:38200 {
+        flush_interval -1
+    }
+}

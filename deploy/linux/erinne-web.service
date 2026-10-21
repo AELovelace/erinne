@@ -1,7 +1,7 @@
 [Unit]
 Description=Erinne web app (127.0.0.1:38200)
-After=network.target llama-generator.service erinne-embedder.service
-Wants=llama-generator.service erinne-embedder.service
+After=network.target erinne-generator.service erinne-embedder.service
+Wants=erinne-generator.service erinne-embedder.service
 
 [Service]
 Type=simple

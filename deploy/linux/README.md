@@ -1,23 +1,23 @@
 # Erinne on Fedora (pilot next to MicroJames)
 
-The box already has what MicroJames needed: the NVIDIA 580xx driver,
-llama.cpp in `/opt/llama.cpp`, and the `llama-generator` (:8081) and
-`llama-embedder` (:8082, jina) services. Erinne shares the generator but uses
-a better embedder (Qwen3-Embedding-0.6B, chosen by evaluation), so it gets its
-own embedder service on :8085. Nothing of MicroJames changes.
+The box runs an AMD RX 580 (8 GB) with llama.cpp built for Vulkan in
+`/opt/llama.cpp` (see the RX 580 install guide for the driver and build),
+next to MicroJames and its `llama-generator` (:8081) and `llama-embedder`
+(:8082, jina) services. Erinne has its own generator and embedder, so it
+runs independently and MicroJames can be switched off without touching it.
 
 | Service | Listens on | Does |
 |---|---|---|
-| `erinne-web` | 127.0.0.1:38200 | web app, answers questions |
+| `erinne-web` | 127.0.0.1:38200 | web app, answers questions, MCP for Claude |
 | `erinne-worker` | — | turns uploads into searchable chunks (OCR, embeddings) |
-| `erinne-embedder` | 127.0.0.1:8085 | Qwen3-Embedding-0.6B (llama-server) |
+| `erinne-generator` | 127.0.0.1:8086 | LFM2.5-2.6B (llama-server, Vulkan) |
+| `erinne-embedder` | 127.0.0.1:8085 | Qwen3-Embedding-0.6B (llama-server, Vulkan) |
 | `erinne-backup.timer` | — | nightly snapshot to `/var/backups/erinne` |
 
-**VRAM check (4 GB card):** the generator (~2.5 GB with its cache), jina for
-MicroJames (~0.2 GB) and Qwen3-Embedding (~0.7 GB) should just fit. Watch
-`nvidia-smi` after step 4; if the embedder fails to start or the generator
-runs out of memory, switch `erinne-embedder` to the CPU (see the comment in
-its unit file). At cutover the jina embedder goes away and frees 0.2 GB.
+**VRAM (8 GB card):** Erinne's generator (~2.5 GB with its cache) and
+embedder (~0.7 GB) plus MicroJames's generator and jina embedder (~2.9 GB)
+come to about 6 GB. Check with `radeontop` after step 4. Both llama-server
+units join the `render` and `video` groups to reach the GPU.
 
 ## 1. Packages
 
@@ -68,9 +68,11 @@ sudo cp /opt/erinne/deploy/linux/erinne-*.service /opt/erinne/deploy/linux/erinn
 sudo mkdir -p /var/backups/erinne && sudo chown erinne:erinne /var/backups/erinne
 sudo systemctl daemon-reload
 sudo chown erinne:erinne /opt/models/Qwen3-Embedding-0.6B-Q8_0.gguf
-sudo systemctl enable --now erinne-embedder erinne-web erinne-worker erinne-backup.timer
-journalctl -u erinne-web -n 20 --no-pager     # "Database ready ... (schema v2)"
-nvidia-smi                                     # three llama-server processes, under 4 GB total
+sudo chmod o+r /opt/models/LFM2.5-2.6B-Q4_K_M.gguf     # erinne-generator reads it too
+sudo systemctl enable --now erinne-generator erinne-embedder erinne-web erinne-worker erinne-backup.timer
+journalctl -u erinne-web -n 20 --no-pager     # "Database ready ... (schema v6)"
+journalctl -u erinne-generator -n 20 --no-pager | grep -i vulkan   # "Vulkan0: AMD Radeon RX 580 ..."
+sudo radeontop -d - -l 1 | grep -o 'vram [^,]*'  # about 6 GB used while MicroJames also runs
 ```
 
 ## 5. Import MicroJames users and documents
@@ -88,31 +90,48 @@ journalctl -u erinne-worker -f        # "File N: … chunks indexed"; the Oracle
 Users keep their MicroJames passwords. With `ocrmypdf` installed the two
 scanned Oregon letters should come through this time.
 
-## 6. nginx
+## 6. HTTPS (Caddy)
+
+Caddy already serves MicroJames on 443, so Erinne is a second site in the
+same Caddyfile. Pick a hostname that resolves to this box on staff PCs
+(internal DNS or the router), e.g. `erinne.example.internal`.
 
 ```sh
-sudo cp /opt/erinne/deploy/linux/nginx-erinne.conf /etc/nginx/conf.d/erinne.conf
-sudoedit /etc/nginx/conf.d/erinne.conf          # server_name + certificate paths
-sudo setsebool -P httpd_can_network_connect 1    # already set if MicroJames is proxied
-sudo nginx -t && sudo systemctl reload nginx
+sudo dnf install caddy                              # already there if MicroJames uses it
+sudoedit /etc/caddy/Caddyfile                       # delete Fedora's default ":80 { … }" block
+sed 's/erinne.example.internal/YOUR-HOSTNAME/' /opt/erinne/deploy/linux/Caddyfile-erinne \
+  | sudo tee -a /etc/caddy/Caddyfile >/dev/null
+sudo setsebool -P httpd_can_network_connect 1       # already set if MicroJames is proxied
+sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl enable caddy && sudo systemctl reload-or-restart caddy
+sudo firewall-cmd --permanent --add-service=https && sudo firewall-cmd --reload
+curl -vk --resolve YOUR-HOSTNAME:443:127.0.0.1 https://YOUR-HOSTNAME/healthz
 ```
 
-The `/api/ask` block turns off proxy buffering; without it answers arrive
-all at once instead of streaming. The `/mcp` block serves Claude Desktop
-(next section).
+If a browser shows Caddy's "Fedora webserver" test page, the request missed
+the Erinne site: the default `:80` block is still there, or the address was
+`http://`, the IP, or a hostname that doesn't match the Caddyfile.
+
+`tls internal` makes Caddy its own certificate authority. Its root
+certificate is `/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt`:
+install it on staff PCs as a trusted root (Local Machine → Trusted Root
+Certification Authorities; Group Policy for many PCs), and copy it to
+`clients/claude-desktop/ca.pem` on the dev PC before packing the extension.
+Then set `ERINNE_PUBLIC_URL=https://YOUR-HOSTNAME` (next section).
+
+`flush_interval -1` keeps answers streaming. `nginx-erinne.conf` is an
+equivalent nginx setup, for a box where nginx owns port 443 instead.
 
 ## 6b. Claude Desktop
 
 Staff connect Claude Desktop through the Erinne extension, which relays to
-`https://<server_name>/mcp` with a personal token (made under **Claude** in
+`https://YOUR-HOSTNAME/mcp` with a personal token (made under **Claude** in
 the web app). Admins choose what Claude may search on the **Access** page;
 everything is on by default.
 
 1. Set `ERINNE_PUBLIC_URL` in `/etc/erinne/erinne.env` to the address people
    use, then `sudo systemctl restart erinne-web`.
 2. On the dev PC, pack the extension (see `clients/claude-desktop/README.md`)
-   with that address as the default and, for an internal certificate, the CA
-   certificate as `ca.pem`.
+   with that address as the default and Caddy's root certificate as `ca.pem`.
 3. Copy `erinne.mcpb` to `/var/lib/erinne/erinne.mcpb` (owner erinne). The
    **Claude** page then offers it for download.
 
@@ -123,7 +142,7 @@ shows every search and which files' text went back to Claude.
 ## 7. Check
 
 ```sh
-curl -s http://127.0.0.1:38200/healthz            # {"status":"ok","schema":2}
+curl -s http://127.0.0.1:38200/healthz            # {"status":"ok","schema":6}
 sudo erinne-admin list-users
 ```
 

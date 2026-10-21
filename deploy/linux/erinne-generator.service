@@ -1,0 +1,29 @@
+[Unit]
+Description=llama.cpp generator for Erinne (127.0.0.1:8086)
+After=network.target
+
+[Service]
+Type=simple
+User=erinne
+Group=erinne
+# The RX 580 is reached through /dev/dri/renderD128 (Vulkan).
+SupplementaryGroups=render video
+Environment=LD_LIBRARY_PATH=/opt/llama.cpp
+# Mesa keeps its compiled shaders here; without it every start recompiles them.
+CacheDirectory=erinne-llama
+Environment=XDG_CACHE_HOME=/var/cache/erinne-llama
+# Localhost only: llama-server has no authentication. 16k context split
+# across 2 slots. To run Qwen3-8B instead, change -m and the label in
+# ERINNE_LLM_MODEL; keep -c at 16384 or lower on the 8 GB card.
+ExecStart=/opt/llama.cpp/llama-server --host 127.0.0.1 --port 8086 -ngl 99 \
+    -m /opt/models/LFM2.5-2.6B-Q4_K_M.gguf -c 16384 -np 2 \
+    --jinja --reasoning-format deepseek
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
