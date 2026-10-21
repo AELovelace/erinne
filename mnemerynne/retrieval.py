@@ -12,9 +12,9 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 
-from erinne import permissions, synonyms
-from erinne.clients.embed import pack_vector
-from erinne.config import Settings
+from mnemerynne import permissions, synonyms
+from mnemerynne.clients.embed import pack_vector
+from mnemerynne.config import Settings
 
 
 def _synonym_groups(settings: Settings) -> list[list[str]]:

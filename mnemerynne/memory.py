@@ -14,9 +14,9 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from erinne.graph import memory_namespace
+from mnemerynne.graph import memory_namespace
 
-log = logging.getLogger("erinne.memory")
+log = logging.getLogger("mnemerynne.memory")
 
 MEMORY_SCHEMA = {
     "type": "object",

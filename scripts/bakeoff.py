@@ -20,13 +20,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from erinne import db  # noqa: E402
-from erinne.clients.embed import Embedder  # noqa: E402
-from erinne.clients.rerank import Reranker  # noqa: E402
-from erinne.config import get_settings  # noqa: E402
-from erinne.evaluation import load_gold  # noqa: E402
-from erinne.evaluation.retrieval_eval import evaluate  # noqa: E402
-from erinne.ingest.reembed import reembed_all  # noqa: E402
+from mnemerynne import db  # noqa: E402
+from mnemerynne.clients.embed import Embedder  # noqa: E402
+from mnemerynne.clients.rerank import Reranker  # noqa: E402
+from mnemerynne.config import get_settings  # noqa: E402
+from mnemerynne.evaluation import load_gold  # noqa: E402
+from mnemerynne.evaluation.retrieval_eval import evaluate  # noqa: E402
+from mnemerynne.ingest.reembed import reembed_all  # noqa: E402
 
 
 def main() -> None:
@@ -45,7 +45,7 @@ def main() -> None:
     settings = get_settings()
     work = Path("runs/bakeoff") / args.name
     work.mkdir(parents=True, exist_ok=True)
-    copy_path = work / "erinne.db"
+    copy_path = work / "mnemerynne.db"
     settings.embed_url, settings.embed_dim = args.embed_url, args.dim
     settings.embed_query_prefix, settings.embed_doc_prefix = args.query_prefix, args.doc_prefix
     settings.embed_model = args.name

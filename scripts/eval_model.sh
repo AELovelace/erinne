@@ -22,11 +22,11 @@ run() {  # gguf label
     kill -0 $pid 2> /dev/null || { echo "llama-server failed; see runs/server-$2.log" >&2; exit 1; }
     sleep 2
   done
-  PYTHONIOENCODING=utf-8 $PY -m erinne eval-answers eval/gold/dev.jsonl --generator http://127.0.0.1:$PORT \
+  PYTHONIOENCODING=utf-8 $PY -m mnemerynne eval-answers eval/gold/dev.jsonl --generator http://127.0.0.1:$PORT \
     --judge http://127.0.0.1:8081 --label "$2" --out "runs/answers-$2.json"
   kill $pid; wait $pid 2> /dev/null || true
 }
 
 [ -f "runs/answers-lfm2.5-stock-v2.json" ] || run "$STOCK" lfm2.5-stock-v2
 run "$NEW" "$LABEL"
-$PY -m erinne eval-gate runs/answers-lfm2.5-stock-v2.json "runs/answers-$LABEL.json"
+$PY -m mnemerynne eval-gate runs/answers-lfm2.5-stock-v2.json "runs/answers-$LABEL.json"

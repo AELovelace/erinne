@@ -15,7 +15,7 @@ from passlib.context import CryptContext
 _pwd_ctx = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 # Used to keep login timing similar whether or not the username exists.
-_DUMMY_HASH = _pwd_ctx.hash("erinne-auth-dummy")
+_DUMMY_HASH = _pwd_ctx.hash("mnemerynne-auth-dummy")
 
 # Usernames appear in URLs and logs; keep them to a safe, case-insensitive set.
 _USERNAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$")

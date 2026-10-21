@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pypdfium2 as pdfium
 
-from erinne.ingest import Segment
+from mnemerynne.ingest import Segment
 
 # Top-level sections that are navigation, not content; they flood keyword search.
 _NAVIGATION_TITLES = {"contents", "table of contents", "index"}

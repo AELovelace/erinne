@@ -1,12 +1,12 @@
 {
   "manifest_version": "0.3",
-  "name": "erinne",
-  "display_name": "Erinne",
-  "version": "0.1.0",
-  "description": "Search your Erinne documents (inbox and shared libraries) from Claude, with citations.",
-  "long_description": "Lets Claude search the documents you can see in Erinne and answer with the file, page and section for every claim, linking back to Erinne. Read-only. Uses a personal token you create under Claude in Erinne; what Claude may search is set by Erinne's admins.",
+  "name": "erynne",
+  "display_name": "Erynne",
+  "version": "0.2.0",
+  "description": "Search your Erynne documents (inbox and shared libraries) from Claude, with citations.",
+  "long_description": "Lets Claude search the documents you can see in Erynne and answer with the file, page and section for every claim, linking back to Erynne. Read-only. Uses a personal token you create under Claude in Erynne; what Claude may search is set by Erynne's admins.",
   "author": {
-    "name": "Erinne admins"
+    "name": "Erynne admins"
   },
   "server": {
     "type": "node",
@@ -15,8 +15,8 @@
       "command": "node",
       "args": ["${__dirname}/server/index.js"],
       "env": {
-        "ERINNE_URL": "${user_config.erinne_url}",
-        "ERINNE_TOKEN": "${user_config.api_token}"
+        "ERYNNE_URL": "${user_config.erynne_url}",
+        "ERYNNE_TOKEN": "${user_config.api_token}"
       }
     }
   },
@@ -30,16 +30,16 @@
   "user_config": {
     "api_token": {
       "type": "string",
-      "title": "Erinne token",
-      "description": "Create one in Erinne under Claude → Create token, then paste it here.",
+      "title": "Erynne token",
+      "description": "Create one in Erynne under Claude → Create token, then paste it here.",
       "sensitive": true,
       "required": true
     },
-    "erinne_url": {
+    "erynne_url": {
       "type": "string",
-      "title": "Erinne address",
-      "description": "Where Erinne runs. Leave as is unless an admin tells you otherwise.",
-      "default": "https://erinne.example.internal",
+      "title": "Erynne address",
+      "description": "Where Erynne runs. Leave as is unless an admin tells you otherwise.",
+      "default": "https://erynne.example.internal",
       "required": true
     }
   },

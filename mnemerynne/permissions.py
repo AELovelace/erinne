@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from erinne.db import transaction
+from mnemerynne.db import transaction
 
 _READABLE_SQL = """
     SELECT id FROM collections WHERE kind = 'private' AND owner_user_id = :u

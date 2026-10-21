@@ -1,4 +1,4 @@
--- erinne:no-fk
+-- mnemerynne:no-fk
 -- File manager: folders, a recycle bin, any file type, folder-scoped search.
 -- Rebuilds `blobs` (wider kind CHECK) and `files` (drops the one-copy-per-
 -- collection rule, adds folders and trash), so it runs with foreign keys off;
@@ -40,7 +40,7 @@ ALTER TABLE blobs_new RENAME TO blobs;
 
 -- ------------------------------------------------------------------ files
 -- The same content may now sit in several folders of one collection. Live
--- names are unique per folder (enforced in erinne/fs.py, since existing data
+-- names are unique per folder (enforced in mnemerynne/fs.py, since existing data
 -- may already repeat a name).
 CREATE TABLE files_new (
     id            INTEGER PRIMARY KEY,

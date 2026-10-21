@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from erinne import router as router_mod
-from erinne.router import Router, RouterError, load_router, train
+from mnemerynne import router as router_mod
+from mnemerynne.router import Router, RouterError, load_router, train
 
 
 def _clusters(n=60, dim=16, seed=0):
@@ -64,7 +64,7 @@ def test_load_router_missing_or_stale_returns_none(settings, tmp_path):
 
 
 def test_new_flows_fall_back_to_search_until_registered():
-    from erinne.graph import FLOWS
+    from mnemerynne.graph import FLOWS
     assert FLOWS["search"] == "retrieve" and FLOWS["general"] == "general" and FLOWS["smalltalk"] == "general"
     assert FLOWS.get("translate", "retrieve") == "retrieve"
     assert router_mod.DEFAULT_ROUTE == "search"

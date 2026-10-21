@@ -21,10 +21,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
-from erinne import jobs
-from erinne.config import Settings
-from erinne.db import transaction
-from erinne.ingest import markdown, pdf
+from mnemerynne import jobs
+from mnemerynne.config import Settings
+from mnemerynne.db import transaction
+from mnemerynne.ingest import markdown, pdf
 
 _MD_SUFFIXES = (".md", ".markdown")
 _TXT_SUFFIXES = (".txt", ".text", ".log")
@@ -167,7 +167,7 @@ def add_file(
     same folder again returns the existing file; a different file with a
     taken name gets "name (2).ext".
     """
-    from erinne import fs  # fs builds on this module
+    from mnemerynne import fs  # fs builds on this module
 
     with transaction(conn):
         if folder_parts:

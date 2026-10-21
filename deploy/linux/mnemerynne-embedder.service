@@ -1,24 +1,24 @@
 [Unit]
-Description=llama.cpp Qwen3-Embedding for Erinne (127.0.0.1:8085)
+Description=llama.cpp Qwen3-Embedding for Mnemerynne (127.0.0.1:8085)
 After=network.target
 
 [Service]
 Type=simple
-User=erinne
-Group=erinne
-# The RX 580 is reached through /dev/dri (Vulkan). ERINNE_GPU, the llama.cpp
+User=mnemerynne
+Group=mnemerynne
+# The RX 580 is reached through /dev/dri (Vulkan). MNEMERYNNE_GPU, the llama.cpp
 # device (e.g. Vulkan1), comes from the gpu.conf drop-in that preinstall.sh
 # writes; without it the unit fails rather than picking the wrong card.
 SupplementaryGroups=render video
 Environment=LD_LIBRARY_PATH=/opt/llama.cpp-vulkan
-CacheDirectory=erinne-llama
-Environment=XDG_CACHE_HOME=/var/cache/erinne-llama
+CacheDirectory=mnemerynne-llama
+Environment=XDG_CACHE_HOME=/var/cache/mnemerynne-llama
 # Qwen3-Embedding needs last-token pooling. Each input must fit one
 # micro-batch: -ub 2048 is far above a 512-token chunk.
 # If VRAM is ever too tight next to the generator, run it on the CPU instead:
 # replace "-ngl 99" with "--device none -ngl 0" (questions stay fast; bulk
 # imports become slow, e.g. an overnight first import).
-ExecStart=/opt/llama.cpp-vulkan/llama-server --host 127.0.0.1 --port 8085 -dev ${ERINNE_GPU} -ngl 99 \
+ExecStart=/opt/llama.cpp-vulkan/llama-server --host 127.0.0.1 --port 8085 -dev ${MNEMERYNNE_GPU} -ngl 99 \
     -m /opt/models/Qwen3-Embedding-0.6B-Q8_0.gguf --embedding --pooling last \
     -c 8192 -np 4 -b 2048 -ub 2048
 Restart=on-failure

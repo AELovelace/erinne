@@ -1,17 +1,18 @@
-# Erinne
+# Mnemerynne
 
-A private document inbox with cited question answering. Each person keeps
+Mnemerynne is the server behind **Erynne**, a private document inbox with
+cited question answering. Each person keeps
 files in their own space; admins publish shared libraries (brand standards,
 system manuals). The **Files** page is a full file manager: folders, drag and
 drop (files and whole folders), move/copy/rename, a recycle bin and previews.
-Any file can be stored; PDF, Markdown and text files are made searchable. Erinne answers questions from the files a
+Any file can be stored; PDF, Markdown and text files are made searchable. Erynne answers questions from the files a
 person can access and cites the file and page (or Markdown heading) for every
 claim, or says the answer isn't in their documents. It remembers follow-up
 context within a conversation and facts users tell it about themselves.
 
 Everything runs locally: a FastAPI app, one SQLite database (FTS5,
 sqlite-vec, LangGraph checkpoints and memory), and llama.cpp `llama-server`
-for the Erinne model and embeddings. No document, question or trace leaves
+for the Erynne model and embeddings. No document, question or trace leaves
 the machine (LangSmith is forced off).
 
 ## Status
@@ -25,7 +26,7 @@ the machine (LangSmith is forced off).
 | P3 | LangGraph answering flow, streaming, citations, conversation memory, feedback | done |
 | P3b | Long-term user memory with safety filter and "Your memories" page | done |
 | P4 | Fedora pilot next to MicroJames | ready: `deploy/linux/README.md` |
-| P5 | Fine-tuning the Erinne model (LFM2.5-2.6B) | pipeline ready: `training/README.md` |
+| P5 | Fine-tuning the Erynne model (LFM2.5-2.6B) | pipeline ready: `training/README.md` |
 
 ## How it answers
 
@@ -40,9 +41,9 @@ question ─► memories ─► condense follow-up ─► hybrid search ─► n
 * **Search:** keyword (FTS5 bm25, section titles weighted) and vector
   (Qwen3-Embedding-0.6B) search run with the user's readable collections
   inside each query. Jargon variants ("night audit" ↔ "End of Day", see
-  `erinne/synonyms.py`, extendable via `<data_dir>/synonyms.txt`) are searched
+  `mnemerynne/synonyms.py`, extendable via `<data_dir>/synonyms.txt`) are searched
   too, fused with reciprocal rank fusion.
-* **Answer contract** (`erinne/answer.py`): sources numbered `[n] file · p. x
+* **Answer contract** (`mnemerynne/answer.py`): sources numbered `[n] file · p. x
   · Section`, JSON output `{status, answer, citations}` enforced by
   llama-server's JSON schema; uncited or malformed answers become "not found".
 * **Memory:** conversation state per thread (LangGraph checkpointer); facts
@@ -56,11 +57,11 @@ Requires Python 3.14 and [uv](https://docs.astral.sh/uv/) (on Windows without
 
 ```sh
 uv sync
-cp .env.example .env               # then set ERINNE_SECRET_KEY
+cp .env.example .env               # then set MNEMERYNNE_SECRET_KEY
 scripts/start-llama.ps1            # Windows dev: Qwen3-8B :8081, Qwen3-Embedding :8082
-uv run erinne create-user yourname --role admin
-uv run erinne serve                # http://127.0.0.1:38200
-uv run erinne worker               # separate terminal: processes uploads
+uv run mnemerynne create-user yourname --role admin
+uv run mnemerynne serve                # http://127.0.0.1:38200
+uv run mnemerynne worker               # separate terminal: processes uploads
 uv run pytest
 ```
 
@@ -68,18 +69,18 @@ uv run pytest
 
 | Command | Does |
 |---|---|
-| `erinne serve` / `erinne worker` | web app / ingestion worker |
-| `erinne create-user`, `reset-password`, `set-role`, `list-users` | accounts (passwords are prompted) |
-| `erinne create-library NAME`, `grant LIBRARY USER [--write]` | shared libraries (or the **Libraries** page, for admins) |
-| `erinne import FOLDER --library NAME \| --user NAME [--flat]` | bulk upload, keeping subfolders |
-| `erinne purge-trash [--days N]` | empty old recycle-bin items now (the worker does this hourly) |
-| `erinne reindex [--file ID] [--reextract]` | re-chunk (and re-read) files |
-| `erinne reembed` | rebuild all vectors after changing the embedder |
-| `erinne forget-memories USER` | wipe a user's memories (admins can't read them) |
-| `erinne backup --dest DIR` | database snapshot + new files |
-| `erinne migrate-microjames --source DIR [--import-files]` | import from MicroJames |
-| `erinne draft-gold`, `eval-retrieval`, `eval-answers`, `eval-gate` | evaluation |
-| `erinne gen-sft` | fine-tuning data from the teacher |
+| `mnemerynne serve` / `mnemerynne worker` | web app / ingestion worker |
+| `mnemerynne create-user`, `reset-password`, `set-role`, `list-users` | accounts (passwords are prompted) |
+| `mnemerynne create-library NAME`, `grant LIBRARY USER [--write]` | shared libraries (or the **Libraries** page, for admins) |
+| `mnemerynne import FOLDER --library NAME \| --user NAME [--flat]` | bulk upload, keeping subfolders |
+| `mnemerynne purge-trash [--days N]` | empty old recycle-bin items now (the worker does this hourly) |
+| `mnemerynne reindex [--file ID] [--reextract]` | re-chunk (and re-read) files |
+| `mnemerynne reembed` | rebuild all vectors after changing the embedder |
+| `mnemerynne forget-memories USER` | wipe a user's memories (admins can't read them) |
+| `mnemerynne backup --dest DIR` | database snapshot + new files |
+| `mnemerynne migrate-microjames --source DIR [--import-files]` | import from MicroJames |
+| `mnemerynne draft-gold`, `eval-retrieval`, `eval-answers`, `eval-gate` | evaluation |
+| `mnemerynne gen-sft` | fine-tuning data from the teacher |
 
 ## Evaluation
 
@@ -89,8 +90,8 @@ should check each and set `"verified": true` (fix or delete wrong ones, in
 particular "off-topic" items that the documents actually answer).
 
 ```sh
-uv run erinne eval-retrieval eval/gold/dev.jsonl --verified-only
-uv run erinne eval-answers eval/gold/dev.jsonl --generator http://127.0.0.1:8081 --label qwen3-8b --out runs/answers-qwen3.json
+uv run mnemerynne eval-retrieval eval/gold/dev.jsonl --verified-only
+uv run mnemerynne eval-answers eval/gold/dev.jsonl --generator http://127.0.0.1:8081 --label qwen3-8b --out runs/answers-qwen3.json
 ```
 
 Embedder bake-off (2026-10-20, unverified gold, no gate):

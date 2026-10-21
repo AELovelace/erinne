@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from erinne.config import Settings
+from mnemerynne.config import Settings
 
 
 class TeacherScopeError(ValueError):
@@ -27,13 +27,13 @@ def allowed_collections(conn: sqlite3.Connection, settings: Settings, teacher) -
         return {r[0] for r in conn.execute("SELECT id FROM collections")}
     if not names:
         raise TeacherScopeError(
-            "A remote teacher needs ERINNE_TEACHER_ALLOWED_LIBRARIES (library names whose text may be "
+            "A remote teacher needs MNEMERYNNE_TEACHER_ALLOWED_LIBRARIES (library names whose text may be "
             "sent to it, e.g. Oracle). Nothing is sent by default.")
     ids = set()
     for name in names:
         row = conn.execute("SELECT id FROM collections WHERE kind = 'library' AND name = ? COLLATE NOCASE",
                            (name,)).fetchone()
         if row is None:
-            raise TeacherScopeError(f"ERINNE_TEACHER_ALLOWED_LIBRARIES names unknown library '{name}'.")
+            raise TeacherScopeError(f"MNEMERYNNE_TEACHER_ALLOWED_LIBRARIES names unknown library '{name}'.")
         ids.add(row[0])
     return ids

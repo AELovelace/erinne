@@ -1,12 +1,12 @@
-"""'Your memories': users see and delete what Erinne remembers about them."""
+"""'Your memories': users see and delete what Erynne remembers about them."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 
-from erinne import memory, users
-from erinne.web.deps import api_user, page_user
+from mnemerynne import memory, users
+from mnemerynne.web.deps import api_user, page_user
 
 router = APIRouter()
 

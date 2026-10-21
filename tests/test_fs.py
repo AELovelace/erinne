@@ -3,8 +3,8 @@ import struct
 
 import pytest
 
-from erinne import db, fs, permissions, retrieval, users, worker
-from erinne.ingest import store
+from mnemerynne import db, fs, permissions, retrieval, users, worker
+from mnemerynne.ingest import store
 from fakes import KeywordEmbedder
 from pdfgen import make_pdf
 

@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from erinne.evaluation import GoldItem, Support, dump_gold, load_gold
-from erinne.evaluation.retrieval_eval import evaluate
-from erinne.retrieval import Hit
+from mnemerynne.evaluation import GoldItem, Support, dump_gold, load_gold
+from mnemerynne.evaluation.retrieval_eval import evaluate
+from mnemerynne.retrieval import Hit
 from test_retrieval import embedder, world  # noqa: F401  (fixtures)
 
 
@@ -59,7 +59,7 @@ class _Judge:
 def test_answer_evaluation_metrics(conn, settings, embedder, world):  # noqa: F811
     import asyncio
 
-    from erinne.evaluation.answer_eval import evaluate_answers
+    from mnemerynne.evaluation.answer_eval import evaluate_answers
 
     settings.vector_max_distance, settings.vector_max_distance_no_keywords = 99.0, 0.2
     items = [
@@ -80,7 +80,7 @@ def test_answer_evaluation_metrics(conn, settings, embedder, world):  # noqa: F8
 def test_remote_generator_is_restricted_to_allowed_libraries(conn, settings, embedder, world):  # noqa: F811
     import asyncio
 
-    from erinne.evaluation.answer_eval import evaluate_answers, restrict_items
+    from mnemerynne.evaluation.answer_eval import evaluate_answers, restrict_items
 
     class RemoteGenerator(_Generator):
         is_remote = True
@@ -108,7 +108,7 @@ def test_remote_generator_is_restricted_to_allowed_libraries(conn, settings, emb
 
 
 def test_deployment_gate():
-    from erinne.evaluation.gate import compare
+    from mnemerynne.evaluation.gate import compare
 
     def report(**s):
         base = {"answer_rate": .8, "refusal_recall": .7, "refusal_precision": .8, "citation_precision": .9,

@@ -21,10 +21,10 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
-from erinne import jobs, permissions
-from erinne.config import Settings
-from erinne.db import transaction
-from erinne.ingest import store
+from mnemerynne import jobs, permissions
+from mnemerynne.config import Settings
+from mnemerynne.db import transaction
+from mnemerynne.ingest import store
 
 TRASH_COLLECTION = 0  # chunk/vector scope for anything in the bin
 

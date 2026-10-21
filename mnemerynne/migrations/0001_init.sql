@@ -1,4 +1,4 @@
--- erinne schema v1. Applied inside a transaction by erinne.db.migrate().
+-- mnemerynne schema v1. Applied inside a transaction by mnemerynne.db.migrate().
 -- chunk_vec (sqlite-vec) is created by db.ensure_vector_table() because its
 -- vector dimension comes from configuration.
 

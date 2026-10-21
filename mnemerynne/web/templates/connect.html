@@ -14,14 +14,14 @@
   <ol class="steps">
     <li>Create a token below and copy it. It's shown only once.</li>
     {% if has_extension %}
-    <li><a href="/connect/erinne.mcpb">Download the {{ assistant_name }} extension</a> and double-click it. Claude Desktop opens an install dialog.</li>
+    <li><a href="/connect/erynne.mcpb">Download the {{ assistant_name }} extension</a> and double-click it. Claude Desktop opens an install dialog.</li>
     <li>Paste your token when it asks. The {{ assistant_name }} address is already filled in.</li>
     {% else %}
     <li>The Claude Desktop extension isn't published yet; ask an admin. Claude Code users can connect now with the command below.</li>
     {% endif %}
     <li>Ask Claude something your documents answer, e.g. “What does the night audit checklist say about rate changes?”</li>
   </ol>
-  <p class="small muted">Claude Code: <code id="cc-command">claude mcp add --transport http erinne <span id="mcp-url"></span> --header "Authorization: Bearer YOUR_TOKEN"</code></p>
+  <p class="small muted">Claude Code: <code id="cc-command">claude mcp add --transport http erynne <span id="mcp-url"></span> --header "Authorization: Bearer YOUR_TOKEN"</code></p>
 
   <h2 class="admin-section">Your tokens</h2>
   <form class="new-lib" id="new-token">

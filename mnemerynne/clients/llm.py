@@ -13,7 +13,7 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-from erinne.config import Settings
+from mnemerynne.config import Settings
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
@@ -86,11 +86,11 @@ class LLM:
     @classmethod
     def teacher(cls, settings: Settings, base_url: str | None = None) -> "LLM":
         """The model that writes training/evaluation data: local by default,
-        or a remote OpenAI-compatible API when ERINNE_TEACHER_FLAVOR=openai."""
+        or a remote OpenAI-compatible API when MNEMERYNNE_TEACHER_FLAVOR=openai."""
         timeout = max(settings.llm_timeout, 300)
         if settings.teacher_flavor == "openai":
             if not settings.teacher_api_key:
-                raise ValueError("ERINNE_TEACHER_API_KEY is required for an OpenAI teacher.")
+                raise ValueError("MNEMERYNNE_TEACHER_API_KEY is required for an OpenAI teacher.")
             llm = cls(base_url or settings.teacher_url, model=settings.teacher_model, timeout=timeout,
                       flavor="openai", api_key=settings.teacher_api_key)
             llm.price_in_per_m, llm.price_out_per_m = settings.teacher_price_in, settings.teacher_price_out

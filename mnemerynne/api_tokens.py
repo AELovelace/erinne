@@ -1,6 +1,6 @@
 """Personal API tokens: how Claude Desktop (and other MCP clients) act as a user.
 
-A token is `erinne_` + 43 random URL-safe characters. Only its SHA-256 is
+A token is `erynne_` + 43 random URL-safe characters. Only its SHA-256 is
 stored. A token acts with its user's permissions at the moment of each call,
 so deactivating the user or removing a grant takes effect immediately.
 """
@@ -12,7 +12,9 @@ import secrets
 import sqlite3
 from dataclasses import dataclass
 
-PREFIX = "erinne_"
+PREFIX = "erynne_"
+# Tokens made before the rename keep working until they expire.
+LEGACY_PREFIXES = ("erinne_",)
 EXPIRY_DAYS = (30, 90, 365)
 
 
@@ -42,7 +44,7 @@ def create(conn: sqlite3.Connection, user_id: int, name: str, days: int | None =
 def verify(conn: sqlite3.Connection, token: str | None, *, touch: bool = True) -> Caller | None:
     """The caller behind a token, or None if it is unknown, revoked, expired,
     or belongs to a deactivated user."""
-    if not token or not token.startswith(PREFIX):
+    if not token or not token.startswith((PREFIX, *LEGACY_PREFIXES)):
         return None
     row = conn.execute(
         "SELECT t.id, t.user_id, u.username FROM api_tokens t JOIN users u ON u.id = t.user_id "

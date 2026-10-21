@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-/* Erinne relay for Claude Desktop.
+/* Erynne relay for Claude Desktop.
 
-   Claude Desktop talks MCP over stdio (one JSON-RPC message per line); Erinne
-   serves MCP over HTTPS at <ERINNE_URL>/mcp (stateless, JSON responses). This
+   Claude Desktop talks MCP over stdio (one JSON-RPC message per line); Erynne
+   serves MCP over HTTPS at <ERYNNE_URL>/mcp (stateless, JSON responses). This
    forwards each message with the user's token and writes the reply back.
    No dependencies: Node's own https module, so Claude Desktop's built-in
-   Node runs it as is. A ca.pem next to this file (or ERINNE_CA_FILE) is
-   trusted in addition to the system's CAs, for Erinne's internal certificate.
+   Node runs it as is. A ca.pem next to this file (or MNEMERYNNE_CA_FILE) is
+   trusted in addition to the system's CAs, for Erynne's internal certificate.
    Logs go to stderr, which Claude Desktop keeps in its MCP log files. */
 "use strict";
 
@@ -17,15 +17,15 @@ const path = require("path");
 const tls = require("tls");
 
 const VERSION = "0.1.0";
-const base = (process.env.ERINNE_URL || "").trim().replace(/\/+$/, "");
-const token = (process.env.ERINNE_TOKEN || "").trim();
+const base = (process.env.ERYNNE_URL || "").trim().replace(/\/+$/, "");
+const token = (process.env.ERYNNE_TOKEN || "").trim();
 
 function log(message) {
-  process.stderr.write("[erinne] " + message + "\n");
+  process.stderr.write("[erynne] " + message + "\n");
 }
 
 function loadCa() {
-  const file = process.env.ERINNE_CA_FILE || path.join(__dirname, "..", "ca.pem");
+  const file = process.env.MNEMERYNNE_CA_FILE || path.join(__dirname, "..", "ca.pem");
   try {
     const extra = fs.readFileSync(file, "utf8");
     log("trusting the extra CA certificate in " + file);
@@ -57,7 +57,7 @@ function post(body) {
       "Content-Type": "application/json",
       "Accept": "application/json, text/event-stream",
       "Authorization": "Bearer " + token,
-      "User-Agent": "erinne-claude-desktop/" + VERSION,
+      "User-Agent": "erynne-claude-desktop/" + VERSION,
       "Content-Length": Buffer.byteLength(body),
     };
     if (protocolVersion) headers["MCP-Protocol-Version"] = protocolVersion;
@@ -69,7 +69,7 @@ function post(body) {
         resolve({ status: res.statusCode, type: res.headers["content-type"] || "", text: Buffer.concat(chunks).toString("utf8") });
       });
     });
-    req.on("timeout", function () { req.destroy(new Error("Erinne took too long to answer")); });
+    req.on("timeout", function () { req.destroy(new Error("Erynne took too long to answer")); });
     req.on("error", reject);
     req.end(body);
   });
@@ -96,7 +96,7 @@ async function relay(line) {
     return;
   }
   if (!endpoint || !token) {
-    fail(request, -32002, "The Erinne extension isn't set up: open Claude's extension settings and enter your Erinne token.");
+    fail(request, -32002, "The Erynne extension isn't set up: open Claude's extension settings and enter your Erynne token.");
     return;
   }
   let response;
@@ -104,20 +104,20 @@ async function relay(line) {
     response = await post(line);
   } catch (e) {
     log("request failed: " + e.message);
-    fail(request, -32003, "Couldn't reach Erinne at " + base + " (" + e.message + "). Are you on the office network or Tailscale?");
+    fail(request, -32003, "Couldn't reach Erynne at " + base + " (" + e.message + "). Are you on the office network or Tailscale?");
     return;
   }
   if (response.status === 401) {
-    fail(request, -32001, "Erinne didn't accept the token: it may have expired or been revoked. Create a new one under Claude in Erinne.");
+    fail(request, -32001, "Erynne didn't accept the token: it may have expired or been revoked. Create a new one under Claude in Erynne.");
     return;
   }
   if (response.status === 429) {
-    fail(request, -32004, "Too many Erinne searches in the last minute; wait a moment and try again.");
+    fail(request, -32004, "Too many Erynne searches in the last minute; wait a moment and try again.");
     return;
   }
   if (response.status >= 400) {
     log("HTTP " + response.status + ": " + response.text.slice(0, 300));
-    fail(request, -32005, "Erinne answered with an error (HTTP " + response.status + ").");
+    fail(request, -32005, "Erynne answered with an error (HTTP " + response.status + ").");
     return;
   }
   try {
@@ -129,7 +129,7 @@ async function relay(line) {
     });
   } catch (e) {
     log("unreadable reply: " + e.message);
-    fail(request, -32005, "Erinne's reply couldn't be read.");
+    fail(request, -32005, "Erynne's reply couldn't be read.");
   }
 }
 
@@ -157,4 +157,4 @@ process.stdin.on("data", function (chunk) {
 // Claude Desktop closing stdin: answer what's in flight, then stop.
 process.stdin.on("end", function () { ended = true; finish(); });
 
-log("relaying to " + (endpoint ? endpoint.href : "(no ERINNE_URL set)"));
+log("relaying to " + (endpoint ? endpoint.href : "(no ERYNNE_URL set)"));

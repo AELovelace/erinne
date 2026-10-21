@@ -1,10 +1,10 @@
-"""Erinne's MCP endpoint: lets Claude Desktop (through the Erinne extension)
+"""Erynne's MCP endpoint: lets Claude Desktop (through the Erynne extension)
 and other MCP clients search people's documents.
 
 Everything is read-only and acts as the token's user, limited to the
 collections that user may search from Claude (permissions.claude_collection_ids):
 an fs.Access built from that set makes every file helper respect the Claude
-switches with no extra checks. Claude writes the answers; Erinne only finds
+switches with no extra checks. Claude writes the answers; Erynne only finds
 and returns passages with their citations. Every call is logged in mcp_calls.
 """
 
@@ -27,14 +27,14 @@ from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
-from erinne import api_tokens, db, fs, permissions, retrieval
-from erinne.api_tokens import Caller
-from erinne.config import Settings
+from mnemerynne import api_tokens, db, fs, permissions, retrieval
+from mnemerynne.api_tokens import Caller
+from mnemerynne.config import Settings
 
-log = logging.getLogger("erinne.mcp")
+log = logging.getLogger("mnemerynne.mcp")
 
 INSTRUCTIONS = """\
-Erinne holds this organisation's documents: each person's private inbox and the shared libraries they
+Erynne holds this organisation's documents: each person's private inbox and the shared libraries they
 have been given (brand standards, system manuals and so on). Use these tools whenever a question could
 be answered from those documents.
 
@@ -156,7 +156,7 @@ class Tools:
             raise ToolError("Name the library the folder is in, too.")
         if not allowed:
             return {"found": False, "query": query, "results": [],
-                    "note": "Nothing is shared with Claude for you yet; ask an Erinne admin."}, []
+                    "note": "Nothing is shared with Claude for you yet; ask an Erynne admin."}, []
         result = retrieval.search(conn, self.settings, self.get_embedder(), query, allowed, folders=folders)
         if not result.found_anything:
             return {"found": False, "query": query, "results": [],
@@ -227,7 +227,7 @@ class Tools:
 # --------------------------------------------------------------- the server
 def build_server(settings: Settings, get_embedder: Callable[[], Any]) -> MCPServer:
     tools = Tools(settings, get_embedder)
-    server = MCPServer(name="erinne", title="Erinne", instructions=INSTRUCTIONS)
+    server = MCPServer(name="erynne", title="Erynne", instructions=INSTRUCTIONS)
 
     async def call(ctx: Context, name: str, args: dict, fn) -> dict:
         caller = _caller_of(ctx)
@@ -252,7 +252,7 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any]) -> MCPServ
     @server.tool(annotations=_READ_ONLY)
     async def search_documents(ctx: Context, query: str, library: str | None = None, folder: str | None = None,
                                limit: int = 8) -> dict:
-        """Search the user's Erinne documents (their inbox and shared libraries) and return the best
+        """Search the user's Erynne documents (their inbox and shared libraries) and return the best
         matching passages, each with a ready-to-use `citation` and `link`. Ask in natural language;
         hotel and system jargon works. Optionally narrow to one `library` (a name from list_libraries,
         or "inbox") and a `folder` path inside it such as "Front Office/Night Audit". `limit` is 1-20.
@@ -289,7 +289,7 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any]) -> MCPServ
 def _caller_of(ctx: Context) -> Caller:
     """The caller McpEndpoint verified for this HTTP request."""
     request = ctx.request_context.request
-    caller = getattr(request, "scope", {}).get("erinne.caller") if request is not None else None
+    caller = getattr(request, "scope", {}).get("mnemerynne.caller") if request is not None else None
     if caller is None:
         raise ToolError("Not authenticated.")
     return caller
@@ -331,13 +331,13 @@ class McpEndpoint:
         caller = await anyio.to_thread.run_sync(self._verify, match.group(1) if match else None)
         if caller is None:
             response = JSONResponse({"error": "invalid_token",
-                                     "error_description": "Missing, expired or revoked Erinne token."},
-                                    status_code=401, headers={"WWW-Authenticate": 'Bearer realm="erinne"'})
+                                     "error_description": "Missing, expired or revoked Erynne token."},
+                                    status_code=401, headers={"WWW-Authenticate": 'Bearer realm="erynne"'})
             return await response(scope, receive, send)
         if scope["method"] == "POST" and self._over_limit(caller.token_id):
             response = JSONResponse({"error": "rate_limited",
                                      "error_description": "Too many requests; wait a minute."},
                                     status_code=429, headers={"Retry-After": "60"})
             return await response(scope, receive, send)
-        scope["erinne.caller"] = caller
+        scope["mnemerynne.caller"] = caller
         await self.manager.handle_request(scope, receive, send)

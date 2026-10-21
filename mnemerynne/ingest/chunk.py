@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from itertools import groupby
 
-from erinne.ingest import Chunk, Segment
+from mnemerynne.ingest import Chunk, Segment
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 

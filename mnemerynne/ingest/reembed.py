@@ -10,12 +10,12 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from erinne import db
-from erinne.clients.embed import pack_vector
-from erinne.config import Settings
-from erinne.ingest import Chunk, chunk
+from mnemerynne import db
+from mnemerynne.clients.embed import pack_vector
+from mnemerynne.config import Settings
+from mnemerynne.ingest import Chunk, chunk
 
-log = logging.getLogger("erinne.reembed")
+log = logging.getLogger("mnemerynne.reembed")
 
 
 def reembed_all(conn: sqlite3.Connection, settings: Settings, embedder, batch: int = 512,

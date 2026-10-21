@@ -3,8 +3,8 @@ import io
 import httpx
 import pytest
 
-from erinne import jobs, permissions, users, worker
-from erinne.ingest import ocr, pdf, store
+from mnemerynne import jobs, permissions, users, worker
+from mnemerynne.ingest import ocr, pdf, store
 from fakes import FakeEmbedder
 from pdfgen import make_pdf
 
@@ -182,7 +182,7 @@ def test_file_deleted_while_queued_is_skipped(conn, settings, embedder, alice):
     file_id, _ = _add(conn, settings, MANUAL, "manual.pdf", alice["inbox"])
     job = jobs.claim(conn)
     store.delete_file(conn, settings, file_id)  # job row cascades away too
-    from erinne.ingest import pipeline
+    from mnemerynne.ingest import pipeline
     pipeline.process_file(conn, settings, embedder, job["file_id"])  # no exception
     assert embedder.calls == 0
 
@@ -225,7 +225,7 @@ def test_index_limits_store_instead_of_reject(settings):
 
 
 def test_plain_text_is_indexed(conn, settings):
-    from erinne import users, worker
+    from mnemerynne import users, worker
     from fakes import FakeEmbedder
     alice = users.create_user(conn, "alice", "pw-alice-123")
     inbox = conn.execute("SELECT id FROM collections WHERE owner_user_id = ?", (alice,)).fetchone()[0]

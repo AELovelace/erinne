@@ -1,6 +1,6 @@
 import pytest
 
-from erinne import permissions, users
+from mnemerynne import permissions, users
 
 
 @pytest.fixture

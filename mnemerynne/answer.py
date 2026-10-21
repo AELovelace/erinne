@@ -11,10 +11,10 @@ import json
 import re
 from dataclasses import dataclass, field
 
-from erinne.retrieval import Hit
+from mnemerynne.retrieval import Hit
 
 PROMPT_VERSION = "2026-10-20.2"
-ASSISTANT_NAME = "Erinne"
+ASSISTANT_NAME = "Erynne"
 NOT_FOUND_TEXT = "I couldn't find that in your documents."
 
 ANSWER_SCHEMA = {

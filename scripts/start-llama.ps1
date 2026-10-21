@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Start (or stop) the two llama-server processes Erinne needs on Windows (dev PC).
+  Start (or stop) the two llama-server processes Mnemerynne needs on Windows (dev PC).
 
 .DESCRIPTION
   Generator: OpenAI-compatible chat server on 127.0.0.1:8081

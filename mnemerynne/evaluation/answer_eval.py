@@ -13,12 +13,12 @@ import statistics
 import time
 from dataclasses import asdict, dataclass, field
 
-from erinne import answer as answer_mod
-from erinne import retrieval
-from erinne.clients.llm import LLM
-from erinne.config import Settings
-from erinne.evaluation import GoldItem
-from erinne.evaluation.retrieval_eval import _allowed
+from mnemerynne import answer as answer_mod
+from mnemerynne import retrieval
+from mnemerynne.clients.llm import LLM
+from mnemerynne.config import Settings
+from mnemerynne.evaluation import GoldItem
+from mnemerynne.evaluation.retrieval_eval import _allowed
 
 JUDGE_SCHEMA = {
     "type": "object",

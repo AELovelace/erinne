@@ -1,14 +1,14 @@
 #!/bin/bash
-# Prepare a Fedora box for Erinne: packages, the erinne user, llama.cpp built
+# Prepare a Fedora box for Mnemerynne: packages, the mnemerynne user, llama.cpp built
 # for Vulkan in /opt/llama.cpp-vulkan, the GPU drop-ins and the embedding model.
 # Safe to run again: finished steps are skipped.
 #
-#   sudo bash /opt/erinne/deploy/linux/preinstall.sh
+#   sudo bash /opt/mnemerynne/deploy/linux/preinstall.sh
 #
 # Overrides (environment):
 #   LLAMA_TAG=b11756        llama.cpp release to build
-#   GPU_MATCH='RX 580'      text identifying Erinne's card in --list-devices
-#   ERINNE_GPU=Vulkan1      skip detection and use this llama.cpp device
+#   GPU_MATCH='RX 580'      text identifying Mnemerynne's card in --list-devices
+#   MNEMERYNNE_GPU=Vulkan1      skip detection and use this llama.cpp device
 #
 # MicroJames's CUDA build in /opt/llama.cpp is not touched.
 set -euo pipefail
@@ -38,10 +38,10 @@ dnf install -y \
     git cmake gcc-c++ glslc glslang vulkan-headers vulkan-loader-devel spirv-headers-devel \
     mesa-vulkan-drivers vulkan-tools nvtop policycoreutils-python-utils curl
 
-step "erinne user and folders"
-id erinne >/dev/null 2>&1 || useradd --system --home-dir /var/lib/erinne --shell /sbin/nologin erinne
-install -d -m 755 /etc/erinne
-install -d -o erinne -g erinne -m 750 /var/backups/erinne
+step "mnemerynne user and folders"
+id mnemerynne >/dev/null 2>&1 || useradd --system --home-dir /var/lib/mnemerynne --shell /sbin/nologin mnemerynne
+install -d -m 755 /etc/mnemerynne
+install -d -o mnemerynne -g mnemerynne -m 750 /var/backups/mnemerynne
 
 step "llama.cpp $LLAMA_TAG for Vulkan in $LLAMA_DIR"
 # A shallow clone reports "build 1", so the tag is recorded in a file instead.
@@ -61,18 +61,18 @@ fi
 semanage fcontext -a -t bin_t "$LLAMA_DIR(/.*)?" 2>/dev/null || true
 restorecon -R "$LLAMA_DIR"
 
-step "Erinne's GPU"
+step "Mnemerynne's GPU"
 devices=$(LD_LIBRARY_PATH=$LLAMA_DIR "$LLAMA_DIR/llama-server" --list-devices 2>&1)
 echo "$devices" | grep -E '^\s*Vulkan[0-9]+:' || true
-if [ -z "${ERINNE_GPU:-}" ]; then
-    ERINNE_GPU=$(echo "$devices" | grep -F "$GPU_MATCH" | grep -oE 'Vulkan[0-9]+' | head -1 || true)
-    [ -n "$ERINNE_GPU" ] || die "no Vulkan device matching '$GPU_MATCH'; set GPU_MATCH or ERINNE_GPU"
+if [ -z "${MNEMERYNNE_GPU:-}" ]; then
+    MNEMERYNNE_GPU=$(echo "$devices" | grep -F "$GPU_MATCH" | grep -oE 'Vulkan[0-9]+' | head -1 || true)
+    [ -n "$MNEMERYNNE_GPU" ] || die "no Vulkan device matching '$GPU_MATCH'; set GPU_MATCH or MNEMERYNNE_GPU"
 fi
-echo "using $ERINNE_GPU"
-for unit in erinne-generator erinne-embedder; do
+echo "using $MNEMERYNNE_GPU"
+for unit in mnemerynne-generator mnemerynne-embedder; do
     install -d "/etc/systemd/system/$unit.service.d"
-    printf '[Service]\n# Written by preinstall.sh: the llama.cpp device for Erinne'"'"'s card.\nEnvironment=ERINNE_GPU=%s\n' \
-        "$ERINNE_GPU" > "/etc/systemd/system/$unit.service.d/gpu.conf"
+    printf '[Service]\n# Written by preinstall.sh: the llama.cpp device for Mnemerynne'"'"'s card.\nEnvironment=MNEMERYNNE_GPU=%s\n' \
+        "$MNEMERYNNE_GPU" > "/etc/systemd/system/$unit.service.d/gpu.conf"
 done
 systemctl daemon-reload
 
@@ -85,15 +85,15 @@ fi
 sha=$(sha256sum "$MODELS/$EMBED_MODEL" | cut -c1-${#EMBED_SHA_PREFIX})
 [ "$sha" = "$EMBED_SHA_PREFIX" ] \
     || die "$EMBED_MODEL checksum starts $sha, expected $EMBED_SHA_PREFIX; delete it and run again"
-chown erinne:erinne "$MODELS/$EMBED_MODEL"
+chown mnemerynne:mnemerynne "$MODELS/$EMBED_MODEL"
 if [ -f "$MODELS/$GEN_MODEL" ]; then
     chmod o+r "$MODELS/$GEN_MODEL"
 else
-    echo "WARNING: $MODELS/$GEN_MODEL is missing; copy it there before starting erinne-generator" >&2
+    echo "WARNING: $MODELS/$GEN_MODEL is missing; copy it there before starting mnemerynne-generator" >&2
 fi
 
 step "Done"
 cat <<EOF
-llama.cpp $LLAMA_TAG (Vulkan) is in $LLAMA_DIR and Erinne will use $ERINNE_GPU.
+llama.cpp $LLAMA_TAG (Vulkan) is in $LLAMA_DIR and Mnemerynne will use $MNEMERYNNE_GPU.
 Next, from deploy/linux/README.md: uv sync (section 1), then settings (2) and services (3).
 EOF

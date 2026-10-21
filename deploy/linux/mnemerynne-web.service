@@ -1,20 +1,20 @@
 [Unit]
-Description=Erinne web app (127.0.0.1:38200)
-After=network.target erinne-generator.service erinne-embedder.service
-Wants=erinne-generator.service erinne-embedder.service
+Description=Mnemerynne web app (127.0.0.1:38200)
+After=network.target mnemerynne-generator.service mnemerynne-embedder.service
+Wants=mnemerynne-generator.service mnemerynne-embedder.service
 
 [Service]
 Type=simple
-User=erinne
-Group=erinne
-WorkingDirectory=/opt/erinne
-EnvironmentFile=/etc/erinne/erinne.env
+User=mnemerynne
+Group=mnemerynne
+WorkingDirectory=/opt/mnemerynne
+EnvironmentFile=/etc/mnemerynne/mnemerynne.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/erinne/.venv/bin/erinne serve
+ExecStart=/opt/mnemerynne/.venv/bin/mnemerynne serve
 Restart=on-failure
 RestartSec=5
-# /var/lib/erinne, created with the right owner and SELinux label.
-StateDirectory=erinne
+# /var/lib/mnemerynne, created with the right owner and SELinux label.
+StateDirectory=mnemerynne
 StateDirectoryMode=0750
 NoNewPrivileges=true
 ProtectSystem=strict

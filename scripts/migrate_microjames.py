@@ -4,14 +4,14 @@
     python scripts/migrate_microjames.py --source /opt/microjames
 
 What it does:
-  * users        -> erinne users, keeping their pbkdf2 password hashes (same
+  * users        -> mnemerynne users, keeping their pbkdf2 password hashes (same
                     passwords work) and roles; each gets a private inbox
   * docs/<Name>  -> a library per top-level folder (except docs/users)
   * access_control.json grants of those folders -> library grants
   * files        -> with --import-files, PDF/Markdown files are queued for
-                    ingestion (run `erinne worker` to process them)
+                    ingestion (run `mnemerynne worker` to process them)
 
-Grants that point at another user's private folder are skipped: erinne never
+Grants that point at another user's private folder are skipped: mnemerynne never
 shares private inboxes. Publish such documents as a library instead.
 Running it twice is safe: existing users, libraries and grants are left alone.
 """
@@ -27,9 +27,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from erinne import auth, db, permissions, users  # noqa: E402
-from erinne.cli import import_folder  # noqa: E402
-from erinne.config import get_settings  # noqa: E402
+from mnemerynne import auth, db, permissions, users  # noqa: E402
+from mnemerynne.cli import import_folder  # noqa: E402
+from mnemerynne.config import get_settings  # noqa: E402
 
 SUPPORTED_SUFFIXES = {".pdf", ".md", ".markdown"}
 
@@ -196,7 +196,7 @@ def main() -> None:
         print(line)
     if args.import_files:
         import_files(conn, settings, plan)
-        print("\nRun `erinne worker` (or the erinne-worker service) to process the queued files.")
+        print("\nRun `mnemerynne worker` (or the mnemerynne-worker service) to process the queued files.")
     print(f"\nImported into {settings.db_path}.")
 
 

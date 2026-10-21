@@ -18,9 +18,9 @@ import random
 import sqlite3
 from pathlib import Path
 
-from erinne import permissions, users
-from erinne.clients.llm import LLM
-from erinne.evaluation import GoldItem, Support
+from mnemerynne import permissions, users
+from mnemerynne.clients.llm import LLM
+from mnemerynne.evaluation import GoldItem, Support
 
 QUESTION_SCHEMA = {
     "type": "object",

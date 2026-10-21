@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Merged HF checkpoint -> GGUF -> Q4_K_M, named erinne-YYYY-MM-DD-q4_k_m.gguf.
-#   training/export_gguf.sh training/out/erinne-merged
+# Merged HF checkpoint -> GGUF -> Q4_K_M, named erynne-YYYY-MM-DD-q4_k_m.gguf.
+#   training/export_gguf.sh training/out/erynne-merged
 # Needs a llama.cpp checkout (for convert_hf_to_gguf.py) and a built
 # llama-quantize, at the same build the servers run (b11756) or newer.
 set -euo pipefail
@@ -9,7 +9,7 @@ MERGED=${1:?usage: export_gguf.sh <merged-model-dir>}
 LLAMA_SRC=${LLAMA_SRC:-$HOME/llama.cpp}
 QUANTIZE=${QUANTIZE:-$LLAMA_SRC/build/bin/llama-quantize}
 OUT_DIR=${OUT_DIR:-training/out}
-NAME="erinne-$(date +%F)"
+NAME="erynne-$(date +%F)"
 
 if [ ! -f "$LLAMA_SRC/convert_hf_to_gguf.py" ]; then
   echo "Clone llama.cpp first: git clone --depth 1 --branch b11756 https://github.com/ggml-org/llama.cpp $LLAMA_SRC" >&2

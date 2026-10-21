@@ -1,6 +1,6 @@
 import pytest
 
-from erinne import permissions, users, worker
+from mnemerynne import permissions, users, worker
 from fakes import FakeEmbedder
 from pdfgen import make_pdf
 

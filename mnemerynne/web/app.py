@@ -21,19 +21,19 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
-from erinne import db, mcp_server, memory, permissions, users
-from erinne.answer import ASSISTANT_NAME
-from erinne.auth import LoginThrottle
-from erinne.clients.embed import Embedder
-from erinne.clients.llm import LLM
-from erinne.clients.rerank import Reranker
-from erinne.config import Settings, get_settings
-from erinne.graph import Deps, build_graph
-from erinne.router import load_router
-from erinne.web import admin, chat, files, memories, tokens
-from erinne.web.deps import LoginRequired, api_user, get_db, page_user
+from mnemerynne import db, mcp_server, memory, permissions, users
+from mnemerynne.answer import ASSISTANT_NAME
+from mnemerynne.auth import LoginThrottle
+from mnemerynne.clients.embed import Embedder
+from mnemerynne.clients.llm import LLM
+from mnemerynne.clients.rerank import Reranker
+from mnemerynne.config import Settings, get_settings
+from mnemerynne.graph import Deps, build_graph
+from mnemerynne.router import load_router
+from mnemerynne.web import admin, chat, files, memories, tokens
+from mnemerynne.web.deps import LoginRequired, api_user, get_db, page_user
 
-log = logging.getLogger("erinne.web")
+log = logging.getLogger("mnemerynne.web")
 
 _HERE = Path(__file__).parent
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -69,7 +69,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     settings = settings or get_settings()
     secret_key = settings.secret_key
     if not secret_key:
-        log.warning("ERINNE_SECRET_KEY is not set; using a random key, so sessions end on restart.")
+        log.warning("MNEMERYNNE_SECRET_KEY is not set; using a random key, so sessions end on restart.")
         secret_key = secrets.token_urlsafe(48)
 
     @asynccontextmanager
@@ -125,7 +125,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.add_middleware(
         SessionMiddleware,
         secret_key=secret_key,
-        session_cookie="erinne_session",
+        session_cookie="mnemerynne_session",
         max_age=settings.session_max_age,
         same_site="lax",
         https_only=settings.session_https_only,
@@ -158,7 +158,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(admin.router)
     app.include_router(tokens.router)
 
-    # MCP for Claude Desktop: bearer-token auth, read-only tools (erinne/mcp_server.py).
+    # MCP for Claude Desktop: bearer-token auth, read-only tools (mnemerynne/mcp_server.py).
     mcp = mcp_server.build_server(settings, lambda: app.state.embedder)
     app.add_route("/mcp", mcp_server.McpEndpoint(settings, mcp), methods=["GET", "POST", "DELETE"])
 

@@ -1,5 +1,5 @@
 [Unit]
-Description=Run the Erinne backup nightly
+Description=Run the Mnemerynne backup nightly
 
 [Timer]
 OnCalendar=*-*-* 02:30:00

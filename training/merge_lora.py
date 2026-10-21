@@ -1,6 +1,6 @@
 """Merge a LoRA adapter into the base model and save a full HF checkpoint.
 
-    python training/merge_lora.py --adapter training/out/erinne-lora --out training/out/erinne-merged
+    python training/merge_lora.py --adapter training/out/erynne-lora --out training/out/erynne-merged
 """
 
 from __future__ import annotations

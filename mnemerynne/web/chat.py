@@ -12,11 +12,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from erinne import answer as answer_mod
-from erinne import db, fs, graph as graph_mod
-from erinne.web.deps import api_user, get_db
+from mnemerynne import answer as answer_mod
+from mnemerynne import db, fs, graph as graph_mod
+from mnemerynne.web.deps import api_user, get_db
 
-log = logging.getLogger("erinne.chat")
+log = logging.getLogger("mnemerynne.chat")
 router = APIRouter()
 
 

@@ -11,7 +11,7 @@ from typing import Sequence
 
 import httpx
 
-from erinne.config import Settings
+from mnemerynne.config import Settings
 
 
 class EmbeddingError(RuntimeError):
@@ -57,7 +57,7 @@ class Embedder:
         vectors = [item["embedding"] for item in sorted(data, key=lambda item: item["index"])]
         if any(len(v) != self.dim for v in vectors):
             raise EmbeddingError(
-                f"Embedding server returned {len(vectors[0])}-dim vectors; ERINNE_EMBED_DIM is {self.dim}."
+                f"Embedding server returned {len(vectors[0])}-dim vectors; MNEMERYNNE_EMBED_DIM is {self.dim}."
             )
         return vectors
 

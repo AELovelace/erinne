@@ -1,4 +1,4 @@
-from erinne import permissions, users
+from mnemerynne import permissions, users
 
 
 def _login(client, name):

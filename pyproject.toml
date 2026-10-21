@@ -1,5 +1,5 @@
 [project]
-name = "erinne"
+name = "mnemerynne"
 version = "0.1.0"
 description = "Private document inbox and cited Q&A assistant"
 requires-python = ">=3.14"
@@ -30,7 +30,7 @@ dev = [
 ]
 
 [project.scripts]
-erinne = "erinne.cli:main"
+mnemerynne = "mnemerynne.cli:main"
 
 [build-system]
 requires = ["hatchling"]

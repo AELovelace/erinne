@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-  Overnight fine-tune of the Erinne model on a Windows machine with an RTX 3080.
+  Overnight fine-tune of the Erynne model on a Windows machine with an RTX 3080.
 
 .DESCRIPTION
   1. trains a LoRA on training\out\sft.jsonl       (~2-3 h for ~9k examples)
   2. merges it into LFM2.5-2.6B
-  3. converts to GGUF and quantises to Q4_K_M       -> training\out\erinne-YYYY-MM-DD-q4_k_m.gguf
+  3. converts to GGUF and quantises to Q4_K_M       -> training\out\erynne-YYYY-MM-DD-q4_k_m.gguf
 
   Every step logs to training\out\overnight.log. If a step fails the script
   stops; re-running skips steps whose output already exists.
@@ -33,7 +33,7 @@ $ErrorActionPreference = "Stop"
 Set-Location (Split-Path $PSScriptRoot)
 $out = "training\out"
 $log = "$out\overnight.log"
-$name = "erinne-$(Get-Date -Format yyyy-MM-dd)"
+$name = "erynne-$(Get-Date -Format yyyy-MM-dd)"
 $env:PYTHONIOENCODING = "utf-8"
 $env:HF_HUB_DISABLE_TELEMETRY = "1"
 
@@ -51,14 +51,14 @@ foreach ($p in @($Data, $Python, "$LlamaSrc\convert_hf_to_gguf.py", $Quantize)) 
 }
 "[$(Get-Date -Format HH:mm:ss)] Starting: $((Get-Content $Data | Measure-Object -Line).Lines) examples" | Tee-Object -FilePath $log -Append
 
-if (-not (Test-Path "$out\erinne-lora\adapter_model.safetensors")) {
-    Step "Train LoRA" { & $Python training\train_lora.py --data $Data --out "$out\erinne-lora" --max-len $MaxLen --epochs $Epochs }
+if (-not (Test-Path "$out\erynne-lora\adapter_model.safetensors")) {
+    Step "Train LoRA" { & $Python training\train_lora.py --data $Data --out "$out\erynne-lora" --max-len $MaxLen --epochs $Epochs }
 }
-if (-not (Test-Path "$out\erinne-merged\config.json")) {
-    Step "Merge" { & $Python training\merge_lora.py --adapter "$out\erinne-lora" --out "$out\erinne-merged" }
+if (-not (Test-Path "$out\erynne-merged\config.json")) {
+    Step "Merge" { & $Python training\merge_lora.py --adapter "$out\erynne-lora" --out "$out\erynne-merged" }
 }
 if (-not (Test-Path "$out\$name-bf16.gguf")) {
-    Step "Convert to GGUF" { & $Python "$LlamaSrc\convert_hf_to_gguf.py" "$out\erinne-merged" --outtype bf16 --outfile "$out\$name-bf16.gguf" }
+    Step "Convert to GGUF" { & $Python "$LlamaSrc\convert_hf_to_gguf.py" "$out\erynne-merged" --outtype bf16 --outfile "$out\$name-bf16.gguf" }
 }
 Step "Quantise Q4_K_M" { & $Quantize "$out\$name-bf16.gguf" "$out\$name-q4_k_m.gguf" Q4_K_M }
 $hash = (Get-FileHash "$out\$name-q4_k_m.gguf" -Algorithm SHA256).Hash

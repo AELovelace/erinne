@@ -7,10 +7,10 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from erinne import graph as graph_mod
-from erinne import memory, permissions, users, worker
-from erinne.ingest import store
-from erinne.web.app import Services, create_app
+from mnemerynne import graph as graph_mod
+from mnemerynne import memory, permissions, users, worker
+from mnemerynne.ingest import store
+from mnemerynne.web.app import Services, create_app
 from fakes import KeywordEmbedder
 from pdfgen import make_pdf
 
@@ -256,7 +256,7 @@ class KeywordRouter:
     labels = ["general", "search", "smalltalk"]
 
     def decide(self, vector):
-        from erinne.router import Decision
+        from mnemerynne.router import Decision
         return Decision(self.next, {"search": 0.1, "smalltalk": 0.1, "general": 0.1, self.next: 0.9})
 
 
@@ -310,5 +310,5 @@ def test_unregistered_route_falls_back_to_search(routed_client, llm):
 
 def test_chat_pages_render(chat_client):
     _login(chat_client, "alice")
-    assert "Ask Erinne" in chat_client.get("/").text
+    assert "Ask Erynne" in chat_client.get("/").text
     assert 'id="tree"' in chat_client.get("/files").text

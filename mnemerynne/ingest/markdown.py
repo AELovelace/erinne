@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from markdown_it import MarkdownIt
 
-from erinne.ingest import Segment
+from mnemerynne.ingest import Segment
 
 _FRONT_MATTER = re.compile(r"\A(?:---|\+\+\+)[ \t]*\n.*?\n(?:---|\.\.\.|\+\+\+)[ \t]*(?:\n|\Z)", re.DOTALL)
 _ALLOWED_LINK = re.compile(r"^(?:https?:|mailto:|#|/|\./|\.\./|[^:]*$)", re.IGNORECASE)

@@ -28,10 +28,10 @@ os.environ["LANGCHAIN_TRACING_V2"] = "false"
 from langgraph.config import get_store, get_stream_writer  # noqa: E402
 from langgraph.graph import END, START, StateGraph  # noqa: E402
 
-from erinne import answer as answer_mod  # noqa: E402
-from erinne import db, retrieval  # noqa: E402
-from erinne.clients.llm import LLM  # noqa: E402
-from erinne.config import Settings  # noqa: E402
+from mnemerynne import answer as answer_mod  # noqa: E402
+from mnemerynne import db, retrieval  # noqa: E402
+from mnemerynne.clients.llm import LLM  # noqa: E402
+from mnemerynne.config import Settings  # noqa: E402
 
 HISTORY_TURNS = 4          # earlier turns the condense step sees
 MAX_MEMORIES = 10
@@ -53,7 +53,7 @@ class State(TypedDict, total=False):
     turns: Annotated[list[dict], operator.add]   # conversation memory, appended per turn
 
 
-# Route label (from erinne.router) -> graph node that handles it. Add a flow by
+# Route label (from mnemerynne.router) -> graph node that handles it. Add a flow by
 # training the router with a new label and registering its node here. Labels
 # without a node fall back to document search.
 FLOWS: dict[str, str] = {
@@ -80,7 +80,7 @@ Latest message: {question}"""
 
 
 # Per-run node timings, logged to graph_runs (our local replacement for LangSmith).
-_trace: contextvars.ContextVar[list | None] = contextvars.ContextVar("erinne_trace", default=None)
+_trace: contextvars.ContextVar[list | None] = contextvars.ContextVar("mnemerynne_trace", default=None)
 
 
 def _timed(name):
@@ -104,7 +104,7 @@ class Deps:
     llm: LLM
     embedder: Any
     reranker: Any = None
-    router: Any = None   # erinne.router.Router; None routes everything to search
+    router: Any = None   # mnemerynne.router.Router; None routes everything to search
 
 
 def build_graph(deps: Deps, checkpointer=None, store=None):

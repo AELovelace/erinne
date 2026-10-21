@@ -7,8 +7,8 @@ from typing import Iterator
 
 from fastapi import Depends, HTTPException, Request, status
 
-from erinne import db, users
-from erinne.config import Settings
+from mnemerynne import db, users
+from mnemerynne.config import Settings
 
 
 class LoginRequired(Exception):

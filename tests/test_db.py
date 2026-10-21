@@ -2,7 +2,7 @@ import struct
 
 import pytest
 
-from erinne import db, users
+from mnemerynne import db, users
 
 LATEST = len(db._migration_files())
 

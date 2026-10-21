@@ -6,13 +6,13 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from erinne import fs
-from erinne.clients.embed import Embedder, pack_vector
-from erinne.config import Settings
-from erinne.db import transaction
-from erinne.ingest import Segment, chunk, markdown, ocr, pdf, store
+from mnemerynne import fs
+from mnemerynne.clients.embed import Embedder, pack_vector
+from mnemerynne.config import Settings
+from mnemerynne.db import transaction
+from mnemerynne.ingest import Segment, chunk, markdown, ocr, pdf, store
 
-log = logging.getLogger("erinne.ingest")
+log = logging.getLogger("mnemerynne.ingest")
 
 
 class IngestError(RuntimeError):

@@ -4,7 +4,7 @@
 (function () {
   "use strict";
 
-  const { el, api } = window.Erinne;
+  const { el, api } = window.Erynne;
   const libsNode = document.getElementById("libs");
   const groupsNode = document.getElementById("groups");
   const accessNode = document.getElementById("access");

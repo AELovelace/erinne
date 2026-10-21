@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from erinne.answer import (ANSWER_SCHEMA, NOT_FOUND_TEXT, AnswerStreamer, build_messages, format_source,
+from mnemerynne.answer import (ANSWER_SCHEMA, NOT_FOUND_TEXT, AnswerStreamer, build_messages, format_source,
                            parse_answer)
-from erinne.retrieval import Hit
+from mnemerynne.retrieval import Hit
 
 
 def _hit(n=1, **kw):

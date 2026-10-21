@@ -1,4 +1,4 @@
-"""Command-line administration: `erinne <command>` or `python -m erinne <command>`.
+"""Command-line administration: `mnemerynne <command>` or `python -m mnemerynne <command>`.
 
 Passwords are prompted for (or read from stdin with --password-stdin), never
 taken as arguments, so they stay out of shell history and process lists.
@@ -11,8 +11,8 @@ import getpass
 import logging
 import sys
 
-from erinne import db, permissions, users
-from erinne.config import get_settings
+from mnemerynne import db, permissions, users
+from mnemerynne.config import get_settings
 
 
 def _connect():
@@ -80,7 +80,7 @@ def cmd_grant(args):
 
 
 def cmd_revoke_tokens(args):
-    from erinne import api_tokens
+    from mnemerynne import api_tokens
 
     conn = _connect()
     user = users.get_user(conn, args.username)
@@ -91,7 +91,7 @@ def cmd_revoke_tokens(args):
 
 
 def cmd_worker(args):
-    from erinne import worker
+    from mnemerynne import worker
 
     worker.run(get_settings(), once=args.once)
 
@@ -112,7 +112,7 @@ def cmd_import(args):
             raise SystemExit(f"No user '{args.user}'.")
         collection_id, owner = permissions.private_collection_id(conn, user["id"]), user["id"]
     import_folder(conn, settings, Path(args.path), collection_id, owner, flat=args.flat)
-    print("Queued; run `erinne worker` (or the erinne-worker service) to process them.")
+    print("Queued; run `mnemerynne worker` (or the mnemerynne-worker service) to process them.")
 
 
 _JUNK_FILES = {"thumbs.db", "desktop.ini", ".ds_store"}
@@ -124,8 +124,8 @@ def import_folder(conn, settings, folder, collection_id, owner, *, flat: bool = 
     PDF, Markdown and text files are queued for indexing; anything else is
     stored as not searchable. Returns (added, existing, rejected).
     """
-    from erinne import fs
-    from erinne.ingest import store
+    from mnemerynne import fs
+    from mnemerynne.ingest import store
 
     added = existing = rejected = 0
     for path in sorted(p for p in folder.rglob("*") if p.is_file()):
@@ -146,7 +146,7 @@ def import_folder(conn, settings, folder, collection_id, owner, *, flat: bool = 
 
 
 def cmd_purge_trash(args):
-    from erinne import fs
+    from mnemerynne import fs
 
     conn = _connect()
     settings = get_settings()
@@ -156,7 +156,7 @@ def cmd_purge_trash(args):
 
 
 def cmd_reindex(args):
-    from erinne import jobs
+    from mnemerynne import jobs
 
     conn = _connect()
     where, params = ("WHERE id = ?", (args.file,)) if args.file else ("", ())
@@ -172,8 +172,8 @@ def cmd_reindex(args):
 
 
 def cmd_reembed(args):
-    from erinne.clients.embed import Embedder
-    from erinne.ingest.reembed import reembed_all
+    from mnemerynne.clients.embed import Embedder
+    from mnemerynne.ingest.reembed import reembed_all
 
     settings = get_settings()
     conn = db.connect(settings.db_path)
@@ -192,9 +192,9 @@ def cmd_draft_gold(args):
     import asyncio
     from pathlib import Path
 
-    from erinne.clients.llm import LLM
-    from erinne.evaluation import dump_gold
-    from erinne.evaluation.draft import draft
+    from mnemerynne.clients.llm import LLM
+    from mnemerynne.evaluation import dump_gold
+    from mnemerynne.evaluation.draft import draft
 
     settings = get_settings()
     conn = _connect()
@@ -203,7 +203,7 @@ def cmd_draft_gold(args):
         raise SystemExit(f"{out} exists; pass --force to overwrite (it may hold verified items).")
 
     async def run():
-        from erinne.teacher import allowed_collections
+        from mnemerynne.teacher import allowed_collections
         llm = LLM.teacher(settings, base_url=args.teacher_url)
         allowed = allowed_collections(conn, settings, llm) if llm.is_remote else None
         try:
@@ -226,10 +226,10 @@ def cmd_eval_retrieval(args):
     import time
     from pathlib import Path
 
-    from erinne.clients.embed import Embedder
-    from erinne.clients.rerank import Reranker
-    from erinne.evaluation import load_gold
-    from erinne.evaluation.retrieval_eval import evaluate
+    from mnemerynne.clients.embed import Embedder
+    from mnemerynne.clients.rerank import Reranker
+    from mnemerynne.evaluation import load_gold
+    from mnemerynne.evaluation.retrieval_eval import evaluate
 
     settings = get_settings()
     if args.no_gate:
@@ -258,12 +258,12 @@ def cmd_eval_answers(args):
     import json
     from pathlib import Path
 
-    from erinne.answer import PROMPT_VERSION
-    from erinne.clients.embed import Embedder
-    from erinne.clients.llm import LLM
-    from erinne.clients.rerank import Reranker
-    from erinne.evaluation import load_gold
-    from erinne.evaluation.answer_eval import evaluate_answers
+    from mnemerynne.answer import PROMPT_VERSION
+    from mnemerynne.clients.embed import Embedder
+    from mnemerynne.clients.llm import LLM
+    from mnemerynne.clients.rerank import Reranker
+    from mnemerynne.evaluation import load_gold
+    from mnemerynne.evaluation.answer_eval import evaluate_answers
 
     settings = get_settings()
     conn = _connect()
@@ -276,7 +276,7 @@ def cmd_eval_answers(args):
         if args.generator_openai:
             # The remote API under test: teacher settings (key/model), and only the
             # allowed libraries' text may appear in its prompts.
-            from erinne.teacher import allowed_collections
+            from mnemerynne.teacher import allowed_collections
             settings.teacher_flavor = "openai"
             if args.generator_model:
                 settings.teacher_model = args.generator_model
@@ -311,7 +311,7 @@ def cmd_eval_answers(args):
 def cmd_backup(args):
     from pathlib import Path
 
-    from erinne.backup import backup
+    from mnemerynne.backup import backup
 
     result = backup(get_settings(), Path(args.dest), keep=args.keep)
     print(f"Snapshot {result['snapshot']}; {result['blobs_copied']} new file(s) copied; "
@@ -323,7 +323,7 @@ def cmd_forget_memories(args):
 
     from langgraph.store.sqlite import SqliteStore
 
-    from erinne.graph import memory_namespace
+    from mnemerynne.graph import memory_namespace
 
     settings = get_settings()
     conn = _connect()
@@ -340,7 +340,7 @@ def cmd_forget_memories(args):
 
 
 def run_migrate_microjames(argv: list[str]) -> None:
-    """`erinne migrate-microjames ...`: everything after the command goes to the script."""
+    """`mnemerynne migrate-microjames ...`: everything after the command goes to the script."""
     import importlib.util
     import sys
     from pathlib import Path
@@ -350,7 +350,7 @@ def run_migrate_microjames(argv: list[str]) -> None:
     module = importlib.util.module_from_spec(spec)
     sys.modules["migrate_microjames"] = module
     spec.loader.exec_module(module)
-    sys.argv = ["erinne migrate-microjames", *argv]
+    sys.argv = ["mnemerynne migrate-microjames", *argv]
     module.main()
 
 
@@ -358,10 +358,10 @@ def cmd_gen_sft(args):
     import asyncio
     from pathlib import Path
 
-    from erinne.clients.embed import Embedder
-    from erinne.clients.llm import LLM
-    from erinne.evaluation import load_gold
-    from erinne.sft import generate
+    from mnemerynne.clients.embed import Embedder
+    from mnemerynne.clients.llm import LLM
+    from mnemerynne.evaluation import load_gold
+    from mnemerynne.sft import generate
 
     settings = get_settings()
     conn = _connect()
@@ -390,7 +390,7 @@ def cmd_eval_gate(args):
     import json
     from pathlib import Path
 
-    from erinne.evaluation.gate import compare
+    from mnemerynne.evaluation.gate import compare
 
     baseline = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
     candidate = json.loads(Path(args.candidate).read_text(encoding="utf-8"))
@@ -406,8 +406,8 @@ def cmd_router_data(args):
     import asyncio
     from pathlib import Path
 
-    from erinne.clients.llm import LLM
-    from erinne.router_data import generate
+    from mnemerynne.clients.llm import LLM
+    from mnemerynne.router_data import generate
 
     settings = get_settings()
     conn = _connect()
@@ -426,9 +426,9 @@ def cmd_train_router(args):
     import json
     from pathlib import Path
 
-    from erinne import router as router_mod
-    from erinne.clients.embed import Embedder
-    from erinne.router_data import load
+    from mnemerynne import router as router_mod
+    from mnemerynne.clients.embed import Embedder
+    from mnemerynne.router_data import load
 
     settings = get_settings()
     texts, labels = load(Path(args.data))
@@ -442,13 +442,13 @@ def cmd_train_router(args):
     out = Path(settings.data_dir) / "router.json"
     model.save(out)
     print(json.dumps(model.metrics, indent=2))
-    print(f"Saved {out}. Restart erinne-web to use it.")
+    print(f"Saved {out}. Restart mnemerynne-web to use it.")
 
 
 def cmd_serve(args):
     import uvicorn
 
-    from erinne.web.app import create_app
+    from mnemerynne.web.app import create_app
 
     settings = get_settings()
     # proxy_headers + FORWARDED_ALLOW_IPS let login throttling see real client
@@ -457,7 +457,7 @@ def cmd_serve(args):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="erinne", description="Erinne administration")
+    parser = argparse.ArgumentParser(prog="mnemerynne", description="Mnemerynne administration")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init-db", help="Create or migrate the database").set_defaults(func=cmd_init_db)
@@ -476,7 +476,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_import)
 
     p = sub.add_parser("purge-trash", help="Empty recycle-bin items older than the retention period")
-    p.add_argument("--days", type=int, default=None, help="Default: ERINNE_TRASH_DAYS (30)")
+    p.add_argument("--days", type=int, default=None, help="Default: MNEMERYNNE_TRASH_DAYS (30)")
     p.set_defaults(func=cmd_purge_trash)
 
     p = sub.add_parser("draft-gold", help="Draft evaluation questions with the teacher model")
@@ -486,7 +486,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--scope", type=int, default=20, help="Scope-excluded (permission) negatives")
     p.add_argument("--as-user", default="rob", help="User the answerable questions are asked as")
     p.add_argument("--outsider", default="test", help="User without access, for scope negatives ('' = none)")
-    p.add_argument("--teacher-url", default=None, help="Teacher llama-server (default ERINNE_LLM_URL)")
+    p.add_argument("--teacher-url", default=None, help="Teacher llama-server (default MNEMERYNNE_LLM_URL)")
     p.add_argument("--force", action="store_true")
     p.set_defaults(func=cmd_draft_gold)
 
@@ -545,17 +545,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--keep", type=int, default=14, help="Daily database snapshots to keep")
     p.set_defaults(func=cmd_backup)
 
-    p = sub.add_parser("forget-memories", help="Delete everything Erinne remembers about a user")
+    p = sub.add_parser("forget-memories", help="Delete everything Erynne remembers about a user")
     p.add_argument("username")
     p.set_defaults(func=cmd_forget_memories)
 
     p = sub.add_parser("eval-answers", help="End-to-end answer evaluation against a gold set")
     p.add_argument("gold", nargs="+")
-    p.add_argument("--generator", default=None, help="Model being evaluated (default ERINNE_LLM_URL)")
+    p.add_argument("--generator", default=None, help="Model being evaluated (default MNEMERYNNE_LLM_URL)")
     p.add_argument("--generator-openai", action="store_true",
-                   help="Evaluate the OpenAI API model from the ERINNE_TEACHER_* settings; only questions answered by ERINNE_TEACHER_ALLOWED_LIBRARIES are used")
-    p.add_argument("--generator-model", default=None, help="Override ERINNE_TEACHER_MODEL for this run")
-    p.add_argument("--judge", default=None, help="Judge model, e.g. the teacher (default ERINNE_LLM_URL)")
+                   help="Evaluate the OpenAI API model from the MNEMERYNNE_TEACHER_* settings; only questions answered by MNEMERYNNE_TEACHER_ALLOWED_LIBRARIES are used")
+    p.add_argument("--generator-model", default=None, help="Override MNEMERYNNE_TEACHER_MODEL for this run")
+    p.add_argument("--judge", default=None, help="Judge model, e.g. the teacher (default MNEMERYNNE_LLM_URL)")
     p.add_argument("--no-judge", action="store_true")
     p.add_argument("--label", default="")
     p.add_argument("--split", default=None)
@@ -566,7 +566,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_eval_answers)
 
     sub.add_parser(
-        "reembed", help="Rebuild all vectors after changing the embedding model (ERINNE_EMBED_*)"
+        "reembed", help="Rebuild all vectors after changing the embedding model (MNEMERYNNE_EMBED_*)"
     ).set_defaults(func=cmd_reembed)
 
     p = sub.add_parser("reindex", help="Re-chunk and re-embed files from their stored text")

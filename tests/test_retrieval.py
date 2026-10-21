@@ -2,8 +2,8 @@ import io
 
 import pytest
 
-from erinne import db, permissions, retrieval, users, worker
-from erinne.ingest import reembed, store
+from mnemerynne import db, permissions, retrieval, users, worker
+from mnemerynne.ingest import reembed, store
 from fakes import FakeReranker, KeywordEmbedder
 from pdfgen import make_pdf
 

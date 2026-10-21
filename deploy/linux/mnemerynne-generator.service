@@ -1,23 +1,23 @@
 [Unit]
-Description=llama.cpp generator for Erinne (127.0.0.1:8086)
+Description=llama.cpp generator for Mnemerynne (127.0.0.1:8086)
 After=network.target
 
 [Service]
 Type=simple
-User=erinne
-Group=erinne
-# The RX 580 is reached through /dev/dri (Vulkan). ERINNE_GPU, the llama.cpp
+User=mnemerynne
+Group=mnemerynne
+# The RX 580 is reached through /dev/dri (Vulkan). MNEMERYNNE_GPU, the llama.cpp
 # device (e.g. Vulkan1), comes from the gpu.conf drop-in that preinstall.sh
 # writes; without it the unit fails rather than picking the wrong card.
 SupplementaryGroups=render video
 Environment=LD_LIBRARY_PATH=/opt/llama.cpp-vulkan
 # Mesa keeps its compiled shaders here; without it every start recompiles them.
-CacheDirectory=erinne-llama
-Environment=XDG_CACHE_HOME=/var/cache/erinne-llama
+CacheDirectory=mnemerynne-llama
+Environment=XDG_CACHE_HOME=/var/cache/mnemerynne-llama
 # Localhost only: llama-server has no authentication. 16k context split
 # across 2 slots. To run Qwen3-8B instead, change -m and the label in
-# ERINNE_LLM_MODEL; keep -c at 16384 or lower on the 8 GB card.
-ExecStart=/opt/llama.cpp-vulkan/llama-server --host 127.0.0.1 --port 8086 -dev ${ERINNE_GPU} -ngl 99 \
+# MNEMERYNNE_LLM_MODEL; keep -c at 16384 or lower on the 8 GB card.
+ExecStart=/opt/llama.cpp-vulkan/llama-server --host 127.0.0.1 --port 8086 -dev ${MNEMERYNNE_GPU} -ngl 99 \
     -m /opt/models/LFM2.5-2.6B-Q4_K_M.gguf -c 16384 -np 2 \
     --jinja --reasoning-format deepseek
 Restart=on-failure

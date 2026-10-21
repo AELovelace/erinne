@@ -1,4 +1,4 @@
-"""Ingestion worker: `erinne worker`. Runs as its own process/systemd unit."""
+"""Ingestion worker: `mnemerynne worker`. Runs as its own process/systemd unit."""
 
 from __future__ import annotations
 
@@ -7,12 +7,12 @@ import signal
 import sqlite3
 import time
 
-from erinne import db, fs, jobs
-from erinne.clients.embed import Embedder
-from erinne.config import Settings
-from erinne.ingest import pipeline
+from mnemerynne import db, fs, jobs
+from mnemerynne.clients.embed import Embedder
+from mnemerynne.config import Settings
+from mnemerynne.ingest import pipeline
 
-log = logging.getLogger("erinne.worker")
+log = logging.getLogger("mnemerynne.worker")
 
 
 def _mark_file(conn: sqlite3.Connection, file_id: int | None, **fields) -> None:

@@ -1,8 +1,8 @@
-"""Fine-tune LFM2.5-2.6B into the Erinne model with LoRA (bf16) on one GPU.
+"""Fine-tune LFM2.5-2.6B into the Erynne model with LoRA (bf16) on one GPU.
 
-    python training/train_lora.py --data training/out/sft.jsonl --out training/out/erinne-lora
+    python training/train_lora.py --data training/out/sft.jsonl --out training/out/erynne-lora
 
-Expects the chat examples written by `erinne gen-sft`, converted to TRL's
+Expects the chat examples written by `mnemerynne gen-sft`, converted to TRL's
 conversational prompt/completion format so the loss covers only the
 assistant's reply (not the prompt or the quoted sources). Designed for a 10 GB RTX 3080: bf16 weights (~5.2 GB),
 gradient checkpointing, batch 1 x 16 accumulation. Pass --qlora if that runs

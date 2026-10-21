@@ -1,9 +1,9 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from erinne import db
-from erinne.config import Settings
-from erinne.web.app import create_app
+from mnemerynne import db
+from mnemerynne.config import Settings
+from mnemerynne.web.app import create_app
 
 
 @pytest.fixture

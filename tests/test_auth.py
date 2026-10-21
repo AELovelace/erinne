@@ -1,7 +1,7 @@
 import pytest
 from passlib.hash import pbkdf2_sha256
 
-from erinne import auth
+from mnemerynne import auth
 
 
 def test_hash_round_trip():

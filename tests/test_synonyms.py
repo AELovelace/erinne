@@ -1,4 +1,4 @@
-from erinne import synonyms
+from mnemerynne import synonyms
 
 
 def test_variants_swap_jargon():

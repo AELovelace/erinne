@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from passlib.hash import pbkdf2_sha256
 
-from erinne import permissions, users
+from mnemerynne import permissions, users
 
 _SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "migrate_microjames.py"
 _spec = importlib.util.spec_from_file_location("migrate_microjames", _SCRIPT)

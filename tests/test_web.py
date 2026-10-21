@@ -1,4 +1,4 @@
-from erinne import db, permissions, users
+from mnemerynne import db, permissions, users
 
 
 def _login(client, username="alice", password="password123"):
@@ -17,7 +17,7 @@ def test_inbox_requires_login(client):
 
 def test_login_page_renders(client):
     r = client.get("/login")
-    assert r.status_code == 200 and "Erinne" in r.text
+    assert r.status_code == 200 and "Erynne" in r.text
 
 
 def test_login_and_inbox(client, conn):

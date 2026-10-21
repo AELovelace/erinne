@@ -1,6 +1,6 @@
-# Training the Erinne model
+# Training the Erynne model
 
-Erinne's answering model is **LFM2.5-2.6B fine-tuned with LoRA**, distilled
+Erynne's answering model is **LFM2.5-2.6B fine-tuned with LoRA**, distilled
 from Qwen3-8B (the teacher). It learns *behaviour*, not document content:
 answering only from the given sources, citing them inline, saying "not found"
 when they don't answer, rewriting follow-ups, and extracting memories. Content
@@ -14,8 +14,8 @@ lives in `training/out/` (git-ignored). No hub uploads, no trackers.
 Fine-tune only if the stock model falls short. With the gold set verified:
 
 ```sh
-erinne eval-answers eval/gold/dev.jsonl --generator http://127.0.0.1:8081 --label qwen3-8b --out runs/answers-qwen3-8b.json
-erinne eval-answers eval/gold/dev.jsonl --generator http://127.0.0.1:8083 --label lfm2.5-stock --out runs/answers-lfm2.5-stock.json
+mnemerynne eval-answers eval/gold/dev.jsonl --generator http://127.0.0.1:8081 --label qwen3-8b --out runs/answers-qwen3-8b.json
+mnemerynne eval-answers eval/gold/dev.jsonl --generator http://127.0.0.1:8083 --label lfm2.5-stock --out runs/answers-lfm2.5-stock.json
 ```
 
 (8081 = Qwen3-8B teacher, 8083 = stock LFM2.5; the judge defaults to 8081.)
@@ -23,7 +23,7 @@ erinne eval-answers eval/gold/dev.jsonl --generator http://127.0.0.1:8083 --labe
 ## 1. Generate training data (dev PC, teacher on the TITAN X)
 
 ```sh
-erinne gen-sft --out training/out/sft.jsonl --gold eval/gold/dev.jsonl
+mnemerynne gen-sft --out training/out/sft.jsonl --gold eval/gold/dev.jsonl
 ```
 
 Defaults: 2000 cited answers, 500 near-miss + 200 off-topic "not found",
@@ -37,8 +37,8 @@ and resume.
 
 **Using the OpenAI API as the teacher instead** (about $2 for this run with
 `gpt-6-luna`, Oct 2026 pricing; finishes in under an hour): set
-`ERINNE_TEACHER_FLAVOR=openai`, `ERINNE_TEACHER_API_KEY`, and
-`ERINNE_TEACHER_ALLOWED_LIBRARIES` (e.g. `Oracle`, or `*` for every
+`MNEMERYNNE_TEACHER_FLAVOR=openai`, `MNEMERYNNE_TEACHER_API_KEY`, and
+`MNEMERYNNE_TEACHER_ALLOWED_LIBRARIES` (e.g. `Oracle`, or `*` for every
 library). Only those libraries' text is ever sent; nothing is sent while it
 is unset. Generate examples for confidential libraries with the local
 teacher in a second run. Check OpenAI's current terms on
@@ -84,7 +84,7 @@ short: a cut-off example would teach broken JSON.
 ## 3. Train
 
 ```sh
-python training/train_lora.py --data training/out/sft.jsonl --out training/out/erinne-lora
+python training/train_lora.py --data training/out/sft.jsonl --out training/out/erynne-lora
 ```
 
 bf16 LoRA (r=16, α=32, lr 1e-4, 2 epochs, 4096 tokens, batch 1 × 16
@@ -95,10 +95,10 @@ runs out of memory: `--qlora`, or `--max-len 3072`.
 ## 4. Merge and export to GGUF
 
 ```sh
-python training/merge_lora.py --adapter training/out/erinne-lora --out training/out/erinne-merged
+python training/merge_lora.py --adapter training/out/erynne-lora --out training/out/erynne-merged
 git clone --depth 1 --branch b11756 https://github.com/ggml-org/llama.cpp ~/llama.cpp
 cmake -S ~/llama.cpp -B ~/llama.cpp/build && cmake --build ~/llama.cpp/build --target llama-quantize -j
-training/export_gguf.sh training/out/erinne-merged     # -> training/out/erinne-YYYY-MM-DD-q4_k_m.gguf
+training/export_gguf.sh training/out/erynne-merged     # -> training/out/erynne-YYYY-MM-DD-q4_k_m.gguf
 ```
 
 ## 5. Evaluate and gate (dev PC)
@@ -106,9 +106,9 @@ training/export_gguf.sh training/out/erinne-merged     # -> training/out/erinne-
 Serve the new GGUF on a spare port, evaluate, compare with the stock model:
 
 ```sh
-llama-server -m erinne-YYYY-MM-DD-q4_k_m.gguf --port 8084 -ngl 99 -c 8192 --jinja
-erinne eval-answers eval/gold/dev.jsonl --generator http://127.0.0.1:8084 --label erinne-YYYY-MM-DD --out runs/answers-erinne-YYYY-MM-DD.json
-erinne eval-gate runs/answers-lfm2.5-stock.json runs/answers-erinne-YYYY-MM-DD.json
+llama-server -m erynne-YYYY-MM-DD-q4_k_m.gguf --port 8084 -ngl 99 -c 8192 --jinja
+mnemerynne eval-answers eval/gold/dev.jsonl --generator http://127.0.0.1:8084 --label mnemerynne-YYYY-MM-DD --out runs/answers-mnemerynne-YYYY-MM-DD.json
+mnemerynne eval-gate runs/answers-lfm2.5-stock.json runs/answers-mnemerynne-YYYY-MM-DD.json
 ```
 
 The gate fails if any metric drops more than 0.02, if faithfulness or
@@ -118,12 +118,12 @@ refusal F1 gets worse at all, or if under 98 % of answers parse. Use the
 ## 6. Deploy (Fedora box)
 
 ```sh
-sudo cp erinne-YYYY-MM-DD-q4_k_m.gguf /opt/models/
-sudo ln -sfn /opt/models/erinne-YYYY-MM-DD-q4_k_m.gguf /opt/models/erinne-current.gguf
-# llama.env: GENERATOR_MODEL=/opt/models/erinne-current.gguf (once)
+sudo cp erynne-YYYY-MM-DD-q4_k_m.gguf /opt/models/
+sudo ln -sfn /opt/models/erynne-YYYY-MM-DD-q4_k_m.gguf /opt/models/mnemerynne-current.gguf
+# llama.env: GENERATOR_MODEL=/opt/models/mnemerynne-current.gguf (once)
 sudo systemctl restart llama-generator
 ```
 
 Roll back by pointing the symlink at the previous file and restarting.
-Set `ERINNE_LLM_MODEL=erinne-YYYY-MM-DD` in `/etc/erinne/erinne.env` so
+Set `MNEMERYNNE_LLM_MODEL=mnemerynne-YYYY-MM-DD` in `/etc/mnemerynne/mnemerynne.env` so
 answers record which model wrote them.

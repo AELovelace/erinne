@@ -1,4 +1,4 @@
-# Training environment for the Erinne model (separate from the app's).
+# Training environment for the Erynne model (separate from the app's).
 # Python 3.12, on the machine with the RTX 3080 (WSL2 Ubuntu recommended).
 #   python3.12 -m venv .venv-train && . .venv-train/bin/activate
 #   pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cu128

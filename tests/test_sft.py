@@ -3,14 +3,14 @@ import io
 import json
 import re
 
-from erinne import graph as graph_mod
-from erinne import memory, permissions, users, worker
-from erinne.answer import ANSWER_SCHEMA
-from erinne.evaluation import GoldItem, Support
-from erinne.evaluation.answer_eval import JUDGE_SCHEMA
-from erinne.evaluation.draft import OFFTOPIC_SCHEMA, QUESTION_SCHEMA
-from erinne.ingest import store
-from erinne.sft import FOLLOWUP_SCHEMA, MESSAGES_SCHEMA, generate
+from mnemerynne import graph as graph_mod
+from mnemerynne import memory, permissions, users, worker
+from mnemerynne.answer import ANSWER_SCHEMA
+from mnemerynne.evaluation import GoldItem, Support
+from mnemerynne.evaluation.answer_eval import JUDGE_SCHEMA
+from mnemerynne.evaluation.draft import OFFTOPIC_SCHEMA, QUESTION_SCHEMA
+from mnemerynne.ingest import store
+from mnemerynne.sft import FOLLOWUP_SCHEMA, MESSAGES_SCHEMA, generate
 from fakes import KeywordEmbedder
 from pdfgen import make_pdf
 
@@ -82,7 +82,7 @@ def test_generate_produces_every_task_from_production_prompts(conn, settings, tm
     answers = [r for r in rows if r["task"] == "answer"]
     assert answers and all("pets" not in r["messages"][1]["content"].split("Question:")[1] for r in answers)
     first = answers[0]
-    assert first["messages"][0]["content"].startswith("You are Erinne")       # production system prompt
+    assert first["messages"][0]["content"].startswith("You are Erynne")       # production system prompt
     assert json.loads(first["messages"][-1]["content"])["citations"]
     nf = [r for r in rows if r["task"] == "not_found"]
     assert all(json.loads(r["messages"][-1]["content"])["status"] == "not_found" for r in nf)

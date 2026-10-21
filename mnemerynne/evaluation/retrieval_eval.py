@@ -13,9 +13,9 @@ import statistics
 import time
 from dataclasses import asdict, dataclass
 
-from erinne import retrieval, users
-from erinne.config import Settings
-from erinne.evaluation import GoldItem
+from mnemerynne import retrieval, users
+from mnemerynne.config import Settings
+from mnemerynne.evaluation import GoldItem
 
 KS = (1, 3, 5, 10, 20)
 
@@ -38,7 +38,7 @@ def _allowed(conn: sqlite3.Connection, item: GoldItem) -> set[int]:
         user = users.get_user(conn, item.as_user)
         if user is None:
             raise ValueError(f"Gold item {item.id}: unknown user {item.as_user!r}")
-        from erinne import permissions
+        from mnemerynne import permissions
         return permissions.readable_collection_ids(conn, user["id"])
     return {r[0] for r in conn.execute("SELECT id FROM collections")}
 

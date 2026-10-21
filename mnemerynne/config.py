@@ -1,4 +1,4 @@
-"""Settings, read from ERINNE_* environment variables and an optional .env file."""
+"""Settings, read from MNEMERYNNE_* environment variables and an optional .env file."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="ERINNE_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="MNEMERYNNE_", env_file=".env", extra="ignore")
 
     # Storage
     data_dir: Path = Path("data")
@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     secret_key: str = ""
     session_max_age: int = 24 * 3600
     session_https_only: bool = False
-    # The address people open Erinne at, e.g. https://erinne.example.internal;
+    # The address people open Erynne at, e.g. https://erynne.example.internal;
     # links handed to Claude are built on it (relative links when empty).
     public_url: str = ""
 
@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     # farther than vector_max_distance, or there is no keyword match at all and it
     # is farther than vector_max_distance_no_keywords. Cosine distances depend on
     # the embedder; these fit Qwen3-Embedding (answerable questions: p95 0.35,
-    # max 0.48). Re-tune with `erinne eval-retrieval --no-gate` after changing it.
+    # max 0.48). Re-tune with `mnemerynne eval-retrieval --no-gate` after changing it.
     vector_max_distance: float = 0.50
     vector_max_distance_no_keywords: float = 0.42
     rerank_url: str = ""               # optional llama-server --reranking endpoint
@@ -110,7 +110,7 @@ class Settings(BaseSettings):
 
     @property
     def db_path(self) -> Path:
-        return self.data_dir / "erinne.db"
+        return self.data_dir / "mnemerynne.db"
 
     @property
     def blob_dir(self) -> Path:

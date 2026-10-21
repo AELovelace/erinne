@@ -1,4 +1,4 @@
-"""Training data for the Erinne model, distilled from the teacher (Qwen3-8B).
+"""Training data for the Erynne model, distilled from the teacher (Qwen3-8B).
 
 Every example is produced through the production code paths: real retrieval
 for a user's scope, `answer.build_messages`, the graph's condense prompt and
@@ -24,17 +24,17 @@ import sqlite3
 import threading
 from pathlib import Path
 
-from erinne import answer as answer_mod
-from erinne import graph as graph_mod
-from erinne import db, memory, retrieval
-from erinne import teacher as teacher_scope
-from erinne.clients.llm import LLM, BudgetExceeded
-from erinne.config import Settings
-from erinne.evaluation import GoldItem
-from erinne.evaluation.answer_eval import JUDGE_SCHEMA, _JUDGE_PROMPT
-from erinne.evaluation.draft import _OFFTOPIC_PROMPT, _QUESTION_PROMPT, OFFTOPIC_SCHEMA, QUESTION_SCHEMA, STYLES
+from mnemerynne import answer as answer_mod
+from mnemerynne import graph as graph_mod
+from mnemerynne import db, memory, retrieval
+from mnemerynne import teacher as teacher_scope
+from mnemerynne.clients.llm import LLM, BudgetExceeded
+from mnemerynne.config import Settings
+from mnemerynne.evaluation import GoldItem
+from mnemerynne.evaluation.answer_eval import JUDGE_SCHEMA, _JUDGE_PROMPT
+from mnemerynne.evaluation.draft import _OFFTOPIC_PROMPT, _QUESTION_PROMPT, OFFTOPIC_SCHEMA, QUESTION_SCHEMA, STYLES
 
-log = logging.getLogger("erinne.sft")
+log = logging.getLogger("mnemerynne.sft")
 _INLINE_MARKER = re.compile(r"\[\d{1,2}\]")
 
 FOLLOWUP_SCHEMA = {
@@ -264,7 +264,7 @@ async def generate(conn: sqlite3.Connection, settings: Settings, embedder, teach
     near_pool = gen._chunks(n_near_miss * 3)
     general_pool: list[tuple[str, str]] = []
     if router_messages and router_messages.exists() and n_general:
-        from erinne.router_data import load as load_router_messages
+        from mnemerynne.router_data import load as load_router_messages
         texts, labels = load_router_messages(router_messages)
         general_pool = [(t, label) for t, label in zip(texts, labels) if label != "search"]
         gen.rng.shuffle(general_pool)

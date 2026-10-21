@@ -13,7 +13,7 @@
   const scopeLabel = document.getElementById("scope-label");
 
   document.getElementById("scope").addEventListener("click", async function () {
-    const picked = await window.Erinne.pickLocation({ title: "Search in…", ok: "Search here", allowAll: true,
+    const picked = await window.Erynne.pickLocation({ title: "Search in…", ok: "Search here", allowAll: true,
                                                       current: scope });
     if (!picked) return;
     scope = picked.all ? null : picked;

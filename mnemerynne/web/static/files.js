@@ -5,9 +5,9 @@
 (function () {
   "use strict";
 
-  const { el, api } = window.Erinne;
+  const { el, api } = window.Erynne;
   const $ = function (id) { return document.getElementById(id); };
-  const ITEMS_MIME = "application/x-erinne-items";
+  const ITEMS_MIME = "application/x-erynne-items";
   const TRASH_DAYS = Number($("fm").dataset.trashDays || 30);
   const UPLOAD_CONCURRENCY = 3;
 
@@ -230,7 +230,7 @@
       });
       if (expanded) {
         let folders = [];
-        try { folders = await window.Erinne.folders(loc.id); } catch (e) { /* ignore */ }
+        try { folders = await window.Erynne.folders(loc.id); } catch (e) { /* ignore */ }
         const kids = folderBranch(loc, folders, null, 1);
         if (kids) node.appendChild(kids);
         if (loc.writable) {
@@ -277,7 +277,7 @@
   }
 
   async function treeChanged(collectionIds) {
-    (collectionIds || [state.cid]).forEach(function (c) { window.Erinne.forgetFolders(c); });
+    (collectionIds || [state.cid]).forEach(function (c) { window.Erynne.forgetFolders(c); });
     await loadLocations();  // bin counts
   }
 
@@ -615,7 +615,7 @@
   async function moveOrCopy(items, op, target) {
     if (!items.length) return;
     if (!target) {
-      target = await window.Erinne.pickLocation({
+      target = await window.Erynne.pickLocation({
         title: (op === "move" ? "Move " : "Copy ") + (items.length === 1 ? "“" + items[0].name + "”" : items.length + " items") + " to…",
         ok: op === "move" ? "Move here" : "Copy here", writableOnly: true,
         current: { collection_id: state.cid, folder_id: state.fid },

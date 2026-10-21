@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
-from erinne import auth
-from erinne.db import transaction
+from mnemerynne import auth
+from mnemerynne.db import transaction
 
 ROLES = ("user", "admin")
 

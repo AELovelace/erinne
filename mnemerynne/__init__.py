@@ -1,1 +1,1 @@
-"""Erinne: private document inboxes with cited question answering."""
+"""Mnemerynne: private document inboxes with cited question answering."""

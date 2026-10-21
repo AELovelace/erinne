@@ -3,7 +3,7 @@
 (function () {
   "use strict";
 
-  const { el, api } = window.Erinne;
+  const { el, api } = window.Erynne;
   const errorNode = document.getElementById("token-error");
 
   function showError(message) {

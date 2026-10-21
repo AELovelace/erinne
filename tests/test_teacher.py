@@ -5,11 +5,11 @@ import json
 import httpx
 import pytest
 
-from erinne import permissions, users, worker
-from erinne.clients.llm import LLM, strict_schema
-from erinne.ingest import store
-from erinne.sft import generate
-from erinne.teacher import TeacherScopeError, allowed_collections
+from mnemerynne import permissions, users, worker
+from mnemerynne.clients.llm import LLM, strict_schema
+from mnemerynne.ingest import store
+from mnemerynne.sft import generate
+from mnemerynne.teacher import TeacherScopeError, allowed_collections
 from fakes import KeywordEmbedder
 from pdfgen import make_pdf
 from test_sft import FakeTeacher
@@ -81,7 +81,7 @@ def test_streaming_drops_rejected_parameter_then_streams():
 
 
 def test_usage_is_tracked_and_budget_stops_calls():
-    from erinne.clients.llm import BudgetExceeded
+    from mnemerynne.clients.llm import BudgetExceeded
 
     def handler(request):
         return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}],
@@ -186,7 +186,7 @@ def test_remote_teacher_never_sees_disallowed_library_text(conn, settings, tmp_p
     assert "CONFIDENTIAL-BWH" not in sent and "bwh-standards" not in sent
 
     # A spent budget stops generation cleanly (no exception) with what was written.
-    from erinne.clients.llm import BudgetExceeded
+    from mnemerynne.clients.llm import BudgetExceeded
 
     class BrokeTeacher(RecordingRemoteTeacher):
         async def chat_json(self, messages, schema, **kw):

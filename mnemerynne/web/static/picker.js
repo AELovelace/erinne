@@ -136,5 +136,5 @@
     });
   }
 
-  window.Erinne = { el: el, api: api, folders: folders, forgetFolders: forget, pickLocation: pickLocation };
+  window.Erynne = { el: el, api: api, folders: folders, forgetFolders: forget, pickLocation: pickLocation };
 })();

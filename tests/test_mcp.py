@@ -5,10 +5,10 @@ import pytest
 from fastapi.testclient import TestClient
 from mcp.server.mcpserver.exceptions import ToolError
 
-from erinne import api_tokens, permissions, users, worker
-from erinne.ingest import store
-from erinne.mcp_server import Tools
-from erinne.web.app import Services, create_app
+from mnemerynne import api_tokens, permissions, users, worker
+from mnemerynne.ingest import store
+from mnemerynne.mcp_server import Tools
+from mnemerynne.web.app import Services, create_app
 from fakes import KeywordEmbedder
 from pdfgen import make_pdf
 
@@ -52,12 +52,19 @@ def _texts(out):
 
 
 # ----------------------------------------------------------------- tokens
+def test_tokens_from_before_the_rename_still_work(conn, world):
+    token_id, token = api_tokens.create(conn, world["alice"], "laptop")
+    old = "erinne_" + token.removeprefix(api_tokens.PREFIX)
+    conn.execute("UPDATE api_tokens SET token_hash = ? WHERE id = ?", (api_tokens._hash(old), token_id))
+    assert api_tokens.verify(conn, old).user_id == world["alice"]
+
+
 def test_tokens_expire_revoke_and_follow_the_user(conn, world):
     token_id, token = api_tokens.create(conn, world["alice"], "laptop", days=30)
-    assert token.startswith("erinne_") and len(token) > 40
+    assert token.startswith("erynne_") and len(token) > 40
     assert conn.execute("SELECT count(*) FROM api_tokens WHERE token_hash = ?", (token,)).fetchone()[0] == 0
     assert api_tokens.verify(conn, token).user_id == world["alice"]
-    assert api_tokens.verify(conn, "erinne_nope") is None and api_tokens.verify(conn, None) is None
+    assert api_tokens.verify(conn, "erynne_nope") is None and api_tokens.verify(conn, None) is None
 
     users.set_active(conn, "alice", False)
     assert api_tokens.verify(conn, token) is None
@@ -153,12 +160,12 @@ def _initialize(client, token):
 
 def test_mcp_endpoint_end_to_end(mcp_client, conn, world):
     assert _initialize(mcp_client, None).status_code == 401
-    assert _initialize(mcp_client, "erinne_wrong").status_code == 401
+    assert _initialize(mcp_client, "erynne_wrong").status_code == 401
 
     _, token = api_tokens.create(conn, world["alice"], "test")
     init = _initialize(mcp_client, token)
     assert init.status_code == 200, init.text
-    assert init.json()["result"]["serverInfo"]["name"] == "erinne"
+    assert init.json()["result"]["serverInfo"]["name"] == "erynne"
 
     listed = _rpc(mcp_client, token, "tools/list").json()["result"]["tools"]
     assert {t["name"] for t in listed} == {"search_documents", "read_passage", "list_libraries", "browse_folder",
@@ -195,16 +202,16 @@ def test_mcp_rate_limit(settings, conn, world, embedder):
 # ------------------------------------------------------------ web pages/API
 def test_connect_page_and_token_api(mcp_client, conn, world):
     mcp_client.post("/login", data={"username": "alice", "password": "password123"})
-    assert "Use Erinne from Claude" in mcp_client.get("/connect").text
+    assert "Use Erynne from Claude" in mcp_client.get("/connect").text
     made = mcp_client.post("/api/tokens", json={"name": "Laptop", "days": 30})
-    assert made.status_code == 201 and made.json()["token"].startswith("erinne_")
+    assert made.status_code == 201 and made.json()["token"].startswith("erynne_")
     assert mcp_client.post("/api/tokens", json={"name": "x", "days": 7}).status_code == 422
 
     listed = mcp_client.get("/api/tokens").json()
     assert [t["name"] for t in listed["tokens"]] == ["Laptop"] and "token" not in listed["tokens"][0]
     assert {c["name"] for c in listed["shared"]} == {"My inbox", "Oracle"}
     assert listed["mcp_url"].endswith("/mcp")
-    assert mcp_client.get("/connect/erinne.mcpb").status_code == 404
+    assert mcp_client.get("/connect/erynne.mcpb").status_code == 404
 
     token_id = made.json()["id"]
     assert mcp_client.delete(f"/api/tokens/{token_id}").status_code == 200

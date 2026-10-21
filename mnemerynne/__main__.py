@@ -1,3 +1,3 @@
-from erinne.cli import main
+from mnemerynne.cli import main
 
 main()

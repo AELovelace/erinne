@@ -1,7 +1,7 @@
 import pytest
 
-from erinne.ingest import Segment, markdown, pdf
-from erinne.ingest.chunk import chunk_segments, embed_text
+from mnemerynne.ingest import Segment, markdown, pdf
+from mnemerynne.ingest.chunk import chunk_segments, embed_text
 from pdfgen import make_pdf
 
 

@@ -10,10 +10,10 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from erinne import fs, jobs, permissions
-from erinne.config import Settings
-from erinne.ingest import markdown, store
-from erinne.web.deps import api_user, get_db, get_settings, page_user
+from mnemerynne import fs, jobs, permissions
+from mnemerynne.config import Settings
+from mnemerynne.ingest import markdown, store
+from mnemerynne.web.deps import api_user, get_db, get_settings, page_user
 
 router = APIRouter()
 

@@ -1,15 +1,15 @@
 [Unit]
-Description=Erinne nightly backup
+Description=Mnemerynne nightly backup
 
 [Service]
 Type=oneshot
-User=erinne
-Group=erinne
-WorkingDirectory=/opt/erinne
-EnvironmentFile=/etc/erinne/erinne.env
-ExecStart=/opt/erinne/.venv/bin/erinne backup --dest /var/backups/erinne --keep 14
-StateDirectory=erinne
+User=mnemerynne
+Group=mnemerynne
+WorkingDirectory=/opt/mnemerynne
+EnvironmentFile=/etc/mnemerynne/mnemerynne.env
+ExecStart=/opt/mnemerynne/.venv/bin/mnemerynne backup --dest /var/backups/mnemerynne --keep 14
+StateDirectory=mnemerynne
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/backups/erinne
+ReadWritePaths=/var/backups/mnemerynne

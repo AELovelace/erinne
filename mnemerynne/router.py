@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-log = logging.getLogger("erinne.router")
+log = logging.getLogger("mnemerynne.router")
 
 DEFAULT_ROUTE = "search"
 DEFAULT_THRESHOLD = 0.85
@@ -92,7 +92,7 @@ class Router:
         if router.embed_model != embed_model or router.weights.shape[0] != dim:
             raise RouterError(
                 f"Router was trained on {router.embed_model} ({router.weights.shape[0]}-dim) but the embedder is "
-                f"{embed_model} ({dim}-dim); retrain with `erinne train-router`.")
+                f"{embed_model} ({dim}-dim); retrain with `mnemerynne train-router`.")
         if DEFAULT_ROUTE not in router.labels:
             raise RouterError(f"Router has no '{DEFAULT_ROUTE}' label.")
         return router

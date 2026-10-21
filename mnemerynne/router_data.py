@@ -17,11 +17,11 @@ import random
 import sqlite3
 from pathlib import Path
 
-from erinne import teacher as teacher_scope
-from erinne.clients.llm import LLM
-from erinne.evaluation.draft import _QUESTION_PROMPT, QUESTION_SCHEMA, STYLES
+from mnemerynne import teacher as teacher_scope
+from mnemerynne.clients.llm import LLM
+from mnemerynne.evaluation.draft import _QUESTION_PROMPT, QUESTION_SCHEMA, STYLES
 
-log = logging.getLogger("erinne.router_data")
+log = logging.getLogger("mnemerynne.router_data")
 
 LIST_SCHEMA = {
     "type": "object",

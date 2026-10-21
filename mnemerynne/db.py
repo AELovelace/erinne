@@ -81,7 +81,7 @@ def migrate(conn: sqlite3.Connection, embed_dim: int, *, ensure_vectors: bool = 
     current = schema_version(conn)
     if current > len(files):
         raise SchemaError(
-            f"Database schema v{current} is newer than this code (v{len(files)}); upgrade erinne."
+            f"Database schema v{current} is newer than this code (v{len(files)}); upgrade mnemerynne."
         )
     for number, path in files:
         if number <= current:
@@ -89,7 +89,7 @@ def migrate(conn: sqlite3.Connection, embed_dim: int, *, ensure_vectors: bool = 
         sql = path.read_text(encoding="utf-8")
         # Table rebuilds (create new, copy, drop old, rename) need foreign keys
         # off; that can only change outside a transaction.
-        no_fk = sql.startswith("-- erinne:no-fk")
+        no_fk = sql.startswith("-- mnemerynne:no-fk")
         if no_fk:
             conn.execute("PRAGMA foreign_keys = OFF")
         # executescript() commits any open transaction, so wrap the script and
@@ -128,13 +128,13 @@ def ensure_vector_table(conn: sqlite3.Connection, embed_dim: int) -> None:
 
     The vector size is fixed when the table is created, so it lives outside the
     numbered migrations. Changing embedder dimension requires a re-index
-    (`erinne reset-vectors`, added with the ingestion pipeline).
+    (`mnemerynne reset-vectors`, added with the ingestion pipeline).
     """
     row = conn.execute("SELECT value FROM meta WHERE key = 'embed_dim'").fetchone()
     if row is not None:
         if int(row["value"]) != embed_dim:
             raise SchemaError(
-                f"chunk_vec was built for {row['value']}-dim embeddings but ERINNE_EMBED_DIM="
+                f"chunk_vec was built for {row['value']}-dim embeddings but MNEMERYNNE_EMBED_DIM="
                 f"{embed_dim}; re-index or restore the previous embedder setting."
             )
         layout = conn.execute("SELECT value FROM meta WHERE key = 'vec_layout'").fetchone()
