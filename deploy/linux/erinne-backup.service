@@ -1,0 +1,15 @@
+[Unit]
+Description=Erinne nightly backup
+
+[Service]
+Type=oneshot
+User=erinne
+Group=erinne
+WorkingDirectory=/opt/erinne
+EnvironmentFile=/etc/erinne/erinne.env
+ExecStart=/opt/erinne/.venv/bin/erinne backup --dest /var/backups/erinne --keep 14
+StateDirectory=erinne
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/erinne

@@ -2,34 +2,51 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 import sqlite3
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Any
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
+import aiosqlite
+from fastapi import Depends, FastAPI, Form, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
-from erinne import db, permissions, users
+from erinne import db, memory, permissions, users
+from erinne.answer import ASSISTANT_NAME
 from erinne.auth import LoginThrottle
+from erinne.clients.embed import Embedder
+from erinne.clients.llm import LLM
+from erinne.clients.rerank import Reranker
 from erinne.config import Settings, get_settings
+from erinne.graph import Deps, build_graph
+from erinne.router import load_router
+from erinne.web import chat, files, memories
+from erinne.web.deps import LoginRequired, api_user, get_db, page_user
 
 log = logging.getLogger("erinne.web")
 
 _HERE = Path(__file__).parent
-ASSISTANT_NAME = "Erinne"
 
 
-class LoginRequired(Exception):
-    """Raised by page dependencies; turned into a redirect to /login."""
+@dataclass
+class Services:
+    """Model clients; tests pass fakes."""
+    llm: Any
+    embedder: Any
+    reranker: Any = None
+    router: Any = None
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, services: Services | None = None) -> FastAPI:
     settings = settings or get_settings()
     secret_key = settings.secret_key
     if not secret_key:
@@ -44,9 +61,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             conn.close()
         log.info("Database ready at %s (schema v%d).", settings.db_path, version)
-        yield
 
-    app = FastAPI(title="Erinne", lifespan=lifespan, docs_url=None, redoc_url=None)
+        svc = services or Services(
+            llm=LLM.from_settings(settings),
+            embedder=Embedder(settings),
+            reranker=Reranker(settings.rerank_url) if settings.rerank_url else None,
+        )
+        # LangGraph's checkpointer (conversation state) and store (long-term
+        # memories) live in the same database file, on their own connections.
+        # Autocommit (isolation_level=None): they issue their own BEGIN/COMMIT,
+        # and Python's implicit transactions would otherwise hold the write lock.
+        saver_conn = await aiosqlite.connect(settings.db_path, timeout=10, isolation_level=None)
+        store_conn = await aiosqlite.connect(settings.db_path, timeout=10, isolation_level=None)
+        checkpointer = AsyncSqliteSaver(saver_conn)
+        await checkpointer.setup()
+        store = AsyncSqliteStore(store_conn)
+        await store.setup()
+        app.state.checkpointer, app.state.store = checkpointer, store
+        router = svc.router if services is not None else load_router(settings)
+        log.info("Routing: %s.", f"{', '.join(router.labels)}" if router else "no router trained; everything is search")
+        app.state.graph = build_graph(Deps(settings, svc.llm, svc.embedder, svc.reranker, router),
+                                      checkpointer, store)
+        app.state.background = set()
+        app.state.memory_writer = memory.make_writer(settings, svc.llm, store, app.state.background)
+        try:
+            yield
+        finally:
+            for task in list(app.state.background):
+                task.cancel()
+            await asyncio.gather(*app.state.background, return_exceptions=True)
+            await saver_conn.close()
+            await store_conn.close()
+            if services is None:
+                svc.embedder.close()
+                await svc.llm.aclose()
+                if svc.reranker:
+                    svc.reranker.close()
+
+    app = FastAPI(title=ASSISTANT_NAME, lifespan=lifespan, docs_url=None, redoc_url=None)
     app.state.settings = settings
     app.state.throttle = LoginThrottle(settings.login_max_failures, settings.login_lockout_seconds)
     app.add_middleware(
@@ -60,43 +112,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
     templates = Jinja2Templates(directory=_HERE / "templates")
     templates.env.globals["assistant_name"] = ASSISTANT_NAME
-
-    # ------------------------------------------------------------ dependencies
-    def get_db() -> Iterator[sqlite3.Connection]:
-        conn = db.connect(settings.db_path)
-        try:
-            yield conn
-        finally:
-            conn.close()
-
-    def _session_user(request: Request, conn: sqlite3.Connection) -> sqlite3.Row | None:
-        """The logged-in user, re-checked against the database on every request."""
-        user_id = request.session.get("user_id")
-        user = users.get_user_by_id(conn, user_id) if user_id else None
-        if user is None or not user["active"]:
-            request.session.clear()
-            return None
-        return user
-
-    def page_user(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> sqlite3.Row:
-        user = _session_user(request, conn)
-        if user is None:
-            raise LoginRequired()
-        return user
-
-    def api_user(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> sqlite3.Row:
-        user = _session_user(request, conn)
-        if user is None:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
-        return user
-
-    app.state.api_user = api_user  # for routers added in later phases
+    app.state.templates = templates
+    app.include_router(files.router)
+    app.include_router(chat.router)
+    app.include_router(memories.router)
 
     @app.exception_handler(LoginRequired)
     async def _redirect_to_login(request: Request, exc: LoginRequired):
         return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
 
-    # ------------------------------------------------------------------ routes
     @app.get("/healthz")
     def healthz(conn: sqlite3.Connection = Depends(get_db)):
         return JSONResponse({"status": "ok", "schema": db.schema_version(conn)})
@@ -138,16 +162,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request.session.clear()
         return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
 
+    def _page(request: Request, template: str, user, conn, **extra):
+        return templates.TemplateResponse(request, template, {
+            "user": user, "is_admin": users.is_admin(user, settings.admin_usernames), **extra})
+
     @app.get("/", response_class=HTMLResponse)
-    def inbox(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db)):
-        return templates.TemplateResponse(
-            request, "inbox.html",
-            {
-                "user": user,
-                "is_admin": users.is_admin(user, settings.admin_usernames),
-                "collections": permissions.readable_collections(conn, user["id"]),
-            },
-        )
+    def chat_page(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db)):
+        has_files = conn.execute(
+            "SELECT 1 FROM files WHERE status = 'ready' AND collection_id IN "
+            f"({','.join(str(i) for i in permissions.readable_collection_ids(conn, user['id'])) or 'NULL'}) "
+            "LIMIT 1").fetchone() is not None
+        return _page(request, "chat.html", user, conn, active="chat", has_files=has_files)
+
+    @app.get("/files", response_class=HTMLResponse)
+    def files_page(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db)):
+        writable = permissions.writable_collection_ids(conn, user["id"])
+        collections = [
+            {**dict(c), "writable": c["id"] in writable}
+            for c in permissions.readable_collections(conn, user["id"])
+        ]
+        return _page(request, "inbox.html", user, conn, active="files", collections=collections)
 
     @app.get("/api/me")
     def me(user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):

@@ -1,19 +1,25 @@
 {% extends "base.html" %}
+{% block title %}Files · {{ assistant_name }}{% endblock %}
 {% block body %}
-<header class="topbar">
-  <strong>{{ assistant_name }}</strong>
-  <span class="muted">Signed in as {{ user.username }}{% if is_admin %} (admin){% endif %}</span>
-  <form method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
-</header>
+{% include "_nav.html" %}
 <main class="inbox">
-  <section>
-    <h2>Your collections</h2>
-    <ul class="collections">
-      {% for c in collections %}
-      <li><span class="tag {{ c.kind }}">{{ 'Inbox' if c.kind == 'private' else 'Library' }}</span> {{ c.name }}</li>
-      {% endfor %}
-    </ul>
-    <p class="muted">Uploading files and asking questions arrive in the next milestones.</p>
+  <p class="muted">Upload PDFs or Markdown files. Once a file shows <em>Ready</em>, {{ assistant_name }} can answer questions from it.</p>
+  {% for c in collections %}
+  <section class="collection" data-collection-id="{{ c.id }}">
+    <div class="collection-head">
+      <h2><span class="tag {{ c.kind }}">{{ 'Inbox' if c.kind == 'private' else 'Library' }}</span> {{ c.name }}</h2>
+      {% if c.writable %}
+      <label class="upload-button">
+        Upload files
+        <input type="file" accept=".pdf,.md,.markdown,application/pdf,text/markdown" multiple hidden>
+      </label>
+      {% endif %}
+    </div>
+    {% if c.writable %}<div class="dropzone" hidden>Drop PDF or Markdown files here</div>{% endif %}
+    <ul class="files" aria-live="polite"></ul>
+    <p class="empty muted" hidden>No files yet.</p>
   </section>
+  {% endfor %}
 </main>
+<script src="/static/inbox.js"></script>
 {% endblock %}

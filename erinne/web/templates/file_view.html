@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}{{ file.display_name }} · {{ assistant_name }}{% endblock %}
+{% block body %}
+<header class="topbar">
+  <a class="brand" href="/"><span class="blossom" aria-hidden="true">🌸</span>{{ assistant_name }}</a>
+  <strong>{{ file.display_name }}</strong>
+  <span class="muted">{{ file.collection_name }}</span>
+  <a class="push-right" href="/files/{{ file.id }}/raw">Download</a>
+</header>
+<main class="doc">
+  {{ content | safe }}
+</main>
+{% endblock %}

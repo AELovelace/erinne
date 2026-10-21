@@ -1,0 +1,7 @@
+#!/bin/sh
+# Run an erinne CLI command as the erinne user with the service settings.
+#   sudo erinne-admin list-users
+#   sudo erinne-admin migrate-microjames --source /opt/microjames --dry-run
+# Install: sudo install -m 755 deploy/linux/erinne-admin /usr/local/bin/
+set -eu
+exec sudo -u erinne sh -c 'set -a; . /etc/erinne/erinne.env; set +a; cd /opt/erinne; exec .venv/bin/erinne "$@"' erinne "$@"

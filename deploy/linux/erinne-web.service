@@ -1,0 +1,25 @@
+[Unit]
+Description=Erinne web app (127.0.0.1:38200)
+After=network.target llama-generator.service erinne-embedder.service
+Wants=llama-generator.service erinne-embedder.service
+
+[Service]
+Type=simple
+User=erinne
+Group=erinne
+WorkingDirectory=/opt/erinne
+EnvironmentFile=/etc/erinne/erinne.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/erinne/.venv/bin/erinne serve
+Restart=on-failure
+RestartSec=5
+# /var/lib/erinne, created with the right owner and SELinux label.
+StateDirectory=erinne
+StateDirectoryMode=0750
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

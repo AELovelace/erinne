@@ -1,0 +1,29 @@
+[Unit]
+Description=Erinne ingestion worker (uploads -> searchable chunks)
+After=network.target erinne-embedder.service
+Wants=erinne-embedder.service
+
+[Service]
+Type=simple
+User=erinne
+Group=erinne
+WorkingDirectory=/opt/erinne
+EnvironmentFile=/etc/erinne/erinne.env
+Environment=PYTHONUNBUFFERED=1
+# ocrmypdf/tesseract need a writable home for caches.
+Environment=HOME=/var/lib/erinne
+ExecStart=/opt/erinne/.venv/bin/erinne worker
+# SIGTERM: finish the current file, then exit.
+KillSignal=SIGTERM
+TimeoutStopSec=600
+Restart=on-failure
+RestartSec=10
+StateDirectory=erinne
+StateDirectoryMode=0750
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

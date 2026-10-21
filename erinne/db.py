@@ -71,10 +71,11 @@ def schema_version(conn: sqlite3.Connection) -> int:
     return conn.execute("PRAGMA user_version").fetchone()[0]
 
 
-def migrate(conn: sqlite3.Connection, embed_dim: int) -> int:
+def migrate(conn: sqlite3.Connection, embed_dim: int, *, ensure_vectors: bool = True) -> int:
     """Apply pending migrations, then make sure the vector table exists.
 
-    Returns the schema version after migrating.
+    Returns the schema version after migrating. `ensure_vectors=False` skips
+    the vector-table check (used by re-embedding, which rebuilds it).
     """
     files = _migration_files()
     current = schema_version(conn)
@@ -94,8 +95,17 @@ def migrate(conn: sqlite3.Connection, embed_dim: int) -> int:
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
             raise SchemaError(f"Migration {path.name} failed: {exc}") from exc
-    ensure_vector_table(conn, embed_dim)
+    if ensure_vectors:
+        ensure_vector_table(conn, embed_dim)
     return schema_version(conn)
+
+
+def drop_vector_table(conn: sqlite3.Connection) -> None:
+    """Remove chunk_vec so it can be rebuilt with another dimension."""
+    with transaction(conn):
+        conn.execute("DROP TRIGGER IF EXISTS chunks_vec_ad")
+        conn.execute("DROP TABLE IF EXISTS chunk_vec")
+        conn.execute("DELETE FROM meta WHERE key = 'embed_dim'")
 
 
 def ensure_vector_table(conn: sqlite3.Connection, embed_dim: int) -> None:

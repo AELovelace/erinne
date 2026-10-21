@@ -1,4 +1,4 @@
-from erinne import permissions, users
+from erinne import db, permissions, users
 
 
 def _login(client, username="alice", password="password123"):
@@ -6,7 +6,7 @@ def _login(client, username="alice", password="password123"):
 
 
 def test_healthz(client):
-    assert client.get("/healthz").json() == {"status": "ok", "schema": 1}
+    assert client.get("/healthz").json() == {"status": "ok", "schema": len(db._migration_files())}
 
 
 def test_inbox_requires_login(client):
@@ -28,7 +28,7 @@ def test_login_and_inbox(client, conn):
     r = _login(client, username="ALICE")
     assert r.status_code == 303 and r.headers["location"] == "/"
 
-    page = client.get("/")
+    page = client.get("/files")
     assert page.status_code == 200
     assert "alice&#39;s inbox" in page.text or "alice's inbox" in page.text
     assert "BrandResBW" in page.text

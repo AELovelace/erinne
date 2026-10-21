@@ -1,0 +1,10 @@
+<header class="topbar">
+  <a class="brand" href="/"><span class="blossom" aria-hidden="true">🌸</span>{{ assistant_name }}</a>
+  <nav class="tabs">
+    <a href="/" {% if active == 'chat' %}aria-current="page"{% endif %}>Ask</a>
+    <a href="/files" {% if active == 'files' %}aria-current="page"{% endif %}>Files</a>
+    <a href="/memories" {% if active == 'memories' %}aria-current="page"{% endif %}>Memories</a>
+  </nav>
+  <span class="muted push-right">{{ user.username }}{% if is_admin %} · admin{% endif %}</span>
+  <form method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
+</header>

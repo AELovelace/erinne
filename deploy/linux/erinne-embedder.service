@@ -1,0 +1,26 @@
+[Unit]
+Description=llama.cpp Qwen3-Embedding for Erinne (127.0.0.1:8085)
+After=network.target
+
+[Service]
+Type=simple
+User=erinne
+Group=erinne
+Environment=LD_LIBRARY_PATH=/opt/llama.cpp
+# Qwen3-Embedding needs last-token pooling. Each input must fit one
+# micro-batch: -ub 2048 is far above a 512-token chunk.
+# If VRAM is too tight next to the generator, run it on the CPU instead:
+# replace "-ngl 99" with "--device none -ngl 0" (questions stay fast; bulk
+# imports become slow, e.g. an overnight first import).
+ExecStart=/opt/llama.cpp/llama-server --host 127.0.0.1 --port 8085 -ngl 99 \
+    -m /opt/models/Qwen3-Embedding-0.6B-Q8_0.gguf --embedding --pooling last \
+    -c 8192 -np 4 -b 2048 -ub 2048
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

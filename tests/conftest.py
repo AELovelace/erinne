@@ -9,7 +9,8 @@ from erinne.web.app import create_app
 @pytest.fixture
 def settings(tmp_path):
     # Small vectors keep tests fast; production uses the embedder's real size.
-    return Settings(data_dir=tmp_path / "data", secret_key="test-secret", embed_dim=4)
+    # _env_file=None: never pick up the developer's .env (API keys, teacher settings).
+    return Settings(_env_file=None, data_dir=tmp_path / "data", secret_key="test-secret", embed_dim=4)
 
 
 @pytest.fixture

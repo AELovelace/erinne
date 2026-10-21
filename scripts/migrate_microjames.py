@@ -8,7 +8,8 @@ What it does:
                     passwords work) and roles; each gets a private inbox
   * docs/<Name>  -> a library per top-level folder (except docs/users)
   * access_control.json grants of those folders -> library grants
-  * files        -> counted only; importing them needs the ingestion pipeline (P1)
+  * files        -> with --import-files, PDF/Markdown files are queued for
+                    ingestion (run `erinne worker` to process them)
 
 Grants that point at another user's private folder are skipped: erinne never
 shares private inboxes. Publish such documents as a library instead.
@@ -27,6 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from erinne import auth, db, permissions, users  # noqa: E402
+from erinne.cli import import_folder  # noqa: E402
 from erinne.config import get_settings  # noqa: E402
 
 SUPPORTED_SUFFIXES = {".pdf", ".md", ".markdown"}
@@ -39,6 +41,8 @@ class Plan:
     grants: list[tuple[str, str]] = field(default_factory=list)  # (username, library)
     warnings: list[str] = field(default_factory=list)
     file_counts: dict[str, tuple[int, int]] = field(default_factory=dict)  # name -> (supported, skipped)
+    library_folders: dict[str, Path] = field(default_factory=dict)  # library name -> folder
+    inbox_folders: dict[str, Path] = field(default_factory=dict)    # username -> folder
 
 
 def _count_files(folder: Path) -> tuple[int, int]:
@@ -87,12 +91,15 @@ def build_plan(source: Path, admin_users: set[str]) -> Plan:
                 library_folders[p.name.lower()] = p
                 plan.libraries.append(p.name)
 
+    known_users = {u for u, _, _ in plan.users}
     for name, folder in sorted(user_folders.items()):
         plan.file_counts[f"inbox:{name}"] = _count_files(folder)
+        if name in known_users:
+            plan.inbox_folders[name] = folder
     for folder in library_folders.values():
         plan.file_counts[f"library:{folder.name}"] = _count_files(folder)
+        plan.library_folders[folder.name] = folder
 
-    known_users = {u for u, _, _ in plan.users}
     acl_path = source / "data" / "access_control.json"
     acl = json.loads(acl_path.read_text(encoding="utf-8")) if acl_path.exists() else {}
     for raw_user, sources in sorted(acl.items()):
@@ -136,6 +143,17 @@ def apply_plan(conn: sqlite3.Connection, plan: Plan) -> list[str]:
     return done
 
 
+def import_files(conn: sqlite3.Connection, settings, plan: Plan) -> None:
+    """Queue every supported file for ingestion (safe to repeat: duplicates are skipped)."""
+    for lib, folder in plan.library_folders.items():
+        print(f"\nLibrary {lib}:")
+        import_folder(conn, settings, folder, permissions.get_library(conn, lib)["id"], None)
+    for name, folder in plan.inbox_folders.items():
+        user = users.get_user(conn, name)
+        print(f"\nInbox of {name}:")
+        import_folder(conn, settings, folder, permissions.private_collection_id(conn, user["id"]), user["id"])
+
+
 def print_plan(plan: Plan) -> None:
     print("Users:")
     for name, _, role in plan.users:
@@ -159,6 +177,8 @@ def main() -> None:
         help="Comma-separated usernames MicroJames treated as admins by name (its ADMIN_USERS; default 'admin')",
     )
     parser.add_argument("--dry-run", action="store_true", help="Show what would happen, change nothing")
+    parser.add_argument("--import-files", action="store_true",
+                        help="Also queue the PDF/Markdown documents for ingestion")
     args = parser.parse_args()
 
     admin_users = {u.strip().lower() for u in args.admin_users.split(",") if u.strip()}
@@ -174,6 +194,9 @@ def main() -> None:
     print()
     for line in apply_plan(conn, plan):
         print(line)
+    if args.import_files:
+        import_files(conn, settings, plan)
+        print("\nRun `erinne worker` (or the erinne-worker service) to process the queued files.")
     print(f"\nImported into {settings.db_path}.")
 
 

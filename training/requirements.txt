@@ -1,0 +1,17 @@
+# Training environment for the Erinne model (separate from the app's).
+# Python 3.12, on the machine with the RTX 3080 (WSL2 Ubuntu recommended).
+#   python3.12 -m venv .venv-train && . .venv-train/bin/activate
+#   pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cu128
+#   pip install -r training/requirements.txt
+# Versions verified on PyPI 2026-10-20; bump deliberately.
+transformers==5.20.2
+trl==1.16.0
+peft==0.21.2
+accelerate==1.15.0
+datasets==5.1.0
+sentencepiece==0.2.2
+# Only for --qlora:
+bitsandbytes==0.50.2
+# GGUF conversion (llama.cpp's convert_hf_to_gguf.py):
+gguf==0.19.0
+numpy==2.5.4

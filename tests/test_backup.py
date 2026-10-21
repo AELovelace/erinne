@@ -1,0 +1,42 @@
+import io
+import sqlite3
+from datetime import date, timedelta
+
+from erinne import users
+from erinne.backup import backup
+from erinne.cli import main
+from erinne.ingest import store
+
+
+def test_backup_snapshots_db_copies_blobs_and_prunes(conn, settings, tmp_path):
+    users.create_user(conn, "alice", "password123")
+    inbox = conn.execute("SELECT id FROM collections").fetchone()[0]
+    store.add_file(conn, settings, store.receive(io.BytesIO(b"# Hi\n\nThere."), "a.md", settings), inbox, None)
+    dest = tmp_path / "backups"
+
+    first = backup(settings, dest, keep=2, today=date(2026, 10, 1))
+    assert first["blobs_copied"] == 1
+    snap = sqlite3.connect(first["snapshot"])
+    assert snap.execute("SELECT username FROM users").fetchone()[0] == "alice"
+    snap.close()
+
+    again = backup(settings, dest, keep=2, today=date(2026, 10, 2))
+    assert again["blobs_copied"] == 0  # unchanged files are not copied twice
+    third = backup(settings, dest, keep=2, today=date(2026, 10, 1) + timedelta(days=2))
+    assert third["pruned"] == ["erinne-2026-10-01.db"]
+    assert sorted(p.name for p in (dest / "db").iterdir()) == ["erinne-2026-10-02.db", "erinne-2026-10-03.db"]
+
+
+def test_forget_memories_cli(conn, settings, monkeypatch, capsys):
+    from langgraph.store.sqlite import SqliteStore
+
+    from erinne.graph import memory_namespace
+
+    uid = users.create_user(conn, "alice", "password123")
+    s = SqliteStore(sqlite3.connect(settings.db_path, isolation_level=None, check_same_thread=False))
+    s.setup()
+    s.put(memory_namespace(uid), "k1", {"text": "Works nights."})
+    monkeypatch.setattr("erinne.cli.get_settings", lambda: settings)
+    main(["forget-memories", "alice"])
+    assert "Forgot 1 memory item(s)" in capsys.readouterr().out
+    assert s.search(memory_namespace(uid)) == []

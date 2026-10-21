@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Ask · {{ assistant_name }}{% endblock %}
+{% block body %}
+{% include "_nav.html" %}
+<div class="chat-layout">
+  <aside class="history">
+    <button type="button" id="new-chat">New question</button>
+    <ul id="conversations"></ul>
+  </aside>
+  <main class="chat">
+    <div id="thread" aria-live="polite">
+      <div class="welcome">
+        <h1>Ask {{ assistant_name }}</h1>
+        {% if has_files %}
+        <p class="muted">Answers come only from your files and the libraries shared with you, with a link to the exact page.</p>
+        {% else %}
+        <p class="muted">You don't have any ready files yet. <a href="/files">Upload a PDF or Markdown file</a> first.</p>
+        {% endif %}
+      </div>
+    </div>
+    <form id="ask-form" class="ask">
+      <textarea id="question" rows="2" placeholder="e.g. How do I run the night audit?" required maxlength="2000"></textarea>
+      <button type="submit" id="send">Ask</button>
+    </form>
+  </main>
+</div>
+<script src="/static/chat.js"></script>
+{% endblock %}

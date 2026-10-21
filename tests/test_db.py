@@ -4,6 +4,8 @@ import pytest
 
 from erinne import db, users
 
+LATEST = len(db._migration_files())
+
 
 def _vec(*values):
     return struct.pack(f"{len(values)}f", *values)
@@ -30,7 +32,7 @@ def _add_file_with_chunk(conn, collection_id, text="Checkout time is 11am.", sha
 
 
 def test_migrate_from_empty(conn, settings):
-    assert db.schema_version(conn) == 1
+    assert db.schema_version(conn) == LATEST
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table','view')")}
     assert {"users", "collections", "files", "chunks", "chunks_fts", "chunk_vec", "jobs", "messages"} <= tables
     assert conn.execute("SELECT value FROM meta WHERE key='embed_dim'").fetchone()[0] == "4"
@@ -39,7 +41,7 @@ def test_migrate_from_empty(conn, settings):
 
 
 def test_migrate_is_idempotent(conn, settings):
-    assert db.migrate(conn, settings.embed_dim) == 1
+    assert db.migrate(conn, settings.embed_dim) == LATEST
 
 
 def test_embed_dim_mismatch_is_refused(conn):

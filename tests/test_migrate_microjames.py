@@ -53,6 +53,27 @@ def test_plan(microjames):
     assert "bad name" in warnings and "ghost" in warnings and "private inbox" in warnings
 
 
+def test_import_files_queues_supported_documents(microjames, conn, settings, monkeypatch):
+    sys.path.insert(0, str(Path(__file__).parent))
+    from pdfgen import make_pdf
+
+    for rel in ["docs/BrandResBW/standards.pdf", "docs/Oracle/manual.pdf", "docs/users/rob/mine.pdf"]:
+        (microjames / rel).write_bytes(make_pdf([[f"Text of {rel}"]]))
+    (microjames / "docs/Oracle/start.md").write_text("# Start\n\nHello.", encoding="utf-8")
+    plan = migrate_microjames.build_plan(microjames, admin_users={"admin"})
+    migrate_microjames.apply_plan(conn, plan)
+    migrate_microjames.import_files(conn, settings, plan)
+    migrate_microjames.import_files(conn, settings, plan)  # repeat: nothing duplicated
+
+    rows = conn.execute(
+        "SELECT c.name, f.display_name FROM files f JOIN collections c ON c.id = f.collection_id "
+        "ORDER BY c.name, f.display_name").fetchall()
+    assert [tuple(r) for r in rows] == [
+        ("BrandResBW", "standards.pdf"), ("Oracle", "manual.pdf"), ("Oracle", "start.md"),
+        ("rob's inbox", "mine.pdf")]
+    assert conn.execute("SELECT count(*) FROM jobs WHERE status = 'queued'").fetchone()[0] == 4
+
+
 def test_apply_keeps_passwords_and_is_idempotent(microjames, conn):
     plan = migrate_microjames.build_plan(microjames, admin_users={"admin"})
     migrate_microjames.apply_plan(conn, plan)
