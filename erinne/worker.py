@@ -7,7 +7,7 @@ import signal
 import sqlite3
 import time
 
-from erinne import db, jobs
+from erinne import db, fs, jobs
 from erinne.clients.embed import Embedder
 from erinne.config import Settings
 from erinne.ingest import pipeline
@@ -71,6 +71,7 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
         log.info("Requeued %d job(s) left running by a previous worker.", recovered)
     log.info("Worker ready (embedder %s).", settings.embed_url)
     last_recover = time.monotonic()
+    last_purge = 0.0
     try:
         while not stopping:
             did_work = run_one(conn, settings, embedder)
@@ -81,6 +82,14 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
             if time.monotonic() - last_recover > 300:
                 jobs.recover_stale(conn, settings.job_stale_minutes)
                 last_recover = time.monotonic()
+            if time.monotonic() - last_purge > 3600:
+                last_purge = time.monotonic()
+                try:
+                    removed = fs.purge_expired(conn, settings, settings.trash_days)
+                    if removed:
+                        log.info("Emptied %d recycle-bin item(s) older than %d days.", removed, settings.trash_days)
+                except Exception:  # never let housekeeping stop ingestion
+                    log.exception("Recycle bin cleanup failed")
     finally:
         embedder.close()
         conn.close()

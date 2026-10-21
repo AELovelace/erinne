@@ -98,7 +98,27 @@ sudo nginx -t && sudo systemctl reload nginx
 ```
 
 The `/api/ask` block turns off proxy buffering; without it answers arrive
-all at once instead of streaming.
+all at once instead of streaming. The `/mcp` block serves Claude Desktop
+(next section).
+
+## 6b. Claude Desktop
+
+Staff connect Claude Desktop through the Erinne extension, which relays to
+`https://<server_name>/mcp` with a personal token (made under **Claude** in
+the web app). Admins choose what Claude may search on the **Access** page;
+everything is on by default.
+
+1. Set `ERINNE_PUBLIC_URL` in `/etc/erinne/erinne.env` to the address people
+   use, then `sudo systemctl restart erinne-web`.
+2. On the dev PC, pack the extension (see `clients/claude-desktop/README.md`)
+   with that address as the default and, for an internal certificate, the CA
+   certificate as `ca.pem`.
+3. Copy `erinne.mcpb` to `/var/lib/erinne/erinne.mcpb` (owner erinne). The
+   **Claude** page then offers it for download.
+
+To cut someone off at once: **Access → Revoke Claude tokens**, or
+`sudo erinne-admin revoke-tokens USERNAME`. **Access → Claude activity**
+shows every search and which files' text went back to Claude.
 
 ## 7. Check
 
@@ -116,6 +136,12 @@ should open the OPERA manual at the right page.
 Ship a new tarball, extract over `/opt/erinne`, `uv sync --frozen --no-dev`,
 `sudo systemctl restart erinne-web erinne-worker`. Database migrations run
 automatically at start-up.
+
+Take a backup first (`sudo systemctl start erinne-backup`) when an update
+changes the schema. The file-manager update (schema v4) rebuilds the files
+table and the vector index in place: about 20 seconds for 6,000 chunks, with
+nothing re-embedded. Start `erinne-web` first and let it finish migrating
+before starting `erinne-worker`.
 
 ## Restore from backup
 

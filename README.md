@@ -1,8 +1,10 @@
 # Erinne
 
-A private document inbox with cited question answering. Each person uploads
-PDFs and Markdown files to their own inbox; admins publish shared libraries
-(brand standards, system manuals). Erinne answers questions from the files a
+A private document inbox with cited question answering. Each person keeps
+files in their own space; admins publish shared libraries (brand standards,
+system manuals). The **Files** page is a full file manager: folders, drag and
+drop (files and whole folders), move/copy/rename, a recycle bin and previews.
+Any file can be stored; PDF, Markdown and text files are made searchable. Erinne answers questions from the files a
 person can access and cites the file and page (or Markdown heading) for every
 claim, or says the answer isn't in their documents. It remembers follow-up
 context within a conversation and facts users tell it about themselves.
@@ -18,6 +20,7 @@ the machine (LangSmith is forced off).
 |---|---|---|
 | P0 | Repo, config, database and migrations, accounts, permissions, MicroJames import | done |
 | P1 | Uploads, ingestion worker, PDF/OCR/Markdown extraction, chunking, embeddings | done |
+| P1b | File manager (folders, move/copy, recycle bin, upload queue, previews), library admin page, "search in" a folder | done |
 | P2 | Permission-filtered hybrid search, synonyms, evaluation harness, embedder bake-off | done; gold set needs staff review |
 | P3 | LangGraph answering flow, streaming, citations, conversation memory, feedback | done |
 | P3b | Long-term user memory with safety filter and "Your memories" page | done |
@@ -67,8 +70,9 @@ uv run pytest
 |---|---|
 | `erinne serve` / `erinne worker` | web app / ingestion worker |
 | `erinne create-user`, `reset-password`, `set-role`, `list-users` | accounts (passwords are prompted) |
-| `erinne create-library NAME`, `grant LIBRARY USER [--write]` | shared libraries |
-| `erinne import FOLDER --library NAME \| --user NAME` | bulk upload |
+| `erinne create-library NAME`, `grant LIBRARY USER [--write]` | shared libraries (or the **Libraries** page, for admins) |
+| `erinne import FOLDER --library NAME \| --user NAME [--flat]` | bulk upload, keeping subfolders |
+| `erinne purge-trash [--days N]` | empty old recycle-bin items now (the worker does this hourly) |
 | `erinne reindex [--file ID] [--reextract]` | re-chunk (and re-read) files |
 | `erinne reembed` | rebuild all vectors after changing the embedder |
 | `erinne forget-memories USER` | wipe a user's memories (admins can't read them) |

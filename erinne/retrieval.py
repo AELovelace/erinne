@@ -96,30 +96,39 @@ def _in(ids) -> tuple[str, tuple]:
     return ",".join("?" * len(ids)), ids
 
 
+def _folder_filter(folders: set[int] | None, column: str) -> tuple[str, tuple]:
+    if folders is None:
+        return "", ()
+    marks, ids = _in(folders)
+    return f" AND {column} IN ({marks})", ids
+
+
 def keyword_search(conn: sqlite3.Connection, question: str, collections: set[int], k: int,
-                   section_weight: float = 3.0) -> list[int]:
+                   section_weight: float = 3.0, folders: set[int] | None = None) -> list[int]:
     query = fts_query(question)
-    if not query or not collections:
+    if not query or not collections or folders == set():
         return []
     marks, ids = _in(collections)
+    folder_sql, folder_ids = _folder_filter(folders, "c.folder_id")
     rows = conn.execute(
         f"SELECT c.id FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid "
-        f"WHERE chunks_fts MATCH ? AND c.collection_id IN ({marks}) "
+        f"WHERE chunks_fts MATCH ? AND c.collection_id IN ({marks}){folder_sql} "
         f"ORDER BY bm25(chunks_fts, ?, 1.0) LIMIT ?",
-        (query, *ids, section_weight, k),
+        (query, *ids, *folder_ids, section_weight, k),
     ).fetchall()
     return [r[0] for r in rows]
 
 
 def vector_search(conn: sqlite3.Connection, query_vector: list[float], collections: set[int],
-                  k: int) -> list[tuple[int, float]]:
-    if not collections:
+                  k: int, folders: set[int] | None = None) -> list[tuple[int, float]]:
+    if not collections or folders == set():
         return []
     marks, ids = _in(collections)
+    folder_sql, folder_ids = _folder_filter(folders, "folder_id")
     rows = conn.execute(
         f"SELECT rowid, distance FROM chunk_vec WHERE embedding MATCH ? AND k = ? "
-        f"AND collection_id IN ({marks}) ORDER BY distance",
-        (pack_vector(query_vector), k, *ids),
+        f"AND collection_id IN ({marks}){folder_sql} ORDER BY distance",
+        (pack_vector(query_vector), k, *ids, *folder_ids),
     ).fetchall()
     return [(r[0], r[1]) for r in rows]
 
@@ -140,24 +149,33 @@ def _load_hits(conn: sqlite3.Connection, chunk_ids: list[int]) -> dict[int, Hit]
 
 
 def search_for_user(conn: sqlite3.Connection, settings: Settings, embedder, user_id: int, question: str,
-                    reranker=None) -> SearchResult:
-    """Hybrid search over exactly the collections `user_id` may read."""
+                    reranker=None, scope: dict | None = None) -> SearchResult:
+    """Hybrid search over exactly the collections `user_id` may read.
+
+    `scope` ({"collection_id", "folders"}) narrows it to one collection and,
+    optionally, a set of folder ids; it can only narrow, never widen.
+    """
     allowed = permissions.readable_collection_ids(conn, user_id)
-    return search(conn, settings, embedder, question, allowed, reranker)
+    folders = None
+    if scope:
+        allowed &= {scope["collection_id"]}
+        folders = set(scope["folders"]) if scope.get("folders") is not None else None
+    return search(conn, settings, embedder, question, allowed, reranker, folders=folders)
 
 
 def search(conn: sqlite3.Connection, settings: Settings, embedder, question: str, allowed: set[int],
-           reranker=None) -> SearchResult:
-    """Hybrid search restricted to `allowed` collection ids (applied inside both queries).
+           reranker=None, folders: set[int] | None = None) -> SearchResult:
+    """Hybrid search restricted to `allowed` collection ids (and `folders`, if
+    given), applied inside both queries.
 
     The question is also searched with known jargon swapped (synonyms.py), and
     every keyword and vector result list is fused with reciprocal rank fusion.
     """
     queries = [question] + synonyms.variants(question, _synonym_groups(settings))
-    lexical_lists = [keyword_search(conn, q, allowed, settings.retrieval_k, settings.fts_section_weight)
+    lexical_lists = [keyword_search(conn, q, allowed, settings.retrieval_k, settings.fts_section_weight, folders)
                      for q in queries]
-    vector_lists = [vector_search(conn, embedder.embed_query(q), allowed, settings.retrieval_k)
-                    for q in queries] if allowed else []
+    vector_lists = [vector_search(conn, embedder.embed_query(q), allowed, settings.retrieval_k, folders)
+                    for q in queries] if allowed and folders != set() else []
 
     # RRF within each phrasing (keyword + vector), then each chunk keeps its best
     # phrasing's score: phrasings are alternatives, so a chunk that matches one of

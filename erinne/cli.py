@@ -79,6 +79,17 @@ def cmd_grant(args):
     print(f"Granted '{user['username']}' {'read/write' if args.write else 'read'} access to '{lib['name']}'.")
 
 
+def cmd_revoke_tokens(args):
+    from erinne import api_tokens
+
+    conn = _connect()
+    user = users.get_user(conn, args.username)
+    if user is None:
+        raise SystemExit("Unknown user.")
+    count = api_tokens.revoke_all(conn, user["id"])
+    print(f"Revoked {count} Claude token(s) for '{user['username']}'.")
+
+
 def cmd_worker(args):
     from erinne import worker
 
@@ -100,29 +111,48 @@ def cmd_import(args):
         if user is None:
             raise SystemExit(f"No user '{args.user}'.")
         collection_id, owner = permissions.private_collection_id(conn, user["id"]), user["id"]
-    import_folder(conn, settings, Path(args.path), collection_id, owner)
+    import_folder(conn, settings, Path(args.path), collection_id, owner, flat=args.flat)
     print("Queued; run `erinne worker` (or the erinne-worker service) to process them.")
 
 
-def import_folder(conn, settings, folder, collection_id, owner) -> tuple[int, int, int]:
-    """Queue every PDF/Markdown file under `folder`. Returns (added, existing, rejected)."""
+_JUNK_FILES = {"thumbs.db", "desktop.ini", ".ds_store"}
+
+
+def import_folder(conn, settings, folder, collection_id, owner, *, flat: bool = False) -> tuple[int, int, int]:
+    """Add every file under `folder`, keeping its subfolders (unless `flat`).
+
+    PDF, Markdown and text files are queued for indexing; anything else is
+    stored as not searchable. Returns (added, existing, rejected).
+    """
+    from erinne import fs
     from erinne.ingest import store
 
     added = existing = rejected = 0
     for path in sorted(p for p in folder.rglob("*") if p.is_file()):
-        if path.suffix.lower() not in (".pdf", ".md", ".markdown"):
+        if path.name.lower() in _JUNK_FILES or path.name.startswith(("~$", ".")):
             continue
+        parts = [] if flat else list(path.relative_to(folder).parent.parts)
         try:
-            _, created = store.add_path(conn, settings, path, collection_id, owner)
-        except store.UploadError as exc:
+            _, created = store.add_path(conn, settings, path, collection_id, owner, folder_parts=parts)
+        except (store.UploadError, fs.FsError) as exc:
             rejected += 1
             print(f"  rejected {path.name}: {exc}")
             continue
         added += created
         existing += not created
-        print(f"  {'queued' if created else 'already there'}: {path.name}")
-    print(f"{added} queued, {existing} already present, {rejected} rejected.")
+        print(f"  {'added' if created else 'already there'}: {path.relative_to(folder)}")
+    print(f"{added} added, {existing} already present, {rejected} rejected.")
     return added, existing, rejected
+
+
+def cmd_purge_trash(args):
+    from erinne import fs
+
+    conn = _connect()
+    settings = get_settings()
+    days = settings.trash_days if args.days is None else args.days
+    removed = fs.purge_expired(conn, settings, days)
+    print(f"Deleted {removed} item(s) that were in a recycle bin for more than {days} day(s).")
 
 
 def cmd_reindex(args):
@@ -437,12 +467,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--once", action="store_true", help="Exit when no jobs are due")
     p.set_defaults(func=cmd_worker)
 
-    p = sub.add_parser("import", help="Queue a folder of PDF/Markdown files")
+    p = sub.add_parser("import", help="Add a folder of files (subfolders kept)")
     p.add_argument("path")
     target = p.add_mutually_exclusive_group(required=True)
     target.add_argument("--library", help="Library name")
     target.add_argument("--user", help="Import into this user's inbox")
+    p.add_argument("--flat", action="store_true", help="Put every file at the top level, ignoring subfolders")
     p.set_defaults(func=cmd_import)
+
+    p = sub.add_parser("purge-trash", help="Empty recycle-bin items older than the retention period")
+    p.add_argument("--days", type=int, default=None, help="Default: ERINNE_TRASH_DAYS (30)")
+    p.set_defaults(func=cmd_purge_trash)
 
     p = sub.add_parser("draft-gold", help="Draft evaluation questions with the teacher model")
     p.add_argument("--out", default="eval/gold/dev.jsonl")
@@ -566,6 +601,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("username")
     p.add_argument("--write", action="store_true", help="Also allow uploading to the library")
     p.set_defaults(func=cmd_grant)
+
+    p = sub.add_parser("revoke-tokens", help="Revoke all of a user's Claude (API) tokens")
+    p.add_argument("username")
+    p.set_defaults(func=cmd_revoke_tokens)
     return parser
 
 

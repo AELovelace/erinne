@@ -25,7 +25,7 @@ def _add_file_with_chunk(conn, collection_id, text="Checkout time is 11am.", sha
         (file_id, collection_id, text),
     ).lastrowid
     conn.execute(
-        "INSERT INTO chunk_vec(rowid, embedding, collection_id) VALUES (?, ?, ?)",
+        "INSERT INTO chunk_vec(rowid, embedding, collection_id, folder_id) VALUES (?, ?, ?, 0)",
         (chunk_id, _vec(1, 0, 0, 0), collection_id),
     )
     return file_id, chunk_id

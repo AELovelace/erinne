@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import aiosqlite
 from fastapi import Depends, FastAPI, Form, Request, status
@@ -20,7 +21,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
-from erinne import db, memory, permissions, users
+from erinne import db, mcp_server, memory, permissions, users
 from erinne.answer import ASSISTANT_NAME
 from erinne.auth import LoginThrottle
 from erinne.clients.embed import Embedder
@@ -29,12 +30,30 @@ from erinne.clients.rerank import Reranker
 from erinne.config import Settings, get_settings
 from erinne.graph import Deps, build_graph
 from erinne.router import load_router
-from erinne.web import chat, files, memories
+from erinne.web import admin, chat, files, memories, tokens
 from erinne.web.deps import LoginRequired, api_user, get_db, page_user
 
 log = logging.getLogger("erinne.web")
 
 _HERE = Path(__file__).parent
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def _cross_site(request: Request) -> bool:
+    """True for a state-changing request another site's page made the browser send.
+
+    Browsers label requests with Sec-Fetch-Site and Origin; requests without
+    either (curl, scripts) can't ride on someone's session cookie anyway.
+    Hostnames only: nginx forwards Host without the port.
+    """
+    fetch_site = request.headers.get("sec-fetch-site")
+    if fetch_site and fetch_site not in ("same-origin", "none"):
+        return True
+    origin = request.headers.get("origin")
+    if origin:
+        host = (request.headers.get("host") or "").rsplit(":", 1)[0].strip("[]").lower()
+        return (urlsplit(origin).hostname or "") != host
+    return False
 
 
 @dataclass
@@ -84,8 +103,10 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                                       checkpointer, store)
         app.state.background = set()
         app.state.memory_writer = memory.make_writer(settings, svc.llm, store, app.state.background)
+        app.state.embedder = svc.embedder
         try:
-            yield
+            async with mcp.session_manager.run():
+                yield
         finally:
             for task in list(app.state.background):
                 task.cancel()
@@ -109,13 +130,37 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         same_site="lax",
         https_only=settings.session_https_only,
     )
+
+    @app.middleware("http")
+    async def _csrf_guard(request: Request, call_next):
+        # The session cookie is SameSite=lax, which still lets other sites'
+        # top-level form POSTs through; refuse anything cross-site that changes data.
+        if request.method not in _SAFE_METHODS and _cross_site(request):
+            return JSONResponse({"detail": "Cross-site request refused."}, status_code=status.HTTP_403_FORBIDDEN)
+        return await call_next(request)
+
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
     templates = Jinja2Templates(directory=_HERE / "templates")
     templates.env.globals["assistant_name"] = ASSISTANT_NAME
+
+    def static(name: str) -> str:
+        # The file's mtime in the URL: browsers fetch the new copy after an update
+        # instead of reusing a cached one.
+        path = _HERE / "static" / name
+        version = int(path.stat().st_mtime) if path.exists() else 0
+        return f"/static/{name}?v={version}"
+
+    templates.env.globals["static"] = static
     app.state.templates = templates
     app.include_router(files.router)
     app.include_router(chat.router)
     app.include_router(memories.router)
+    app.include_router(admin.router)
+    app.include_router(tokens.router)
+
+    # MCP for Claude Desktop: bearer-token auth, read-only tools (erinne/mcp_server.py).
+    mcp = mcp_server.build_server(settings, lambda: app.state.embedder)
+    app.add_route("/mcp", mcp_server.McpEndpoint(settings, mcp), methods=["GET", "POST", "DELETE"])
 
     @app.exception_handler(LoginRequired)
     async def _redirect_to_login(request: Request, exc: LoginRequired):
@@ -176,12 +221,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
 
     @app.get("/files", response_class=HTMLResponse)
     def files_page(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db)):
-        writable = permissions.writable_collection_ids(conn, user["id"])
-        collections = [
-            {**dict(c), "writable": c["id"] in writable}
-            for c in permissions.readable_collections(conn, user["id"])
-        ]
-        return _page(request, "inbox.html", user, conn, active="files", collections=collections)
+        # The file manager loads everything through the /api routes.
+        return _page(request, "files.html", user, conn, active="files", trash_days=settings.trash_days)
 
     @app.get("/api/me")
     def me(user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):

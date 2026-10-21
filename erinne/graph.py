@@ -43,6 +43,7 @@ def memory_namespace(user_id: int) -> tuple[str, ...]:
 
 class State(TypedDict, total=False):
     user_id: int
+    scope: dict | None   # "search in": {"collection_id", "folders"}, checked by the web layer
     question: str
     standalone: str
     route: str
@@ -135,7 +136,7 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
             conn = db.connect(settings.db_path)
             try:
                 return retrieval.search_for_user(conn, settings, deps.embedder, state["user_id"],
-                                                 state["standalone"], deps.reranker)
+                                                 state["standalone"], deps.reranker, state.get("scope"))
             finally:
                 conn.close()
 
@@ -224,7 +225,7 @@ def _source_view(n: int, hit: retrieval.Hit) -> dict:
             "page_start": hit.page_start, "anchor": hit.anchor}
 
 
-async def run_turn(graph, user_id: int, conversation_id: str, question: str):
+async def run_turn(graph, user_id: int, conversation_id: str, question: str, scope: dict | None = None):
     """Run one question through the graph, yielding stream events, then a final
     {"type": "final", ...} event with the answer, cited sources and timings."""
     trace: list = []
@@ -233,7 +234,7 @@ async def run_turn(graph, user_id: int, conversation_id: str, question: str):
     sources: list[dict] = []
     try:
         config = {"configurable": {"thread_id": conversation_id}}
-        async for event in graph.astream({"user_id": user_id, "question": question, "hits": [],
+        async for event in graph.astream({"user_id": user_id, "scope": scope, "question": question, "hits": [],
                                           "answer": {}, "route": "search"}, config, stream_mode="custom"):
             if event.get("type") == "sources":
                 sources = event["sources"]

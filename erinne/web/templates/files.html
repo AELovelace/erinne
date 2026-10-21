@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Files · {{ assistant_name }}{% endblock %}
+{% block body %}
+{% include "_nav.html" %}
+<main class="fm" id="fm" data-trash-days="{{ trash_days }}">
+  <aside class="fm-side glass" aria-label="Locations">
+    <ul class="tree" id="tree" role="tree"></ul>
+  </aside>
+
+  <section class="fm-main glass" aria-label="Files">
+    <div class="fm-toolbar" role="toolbar" aria-label="File actions">
+      <div class="menu-wrap" data-mode="browse">
+        <button type="button" id="btn-upload" data-needs="write" aria-haspopup="menu" aria-expanded="false">Upload ▾</button>
+        <div class="menu" id="upload-menu" role="menu" hidden>
+          <button type="button" role="menuitem" data-act="upload-files">Files…</button>
+          <button type="button" role="menuitem" data-act="upload-folder">Folder…</button>
+        </div>
+      </div>
+      <button type="button" class="tool" data-act="new-folder" data-mode="browse" data-needs="write">New folder</button>
+      <span class="sep" data-mode="browse search"></span>
+      <button type="button" class="tool" data-act="open" data-mode="browse search" data-needs="one">Open</button>
+      <button type="button" class="tool" data-act="download" data-mode="browse search" data-needs="files">Download</button>
+      <button type="button" class="tool" data-act="rename" data-mode="browse search" data-needs="one write">Rename</button>
+      <button type="button" class="tool" data-act="move" data-mode="browse search" data-needs="some write">Move to…</button>
+      <button type="button" class="tool" data-act="copy" data-mode="browse search" data-needs="some">Copy to…</button>
+      <button type="button" class="tool danger" data-act="trash" data-mode="browse search" data-needs="some write">Delete</button>
+      <button type="button" class="tool" data-act="restore" data-mode="trash" data-needs="some">Restore</button>
+      <button type="button" class="tool danger" data-act="purge" data-mode="trash" data-needs="some">Delete forever</button>
+      <button type="button" class="tool danger" data-act="empty-bin" data-mode="trash">Empty bin</button>
+      <span class="grow"></span>
+      <input type="search" id="fm-search" placeholder="Search file names" aria-label="Search file names" autocomplete="off">
+      <select id="fm-sort" aria-label="Sort by">
+        <option value="name">Name</option>
+        <option value="date">Modified</option>
+        <option value="size">Size</option>
+        <option value="kind">Type</option>
+      </select>
+      <div class="seg" role="group" aria-label="View">
+        <button type="button" class="tool" data-view="list" aria-pressed="true" title="List">☰</button>
+        <button type="button" class="tool" data-view="grid" aria-pressed="false" title="Grid">▦</button>
+      </div>
+      <button type="button" class="tool" id="btn-info" aria-pressed="false" title="Details">ⓘ</button>
+    </div>
+
+    <nav class="crumbs" id="crumbs" aria-label="Path"></nav>
+    <p class="fm-note muted" id="fm-note" hidden></p>
+    <div class="fm-list list" id="list" tabindex="0" role="listbox" aria-multiselectable="true" aria-label="Items"></div>
+    <p class="fm-empty muted" id="fm-empty" hidden></p>
+    <div class="drop-overlay" id="drop-overlay" hidden><span>Drop to upload here</span></div>
+  </section>
+
+  <aside class="fm-info glass" id="info" aria-label="Details" hidden></aside>
+</main>
+
+<input type="file" id="pick-files" multiple hidden>
+<input type="file" id="pick-folder" webkitdirectory multiple hidden>
+
+<div class="ctx menu" id="ctx" role="menu" hidden></div>
+
+<dialog class="dlg glass" id="dlg-name">
+  <form method="dialog">
+    <h2 id="dlg-name-title">New folder</h2>
+    <input type="text" id="dlg-name-input" maxlength="200" required autocomplete="off">
+    <p class="error small" id="dlg-name-error"></p>
+    <div class="dlg-actions">
+      <button type="button" class="link" value="cancel" data-close>Cancel</button>
+      <button type="submit" value="ok">OK</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="dlg glass" id="dlg-confirm">
+  <form method="dialog">
+    <h2 id="dlg-confirm-title">Are you sure?</h2>
+    <p id="dlg-confirm-text"></p>
+    <div class="dlg-actions">
+      <button type="button" class="link" value="cancel" data-close>Cancel</button>
+      <button type="submit" value="ok" class="danger-fill" id="dlg-confirm-ok">Delete</button>
+    </div>
+  </form>
+</dialog>
+
+<section class="queue glass" id="queue" aria-label="Uploads" hidden>
+  <header>
+    <strong id="queue-title">Uploads</strong>
+    <button type="button" class="link" id="queue-clear">Clear finished</button>
+    <button type="button" class="link" id="queue-min" aria-expanded="true">▾</button>
+  </header>
+  <ul id="queue-list" aria-live="polite"></ul>
+</section>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="{{ static('picker.js') }}"></script>
+<script src="{{ static('files.js') }}"></script>
+{% endblock %}

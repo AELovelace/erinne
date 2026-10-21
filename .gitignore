@@ -17,3 +17,10 @@ runs/
 
 # Training data and model outputs contain document content.
 training/out/
+
+# Model weights (multi-GB; never commit)
+*.gguf
+
+# Packed Claude Desktop extension and its internal CA certificate
+*.mcpb
+clients/claude-desktop/ca.pem

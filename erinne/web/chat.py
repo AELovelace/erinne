@@ -13,16 +13,22 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from erinne import answer as answer_mod
-from erinne import db, graph as graph_mod
+from erinne import db, fs, graph as graph_mod
 from erinne.web.deps import api_user, get_db
 
 log = logging.getLogger("erinne.chat")
 router = APIRouter()
 
 
+class Scope(BaseModel):
+    collection_id: int
+    folder_id: int | None = None
+
+
 class AskBody(BaseModel):
     question: str
     conversation_id: str | None = None
+    scope: Scope | None = None  # "search in" one collection or folder
 
 
 class FeedbackBody(BaseModel):
@@ -50,6 +56,16 @@ async def ask(body: AskBody, request: Request, user=Depends(api_user),
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
                             f"Questions are limited to {settings.max_question_chars} characters.")
 
+    scope = scope_json = None
+    if body.scope:
+        try:
+            folders = fs.scope_folders(conn, fs.Access.of(conn, user["id"]), body.scope.collection_id,
+                                       body.scope.folder_id)
+        except fs.FsError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+        scope = {"collection_id": body.scope.collection_id, "folders": sorted(folders) if folders else None}
+        scope_json = json.dumps(body.scope.model_dump())
+
     conversation_id = body.conversation_id
     if conversation_id:
         _own_conversation(conn, user["id"], conversation_id)
@@ -57,8 +73,8 @@ async def ask(body: AskBody, request: Request, user=Depends(api_user),
         conversation_id = uuid.uuid4().hex
         conn.execute("INSERT INTO conversations(id, user_id, title) VALUES (?, ?, ?)",
                      (conversation_id, user["id"], question[:80]))
-    conn.execute("INSERT INTO messages(conversation_id, role, content) VALUES (?, 'user', ?)",
-                 (conversation_id, question))
+    conn.execute("INSERT INTO messages(conversation_id, role, content, scope) VALUES (?, 'user', ?, ?)",
+                 (conversation_id, question, scope_json))
     user_id = user["id"]
     app = request.app
 
@@ -66,7 +82,7 @@ async def ask(body: AskBody, request: Request, user=Depends(api_user),
         yield _sse({"type": "conversation", "conversation_id": conversation_id})
         final = None
         try:
-            async for event in graph_mod.run_turn(app.state.graph, user_id, conversation_id, question):
+            async for event in graph_mod.run_turn(app.state.graph, user_id, conversation_id, question, scope):
                 if event["type"] == "final":
                     final = event
                 else:

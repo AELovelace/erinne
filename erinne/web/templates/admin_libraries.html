@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Access · {{ assistant_name }}{% endblock %}
+{% block body %}
+{% include "_nav.html" %}
+<main class="inbox admin">
+  <h1>Access</h1>
+  <p class="error" id="admin-error" hidden></p>
+
+  <h2 class="admin-section">Shared libraries</h2>
+  <p class="muted">Libraries are shared folders of documents. People with <em>read</em> access can browse them and get answers
+    from them; <em>editors</em> can also upload, organise and delete files. Private inboxes are never shared.
+    <strong>Claude</strong> lets someone search a library from Claude Desktop, which sends the passages found to Anthropic:
+    it needs the library's switch on <em>and</em> Claude ticked on their grant.</p>
+  <form class="new-lib" id="new-lib">
+    <input type="text" id="new-lib-name" placeholder="New library name, e.g. Brand Standards" maxlength="120" required>
+    <button type="submit">Create library</button>
+  </form>
+  <div id="libs" aria-live="polite"></div>
+
+  <h2 class="admin-section">Groups</h2>
+  <p class="muted">Grant a library to a group and everyone in it gets that access.</p>
+  <form class="new-lib" id="new-group">
+    <input type="text" id="new-group-name" placeholder="New group name, e.g. Front desk" maxlength="80" required>
+    <button type="submit">Create group</button>
+  </form>
+  <div id="groups" aria-live="polite"></div>
+
+  <h2 class="admin-section">Who can see what</h2>
+  <p class="muted">Each person's inbox and libraries, the access they have, whether they can use it from Claude, and the grants that give it.</p>
+  <div id="access" class="table-wrap"></div>
+
+  <h2 class="admin-section">Claude activity</h2>
+  <p class="muted">Recent searches from Claude, and which files' text was sent back.</p>
+  <div id="activity" class="table-wrap"></div>
+
+  <h2 class="admin-section">Recent changes</h2>
+  <div id="log" class="table-wrap"></div>
+</main>
+<script src="{{ static('picker.js') }}"></script>
+<script src="{{ static('admin.js') }}"></script>
+{% endblock %}

@@ -24,7 +24,7 @@ def reembed_all(conn: sqlite3.Connection, settings: Settings, embedder, batch: i
     db.drop_vector_table(conn)
     db.ensure_vector_table(conn, settings.embed_dim)
     rows = conn.execute(
-        "SELECT c.id, c.collection_id, c.page_start, c.page_end, c.anchor, c.section_path, c.text, "
+        "SELECT c.id, c.collection_id, c.folder_id, c.page_start, c.page_end, c.anchor, c.section_path, c.text, "
         "f.display_name FROM chunks c JOIN files f ON f.id = c.file_id ORDER BY c.id"
     ).fetchall()
     written = 0
@@ -36,8 +36,8 @@ def reembed_all(conn: sqlite3.Connection, settings: Settings, embedder, batch: i
         vectors = embedder.embed_documents(texts)
         with db.transaction(conn):
             conn.executemany(
-                "INSERT INTO chunk_vec(rowid, embedding, collection_id) VALUES (?, ?, ?)",
-                [(r["id"], pack_vector(v), r["collection_id"]) for r, v in zip(part, vectors)],
+                "INSERT INTO chunk_vec(rowid, embedding, collection_id, folder_id) VALUES (?, ?, ?, ?)",
+                [(r["id"], pack_vector(v), r["collection_id"], r["folder_id"]) for r, v in zip(part, vectors)],
             )
         written += len(part)
         progress(f"Re-embedded {written}/{len(rows)} chunks")

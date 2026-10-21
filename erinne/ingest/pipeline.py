@@ -6,6 +6,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
+from erinne import fs
 from erinne.clients.embed import Embedder, pack_vector
 from erinne.config import Settings
 from erinne.db import transaction
@@ -78,7 +79,9 @@ def _extract(conn, settings: Settings, blob: sqlite3.Row, file_id: int) -> tuple
             text = markdown.decode(store.blob_path(settings, blob["rel_path"]).read_bytes())
         except markdown.MarkdownError as exc:
             raise IngestError(str(exc)) from exc
-        segments, note = markdown.segments(text), None
+        # Plain text is one unit; the chunker still splits it on paragraphs.
+        segments = markdown.segments(text) if blob["kind"] == "md" else ([Segment(text)] if text.strip() else [])
+        note = None
         conn.execute("UPDATE blobs SET unit_count = ? WHERE sha256 = ?", (len(segments), blob["sha256"]))
 
     with transaction(conn):
@@ -92,8 +95,8 @@ def _extract(conn, settings: Settings, blob: sqlite3.Row, file_id: int) -> tuple
 
 
 # ------------------------------------------------------------------ indexing
-def _copy_from_twin(conn, file_id: int, collection_id: int, sha256: str) -> bool:
-    """Reuse chunks+vectors from the same blob already ready in another collection."""
+def _copy_from_twin(conn, file_id: int, sha256: str) -> bool:
+    """Reuse chunks+vectors from the same blob already indexed for another file."""
     twin = conn.execute(
         "SELECT id FROM files WHERE blob_sha256 = ? AND status = 'ready' AND id != ? "
         "AND EXISTS (SELECT 1 FROM chunks WHERE file_id = files.id) LIMIT 1",
@@ -102,18 +105,19 @@ def _copy_from_twin(conn, file_id: int, collection_id: int, sha256: str) -> bool
     if twin is None:
         return False
     with transaction(conn):
+        collection_id, folder_id = fs.search_scope(conn, file_id)
         conn.execute("DELETE FROM chunks WHERE file_id = ?", (file_id,))
         for row in conn.execute("SELECT * FROM chunks WHERE file_id = ? ORDER BY ord", (twin["id"],)).fetchall():
             new_id = conn.execute(
-                "INSERT INTO chunks(file_id, collection_id, ord, page_start, page_end, anchor, section_path, text, tokens) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (file_id, collection_id, row["ord"], row["page_start"], row["page_end"], row["anchor"],
+                "INSERT INTO chunks(file_id, collection_id, folder_id, ord, page_start, page_end, anchor, "
+                "section_path, text, tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (file_id, collection_id, folder_id, row["ord"], row["page_start"], row["page_end"], row["anchor"],
                  row["section_path"], row["text"], row["tokens"]),
             ).lastrowid
             vector = conn.execute("SELECT embedding FROM chunk_vec WHERE rowid = ?", (row["id"],)).fetchone()
             conn.execute(
-                "INSERT INTO chunk_vec(rowid, embedding, collection_id) VALUES (?, ?, ?)",
-                (new_id, vector["embedding"], collection_id),
+                "INSERT INTO chunk_vec(rowid, embedding, collection_id, folder_id) VALUES (?, ?, ?, ?)",
+                (new_id, vector["embedding"], collection_id, folder_id),
             )
         _set(conn, file_id, status="ready", progress=None, error=None)
     return True
@@ -127,13 +131,16 @@ def process_file(conn: sqlite3.Connection, settings: Settings, embedder: Embedde
     if row is None:
         log.info("File %s was deleted before ingestion; skipping.", file_id)
         return
+    if row["kind"] == "other":
+        _set(conn, file_id, status="stored", progress=None, error=None)
+        return
     _set(conn, file_id, status="processing", error=None)
 
     segments, note = _extract(conn, settings, row, file_id)
     if note:
         _set(conn, file_id, notes=note)
 
-    if _copy_from_twin(conn, file_id, row["collection_id"], row["sha256"]):
+    if _copy_from_twin(conn, file_id, row["sha256"]):
         log.info("File %s: reused chunks from an identical file.", file_id)
         return
 
@@ -151,18 +158,23 @@ def process_file(conn: sqlite3.Connection, settings: Settings, embedder: Embedde
     )
 
     # Swap in atomically: search sees either the old chunks or the new ones.
+    # The file may have been moved or put in the bin while it was embedding,
+    # so its scope is read inside the swap.
     with transaction(conn):
+        if conn.execute("SELECT 1 FROM files WHERE id = ?", (file_id,)).fetchone() is None:
+            return  # deleted for good meanwhile
+        collection_id, folder_id = fs.search_scope(conn, file_id)
         conn.execute("DELETE FROM chunks WHERE file_id = ?", (file_id,))
         for ord_, (c, vector) in enumerate(zip(chunks, vectors)):
             chunk_id = conn.execute(
-                "INSERT INTO chunks(file_id, collection_id, ord, page_start, page_end, anchor, section_path, text, tokens) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (file_id, row["collection_id"], ord_, c.page_start, c.page_end, c.anchor,
+                "INSERT INTO chunks(file_id, collection_id, folder_id, ord, page_start, page_end, anchor, "
+                "section_path, text, tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (file_id, collection_id, folder_id, ord_, c.page_start, c.page_end, c.anchor,
                  c.section_path, c.text, c.tokens),
             ).lastrowid
             conn.execute(
-                "INSERT INTO chunk_vec(rowid, embedding, collection_id) VALUES (?, ?, ?)",
-                (chunk_id, pack_vector(vector), row["collection_id"]),
+                "INSERT INTO chunk_vec(rowid, embedding, collection_id, folder_id) VALUES (?, ?, ?, ?)",
+                (chunk_id, pack_vector(vector), collection_id, folder_id),
             )
         _set(conn, file_id, status="ready", progress=None, error=None)
     log.info("File %s: %d chunks indexed.", file_id, len(chunks))

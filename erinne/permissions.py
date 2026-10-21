@@ -33,12 +33,32 @@ _WRITABLE_SQL = """
 """
 
 
+# Collections the user may search from Claude: their inbox if its switch is
+# on, and libraries whose switch is on, reached through a grant (direct or
+# group) that allows Claude.
+_CLAUDE_SQL = """
+    SELECT id FROM collections WHERE kind = 'private' AND owner_user_id = :u AND claude_enabled = 1
+    UNION
+    SELECT g.collection_id
+      FROM collection_grants g
+      JOIN collections c ON c.id = g.collection_id
+     WHERE c.claude_enabled = 1 AND g.can_claude = 1
+       AND (g.user_id = :u OR g.group_id IN (SELECT group_id FROM group_members WHERE user_id = :u))
+"""
+
+
 def readable_collection_ids(conn: sqlite3.Connection, user_id: int) -> set[int]:
     return {row[0] for row in conn.execute(_READABLE_SQL, {"u": user_id})}
 
 
 def writable_collection_ids(conn: sqlite3.Connection, user_id: int) -> set[int]:
     return {row[0] for row in conn.execute(_WRITABLE_SQL, {"u": user_id})}
+
+
+def claude_collection_ids(conn: sqlite3.Connection, user_id: int) -> set[int]:
+    """Collections `user_id` may search from Claude; the MCP endpoint must
+    search only these (always a subset of readable_collection_ids)."""
+    return {row[0] for row in conn.execute(_CLAUDE_SQL, {"u": user_id})}
 
 
 def private_collection_id(conn: sqlite3.Connection, user_id: int) -> int | None:
@@ -72,25 +92,38 @@ def get_library(conn: sqlite3.Connection, name: str) -> sqlite3.Row | None:
     ).fetchone()
 
 
-def grant_user(conn: sqlite3.Connection, collection_id: int, user_id: int, *, can_write: bool = False) -> None:
-    """Grant (or update) a user's access to a library."""
+def _grant(conn: sqlite3.Connection, collection_id: int, column: str, principal_id: int,
+           can_write: bool, can_claude: bool | None) -> None:
     _require_library(conn, collection_id)
+    claude = None if can_claude is None else int(can_claude)
     conn.execute(
-        "INSERT INTO collection_grants(collection_id, user_id, can_write) VALUES (?, ?, ?) "
-        "ON CONFLICT(collection_id, user_id) WHERE user_id IS NOT NULL "
-        "DO UPDATE SET can_write = excluded.can_write",
-        (collection_id, user_id, int(can_write)),
+        f"INSERT INTO collection_grants(collection_id, {column}, can_write, can_claude) "
+        f"VALUES (?, ?, ?, COALESCE(?, 1)) "
+        f"ON CONFLICT(collection_id, {column}) WHERE {column} IS NOT NULL "
+        f"DO UPDATE SET can_write = excluded.can_write, can_claude = COALESCE(?, can_claude)",
+        (collection_id, principal_id, int(can_write), claude, claude),
     )
 
 
-def grant_group(conn: sqlite3.Connection, collection_id: int, group_id: int, *, can_write: bool = False) -> None:
-    _require_library(conn, collection_id)
+def grant_user(conn: sqlite3.Connection, collection_id: int, user_id: int, *, can_write: bool = False,
+               can_claude: bool | None = None) -> None:
+    """Grant (or update) a user's access to a library. `can_claude=None` keeps
+    the grant's current Claude setting (on for a new grant)."""
+    _grant(conn, collection_id, "user_id", user_id, can_write, can_claude)
+
+
+def grant_group(conn: sqlite3.Connection, collection_id: int, group_id: int, *, can_write: bool = False,
+                can_claude: bool | None = None) -> None:
+    _grant(conn, collection_id, "group_id", group_id, can_write, can_claude)
+
+
+def set_claude_enabled(conn: sqlite3.Connection, collection_id: int, enabled: bool, by_user_id: int) -> None:
+    """Switch Claude search on or off for a whole library or one inbox."""
+    if conn.execute("SELECT 1 FROM collections WHERE id = ?", (collection_id,)).fetchone() is None:
+        raise ValueError(f"Collection {collection_id} does not exist.")
     conn.execute(
-        "INSERT INTO collection_grants(collection_id, group_id, can_write) VALUES (?, ?, ?) "
-        "ON CONFLICT(collection_id, group_id) WHERE group_id IS NOT NULL "
-        "DO UPDATE SET can_write = excluded.can_write",
-        (collection_id, group_id, int(can_write)),
-    )
+        "UPDATE collections SET claude_enabled = ?, claude_changed_by = ?, claude_changed_at = datetime('now') "
+        "WHERE id = ?", (int(enabled), by_user_id, collection_id))
 
 
 def revoke_user(conn: sqlite3.Connection, collection_id: int, user_id: int) -> None:
@@ -99,6 +132,13 @@ def revoke_user(conn: sqlite3.Connection, collection_id: int, user_id: int) -> N
     )
 
 
+def revoke_group(conn: sqlite3.Connection, collection_id: int, group_id: int) -> None:
+    conn.execute(
+        "DELETE FROM collection_grants WHERE collection_id = ? AND group_id = ?", (collection_id, group_id)
+    )
+
+
+# -------------------------------------------------------------------- groups
 def create_group(conn: sqlite3.Connection, name: str, member_ids: list[int] = ()) -> int:
     with transaction(conn):
         group_id = conn.execute("INSERT INTO groups(name) VALUES (?)", (name.strip(),)).lastrowid
@@ -106,6 +146,45 @@ def create_group(conn: sqlite3.Connection, name: str, member_ids: list[int] = ()
             "INSERT INTO group_members(group_id, user_id) VALUES (?, ?)", [(group_id, u) for u in member_ids]
         )
     return group_id
+
+
+def set_group_members(conn: sqlite3.Connection, group_id: int, member_ids: list[int]) -> None:
+    """Replace a group's members with exactly `member_ids`."""
+    with transaction(conn):
+        conn.execute("DELETE FROM group_members WHERE group_id = ?", (group_id,))
+        conn.executemany("INSERT INTO group_members(group_id, user_id) VALUES (?, ?)",
+                         [(group_id, u) for u in dict.fromkeys(member_ids)])
+
+
+def group_member_ids(conn: sqlite3.Connection, group_id: int) -> list[int]:
+    return [r[0] for r in conn.execute("SELECT user_id FROM group_members WHERE group_id = ?", (group_id,))]
+
+
+# ------------------------------------------------------------------ overview
+def access_summary(conn: sqlite3.Connection, user_id: int) -> list[dict]:
+    """Every collection a user can reach (inbox first, then libraries), with the
+    strongest access, whether they may use it from Claude, and what gives it
+    ('own inbox', 'direct' or group names)."""
+    inbox = conn.execute("SELECT id, name, claude_enabled FROM collections "
+                         "WHERE kind = 'private' AND owner_user_id = ?", (user_id,)).fetchone()
+    summary = [{"id": inbox["id"], "name": inbox["name"], "kind": "private", "access": "write",
+                "claude": bool(inbox["claude_enabled"]), "via": ["own inbox"]}] if inbox else []
+    rows = conn.execute(
+        "SELECT c.id, c.name, c.claude_enabled, g.can_write, g.can_claude, gr.name AS via_group "
+        "FROM collection_grants g JOIN collections c ON c.id = g.collection_id "
+        "LEFT JOIN groups gr ON gr.id = g.group_id "
+        "WHERE g.user_id = :u OR g.group_id IN (SELECT group_id FROM group_members WHERE user_id = :u) "
+        "ORDER BY c.name COLLATE NOCASE, gr.name IS NOT NULL, gr.name COLLATE NOCASE",
+        {"u": user_id}).fetchall()
+    libraries: dict[int, dict] = {}
+    for r in rows:
+        lib = libraries.setdefault(r["id"], {"id": r["id"], "name": r["name"], "kind": "library",
+                                             "access": "read", "claude": False, "via": []})
+        if r["can_write"]:
+            lib["access"] = "write"
+        lib["claude"] = lib["claude"] or bool(r["claude_enabled"] and r["can_claude"])
+        lib["via"].append(r["via_group"] or "direct")
+    return summary + list(libraries.values())
 
 
 def _require_library(conn: sqlite3.Connection, collection_id: int) -> None:

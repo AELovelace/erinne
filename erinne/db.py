@@ -87,14 +87,29 @@ def migrate(conn: sqlite3.Connection, embed_dim: int, *, ensure_vectors: bool = 
         if number <= current:
             continue
         sql = path.read_text(encoding="utf-8")
+        # Table rebuilds (create new, copy, drop old, rename) need foreign keys
+        # off; that can only change outside a transaction.
+        no_fk = sql.startswith("-- erinne:no-fk")
+        if no_fk:
+            conn.execute("PRAGMA foreign_keys = OFF")
         # executescript() commits any open transaction, so wrap the script and
         # the version bump in one explicit transaction of our own.
         try:
-            conn.executescript(f"BEGIN IMMEDIATE;\n{sql}\nPRAGMA user_version = {number};\nCOMMIT;")
-        except sqlite3.Error as exc:
+            conn.executescript(f"BEGIN IMMEDIATE;\n{sql}\nPRAGMA user_version = {number};")
+            broken = conn.execute("PRAGMA foreign_key_check").fetchall()
+            if broken:
+                raise SchemaError(f"Migration {path.name} left {len(broken)} broken reference(s), "
+                                  f"e.g. {tuple(broken[0])}")
+            conn.execute("COMMIT")
+        except (sqlite3.Error, SchemaError) as exc:
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
+            if isinstance(exc, SchemaError):
+                raise
             raise SchemaError(f"Migration {path.name} failed: {exc}") from exc
+        finally:
+            if no_fk:
+                conn.execute("PRAGMA foreign_keys = ON")
     if ensure_vectors:
         ensure_vector_table(conn, embed_dim)
     return schema_version(conn)
@@ -105,7 +120,7 @@ def drop_vector_table(conn: sqlite3.Connection) -> None:
     with transaction(conn):
         conn.execute("DROP TRIGGER IF EXISTS chunks_vec_ad")
         conn.execute("DROP TABLE IF EXISTS chunk_vec")
-        conn.execute("DELETE FROM meta WHERE key = 'embed_dim'")
+        conn.execute("DELETE FROM meta WHERE key IN ('embed_dim', 'vec_layout')")
 
 
 def ensure_vector_table(conn: sqlite3.Connection, embed_dim: int) -> None:
@@ -122,16 +137,49 @@ def ensure_vector_table(conn: sqlite3.Connection, embed_dim: int) -> None:
                 f"chunk_vec was built for {row['value']}-dim embeddings but ERINNE_EMBED_DIM="
                 f"{embed_dim}; re-index or restore the previous embedder setting."
             )
+        layout = conn.execute("SELECT value FROM meta WHERE key = 'vec_layout'").fetchone()
+        if layout is None or int(layout["value"]) < VEC_LAYOUT:
+            _upgrade_vector_table(conn, embed_dim)
         return
     with transaction(conn):
-        conn.execute(
-            f"CREATE VIRTUAL TABLE chunk_vec USING vec0("
-            f"embedding float[{int(embed_dim)}] distance_metric=cosine, "
-            f"collection_id integer)"
-        )
-        # Keep vectors in step with chunks, including cascaded deletes.
-        conn.execute(
-            "CREATE TRIGGER chunks_vec_ad AFTER DELETE ON chunks BEGIN "
-            "DELETE FROM chunk_vec WHERE rowid = old.id; END"
-        )
+        _create_vector_table(conn, embed_dim)
         conn.execute("INSERT INTO meta(key, value) VALUES ('embed_dim', ?)", (str(embed_dim),))
+
+
+# 2: vectors carry folder_id as well as collection_id (folder-scoped search).
+VEC_LAYOUT = 2
+
+
+def _create_vector_table(conn: sqlite3.Connection, embed_dim: int) -> None:
+    # Metadata columns are filtered inside the KNN query. vec0 metadata can't
+    # be NULL, so folder 0 means the collection root.
+    conn.execute(
+        f"CREATE VIRTUAL TABLE chunk_vec USING vec0("
+        f"embedding float[{int(embed_dim)}] distance_metric=cosine, "
+        f"collection_id integer, folder_id integer)"
+    )
+    # Keep vectors in step with chunks, including cascaded deletes.
+    conn.execute(
+        "CREATE TRIGGER chunks_vec_ad AFTER DELETE ON chunks BEGIN "
+        "DELETE FROM chunk_vec WHERE rowid = old.id; END"
+    )
+    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('vec_layout', ?)", (str(VEC_LAYOUT),))
+
+
+def _upgrade_vector_table(conn: sqlite3.Connection, embed_dim: int) -> None:
+    """Rebuild chunk_vec in the current layout, keeping every embedding.
+
+    vec0 tables can't be renamed, so vectors go through a temp table.
+    """
+    with transaction(conn):
+        conn.execute("DROP TABLE IF EXISTS temp.vec_copy")
+        conn.execute("CREATE TEMP TABLE vec_copy AS SELECT rowid AS id, embedding FROM chunk_vec")
+        conn.execute("DROP TRIGGER IF EXISTS chunks_vec_ad")
+        conn.execute("DROP TABLE chunk_vec")
+        _create_vector_table(conn, embed_dim)
+        # Scope comes from chunks, the source of truth.
+        conn.execute(
+            "INSERT INTO chunk_vec(rowid, embedding, collection_id, folder_id) "
+            "SELECT v.id, v.embedding, c.collection_id, c.folder_id FROM temp.vec_copy v JOIN chunks c ON c.id = v.id"
+        )
+        conn.execute("DROP TABLE temp.vec_copy")

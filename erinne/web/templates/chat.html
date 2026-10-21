@@ -14,9 +14,12 @@
         {% if has_files %}
         <p class="muted">Answers come only from your files and the libraries shared with you, with a link to the exact page.</p>
         {% else %}
-        <p class="muted">You don't have any ready files yet. <a href="/files">Upload a PDF or Markdown file</a> first.</p>
+        <p class="muted">You don't have any searchable files yet. <a href="/files">Upload some documents</a> first (PDF, Markdown or text).</p>
         {% endif %}
       </div>
+    </div>
+    <div class="ask-scope">
+      <button type="button" class="scope-chip" id="scope" title="Choose which documents to search">🔎 <span id="scope-label">All my documents</span> ▾</button>
     </div>
     <form id="ask-form" class="ask">
       <textarea id="question" rows="2" placeholder="e.g. How do I run the night audit?" required maxlength="2000"></textarea>
@@ -24,5 +27,6 @@
     </form>
   </main>
 </div>
-<script src="/static/chat.js"></script>
+<script src="{{ static('picker.js') }}"></script>
+<script src="{{ static('chat.js') }}"></script>
 {% endblock %}

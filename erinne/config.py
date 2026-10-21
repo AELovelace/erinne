@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     secret_key: str = ""
     session_max_age: int = 24 * 3600
     session_https_only: bool = False
+    # The address people open Erinne at, e.g. https://erinne.example.internal;
+    # links handed to Claude are built on it (relative links when empty).
+    public_url: str = ""
+
+    # MCP endpoint (/mcp) for Claude Desktop and other MCP clients.
+    mcp_calls_per_minute: int = 60     # per token
+    mcp_max_tokens: int = 4000         # passage text returned by one search
 
     # Login throttling: lock a username+IP pair after this many failures.
     login_max_failures: int = 5
@@ -48,10 +55,13 @@ class Settings(BaseSettings):
     embed_batch_size: int = 32
     embed_timeout: float = 120.0
 
-    # Uploads
+    # Uploads: any file up to max_file_bytes is kept; the PDF and text limits
+    # decide what gets indexed for search (bigger files are stored only).
+    max_file_bytes: int = 500 * 1024 * 1024
     max_pdf_bytes: int = 100 * 1024 * 1024
     max_pdf_pages: int = 5000          # the OPERA Cloud manual alone is 3,300 pages
     max_md_bytes: int = 5 * 1024 * 1024
+    trash_days: int = 30               # recycle bin items are deleted for good after this
 
     # Ingestion
     ocr_command: str = "ocrmypdf"      # run when present on PATH; skipped otherwise

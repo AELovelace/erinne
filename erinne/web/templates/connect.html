@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Connect Claude · {{ assistant_name }}{% endblock %}
+{% block body %}
+{% include "_nav.html" %}
+<main class="inbox admin connect">
+  <h1>Use {{ assistant_name }} from Claude</h1>
+  <p class="muted">Claude can search your documents through {{ assistant_name }} and answer with citations that link back here.
+    Passages Claude reads are sent to Anthropic as part of your chat, so only what's listed below is reachable.</p>
+
+  <h2 class="admin-section">What Claude can search for you</h2>
+  <ul class="grants" id="shared"><li class="muted small">Loading…</li></ul>
+
+  <h2 class="admin-section">Set it up</h2>
+  <ol class="steps">
+    <li>Create a token below and copy it. It's shown only once.</li>
+    {% if has_extension %}
+    <li><a href="/connect/erinne.mcpb">Download the {{ assistant_name }} extension</a> and double-click it. Claude Desktop opens an install dialog.</li>
+    <li>Paste your token when it asks. The {{ assistant_name }} address is already filled in.</li>
+    {% else %}
+    <li>The Claude Desktop extension isn't published yet; ask an admin. Claude Code users can connect now with the command below.</li>
+    {% endif %}
+    <li>Ask Claude something your documents answer, e.g. “What does the night audit checklist say about rate changes?”</li>
+  </ol>
+  <p class="small muted">Claude Code: <code id="cc-command">claude mcp add --transport http erinne <span id="mcp-url"></span> --header "Authorization: Bearer YOUR_TOKEN"</code></p>
+
+  <h2 class="admin-section">Your tokens</h2>
+  <form class="new-lib" id="new-token">
+    <input type="text" id="token-name" value="Claude Desktop" maxlength="80" aria-label="Token name" required>
+    <select id="token-days" aria-label="Expires after"></select>
+    <button type="submit">Create token</button>
+  </form>
+  <div class="token-reveal" id="token-reveal" hidden>
+    <p><strong>Your new token</strong>. Copy it now; it won't be shown again.</p>
+    <div class="grant-add"><code id="token-value"></code><button type="button" class="small" id="token-copy">Copy</button></div>
+  </div>
+  <p class="error" id="token-error" hidden></p>
+  <div id="tokens" class="table-wrap"></div>
+</main>
+<script src="{{ static('picker.js') }}"></script>
+<script src="{{ static('connect.js') }}"></script>
+{% endblock %}

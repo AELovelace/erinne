@@ -195,22 +195,46 @@ def test_stale_running_jobs_are_requeued(conn, settings, alice):
     assert conn.execute("SELECT status FROM jobs").fetchone()[0] == "queued"
 
 
-@pytest.mark.parametrize("data, name, message", [
-    (b"MZ\x90\x00 not a pdf", "invoice.pdf", "Only PDF and Markdown"),
-    (b"plain text", "notes.txt", "Only PDF and Markdown"),
-    ("café".encode("latin-1"), "notes.md", "UTF-8"),
-    (b"", "empty.md", "empty"),
+@pytest.mark.parametrize("data, name, kind, note", [
+    (b"MZ\x90\x00 not a pdf", "invoice.pdf", "other", None),
+    (b"plain text", "notes.txt", "txt", None),
+    ("café".encode("latin-1"), "notes.md", "other", "UTF-8"),
+    (b"<svg/>", "logo.svg", "other", None),
 ])
-def test_rejected_uploads_leave_nothing_behind(settings, data, name, message):
-    with pytest.raises(store.UploadError, match=message):
-        store.receive(io.BytesIO(data), name, settings)
+def test_any_file_is_received(settings, data, name, kind, note):
+    received = store.receive(io.BytesIO(data), name, settings)
+    assert received.kind == kind
+    assert (note in received.note) if note else received.note is None
+    received.tmp_path.unlink()
+
+
+def test_rejected_uploads_leave_nothing_behind(settings):
+    with pytest.raises(store.UploadError, match="empty"):
+        store.receive(io.BytesIO(b""), "empty.md", settings)
+    settings.max_file_bytes = 10
+    with pytest.raises(store.UploadError, match="larger than"):
+        store.receive(io.BytesIO(b"# " + b"x" * 100), "big.md", settings)
     assert not any(settings.tmp_dir.iterdir())
 
 
-def test_size_limit(settings):
+def test_index_limits_store_instead_of_reject(settings):
     settings.max_md_bytes = 10
-    with pytest.raises(store.UploadError, match="larger than"):
-        store.receive(io.BytesIO(b"# " + b"x" * 100), "big.md", settings)
+    received = store.receive(io.BytesIO(b"# " + b"x" * 100), "big.md", settings)
+    assert received.kind == "other" and "Not searchable" in received.note
+    received.tmp_path.unlink()
+
+
+def test_plain_text_is_indexed(conn, settings):
+    from erinne import users, worker
+    from fakes import FakeEmbedder
+    alice = users.create_user(conn, "alice", "pw-alice-123")
+    inbox = conn.execute("SELECT id FROM collections WHERE owner_user_id = ?", (alice,)).fetchone()[0]
+    received = store.receive(io.BytesIO(b"Pool hours are 7am to 10pm.\n\nTowels at the desk."), "pool.txt", settings)
+    file_id, _ = store.add_file(conn, settings, received, inbox, alice)
+    while worker.run_one(conn, settings, FakeEmbedder()):
+        pass
+    assert conn.execute("SELECT status FROM files WHERE id = ?", (file_id,)).fetchone()[0] == "ready"
+    assert "Pool hours" in conn.execute("SELECT text FROM chunks WHERE file_id = ?", (file_id,)).fetchone()[0]
 
 
 def test_display_name_is_sanitised():

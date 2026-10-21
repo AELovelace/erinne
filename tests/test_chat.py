@@ -311,4 +311,4 @@ def test_unregistered_route_falls_back_to_search(routed_client, llm):
 def test_chat_pages_render(chat_client):
     _login(chat_client, "alice")
     assert "Ask Erinne" in chat_client.get("/").text
-    assert "Upload files" in chat_client.get("/files").text
+    assert 'id="tree"' in chat_client.get("/files").text

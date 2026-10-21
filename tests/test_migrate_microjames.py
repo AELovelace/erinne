@@ -69,9 +69,11 @@ def test_import_files_queues_supported_documents(microjames, conn, settings, mon
         "SELECT c.name, f.display_name FROM files f JOIN collections c ON c.id = f.collection_id "
         "ORDER BY c.name, f.display_name").fetchall()
     assert [tuple(r) for r in rows] == [
-        ("BrandResBW", "standards.pdf"), ("Oracle", "manual.pdf"), ("Oracle", "start.md"),
-        ("rob's inbox", "mine.pdf")]
+        ("BrandResBW", "standards.pdf"), ("Oracle", "manual.pdf"), ("Oracle", "notes.docx"),
+        ("Oracle", "start.md"), ("rob's inbox", "mine.pdf")]
+    # Searchable documents are queued; the .docx is kept but not indexed.
     assert conn.execute("SELECT count(*) FROM jobs WHERE status = 'queued'").fetchone()[0] == 4
+    assert conn.execute("SELECT status FROM files WHERE display_name = 'notes.docx'").fetchone()[0] == "stored"
 
 
 def test_apply_keeps_passwords_and_is_idempotent(microjames, conn):

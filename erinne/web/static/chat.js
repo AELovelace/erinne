@@ -9,6 +9,16 @@
   const send = document.getElementById("send");
   const list = document.getElementById("conversations");
   let conversationId = null;
+  let scope = null;  // {collection_id, folder_id, label} or null for everything
+  const scopeLabel = document.getElementById("scope-label");
+
+  document.getElementById("scope").addEventListener("click", async function () {
+    const picked = await window.Erinne.pickLocation({ title: "Search in…", ok: "Search here", allowAll: true,
+                                                      current: scope });
+    if (!picked) return;
+    scope = picked.all ? null : picked;
+    scopeLabel.textContent = scope ? scope.label : "All my documents";
+  });
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -82,10 +92,13 @@
     return box;
   }
 
-  function addQuestion(text) {
+  function addQuestion(text, where) {
     const welcome = thread.querySelector(".welcome");
     if (welcome) welcome.remove();
-    thread.appendChild(el("div", "msg user", text));
+    const msg = el("div", "msg user");
+    if (where) msg.appendChild(el("div", "scope-chip", "🔎 " + where));
+    msg.appendChild(document.createTextNode(text));
+    thread.appendChild(msg);
   }
 
   function addAnswerShell() {
@@ -138,7 +151,7 @@
   }
 
   async function ask(question) {
-    addQuestion(question);
+    addQuestion(question, scope ? scope.label : null);
     const view = addAnswerShell();
     send.disabled = true;
     let streamed = "";
@@ -146,7 +159,8 @@
     try {
       const resp = await fetch("/api/ask", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: question, conversation_id: conversationId }) });
+        body: JSON.stringify({ question: question, conversation_id: conversationId,
+                               scope: scope ? { collection_id: scope.collection_id, folder_id: scope.folder_id } : null }) });
       if (resp.status === 401) { window.location.href = "/login"; return; }
       if (!resp.ok) {
         const err = await resp.json().catch(function () { return {}; });
