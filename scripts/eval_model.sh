@@ -16,10 +16,10 @@ PORT=8084
 mkdir -p runs
 
 run() {  # gguf label
-  # Same template and reasoning setting as production (deploy/linux/mnemerynne-generator.service):
-  # LFM2.5's own template forces a <think> block that fine-tuning never trains.
-  "$SERVER" -m "$1" --port $PORT -ngl 99 -c 8192 --jinja --chat-template-file deploy/linux/lfm2-no-think.jinja \
-    --reasoning-format none > "runs/server-$2.log" 2>&1 &
+  # Served as in production (deploy/linux/mnemerynne-generator.service): the model thinks
+  # first, and eval-answers gives it MNEMERYNNE_LLM_REASONING_TOKENS of room to do so.
+  "$SERVER" -m "$1" --port $PORT -ngl 99 -c 8192 --jinja --reasoning-format deepseek \
+    > "runs/server-$2.log" 2>&1 &
   local pid=$!
   until curl -sf http://127.0.0.1:$PORT/health > /dev/null; do
     kill -0 $pid 2> /dev/null || { echo "llama-server failed; see runs/server-$2.log" >&2; exit 1; }
@@ -30,7 +30,7 @@ run() {  # gguf label
   kill $pid; wait $pid 2> /dev/null || true
 }
 
-# v3: measured without the forced <think> (v2 and earlier were served with it).
+# v3: with the thinking allowance production now has (v2 and earlier could run out mid-thought).
 [ -f "runs/answers-lfm2.5-stock-v3.json" ] || run "$STOCK" lfm2.5-stock-v3
 run "$NEW" "$LABEL"
 $PY -m mnemerynne eval-gate runs/answers-lfm2.5-stock-v3.json "runs/answers-$LABEL.json"

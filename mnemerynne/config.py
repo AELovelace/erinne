@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     embed_url: str = "http://127.0.0.1:8082"
     llm_timeout: float = 120.0
     llm_model: str = "qwen3-8b-q4_k_m"   # label recorded with each answer (the server decides)
+    # Extra tokens every generator call may spend thinking before it answers.
+    # LFM2.5 and models tuned from it always think first (their chat template
+    # opens <think>); llama-server moves that into reasoning_content and only
+    # enforces the JSON schema after it, so a call whose budget runs out while
+    # thinking returns nothing. 0 for models that don't think.
+    llm_reasoning_tokens: int = 1024
     max_question_chars: int = 2000
 
     # Embeddings: vector size fixes the chunk_vec table's shape.

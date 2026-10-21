@@ -112,18 +112,21 @@ class LLM:
 
     def __init__(self, base_url: str, *, model: str = "local", timeout: float = 120.0,
                  client: httpx.AsyncClient | None = None, flavor: str = "llamacpp",
-                 api_key: str = "", max_retries: int = 4) -> None:
+                 api_key: str = "", max_retries: int = 4, reasoning_tokens: int = 0) -> None:
         self.url = base_url.rstrip("/") + "/v1/chat/completions"
         self.model = model
         self.flavor = flavor
         self.max_retries = max_retries
+        # Added to every local call's max_tokens: room to think before the answer.
+        self.reasoning_tokens = reasoning_tokens
         self._unsupported: set[str] = set()  # parameters this model rejected once; never sent again
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self._client = client or httpx.AsyncClient(timeout=timeout, headers=headers)
 
     @classmethod
     def from_settings(cls, settings: Settings, base_url: str | None = None) -> "LLM":
-        return cls(base_url or settings.llm_url, timeout=settings.llm_timeout)
+        return cls(base_url or settings.llm_url, timeout=settings.llm_timeout,
+                   reasoning_tokens=settings.llm_reasoning_tokens)
 
     @classmethod
     def teacher(cls, settings: Settings, base_url: str | None = None) -> "LLM":
@@ -161,7 +164,7 @@ class LLM:
             strict = True
         else:
             payload["temperature"] = temperature
-            payload["max_tokens"] = max_tokens
+            payload["max_tokens"] = max_tokens + self.reasoning_tokens
             # Read by chat templates that support it (Qwen3); ignored by others.
             payload["chat_template_kwargs"] = {"enable_thinking": bool(thinking) and json_schema is None}
             schema, strict = json_schema, None
@@ -232,7 +235,7 @@ class LLM:
         raw = message.get("content") or ""
         why = []
         if choice.get("finish_reason") == "length":
-            why.append(f"it hit the {max_tokens}-token limit")
+            why.append(f"it hit the {max_tokens + self.reasoning_tokens}-token limit")
         if reasoning or "<think>" in raw.lower():
             why.append(f"it spent {len(reasoning) or len(raw)} characters thinking (a reasoning model, or "
                        f"a chat template that ignores enable_thinking=false)")

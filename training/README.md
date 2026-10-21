@@ -106,17 +106,17 @@ training/export_gguf.sh training/out/erynne-merged     # -> training/out/erynne-
 Serve the new GGUF on a spare port, evaluate, compare with the stock model:
 
 ```sh
-llama-server -m erynne-YYYY-MM-DD-q4_k_m.gguf --port 8084 -ngl 99 -c 8192 --jinja \
-  --chat-template-file deploy/linux/lfm2-no-think.jinja --reasoning-format none
+llama-server -m erynne-YYYY-MM-DD-q4_k_m.gguf --port 8084 -ngl 99 -c 8192 --jinja --reasoning-format deepseek
 mnemerynne eval-answers eval/gold/dev.jsonl --generator http://127.0.0.1:8084 --label mnemerynne-YYYY-MM-DD --out runs/answers-mnemerynne-YYYY-MM-DD.json
 mnemerynne eval-gate runs/answers-lfm2.5-stock.json runs/answers-mnemerynne-YYYY-MM-DD.json
 ```
 
-Serve every LFM2.5-based model (stock or fine-tuned) with those last two
-flags, here and in production. LFM2.5's built-in chat template always opens a
-`<think>` block, but fine-tuning trains on answers without one; with the
-template's version the model thinks first, and llama-server can't apply the
-JSON schemas until it stops (a 120-token follow-up rewrite never got there).
+Serve every model exactly as production does. LFM2.5 and its fine-tunes think
+before answering (the chat template always opens a `<think>` block), and
+`eval-answers` gives them `MNEMERYNNE_LLM_REASONING_TOKENS` of room for it, as
+the app does. `deploy/linux/lfm2-no-think.jinja` with `--reasoning-format none`
+switches thinking off; erinne-0.1 served that way refused questions it answers
+when it may think, so evaluate a model that way only if it will run that way.
 `scripts/eval_model.sh` does this for you.
 
 The gate fails if any metric drops more than 0.02, if faithfulness or

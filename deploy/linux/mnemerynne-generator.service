@@ -18,16 +18,17 @@ Environment=XDG_CACHE_HOME=/var/cache/mnemerynne-llama
 # across 2 slots. To run Qwen3-8B instead, change -m and the label in
 # MNEMERYNNE_LLM_MODEL; keep -c at 16384 or lower on the 8 GB card.
 #
-# LFM2.5 (and models fine-tuned from it) is a reasoning model whose own chat
-# template always opens a <think> block. lfm2-no-think.jinja is that template
-# without the forced <think>, matching how fine-tuning trains (answers, no
-# thinking); --reasoning-format none makes llama-server apply Mnemerynne's JSON
-# schemas from the first token, so the model answers instead of thinking until
-# it runs out of tokens. Keep both for any LFM2.5-based model, fine-tunes too;
-# drop both for Qwen3, whose template honours enable_thinking=false.
+# LFM2.5 (and models fine-tuned from it) thinks before it answers: its chat
+# template always opens a <think> block, and its answers are much better for
+# it. --reasoning-format deepseek moves the thinking out of the reply, and
+# MNEMERYNNE_LLM_REASONING_TOKENS (default 1024) gives every call room for it
+# on top of its answer budget. lfm2-no-think.jinja with --reasoning-format none
+# turns thinking off instead: JSON from the first token, but erinne-0.1 then
+# refused questions it answers fine when it may think (21 Oct 2026), so only
+# use that for a model trained and evaluated that way.
 ExecStart=/opt/llama.cpp-vulkan/llama-server --host 127.0.0.1 --port 8086 -dev ${MNEMERYNNE_GPU} -ngl 99 \
     -m /opt/models/LFM2.5-2.6B-Q4_K_M.gguf -c 16384 -np 2 \
-    --jinja --chat-template-file /opt/mnemerynne/deploy/linux/lfm2-no-think.jinja --reasoning-format none
+    --jinja --reasoning-format deepseek
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true

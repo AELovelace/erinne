@@ -283,7 +283,8 @@ def cmd_eval_answers(args):
             generator = LLM.teacher(settings)
             restrict = allowed_collections(conn, settings, generator)
         else:
-            generator = LLM(args.generator or settings.llm_url, timeout=settings.llm_timeout)
+            generator = LLM(args.generator or settings.llm_url, timeout=settings.llm_timeout,
+                            reasoning_tokens=settings.llm_reasoning_tokens)  # as in production
         judge = None if args.no_judge else LLM(args.judge or settings.llm_url, timeout=settings.llm_timeout)
         embedder = Embedder(settings)
         reranker = Reranker(args.rerank_url) if args.rerank_url else None
