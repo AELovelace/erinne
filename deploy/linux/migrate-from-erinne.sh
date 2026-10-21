@@ -41,13 +41,16 @@ move /var/cache/erinne-llama /var/cache/mnemerynne-llama
 for suffix in "" -wal -shm; do
     move "/var/lib/mnemerynne/erinne.db$suffix" "/var/lib/mnemerynne/mnemerynne.db$suffix"
 done
-move /var/lib/mnemerynne/erinne.mcpb /var/lib/mnemerynne/erynne.mcpb
+move /var/lib/mnemerynne/erinne.mcpb /var/lib/mnemerynne/mnemerynne.mcpb
 if [ -d /etc/erinne ]; then
     move /etc/erinne /etc/mnemerynne
     move /etc/mnemerynne/erinne.env /etc/mnemerynne/mnemerynne.env
 fi
 if [ -f /etc/mnemerynne/mnemerynne.env ]; then
-    sed -i 's/ERINNE_/MNEMERYNNE_/g' /etc/mnemerynne/mnemerynne.env
+    # Names and the paths in their values (MNEMERYNNE_DATA_DIR=/var/lib/erinne).
+    sed -i 's/ERINNE_/MNEMERYNNE_/g; s#/var/lib/erinne#/var/lib/mnemerynne#g;
+            s#/var/backups/erinne#/var/backups/mnemerynne#g; s#/opt/erinne#/opt/mnemerynne#g' \
+        /etc/mnemerynne/mnemerynne.env
     chown root:mnemerynne /etc/mnemerynne/mnemerynne.env && chmod 640 /etc/mnemerynne/mnemerynne.env
 fi
 
@@ -82,5 +85,5 @@ Check:
   sudo mnemerynne-admin list-users
 Everyone has to sign in again (the session cookie was renamed). Existing Claude
 tokens keep working; download the extension again from the Claude page once the
-new erynne.mcpb is packed and copied to /var/lib/mnemerynne/.
+new mnemerynne.mcpb is packed and copied to /var/lib/mnemerynne/.
 EOF

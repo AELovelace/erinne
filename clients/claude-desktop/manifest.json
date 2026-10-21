@@ -1,12 +1,12 @@
 {
   "manifest_version": "0.3",
-  "name": "erynne",
-  "display_name": "Erynne",
+  "name": "mnemerynne",
+  "display_name": "Mnemerynne",
   "version": "0.2.0",
-  "description": "Search your Erynne documents (inbox and shared libraries) from Claude, with citations.",
-  "long_description": "Lets Claude search the documents you can see in Erynne and answer with the file, page and section for every claim, linking back to Erynne. Read-only. Uses a personal token you create under Claude in Erynne; what Claude may search is set by Erynne's admins.",
+  "description": "Search your Mnemerynne documents (inbox and shared libraries) from Claude, with citations.",
+  "long_description": "Lets Claude search the documents you can see in Mnemerynne and answer with the file, page and section for every claim, linking back to Mnemerynne. Read-only. Uses a personal token you create under Claude in Mnemerynne; what Claude may search is set by Mnemerynne's admins.",
   "author": {
-    "name": "Erynne admins"
+    "name": "Mnemerynne admins"
   },
   "server": {
     "type": "node",
@@ -15,8 +15,8 @@
       "command": "node",
       "args": ["${__dirname}/server/index.js"],
       "env": {
-        "ERYNNE_URL": "${user_config.erynne_url}",
-        "ERYNNE_TOKEN": "${user_config.api_token}"
+        "MNEMERYNNE_URL": "${user_config.mnemerynne_url}",
+        "MNEMERYNNE_TOKEN": "${user_config.api_token}"
       }
     }
   },
@@ -30,16 +30,16 @@
   "user_config": {
     "api_token": {
       "type": "string",
-      "title": "Erynne token",
-      "description": "Create one in Erynne under Claude → Create token, then paste it here.",
+      "title": "Mnemerynne token",
+      "description": "Create one in Mnemerynne under Claude → Create token, then paste it here.",
       "sensitive": true,
       "required": true
     },
-    "erynne_url": {
+    "mnemerynne_url": {
       "type": "string",
-      "title": "Erynne address",
-      "description": "Where Erynne runs. Leave as is unless an admin tells you otherwise.",
-      "default": "https://erynne.example.internal",
+      "title": "Mnemerynne address",
+      "description": "Where Mnemerynne runs. Leave as is unless an admin tells you otherwise.",
+      "default": "https://lwhittaker.net",
       "required": true
     }
   },

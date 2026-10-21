@@ -113,7 +113,7 @@ equivalent nginx setup, for a box where nginx owns port 443 instead.
 
 ## 5b. Claude Desktop
 
-Staff connect Claude Desktop through the Erynne extension, which relays to
+Staff connect Claude Desktop through the Mnemerynne extension, which relays to
 `https://YOUR-HOSTNAME/mcp` with a personal token (made under **Claude** in
 the web app). Admins choose what Claude may search on the **Access** page;
 everything is on by default.
@@ -122,7 +122,7 @@ everything is on by default.
    use, then `sudo systemctl restart mnemerynne-web`.
 2. On the dev PC, pack the extension (see `clients/claude-desktop/README.md`)
    with that address as the default and Caddy's root certificate as `ca.pem`.
-3. Copy `erynne.mcpb` to `/var/lib/mnemerynne/erynne.mcpb` (owner mnemerynne). The
+3. Copy `mnemerynne.mcpb` to `/var/lib/mnemerynne/mnemerynne.mcpb` (owner mnemerynne). The
    **Claude** page then offers it for download.
 
 To cut someone off at once: **Access → Revoke Claude tokens**, or

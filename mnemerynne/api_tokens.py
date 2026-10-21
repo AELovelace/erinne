@@ -1,6 +1,6 @@
 """Personal API tokens: how Claude Desktop (and other MCP clients) act as a user.
 
-A token is `erynne_` + 43 random URL-safe characters. Only its SHA-256 is
+A token is `mnemerynne_` + 43 random URL-safe characters. Only its SHA-256 is
 stored. A token acts with its user's permissions at the moment of each call,
 so deactivating the user or removing a grant takes effect immediately.
 """
@@ -12,9 +12,9 @@ import secrets
 import sqlite3
 from dataclasses import dataclass
 
-PREFIX = "erynne_"
+PREFIX = "mnemerynne_"
 # Tokens made before the rename keep working until they expire.
-LEGACY_PREFIXES = ("erinne_",)
+LEGACY_PREFIXES = ("erinne_", "erynne_")
 EXPIRY_DAYS = (30, 90, 365)
 
 

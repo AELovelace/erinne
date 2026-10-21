@@ -18,7 +18,7 @@ router = APIRouter()
 
 def _extension(settings: Settings):
     """The packed Claude Desktop extension, dropped into the data directory by an admin."""
-    path = settings.data_dir / "erynne.mcpb"
+    path = settings.data_dir / "mnemerynne.mcpb"
     return path if path.is_file() else None
 
 
@@ -29,12 +29,12 @@ def connect_page(request: Request, user=Depends(page_user), settings: Settings =
         "has_extension": _extension(settings) is not None})
 
 
-@router.get("/connect/erynne.mcpb")
+@router.get("/connect/mnemerynne.mcpb")
 def download_extension(user=Depends(page_user), settings: Settings = Depends(get_settings)):
     path = _extension(settings)
     if path is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "The extension hasn't been published yet.")
-    return FileResponse(path, media_type="application/octet-stream", filename="erynne.mcpb")
+    return FileResponse(path, media_type="application/octet-stream", filename="mnemerynne.mcpb")
 
 
 @router.get("/api/tokens")
