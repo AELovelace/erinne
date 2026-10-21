@@ -159,19 +159,37 @@ before the rename keep working.
 ## Updating
 
 ```sh
-cd /opt/mnemerynne && sudo git pull && sudo uv sync --frozen --no-dev && sudo restorecon -R /opt/mnemerynne
-sudo cp deploy/linux/mnemerynne-*.service deploy/linux/mnemerynne-backup.timer /etc/systemd/system/ && sudo systemctl daemon-reload
-sudo systemctl restart mnemerynne-web mnemerynne-worker
+sudo mnemerynne-admin check-updates     # what's new on GitHub and what an update would change
+sudo mnemerynne-admin update            # asks first; --yes to skip the question
 ```
 
-Database migrations run automatically at start-up. Restart
-`mnemerynne-generator` and `mnemerynne-embedder` too when their unit files changed.
+`update` (deploy/linux/update.sh, run as root) does what used to be done by hand:
 
-Take a backup first (`sudo systemctl start mnemerynne-backup`) when an update
-changes the schema. The file-manager update (schema v4) rebuilds the files
-table and the vector index in place: about 20 seconds for 6,000 chunks, with
-nothing re-embedded. Start `mnemerynne-web` first and let it finish migrating
-before starting `mnemerynne-worker`.
+1. Backs up the database to `/var/lib/mnemerynne/update/before-*.db` (the last five are kept).
+2. Fast-forwards `/opt/mnemerynne` to GitHub's `main`. It refuses, changing nothing, if
+   the checkout has local edits or commits GitHub doesn't have.
+3. `uv sync --frozen --no-dev` and `restorecon`.
+4. Installs service files that changed (and the `mnemerynne-admin` command), then
+   restarts what changed: the generator or embedder if their files did, then
+   `mnemerynne-web` (which applies any database update), and once it reports
+   healthy, `mnemerynne-worker`.
+5. If any step fails or the web app doesn't come back healthy, it undoes all of
+   it: previous code and packages, previous service files, and the database backup
+   if the schema had changed. Then it shows the end of the web app's log.
+
+Keep your own changes to service files in drop-ins
+(`sudo systemctl edit mnemerynne-generator`): an update replaces the unit files
+in `/etc/systemd/system` but never touches drop-ins. The **Settings** tab on the
+Access page shows whether updates are available and how the last one went; it
+can't start one.
+
+**First time:** this needs the new `mnemerynne-admin` installed once by hand:
+
+```sh
+cd /opt/mnemerynne && sudo git pull && sudo uv sync --frozen --no-dev && sudo restorecon -R /opt/mnemerynne
+sudo install -m 755 deploy/linux/mnemerynne-admin /usr/local/bin/
+sudo systemctl restart mnemerynne-web mnemerynne-worker
+```
 
 ## Restore from backup
 

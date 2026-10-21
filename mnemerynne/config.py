@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     # links handed to Claude are built on it (relative links when empty).
     public_url: str = ""
 
+    # Where `mnemerynne-admin update` gets new versions, for the Settings page's
+    # "updates available" check: owner/name on GitHub (empty = the checkout's
+    # origin) and the branch update.sh follows (it reads MNEMERYNNE_UPDATE_BRANCH too).
+    update_repo: str = ""
+    update_branch: str = "main"
+
     # MCP endpoint (/mcp) for Claude Desktop and other MCP clients.
     mcp_calls_per_minute: int = 60     # per token
     mcp_max_tokens: int = 4000         # passage text returned by one search

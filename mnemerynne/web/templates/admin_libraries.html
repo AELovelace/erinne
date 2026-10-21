@@ -11,6 +11,7 @@
       <button type="button" role="tab" data-tab="people">Who can see what</button>
       <button type="button" role="tab" data-tab="claude">Claude activity</button>
       <button type="button" role="tab" data-tab="changes">Recent changes</button>
+      <button type="button" role="tab" data-tab="settings">Settings</button>
     </nav>
   </header>
   <p class="error ax-error" id="admin-error" hidden></p>
@@ -49,6 +50,11 @@
 
   <section class="inbox admin" data-panel="changes" role="tabpanel" hidden>
     <div id="log" class="table-wrap"></div>
+  </section>
+
+  <section class="inbox admin" data-panel="settings" role="tabpanel" hidden>
+    <h2 class="ax-h">Updates</h2>
+    <div id="updates" aria-live="polite"><p class="muted">Checking…</p></div>
   </section>
 </main>
 <script src="{{ static('picker.js') }}"></script>

@@ -9,11 +9,13 @@ import json
 import sqlite3
 from typing import Literal
 
+import anyio
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import api_tokens, fs, permissions, users
+from mnemerynne import api_tokens, fs, permissions, updates, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
@@ -412,3 +414,12 @@ def access_log(limit: int = 100, user=Depends(admin_api_user), conn: sqlite3.Con
     rows = conn.execute("SELECT at, actor_name, action, target, detail FROM access_log ORDER BY id DESC LIMIT ?",
                         (max(1, min(limit, 1000)),)).fetchall()
     return {"entries": [dict(r) for r in rows]}
+
+
+# ------------------------------------------------------------------ settings
+@router.get("/api/admin/updates")
+async def update_status(refresh: bool = False, user=Depends(admin_api_user),
+                        settings: Settings = Depends(get_settings)):
+    """Installed version and what's newer on GitHub (read-only: installing is
+    `sudo mnemerynne-admin update` on the server)."""
+    return await anyio.to_thread.run_sync(lambda: updates.check(settings, force=refresh))

@@ -514,6 +514,60 @@
       : el("p", "muted", "No changes yet."));
   }
 
+  // -------------------------------------------------------------- settings
+  /* Read-only: installing an update is `sudo mnemerynne-admin update` on the server. */
+  function renderUpdates(u) {
+    const box = $("updates");
+    box.replaceChildren();
+    const cur = u.current || {};
+    const line = el("p");
+    line.appendChild(el("span", null, "Installed: "));
+    line.appendChild(el("code", null, cur.short || "unknown"));
+    if (cur.date || cur.message) line.appendChild(el("span", "muted", " · " + [cur.date, cur.message].filter(Boolean).join(" · ")));
+    box.appendChild(line);
+    if (u.repo) box.appendChild(el("p", "muted small", "Following " + u.repo + ", branch " + u.branch + ". Checked " + u.checked_at + "."));
+
+    if (u.error) box.appendChild(el("p", "error", u.error));
+    else if (!u.ahead) box.appendChild(el("p", null, "✓ Mnemerynne is up to date."));
+    else {
+      box.appendChild(el("p", null, u.ahead + (u.ahead === 1 ? " update" : " updates") + " available:"));
+      const list = el("ul", "ax-commits");
+      u.commits.forEach(function (c) {
+        const li = el("li");
+        li.append(el("code", null, c.short), el("span", "muted", " " + c.date + " "), el("span", null, c.message));
+        list.appendChild(li);
+      });
+      box.appendChild(list);
+      const notes = [];
+      if (u.flags.migrations.length) notes.push("Includes a database update (" + u.flags.migrations.length + "); a backup is taken first.");
+      if (u.flags.services.length) notes.push("Changes service files: " + u.flags.services.join(", ") + " (they restart).");
+      if (u.flags.packages) notes.push("Installs new or changed Python packages.");
+      if (u.flags.admin_command) notes.push("Updates the mnemerynne-admin command itself.");
+      notes.forEach(function (n) { box.appendChild(el("p", "small", "• " + n)); });
+      const how = el("p");
+      how.append(document.createTextNode("To install, on the server: "), el("code", null, u.command));
+      box.appendChild(how);
+      box.appendChild(el("p", "muted small", "It backs up the database, updates, restarts, and undoes everything if Mnemerynne doesn't come back healthy."));
+    }
+    const last = u.last_update;
+    if (last) {
+      box.appendChild(el("p", "muted small", "Last update: " + last.at + " — " +
+        (last.result === "ok" ? "succeeded" : "failed" + (last.message ? " (" + last.message + ")" : "")) +
+        ", " + (last.from || "").slice(0, 7) + " → " + (last.to || "").slice(0, 7) + "."));
+    }
+    box.appendChild(button("Check now", "small", function () { loadUpdates(true); }));
+  }
+
+  let updatesLoaded = false;
+  async function loadUpdates(refresh) {
+    updatesLoaded = true;
+    try {
+      renderUpdates(await api("GET", "/api/admin/updates" + (refresh ? "?refresh=1" : "")));
+    } catch (e) {
+      $("updates").replaceChildren(el("p", "error", e.message));
+    }
+  }
+
   // ------------------------------------------------------------ tabs, hash
   function showTab(tab) {
     state.tab = tab;
@@ -521,6 +575,8 @@
       b.setAttribute("aria-selected", String(b.dataset.tab === tab));
     });
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
+    // Only contact GitHub when someone opens Settings.
+    if (tab === "settings" && !updatesLoaded) loadUpdates(false);
   }
 
   function writeHash() {

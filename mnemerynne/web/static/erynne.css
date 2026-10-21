@@ -552,3 +552,6 @@ button.danger-fill { background: var(--error); }
   .ax { grid-template-columns: 1fr; }
   .ax-tree { max-height: 40vh; }
 }
+.ax-commits { list-style: none; padding: 0; margin: .4rem 0 .8rem; font-size: .9rem; }
+.ax-commits li { padding: .2rem 0; border-bottom: 1px solid var(--line); }
+.ax-commits code { margin-right: .4rem; }

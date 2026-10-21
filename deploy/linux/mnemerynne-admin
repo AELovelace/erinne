@@ -2,6 +2,13 @@
 # Run an mnemerynne CLI command as the mnemerynne user with the service settings.
 #   sudo mnemerynne-admin list-users
 #   sudo mnemerynne-admin migrate-microjames --source /opt/microjames --dry-run
+# Updating Mnemerynne itself stays root (deploy/linux/update.sh):
+#   sudo mnemerynne-admin check-updates
+#   sudo mnemerynne-admin update [--yes]
 # Install: sudo install -m 755 deploy/linux/mnemerynne-admin /usr/local/bin/
 set -eu
+case "${1:-}" in
+    update|check-updates)
+        exec /bin/bash /opt/mnemerynne/deploy/linux/update.sh "$@" ;;
+esac
 exec sudo -u mnemerynne sh -c 'set -a; . /etc/mnemerynne/mnemerynne.env; set +a; cd /opt/mnemerynne; exec .venv/bin/mnemerynne "$@"' mnemerynne "$@"
