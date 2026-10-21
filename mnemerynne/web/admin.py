@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import api_tokens, permissions, users
+from mnemerynne import api_tokens, fs, permissions, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
@@ -47,16 +47,40 @@ def _group(conn: sqlite3.Connection, group_id: int) -> sqlite3.Row:
     return row
 
 
+def _grant_json(r) -> dict:
+    out = {"type": "user" if r["user_id"] else "group", "id": r["user_id"] or r["group_id"],
+           "name": r["username"] or r["group_name"], "access": "write" if r["can_write"] else "read",
+           "claude": bool(r["can_claude"])}
+    if "source" in r.keys():
+        out["source"] = r["source"]
+    return out
+
+
 def _grants(conn: sqlite3.Connection, library_id: int) -> list[dict]:
-    rows = conn.execute(
-        "SELECT g.can_write, g.can_claude, g.user_id, g.group_id, u.username, gr.name AS group_name "
-        "FROM collection_grants g LEFT JOIN users u ON u.id = g.user_id LEFT JOIN groups gr ON gr.id = g.group_id "
-        "WHERE g.collection_id = ? ORDER BY g.group_id IS NULL, COALESCE(u.username, gr.name) COLLATE NOCASE",
-        (library_id,)).fetchall()
-    return [{"type": "user" if r["user_id"] else "group", "id": r["user_id"] or r["group_id"],
-             "name": r["username"] or r["group_name"], "access": "write" if r["can_write"] else "read",
-             "claude": bool(r["can_claude"])}
-            for r in rows]
+    return [_grant_json(r) for r in permissions.library_grants(conn, library_id)]
+
+
+def _principal(conn: sqlite3.Connection, kind: str, principal_id: int) -> str:
+    """How the log names a user or group; 404 if there is none."""
+    table, column = ("users", "username") if kind == "user" else ("groups", "name")
+    row = conn.execute(f"SELECT {column} FROM {table} WHERE id = ?", (principal_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No such {kind}")
+    return row[0] if kind == "user" else f"group {row[0]}"
+
+
+def _library_folder(conn: sqlite3.Connection, folder_id: int) -> sqlite3.Row:
+    try:
+        row = permissions.library_folder(conn, folder_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Folder not found") from None
+    if not fs.is_live_folder(conn, folder_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "That folder is in the recycle bin")
+    return row
+
+
+def _folder_label(conn: sqlite3.Connection, folder: sqlite3.Row) -> str:
+    return folder["library_name"] + "/" + "/".join(p["name"] for p in fs.folder_path(conn, folder["id"]))
 
 
 @router.get("/admin/libraries", response_class=HTMLResponse)
@@ -146,12 +170,7 @@ class GrantBody(BaseModel):
 def set_grant(library_id: int, body: GrantBody, user=Depends(admin_api_user),
               conn: sqlite3.Connection = Depends(get_db)):
     library = _library(conn, library_id)
-    table = "users" if body.type == "user" else "groups"
-    column = "username" if body.type == "user" else "name"
-    principal = conn.execute(f"SELECT {column} FROM {table} WHERE id = ?", (body.id,)).fetchone()
-    if principal is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No such {body.type}")
-    who = principal[0] if body.type == "user" else f"group {principal[0]}"
+    who = _principal(conn, body.type, body.id)
     with transaction(conn):
         if body.access == "none":
             (permissions.revoke_user if body.type == "user" else permissions.revoke_group)(conn, library_id, body.id)
@@ -162,6 +181,74 @@ def set_grant(library_id: int, body: GrantBody, user=Depends(admin_api_user),
             claude = "" if body.claude is None else f", Claude {'on' if body.claude else 'off'}"
             _log(conn, user, "grant", library["name"], f"{who}: {body.access}{claude}")
     return {"grants": _grants(conn, library_id)}
+
+
+# ------------------------------------------------------------------- folders
+@router.get("/api/admin/libraries/{library_id}/folders")
+def library_folders(library_id: int, user=Depends(admin_api_user), conn: sqlite3.Connection = Depends(get_db)):
+    """The library's live folders, flat (the page builds the tree), with how
+    many grants each has and whether it inherits."""
+    _library(conn, library_id)
+    live = fs.live_folder_ids(conn, library_id)
+    rows = conn.execute(
+        "SELECT f.id, f.parent_id, f.name, f.inherit, (SELECT count(*) FROM folder_grants g WHERE g.folder_id = f.id) "
+        "AS grants, (SELECT count(*) FROM files x WHERE x.folder_id = f.id AND x.deleted_at IS NULL) AS files "
+        "FROM folders f WHERE f.collection_id = ? ORDER BY f.name COLLATE NOCASE", (library_id,)).fetchall()
+    return {"folders": [{**dict(r), "inherit": bool(r["inherit"])} for r in rows if r["id"] in live]}
+
+
+def _folder_detail(conn: sqlite3.Connection, folder_id: int) -> dict:
+    folder = _library_folder(conn, folder_id)
+    return {
+        "id": folder_id, "name": folder["name"], "inherit": bool(folder["inherit"]),
+        "library": {"id": folder["collection_id"], "name": folder["library_name"]},
+        "path": fs.folder_path(conn, folder_id),
+        "files": conn.execute("SELECT count(*) FROM files WHERE folder_id = ? AND deleted_at IS NULL",
+                              (folder_id,)).fetchone()[0],
+        "grants": [_grant_json(r) for r in permissions.folder_grants(conn, folder_id)],
+        "inherited": [_grant_json(g) for g in permissions.inherited_grants(conn, folder_id)],
+    }
+
+
+@router.get("/api/admin/folders/{folder_id}")
+def folder_access(folder_id: int, user=Depends(admin_api_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Who can reach a folder: its own grants, and what it inherits and from where."""
+    return _folder_detail(conn, folder_id)
+
+
+@router.put("/api/admin/folders/{folder_id}/grants")
+def set_folder_grant(folder_id: int, body: GrantBody, user=Depends(admin_api_user),
+                     conn: sqlite3.Connection = Depends(get_db)):
+    folder = _library_folder(conn, folder_id)
+    who = _principal(conn, body.type, body.id)
+    target = _folder_label(conn, folder)
+    with transaction(conn):
+        if body.access == "none":
+            permissions.revoke_folder(conn, folder_id, body.type, body.id)
+            _log(conn, user, "folder.grant.remove", target, who)
+        else:
+            permissions.grant_folder(conn, folder_id, body.type, body.id, can_write=body.access == "write",
+                                     can_claude=body.claude)
+            claude = "" if body.claude is None else f", Claude {'on' if body.claude else 'off'}"
+            _log(conn, user, "folder.grant", target, f"{who}: {body.access}{claude}")
+    return _folder_detail(conn, folder_id)
+
+
+class InheritBody(BaseModel):
+    inherit: bool
+    keep_access: bool = True    # turning it off: keep today's inherited access as the folder's own grants
+
+
+@router.put("/api/admin/folders/{folder_id}/inherit")
+def set_folder_inherit(folder_id: int, body: InheritBody, user=Depends(admin_api_user),
+                       conn: sqlite3.Connection = Depends(get_db)):
+    """Turn inheritance off to limit a folder to its own grants (hiding it from
+    people who only had access through the library), or back on."""
+    folder = _library_folder(conn, folder_id)
+    permissions.set_folder_inherit(conn, folder_id, body.inherit, copy_inherited=body.keep_access)
+    detail = "" if body.inherit else ("inherited access copied" if body.keep_access else "own grants only")
+    _log(conn, user, "folder.inherit.on" if body.inherit else "folder.inherit.off", _folder_label(conn, folder), detail)
+    return _folder_detail(conn, folder_id)
 
 
 class ClaudeBody(BaseModel):

@@ -46,7 +46,7 @@ def _preview(row: sqlite3.Row) -> str | None:
     return None
 
 
-def _file_json(row: sqlite3.Row, writable: set[int]) -> dict:
+def _file_json(row: sqlite3.Row, access: fs.Access) -> dict:
     preview = _preview(row)
     view = {"pdf": f"/files/{row['id']}/pdf", "md": f"/files/{row['id']}/view",
             "image": f"/files/{row['id']}/inline", "text": f"/files/{row['id']}/inline"}.get(preview)
@@ -70,7 +70,7 @@ def _file_json(row: sqlite3.Row, writable: set[int]) -> dict:
         "preview": preview,
         "view_url": view,
         "download_url": f"/files/{row['id']}/raw",
-        "can_delete": row["collection_id"] in writable,
+        "can_delete": access.can_write(row["collection_id"], row["folder_id"]),
     }
 
 
@@ -82,31 +82,34 @@ def _folder_json(row: sqlite3.Row) -> dict:
     return out
 
 
-def _readable_file(conn: sqlite3.Connection, user: sqlite3.Row, file_id: int) -> sqlite3.Row:
+def _readable_file(conn: sqlite3.Connection, access: fs.Access, file_id: int) -> sqlite3.Row:
     row = fs.file_row(conn, file_id)
     # Same 404 whether the file doesn't exist or isn't yours: no existence leaks.
-    if row is None or row["collection_id"] not in permissions.readable_collection_ids(conn, user["id"]):
+    if row is None or not access.can_read(row["collection_id"], row["folder_id"]):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")
     return row
 
 
-def _writable_file(conn: sqlite3.Connection, user: sqlite3.Row, file_id: int) -> sqlite3.Row:
-    row = _readable_file(conn, user, file_id)
-    if row["collection_id"] not in permissions.writable_collection_ids(conn, user["id"]):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't change files in this collection")
+def _writable_file(conn: sqlite3.Connection, access: fs.Access, file_id: int) -> sqlite3.Row:
+    row = _readable_file(conn, access, file_id)
+    if not access.can_write(row["collection_id"], row["folder_id"]):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't change files here")
     return row
 
 
 # ------------------------------------------------------------------ browsing
 @router.get("/api/locations")
 def locations(user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
-    """The inbox and libraries the user can open, for the tree's top level."""
+    """The inbox and libraries the user can open, for the tree's top level.
+    `writable`: may change the top level (folders carry their own `can_write`);
+    `editable`: may change something somewhere in it (so it has a bin to show)."""
     access = fs.Access.of(conn, user["id"])
     out = []
     for c in permissions.readable_collections(conn, user["id"]):
-        writable = c["id"] in access.writable
+        editable = c["id"] in access.writable
         out.append({"id": c["id"], "kind": c["kind"], "name": "My files" if c["kind"] == "private" else c["name"],
-                    "writable": writable, "trash": fs.trash_count(conn, c["id"]) if writable else None})
+                    "writable": access.can_write(c["id"], None), "editable": editable,
+                    "trash": fs.trash_count(conn, c["id"]) if editable else None})
     return {"locations": out}
 
 
@@ -122,7 +125,7 @@ def browse(collection_id: int, folder_id: int | None = None, user=Depends(api_us
     access = fs.Access.of(conn, user["id"])
     listing = _fs_errors(lambda: fs.browse(conn, access, collection_id, folder_id))
     return {"folders": [_folder_json(r) for r in listing["folders"]],
-            "files": [_file_json(r, access.writable) for r in listing["files"]],
+            "files": [_file_json(r, access) for r in listing["files"]],
             "path": listing["path"], "can_write": listing["can_write"]}
 
 
@@ -133,7 +136,7 @@ def search_names(q: str = Query("", max_length=200), user=Depends(api_user),
     found = fs.search_names(conn, access, q)
     files = []
     for r in found["files"]:
-        item = _file_json(r, access.writable)
+        item = _file_json(r, access)
         item["path"] = fs.folder_path(conn, r["folder_id"])
         files.append(item)
     folders = [{**_folder_json(r), "path": fs.folder_path(conn, r["parent_id"])} for r in found["folders"]]
@@ -258,6 +261,8 @@ def upload(
     if target not in access.writable:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't upload to this collection")
     _fs_errors(lambda: fs.require_folder(conn, target, folder_id))
+    if not access.can_write(target, folder_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't upload to this folder")
     try:
         received = store.receive(file.file, file.filename or "", settings)
     except store.UploadError as exc:
@@ -266,7 +271,7 @@ def upload(
     parts = fs.split_relative_path(relative_path) if relative_path else None
     file_id, created = _fs_errors(lambda: store.add_file(conn, settings, received, target, user["id"],
                                                          folder_id=folder_id, folder_parts=parts))
-    return JSONResponse(_file_json(fs.file_row(conn, file_id), access.writable),
+    return JSONResponse(_file_json(fs.file_row(conn, file_id), access),
                         status_code=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
@@ -277,25 +282,27 @@ def list_files(
     conn: sqlite3.Connection = Depends(get_db),
 ):
     """Every live file the user can read (flat), newest first."""
-    readable = permissions.readable_collection_ids(conn, user["id"])
+    access = fs.Access.of(conn, user["id"])
+    readable = access.readable
     if collection_id is not None:
         if collection_id not in readable:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Collection not found")
         readable = {collection_id}
-    writable = permissions.writable_collection_ids(conn, user["id"])
     marks = ",".join("?" * len(readable)) or "NULL"
     rows = conn.execute(
         f"SELECT {fs._FILE_COLUMNS} {fs._FILE_FROM} WHERE f.collection_id IN ({marks}) AND f.deleted_at IS NULL "
         "ORDER BY f.created_at DESC, f.id DESC", tuple(readable)).fetchall()
     live = {cid: fs.live_folder_ids(conn, cid) for cid in readable}
-    return {"files": [_file_json(r, writable) for r in rows
-                      if r["folder_id"] is None or r["folder_id"] in live[r["collection_id"]]]}
+    return {"files": [_file_json(r, access) for r in rows
+                      if (r["folder_id"] is None or r["folder_id"] in live[r["collection_id"]])
+                      and access.can_read(r["collection_id"], r["folder_id"])]}
 
 
 @router.get("/api/files/{file_id}")
 def file_status(file_id: int, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
-    row = _readable_file(conn, user, file_id)
-    out = _file_json(row, permissions.writable_collection_ids(conn, user["id"]))
+    access = fs.Access.of(conn, user["id"])
+    row = _readable_file(conn, access, file_id)
+    out = _file_json(row, access)
     out["path"] = fs.folder_path(conn, row["folder_id"]) if fs.is_live_folder(conn, row["folder_id"]) else []
     out["chunks"] = conn.execute("SELECT count(*) FROM chunks WHERE file_id = ?", (file_id,)).fetchone()[0]
     out["in_trash"] = row["deleted_at"] is not None
@@ -313,7 +320,7 @@ def delete_file(file_id: int, user=Depends(api_user), conn: sqlite3.Connection =
 
 @router.post("/api/files/{file_id}/retry")
 def retry_file(file_id: int, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
-    row = _writable_file(conn, user, file_id)
+    row = _writable_file(conn, fs.Access.of(conn, user["id"]), file_id)
     if row["status"] != "failed":
         raise HTTPException(status.HTTP_409_CONFLICT, "Only failed files can be retried")
     conn.execute("UPDATE files SET status = 'queued', error = NULL, progress = NULL WHERE id = ?", (file_id,))
@@ -333,7 +340,7 @@ def _blob_file(settings: Settings, row: sqlite3.Row, prefer_ocr: bool) -> Path:
 @router.get("/files/{file_id}/pdf")
 def view_pdf(file_id: int, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db),
              settings: Settings = Depends(get_settings)):
-    row = _readable_file(conn, user, file_id)
+    row = _readable_file(conn, fs.Access.of(conn, user["id"]), file_id)
     if row["kind"] != "pdf":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not a PDF")
     # Serve the OCR'd copy when there is one, so its text is selectable too.
@@ -347,7 +354,7 @@ def view_pdf(file_id: int, user=Depends(page_user), conn: sqlite3.Connection = D
 @router.get("/files/{file_id}/view", response_class=HTMLResponse)
 def view_markdown(request: Request, file_id: int, user=Depends(page_user),
                   conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
-    row = _readable_file(conn, user, file_id)
+    row = _readable_file(conn, fs.Access.of(conn, user["id"]), file_id)
     if row["kind"] != "md":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not a Markdown file")
     html = markdown.render_html(markdown.decode(_blob_file(settings, row, prefer_ocr=False).read_bytes()))
@@ -362,7 +369,7 @@ def view_markdown(request: Request, file_id: int, user=Depends(page_user),
 def view_inline(file_id: int, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db),
                 settings: Settings = Depends(get_settings)):
     """Preview an image (raster only) or the start of a text file."""
-    row = _readable_file(conn, user, file_id)
+    row = _readable_file(conn, fs.Access.of(conn, user["id"]), file_id)
     preview = _preview(row)
     headers = {"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox"}
     if preview == "image":
@@ -380,7 +387,7 @@ def view_inline(file_id: int, user=Depends(page_user), conn: sqlite3.Connection 
 def download_raw(file_id: int, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db),
                  settings: Settings = Depends(get_settings)):
     """Download the original. Always an attachment, never rendered by the browser."""
-    row = _readable_file(conn, user, file_id)
+    row = _readable_file(conn, fs.Access.of(conn, user["id"]), file_id)
     media = {"pdf": "application/pdf", "md": "text/markdown; charset=utf-8",
              "txt": "text/plain; charset=utf-8"}.get(row["kind"], "application/octet-stream")
     return FileResponse(_blob_file(settings, row, prefer_ocr=False), media_type=media,

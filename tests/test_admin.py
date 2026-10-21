@@ -14,7 +14,7 @@ def test_library_admin(client, conn):
     client.post("/logout")
 
     _login(client, "boss")
-    assert "Shared libraries" in client.get("/admin/libraries").text
+    assert "Who can see what" in client.get("/admin/libraries").text
     lib = client.post("/api/admin/libraries", json={"name": "Brand Standards"}).json()["id"]
     assert client.post("/api/admin/libraries", json={"name": "brand standards"}).status_code == 409
     assert lib in permissions.writable_collection_ids(conn, boss)  # the creator can fill it
@@ -92,9 +92,9 @@ def test_claude_sharing(client, conn):
     # Overview: alice sees her inbox and the library, via both grants.
     overview = {u["name"]: u["libraries"] for u in client.get("/api/admin/access").json()["users"]}
     alice_libs = {c["name"]: c for c in overview["alice"]}
-    assert alice_libs["Manuals"]["access"] == "write"
+    assert alice_libs["Manuals"]["read"] == "everything" and alice_libs["Manuals"]["edit"] == "everything"
     assert alice_libs["Manuals"]["via"] == ["direct", "Front desk"]
-    assert alice_libs["Manuals"]["claude"] is False
+    assert alice_libs["Manuals"]["claude"] == "nothing"
     assert [c["kind"] for c in overview["alice"]] == ["private", "library"]
 
     # Every change is logged with who made it.

@@ -1,8 +1,10 @@
 """The file manager: folders, rename, move, copy and the recycle bin.
 
 Folders live inside a collection (a user's inbox or a library); NULL folder
-means the collection root. Permissions stay per collection: anyone who can
-write a collection can organise everything in it.
+means the collection root. Access is per location (permissions.reach): a
+person may read or change some folders of a library and not others. Changing
+an item needs write access where it is; a folder also needs write access to
+everything inside it, so nobody can move or bin what they couldn't change.
 
 Search scope travels with each file's chunks and vectors (collection_id,
 folder_id), so every operation that changes where a file lives, or whether
@@ -20,6 +22,7 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
+from typing import Callable
 
 from mnemerynne import jobs, permissions
 from mnemerynne.config import Settings
@@ -48,24 +51,71 @@ class Conflict(FsError):
 
 @dataclass
 class Access:
-    """What one user may read and write, looked up once per request."""
+    """What one user may read and write, looked up once per request:
+    permissions.reach() per collection."""
     user_id: int
-    readable: set[int]
-    writable: set[int]
+    reaches: dict[int, permissions.Reach]
+    # Re-reads `reaches` when a folder turns up that didn't exist when they were
+    # read (one made since, e.g. by a folder upload); None for a fixed snapshot.
+    reload: Callable[[], dict[int, permissions.Reach]] | None = field(default=None, repr=False)
 
     @classmethod
     def of(cls, conn: sqlite3.Connection, user_id: int) -> "Access":
-        return cls(user_id, permissions.readable_collection_ids(conn, user_id),
-                   permissions.writable_collection_ids(conn, user_id))
+        return cls(user_id, permissions.reach(conn, user_id), lambda: permissions.reach(conn, user_id))
 
-    def read(self, collection_id: int) -> None:
+    @classmethod
+    def for_claude(cls, conn: sqlite3.Connection, user_id: int) -> "Access":
+        """Read-only access to what the user may search from Claude."""
+        return cls(user_id, permissions.claude_reach(conn, user_id), lambda: permissions.claude_reach(conn, user_id))
+
+    def _reach(self, collection_id: int, folder_id: int | None = None) -> permissions.Reach | None:
+        r = self.reaches.get(collection_id)
+        if self.reload and folder_id is not None and (r is None or folder_id not in r.parents):
+            self.reaches = self.reload()
+            r = self.reaches.get(collection_id)
+        return r
+
+    @property
+    def readable(self) -> set[int]:
+        """Collections the user can read anything in."""
+        return {cid for cid, r in self.reaches.items() if r.root_read or r.read}
+
+    @property
+    def writable(self) -> set[int]:
+        """Collections the user can change anything in."""
+        return {cid for cid, r in self.reaches.items() if r.any_write}
+
+    def can_read(self, collection_id: int, folder_id: int | None) -> bool:
+        r = self._reach(collection_id, folder_id)
+        return r is not None and r.can_read(folder_id)
+
+    def can_write(self, collection_id: int, folder_id: int | None) -> bool:
+        r = self._reach(collection_id, folder_id)
+        return r is not None and r.can_write(folder_id)
+
+    def visible(self, collection_id: int, folder_ids=()) -> set[int]:
+        """Folders the user may see (to read them or reach one below). Pass the
+        ids about to be filtered so that ones newer than `reaches` are known."""
+        r = self.reaches.get(collection_id)
+        unknown = next((f for f in folder_ids if r is None or f not in r.parents), None)
+        if unknown is not None:
+            r = self._reach(collection_id, unknown)
+        return r.visible() if r else set()
+
+    def see(self, collection_id: int, folder_id: int | None) -> None:
+        """May open this place to look around (maybe only to reach a folder below)."""
+        self._reach(collection_id, folder_id)
         # Same 404 whether it doesn't exist or isn't yours: no existence leaks.
-        if collection_id not in self.readable:
+        if collection_id not in self.readable or (folder_id is not None and folder_id not in self.visible(collection_id)):
             raise NotFound("Not found")
 
-    def write(self, collection_id: int) -> None:
-        self.read(collection_id)
-        if collection_id not in self.writable:
+    def read(self, collection_id: int, folder_id: int | None) -> None:
+        if not self.can_read(collection_id, folder_id):
+            raise NotFound("Not found")
+
+    def write(self, collection_id: int, folder_id: int | None) -> None:
+        self.see(collection_id, folder_id)
+        if not self.can_write(collection_id, folder_id):
             raise Forbidden("You can't change files here")
 
 
@@ -186,7 +236,7 @@ def require_folder(conn: sqlite3.Connection, collection_id: int, folder_id: int 
 
 def create_folder(conn: sqlite3.Connection, access: Access, collection_id: int, parent_id: int | None,
                   name: str) -> int:
-    access.write(collection_id)
+    access.write(collection_id, parent_id)
     name = clean_name(name)
     with transaction(conn):
         require_folder(conn, collection_id, parent_id)
@@ -241,44 +291,53 @@ def file_row(conn: sqlite3.Connection, file_id: int) -> sqlite3.Row | None:
 
 
 def browse(conn: sqlite3.Connection, access: Access, collection_id: int, folder_id: int | None) -> dict:
-    access.read(collection_id)
+    """A place's subfolders and files. Someone who may only open a folder deeper
+    down sees the folders on the way to it, but no files beside them."""
+    access.see(collection_id, folder_id)
     require_folder(conn, collection_id, folder_id)
-    folders = conn.execute(
+    rows = conn.execute(
         "SELECT id, name, created_at, (SELECT count(*) FROM files x WHERE x.folder_id = folders.id "
         "AND x.deleted_at IS NULL) + (SELECT count(*) FROM folders y WHERE y.parent_id = folders.id "
         "AND y.deleted_at IS NULL) AS items FROM folders WHERE collection_id = ? AND COALESCE(parent_id, 0) = ? "
         "AND deleted_at IS NULL ORDER BY name COLLATE NOCASE", (collection_id, folder_id or 0)).fetchall()
+    visible = access.visible(collection_id, [r["id"] for r in rows])
+    folders = [r for r in rows if r["id"] in visible]
     files = conn.execute(
         f"SELECT {_FILE_COLUMNS} {_FILE_FROM} WHERE f.collection_id = ? AND COALESCE(f.folder_id, 0) = ? "
-        "AND f.deleted_at IS NULL ORDER BY f.display_name COLLATE NOCASE", (collection_id, folder_id or 0)).fetchall()
+        "AND f.deleted_at IS NULL ORDER BY f.display_name COLLATE NOCASE",
+        (collection_id, folder_id or 0)).fetchall() if access.can_read(collection_id, folder_id) else []
     return {"folders": folders, "files": files, "path": folder_path(conn, folder_id),
-            "can_write": collection_id in access.writable}
+            "can_write": access.can_write(collection_id, folder_id)}
 
 
 def folder_tree(conn: sqlite3.Connection, access: Access, collection_id: int) -> list[dict]:
-    access.read(collection_id)
+    access.see(collection_id, None)
     live = live_folder_ids(conn, collection_id)
-    return [{"id": r["id"], "parent_id": r["parent_id"], "name": r["name"]}
+    shown = live & access.visible(collection_id, live)
+    return [{"id": r["id"], "parent_id": r["parent_id"], "name": r["name"],
+             "can_write": access.can_write(collection_id, r["id"])}
             for r in conn.execute("SELECT * FROM folders WHERE collection_id = ? ORDER BY name COLLATE NOCASE",
-                                  (collection_id,)) if r["id"] in live]
+                                  (collection_id,)) if r["id"] in shown]
 
 
 def search_names(conn: sqlite3.Connection, access: Access, q: str, limit: int = 200) -> dict:
     """Files and folders whose name contains `q`, anywhere the user can read."""
     q = (q or "").strip()
-    if not q or not access.readable:
+    readable = access.readable
+    if not q or not readable:
         return {"folders": [], "files": []}
-    marks = ",".join("?" * len(access.readable))
+    marks = ",".join("?" * len(readable))
     like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-    live = {cid: live_folder_ids(conn, cid) for cid in access.readable}
+    live = {cid: live_folder_ids(conn, cid) for cid in readable}
     folders = [r for r in conn.execute(
         f"SELECT id, collection_id, parent_id, name FROM folders WHERE collection_id IN ({marks}) "
-        "AND name LIKE ? ESCAPE '\\' ORDER BY name COLLATE NOCASE", (*access.readable, like))
-        if r["id"] in live[r["collection_id"]]][:limit]
+        "AND name LIKE ? ESCAPE '\\' ORDER BY name COLLATE NOCASE", (*readable, like))
+        if r["id"] in live[r["collection_id"]] and access.can_read(r["collection_id"], r["id"])][:limit]
     files = [r for r in conn.execute(
         f"SELECT {_FILE_COLUMNS} {_FILE_FROM} WHERE f.collection_id IN ({marks}) AND f.deleted_at IS NULL "
-        "AND f.display_name LIKE ? ESCAPE '\\' ORDER BY f.display_name COLLATE NOCASE", (*access.readable, like))
-        if r["folder_id"] is None or r["folder_id"] in live[r["collection_id"]]][:limit]
+        "AND f.display_name LIKE ? ESCAPE '\\' ORDER BY f.display_name COLLATE NOCASE", (*readable, like))
+        if (r["folder_id"] is None or r["folder_id"] in live[r["collection_id"]])
+        and access.can_read(r["collection_id"], r["folder_id"])][:limit]
     return {"folders": folders, "files": files}
 
 
@@ -320,15 +379,31 @@ def _live_file(conn: sqlite3.Connection, access: Access, file_id: int, *, write:
     row = conn.execute("SELECT * FROM files WHERE id = ?", (file_id,)).fetchone()
     if row is None:
         raise NotFound("File not found")
-    (access.write if write else access.read)(row["collection_id"])
+    try:
+        (access.write if write else access.read)(row["collection_id"], row["folder_id"])
+    except NotFound:
+        raise NotFound("File not found") from None
     if row["deleted_at"] is not None or not is_live_folder(conn, row["folder_id"]):
         raise NotFound("File not found")
     return row
 
 
+def _write_whole_folder(conn: sqlite3.Connection, access: Access, row: sqlite3.Row) -> None:
+    """Changing a folder (rename, move, bin) needs write access where it sits
+    and to every folder inside it."""
+    cid = row["collection_id"]
+    access.write(cid, row["parent_id"])
+    blocked = [f for f in subtree(conn, row["id"]) if not access.can_write(cid, f)]
+    if blocked:
+        raise Forbidden("You can't change this folder: you don't have edit access to everything in it.")
+
+
 def _live_folder(conn: sqlite3.Connection, access: Access, folder_id: int, *, write: bool) -> sqlite3.Row:
-    row = _folder(conn, folder_id)
-    (access.write if write else access.read)(row["collection_id"])
+    row = conn.execute("SELECT * FROM folders WHERE id = ?", (folder_id,)).fetchone()
+    if row is None or not access.can_read(row["collection_id"], folder_id):
+        raise NotFound("Folder not found")
+    if write:
+        _write_whole_folder(conn, access, row)
     if not is_live_folder(conn, folder_id):
         raise NotFound("Folder not found")
     return row
@@ -364,7 +439,7 @@ def _each(items: list[Item], op) -> list[Result]:
 
 def move(conn: sqlite3.Connection, access: Access, items: list[Item], collection_id: int,
          folder_id: int | None) -> list[Result]:
-    access.write(collection_id)
+    access.write(collection_id, folder_id)
 
     def one(item: Item) -> dict:
         with transaction(conn):
@@ -414,7 +489,7 @@ def _copy_file(conn: sqlite3.Connection, src: sqlite3.Row, collection_id: int, f
 
 def copy(conn: sqlite3.Connection, access: Access, items: list[Item], collection_id: int,
          folder_id: int | None) -> list[Result]:
-    access.write(collection_id)
+    access.write(collection_id, folder_id)
 
     def one(item: Item) -> dict:
         with transaction(conn):
@@ -435,7 +510,8 @@ def copy(conn: sqlite3.Connection, access: Access, items: list[Item], collection
                                       (source_id,)).fetchall():
                     _copy_file(conn, f, collection_id, new_id, access.user_id)
                 for child in conn.execute("SELECT id, name FROM folders WHERE parent_id = ?", (source_id,)).fetchall():
-                    if child["id"] in live:
+                    # Only what the person can read comes along.
+                    if child["id"] in live and access.can_read(src["collection_id"], child["id"]):
                         copy_tree(child["id"], new_id, child["name"])
                 return new_id
 
@@ -467,7 +543,10 @@ def _binned(conn: sqlite3.Connection, access: Access, item: Item) -> sqlite3.Row
     row = conn.execute(f"SELECT * FROM {table} WHERE id = ?", (item.id,)).fetchone()
     if row is None:
         raise NotFound("Not found")
-    access.write(row["collection_id"])
+    cid = row["collection_id"]
+    location = row["folder_id"] if item.type == "file" else row["parent_id"]
+    if not access.can_write(cid, location) or (item.type == "folder" and not access.can_write(cid, item.id)):
+        raise NotFound("Not found")
     if row["deleted_at"] is None:
         raise NotFound("That isn't in the recycle bin")
     return row
@@ -540,7 +619,11 @@ def purge_expired(conn: sqlite3.Connection, settings: Settings, days: int) -> in
 
 
 def list_trash(conn: sqlite3.Connection, access: Access, collection_id: int) -> dict:
-    access.write(collection_id)
+    """The bin of a collection: what the user could put back (items from places they can change)."""
+    if collection_id not in access.readable:
+        raise NotFound("Not found")
+    if collection_id not in access.writable:
+        raise Forbidden("You can't change files here")
 
     def where(folder_id: int | None) -> str:
         try:
@@ -553,14 +636,16 @@ def list_trash(conn: sqlite3.Connection, access: Access, collection_id: int) -> 
                for r in conn.execute(
                    "SELECT f.*, u.username FROM folders f LEFT JOIN users u ON u.id = f.deleted_by "
                    "WHERE f.collection_id = ? AND f.deleted_at IS NOT NULL ORDER BY f.deleted_at DESC",
-                   (collection_id,))]
+                   (collection_id,))
+               if access.can_write(collection_id, r["parent_id"]) and access.can_write(collection_id, r["id"])]
     files = [{"id": r["id"], "name": r["display_name"], "deleted_at": r["deleted_at"], "deleted_by": r["username"],
               "original_path": where(r["folder_id"]), "size": r["size"], "kind": r["kind"], "mime": r["mime"]}
              for r in conn.execute(
                  "SELECT f.*, b.size, b.kind, b.mime, u.username FROM files f JOIN blobs b ON b.sha256 = f.blob_sha256 "
                  "LEFT JOIN users u ON u.id = f.deleted_by "
                  "WHERE f.collection_id = ? AND f.deleted_at IS NOT NULL ORDER BY f.deleted_at DESC",
-                 (collection_id,))]
+                 (collection_id,))
+             if access.can_write(collection_id, r["folder_id"])]
     return {"folders": folders, "files": files}
 
 
@@ -573,8 +658,9 @@ def trash_count(conn: sqlite3.Connection, collection_id: int) -> int:
 
 def scope_folders(conn: sqlite3.Connection, access: Access, collection_id: int, folder_id: int | None) -> set[int] | None:
     """Folder ids for a "search in this folder" question: the folder and its
-    live subfolders. None means the whole collection."""
-    access.read(collection_id)
+    live subfolders. None means the whole collection. The search scope still
+    applies on top, so subfolders the user can't read stay out."""
+    access.see(collection_id, folder_id)
     if folder_id is None:
         return None
     require_folder(conn, collection_id, folder_id)

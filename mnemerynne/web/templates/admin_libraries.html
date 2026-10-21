@@ -2,39 +2,54 @@
 {% block title %}Access · {{ assistant_name }}{% endblock %}
 {% block body %}
 {% include "_nav.html" %}
-<main class="inbox admin">
-  <h1>Access</h1>
-  <p class="error" id="admin-error" hidden></p>
+<main class="ax-page">
+  <header class="ax-head">
+    <h1>Access</h1>
+    <nav class="ax-tabs" role="tablist" aria-label="Access sections">
+      <button type="button" role="tab" data-tab="files">Files &amp; folders</button>
+      <button type="button" role="tab" data-tab="groups">Groups</button>
+      <button type="button" role="tab" data-tab="people">Who can see what</button>
+      <button type="button" role="tab" data-tab="claude">Claude activity</button>
+      <button type="button" role="tab" data-tab="changes">Recent changes</button>
+    </nav>
+  </header>
+  <p class="error ax-error" id="admin-error" hidden></p>
 
-  <h2 class="admin-section">Shared libraries</h2>
-  <p class="muted">Libraries are shared folders of documents. People with <em>read</em> access can browse them and get answers
-    from them; <em>editors</em> can also upload, organise and delete files. Private inboxes are never shared.
-    <strong>Claude</strong> lets someone search a library from Claude Desktop, which sends the passages found to Anthropic:
-    it needs the library's switch on <em>and</em> Claude ticked on their grant.</p>
-  <form class="new-lib" id="new-lib">
-    <input type="text" id="new-lib-name" placeholder="New library name, e.g. Brand Standards" maxlength="120" required>
-    <button type="submit">Create library</button>
-  </form>
-  <div id="libs" aria-live="polite"></div>
+  <section class="ax" data-panel="files" role="tabpanel" aria-label="Files and folders">
+    <aside class="ax-tree glass" aria-label="Libraries and folders">
+      <form class="ax-new" id="new-lib">
+        <input type="text" id="new-lib-name" placeholder="New library" maxlength="120" required aria-label="New library name">
+        <button type="submit" class="small">Create</button>
+      </form>
+      <ul class="tree" id="ax-tree" role="tree" aria-label="Libraries"></ul>
+    </aside>
+    <section class="ax-pane glass" id="ax-pane" aria-live="polite">
+      <p class="muted">Pick a library or folder on the left to see and change who can reach it.</p>
+    </section>
+  </section>
 
-  <h2 class="admin-section">Groups</h2>
-  <p class="muted">Grant a library to a group and everyone in it gets that access.</p>
-  <form class="new-lib" id="new-group">
-    <input type="text" id="new-group-name" placeholder="New group name, e.g. Front desk" maxlength="80" required>
-    <button type="submit">Create group</button>
-  </form>
-  <div id="groups" aria-live="polite"></div>
+  <section class="inbox admin" data-panel="groups" role="tabpanel" hidden>
+    <p class="muted">Grant a library or folder to a group and everyone in it gets that access.</p>
+    <form class="new-lib" id="new-group">
+      <input type="text" id="new-group-name" placeholder="New group name, e.g. Front desk" maxlength="80" required>
+      <button type="submit">Create group</button>
+    </form>
+    <div id="groups" aria-live="polite"></div>
+  </section>
 
-  <h2 class="admin-section">Who can see what</h2>
-  <p class="muted">Each person's inbox and libraries, the access they have, whether they can use it from Claude, and the grants that give it.</p>
-  <div id="access" class="table-wrap"></div>
+  <section class="inbox admin" data-panel="people" role="tabpanel" hidden>
+    <p class="muted">Each person's inbox and libraries: what they can read, edit and search from Claude, and the grants that give it.</p>
+    <div id="access" class="table-wrap"></div>
+  </section>
 
-  <h2 class="admin-section">Claude activity</h2>
-  <p class="muted">Recent searches from Claude, and which files' text was sent back.</p>
-  <div id="activity" class="table-wrap"></div>
+  <section class="inbox admin" data-panel="claude" role="tabpanel" hidden>
+    <p class="muted">Recent searches from Claude, and which files' text was sent back.</p>
+    <div id="activity" class="table-wrap"></div>
+  </section>
 
-  <h2 class="admin-section">Recent changes</h2>
-  <div id="log" class="table-wrap"></div>
+  <section class="inbox admin" data-panel="changes" role="tabpanel" hidden>
+    <div id="log" class="table-wrap"></div>
+  </section>
 </main>
 <script src="{{ static('picker.js') }}"></script>
 <script src="{{ static('admin.js') }}"></script>

@@ -233,7 +233,7 @@
         try { folders = await window.Erynne.folders(loc.id); } catch (e) { /* ignore */ }
         const kids = folderBranch(loc, folders, null, 1);
         if (kids) node.appendChild(kids);
-        if (loc.writable) {
+        if (loc.editable) {
           const bin = treeNode("🗑️ Recycle bin" + (loc.trash ? " (" + loc.trash + ")" : ""), {
             depth: 1, expandable: false, current: state.mode === "trash" && state.cid === loc.id,
             onOpen: function () { go({ mode: "trash", cid: loc.id }); },
@@ -263,7 +263,7 @@
         current: state.mode === "browse" && state.fid === f.id,
         onToggle: function () { toggleNode(fk); },
         onOpen: function () { go({ mode: "browse", cid: loc.id, fid: f.id }); },
-        drop: loc.writable ? { cid: loc.id, fid: f.id } : null,
+        drop: f.can_write ? { cid: loc.id, fid: f.id } : null,
       });
       if (expanded && hasKids) node.appendChild(folderBranch(loc, folders, f.id, depth + 1));
       ul.appendChild(node);
@@ -324,7 +324,7 @@
       if (!last) {
         c.type = "button";
         c.addEventListener("click", function () { go({ mode: "browse", cid: state.cid, fid: p.id }); });
-        makeDropTarget(c, loc && loc.writable ? { cid: state.cid, fid: p.id } : null);
+        makeDropTarget(c, folderWritable(state.cid, p.id) ? { cid: state.cid, fid: p.id } : null);
       }
       nav.appendChild(c);
     });
@@ -470,10 +470,18 @@
     renderInfo();
   }
 
+  /* Edit access to a folder, from the tree's folder list when it's loaded
+     (access can differ from folder to folder; unknown counts as no). */
+  function folderWritable(cid, fid) {
+    const list = window.Erynne.cachedFolders(cid) || [];
+    const f = list.find(function (x) { return x.id === fid; });
+    return !!(f && f.can_write);
+  }
+
   function canWriteItem(item) {
     if (state.mode === "browse" || state.mode === "trash") return state.canWrite;
-    const loc = locationOf(item.collection_id);
-    return !!(loc && loc.writable);
+    if (item.type === "file") return !!item.can_delete;
+    return folderWritable(item.collection_id, item.id);
   }
 
   function updateToolbar() {

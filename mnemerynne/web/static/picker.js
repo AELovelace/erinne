@@ -45,13 +45,21 @@
     if (collectionId === undefined) folderCache.clear(); else folderCache.delete(collectionId);
   }
 
+  /* The folders already loaded for a collection, or null (no request). */
+  function cachedFolders(collectionId) {
+    return folderCache.get(collectionId) || null;
+  }
+
   /* Ask the user for a location. Resolves to {collection_id, folder_id, label},
      {all: true} (when allowAll and "All my documents" is chosen), or null. */
   async function pickLocation(options) {
     const opts = Object.assign({ title: "Choose a folder", ok: "Choose", writableOnly: false, allowAll: false,
                                  current: null }, options || {});
     const data = await api("GET", "/api/locations");
-    const locations = data.locations.filter(function (l) { return l.writable || !opts.writableOnly; });
+    // With writableOnly, places the user can't change stay visible (to reach
+    // folders below them) but can't be chosen.
+    const locations = data.locations.filter(function (l) { return l.editable || !opts.writableOnly; });
+    const choosable = function (canWrite) { return canWrite || !opts.writableOnly; };
 
     const dlg = el("dialog", "dlg glass picker");
     const form = el("form");
@@ -86,9 +94,14 @@
         const label = el("button", "tree-label", "📁 " + f.name);
         label.type = "button";
         label.style.paddingLeft = (0.6 + depth * 0.9) + "rem";
-        label.addEventListener("click", function () {
-          choose(label, { collection_id: loc.id, folder_id: f.id, label: loc.name + " / " + f.name });
-        });
+        if (choosable(f.can_write)) {
+          label.addEventListener("click", function () {
+            choose(label, { collection_id: loc.id, folder_id: f.id, label: loc.name + " / " + f.name });
+          });
+        } else {
+          label.disabled = true;
+          label.title = "You can't change this folder";
+        }
         li.appendChild(label);
         const kids = folderNodes(loc, list, f.id, depth + 1);
         if (kids.childElementCount) li.appendChild(kids);
@@ -109,9 +122,14 @@
       const li = el("li");
       const label = el("button", "tree-label", (loc.kind === "private" ? "🏠 " : "📚 ") + loc.name);
       label.type = "button";
-      label.addEventListener("click", function () {
-        choose(label, { collection_id: loc.id, folder_id: null, label: loc.name });
-      });
+      if (choosable(loc.writable)) {
+        label.addEventListener("click", function () {
+          choose(label, { collection_id: loc.id, folder_id: null, label: loc.name });
+        });
+      } else {
+        label.disabled = true;
+        label.title = "You can't change the top level of this library";
+      }
       li.appendChild(label);
       try {
         const list = await folders(loc.id);
@@ -136,5 +154,6 @@
     });
   }
 
-  window.Erynne = { el: el, api: api, folders: folders, forgetFolders: forget, pickLocation: pickLocation };
+  window.Erynne = { el: el, api: api, folders: folders, cachedFolders: cachedFolders, forgetFolders: forget,
+                    pickLocation: pickLocation };
 })();

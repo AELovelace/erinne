@@ -90,12 +90,13 @@ def _resolve_collection(conn: sqlite3.Connection, access: fs.Access, ref: str) -
                     "Call list_libraries to see the names.")
 
 
-def _resolve_folder(conn: sqlite3.Connection, collection_id: int, ref: str | None) -> int | None:
-    """A folder id from an id or a path like 'Front Office/Night Audit' (case-insensitive)."""
+def _resolve_folder(conn: sqlite3.Connection, access: fs.Access, collection_id: int, ref: str | None) -> int | None:
+    """A folder id from an id or a path like 'Front Office/Night Audit' (case-insensitive),
+    among the folders the user may see."""
     ref = (ref or "").strip().strip("/")
     if not ref:
         return None
-    live = fs.live_folder_ids(conn, collection_id)
+    live = fs.live_folder_ids(conn, collection_id) & access.visible(collection_id)
     if ref.isdigit() and int(ref) in live:
         return int(ref)
     parent = None
@@ -147,7 +148,7 @@ class Tools:
         return self.settings.public_url.rstrip("/")
 
     def _access(self, conn: sqlite3.Connection, caller: Caller) -> fs.Access:
-        return fs.Access(caller.user_id, permissions.claude_collection_ids(conn, caller.user_id), set())
+        return fs.Access.for_claude(conn, caller.user_id)
 
     def search_documents(self, conn, caller: Caller, query: str, library: str | None = None,
                          folder: str | None = None, limit: int = 8) -> tuple[dict, list[int]]:
@@ -158,18 +159,17 @@ class Tools:
             raise ToolError(f"Keep the search under {self.settings.max_question_chars} characters.")
         limit = max(1, min(int(limit), 20))
         access = self._access(conn, caller)
-        allowed, folders = set(access.readable), None
+        allowed = retrieval.Scope.of_reach(access.reaches.values())
         if library:
             row = _resolve_collection(conn, access, library)
-            allowed = {row["id"]}
-            folder_id = _resolve_folder(conn, row["id"], folder)
-            folders = fs.scope_folders(conn, access, row["id"], folder_id)
+            folder_id = _resolve_folder(conn, access, row["id"], folder)
+            allowed = allowed.narrow(row["id"], fs.scope_folders(conn, access, row["id"], folder_id))
         elif folder:
             raise ToolError("Name the library the folder is in, too.")
         if not allowed:
             return {"found": False, "query": query, "results": [],
                     "note": "Nothing is shared with Claude for you yet; ask a Mnemerynne admin."}, []
-        result = retrieval.search(conn, self.settings, self.get_embedder(), query, allowed, folders=folders)
+        result = retrieval.search(conn, self.settings, self.get_embedder(), query, allowed)
         if not result.found_anything:
             return {"found": False, "query": query, "results": [],
                     "note": "Nothing in these documents is close to this question."}, []
@@ -188,9 +188,12 @@ class Tools:
     def read_passage(self, conn, caller: Caller, chunk_id: int, around: int = 1) -> tuple[dict, list[int]]:
         around = max(0, min(int(around), 3))
         access = self._access(conn, caller)
-        row = conn.execute("SELECT c.file_id, c.ord, c.collection_id FROM chunks c JOIN files f ON f.id = c.file_id "
-                           "WHERE c.id = ? AND f.deleted_at IS NULL", (chunk_id,)).fetchone()
-        if row is None or row["collection_id"] not in access.readable:
+        row = conn.execute("SELECT c.file_id, c.ord, c.collection_id, f.folder_id FROM chunks c "
+                           "JOIN files f ON f.id = c.file_id WHERE c.id = ? AND f.deleted_at IS NULL",
+                           (chunk_id,)).fetchone()
+        # Chunks of a file in the bin (or under a binned folder) carry collection 0.
+        if row is None or row["collection_id"] == fs.TRASH_COLLECTION \
+                or not access.can_read(row["collection_id"], row["folder_id"]):
             raise ToolError("No such passage (or it isn't shared with Claude). Use a chunk_id from search_documents.")
         ids = [r[0] for r in conn.execute("SELECT id FROM chunks WHERE file_id = ? AND ord BETWEEN ? AND ? ORDER BY ord",
                                           (row["file_id"], row["ord"] - around, row["ord"] + around))]
@@ -212,7 +215,7 @@ class Tools:
     def browse_folder(self, conn, caller: Caller, library: str, folder: str | None = None) -> tuple[dict, list[int]]:
         access = self._access(conn, caller)
         row = _resolve_collection(conn, access, library)
-        folder_id = _resolve_folder(conn, row["id"], folder)
+        folder_id = _resolve_folder(conn, access, row["id"], folder)
         listing = fs.browse(conn, access, row["id"], folder_id)
         return {
             "library": _label(row), "path": _path(conn, folder_id) or "/",
@@ -239,7 +242,8 @@ class Tools:
         """A PDF page as a JPEG, plus a line saying what it is."""
         access = self._access(conn, caller)
         row = fs.file_row(conn, file_id)
-        if row is None or row["deleted_at"] is not None or row["collection_id"] not in access.readable:
+        if row is None or row["deleted_at"] is not None or not fs.is_live_folder(conn, row["folder_id"]) \
+                or not access.can_read(row["collection_id"], row["folder_id"]):
             raise ToolError("No such file (or it isn't shared with Claude). Use a file_id from the other tools.")
         if row["kind"] != "pdf":
             raise ToolError(f"“{row['display_name']}” isn't a PDF; use read_passage for its text.")

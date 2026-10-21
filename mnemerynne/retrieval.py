@@ -1,9 +1,14 @@
 """Permission-filtered hybrid search.
 
 Keyword (FTS5 bm25) and vector (sqlite-vec) search run with the user's
-readable collections inside each query, never as a filter afterwards. Results
-are fused with reciprocal rank fusion, optionally reranked, then trimmed to a
-token budget for the model's context.
+readable collections and folders (a `Scope`) inside each query, never as a
+filter afterwards. Results are fused with reciprocal rank fusion, optionally
+reranked, then trimmed to a token budget for the model's context.
+
+sqlite-vec applies `IN` constraints before picking the k nearest vectors but
+`OR` only after, which would silently drop allowed results. So a scope is
+split into branches that each need only `IN`, every branch gets its own
+nearest-neighbour query, and the results are merged by distance.
 """
 
 from __future__ import annotations
@@ -96,41 +101,111 @@ def _in(ids) -> tuple[str, tuple]:
     return ",".join("?" * len(ids)), ids
 
 
-def _folder_filter(folders: set[int] | None, column: str) -> tuple[str, tuple]:
-    if folders is None:
-        return "", ()
-    marks, ids = _in(folders)
-    return f" AND {column} IN ({marks})", ids
+@dataclass(frozen=True)
+class Scope:
+    """What a search may look at.
+
+    `whole`: collections searched entirely. `parts`: (collection_id,
+    top_level, folder_ids) for collections only partly readable: their
+    folders in `folder_ids`, plus files at the top level when `top_level`.
+    Chunks keep folder 0 for the top level and collection 0 in the bin, so
+    the collection guard in every branch also keeps binned files out.
+    """
+    whole: frozenset[int] = frozenset()
+    parts: tuple[tuple[int, bool, frozenset[int]], ...] = ()
+
+    @classmethod
+    def collections(cls, ids, folders: set[int] | None = None) -> "Scope":
+        """Whole collections, or (with `folders`) just those folders in them."""
+        ids = frozenset(ids)
+        if folders is None:
+            return cls(whole=ids)
+        return cls(parts=tuple((cid, False, frozenset(folders)) for cid in sorted(ids)))
+
+    @classmethod
+    def of_reach(cls, reaches) -> "Scope":
+        """From permissions.reach() (or claude_reach()) values."""
+        whole, parts = set(), []
+        for r in reaches:
+            if r.everything:
+                whole.add(r.collection_id)
+            elif r.root_read or r.read:
+                parts.append((r.collection_id, r.root_read, frozenset(r.read)))
+        return cls(frozenset(whole), tuple(parts))
+
+    def narrow(self, collection_id: int, folders: set[int] | None = None) -> "Scope":
+        """Only this collection, and within it only `folders` (a subtree) if given.
+        It can only narrow: nothing outside the original scope gets in."""
+        part = next((p for p in self.parts if p[0] == collection_id), None)
+        if folders is None:
+            return Scope(self.whole & {collection_id}, (part,) if part else ())
+        if collection_id in self.whole:
+            return Scope(parts=((collection_id, False, frozenset(folders)),))
+        if part:
+            return Scope(parts=((collection_id, False, part[2] & frozenset(folders)),))
+        return Scope()
+
+    def branches(self) -> list[tuple[set[int], set[int] | None]]:
+        """(collections, folders or None for all) pairs that each need only `IN`."""
+        out = []
+        if self.whole:
+            out.append((set(self.whole), None))
+        with_folders = [p for p in self.parts if p[2]]
+        if with_folders:
+            out.append(({p[0] for p in with_folders}, set().union(*(p[2] for p in with_folders))))
+        tops = {p[0] for p in self.parts if p[1]}
+        if tops:
+            out.append((tops, {0}))
+        return out
+
+    def __bool__(self) -> bool:
+        return bool(self.branches())
 
 
-def keyword_search(conn: sqlite3.Connection, question: str, collections: set[int], k: int,
-                   section_weight: float = 3.0, folders: set[int] | None = None) -> list[int]:
-    query = fts_query(question)
-    if not query or not collections or folders == set():
-        return []
+def _as_scope(allowed, folders: set[int] | None = None) -> Scope:
+    if isinstance(allowed, Scope):
+        return allowed
+    return Scope.collections(allowed, folders) if folders != set() else Scope()
+
+
+def _branch_sql(collections: set[int], folders: set[int] | None, prefix: str) -> tuple[str, tuple]:
     marks, ids = _in(collections)
-    folder_sql, folder_ids = _folder_filter(folders, "c.folder_id")
+    sql = f"{prefix}collection_id IN ({marks})"
+    if folders is not None:
+        folder_marks, folder_ids = _in(folders)
+        sql += f" AND {prefix}folder_id IN ({folder_marks})"
+        ids += folder_ids
+    return sql, ids
+
+
+def keyword_search(conn: sqlite3.Connection, question: str, allowed, k: int,
+                   section_weight: float = 3.0, folders: set[int] | None = None) -> list[int]:
+    """`allowed`: a Scope, or a set of collection ids (with optional `folders`)."""
+    query = fts_query(question)
+    branches = _as_scope(allowed, folders).branches()
+    if not query or not branches:
+        return []
+    parts = [_branch_sql(c, f, "c.") for c, f in branches]   # plain SQL, so OR is fine here
+    where = " OR ".join(f"({sql})" for sql, _ in parts)
     rows = conn.execute(
         f"SELECT c.id FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid "
-        f"WHERE chunks_fts MATCH ? AND c.collection_id IN ({marks}){folder_sql} "
-        f"ORDER BY bm25(chunks_fts, ?, 1.0) LIMIT ?",
-        (query, *ids, *folder_ids, section_weight, k),
+        f"WHERE chunks_fts MATCH ? AND ({where}) ORDER BY bm25(chunks_fts, ?, 1.0) LIMIT ?",
+        (query, *[p for _, params in parts for p in params], section_weight, k),
     ).fetchall()
     return [r[0] for r in rows]
 
 
-def vector_search(conn: sqlite3.Connection, query_vector: list[float], collections: set[int],
-                  k: int, folders: set[int] | None = None) -> list[tuple[int, float]]:
-    if not collections or folders == set():
-        return []
-    marks, ids = _in(collections)
-    folder_sql, folder_ids = _folder_filter(folders, "folder_id")
-    rows = conn.execute(
-        f"SELECT rowid, distance FROM chunk_vec WHERE embedding MATCH ? AND k = ? "
-        f"AND collection_id IN ({marks}){folder_sql} ORDER BY distance",
-        (pack_vector(query_vector), k, *ids, *folder_ids),
-    ).fetchall()
-    return [(r[0], r[1]) for r in rows]
+def vector_search(conn: sqlite3.Connection, query_vector: list[float], allowed, k: int,
+                  folders: set[int] | None = None) -> list[tuple[int, float]]:
+    """`allowed`: a Scope, or a set of collection ids (with optional `folders`)."""
+    found: list[tuple[int, float]] = []
+    vector = pack_vector(query_vector)
+    for collections, branch_folders in _as_scope(allowed, folders).branches():
+        sql, params = _branch_sql(collections, branch_folders, "")
+        found += [(r[0], r[1]) for r in conn.execute(
+            f"SELECT rowid, distance FROM chunk_vec WHERE embedding MATCH ? AND k = ? AND {sql} ORDER BY distance",
+            (vector, k, *params))]
+    return sorted(found, key=lambda r: r[1])[:k]
 
 
 def _load_hits(conn: sqlite3.Connection, chunk_ids: list[int]) -> dict[int, Hit]:
@@ -150,32 +225,32 @@ def _load_hits(conn: sqlite3.Connection, chunk_ids: list[int]) -> dict[int, Hit]
 
 def search_for_user(conn: sqlite3.Connection, settings: Settings, embedder, user_id: int, question: str,
                     reranker=None, scope: dict | None = None) -> SearchResult:
-    """Hybrid search over exactly the collections `user_id` may read.
+    """Hybrid search over exactly what `user_id` may read.
 
     `scope` ({"collection_id", "folders"}) narrows it to one collection and,
     optionally, a set of folder ids; it can only narrow, never widen.
     """
-    allowed = permissions.readable_collection_ids(conn, user_id)
-    folders = None
+    allowed = Scope.of_reach(permissions.reach(conn, user_id).values())
     if scope:
-        allowed &= {scope["collection_id"]}
         folders = set(scope["folders"]) if scope.get("folders") is not None else None
-    return search(conn, settings, embedder, question, allowed, reranker, folders=folders)
+        allowed = allowed.narrow(scope["collection_id"], folders)
+    return search(conn, settings, embedder, question, allowed, reranker)
 
 
-def search(conn: sqlite3.Connection, settings: Settings, embedder, question: str, allowed: set[int],
+def search(conn: sqlite3.Connection, settings: Settings, embedder, question: str, allowed,
            reranker=None, folders: set[int] | None = None) -> SearchResult:
-    """Hybrid search restricted to `allowed` collection ids (and `folders`, if
-    given), applied inside both queries.
+    """Hybrid search restricted to `allowed` (a Scope, or a set of collection
+    ids plus optional `folders`), applied inside both queries.
 
     The question is also searched with known jargon swapped (synonyms.py), and
     every keyword and vector result list is fused with reciprocal rank fusion.
     """
+    allowed = _as_scope(allowed, folders)
     queries = [question] + synonyms.variants(question, _synonym_groups(settings))
-    lexical_lists = [keyword_search(conn, q, allowed, settings.retrieval_k, settings.fts_section_weight, folders)
+    lexical_lists = [keyword_search(conn, q, allowed, settings.retrieval_k, settings.fts_section_weight)
                      for q in queries]
-    vector_lists = [vector_search(conn, embedder.embed_query(q), allowed, settings.retrieval_k, folders)
-                    for q in queries] if allowed and folders != set() else []
+    vector_lists = [vector_search(conn, embedder.embed_query(q), allowed, settings.retrieval_k)
+                    for q in queries] if allowed else []
 
     # RRF within each phrasing (keyword + vector), then each chunk keeps its best
     # phrasing's score: phrasings are alternatives, so a chunk that matches one of
