@@ -10,6 +10,7 @@ and returns passages with their citations. Every call is logged in mcp_calls.
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import re
@@ -19,8 +20,9 @@ from collections import defaultdict, deque
 from typing import Any, Callable
 
 import anyio
+import pypdfium2 as pdfium
 from mcp.server import MCPServer
-from mcp.server.mcpserver import Context
+from mcp.server.mcpserver import Context, Image
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
@@ -30,8 +32,12 @@ from starlette.types import Receive, Scope, Send
 from mnemerynne import api_tokens, db, fs, permissions, retrieval
 from mnemerynne.api_tokens import Caller
 from mnemerynne.config import Settings
+from mnemerynne.ingest import store
 
 log = logging.getLogger("mnemerynne.mcp")
+
+PAGE_WIDTH_PX = 1200     # rendered page width: small print stays legible, JPEG stays ~100-300 KB
+PAGE_MAX_PX = 2000       # cap on either side, for unusually long or wide pages
 
 INSTRUCTIONS = """\
 Mnemerynne holds this organisation's documents: each person's private inbox and the shared libraries they
@@ -44,7 +50,11 @@ be answered from those documents.
   own terms). If it is still not found, say plainly that the documents don't cover it; don't fill the
   gap from general knowledge without saying so.
 - Use read_passage to see the text around a hit before relying on a fragment.
-- Use list_libraries, browse_folder and find_files to see what exists or to narrow a search."""
+- Use view_page to look at a PDF page as an image when a passage mentions a table, figure, form or
+  screenshot, when its text looks garbled (scanned pages), or when the person asks to see the page.
+- Use list_libraries, browse_folder and find_files to see what exists or to narrow a search.
+- The `link`s are for the person to open in their browser, where they are signed in to Mnemerynne.
+  Don't fetch them yourself: they need that login. Use these tools to read documents instead."""
 
 _READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True,
                              open_world_hint=False)
@@ -119,6 +129,8 @@ def _passage(hit: retrieval.Hit, base: str, library: str, n: int | None = None) 
     out = {"citation": citation, "link": base + hit.url, "file": hit.file_name, "file_id": hit.file_id,
            "library": library, "location": hit.location, "section": hit.section_path,
            "chunk_id": hit.chunk_id, "text": hit.text}
+    if hit.kind == "pdf" and hit.page_start:
+        out["page"] = hit.page_start   # for view_page
     return {"n": n, **out} if n is not None else out
 
 
@@ -223,6 +235,34 @@ class Tools:
                       for f in found["files"]],
         }, []
 
+    def view_page(self, conn, caller: Caller, file_id: int, page: int) -> tuple[list, list[int]]:
+        """A PDF page as a JPEG, plus a line saying what it is."""
+        access = self._access(conn, caller)
+        row = fs.file_row(conn, file_id)
+        if row is None or row["deleted_at"] is not None or row["collection_id"] not in access.readable:
+            raise ToolError("No such file (or it isn't shared with Claude). Use a file_id from the other tools.")
+        if row["kind"] != "pdf":
+            raise ToolError(f"“{row['display_name']}” isn't a PDF; use read_passage for its text.")
+        pages = row["unit_count"] or 0
+        if not 1 <= page <= max(pages, 1):
+            raise ToolError(f"“{row['display_name']}” has {pages} page(s); ask for 1-{pages}.")
+        path = store.blob_path(self.settings, row["rel_path"])
+        if not path.exists():
+            raise ToolError("The file's content is missing on the server; tell a Mnemerynne admin.")
+        pdf = pdfium.PdfDocument(str(path))
+        try:
+            pdf_page = pdf[page - 1]
+            width, height = pdf_page.get_size()
+            scale = min(PAGE_WIDTH_PX / width, PAGE_MAX_PX / max(width, height))
+            picture = pdf_page.render(scale=scale).to_pil().convert("RGB")
+        finally:
+            pdf.close()
+        buffer = io.BytesIO()
+        picture.save(buffer, format="JPEG", quality=82, optimize=True)
+        caption = (f"{row['display_name']} · p. {page} of {pages}. Link for the person: "
+                   f"{self.base}/files/{file_id}/pdf#page={page}")
+        return [caption, Image(data=buffer.getvalue(), format="jpeg")], [file_id]
+
 
 # --------------------------------------------------------------- the server
 def build_server(settings: Settings, get_embedder: Callable[[], Any]) -> MCPServer:
@@ -282,6 +322,13 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any]) -> MCPServ
     async def find_files(ctx: Context, name: str) -> dict:
         """Find files and folders whose name contains `name`, across everything the user can search."""
         return await call(ctx, "find_files", {"name": name}, tools.find_files)
+
+    @server.tool(annotations=_READ_ONLY, structured_output=False)
+    async def view_page(ctx: Context, file_id: int, page: int) -> list:
+        """Look at one page of a PDF as an image: tables, figures, forms, screenshots and scanned
+        pages that the text in search results can't show well. `file_id` and `page` come from
+        search_documents results (their `file_id` and `page`) or from browse_folder/find_files."""
+        return await call(ctx, "view_page", {"file_id": file_id, "page": page}, tools.view_page)
 
     return server
 

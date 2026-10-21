@@ -1,6 +1,8 @@
+import base64
 import io
 import json
 
+import PIL.Image
 import pytest
 from fastapi.testclient import TestClient
 from mcp.server.mcpserver.exceptions import ToolError
@@ -169,7 +171,7 @@ def test_mcp_endpoint_end_to_end(mcp_client, conn, world):
 
     listed = _rpc(mcp_client, token, "tools/list").json()["result"]["tools"]
     assert {t["name"] for t in listed} == {"search_documents", "read_passage", "list_libraries", "browse_folder",
-                                           "find_files"}
+                                           "find_files", "view_page"}
     assert all(t["annotations"]["readOnlyHint"] for t in listed)
 
     called = _rpc(mcp_client, token, "tools/call", {"name": "search_documents", "arguments": {"query": "night audit"}})
@@ -187,6 +189,40 @@ def test_mcp_endpoint_end_to_end(mcp_client, conn, world):
 
     api_tokens.revoke_all(conn, world["alice"])
     assert _rpc(mcp_client, token, "tools/list").status_code == 401
+
+
+def test_view_page_returns_the_page_as_an_image(mcp_client, conn, settings, embedder, world):
+    alice, bob = _caller(conn, world["alice"]), _caller(conn, world["bob"])
+    hit = Tools(settings, lambda: embedder).search_documents(conn, alice, "pool hours")[0]["results"][0]
+    assert hit["file"] == "OPERA.pdf" and hit["page"] == 2
+
+    _, token = api_tokens.create(conn, world["alice"], "test")
+    called = _rpc(mcp_client, token, "tools/call",
+                  {"name": "view_page", "arguments": {"file_id": hit["file_id"], "page": hit["page"]}})
+    result = called.json()["result"]
+    assert not result.get("isError"), result
+    kinds = [c["type"] for c in result["content"]]
+    assert kinds == ["text", "image"]
+    assert "OPERA.pdf · p. 2 of 3" in result["content"][0]["text"]
+    image = result["content"][1]
+    assert image["mimeType"] == "image/jpeg"
+    jpeg = base64.b64decode(image["data"])
+    assert jpeg[:3] == b"\xff\xd8\xff" and len(jpeg) < 1_000_000
+    assert PIL.Image.open(io.BytesIO(jpeg)).width == 1200
+    logged = conn.execute("SELECT file_ids FROM mcp_calls WHERE tool = 'view_page'").fetchone()
+    assert json.loads(logged["file_ids"]) == [hit["file_id"]]
+
+    tools = Tools(settings, lambda: embedder)
+    with pytest.raises(ToolError, match="has 3 page"):
+        tools.view_page(conn, alice, hit["file_id"], 9)
+    with pytest.raises(ToolError, match="isn't shared"):
+        tools.view_page(conn, bob, hit["file_id"], 1)        # bob can't read the Oracle library
+    md_file = conn.execute("SELECT id FROM files WHERE display_name = 'alice.md'").fetchone()["id"]
+    with pytest.raises(ToolError, match="isn't a PDF"):
+        tools.view_page(conn, alice, md_file, 1)
+    permissions.set_claude_enabled(conn, world["oracle"], False, world["alice"])
+    with pytest.raises(ToolError, match="isn't shared"):
+        tools.view_page(conn, alice, hit["file_id"], 1)
 
 
 def test_mcp_rate_limit(settings, conn, world, embedder):

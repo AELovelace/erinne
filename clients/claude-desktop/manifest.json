@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "mnemerynne",
   "display_name": "Mnemerynne",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Search your Mnemerynne documents (inbox and shared libraries) from Claude, with citations.",
   "long_description": "Lets Claude search the documents you can see in Mnemerynne and answer with the file, page and section for every claim, linking back to Mnemerynne. Read-only. Uses a personal token you create under Claude in Mnemerynne; what Claude may search is set by Mnemerynne's admins.",
   "author": {
@@ -25,7 +25,8 @@
     {"name": "read_passage", "description": "Read a passage with the text around it"},
     {"name": "list_libraries", "description": "List your inbox and the libraries you can search"},
     {"name": "browse_folder", "description": "List the folders and files in a library"},
-    {"name": "find_files", "description": "Find files and folders by name"}
+    {"name": "find_files", "description": "Find files and folders by name"},
+    {"name": "view_page", "description": "Show a PDF page as an image (tables, figures, scans)"}
   ],
   "user_config": {
     "api_token": {
