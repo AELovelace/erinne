@@ -1,10 +1,10 @@
 # Erinne on Fedora (pilot next to MicroJames)
 
-The box runs an AMD RX 580 (8 GB) with llama.cpp built for Vulkan in
-`/opt/llama.cpp` (see the RX 580 install guide for the driver and build),
-next to MicroJames and its `llama-generator` (:8081) and `llama-embedder`
-(:8082, jina) services. Erinne has its own generator and embedder, so it
-runs independently and MicroJames can be switched off without touching it.
+The box has two GPUs. MicroJames keeps the GTX 1050 Ti, with its CUDA
+llama.cpp in `/opt/llama.cpp` and its `llama-generator` (:8081) and
+`llama-embedder` (:8082, jina) services. Erinne runs on the RX 580 (8 GB)
+with its own llama.cpp built for Vulkan in `/opt/llama.cpp-vulkan`, so it is
+independent of MicroJames, which can be switched off without touching it.
 
 | Service | Listens on | Does |
 |---|---|---|
@@ -14,41 +14,34 @@ runs independently and MicroJames can be switched off without touching it.
 | `erinne-embedder` | 127.0.0.1:8085 | Qwen3-Embedding-0.6B (llama-server, Vulkan) |
 | `erinne-backup.timer` | — | nightly snapshot to `/var/backups/erinne` |
 
-**VRAM (8 GB card):** Erinne's generator (~2.5 GB with its cache) and
-embedder (~0.7 GB) plus MicroJames's generator and jina embedder (~2.9 GB)
-come to about 6 GB. Check with `radeontop` after step 4. Both llama-server
-units join the `render` and `video` groups to reach the GPU.
+**VRAM:** Erinne's generator (~2.5 GB with its cache) and embedder
+(~0.7 GB) use about 3.2 GB of the RX 580's 8 GB; MicroJames stays on the
+1050 Ti. Check both cards with `nvtop` after step 3. Both llama-server units
+join the `render` and `video` groups to reach the GPU.
 
-## 1. Packages
-
-```sh
-sudo dnf install uv ocrmypdf tesseract-langpack-eng
-ocrmypdf --version          # scanned PDFs are OCR'd automatically when this exists
-
-# Embedding model (check the SHA256 against the Hugging Face file page)
-cd /opt/models && sudo curl -LO https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf
-sha256sum Qwen3-Embedding-0.6B-Q8_0.gguf   # 06507c7b4268… (first 12 hex digits)
-```
-
-## 2. Code (from the dev PC)
-
-The repo isn't on GitHub, so ship a tarball of a commit:
-
-```powershell
-# On the dev PC (PowerShell), in C:\Scripts\erinne
-git archive --format=tar.gz -o erinne.tar.gz HEAD
-scp erinne.tar.gz edith@<box-ip>:/home/edith/
-```
+## 1. Code and prerequisites
 
 ```sh
-# On the box
-sudo useradd --system --home-dir /var/lib/erinne --shell /sbin/nologin erinne
-sudo mkdir -p /opt/erinne && sudo tar -xzf /home/edith/erinne.tar.gz -C /opt/erinne
+sudo dnf install git
+sudo git clone https://github.com/AELovelace/erinne.git /opt/erinne
+sudo bash /opt/erinne/deploy/linux/preinstall.sh
 cd /opt/erinne && sudo uv sync --frozen --no-dev
-sudo chown -R root:root /opt/erinne && sudo restorecon -R /opt/erinne
+sudo restorecon -R /opt/erinne
 ```
 
-## 3. Settings
+`preinstall.sh` installs the packages (uv, ocrmypdf, the Vulkan build tools),
+creates the `erinne` user, builds llama.cpp for Vulkan into
+`/opt/llama.cpp-vulkan`, downloads and checks Qwen3-Embedding, and finds
+which llama.cpp device is the RX 580 (`Vulkan1` when the 1050 Ti is also
+present). It writes that device to a `gpu.conf` drop-in for
+`erinne-generator` and `erinne-embedder`. It's safe to run again, for example
+after adding or removing a card. `ERINNE_GPU=Vulkan0 sudo -E bash …` skips
+the detection.
+
+If the repo is private, `git clone` asks for a GitHub username and a personal
+access token (read-only, for this repo) instead of a password.
+
+## 2. Settings
 
 ```sh
 sudo mkdir -p /etc/erinne
@@ -61,21 +54,18 @@ sudo install -m 755 /opt/erinne/deploy/linux/erinne-admin /usr/local/bin/
 `sudo erinne-admin <command>` runs any `erinne` command as the service user
 with these settings (e.g. `sudo erinne-admin list-users`).
 
-## 4. Services
+## 3. Services
 
 ```sh
 sudo cp /opt/erinne/deploy/linux/erinne-*.service /opt/erinne/deploy/linux/erinne-backup.timer /etc/systemd/system/
-sudo mkdir -p /var/backups/erinne && sudo chown erinne:erinne /var/backups/erinne
 sudo systemctl daemon-reload
-sudo chown erinne:erinne /opt/models/Qwen3-Embedding-0.6B-Q8_0.gguf
-sudo chmod o+r /opt/models/LFM2.5-2.6B-Q4_K_M.gguf     # erinne-generator reads it too
 sudo systemctl enable --now erinne-generator erinne-embedder erinne-web erinne-worker erinne-backup.timer
 journalctl -u erinne-web -n 20 --no-pager     # "Database ready ... (schema v6)"
-journalctl -u erinne-generator -n 20 --no-pager | grep -i vulkan   # "Vulkan0: AMD Radeon RX 580 ..."
-sudo radeontop -d - -l 1 | grep -o 'vram [^,]*'  # about 6 GB used while MicroJames also runs
+journalctl -u erinne-generator -n 40 --no-pager | grep -i 'RX 580'   # the model loads on the RX 580
+nvtop                                          # RX 580 about 3.5 GB used; the 1050 Ti unchanged
 ```
 
-## 5. Import MicroJames users and documents
+## 4. Import MicroJames users and documents
 
 The erinne user needs to read MicroJames's data for this step:
 
@@ -90,7 +80,7 @@ journalctl -u erinne-worker -f        # "File N: … chunks indexed"; the Oracle
 Users keep their MicroJames passwords. With `ocrmypdf` installed the two
 scanned Oregon letters should come through this time.
 
-## 6. HTTPS (Caddy)
+## 5. HTTPS (Caddy)
 
 Caddy already serves MicroJames on 443, so Erinne is a second site in the
 same Caddyfile. Pick a hostname that resolves to this box on staff PCs
@@ -121,7 +111,7 @@ Then set `ERINNE_PUBLIC_URL=https://YOUR-HOSTNAME` (next section).
 `flush_interval -1` keeps answers streaming. `nginx-erinne.conf` is an
 equivalent nginx setup, for a box where nginx owns port 443 instead.
 
-## 6b. Claude Desktop
+## 5b. Claude Desktop
 
 Staff connect Claude Desktop through the Erinne extension, which relays to
 `https://YOUR-HOSTNAME/mcp` with a personal token (made under **Claude** in
@@ -139,7 +129,7 @@ To cut someone off at once: **Access → Revoke Claude tokens**, or
 `sudo erinne-admin revoke-tokens USERNAME`. **Access → Claude activity**
 shows every search and which files' text went back to Claude.
 
-## 7. Check
+## 6. Check
 
 ```sh
 curl -s http://127.0.0.1:38200/healthz            # {"status":"ok","schema":6}
@@ -152,9 +142,14 @@ should open the OPERA manual at the right page.
 
 ## Updating
 
-Ship a new tarball, extract over `/opt/erinne`, `uv sync --frozen --no-dev`,
-`sudo systemctl restart erinne-web erinne-worker`. Database migrations run
-automatically at start-up.
+```sh
+cd /opt/erinne && sudo git pull && sudo uv sync --frozen --no-dev && sudo restorecon -R /opt/erinne
+sudo cp deploy/linux/erinne-*.service deploy/linux/erinne-backup.timer /etc/systemd/system/ && sudo systemctl daemon-reload
+sudo systemctl restart erinne-web erinne-worker
+```
+
+Database migrations run automatically at start-up. Restart
+`erinne-generator` and `erinne-embedder` too when their unit files changed.
 
 Take a backup first (`sudo systemctl start erinne-backup`) when an update
 changes the schema. The file-manager update (schema v4) rebuilds the files
