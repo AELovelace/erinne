@@ -21,7 +21,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
-from mnemerynne import db, directory, editing, mcp_server, memory, permissions, share, users
+from mnemerynne import (balancer as balancer_mod, db, directory, editing, mcp_server, memory, permissions, share,
+                        users)
 from mnemerynne.agent import Agent
 from mnemerynne.answer import ASSISTANT_NAME
 from mnemerynne.auth import LoginThrottle
@@ -31,7 +32,8 @@ from mnemerynne.clients.rerank import Reranker
 from mnemerynne.config import Settings, get_settings
 from mnemerynne.graph import Deps, build_graph
 from mnemerynne.router import load_router
-from mnemerynne.web import admin, admin_apis, agent as agent_pages, apis as api_pages, chat, files, memories, tokens
+from mnemerynne.web import (admin, admin_apis, agent as agent_pages, apis as api_pages, balancer as balancer_pages, chat,
+                            files, memories, tokens)
 from mnemerynne.web.deps import LoginRequired, api_user, get_db, is_admin, page_user
 
 log = logging.getLogger("mnemerynne.web")
@@ -66,7 +68,8 @@ class Services:
     router: Any = None
     directory: Any = None   # the AD domain (mnemerynne.directory); None = from settings
     share_checker: Any = None   # share permission checks (share.Checker); None = the real POSIX ACLs
-    agent_llm: Any = None   # the agent's model client; None = built from the Settings → Erynne agent address
+    agent_llm: Any = None   # the agent's model client; None = the balancer nodes, then MNEMERYNNE_LLM_URL
+    balancer: Any = None    # balancer.Balancer (tests pass one with a fake transport); None = a real one
 
 
 def create_app(settings: Settings | None = None, services: Services | None = None) -> FastAPI:
@@ -86,12 +89,20 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             made = editing.ensure_all_agents(conn)
             if made:
                 log.info("Made the Agents folder in %d inbox(es).", made)
+            cfg = balancer_mod.load_config(conn)
+            nodes, node_key = cfg["nodes"], balancer_mod.api_key(settings, cfg)
         finally:
             conn.close()
         log.info("Database ready at %s (schema v%d).", settings.db_path, version)
 
+        # Balancer nodes (Settings): the answer model's requests go to the least busy one.
+        balancer = (services.balancer if services and services.balancer is not None else balancer_mod.Balancer())
+        balancer.configure(nodes, node_key)
+        app.state.balancer = balancer
+        if nodes:
+            log.info("Answer model: %d balancer node(s), %s when none answers.", len(nodes), settings.llm_url)
         svc = services or Services(
-            llm=LLM.from_settings(settings),
+            llm=LLM.from_settings(settings, transport=balancer_mod.BalancedTransport(balancer, settings.llm_url)),
             embedder=Embedder(settings),
             reranker=Reranker(settings.rerank_url) if settings.rerank_url else None,
         )
@@ -108,14 +119,16 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         app.state.checkpointer, app.state.store = checkpointer, store
         router = svc.router if services is not None else load_router(settings)
         log.info("Routing: %s.", f"{', '.join(router.labels)}" if router else "no router trained; everything is search")
-        # Erynne with tools, for the agent group (agent.py); its model is set on Settings.
+        # Erynne with tools, for the agent group (agent.py); same model path as the answers.
         app.state.agent = Agent(settings, lambda: app.state.embedder, lambda: app.state.directory,
-                                (lambda cfg, key: svc.agent_llm) if svc.agent_llm is not None else None)
+                                (lambda cfg: svc.agent_llm) if svc.agent_llm is not None else None, balancer)
         app.state.graph = build_graph(Deps(settings, svc.llm, svc.embedder, svc.reranker, router,
                                            app.state.directory, app.state.agent), checkpointer, store)
         app.state.background = set()
         app.state.memory_writer = memory.make_writer(settings, svc.llm, store, app.state.background)
         app.state.embedder = svc.embedder
+        poller = asyncio.create_task(balancer.run())
+        app.state.background.add(poller)
         try:
             async with mcp.session_manager.run():
                 yield
@@ -126,6 +139,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             await saver_conn.close()
             await store_conn.close()
             await app.state.agent.aclose()
+            await balancer.aclose()
             if services is None:
                 svc.embedder.close()
                 await svc.llm.aclose()
@@ -176,6 +190,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(api_pages.router)
     app.include_router(admin_apis.router)
     app.include_router(agent_pages.router)
+    app.include_router(balancer_pages.router)
 
     # MCP for Claude Desktop: bearer-token auth, read-only tools (mnemerynne/mcp_server.py).
     mcp = mcp_server.build_server(settings, lambda: app.state.embedder, lambda: app.state.directory)

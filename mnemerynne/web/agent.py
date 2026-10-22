@@ -54,9 +54,6 @@ class AgentGroupBody(BaseModel):
 
 
 class AgentModelBody(BaseModel):
-    url: str | None = Field(default=None, max_length=500)
-    model: str | None = Field(default=None, max_length=200)
-    api_key: str | None = Field(default=None, max_length=2000)   # None: keep; '': remove
     timeout: int | None = None
     max_steps: int | None = None
     max_tokens: int | None = None
@@ -65,15 +62,12 @@ class AgentModelBody(BaseModel):
 
 
 async def _status(request: Request, conn: sqlite3.Connection) -> dict:
-    """The agent settings plus whether its model answers right now."""
+    """The agent settings plus whether its model (balancer nodes, then MNEMERYNNE_LLM_URL) answers now."""
     directory = request.app.state.directory
-    cfg = agent_mod.public_model_config(conn)
-    reachable = None
+    cfg = agent_mod.model_config(conn)
     agent = getattr(request.app.state, "agent", None)
-    if cfg["url"] and agent is not None:
-        full = agent_mod.model_config(conn)
-        full["api_key"] = agent_mod.api_key(request.app.state.settings, full)
-        reachable = await agent.reachable(full)
+    reachable = await agent.reachable(cfg) if agent is not None else None
+    balancer = getattr(request.app.state, "balancer", None)
     members = None
     group = accounts.agent_group(conn)
     if group and directory.enabled:
@@ -81,7 +75,8 @@ async def _status(request: Request, conn: sqlite3.Connection) -> dict:
         members = sorted(r["username"] for r in rows if accounts.is_agent_user(conn, r, directory))
     return {"group": group, "domain": request.app.state.settings.ad_domain, "enabled": directory.enabled,
             "groups": await anyio.to_thread.run_sync(directory.groups), "members": members,
-            "model": cfg, "reachable": reachable}
+            "model": cfg, "reachable": reachable, "fallback": request.app.state.settings.llm_url,
+            "nodes": len(balancer.nodes) if balancer is not None else 0}
 
 
 @router.get("/api/admin/settings/agent")
@@ -111,10 +106,8 @@ async def set_agent_model(body: AgentModelBody, request: Request, user=Depends(a
     try:
         with transaction(conn):
             cfg = agent_mod.save_model_config(conn, request.app.state.settings, changes)
-            what = ", ".join(k for k, v in changes.items() if v is not None and k != "api_key")
-            if changes.get("api_key") is not None:
-                what += (", " if what else "") + ("key set" if changes["api_key"].strip() else "key removed")
-            _log(conn, user, "settings.agent_model", cfg["url"] or "(off)", what)
+            what = ", ".join(f"{k} {v}" for k, v in changes.items() if v is not None)
+            _log(conn, user, "settings.agent_model", "limits", what)
     except (ValueError, TypeError) as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
     return await _status(request, conn)

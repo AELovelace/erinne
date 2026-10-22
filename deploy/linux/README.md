@@ -302,21 +302,15 @@ internal APIs they may use, and drafts changes to `.txt`, `.md`, `.docx` and
    `Erynne Agents`) and add people to it. They need their Mnemerynne user
    linked to their domain account (section 5c). Admins aren't included
    automatically; add them to the group like anyone else.
-2. **Run a model for it.** It needs a model that's good at tool calling,
-   served OpenAI-compatibly with tool support, for example llama-server
-   started with `--jinja`:
-
-   ```sh
-   llama-server -m Qwen3-8B-Q4_K_M.gguf --jinja --reasoning-format deepseek \
-     --ctx-size 16384 --parallel 2 --host 0.0.0.0 --port 8083
-   ```
-
-   It can live on another machine, or later behind a balancer. The answer
-   model (`MNEMERYNNE_LLM_URL`) stays as it is.
-3. **Settings → Erynne agent:** pick the group, enter the model's address
-   (e.g. `http://10.0.0.5:8083`) and a name for it, and save. The status line
-   says whether it's answering. An API key is optional, for proxies that need
-   one; it's stored encrypted and never shown again.
+2. **The model.** The agent uses the same model as the answers: the balancer
+   nodes (5h), the least busy first, then `MNEMERYNNE_LLM_URL` (the RX 580)
+   when none answers. There's no separate address to set. Those servers need
+   tool support: llama-server with `--jinja` (the balancer starts its
+   catalog models with it) or a `--chat-template-file`.
+3. **Settings → Erynne agent:** pick the group and save. The status line says
+   whether a model answers, and by which route. The limits (timeout, tool
+   steps, tokens, thinking) are below it. Settings from the old setup (the
+   agent's own address, model name and key) are ignored.
 
 How it behaves:
 
@@ -332,14 +326,56 @@ How it behaves:
   person can read, not only what's shared with Claude. APIs follow each API's
   own group. A *Use tools* switch under the question box lets people ask
   without tools.
-- **Fallback.** If the agent model is unset or not answering (checked every
-  30 seconds), or fails before doing anything, the question gets a normal
-  answer instead.
+- **Fallback.** If no model answers (balancer nodes or the RX 580, checked
+  every 30 seconds), or it fails before doing anything, the question gets a
+  normal answer instead.
 - **Records.** Every tool call is logged in `agent_calls`, and answers
   record the agent model's name. Proposals nobody decides on expire after
   `MNEMERYNNE_VERSION_DAYS` (30). Their content sits in
   `<data_dir>/proposals` until then. It isn't backed up, since it's
   short-lived.
+
+## 5h. Balancer nodes (the answer model on other boxes)
+
+The answer model can run on one or more
+[mnemerynne-balancer](https://github.com/AELovelace/mnemerynne-balancer)
+boxes (for example the npc-rag node's two RX 6800s) instead of, or as well
+as, the RX 580 here.
+
+1. **On each balancer**, download and start Erynne's model on its control
+   page (`http://<node>:9180`): LFM2.5 2.6B Q8 for the stock model. A
+   fine-tuned GGUF has to be on Hugging Face for the balancer to download it.
+   Note its API key (`BALANCER_API_KEY` in its `.env`, or set it on its
+   Settings tab). Every node needs the same key.
+2. **Settings → Balancer nodes:** enter the addresses separated by commas,
+   for example `http://10.0.5.20:9180, http://10.0.5.21:9180`, and the key,
+   then Save. Each node is checked with the key first; if one doesn't answer
+   or rejects the key, nothing is saved and the message says which one. The
+   key is stored encrypted (it needs `MNEMERYNNE_SECRET_KEY`) and never shown
+   again.
+
+How it behaves:
+
+- **Least busy.** Every node is asked every 2 seconds how busy it is
+  (`/v1/balancer/load`: requests in flight and parallel slots). Each answer
+  goes to the ready node with the fewest requests per slot. Requests are
+  counted the moment they're sent, so a burst spreads across nodes instead
+  of piling onto whichever looked idle at the last check. Ties go to the
+  node listed first.
+- **Failover.** A node that refuses the connection, times out, rejects the
+  key or answers 5xx sits out for 30 seconds, and the request goes to the
+  next node. Once a node has started answering, the answer comes from it.
+  If no node answers, or the list is empty, answers come from
+  `MNEMERYNNE_LLM_URL` as before, so keep the RX 580 generator running as the
+  fallback.
+- **Status.** The section shows each node: whether it answers, the model it
+  runs, requests in flight per slot, answers sent there in the last hour, and
+  when it was last checked. It refreshes while the tab is open.
+- **What it covers.** Chat answers, everything else the answer model does
+  (routing questions to APIs, memories, apologies), and the Erynne agent
+  (5g). The embedder stays on this box, next to the files it indexes.
+- **The balancers don't know about each other.** Each one spreads requests
+  over its own cards. Spreading them between boxes happens here.
 
 ## 6. Check
 

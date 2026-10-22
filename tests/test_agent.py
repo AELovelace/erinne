@@ -78,7 +78,6 @@ def world(settings, conn, directory):
         pass
     settings.vector_max_distance, settings.vector_max_distance_no_keywords = 99.0, 0.2
     accounts.set_agent_group(conn, GROUP)
-    agent_mod.save_model_config(conn, settings, {"url": "http://agent.test:8083", "model": "qwen3-8b"})
     return {**ids, "embedder": embedder}
 
 
@@ -126,15 +125,12 @@ def test_only_the_agent_group_gets_tools(client, agent_llm, conn):
     row = conn.execute("SELECT tool, ok, u.username FROM agent_calls JOIN users u ON u.id = user_id").fetchone()
     assert tuple(row) == ("search_documents", 1, "alice")
     saved = conn.execute("SELECT route, model FROM messages WHERE role = 'assistant' ORDER BY id DESC").fetchone()
-    assert tuple(saved) == ("agent", "qwen3-8b")
+    assert tuple(saved) == ("agent", agent_mod.AGENT_MODEL_NAME)
 
 
-def test_no_group_or_no_model_means_nobody(client, agent_llm, conn, settings):
+def test_no_group_means_nobody(client, agent_llm, conn, settings):
     _login(client, "alice")
     accounts.set_agent_group(conn, "")
-    assert _final(_ask(client, "night audit"))["route"] == "search"
-    accounts.set_agent_group(conn, GROUP)
-    agent_mod.save_model_config(conn, settings, {"url": ""})
     assert _final(_ask(client, "night audit"))["route"] == "search"
     assert client.get("/api/me").json()["agent"] is False and agent_llm.calls == []
 
@@ -255,15 +251,11 @@ def test_admin_settings(client, conn, settings):
     _login(client, "boss")
     got = client.get("/api/admin/settings/agent").json()
     assert got["group"] == GROUP and got["members"] == ["alice"] and got["reachable"] is True
-    assert got["model"]["url"] == "http://agent.test:8083" and got["model"]["api_key_set"] is False
+    assert got["fallback"] == settings.llm_url and got["nodes"] == 0 and set(got["model"]) == set(agent_mod.MODEL_DEFAULTS)
     assert client.put("/api/admin/settings/agent-group", json={"group": "Nope"}).status_code == 422
-    assert client.put("/api/admin/settings/agent-model", json={"url": "ftp://x"}).status_code == 422
     assert client.put("/api/admin/settings/agent-model", json={"max_steps": 99}).status_code == 422
-    saved = client.put("/api/admin/settings/agent-model", json={"api_key": "sk-secret", "max_steps": 5}).json()
-    assert saved["model"]["api_key_set"] and saved["model"]["max_steps"] == 5
-    assert "sk-secret" not in json.dumps(saved) and "sk-secret" not in conn.execute(
-        "SELECT value FROM meta WHERE key = 'agent_model'").fetchone()[0]
-    assert agent_mod.api_key(settings, agent_mod.model_config(conn)) == "sk-secret"
+    saved = client.put("/api/admin/settings/agent-model", json={"max_steps": 5, "url": "http://ignored"}).json()
+    assert saved["model"]["max_steps"] == 5 and "url" not in saved["model"]
     off = client.put("/api/admin/settings/agent-group", json={"group": ""}).json()
     assert off["group"] == "" and accounts.agent_group(conn) == ""
     assert client.get("/api/admin/log").json()["entries"][0]["action"] == "settings.agent_group"
@@ -304,3 +296,43 @@ def test_erynne_tools_forgive_guessed_places(settings, conn, world):
     with pytest.raises(ToolError):
         Tools(settings, lambda: world["embedder"]).search_documents(
             conn, api_tokens.Caller(world["alice"], "alice", 1), "night audit", library="Front Office")
+
+
+def test_old_own_address_settings_are_ignored(conn, settings):
+    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('agent_model', ?)",
+                 (json.dumps({"url": "http://old:8083", "model": "qwen3-8b", "api_key_enc": "eA==", "max_steps": 3}),))
+    assert agent_mod.model_config(conn) == {**agent_mod.MODEL_DEFAULTS, "max_steps": 3}
+
+
+def test_agent_requests_take_the_balancer_path(settings):
+    """No llm_factory: the agent's client goes to the least busy balancer node, then MNEMERYNNE_LLM_URL."""
+    import asyncio
+
+    import httpx
+
+    from mnemerynne import balancer as bal
+
+    node = "http://10.0.5.20:9180"
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        if request.url.path == "/v1/balancer/load":
+            return httpx.Response(200, json={"models": [{"id": "m", "ready": True, "in_flight": 0, "slots": 4}]})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "hi", "tool_calls": []}}]})
+
+    b = bal.Balancer(httpx.MockTransport(handler))
+    b.configure([node], "k" * 24)
+    agent = agent_mod.Agent(settings, lambda: None, lambda: None, balancer=b)
+    client = agent._client_for(agent_mod.MODEL_DEFAULTS)
+    client._client._transport.inner = httpx.MockTransport(handler)   # the network, faked
+
+    async def go():
+        await b.poll_once()
+        turn = await client.chat_tools([{"role": "user", "content": "hello"}], [])
+        await agent.aclose()
+        await b.aclose()
+        return turn
+    assert asyncio.run(go()).content == "hi"
+    assert str(seen[-1].url) == node + "/v1/chat/completions"
+    assert seen[-1].headers["authorization"] == "Bearer " + "k" * 24

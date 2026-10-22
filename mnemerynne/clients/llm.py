@@ -189,8 +189,11 @@ class LLM:
         self._client = client or httpx.AsyncClient(timeout=timeout, headers=headers)
 
     @classmethod
-    def from_settings(cls, settings: Settings, base_url: str | None = None) -> "LLM":
-        return cls(base_url or settings.llm_url, timeout=settings.llm_timeout,
+    def from_settings(cls, settings: Settings, base_url: str | None = None,
+                      transport: httpx.AsyncBaseTransport | None = None) -> "LLM":
+        """transport: e.g. balancer.BalancedTransport, which sends requests to balancer nodes."""
+        client = httpx.AsyncClient(timeout=settings.llm_timeout, transport=transport) if transport else None
+        return cls(base_url or settings.llm_url, timeout=settings.llm_timeout, client=client,
                    reasoning_tokens=settings.llm_reasoning_tokens)
 
     @classmethod

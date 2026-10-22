@@ -12,17 +12,18 @@ can read (Erynne runs on this server, nothing leaves it), APIs follow each
 API's own group, and edits or new files become proposals the person applies
 under the answer (proposals.py). Nothing changes without that click.
 
-The agent uses its own model (Settings → Erynne agent: an OpenAI-compatible
-address such as a llama-server with --jinja, later a balancer in front of
-several), stored in meta 'agent_model'. When it is unset, down, or fails
-before doing anything, the question goes through the normal flow instead.
-Every tool call is logged in agent_calls.
+The agent uses the same model path as the answers: the balancer nodes
+(Settings → Balancer nodes, balancer.py), the least busy first, then
+MNEMERYNNE_LLM_URL (the RX 580) when none answers. Its own settings (meta
+'agent_model') are only limits: timeout, tool steps, tokens, thinking. The
+servers need tool support (llama-server --jinja). When the model doesn't
+answer, or fails before doing anything, the question goes through the normal
+flow instead. Every tool call is logged in agent_calls.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import logging
 import re
@@ -34,9 +35,10 @@ from typing import Any, Callable
 import httpx
 from mcp.server.mcpserver.exceptions import ToolError
 
-from mnemerynne import accounts, apis, db, editing, fs, proposals, retrieval, users
+from mnemerynne import accounts, db, editing, fs, proposals, retrieval, users
 from mnemerynne.answer import ASSISTANT_NAME
 from mnemerynne.api_tokens import Caller
+from mnemerynne.balancer import BalancedTransport
 from mnemerynne.clients.llm import LLM, ToolCall
 from mnemerynne.config import Settings
 from mnemerynne.mcp_server import Tools, build_server
@@ -45,8 +47,6 @@ log = logging.getLogger("mnemerynne.agent")
 
 AGENT_MODEL_KEY = "agent_model"
 MODEL_DEFAULTS: dict[str, Any] = {
-    "url": "",                # empty: the agent is off, even for the group
-    "model": "",              # sent as `model` and recorded with answers; the server decides
     "timeout": 120,           # seconds per model call
     "max_steps": 8,           # model turns with tools before it must answer
     "max_tokens": 1500,       # per model turn, on top of the reasoning budget
@@ -54,6 +54,7 @@ MODEL_DEFAULTS: dict[str, Any] = {
     "thinking": True,         # let models that think (Qwen3) do so before choosing tools
 }
 _LIMITS = {"timeout": (5, 900), "max_steps": (1, 20), "max_tokens": (200, 8000), "reasoning_tokens": (0, 16384)}
+AGENT_MODEL_NAME = "agent"    # recorded with answers; balancers serve whatever model they run
 HEALTH_SECONDS = 30           # how long a reachability check is trusted
 TOOL_RESULT_CHARS = 12_000    # per tool result handed back to the model
 HISTORY_TURNS = 4
@@ -100,7 +101,8 @@ files, ask internal systems (live, read-only), and draft changes to .txt, .md, .
 
 # ----------------------------------------------------------------- settings
 def model_config(conn: sqlite3.Connection) -> dict:
-    """The agent model settings (with 'api_key_enc' if a key is stored)."""
+    """The agent's limits. Older settings (its own address, model name, key) are ignored: it uses the
+    balancer nodes and MNEMERYNNE_LLM_URL now."""
     row = conn.execute("SELECT value FROM meta WHERE key = ?", (AGENT_MODEL_KEY,)).fetchone()
     stored = {}
     if row:
@@ -108,30 +110,12 @@ def model_config(conn: sqlite3.Connection) -> dict:
             stored = json.loads(row["value"])
         except ValueError:
             log.warning("The agent model settings are unreadable; using the defaults.")
-    return {**MODEL_DEFAULTS, **{k: v for k, v in stored.items() if k in MODEL_DEFAULTS or k == "api_key_enc"}}
-
-
-def public_model_config(conn: sqlite3.Connection) -> dict:
-    cfg = model_config(conn)
-    key = cfg.pop("api_key_enc", None)
-    return {**cfg, "api_key_set": bool(key)}
-
-
-def api_key(settings: Settings, cfg: dict) -> str:
-    enc = cfg.get("api_key_enc")
-    return (apis.decrypt_secret(settings, base64.b64decode(enc)) or "") if enc else ""
+    return {**MODEL_DEFAULTS, **{k: v for k, v in stored.items() if k in MODEL_DEFAULTS}}
 
 
 def save_model_config(conn: sqlite3.Connection, settings: Settings, changes: dict) -> dict:
-    """Validate and store changed settings. api_key: None keeps it, '' removes it."""
+    """Validate and store changed limits."""
     cfg = model_config(conn)
-    if "url" in changes and changes["url"] is not None:
-        url = str(changes["url"]).strip().rstrip("/")
-        if url and not re.fullmatch(r"https?://[^\s/]+(/[^\s]*)?", url):
-            raise ValueError("The address must start with http:// or https://, e.g. http://10.0.0.5:8081.")
-        cfg["url"] = url
-    if changes.get("model") is not None:
-        cfg["model"] = str(changes["model"]).strip()[:200]
     for key, (low, high) in _LIMITS.items():
         if changes.get(key) is not None:
             value = int(changes[key])
@@ -140,14 +124,8 @@ def save_model_config(conn: sqlite3.Connection, settings: Settings, changes: dic
             cfg[key] = value
     if changes.get("thinking") is not None:
         cfg["thinking"] = bool(changes["thinking"])
-    if changes.get("api_key") is not None:
-        key = str(changes["api_key"]).strip()
-        if key:
-            cfg["api_key_enc"] = base64.b64encode(apis.encrypt_secret(settings, key)).decode()
-        else:
-            cfg.pop("api_key_enc", None)
     conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (AGENT_MODEL_KEY, json.dumps(cfg)))
-    return public_model_config(conn)
+    return model_config(conn)
 
 
 # ------------------------------------------------------------------ helpers
@@ -265,34 +243,39 @@ class AgentCaller(Caller):
 # -------------------------------------------------------------------- agent
 class Agent:
     def __init__(self, settings: Settings, get_embedder: Callable[[], Any], get_directory: Callable[[], Any],
-                 llm_factory: Callable[[dict, str], Any] | None = None):
+                 llm_factory: Callable[[dict], Any] | None = None, balancer: Any = None):
+        """balancer: the answer model's balancer.Balancer; the agent's requests take the same path
+        (least busy node, then MNEMERYNNE_LLM_URL). llm_factory(cfg) replaces the client (tests)."""
         self.settings = settings
         self.get_directory = get_directory
         self.tools = Tools(settings, get_embedder, get_directory, mode="erynne")
         self._server = build_server(settings, get_embedder, get_directory)   # only for the tool list
         self._specs: list[dict] | None = None
         self._names: dict[str, set[str]] = {}
-        self._factory = llm_factory or (lambda cfg, key: LLM(
-            cfg["url"], model=cfg["model"] or "local", timeout=float(cfg["timeout"]), api_key=key,
-            max_retries=1, reasoning_tokens=int(cfg["reasoning_tokens"])))
+        self.balancer = balancer
+        self._factory = llm_factory or self._default_client
         self._client: Any = None
         self._client_key: tuple | None = None
         self._old_clients: list[Any] = []
         self._health: dict[tuple, tuple[float, bool]] = {}
 
+    def _default_client(self, cfg: dict) -> LLM:
+        url = self.settings.llm_url
+        transport = BalancedTransport(self.balancer, url) if self.balancer is not None else None
+        return LLM(url, timeout=float(cfg["timeout"]), max_retries=1, reasoning_tokens=int(cfg["reasoning_tokens"]),
+                   client=httpx.AsyncClient(timeout=float(cfg["timeout"]), transport=transport))
+
     # ------------------------------------------------------------- gate
     def _gate(self, user_id: int) -> tuple[dict, str] | None:
-        """(model settings with the key and the person's libraries, username)
-        if this person gets the agent now."""
+        """(model limits and the person's libraries, username) if this person gets the agent now."""
         conn = db.connect(self.settings.db_path)
         try:
             user = users.get_user_by_id(conn, user_id)
             if user is None or not user["active"]:
                 return None
             cfg = model_config(conn)
-            if not cfg["url"] or not accounts.is_agent_user(conn, user, self.get_directory()):
+            if not accounts.is_agent_user(conn, user, self.get_directory()):
                 return None
-            cfg["api_key"] = api_key(self.settings, cfg)
             access = fs.Access.of(conn, user_id)
             rows = conn.execute(f"SELECT kind, name FROM collections WHERE id IN "
                                 f"({','.join(str(i) for i in access.readable) or 'NULL'})").fetchall()
@@ -303,14 +286,14 @@ class Agent:
             conn.close()
 
     def allowed(self, conn: sqlite3.Connection, user: sqlite3.Row) -> bool:
-        return bool(model_config(conn)["url"]) and accounts.is_agent_user(conn, user, self.get_directory())
+        return accounts.is_agent_user(conn, user, self.get_directory())
 
     def _client_for(self, cfg: dict) -> Any:
-        key = (cfg["url"], cfg["model"], cfg["timeout"], cfg["reasoning_tokens"], cfg["api_key"])
+        key = (cfg["timeout"], cfg["reasoning_tokens"])
         if key != self._client_key:
             if self._client is not None:
                 self._old_clients.append(self._client)
-            self._client, self._client_key = self._factory(cfg, cfg["api_key"]), key
+            self._client, self._client_key = self._factory(cfg), key
         return self._client
 
     async def reachable(self, cfg: dict) -> bool:
@@ -321,7 +304,8 @@ class Agent:
         ok = await client.reachable()
         self._health[self._client_key] = (time.monotonic(), ok)
         if not ok:
-            log.warning("The agent model at %s isn't answering; using the normal flow.", cfg["url"])
+            log.warning("No model answers for the agent (balancer nodes or %s); using the normal flow.",
+                        self.settings.llm_url)
         return ok
 
     def _mark_down(self) -> None:
@@ -462,7 +446,7 @@ class Agent:
         writer({"type": "sources", "sources": sources.items})
         writer({"type": "delta", "text": text})
         return {"answer": {"status": "answered", "text": text, "citations": citations}, "proposals": proposed,
-                "model": cfg["model"] or "agent"}
+                "model": AGENT_MODEL_NAME}
 
     async def aclose(self) -> None:
         for client in [*self._old_clients, self._client]:

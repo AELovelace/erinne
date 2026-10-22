@@ -670,6 +670,83 @@
     catch (e) { $("admin-group").replaceChildren(el("p", "error", e.message)); }
   }
 
+  // -------------------------------------------------------- balancer nodes
+  let balancerTimer = null;
+
+  function balancerRow(n) {
+    let stateText;
+    if (n.reachable === null) stateText = "not asked yet";
+    else if (!n.reachable) stateText = "✗ " + n.error;
+    else if (n.sitting_out_s) stateText = "✗ skipped for " + n.sitting_out_s + " s: " + n.error;
+    else if (!n.ready) stateText = "answering, but no model is ready";
+    else stateText = "✓ " + n.models.join(", ");
+    const bad = n.reachable === false || n.sitting_out_s > 0;
+    return [n.url, el("span", "small" + (bad ? " error" : ""), stateText), n.ready ? n.in_flight + " / " + n.slots : "–",
+            String(n.sent_last_hour), n.polled_s_ago === null ? "–" : n.polled_s_ago + " s ago"];
+  }
+
+  function renderBalancer(data) {
+    const box = $("balancer-settings");
+    box.replaceChildren();
+    box.appendChild(el("p", "muted", "mnemerynne-balancer addresses, separated by commas. Each answer goes to " +
+      "the node with the fewest requests per slot; a node that fails sits out for 30 seconds and the next one " +
+      "is used. With none set, or none answering, answers come from " + data.fallback + "."));
+    const form = el("form");
+    const grid = el("div", "agent-settings");
+    const field = function (label, id, control) {
+      control.id = id;
+      const l = el("label", "small", label);
+      l.htmlFor = id;
+      grid.append(l, control);
+      return control;
+    };
+    const nodes = field("Nodes", "balancer-nodes", agentInput("text", data.nodes.join(", ")));
+    nodes.placeholder = "http://10.0.5.20:9180, http://10.0.5.21:9180";
+    const key = field("API key", "balancer-key", agentInput("password", ""));
+    key.placeholder = data.api_key_set ? "Set; leave blank to keep" : "BALANCER_API_KEY from the balancer";
+    key.autocomplete = "off";
+    form.appendChild(grid);
+    const actions = el("div", "ax-new");
+    const save = el("button", "small", "Save");
+    save.type = "submit";
+    actions.appendChild(save);
+    actions.appendChild(el("span", "small muted", "Each node is checked with the key before the list is saved."));
+    form.appendChild(actions);
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      const body = { nodes: nodes.value.trim() };
+      if (key.value) body.api_key = key.value;
+      save.disabled = true;
+      try { renderBalancer(await api("PUT", "/api/admin/settings/balancer", body)); }
+      catch (err) { showError(err.message); }
+      finally { save.disabled = false; }
+    });
+    box.appendChild(form);
+    const statusBox = el("div", "table-wrap");
+    statusBox.id = "balancer-status";
+    box.appendChild(statusBox);
+    renderBalancerStatus(data.status);
+  }
+
+  function renderBalancerStatus(rows) {
+    const wrap = $("balancer-status");
+    if (!wrap) return;
+    if (!rows.length) { wrap.replaceChildren(); return; }
+    wrap.replaceChildren(table(["Node", "State", "In flight / slots", "Answers (1 h)", "Checked"], rows.map(balancerRow)));
+  }
+
+  async function loadBalancer() {
+    try { renderBalancer(await api("GET", "/api/admin/settings/balancer")); }
+    catch (e) { $("balancer-settings").replaceChildren(el("p", "error", e.message)); return; }
+    // Keep the state column live while Settings is open (only the table; typing isn't disturbed).
+    clearInterval(balancerTimer);
+    balancerTimer = setInterval(async function () {
+      if (state.tab !== "settings" || document.hidden) return;
+      try { renderBalancerStatus((await api("GET", "/api/admin/settings/balancer")).status); } catch (e) { /* next time */ }
+    }, 5000);
+  }
+
   // ---------------------------------------------------------- Erynne agent
   function agentField(grid, label, control) {
     const id = "agent-" + label.toLowerCase().replace(/[^a-z]+/g, "-");
@@ -720,20 +797,11 @@
 
     const m = data.model;
     box.appendChild(el("h3", "ax-h small", "Agent model"));
-    box.appendChild(el("p", "small muted", "An OpenAI-compatible server for the agent, separate from the answer " +
-      "model, e.g. a llama-server started with --jinja (Qwen3-8B), or later a balancer in front of several. " +
-      "When it's unset or doesn't answer, everyone gets the normal answers."));
+    box.appendChild(el("p", "small muted", "The agent uses the same model as the answers: the balancer nodes " +
+      "above, the least busy first, then " + data.fallback + " when none answers. If nothing answers, " +
+      "everyone gets the normal answers. These are its limits:"));
     const form = el("form");
     const grid = el("div", "agent-settings");
-    const url = agentField(grid, "Address", agentInput("url", m.url));
-    url.placeholder = "http://127.0.0.1:8083";
-    const model = agentField(grid, "Model name", agentInput("text", m.model));
-    model.placeholder = "qwen3-8b (recorded with answers)";
-    const key = agentField(grid, "API key", agentInput("password", ""));
-    key.placeholder = m.api_key_set ? "Set; leave blank to keep" : "None (optional)";
-    key.autocomplete = "off";
-    let removeKey = null;
-    if (m.api_key_set) removeKey = agentField(grid, "Remove the key", agentInput("checkbox", false));
     const timeout = agentField(grid, "Timeout (seconds)", agentInput("number", m.timeout));
     const steps = agentField(grid, "Most tool steps", agentInput("number", m.max_steps));
     const maxTokens = agentField(grid, "Tokens per turn", agentInput("number", m.max_tokens));
@@ -744,18 +812,18 @@
     const save = el("button", "small", "Save");
     save.type = "submit";
     actions.appendChild(save);
-    const reach = data.reachable === null ? (m.url ? "not checked" : "not set: the agent is off")
-      : data.reachable ? "✓ answering" : "✗ not answering: everyone gets the normal answers";
+    const via = data.nodes ? data.nodes + " balancer node" + (data.nodes === 1 ? "" : "s") + " or " + data.fallback
+      : data.fallback;
+    const reach = data.reachable === null ? "not checked"
+      : data.reachable ? "✓ answering (" + via + ")" : "✗ not answering (" + via + "): everyone gets the normal answers";
     actions.appendChild(el("span", "small " + (data.reachable === false ? "error" : "muted"), "Model: " + reach));
     form.appendChild(actions);
     form.addEventListener("submit", async function (e) {
       e.preventDefault();
       showError("");
-      const body = { url: url.value.trim(), model: model.value.trim(), timeout: Number(timeout.value),
-                     max_steps: Number(steps.value), max_tokens: Number(maxTokens.value),
-                     reasoning_tokens: Number(reasoning.value), thinking: thinking.checked };
-      if (key.value) body.api_key = key.value;
-      else if (removeKey && removeKey.checked) body.api_key = "";
+      const body = { timeout: Number(timeout.value), max_steps: Number(steps.value),
+                     max_tokens: Number(maxTokens.value), reasoning_tokens: Number(reasoning.value),
+                     thinking: thinking.checked };
       try { renderAgent(await api("PUT", "/api/admin/settings/agent-model", body)); }
       catch (err) { showError(err.message); }
     });
@@ -785,7 +853,7 @@
     });
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
-    if (tab === "settings" && !updatesLoaded) { loadUpdates(false); loadAdminGroup(); loadAgent(); }
+    if (tab === "settings" && !updatesLoaded) { loadUpdates(false); loadAdminGroup(); loadBalancer(); loadAgent(); }
     if (tab === "accounts") loadAccounts();
     if (tab === "apis" && window.ErynneApis) window.ErynneApis.load();   // admin_apis.js
   }
