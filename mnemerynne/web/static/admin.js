@@ -792,11 +792,31 @@
     note.dataset.kept = "1";
   }
 
+  // Microsoft 365 accounts the person linked on the Connect page (m365.py).
+  function microsoftSection(u, linked) {
+    const s = dlgSection("Microsoft 365");
+    if (!linked.length) {
+      s.appendChild(el("p", "small muted", "No Microsoft 365 account linked. They link their own on the Connect page."));
+      return s;
+    }
+    linked.forEach(function (a) {
+      const p = el("p", "small");
+      p.textContent = a.upn + " · " + a.tenant + (a.status === "relink" ? " · needs linking again" : "") + " ";
+      p.appendChild(button("Unlink", "link danger small", function () {
+        if (!confirm("Unlink " + a.upn + " from " + u.username + "? Erynne stops reaching its SharePoint and mail.")) return;
+        accountDo(u.id, "DELETE", "/api/admin/m365/accounts/" + a.id);
+      }));
+      s.appendChild(p);
+    });
+    return s;
+  }
+
   async function openAccount(id) {
     const dlg = $("dlg-user");
-    let u;
+    let u, linked = [];
     try { u = await api("GET", "/api/admin/users/" + id); }
     catch (e) { showError(e.message); return; }
+    try { linked = (await api("GET", "/api/admin/users/" + id + "/m365")).accounts; } catch (e) { /* older server */ }
     $("user-title").textContent = u.username + (u.active ? "" : " (deactivated)");
     const body = $("user-body");
     // Keep a password message the reset just wrote across the redraw.
@@ -804,7 +824,8 @@
     const kept = note && note.dataset.kept ? note.textContent : "";
     const since = el("p", "muted small", "Since " + (u.created_at || "").slice(0, 10) +
       (u.admin_via ? " · " + ADMIN_VIA[u.admin_via] : "") + (u.is_you ? " · this is you" : ""));
-    body.replaceChildren(since, passwordSection(u), accessSection(u), domainSection(u), groupsSection(u), claudeSection(u));
+    body.replaceChildren(since, passwordSection(u), accessSection(u), domainSection(u), groupsSection(u), claudeSection(u),
+                         microsoftSection(u, linked));
     if (kept) pwNote(kept);
     if (!dlg.open) { userError(""); dlg.showModal(); }
   }
@@ -1073,7 +1094,10 @@
     });
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
-    if (tab === "settings" && !updatesLoaded) { loadUpdates(false); loadAdminGroup(); loadBalancer(); loadAgent(); }
+    if (tab === "settings" && !updatesLoaded) {
+      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadAgent();
+      if (window.ErynneM365) window.ErynneM365.load();   // admin_m365.js
+    }
     if (tab === "accounts") loadAccounts();
     if (tab === "apis" && window.ErynneApis) window.ErynneApis.load();   // admin_apis.js
   }

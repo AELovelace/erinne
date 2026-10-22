@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     # while this file is missing or old.
     ad_snapshot: Path = Path("/var/lib/mnemerynne-ad/snapshot.txt")
 
+    # Microsoft 365 (mnemerynne/m365.py): the multitenant app registration that
+    # people link their Microsoft accounts through, on the Connect page.
+    # Tenants are added on Settings → Microsoft 365. Empty: no Microsoft 365.
+    m365_client_id: str = ""
+    m365_client_secret: str = ""
+
     # Libraries and inboxes stored on the SMB share: <share_root>/<Library>/…
     # and <share_root>/<users_folder>/<username>/…. The folders on disk are the
     # source of truth; the worker scans them every share_scan_seconds, and files

@@ -434,6 +434,57 @@ How it behaves:
 - **The balancers don't know about each other.** Each one spreads requests
   over its own cards. Spreading them between boxes happens here.
 
+## 5i. Microsoft 365
+
+People keep signing in to Mnemerynne with their Mnemerynne account. On the
+**Connect** page they then link their Microsoft 365 account(s), one per
+tenant (a person working for two brands links both). Linking is a normal
+Microsoft sign-in, so MFA and Conditional Access apply. It gives Mnemerynne
+delegated access *as that person*, so Microsoft's own permissions decide what
+it can open. Mnemerynne never sends, deletes or moves mail, and asks for no
+permission to do so.
+
+**One app registration, in the home tenant:**
+
+1. Entra admin center → App registrations → New registration: `Mnemerynne`,
+   *Accounts in any organizational directory (multitenant)*, redirect URI
+   **Web** `https://mnemerynne.io/auth/microsoft/callback` (Settings →
+   Microsoft 365 shows the exact one).
+2. Certificates & secrets → New client secret. Put it and the client ID in
+   `/etc/mnemerynne/mnemerynne.env`, then restart:
+   ```sh
+   MNEMERYNNE_M365_CLIENT_ID=<application (client) id>
+   MNEMERYNNE_M365_CLIENT_SECRET=<secret value>
+   ```
+3. API permissions → Microsoft Graph:
+   - **Delegated:** `openid`, `profile`, `email`, `offline_access`,
+     `User.Read`, `Files.Read.All`, `Mail.Read`, `Mail.Read.Shared`,
+     `Calendars.Read` and `Mail.ReadWrite` (drafts only).
+   - **Application:** `Sites.Selected` (SharePoint indexing, granted per site)
+     and `GroupMember.Read.All` (Entra groups).
+
+**Each tenant:**
+
+1. Settings → Microsoft 365 → add it by one of its domains (or its tenant
+   ID), with a name and who links accounts there:
+   - **Synced from our AD:** people may only link the Microsoft account
+     whose on-premises logon name matches their linked domain account
+     (section 5c).
+   - **Separate staff:** anyone may link an account they can sign in to.
+     Create their Mnemerynne user on Access → Accounts first.
+2. An admin **of that tenant** opens its **Grant consent** link once and
+   accepts. **Check** then confirms the app can sign in there.
+3. A tenant whose admins won't consent to an outside app can register its own
+   single-tenant app: enter its client ID and secret on the tenant's row. It
+   then gets its own "Link your … account" button on the Connect page.
+
+Linked accounts show on the Connect page and in each user's dialog on Access →
+Accounts, where admins can unlink them. Removing a tenant unlinks everyone's
+accounts in it. Refresh tokens are stored encrypted with a key derived from
+`MNEMERYNNE_SECRET_KEY`. If Microsoft stops accepting one (password change,
+account disabled, sessions revoked), that account shows *needs linking
+again*.
+
 ## 6. Check
 
 ```sh

@@ -7,6 +7,15 @@
   <p class="muted">Claude can search your documents through {{ assistant_name }} and answer with citations that link back here.
     Passages Claude reads are sent to Anthropic as part of your chat, so only what's listed below is reachable.</p>
 
+  <section id="m365-section" hidden>
+    <h2 class="admin-section" id="m365-title">Microsoft 365</h2>
+    <p class="muted small">Link your Microsoft 365 work account so {{ assistant_name }} can include SharePoint in your
+      answers, and, if your team uses {{ assistant_name }}'s tools, read your mail and calendar and draft replies for you
+      to review. Microsoft decides what each account may open. {{ assistant_name }} never sends, deletes or moves mail,
+      and none of it goes to Claude. You still sign in to {{ assistant_name }} with your {{ assistant_name }} account.</p>
+    <div id="m365" aria-live="polite"><p class="muted small">Loading…</p></div>
+  </section>
+
   <h2 class="admin-section">What Claude can search for you</h2>
   <ul class="grants" id="shared"><li class="muted small">Loading…</li></ul>
 
@@ -45,4 +54,5 @@
 </main>
 <script src="{{ static('picker.js') }}"></script>
 <script src="{{ static('connect.js') }}"></script>
+<script src="{{ static('m365.js') }}"></script>
 {% endblock %}
