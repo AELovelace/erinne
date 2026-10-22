@@ -773,6 +773,10 @@ def main(argv: list[str] | None = None) -> None:
     import sys
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    # httpx logs every request's full URL at INFO; SharePoint download links carry a
+    # temporary access token (tempauth=…), which must never reach the journal.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["migrate-microjames"]:
         run_migrate_microjames(argv[1:])

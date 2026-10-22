@@ -507,10 +507,10 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
                 ok = True
                 return out
             finally:
-                conn.execute("INSERT INTO mcp_calls(user_id, token_id, tool, args, file_ids, ok, ms) "
-                             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                             (caller.user_id, caller.token_id, name, json.dumps(args), json.dumps(file_ids),
-                              int(ok), int((time.monotonic() - started) * 1000)))
+                conn.execute("INSERT INTO mcp_calls(user_id, token_id, grant_id, tool, args, file_ids, ok, ms) "
+                             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                             (caller.user_id, caller.token_id, caller.grant_id, name, json.dumps(args),
+                              json.dumps(file_ids), int(ok), int((time.monotonic() - started) * 1000)))
                 conn.close()
 
         return await anyio.to_thread.run_sync(work)
@@ -643,6 +643,16 @@ def _caller_of(ctx: Context) -> Caller:
     return caller
 
 
+def public_base(settings: Settings, headers: dict[str, str], scope: Scope | None = None) -> str:
+    """This server's address as the outside world uses it: MNEMERYNNE_PUBLIC_URL,
+    or the Host the request came in on (https when the proxy says so)."""
+    if settings.public_url:
+        return settings.public_url.rstrip("/")
+    host = headers.get("x-forwarded-host") or headers.get("host") or "localhost"
+    proto = headers.get("x-forwarded-proto") or (scope or {}).get("scheme") or "https"
+    return f"{proto}://{host}"
+
+
 class McpEndpoint:
     """ASGI endpoint for /mcp: checks the bearer token and the rate limit, then
     hands the request to the SDK's (stateless, JSON) session manager."""
@@ -655,17 +665,20 @@ class McpEndpoint:
             stateless_http=True, json_response=True,
             transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))
         self.manager = server.session_manager
-        self.recent: dict[int, deque[float]] = defaultdict(deque)
+        self.recent: dict[str, deque[float]] = defaultdict(deque)
 
     def _verify(self, token: str | None) -> Caller | None:
+        """A personal token (the Desktop extension) or an OAuth access token (claude.ai, Claude Code)."""
+        from mnemerynne import oauth
+
         conn = db.connect(self.settings.db_path)
         try:
-            return api_tokens.verify(conn, token)
+            return api_tokens.verify(conn, token) or oauth.verify(conn, token)
         finally:
             conn.close()
 
-    def _over_limit(self, token_id: int) -> bool:
-        now, window = time.monotonic(), self.recent[token_id]
+    def _over_limit(self, key: str) -> bool:
+        now, window = time.monotonic(), self.recent[key]
         while window and now - window[0] > 60:
             window.popleft()
         if len(window) >= self.settings.mcp_calls_per_minute:
@@ -678,11 +691,15 @@ class McpEndpoint:
         match = re.fullmatch(r"Bearer\s+(\S+)", headers.get("authorization", ""), re.IGNORECASE)
         caller = await anyio.to_thread.run_sync(self._verify, match.group(1) if match else None)
         if caller is None:
+            # Where OAuth clients (claude.ai, Claude Code) find out how to sign in (RFC 9728).
+            metadata = public_base(self.settings, headers, scope) + "/.well-known/oauth-protected-resource"
             response = JSONResponse({"error": "invalid_token",
                                      "error_description": "Missing, expired or revoked Mnemerynne token."},
-                                    status_code=401, headers={"WWW-Authenticate": 'Bearer realm="mnemerynne"'})
+                                    status_code=401, headers={"WWW-Authenticate":
+                                                              f'Bearer realm="mnemerynne", resource_metadata="{metadata}"'})
             return await response(scope, receive, send)
-        if scope["method"] == "POST" and self._over_limit(caller.token_id):
+        key = f"t{caller.token_id}" if caller.token_id is not None else f"g{caller.grant_id}"
+        if scope["method"] == "POST" and self._over_limit(key):
             response = JSONResponse({"error": "rate_limited",
                                      "error_description": "Too many requests; wait a minute."},
                                     status_code=429, headers={"Retry-After": "60"})

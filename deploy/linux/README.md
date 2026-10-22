@@ -130,6 +130,38 @@ everything is on by default.
 3. Copy `mnemerynne.mcpb` to `/var/lib/mnemerynne/mnemerynne.mcpb` (owner mnemerynne). The
    **Claude** page then offers it for download.
 
+**Claude on the web and phone (claude.ai connector) and Claude Code.**
+Mnemerynne is also a remote MCP server with OAuth sign-in, so Claude can
+connect without a pasted token. The Connect page shows the address
+(`https://YOUR-HOSTNAME/mcp`) and the steps:
+- **Team or Enterprise:** an organisation owner adds it once as a custom
+  connector. Each person then presses Connect in their own Claude settings.
+- **Personal plans:** people add the custom connector themselves.
+- **Claude Code:** `claude mcp add --transport http mnemerynne https://YOUR-HOSTNAME/mcp`,
+  then `/mcp` to sign in.
+
+Claude then sends the person to Mnemerynne to sign in with their Mnemerynne
+account and approve. They choose whether it may edit files. After that it works
+in claude.ai, the phone apps and Desktop alike. Each person's connections are
+listed on their Connect page, and on Access → Accounts in their dialog, where
+admins can disconnect them.
+
+How it's locked down:
+- **Only Claude can register:** apps whose return address is claude.ai or
+  claude.com, or this computer's for Claude Code. Anything else is refused.
+- **Short-lived tokens:** access tokens last an hour; refresh tokens last 90
+  days and are replaced on each use. A refresh token used twice ends the
+  connection, since it was copied.
+- **Same limits as before:** it acts as the person, limited to what's shared
+  with Claude, as a personal token is.
+- **Revoke everything:** "Revoke Claude tokens" and `revoke-tokens` also end
+  OAuth connections, and deactivating a user stops them at once.
+
+The OAuth endpoints (`/.well-known/oauth-*`, `/oauth/*`) must be reachable
+from the internet, like `/mcp`, because claude.ai's servers call them. Caddy
+already passes everything through. Keep `MNEMERYNNE_PUBLIC_URL` set to the
+public address: it's the issuer Claude checks.
+
 To cut someone off at once: **Access → Revoke Claude tokens**, or
 `sudo mnemerynne-admin revoke-tokens USERNAME`. **Access → Claude activity**
 shows every search and which files' text went back to Claude.
@@ -211,6 +243,12 @@ away and suggests a password you hand over. Clicking a name opens their account:
 You can't deactivate yourself, or remove your own admin role unless the domain
 admin group keeps you an admin. Every change goes in **Recent changes**.
 Deleting a user is still done with `mnemerynne-admin delete-user`.
+
+**Everyone's own Settings page** (the Settings tab) shows their account, role,
+domain account and groups. It lets them change their password, which needs
+the current one; wrong guesses count towards the sign-in lockout. They can
+also sign out every other browser and link their Microsoft 365 accounts
+(section 5i).
 
 **Group memberships come from AD itself, refreshed every 5 minutes.** Winbind
 only refreshes someone's groups when they sign in to this box, and it also
@@ -436,8 +474,8 @@ How it behaves:
 
 ## 5i. Microsoft 365
 
-People keep signing in to Mnemerynne with their Mnemerynne account. On the
-**Connect** page they then link their Microsoft 365 account(s), one per
+People keep signing in to Mnemerynne with their Mnemerynne account. On their
+**Settings** page they then link their Microsoft 365 account(s), one per
 tenant (a person working for two brands links both). Linking is a normal
 Microsoft sign-in, so MFA and Conditional Access apply. It gives Mnemerynne
 delegated access *as that person*, so Microsoft's own permissions decide what
@@ -476,9 +514,9 @@ permission to do so.
    accepts. **Check** then confirms the app can sign in there.
 3. A tenant whose admins won't consent to an outside app can register its own
    single-tenant app: enter its client ID and secret on the tenant's row. It
-   then gets its own "Link your … account" button on the Connect page.
+   then gets its own "Link your … account" button on the Settings page.
 
-Linked accounts show on the Connect page and in each user's dialog on Access →
+Linked accounts show on the Settings page and in each user's dialog on Access →
 Accounts, where admins can unlink them. Removing a tenant unlinks everyone's
 accounts in it and removes its SharePoint libraries. Refresh tokens are stored
 encrypted with a key derived from `MNEMERYNNE_SECRET_KEY`. If Microsoft stops

@@ -816,11 +816,31 @@
     note.dataset.kept = "1";
   }
 
-  // Microsoft 365 accounts the person linked on the Connect page (m365.py).
+  // Claude connected through OAuth (claude.ai connectors, Claude Code; oauth.py).
+  function connectionsSection(u, connected) {
+    const s = dlgSection("Claude connections");
+    if (!connected.length) {
+      s.appendChild(el("p", "small muted", "None. They connect claude.ai or Claude Code from the Connect page's address."));
+      return s;
+    }
+    connected.forEach(function (c) {
+      const p = el("p", "small");
+      p.textContent = c.app + (c.can_edit ? " (may edit)" : " (search only)") + ", last used " +
+        (c.last_used_at ? c.last_used_at.slice(0, 16) + " UTC" : "never") + " ";
+      p.appendChild(button("Disconnect", "link danger small", function () {
+        if (!confirm("Disconnect " + c.app + " for " + u.username + "?")) return;
+        accountDo(u.id, "DELETE", "/api/admin/oauth/connections/" + c.id);
+      }));
+      s.appendChild(p);
+    });
+    return s;
+  }
+
+  // Microsoft 365 accounts the person linked on the Settings page (m365.py).
   function microsoftSection(u, linked) {
     const s = dlgSection("Microsoft 365");
     if (!linked.length) {
-      s.appendChild(el("p", "small muted", "No Microsoft 365 account linked. They link their own on the Connect page."));
+      s.appendChild(el("p", "small muted", "No Microsoft 365 account linked. They link their own on the Settings page."));
       return s;
     }
     linked.forEach(function (a) {
@@ -841,6 +861,8 @@
     try { u = await api("GET", "/api/admin/users/" + id); }
     catch (e) { showError(e.message); return; }
     try { linked = (await api("GET", "/api/admin/users/" + id + "/m365")).accounts; } catch (e) { /* older server */ }
+    let connected = [];
+    try { connected = (await api("GET", "/api/admin/users/" + id + "/connections")).connections; } catch (e) { /* older */ }
     $("user-title").textContent = u.username + (u.active ? "" : " (deactivated)");
     const body = $("user-body");
     // Keep a password message the reset just wrote across the redraw.
@@ -849,7 +871,7 @@
     const since = el("p", "muted small", "Since " + (u.created_at || "").slice(0, 10) +
       (u.admin_via ? " · " + ADMIN_VIA[u.admin_via] : "") + (u.is_you ? " · this is you" : ""));
     body.replaceChildren(since, passwordSection(u), accessSection(u), domainSection(u), groupsSection(u), claudeSection(u),
-                         microsoftSection(u, linked));
+                         connectionsSection(u, connected), microsoftSection(u, linked));
     if (kept) pwNote(kept);
     if (!dlg.open) { userError(""); dlg.showModal(); }
   }

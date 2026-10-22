@@ -33,13 +33,16 @@ from mnemerynne.config import Settings, get_settings
 from mnemerynne.graph import Deps, build_graph
 from mnemerynne.router import load_router
 from mnemerynne.web import (admin, admin_apis, agent as agent_pages, apis as api_pages, balancer as balancer_pages, chat,
-                            files, m365 as m365_pages, memories, tokens)
+                            files, m365 as m365_pages, memories, oauth as oauth_pages, settings as settings_pages,
+                            tokens)
 from mnemerynne.web.deps import LoginRequired, api_user, get_db, is_admin, page_user
 
 log = logging.getLogger("mnemerynne.web")
 
 _HERE = Path(__file__).parent
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+# Called by Claude's servers with OAuth credentials, never with the session cookie.
+_OAUTH_API = {"/oauth/token", "/oauth/register", "/oauth/revoke"}
 
 
 def _cross_site(request: Request) -> bool:
@@ -166,7 +169,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     async def _csrf_guard(request: Request, call_next):
         # The session cookie is SameSite=lax, which still lets other sites'
         # top-level form POSTs through; refuse anything cross-site that changes data.
-        if request.method not in _SAFE_METHODS and _cross_site(request):
+        if request.method not in _SAFE_METHODS and _cross_site(request) and request.url.path not in _OAUTH_API:
             return JSONResponse({"detail": "Cross-site request refused."}, status_code=status.HTTP_403_FORBIDDEN)
         return await call_next(request)
 
@@ -192,7 +195,9 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(admin_apis.router)
     app.include_router(agent_pages.router)
     app.include_router(m365_pages.router)
+    app.include_router(oauth_pages.router)
     app.include_router(balancer_pages.router)
+    app.include_router(settings_pages.router)
 
     # MCP for Claude Desktop: bearer-token auth, read-only tools (mnemerynne/mcp_server.py).
     mcp = mcp_server.build_server(settings, lambda: app.state.embedder, lambda: app.state.directory)
@@ -230,10 +235,13 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             throttle.record_failure(username, client_ip)
             return _login(request, "Invalid username or password.", status.HTTP_401_UNAUTHORIZED)
         throttle.clear(username, client_ip)
+        # Back to where signing in was needed (only Claude's connect page asks for that).
+        after = request.session.get("after_login") or ""
         request.session.clear()
         request.session["user_id"] = user["id"]
         request.session["epoch"] = user["session_epoch"]
-        return RedirectResponse("/",status_code=status.HTTP_303_SEE_OTHER)
+        target = after if after.startswith("/oauth/authorize?") else "/"
+        return RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
 
     @app.post("/logout")
     def logout(request: Request):

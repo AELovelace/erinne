@@ -2,7 +2,7 @@
 people link to their Mnemerynne user, their tokens, and a small Graph client.
 
 People sign in to Mnemerynne with their Mnemerynne account, as always. On the
-Connect page they then *link* one or more Microsoft 365 accounts (one per
+Settings page they then *link* one or more Microsoft 365 accounts (one per
 tenant, e.g. Eternal Hotels and Gasco). Linking is a normal Microsoft sign-in
 (MFA and Conditional Access apply) whose result is a refresh token for that
 account, kept encrypted (apis.encrypt_secret). SharePoint and mail use it to
@@ -264,7 +264,7 @@ def finish_link(conn: sqlite3.Connection, settings: Settings, session: dict, use
     """Finish linking: check everything, store the account and its token. Returns the identity."""
     pending = session.pop("m365_link", None)
     if not pending or not secrets.compare_digest(str(pending.get("state", "")), state or ""):
-        raise M365Error("That Microsoft sign-in didn't match one started here; start again from the Connect page.")
+        raise M365Error("That Microsoft sign-in didn't match one started here; start again from the Settings page.")
     if pending["user_id"] != user["id"] or time.time() - pending["at"] > LINK_SECONDS:
         raise M365Error("That Microsoft sign-in took too long or belongs to another session; start again.")
     chosen = tenant(conn, pending["tenant_row"]) if pending.get("tenant_row") else None
@@ -281,7 +281,7 @@ def finish_link(conn: sqlite3.Connection, settings: Settings, session: dict, use
     tid = str(claims.get("tid", "")).lower()
     if claims.get("aud") != client_id or claims.get("nonce") != pending["nonce"] \
             or float(claims.get("exp", 0)) < time.time() - 300 or claims.get("iss") != f"{AUTHORITY}/{tid}/v2.0":
-        raise M365Error("Microsoft's answer didn't check out; start again from the Connect page.")
+        raise M365Error("Microsoft's answer didn't check out; start again from the Settings page.")
     row = by_tid(conn, tid)
     if row is None or not row["enabled"]:
         raise M365Error("That Microsoft account belongs to a directory Mnemerynne doesn't work with. "
@@ -289,12 +289,12 @@ def finish_link(conn: sqlite3.Connection, settings: Settings, session: dict, use
     if chosen is not None and row["id"] != chosen["id"]:
         raise M365Error(f"That account isn't in {chosen['label']}; pick your {chosen['label']} account.")
     if row["client_id"] and chosen is None:
-        raise M365Error(f"{row['label']} uses its own sign-in; use its button on the Connect page.")
+        raise M365Error(f"{row['label']} uses its own sign-in; use its button on the Settings page.")
     me = Graph(body["access_token"]).get("/me", {"$select": "id,userPrincipalName,displayName,"
                                                           "onPremisesSamAccountName,onPremisesDomainName"})
     oid = str(claims.get("oid") or me.get("id") or "").lower()
     if not oid or oid != str(me.get("id", "")).lower():
-        raise M365Error("Microsoft's answer didn't check out; start again from the Connect page.")
+        raise M365Error("Microsoft's answer didn't check out; start again from the Settings page.")
     if row["mode"] == "ad":
         sam = (me.get("onPremisesSamAccountName") or "").lower()
         if not user["ad_account"] or sam != user["ad_account"].lower():
@@ -348,7 +348,7 @@ def access_token(conn: sqlite3.Connection, settings: Settings, identity_id: int)
             raise NeedsRelink("That Microsoft account isn't linked any more.")
         refresh = apis.decrypt_secret(settings, row["refresh_enc"]) if row["status"] == "ok" else None
         if not refresh:
-            raise NeedsRelink(f"Your {row['label']} Microsoft account needs linking again (Connect page).")
+            raise NeedsRelink(f"Your {row['label']} Microsoft account needs linking again (Settings page).")
         t = tenant(conn, row["tenant_row"])
         client_id, secret = credentials(settings, t)
         with _http() as client:
@@ -361,7 +361,7 @@ def access_token(conn: sqlite3.Connection, settings: Settings, identity_id: int)
                 conn.execute("UPDATE m365_identities SET status = 'relink', refresh_enc = NULL WHERE id = ?",
                              (identity_id,))
                 log.info("Microsoft refused %s's token (%s); it needs linking again.", row["upn"], body.get("error"))
-                raise NeedsRelink(f"Your {row['label']} Microsoft account needs linking again (Connect page).")
+                raise NeedsRelink(f"Your {row['label']} Microsoft account needs linking again (Settings page).")
             raise M365Error(_why(body, "Microsoft didn't renew the sign-in"))
         conn.execute("UPDATE m365_identities SET refresh_enc = COALESCE(?, refresh_enc), "
                      "last_used_at = datetime('now') WHERE id = ?",

@@ -119,7 +119,7 @@ def _login(client, name):
 
 
 def _link(client, ms, tid, oid, upn, sam=None, tenant=None, *, state=None, nonce=None):
-    """Run the link round trip; returns the redirect back to /connect."""
+    """Run the link round trip; returns the redirect back to /settings."""
     started = client.get("/m365/link" + (f"?tenant={tenant}" if tenant else ""), follow_redirects=False)
     assert started.status_code == 303, started.text
     q = parse_qs(urlsplit(started.headers["location"]).query)

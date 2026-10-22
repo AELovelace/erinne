@@ -5,6 +5,7 @@
     <a href="/files" {% if active == 'files' %}aria-current="page"{% endif %}>Files</a>
     <a href="/memories" {% if active == 'memories' %}aria-current="page"{% endif %}>Memories</a>
     <a href="/connect" {% if active == 'connect' %}aria-current="page"{% endif %}>Claude</a>
+    <a href="/settings" {% if active == 'settings' %}aria-current="page"{% endif %}>Settings</a>
     {% if is_admin %}<a href="/admin/libraries" {% if active == 'admin' %}aria-current="page"{% endif %}>Access</a>{% endif %}
   </nav>
   <span class="muted push-right">{{ user.username }}{% if is_admin %} · admin{% endif %}</span>

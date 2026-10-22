@@ -1,4 +1,4 @@
-/* Connect page: link Microsoft 365 accounts (one per tenant) so Erynne can
+/* Settings page: link Microsoft 365 accounts (one per tenant) so Erynne can
    reach SharePoint and, for the agent group, mail and calendar as you.
    All text goes through textContent, never innerHTML. */
 (function () {

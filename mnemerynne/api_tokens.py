@@ -24,6 +24,7 @@ class Caller:
     username: str
     token_id: int
     can_edit: bool = False     # the token may change files (where editing is otherwise allowed)
+    grant_id: int | None = None  # an OAuth connection (oauth.py) instead of a personal token
 
 
 def _hash(token: str) -> str:
@@ -90,5 +91,12 @@ def revoke(conn: sqlite3.Connection, token_id: int, user_id: int | None = None) 
 
 
 def revoke_all(conn: sqlite3.Connection, user_id: int) -> int:
-    return conn.execute("UPDATE api_tokens SET revoked_at = datetime('now') "
-                        "WHERE user_id = ? AND revoked_at IS NULL", (user_id,)).rowcount
+    """Every personal token, and every Claude connection made through OAuth (oauth.py)."""
+    count = conn.execute("UPDATE api_tokens SET revoked_at = datetime('now') "
+                         "WHERE user_id = ? AND revoked_at IS NULL", (user_id,)).rowcount
+    grants = [r[0] for r in conn.execute("SELECT id FROM oauth_grants WHERE user_id = ? AND revoked_at IS NULL",
+                                         (user_id,))]
+    for grant_id in grants:
+        conn.execute("UPDATE oauth_grants SET revoked_at = datetime('now') WHERE id = ?", (grant_id,))
+        conn.execute("DELETE FROM oauth_tokens WHERE grant_id = ?", (grant_id,))
+    return count + len(grants)

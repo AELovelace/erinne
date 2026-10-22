@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     ad_snapshot: Path = Path("/var/lib/mnemerynne-ad/snapshot.txt")
 
     # Microsoft 365 (mnemerynne/m365.py): the multitenant app registration that
-    # people link their Microsoft accounts through, on the Connect page.
+    # people link their Microsoft accounts through, on the Settings page.
     # Tenants are added on Settings → Microsoft 365. Empty: no Microsoft 365.
     m365_client_id: str = ""
     m365_client_secret: str = ""

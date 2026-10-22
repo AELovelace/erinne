@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Connect · {{ assistant_name }}{% endblock %}
+{% block body %}
+<main class="login">
+  <div class="login-card consent">
+    <h1>🌸 {{ assistant_name }}</h1>
+    {% if error %}
+    <p class="error" role="alert">{{ error }}</p>
+    {% else %}
+    <p><strong>{{ app }}</strong> wants to use {{ assistant_name }} as <strong>{{ user["username"] }}</strong>.</p>
+    <p class="muted small">It asked as “{{ name }}” and will be sent back to <code>{{ host }}</code>.</p>
+    <p>It will be able to search and read, with citations:</p>
+    {% if places %}
+    <ul class="grants">{% for p in places %}<li>{{ "📥" if p == "My inbox" else "📚" }} {{ p }}</li>{% endfor %}</ul>
+    {% else %}
+    <p class="muted small">Nothing yet: no library is shared with Claude for you. An admin can change that.</p>
+    {% endif %}
+    <p class="muted small">Passages it reads go to Anthropic as part of your chat. You can disconnect it any time on the
+      Connect page in {{ assistant_name }}.</p>
+    <form method="post" action="/oauth/authorize">
+      <input type="hidden" name="nonce" value="{{ nonce }}">
+      <label class="check small"><input type="checkbox" name="can_edit" value="1" checked>
+        Let it create and change files in my Agents folder (and where admins allow AI edits); earlier versions are
+        always kept</label>
+      <div class="consent-actions">
+        <button type="submit" name="decision" value="allow">Allow</button>
+        <button type="submit" name="decision" value="deny" class="link">Deny</button>
+      </div>
+    </form>
+    {% endif %}
+  </div>
+</main>
+{% endblock %}

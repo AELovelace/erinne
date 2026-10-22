@@ -91,7 +91,7 @@
     const box = $("m365-settings");
     box.replaceChildren();
     box.appendChild(el("p", "muted", "People sign in to Mnemerynne as always, then link their Microsoft 365 accounts on " +
-      "the Connect page, one per tenant. Linked accounts let Erynne reach SharePoint, and for the agent group mail and " +
+      "the Settings page, one per tenant. Linked accounts let Erynne reach SharePoint, and for the agent group mail and " +
       "calendar, with Microsoft's own permissions. Nothing is ever sent, deleted or moved."));
     if (!data.configured) {
       box.appendChild(el("p", "error", "The shared app registration isn't set on the server (MNEMERYNNE_M365_CLIENT_ID and " +
@@ -164,7 +164,9 @@
         link.href = l.web_url || "#"; link.target = "_blank"; link.rel = "noopener";
         name.appendChild(link);
         if (l.status === "error") name.appendChild(el("div", "error small", l.error || "Sync failed"));
-        if (l.status === "syncing" || l.status === "new") name.appendChild(el("div", "muted small", "syncing…"));
+        if (l.status === "syncing" || l.status === "new") {
+          name.appendChild(el("div", "muted small", "syncing… " + (l.files ? l.files + " files so far" : "starting")));
+        }
         const actions = el("td");
         actions.append(button("Sync now", "link small", function () {
           change2("POST", "/api/admin/sharepoint/" + l.id + "/sync");
@@ -305,4 +307,7 @@
   }
 
   window.ErynneM365 = { load: load };
+  // admin.js shows the starting tab before this script runs: catch up if that was Settings.
+  const panel = document.querySelector('[data-panel="settings"]');
+  if (panel && !panel.hidden) load();
 })();

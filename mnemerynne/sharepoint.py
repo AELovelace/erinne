@@ -136,13 +136,37 @@ def sync_all(conn: sqlite3.Connection, settings: Settings) -> dict:
     return stats
 
 
+class Progress:
+    """Tells the journal how a sync is going, and keeps its claim alive: the
+    library's file count and sync_started_at are updated every few files, so a
+    long first sync isn't mistaken for a dead one (and the Settings row moves)."""
+
+    EVERY = 10
+
+    def __init__(self, conn: sqlite3.Connection, drive_row: int, name: str, total: int):
+        self.conn, self.drive_row, self.name, self.total, self.done = conn, drive_row, name, total, 0
+
+    def file(self, action: str, item_name: str) -> None:
+        self.done += 1
+        log.info("SharePoint %s: %s %s (%d of %d)", self.name, action, item_name, self.done, self.total)
+        if self.done % self.EVERY == 0:
+            self.beat()
+
+    def beat(self) -> None:
+        count = self.conn.execute("SELECT count(*) FROM files f JOIN sharepoint_drives d ON d.collection_id = "
+                                  "f.collection_id WHERE d.id = ? AND f.deleted_at IS NULL",
+                                  (self.drive_row,)).fetchone()[0]
+        self.conn.execute("UPDATE sharepoint_drives SET files = ?, sync_started_at = datetime('now') WHERE id = ?",
+                          (count, self.drive_row))
+
+
 def sync_drive(conn: sqlite3.Connection, settings: Settings, drive_row: int) -> dict:
     """Bring one library up to date. Without a delta link (first sync, or
     Microsoft asked for a full one), everything not seen is removed after."""
     d = conn.execute("SELECT * FROM sharepoint_drives WHERE id = ?", (drive_row,)).fetchone()
     stats = {"added": 0, "changed": 0, "removed": 0, "skipped": 0}
-    # One sync per library at a time, across processes (the worker, "Sync now"); a claim older than an hour
-    # is from a sync that died.
+    # One sync per library at a time, across processes (the worker, "Sync now"). A running sync renews its
+    # claim every few files (Progress), so one not renewed for an hour died.
     if not conn.execute("UPDATE sharepoint_drives SET status = 'syncing', sync_started_at = datetime('now') "
                         "WHERE id = ? AND (status != 'syncing' OR sync_started_at < datetime('now', '-60 minutes'))",
                         (drive_row,)).rowcount:
@@ -159,13 +183,20 @@ def sync_drive(conn: sqlite3.Connection, settings: Settings, drive_row: int) -> 
                 raise
             full = True
             items, delta_link = _changes(graph, f"/drives/{d['drive_id']}/root/delta?$select={_SELECT}")
-        seen = _apply(conn, settings, d, token, items, stats)
+        name = conn.execute("SELECT name FROM collections WHERE id = ?", (d["collection_id"],)).fetchone()[0]
+        files = sum(1 for i in items if "file" in i and "deleted" not in i)
+        log.info("SharePoint %s: %s sync, %d change(s) from Microsoft, %d of them files", name,
+                 "full" if full else "update", len(items), files)
+        progress = Progress(conn, drive_row, name, files)
+        seen = _apply(conn, settings, d, token, items, stats, progress)
         if full:
             stats["removed"] += _sweep(conn, settings, d["collection_id"], seen)
         count = conn.execute("SELECT count(*) FROM files WHERE collection_id = ? AND deleted_at IS NULL",
                              (d["collection_id"],)).fetchone()[0]
         conn.execute("UPDATE sharepoint_drives SET delta_link = ?, last_sync_at = datetime('now'), status = 'ok', "
                      "error = NULL, files = ? WHERE id = ?", (delta_link, count, drive_row))
+        log.info("SharePoint %s: done; %d added, %d changed, %d removed, %d skipped, %d files in all", name,
+                 stats["added"], stats["changed"], stats["removed"], stats["skipped"], count)
     except (m365.M365Error, httpx.HTTPError, OSError) as exc:
         if conn.in_transaction:
             conn.execute("ROLLBACK")
@@ -189,7 +220,7 @@ def _changes(graph: m365.Graph, url: str) -> tuple[list[dict], str | None]:
 
 
 def _apply(conn: sqlite3.Connection, settings: Settings, d: sqlite3.Row, token: str, items: list[dict],
-           stats: dict) -> set[str]:
+           stats: dict, progress: Progress | None = None) -> set[str]:
     cid = d["collection_id"]
     seen: set[str] = set()
     root_ids = {i["id"] for i in items if "root" in i}
@@ -226,7 +257,7 @@ def _apply(conn: sqlite3.Connection, settings: Settings, d: sqlite3.Row, token: 
             seen.add(item["id"])
             known, parent = parent_of(item)
             if known:
-                _file(conn, settings, d, token, item, parent, stats)
+                _file(conn, settings, d, token, item, parent, stats, progress)
             else:
                 stats["skipped"] += 1
     return seen
@@ -252,13 +283,15 @@ def _folder(conn: sqlite3.Connection, cid: int, item: dict, parent: int | None) 
 
 
 def _file(conn: sqlite3.Connection, settings: Settings, d: sqlite3.Row, token: str, item: dict,
-          parent: int | None, stats: dict) -> None:
+          parent: int | None, stats: dict, progress: Progress | None = None) -> None:
+    note = progress.file if progress is not None else (lambda action, name: None)
     cid = d["collection_id"]
     row = conn.execute("SELECT id, display_name, folder_id, remote_etag, blob_sha256 FROM files "
                        "WHERE collection_id = ? AND remote_id = ? AND deleted_at IS NULL", (cid, item["id"])).fetchone()
     tag = item.get("cTag") or item.get("eTag") or ""
     if int(item.get("size") or 0) > settings.max_file_bytes:
         stats["skipped"] += 1
+        note("skipped (too big)", item["name"])
         return
     if row is not None and row["remote_etag"] == tag:
         if row["display_name"] != item["name"] or row["folder_id"] != parent:   # renamed or moved only
@@ -267,6 +300,9 @@ def _file(conn: sqlite3.Connection, settings: Settings, d: sqlite3.Row, token: s
                          (name, parent, item.get("webUrl"), row["id"]))
             fs._sync_scope(conn, [row["id"]])
             stats["changed"] += 1
+            note("renamed or moved", item["name"])
+        else:
+            note("unchanged", item["name"])
         return
     received = _download(settings, token, d["drive_id"], item)
     if row is None:
@@ -274,6 +310,7 @@ def _file(conn: sqlite3.Connection, settings: Settings, d: sqlite3.Row, token: s
         conn.execute("UPDATE files SET remote_id = ?, remote_etag = ?, web_url = ? WHERE id = ?",
                      (item["id"], tag, item.get("webUrl"), file_id))
         stats["added"] += 1
+        note("downloaded", item["name"])
         return
     with transaction(conn):   # new content for a file we have: same id, so citations keep working
         store.store(conn, settings, received)
@@ -290,6 +327,7 @@ def _file(conn: sqlite3.Connection, settings: Settings, d: sqlite3.Row, token: s
         share._drop_unused_blob(conn, settings, row["blob_sha256"])
         fs._sync_scope(conn, [row["id"]])
     stats["changed"] += 1
+    note("updated", item["name"])
 
 
 def _download(settings: Settings, token: str, drive_id: str, item: dict) -> store.Received:

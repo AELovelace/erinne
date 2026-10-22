@@ -7,14 +7,24 @@
   <p class="muted">Claude can search your documents through {{ assistant_name }} and answer with citations that link back here.
     Passages Claude reads are sent to Anthropic as part of your chat, so only what's listed below is reachable.</p>
 
-  <section id="m365-section" hidden>
-    <h2 class="admin-section" id="m365-title">Microsoft 365</h2>
-    <p class="muted small">Link your Microsoft 365 work account so {{ assistant_name }} can include SharePoint in your
-      answers, and, if your team uses {{ assistant_name }}'s tools, read your mail and calendar and draft replies for you
-      to review. Microsoft decides what each account may open. {{ assistant_name }} never sends, deletes or moves mail,
-      and none of it goes to Claude. You still sign in to {{ assistant_name }} with your {{ assistant_name }} account.</p>
-    <div id="m365" aria-live="polite"><p class="muted small">Loading…</p></div>
-  </section>
+  <p class="muted small">Microsoft 365 accounts are linked on <a href="/settings#m365-title">Settings</a>.</p>
+
+  <h2 class="admin-section">Claude on the web and phone</h2>
+  <p class="muted small">Add {{ assistant_name }} to claude.ai as a connector and it works in Claude on the web, the
+    phone apps and Desktop, with no token to paste. Claude asks you to sign in here and approve it once.</p>
+  <div class="grant-add"><code class="mcp-address"></code><button type="button" class="small copy-mcp">Copy address</button></div>
+  <ol class="steps">
+    <li><strong>Claude Team or Enterprise:</strong> an organisation owner adds it once for everyone, in the
+      organisation's connector settings (<em>Add custom connector</em>): name it {{ assistant_name }} and paste the
+      address above. Each person then finds {{ assistant_name }} in their own connector settings and presses Connect.</li>
+    <li><strong>A personal Claude plan:</strong> add it yourself in your settings under Connectors, with
+      <em>Add custom connector</em> and the address above, then Connect.</li>
+    <li>Claude sends you here to sign in and approve. After that, turn it on in a chat from the tools menu.</li>
+    <li><strong>Claude Code:</strong> <code>claude mcp add --transport http {{ assistant_name|lower }} <span class="mcp-address"></span></code>,
+      then <code>/mcp</code> in Claude Code to sign in.</li>
+  </ol>
+  <p class="muted small">Connected this way:</p>
+  <div id="claude-connections" aria-live="polite"><p class="muted small">Loading…</p></div>
 
   <h2 class="admin-section">What Claude can search for you</h2>
   <ul class="grants" id="shared"><li class="muted small">Loading…</li></ul>
@@ -54,5 +64,5 @@
 </main>
 <script src="{{ static('picker.js') }}"></script>
 <script src="{{ static('connect.js') }}"></script>
-<script src="{{ static('m365.js') }}"></script>
+<script src="{{ static('claude_connect.js') }}"></script>
 {% endblock %}

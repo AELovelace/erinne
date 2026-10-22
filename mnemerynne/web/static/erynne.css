@@ -632,5 +632,14 @@ button.danger-fill { background: var(--error); }
 .agent-settings input[type="number"] { width: 100%; }
 @media (max-width: 600px) { .agent-settings { grid-template-columns: minmax(0, 1fr); } }
 
-/* Connect page: Microsoft 365 links (m365.js) */
+/* Settings page: Microsoft 365 links (m365.js) */
 .ok-note { color: var(--ok-fg); background: var(--ok-bg); padding: .4rem .7rem; border-radius: 8px; }
+
+/* OAuth consent page (oauth_consent.html) */
+.consent .grants { margin: .4rem 0 .8rem; }
+.consent-actions { display: flex; gap: 1rem; align-items: center; margin-top: .8rem; }
+
+/* Personal settings (settings.html) */
+.settings-form { display: grid; grid-template-columns: auto minmax(0, 18rem); gap: .5rem .8rem; align-items: center; }
+.settings-form input { padding: .35rem .5rem; }
+@media (max-width: 640px) { .settings-form { grid-template-columns: 1fr; } }
