@@ -1,0 +1,18 @@
+[Unit]
+Description=Read AD group memberships for Mnemerynne
+Wants=network-online.target winbind.service
+After=network-online.target winbind.service
+
+[Service]
+Type=oneshot
+# Root: `net ads search -P` signs in with the machine account, whose secret
+# only root can read. It writes one file under /var/lib/mnemerynne-ad.
+ExecStart=/bin/sh /opt/mnemerynne/deploy/linux/ad-snapshot.sh
+StateDirectory=mnemerynne-ad
+StateDirectoryMode=0750
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# Samba's own state (locks, Kerberos tickets) stays writable.
+ReadWritePaths=-/var/lib/samba -/var/cache/samba -/run/samba -/var/log/samba

@@ -41,7 +41,7 @@ def _upstream(handler):
 def _api(conn, settings, *, auth="bearer", group="IT", claude=False, header="", user="", secret="s3cret"):
     api_id = conn.execute(
         "INSERT INTO apis(name, base_url, auth_type, auth_header, auth_user, ad_group, claude_enabled, secret_enc) "
-        "VALUES ('Synchro HRM', 'https://synchro.test/api/device', ?, ?, ?, ?, ?, ?)",
+        "VALUES ('Hotel Stats', 'https://stats.test/api', ?, ?, ?, ?, ?, ?)",
         (auth, header, user, group, int(claude), apis.encrypt_secret(settings, secret) if secret else None)).lastrowid
     params = [{"name": "property", "type": "string", "in": "query", "default": "all"},
               {"name": "days", "type": "int", "in": "query", "min": 1, "max": 31, "default": 7}]
@@ -53,8 +53,8 @@ def _api(conn, settings, *, auth="bearer", group="IT", claude=False, header="", 
 
 # ------------------------------------------------------------------ secrets
 def test_secrets_are_encrypted_and_tied_to_the_secret_key(settings):
-    blob = apis.encrypt_secret(settings, "shrm_abc")
-    assert b"shrm_abc" not in blob and apis.decrypt_secret(settings, blob) == "shrm_abc"
+    blob = apis.encrypt_secret(settings, "tok_abc")
+    assert b"tok_abc" not in blob and apis.decrypt_secret(settings, blob) == "tok_abc"
     other = Settings(_env_file=None, data_dir=settings.data_dir, secret_key="another-key", embed_dim=4)
     assert apis.decrypt_secret(other, blob) is None                 # key changed: re-enter it
     with pytest.raises(apis.ApiError, match="MNEMERYNNE_SECRET_KEY"):
@@ -95,7 +95,7 @@ def test_calls_send_the_credential_and_are_recorded_and_cached(conn, settings):
     assert first.ok and first.data == {"totals": {"occupancyPct": 81.5}}
     request = seen[0]
     assert request.headers["authorization"] == "Bearer s3cret"
-    assert request.url.path == "/api/device/stats/summary"
+    assert request.url.path == "/api/stats/summary"
     assert dict(request.url.params) == {"property": "all", "days": "3"}
     second = apis.call(conn, settings, op_id, {"days": 3}, user_id=None, via="chat")
     assert second.cached and len(seen) == 1
@@ -156,13 +156,13 @@ def test_operations_follow_the_ad_group_and_claude_switch(conn, settings, direct
 
     tools = Tools(settings, lambda: None, lambda: directory)
     with pytest.raises(ToolError):
-        tools.query_api(conn, Caller(ivan["id"], "ivan", 1), "Synchro HRM", "Stats summary")
+        tools.query_api(conn, Caller(ivan["id"], "ivan", 1), "Hotel Stats", "Stats summary")
     conn.execute("UPDATE apis SET claude_enabled = 1")
     listed, _ = tools.list_apis(conn, Caller(ivan["id"], "ivan", 1))
     assert listed["apis"][0]["operations"][0]["operation"] == "Stats summary"
     _upstream(lambda r: httpx.Response(200, json={"occupancyPct": 80}))
-    out, _ = tools.query_api(conn, Caller(ivan["id"], "ivan", 1), "synchro hrm", "stats summary", {"days": 2})
-    assert out["citation"].startswith("Synchro HRM · Stats summary (live,") and '"occupancyPct":80' in out["data"]
+    out, _ = tools.query_api(conn, Caller(ivan["id"], "ivan", 1), "hotel stats", "stats summary", {"days": 2})
+    assert out["citation"].startswith("Hotel Stats · Stats summary (live,") and '"occupancyPct":80' in out["data"]
 
 
 # ------------------------------------------------------------------ admin page
@@ -176,24 +176,24 @@ def admin_client(settings, conn, directory):
 
 
 def test_admin_sets_up_an_api_from_a_preset(admin_client, conn):
-    made = admin_client.post("/api/admin/apis", json={"preset": "synchro"}).json()
+    made = admin_client.post("/api/admin/apis", json={"preset": "atera"}).json()
     detail = admin_client.get(f"/api/admin/apis/{made['id']}").json()
-    assert [o["name"] for o in detail["operations"]] == ["Health", "Properties", "Stats summary"]
+    assert [o["name"] for o in detail["operations"]] == ["Tickets", "Ticket", "Ticket comments"]
     assert detail["credential"] == "missing"
     assert conn.execute("SELECT count(*) FROM api_examples").fetchone()[0] > 0   # indexed for routing
 
-    assert admin_client.put(f"/api/admin/apis/{made['id']}/credential", json={"secret": "shrm_x"}).json() == {
+    assert admin_client.put(f"/api/admin/apis/{made['id']}/credential", json={"secret": "tok_x"}).json() == {
         "credential": "set"}
     listed = admin_client.get("/api/admin/apis").text + admin_client.get(f"/api/admin/apis/{made['id']}").text
-    assert "shrm_x" not in listed                                              # write-only
+    assert "tok_x" not in listed                                              # write-only
     assert admin_client.patch(f"/api/admin/apis/{made['id']}", json={"ad_group": "Nope"}).status_code == 422
     assert admin_client.patch(f"/api/admin/apis/{made['id']}", json={"ad_group": "ETERNALHOTELS\\IT"}).json() == {
         "status": "saved"}
     assert admin_client.get("/api/admin/log").json()["entries"][0]["action"] == "api.group"
 
-    health = detail["operations"][0]["id"]
+    tickets = detail["operations"][0]["id"]
     _upstream(lambda r: httpx.Response(200, json={"status": "ok", "sites": {"total": 12, "missing": 0}}))
-    tested = admin_client.post(f"/api/admin/apis/operations/{health}/test", json={"params": {}}).json()
+    tested = admin_client.post(f"/api/admin/apis/operations/{tickets}/test", json={"params": {}}).json()
     assert tested["ok"] and {"path": "sites.total", "type": "number"} in tested["fields"]
 
 
@@ -243,7 +243,7 @@ def test_chat_answers_from_an_api_for_people_in_its_group(settings, conn, direct
         final, events = _ask(c, "What was occupancy last week?")
         assert final["route"] == "api" and final["status"] == "answered"
         source = final["sources"][0]
-        assert source["cited"] and source["url"].startswith("/apis/calls/") and source["file"] == "Synchro HRM"
+        assert source["cited"] and source["url"].startswith("/apis/calls/") and source["file"] == "Hotel Stats"
         assert "What was occupancy last week?" in llm.filled[0]
         assert "81.5" in c.get(source["url"]).text                       # the response behind the citation
         conv = c.get(f"/api/conversations/{events[0]['conversation_id']}").json()

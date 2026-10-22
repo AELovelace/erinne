@@ -15,6 +15,7 @@ when MicroJames is switched off.
 | `mnemerynne-generator` | 127.0.0.1:8086 | LFM2.5-2.6B (llama-server, Vulkan) |
 | `mnemerynne-embedder` | 127.0.0.1:8085 | Qwen3-Embedding-0.6B (llama-server, CUDA on the 1050 Ti) |
 | `mnemerynne-backup.timer` | — | nightly snapshot to `/var/backups/mnemerynne` |
+| `mnemerynne-adsync.timer` | — | every 5 minutes, as root: AD group memberships into `/var/lib/mnemerynne-ad` (5c) |
 
 **VRAM:** the generator uses about 2.5 GB of the RX 580's 8 GB. The 1050 Ti
 (4 GB) holds the embedder (~0.7 GB) next to MicroJames's generator and jina
@@ -59,9 +60,11 @@ with these settings (e.g. `sudo mnemerynne-admin list-users`).
 ## 3. Services
 
 ```sh
-sudo cp /opt/mnemerynne/deploy/linux/mnemerynne-*.service /opt/mnemerynne/deploy/linux/mnemerynne-backup.timer /etc/systemd/system/
+sudo cp /opt/mnemerynne/deploy/linux/mnemerynne-*.service /opt/mnemerynne/deploy/linux/mnemerynne-*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now mnemerynne-generator mnemerynne-embedder mnemerynne-web mnemerynne-worker mnemerynne-backup.timer
+# Only once the box is joined to the domain (5c):
+#   sudo systemctl enable --now mnemerynne-adsync.timer
 journalctl -u mnemerynne-web -n 20 --no-pager     # "Database ready ... (schema v6)"
 journalctl -u mnemerynne-generator -n 40 --no-pager | grep -i 'RX 580'   # the model loads on the RX 580
 nvtop                                          # RX 580: the generator; 1050 Ti: the embedder too
@@ -152,6 +155,30 @@ Linking checks that the domain account exists; unlinking keeps the user and
 their files. `sudo mnemerynne-admin delete-user NAME` removes a user, with
 their inbox and memories.
 
+**Group memberships come from AD itself, refreshed every 5 minutes.** Winbind
+only refreshes someone's groups when they sign in to this box, and it also
+remembers for a while that a newly created group "doesn't exist", so it can't
+be trusted for memberships. The `mnemerynne-adsync` timer runs
+`deploy/linux/ad-snapshot.sh` as root every 5 minutes. The script reads every
+account's and group's memberships from a domain controller with
+`net ads search -P` (the machine account the join created; no extra
+credentials) into `/var/lib/mnemerynne-ad/snapshot.txt`. Mnemerynne works out
+nested groups from it and uses it for admin rights, API access and share
+permissions. Adding someone to a group or removing them takes effect within
+about 5 minutes, without restarts. If the file is missing or over 30 minutes
+old, Mnemerynne uses winbind as before and logs a warning.
+
+```sh
+sudo cp /opt/mnemerynne/deploy/linux/mnemerynne-adsync.* /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now mnemerynne-adsync.timer
+sudo systemctl start mnemerynne-adsync && journalctl -u mnemerynne-adsync -n 5 --no-pager   # "AD snapshot: N accounts and groups"
+sudo grep -c '^sAMAccountName:' /var/lib/mnemerynne-ad/snapshot.txt
+```
+
+Never "fix" stale groups with `net cache flush` on a schedule: right after a
+flush winbind reports only each person's primary group, which briefly locks
+people out of everything their other groups give them.
+
 ## 5d. Libraries on the SMB share
 
 With `MNEMERYNNE_SHARE_ROOT` set, every top-level folder of the share is a
@@ -234,8 +261,8 @@ sudo mnemerynne-admin reclassify
 
 Erynne can answer live questions from internal systems ("did every hotel send
 its night audit?", "any critical Wazuh alerts?", "what's the status of ticket
-4812?"). Admins set them up on **Access → APIs**: start from a preset (Synchro
-HRM, Gasco health, Wazuh, Atera) or a blank API.
+4812?"). Admins set them up on **Access → APIs**: start from a preset (Wazuh,
+Atera) or a blank API.
 
 - **Read-only.** Erynne only calls the operations defined there: a fixed path
   with typed parameters, GET, or a POST whose body is fixed on that page.
@@ -248,11 +275,9 @@ HRM, Gasco health, Wazuh, Atera) or a blank API.
 - **Credentials** are pasted on the page, stored encrypted with a key derived
   from `MNEMERYNNE_SECRET_KEY`, and never shown again. Keep that key stable:
   if it changes, the credentials must be entered again. Use dedicated
-  read-only credentials: a Synchro *Device Access Token* (one per scope, so
-  `health` and `stats:all` need separate APIs or tokens), a Gasco *Health
-  Display Token*, a Wazuh user with a read-only role, and an Atera token
+  read-only credentials, for example a Wazuh user with a read-only role, and an Atera token
   limited to reading tickets.
-- **Self-signed servers** (Synchro, Wazuh): press *Fetch from server*, compare
+- **Self-signed servers** (Wazuh, for example): press *Fetch from server*, compare
   the SHA-256 fingerprint with the real one, and save it. Only that
   certificate is then trusted for the API. For servers reached by IP, untick
   *Check the name in the certificate*.

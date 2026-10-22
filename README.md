@@ -30,6 +30,20 @@ the machine (LangSmith is forced off).
 | P4 | Fedora pilot next to MicroJames | ready: `deploy/linux/README.md` |
 | P5 | Fine-tuning the Erynne model (LFM2.5-2.6B) | pipeline ready: `training/README.md` |
 
+### Planned
+
+- **Domain sign-in.** People sign in to Erynne with their AD username and
+  password (checked through the box's winbind join) instead of a separate
+  Mnemerynne password that an admin links to their domain account. That
+  removes the linking step on Access → Accounts. Open questions: what happens
+  to existing local accounts, and keeping one local admin for when AD is
+  down. Group memberships keep coming from the AD snapshot
+  (`deploy/linux/README.md`, 5c), not from sign-in, so changes in AD still
+  apply within minutes to sessions that are already signed in and to Claude.
+- **Sign in with Microsoft 365.** Single sign-on through Entra ID (OIDC), with
+  each Microsoft account mapped to its domain account. A first version was
+  built and then set aside in favour of local accounts.
+
 ## How it answers
 
 ```

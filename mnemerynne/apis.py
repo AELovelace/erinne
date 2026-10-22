@@ -483,45 +483,6 @@ def _p(name, type_, *, where="query", required=False, help="", **extra) -> dict:
 
 PRESETS: list[dict] = [
     {
-        "key": "synchro", "name": "Synchro HRM", "base_url": "https://synchro.eternalhotels.com/api/device",
-        "auth_type": "bearer", "tls_check_hostname": 1,
-        "description": "Synchro HRM device API: night-audit pipeline health and hotel stats. Tokens come from "
-                       "Synchro → Settings → Device Access Tokens, one scope each (`health`, `stats:all`). "
-                       "The server uses a self-signed certificate: fetch and trust it on this page.",
-        "operations": [
-            {"name": "Health", "path": "/health", "cache_seconds": 60,
-             "description": "Pipeline status (ok/attention/critical), last mailbox upload, sites reported or "
-                            "missing, NetSuite journal runs, sites needing attention, open maintenance work orders.",
-             "example_questions": "Did every hotel send its night audit?\nWhich sites need attention today?\n"
-                                  "Is the Synchro pipeline healthy?\nHow many maintenance work orders are open?\n"
-                                  "Which hotels haven't reported yet?\nDid the NetSuite journals post?"},
-            {"name": "Properties", "path": "/stats/properties", "cache_seconds": 3600,
-             "params": [_p("limit", "int", min=1, max=100, default=100), _p("offset", "int", min=0, default=0)],
-             "description": "Properties with stats: slug and name.",
-             "example_questions": "Which properties are in Synchro?\nList the hotels with stats."},
-            {"name": "Stats summary", "path": "/stats/summary", "cache_seconds": 300,
-             "params": [_p("property", "string", required=True,
-                           help="Property slug from Properties, or 'all' for every hotel", default="all"),
-                        _p("days", "int", min=1, max=31, default=7, help="How many days back"),
-                        _p("to", "date", help="Last day, YYYY-MM-DD (default today)")],
-             "description": "Daily room revenue, rooms sold, available rooms, occupancy %, ADR, RevPAR, reports "
-                            "received, journals posted and failures, with totals.",
-             "example_questions": "What was occupancy last week?\nWhat's our RevPAR this month?\n"
-                                  "How much room revenue did we make yesterday?\nWhat was ADR at each hotel?"},
-        ],
-    },
-    {
-        "key": "gasco", "name": "Gasco health", "base_url": "https://reports.gascofuel.com/api",
-        "auth_type": "header", "auth_header": "X-API-Key",
-        "description": "Gasco fuel reporting health. Key from Crew Access → Health Display Tokens (`id.secret`).",
-        "operations": [
-            {"name": "Health summary", "path": "/health/summary", "cache_seconds": 60,
-             "description": "Upload status, NetSuite run counts and maintenance warnings for the gas stations.",
-             "example_questions": "Are the gas stations reporting?\nIs the Gasco upload healthy?\n"
-                                  "Any Gasco maintenance warnings?"},
-        ],
-    },
-    {
         "key": "wazuh", "name": "Wazuh", "base_url": "https://172.27.22.250:9200", "auth_type": "basic",
         "tls_check_hostname": 0,
         "description": "Wazuh indexer (security alerts). Use a dedicated read-only user; only the fixed query "

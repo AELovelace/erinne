@@ -474,8 +474,8 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
     @server.tool(annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True,
                                              open_world_hint=True))
     async def query_api(ctx: Context, api: str, operation: str, params: dict | None = None) -> dict:
-        """Call one operation of an internal API from list_apis, e.g. api="Synchro HRM",
-        operation="Health", or operation="Stats summary" with params {"property": "all", "days": 7}.
+        """Call one operation of an internal API from list_apis, e.g. api="Atera",
+        operation="Tickets", or operation="Ticket" with params {"ticketId": 4812}.
         Returns live data with a `citation` and `link` to cite."""
         return await call(ctx, "query_api", {"api": api, "operation": operation, "params": params or {}},
                           tools.query_api)

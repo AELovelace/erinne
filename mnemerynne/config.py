@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     # ETERNALHOTELS). Users are linked to its accounts, and admin rights come
     # from one of its groups (picked on the Settings tab).
     ad_domain: str = ""
+    # Group memberships read straight from AD by the root timer
+    # mnemerynne-adsync (winbind's own copy goes stale); winbind is used
+    # while this file is missing or old.
+    ad_snapshot: Path = Path("/var/lib/mnemerynne-ad/snapshot.txt")
 
     # Libraries and inboxes stored on the SMB share: <share_root>/<Library>/…
     # and <share_root>/<users_folder>/<username>/…. The folders on disk are the

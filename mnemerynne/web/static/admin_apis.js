@@ -110,9 +110,9 @@
     const key = $("new-api-preset").value;
     let body = { preset: key || null };
     if (!key) {
-      const name = prompt("Name of the API (e.g. Synchro HRM):");
+      const name = prompt("Name of the API (e.g. Hotel stats):");
       if (!name) return;
-      const url = prompt("Its address (e.g. https://synchro.example.com/api):");
+      const url = prompt("Its address (e.g. https://stats.example.com/api):");
       if (!url) return;
       body = { name: name.trim(), base_url: url.trim() };
     }
