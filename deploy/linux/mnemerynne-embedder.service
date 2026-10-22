@@ -11,6 +11,11 @@ Group=mnemerynne
 # always the 1050 Ti. Embedding on the RX 580 (Vulkan) hung the GPU under
 # import load; the generator keeps the RX 580 to itself.
 Environment=LD_LIBRARY_PATH=/opt/llama.cpp
+# CUDA needs /dev/nvidia-uvm, which only root can create and which doesn't
+# exist after boot until something asks for it: create it first, as root ("+"),
+# without failing if nvidia-modprobe is missing ("-"). Without it, the start
+# fails with "failed to initialize CUDA: unknown error" / "invalid device: CUDA0".
+ExecStartPre=-+/usr/bin/nvidia-modprobe -u -c=0
 # Qwen3-Embedding needs last-token pooling. Each input must fit one
 # micro-batch: -ub 2048 is far above a 512-token chunk.
 # To run it on the CPU instead, replace "-dev CUDA0 -ngl 99" with
