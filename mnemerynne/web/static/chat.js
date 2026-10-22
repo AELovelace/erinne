@@ -252,9 +252,9 @@
       a.addEventListener("click", function (e) { e.preventDefault(); openConversation(c.id); });
       const del = el("button", "link danger small", "×");
       del.type = "button";
-      del.title = "Delete conversation";
-      del.addEventListener("click", async function () {
-        if (!confirm("Delete this conversation?")) return;
+      del.title = "Delete conversation (Shift-click: no question asked)";
+      del.addEventListener("click", async function (e) {
+        if (!e.shiftKey && !confirm("Delete this conversation?")) return;
         await fetch("/api/conversations/" + c.id, { method: "DELETE" });
         if (c.id === conversationId) newChat();
         loadConversations();

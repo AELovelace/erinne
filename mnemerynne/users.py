@@ -72,9 +72,11 @@ def authenticate(conn: sqlite3.Connection, username: str, password: str) -> sqli
 
 
 def set_password(conn: sqlite3.Connection, username: str, password: str) -> bool:
+    """Set a new password; it also signs the user out everywhere (session_epoch)."""
     pw_hash = auth.hash_password(auth.validate_password(password))
     cur = conn.execute(
-        "UPDATE users SET pw_hash = ? WHERE username = ?", (pw_hash, username.strip().lower())
+        "UPDATE users SET pw_hash = ?, session_epoch = session_epoch + 1 WHERE username = ?",
+        (pw_hash, username.strip().lower()),
     )
     return cur.rowcount > 0
 

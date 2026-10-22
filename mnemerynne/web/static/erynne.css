@@ -390,7 +390,15 @@ input.c-check { width: 1rem; height: 1rem; margin: 0; accent-color: var(--rose);
 .dlg::backdrop { background: rgba(61, 37, 48, .35); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
 .dlg h2 { margin: 0 0 .8rem; font-size: 1.2rem; }
 .dlg-actions { display: flex; justify-content: flex-end; align-items: center; gap: 1rem; margin-top: 1rem; }
-.dlg.props { width: min(32rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); overflow: auto; }
+.dlg.props, .dlg.wide { width: min(32rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); overflow: auto; }
+.dlg-grid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .5rem .8rem; align-items: center; }
+.dlg-grid input, .dlg-grid select { width: 100%; padding: .35rem .5rem; }
+.acct-sec .ax-link select { width: auto; }
+.acct-groups { display: flex; flex-wrap: wrap; gap: .3rem 1rem; }
+.ax-bar { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.ax-bar p { margin-top: 0; }
+.ax-name { font-weight: 600; padding: 0; }
+.ax-off .ax-name { opacity: .6; text-decoration: line-through; }
 .props-h { margin: 1rem 0 .4rem; font-size: .8rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
            color: var(--muted); }
 .props-table { width: 100%; border-collapse: collapse; font-size: .9rem; }

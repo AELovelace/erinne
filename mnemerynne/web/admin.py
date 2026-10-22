@@ -528,15 +528,158 @@ class LinkBody(BaseModel):
     ad_account: str = Field(min_length=1, max_length=256)
 
 
+def _target(conn: sqlite3.Connection, user_id: int) -> sqlite3.Row:
+    target = users.get_user_by_id(conn, user_id)
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such user")
+    return target
+
+
+def _tokens(conn: sqlite3.Connection, user_id: int) -> int:
+    return conn.execute("SELECT count(*) FROM api_tokens WHERE user_id = ? AND revoked_at IS NULL "
+                        "AND (expires_at IS NULL OR expires_at > datetime('now'))", (user_id,)).fetchone()[0]
+
+
+def _account_json(request: Request, conn: sqlite3.Connection, r: sqlite3.Row) -> dict:
+    state = request.app.state
+    return {"id": r["id"], "username": r["username"], "role": r["role"], "active": bool(r["active"]),
+            "ad_account": r["ad_account"], "created_at": r["created_at"], "tokens": _tokens(conn, r["id"]),
+            "admin_via": accounts.admin_via(conn, r, state.directory, state.settings.admin_usernames),
+            "groups": [g[0] for g in conn.execute(
+                "SELECT g.name FROM group_members m JOIN groups g ON g.id = m.group_id WHERE m.user_id = ? "
+                "ORDER BY g.name COLLATE NOCASE", (r["id"],))]}
+
+
 @router.get("/api/admin/accounts")
 async def list_accounts(request: Request, user=Depends(admin_api_user), conn: sqlite3.Connection = Depends(get_db)):
     """Every user with the domain account they're linked to (unlinked first),
     plus the domain accounts to pick from."""
     directory = request.app.state.directory
-    return {"users": [{"id": r["id"], "username": r["username"], "role": r["role"], "active": bool(r["active"]),
-                       "ad_account": r["ad_account"]} for r in accounts.list_users(conn)],
+    return {"users": [_account_json(request, conn, r) for r in accounts.list_users(conn)],
             "domain": request.app.state.settings.ad_domain, "enabled": directory.enabled,
             "domain_accounts": await anyio.to_thread.run_sync(directory.accounts)}
+
+
+@router.get("/api/admin/users/{user_id}")
+def account_detail(user_id: int, request: Request, user=Depends(admin_api_user),
+                   conn: sqlite3.Connection = Depends(get_db)):
+    """One account for the account dialog: the list fields, every local group
+    (ticked where they're a member), their inbox and its Claude switches."""
+    target = _target(conn, user_id)
+    inbox = conn.execute(
+        "SELECT c.id, c.claude_enabled, c.claude_edit, count(f.id) AS files, coalesce(sum(b.size), 0) AS bytes "
+        "FROM collections c LEFT JOIN files f ON f.collection_id = c.id AND f.deleted_at IS NULL "
+        "LEFT JOIN blobs b ON b.sha256 = f.blob_sha256 WHERE c.kind = 'private' AND c.owner_user_id = ? GROUP BY c.id", (user_id,)).fetchone()
+    member = {r[0] for r in conn.execute("SELECT group_id FROM group_members WHERE user_id = ?", (user_id,))}
+    groups = conn.execute("SELECT id, name FROM groups ORDER BY name COLLATE NOCASE").fetchall()
+    return {**_account_json(request, conn, target), "is_you": target["id"] == user["id"],
+            "all_groups": [{"id": g["id"], "name": g["name"], "member": g["id"] in member} for g in groups],
+            "inbox": {"files": inbox["files"], "bytes": inbox["bytes"], "claude_enabled": bool(inbox["claude_enabled"]),
+                      "claude_edit": bool(inbox["claude_edit"])} if inbox else None}
+
+
+class NewUserBody(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=1024)
+    role: Literal["user", "admin"] = "user"
+    ad_account: str | None = Field(default=None, max_length=256)
+
+
+@router.post("/api/admin/users", status_code=status.HTTP_201_CREATED)
+def create_account(body: NewUserBody, request: Request, user=Depends(admin_api_user),
+                   conn: sqlite3.Connection = Depends(get_db)):
+    """A new local user with their inbox, optionally linked to a domain account straight away."""
+    directory = request.app.state.directory
+    ad_account = None
+    if body.ad_account and body.ad_account.strip():
+        try:
+            ad_account = accounts.check_link(conn, body.ad_account, directory)   # before anything is made
+        except accounts.LinkError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    try:
+        new_id = users.create_user(conn, body.username, body.password, role=body.role)
+    except users.UserExists as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    name = users.get_user_by_id(conn, new_id)["username"]
+    with transaction(conn):
+        _log(conn, user, "account.create", name, body.role)
+        if ad_account:
+            accounts.link(conn, new_id, ad_account, directory)
+            _log(conn, user, "account.link", name, f"to {ad_account}")
+    return {"id": new_id, "username": name}
+
+
+class PasswordBody(BaseModel):
+    password: str = Field(min_length=1, max_length=1024)
+
+
+@router.put("/api/admin/users/{user_id}/password")
+def reset_password(user_id: int, body: PasswordBody, request: Request, user=Depends(admin_api_user),
+                   conn: sqlite3.Connection = Depends(get_db)):
+    """Set someone's password. They're signed out everywhere; Claude tokens keep working."""
+    target = _target(conn, user_id)
+    try:
+        with transaction(conn):
+            users.set_password(conn, target["username"], body.password)
+            _log(conn, user, "account.password", target["username"])
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    if target["id"] == user["id"]:   # keep the admin who reset their own password signed in
+        request.session["epoch"] = users.get_user_by_id(conn, user_id)["session_epoch"]
+    return {"status": "changed"}
+
+
+class AccountPatch(BaseModel):
+    role: Literal["user", "admin"] | None = None
+    active: bool | None = None
+
+
+@router.patch("/api/admin/users/{user_id}")
+def update_account(user_id: int, body: AccountPatch, request: Request, user=Depends(admin_api_user),
+                   conn: sqlite3.Connection = Depends(get_db)):
+    """Make someone a local admin (or not), or stop them signing in (or let them again)."""
+    target = _target(conn, user_id)
+    if target["id"] == user["id"]:
+        if body.active is False:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "You can't deactivate your own account.")
+        state = request.app.state
+        if body.role == "user" and accounts.admin_via(
+                conn, {**dict(target), "role": "user"}, state.directory, state.settings.admin_usernames) is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                                "That would take away your own admin rights. Ask another admin.")
+    with transaction(conn):
+        if body.role is not None and body.role != target["role"]:
+            users.set_role(conn, target["username"], body.role)
+            _log(conn, user, "account.role", target["username"], f"{target['role']} → {body.role}")
+        if body.active is not None and body.active != bool(target["active"]):
+            users.set_active(conn, target["username"], body.active)
+            _log(conn, user, "account.activate" if body.active else "account.deactivate", target["username"])
+    return _account_json(request, conn, _target(conn, user_id))
+
+
+class UserGroupsBody(BaseModel):
+    groups: list[int]
+
+
+@router.put("/api/admin/users/{user_id}/groups")
+def set_user_groups(user_id: int, body: UserGroupsBody, user=Depends(admin_api_user),
+                    conn: sqlite3.Connection = Depends(get_db)):
+    """The local groups someone is in (all of them: the ones left out are left)."""
+    target = _target(conn, user_id)
+    wanted = list(dict.fromkeys(body.groups))
+    for group_id in wanted:
+        _group(conn, group_id)
+    with transaction(conn):
+        conn.execute("DELETE FROM group_members WHERE user_id = ?", (user_id,))
+        conn.executemany("INSERT INTO group_members(group_id, user_id) VALUES (?, ?)",
+                         [(g, user_id) for g in wanted])
+        names = [r[0] for r in conn.execute(
+            "SELECT g.name FROM group_members m JOIN groups g ON g.id = m.group_id WHERE m.user_id = ? "
+            "ORDER BY g.name COLLATE NOCASE", (user_id,))]
+        _log(conn, user, "account.groups", target["username"], ", ".join(names) or "none")
+    return {"groups": names}
 
 
 @router.put("/api/admin/users/{user_id}/domain-account")

@@ -196,6 +196,22 @@ Linking checks that the domain account exists; unlinking keeps the user and
 their files. `sudo mnemerynne-admin delete-user NAME` removes a user, with
 their inbox and memories.
 
+**Managing users on the web.** On **Access → Accounts**, **New user** creates
+a user with their private files. It can link them to a domain account straight
+away and suggests a password you hand over. Clicking a name opens their account:
+- **Password:** reset it. Resetting signs them out of every browser (Claude
+  tokens keep working). `mnemerynne-admin reset-password` does the same.
+- **Access:** set the role (user or local admin) and turn off "Can sign in"
+  to deactivate them.
+- **Domain account:** link or unlink it.
+- **Groups:** set their local groups.
+- **Their files and Claude:** the Claude switches for their own files, and
+  revoking their Claude tokens.
+
+You can't deactivate yourself, or remove your own admin role unless the domain
+admin group keeps you an admin. Every change goes in **Recent changes**.
+Deleting a user is still done with `mnemerynne-admin delete-user`.
+
 **Group memberships come from AD itself, refreshed every 5 minutes.** Winbind
 only refreshes someone's groups when they sign in to this box, and it also
 remembers for a while that a newly created group "doesn't exist", so it can't

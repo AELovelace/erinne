@@ -41,11 +41,54 @@
   </section>
 
   <section class="inbox admin" data-panel="accounts" role="tabpanel" hidden>
-    <p class="muted">Link each user to their domain account. Admin rights follow the domain account's groups
-      (see Settings). Someone without a domain account needs one made in Active Directory first.</p>
+    <div class="ax-bar">
+      <p class="muted">Click a name to reset a password, change someone's role or groups, or stop them signing in.
+        Admin rights also follow the domain account's groups (see Settings).</p>
+      <button type="button" id="new-user">New user</button>
+    </div>
     <div id="accounts" class="table-wrap" aria-live="polite"><p class="muted">Loading…</p></div>
     <datalist id="domain-accounts"></datalist>
   </section>
+
+  <dialog class="dlg glass wide" id="dlg-user" aria-labelledby="user-title">
+    <form method="dialog">
+      <h2 id="user-title">Account</h2>
+      <div id="user-body" aria-live="polite"></div>
+      <p class="error small" id="user-error" hidden></p>
+      <div class="dlg-actions">
+        <button type="submit" value="ok">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="dlg glass" id="dlg-new-user" aria-labelledby="new-user-title">
+    <form method="dialog" id="new-user-form">
+      <h2 id="new-user-title">New user</h2>
+      <div class="dlg-grid">
+        <label for="nu-name" class="small">Username</label>
+        <input type="text" id="nu-name" maxlength="64" required autocomplete="off" placeholder="e.g. jsmith">
+        <label for="nu-password" class="small">Password</label>
+        <div class="ax-link">
+          <input type="text" id="nu-password" required autocomplete="new-password" spellcheck="false">
+          <button type="button" class="small" id="nu-generate">Generate</button>
+        </div>
+        <label for="nu-role" class="small">Role</label>
+        <select id="nu-role">
+          <option value="user">User</option>
+          <option value="admin">Local admin</option>
+        </select>
+        <label for="nu-account" class="small">Domain account</label>
+        <input type="text" id="nu-account" list="domain-accounts" autocomplete="off" placeholder="Optional">
+      </div>
+      <p class="muted small">They get their own private files straight away. Give them the password; they can't
+        change it themselves yet.</p>
+      <p class="error small" id="nu-error" hidden></p>
+      <div class="dlg-actions">
+        <button type="button" class="link" data-close>Cancel</button>
+        <button type="submit" value="ok">Create</button>
+      </div>
+    </form>
+  </dialog>
 
   <section class="ax" data-panel="apis" role="tabpanel" aria-label="Internal APIs" hidden>
     <aside class="ax-tree glass" aria-label="APIs">

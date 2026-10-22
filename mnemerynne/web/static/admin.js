@@ -588,13 +588,14 @@
     $(id).replaceChildren.apply($(id), values.map(function (v) { const o = el("option"); o.value = v; return o; }));
   }
 
-  function linkCell(u) {
+  /* The domain account: shown with Unlink, or a box to link one. `done` reloads whatever shows it. */
+  function linkCell(u, done) {
     const cell = el("div", "ax-link");
     if (u.ad_account) {
       cell.append(el("span", null, u.ad_account), document.createTextNode(" "),
         button("Unlink", "link danger small", async function () {
           if (!confirm("Unlink " + u.username + " from " + u.ad_account + "? Their account and files stay.")) return;
-          await accountChange("DELETE", "/api/admin/users/" + u.id + "/domain-account");
+          await done("DELETE", "/api/admin/users/" + u.id + "/domain-account");
         }));
       return cell;
     }
@@ -605,10 +606,12 @@
     input.setAttribute("aria-label", "Domain account for " + u.username);
     input.value = u.username;  // usually the same name
     cell.append(input, button("Link", "small", async function () {
-      await accountChange("PUT", "/api/admin/users/" + u.id + "/domain-account", { ad_account: input.value.trim() });
+      await done("PUT", "/api/admin/users/" + u.id + "/domain-account", { ad_account: input.value.trim() });
     }));
     return cell;
   }
+
+  const ADMIN_VIA = { role: "local admin", bootstrap: "admin (server setting)", domain: "admin (domain group)" };
 
   function renderAccounts(data) {
     const box = $("accounts");
@@ -617,12 +620,13 @@
     if (!data.enabled) box.appendChild(el("p", "error", "No AD domain is configured on the server (MNEMERYNNE_AD_DOMAIN), so accounts can't be linked."));
     const waiting = data.users.filter(function (u) { return !u.ad_account && u.active; }).length;
     if (waiting) box.appendChild(el("p", null, waiting + (waiting === 1 ? " user isn't" : " users aren't") + " linked to a domain account yet."));
-    box.appendChild(table(["User", "Domain account" + (data.domain ? " (" + data.domain + ")" : "")],
+    box.appendChild(table(["User", "Domain account" + (data.domain ? " (" + data.domain + ")" : ""), "Groups", "Claude"],
       data.users.map(function (u) {
-        const who = el("div");
-        who.append(el("strong", null, u.username),
-          el("span", "muted small", (u.role === "admin" ? " · local admin" : "") + (u.active ? "" : " · deactivated")));
-        return [who, linkCell(u)];
+        const who = el("div", u.active ? null : "ax-off");
+        who.append(button(u.username, "link ax-name", function () { openAccount(u.id); }),
+          el("span", "muted small", (u.admin_via ? " · " + ADMIN_VIA[u.admin_via] : "") + (u.active ? "" : " · deactivated")));
+        return [who, linkCell(u, accountChange), u.groups.join(", "),
+                u.tokens ? u.tokens + (u.tokens === 1 ? " token" : " tokens") : ""];
       })));
   }
 
@@ -637,6 +641,219 @@
     await loadAccounts();
     await load();  // new users appear in grants and "Who can see what"
   }
+
+  /* A readable password nobody has to squint at: no 0/O, 1/l/I. */
+  function generatePassword() {
+    const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const bytes = new Uint32Array(16);
+    crypto.getRandomValues(bytes);
+    let out = "";
+    bytes.forEach(function (b, i) { out += (i && i % 4 === 0 ? "-" : "") + chars[b % chars.length]; });
+    return out;
+  }
+
+  // ------------------------------------------------------- account dialog
+  let accountDirty = false;   // reload the list when the dialog closes
+
+  function userError(message) {
+    const node = $("user-error");
+    node.textContent = message || "";
+    node.hidden = !message;
+  }
+
+  /* Apply one change from the dialog, then redraw it with what the server now says. */
+  async function accountDo(id, method, url, body) {
+    userError("");
+    try {
+      const result = await api(method, url, body);
+      accountDirty = true;
+      await openAccount(id);
+      return result || true;
+    } catch (e) {
+      userError(e.message);
+      return null;
+    }
+  }
+
+  function dlgSection(title) {
+    const s = el("section", "acct-sec");
+    s.appendChild(el("h3", "props-h", title));
+    return s;
+  }
+
+  function passwordSection(u) {
+    const s = dlgSection("Password");
+    const row = el("div", "ax-link");
+    const input = el("input");
+    input.type = "text";
+    input.autocomplete = "new-password";
+    input.spellcheck = false;
+    input.placeholder = "New password";
+    input.setAttribute("aria-label", "New password for " + u.username);
+    const set = button("Reset password", "small", async function () {
+      if (!input.value) { input.focus(); return; }
+      const value = input.value;
+      if (await accountDo(u.id, "PUT", "/api/admin/users/" + u.id + "/password", { password: value })) {
+        pwNote("Password changed to " + value + ". Give it to " + u.username + "; they've been signed out everywhere.");
+      }
+    });
+    row.append(input, button("Generate", "small", function () { input.value = generatePassword(); }), set);
+    s.append(row, el("p", "muted small acct-pw-note",
+      u.is_you ? "Your other sessions end; this one stays signed in."
+               : "They're signed out everywhere and sign in with the new one. Claude tokens keep working."));
+    return s;
+  }
+
+  function accessSection(u) {
+    const s = dlgSection("Access");
+    const roleRow = el("div", "ax-link");
+    const role = el("select");
+    [["user", "User"], ["admin", "Local admin"]].forEach(function (o) {
+      const opt = el("option", null, o[1]);
+      opt.value = o[0];
+      role.appendChild(opt);
+    });
+    role.value = u.role;
+    role.setAttribute("aria-label", "Role");
+    role.addEventListener("change", function () {
+      accountDo(u.id, "PATCH", "/api/admin/users/" + u.id, { role: role.value });
+    });
+    roleRow.append(el("span", "small", "Role"), role);
+    s.appendChild(roleRow);
+    if (u.admin_via === "domain") {
+      s.appendChild(el("p", "muted small", "Admin through the domain admin group, whatever the role says here."));
+    } else if (u.admin_via === "bootstrap") {
+      s.appendChild(el("p", "muted small", "Admin through MNEMERYNNE_ADMIN_USERNAMES on the server."));
+    }
+    const active = checkbox("Can sign in", u.active, function (on) {
+      if (!on && !confirm("Stop " + u.username + " signing in? They're signed out at once; their files stay.")) {
+        openAccount(u.id);
+        return;
+      }
+      accountDo(u.id, "PATCH", "/api/admin/users/" + u.id, { active: on });
+    }, u.is_you ? "You can't deactivate yourself." : "");
+    if (u.is_you && u.active) active.querySelector("input").disabled = true;
+    s.appendChild(active);
+    return s;
+  }
+
+  function domainSection(u) {
+    const s = dlgSection("Domain account");
+    s.appendChild(linkCell(u, function (method, url, body) { return accountDo(u.id, method, url, body); }));
+    return s;
+  }
+
+  function groupsSection(u) {
+    const s = dlgSection("Groups");
+    if (!u.all_groups.length) {
+      s.appendChild(el("p", "muted small", "No groups yet. Make them on the Groups tab."));
+      return s;
+    }
+    const list = el("div", "acct-groups");
+    u.all_groups.forEach(function (g) {
+      list.appendChild(checkbox(g.name, g.member, function (on) {
+        const ids = u.all_groups.filter(function (x) { return x.id === g.id ? on : x.member; })
+          .map(function (x) { return x.id; });
+        accountDo(u.id, "PUT", "/api/admin/users/" + u.id + "/groups", { groups: ids });
+      }));
+    });
+    s.appendChild(list);
+    return s;
+  }
+
+  function claudeSection(u) {
+    const s = dlgSection("Their files and Claude");
+    if (u.inbox) {
+      s.appendChild(el("p", "small", u.inbox.files + (u.inbox.files === 1 ? " file" : " files") +
+        " in their own files (" + sizeLabel(u.inbox.bytes) + ")."));
+      s.append(checkbox("Claude can search their files", u.inbox.claude_enabled, function (on) {
+        accountDo(u.id, "PUT", "/api/admin/users/" + u.id + "/inbox-claude", { enabled: on });
+      }), el("br"), checkbox("Claude and Erynne can edit anywhere in their files", u.inbox.claude_edit, function (on) {
+        accountDo(u.id, "PUT", "/api/admin/users/" + u.id + "/inbox-claude-edit", { enabled: on });
+      }, "Off: only the Agents folder and what they allow with AI edit in Files."));
+    }
+    const tokens = el("p", "small");
+    tokens.textContent = u.tokens ? u.tokens + (u.tokens === 1 ? " Claude token in use. " : " Claude tokens in use. ")
+                                  : "No Claude tokens.";
+    if (u.tokens) {
+      tokens.appendChild(button("Revoke all", "link danger small", function () {
+        if (!confirm("Revoke all of " + u.username + "'s Claude tokens? Claude stops working for them straight away.")) return;
+        accountDo(u.id, "DELETE", "/api/admin/users/" + u.id + "/tokens");
+      }));
+    }
+    s.appendChild(tokens);
+    return s;
+  }
+
+  /* A message under the password box that stays while the dialog is redrawn. */
+  function pwNote(text) {
+    const note = $("user-body").querySelector(".acct-pw-note");
+    note.textContent = text;
+    note.dataset.kept = "1";
+  }
+
+  async function openAccount(id) {
+    const dlg = $("dlg-user");
+    let u;
+    try { u = await api("GET", "/api/admin/users/" + id); }
+    catch (e) { showError(e.message); return; }
+    $("user-title").textContent = u.username + (u.active ? "" : " (deactivated)");
+    const body = $("user-body");
+    // Keep a password message the reset just wrote across the redraw.
+    const note = body.querySelector(".acct-pw-note");
+    const kept = note && note.dataset.kept ? note.textContent : "";
+    const since = el("p", "muted small", "Since " + (u.created_at || "").slice(0, 10) +
+      (u.admin_via ? " · " + ADMIN_VIA[u.admin_via] : "") + (u.is_you ? " · this is you" : ""));
+    body.replaceChildren(since, passwordSection(u), accessSection(u), domainSection(u), groupsSection(u), claudeSection(u));
+    if (kept) pwNote(kept);
+    if (!dlg.open) { userError(""); dlg.showModal(); }
+  }
+
+  $("dlg-user").addEventListener("close", async function () {
+    if (!accountDirty) return;
+    accountDirty = false;
+    await loadAccounts();
+    await load();
+  });
+
+  // ----------------------------------------------------------- new user
+  $("new-user").addEventListener("click", function () {
+    $("new-user-form").reset();
+    $("nu-error").hidden = true;
+    $("nu-password").value = generatePassword();
+    $("dlg-new-user").showModal();
+    $("nu-name").focus();
+  });
+  $("nu-generate").addEventListener("click", function () { $("nu-password").value = generatePassword(); });
+  $("nu-name").addEventListener("input", function () {
+    // Suggest the same domain account name when there is one.
+    const name = $("nu-name").value.trim().toLowerCase();
+    const known = Array.prototype.some.call($("domain-accounts").options, function (o) { return o.value.toLowerCase() === name; });
+    if (known || !$("nu-account").dataset.touched) $("nu-account").value = known ? name : "";
+  });
+  $("nu-account").addEventListener("input", function () { $("nu-account").dataset.touched = "1"; });
+  $("new-user-form").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    const err = $("nu-error");
+    err.hidden = true;
+    try {
+      const made = await api("POST", "/api/admin/users", {
+        username: $("nu-name").value.trim(), password: $("nu-password").value, role: $("nu-role").value,
+        ad_account: $("nu-account").value.trim() || null });
+      const password = $("nu-password").value;
+      delete $("nu-account").dataset.touched;
+      $("dlg-new-user").close();
+      accountDirty = true;
+      await openAccount(made.id);
+      pwNote("Created with password " + password + ". Give it to " + made.username + ".");
+    } catch (ex) {
+      err.textContent = ex.message;
+      err.hidden = false;
+    }
+  });
+  document.querySelectorAll("dialog [data-close]").forEach(function (b) {
+    b.addEventListener("click", function () { b.closest("dialog").close(); });
+  });
 
   // ----------------------------------------------------------- admin group
   function renderAdminGroup(data) {

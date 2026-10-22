@@ -31,7 +31,8 @@ def _session_user(request: Request, conn: sqlite3.Connection) -> sqlite3.Row | N
     """The logged-in user, re-checked against the database on every request."""
     user_id = request.session.get("user_id")
     user = users.get_user_by_id(conn, user_id) if user_id else None
-    if user is None or not user["active"]:
+    # A password reset bumps session_epoch, ending sessions signed in before it.
+    if user is None or not user["active"] or request.session.get("epoch", 0) != user["session_epoch"]:
         request.session.clear()
         return None
     return user

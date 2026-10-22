@@ -230,7 +230,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         throttle.clear(username, client_ip)
         request.session.clear()
         request.session["user_id"] = user["id"]
-        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+        request.session["epoch"] = user["session_epoch"]
+        return RedirectResponse("/",status_code=status.HTTP_303_SEE_OTHER)
 
     @app.post("/logout")
     def logout(request: Request):
