@@ -368,3 +368,19 @@ def test_long_conversations_are_shortened_to_fit():
     assert agent_mod._size(messages) <= 8000
     assert "[8] OPERA.pdf" in messages[-3]["content"]           # older result: cite markers kept
     assert any(m["content"] == "now" for m in messages)          # the question stays
+
+
+def test_spreadsheets_reach_the_model_compactly():
+    out = agent_mod.compact_sheet({"format": "xlsx", "sheet": "Phones", "cells": [
+        {"A1": "Name", "C1": "Ext"}, {"A5": "Rob Watson", "C5": 4512, "D5": {"formula": "=C5+1", "value": 4513}}]})
+    assert out["cells"] == "row 1: A=Name | C=Ext\nrow 5: A=Rob Watson | C=4512 | D=4513 (=C5+1)"
+    assert out["sheet"] == "Phones"
+
+
+def test_the_newest_result_keeps_the_room_that_is_left():
+    sheet = "row 1: " + "x" * 20000
+    messages = [{"role": "system", "content": "s" * 2000}, {"role": "user", "content": "find rob"},
+                {"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]},
+                {"role": "tool", "content": sheet}]
+    agent_mod.fit(messages, 9000)
+    assert 5000 < len(messages[-1]["content"]) < 9000 and "smaller range" in messages[-1]["content"]

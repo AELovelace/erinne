@@ -24,6 +24,9 @@
       <button type="button" class="tool" data-act="move" data-mode="browse search" data-needs="some write">Move to…</button>
       <button type="button" class="tool" data-act="copy" data-mode="browse search" data-needs="some">Copy to…</button>
       <button type="button" class="tool danger" data-act="trash" data-mode="browse search" data-needs="some write">Delete</button>
+      <button type="button" class="tool" data-act="reembed" data-mode="browse" data-needs="reembed"
+              title="Read and embed the selected items again, or everything here when nothing is selected">Re-embed</button>
+      <button type="button" class="tool" data-act="properties" data-mode="browse search" data-needs="one">Properties</button>
       <button type="button" class="tool" data-act="restore" data-mode="trash" data-needs="some">Restore</button>
       <button type="button" class="tool danger" data-act="purge" data-mode="trash" data-needs="some">Delete forever</button>
       <button type="button" class="tool danger" data-act="empty-bin" data-mode="trash">Empty bin</button>
@@ -65,6 +68,17 @@
     <div class="dlg-actions">
       <button type="button" class="link" value="cancel" data-close>Cancel</button>
       <button type="submit" value="ok">OK</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="dlg glass props" id="dlg-props" aria-labelledby="props-title">
+  <form method="dialog">
+    <h2 id="props-title">Properties</h2>
+    <div id="props-body" aria-live="polite"></div>
+    <p class="error small" id="props-error"></p>
+    <div class="dlg-actions">
+      <button type="submit" value="ok">Close</button>
     </div>
   </form>
 </dialog>

@@ -135,10 +135,41 @@ class Place:
     reason: str          # 'agents' | 'library'
 
 
+def _chain_flag(conn: sqlite3.Connection, column: str, folder_id: int | None,
+                file_id: int | None = None) -> str | None:
+    """The name of the file, or of the nearest folder at or above folder_id, with `column` set; None if none."""
+    if file_id is not None:
+        row = conn.execute(f"SELECT display_name, {column} AS flag FROM files WHERE id = ?", (file_id,)).fetchone()
+        if row is not None and row["flag"]:
+            return row["display_name"]
+    if folder_id is None:
+        return None
+    row = conn.execute(
+        f"WITH RECURSIVE up(id, parent_id, flag, name) AS ("
+        f" SELECT id, parent_id, {column}, name FROM folders WHERE id = ? UNION ALL"
+        f" SELECT f.id, f.parent_id, f.{column}, f.name FROM folders f JOIN up ON f.id = up.parent_id)"
+        f" SELECT name FROM up WHERE flag = 1 LIMIT 1", (folder_id,)).fetchone()
+    return row["name"] if row is not None else None
+
+
+def no_edit_reason(conn: sqlite3.Connection, folder_id: int | None, file_id: int | None = None) -> str | None:
+    """Why the AI may not change this file (or things in this folder): "AI can edit" switched off on the file
+    or on a folder at or above `folder_id` (files.ai_no_edit, folders.ai_no_edit); None if nothing stops it."""
+    name = _chain_flag(conn, "ai_no_edit", folder_id, file_id)
+    return f"“{name}” is read-only for the AI (AI edit is off for it in Files)." if name else None
+
+
+def owner_allows(conn: sqlite3.Connection, folder_id: int | None, file_id: int | None = None) -> bool:
+    """The inbox owner switched "AI can edit" on for this file or a folder at or above folder_id."""
+    return _chain_flag(conn, "ai_edit", folder_id, file_id) is not None
+
+
 def check_edit(conn: sqlite3.Connection, user_id: int, token_can_edit: bool,
-               collection_id: int, folder_id: int | None, *, via: str = "claude") -> Place:
+               collection_id: int, folder_id: int | None, *, via: str = "claude", file_id: int | None = None,
+               item_flags: bool = True) -> Place:
     """Raise unless the assistant (Claude, or Erynne) may change files at this
-    place for this person."""
+    place for this person. file_id: the file being changed (its own switches count too).
+    item_flags=False leaves out the per-folder and per-file switches (to show them)."""
     who = ASSISTANTS[via]
     if not ai_access(conn, user_id, via).can_read(collection_id, folder_id):
         raise EditNotFound("No such place" + (" (or it isn't shared with Claude)." if via == "claude" else "."))
@@ -147,15 +178,51 @@ def check_edit(conn: sqlite3.Connection, user_id: int, token_can_edit: bool,
                             "Mnemerynne and turn on “Let Claude edit files” for this token.")
     if not fs.Access.of(conn, user_id).can_write(collection_id, folder_id):
         raise EditForbidden(f"You can't change files here yourself, so {who} can't either.")
+    if item_flags:
+        why = no_edit_reason(conn, folder_id, file_id)
+        if why:
+            raise EditForbidden(why)
     coll = conn.execute("SELECT kind, owner_user_id, claude_edit FROM collections WHERE id = ?",
                         (collection_id,)).fetchone()
     if coll["claude_edit"]:
         return Place(collection_id, folder_id, "library")
-    if coll["kind"] == "private" and coll["owner_user_id"] == user_id and folder_id in _agents_subtree(conn, collection_id):
+    own_inbox = coll["kind"] == "private" and coll["owner_user_id"] == user_id
+    if own_inbox and folder_id in _agents_subtree(conn, collection_id):
         return Place(collection_id, folder_id, "agents")
-    where = "your inbox outside the Agents folder" if coll["kind"] == "private" else "this library"
-    raise EditForbidden(f"{who} isn't allowed to change files in {where}. Work in your {AGENTS} folder "
+    if own_inbox and item_flags and owner_allows(conn, folder_id, file_id):
+        return Place(collection_id, folder_id, "owner")
+    if own_inbox:
+        raise EditForbidden(f"{who} isn't allowed to change files in your inbox outside the Agents folder. Work "
+                            f"in your {AGENTS} folder instead (create_file puts new files there), or ask the person "
+                            f"to turn on AI edit for this folder or file in Files.")
+    raise EditForbidden(f"{who} isn't allowed to change files in this library. Work in your {AGENTS} folder "
                         f"instead (create_file puts new files there), or ask an admin to allow AI edits here.")
+
+
+def edit_state(conn: sqlite3.Connection, user_id: int, collection_id: int, place: int | None,
+               above: int | None, own_edit: int, own_no_edit: int) -> dict:
+    """The "AI can edit" switch of a file (place and above = its folder) or a folder (place = itself, above =
+    its parent): {on, can_change, shared, why}. In their own inbox people can switch it on (like the Agents
+    folder); elsewhere only an admin allows AI edits and the switch can only make things read-only."""
+    access = fs.Access.of(conn, user_id)
+    coll = conn.execute("SELECT kind, owner_user_id FROM collections WHERE id = ?", (collection_id,)).fetchone()
+    grantable = bool(coll) and coll["kind"] == "private" and coll["owner_user_id"] == user_id \
+        and access.can_write(collection_id, place)
+    try:
+        check_edit(conn, user_id, True, collection_id, place, via="erynne", item_flags=False)
+        base, why = True, None
+    except EditForbidden as exc:
+        base, why = False, str(exc)
+    except EditError as exc:
+        base, why, grantable = False, str(exc), False
+    blocked = no_edit_reason(conn, above)
+    if blocked:
+        return {"on": False, "can_change": False, "shared": False, "why": blocked}
+    allowed_above = base or (grantable and owner_allows(conn, above))
+    shared = allowed_above or grantable
+    on = not own_no_edit and (allowed_above or (grantable and bool(own_edit)))
+    return {"on": on, "can_change": shared and access.can_write(collection_id, place), "shared": shared,
+            "why": None if shared else why}
 
 
 def editable_places(conn: sqlite3.Connection, user_id: int, via: str = "claude") -> list[dict]:
@@ -307,7 +374,8 @@ def save(conn: sqlite3.Connection, settings: Settings, caller, file_id: int, dat
          expected: str, summary: str, via: str = "claude") -> str:
     """The assistant's change to a file, after the permission check."""
     loaded = load(conn, settings, caller.user_id, file_id, via=via)
-    check_edit(conn, caller.user_id, caller.can_edit, loaded.row["collection_id"], loaded.row["folder_id"], via=via)
+    check_edit(conn, caller.user_id, caller.can_edit, loaded.row["collection_id"], loaded.row["folder_id"], via=via,
+               file_id=file_id)
     return replace_content(conn, settings, file_id, data, expected=expected, actor_id=caller.user_id,
                            via=via, summary=summary, token_id=caller.token_id,
                            edited_via=f"{via}:{caller.username}")

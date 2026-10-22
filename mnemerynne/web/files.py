@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from mnemerynne import api_tokens, editing, fs, jobs, permissions, share
 from mnemerynne.config import Settings
 from mnemerynne.ingest import markdown, store
-from mnemerynne.web.deps import api_user, get_db, get_settings, page_user
+from mnemerynne.web.deps import api_user, get_db, get_settings, is_admin, page_user
 
 router = APIRouter()
 
@@ -137,7 +137,7 @@ def _claude_json(on_and_allowed: tuple[bool, bool], writable: bool) -> dict:
 
 
 @router.get("/api/browse")
-def browse(collection_id: int, folder_id: int | None = None, user=Depends(api_user),
+def browse(request: Request, collection_id: int, folder_id: int | None = None, user=Depends(api_user),
            conn: sqlite3.Connection = Depends(get_db)):
     access = fs.Access.of(conn, user["id"])
     listing = _fs_errors(lambda: fs.browse(conn, access, collection_id, folder_id))
@@ -145,6 +145,8 @@ def browse(collection_id: int, folder_id: int | None = None, user=Depends(api_us
     files = [_file_json(r, access) for r in listing["files"]]
     # The Claude column, for people who have Claude connected (Claude page).
     claude = api_tokens.has_active(conn, user["id"])
+    agent = getattr(request.app.state, "agent", None)
+    ai = claude or (agent is not None and agent.allowed(conn, user))
     reach = access.reaches.get(collection_id)
     if claude and reach is not None:
         for out, row in zip(folders, listing["folders"]):
@@ -152,8 +154,124 @@ def browse(collection_id: int, folder_id: int | None = None, user=Depends(api_us
         for out, row in zip(files, listing["files"]):
             out["claude"] = _claude_json(reach.claude_state(row["folder_id"], own=row["claude_hidden"]),
                                          out["can_delete"])
+    if ai and reach is not None:
+        flags = {r["id"]: r for r in conn.execute(
+            f"SELECT id, ai_edit, ai_no_edit FROM folders WHERE id IN ({','.join('?' * len(folders)) or 'NULL'})",
+            [f["id"] for f in folders])}
+        for out in folders:
+            f = flags[out["id"]]
+            out["ai_edit"] = editing.edit_state(conn, user["id"], collection_id, out["id"], folder_id,
+                                                f["ai_edit"], f["ai_no_edit"])
+        for out, row in zip(files, listing["files"]):
+            out["ai_edit"] = editing.edit_state(conn, user["id"], collection_id, row["folder_id"], row["folder_id"],
+                                                row["ai_edit"], row["ai_no_edit"])
     return {"folders": folders, "files": files, "path": listing["path"], "can_write": listing["can_write"],
-            "claude": claude}
+            "claude": claude, "ai": ai, "can_reembed": _can_reembed(request, conn, user, collection_id)}
+
+
+def _can_reembed(request: Request, conn: sqlite3.Connection, user, collection_id: int) -> bool:
+    """Re-embedding: people in their own inbox; admins anywhere."""
+    row = conn.execute("SELECT kind, owner_user_id FROM collections WHERE id = ?", (collection_id,)).fetchone()
+    if row is None:
+        return False
+    return (row["kind"] == "private" and row["owner_user_id"] == user["id"]) or is_admin(request, conn, user)
+
+
+def _where(conn: sqlite3.Connection, collection_id: int, folder_id: int | None) -> str:
+    coll = conn.execute("SELECT kind, name FROM collections WHERE id = ?", (collection_id,)).fetchone()
+    parts = ["My files" if coll and coll["kind"] == "private" else (coll["name"] if coll else "?")]
+    return " / ".join(parts + [p["name"] for p in fs.folder_path(conn, folder_id)])
+
+
+@router.get("/api/properties")
+def properties(request: Request, type: Literal["file", "folder"], id: int, user=Depends(api_user),
+               conn: sqlite3.Connection = Depends(get_db)):
+    """Everything the Properties dialog shows: details, search (embedding) state, and Claude's access."""
+    access = fs.Access.of(conn, user["id"])
+    connected = api_tokens.has_active(conn, user["id"])
+    if type == "file":
+        row = _readable_file(conn, access, id)
+        if row["deleted_at"] is not None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")
+        cid, fid = row["collection_id"], row["folder_id"]
+        reach = access.reaches[cid]
+        chunks = conn.execute("SELECT count(*) FROM chunks WHERE file_id = ?", (id,)).fetchone()[0]
+        vectors = conn.execute("SELECT count(*) FROM chunk_vec WHERE rowid IN (SELECT id FROM chunks WHERE file_id = ?)",
+                               (id,)).fetchone()[0]
+        return {**_file_json(row, access), "where": _where(conn, cid, fid),
+                "search": {"status": row["status"], "progress": row["progress"], "error": row["error"],
+                           "chunks": chunks, "embedded": vectors},
+                "claude_connected": connected,
+                "claude_see": _claude_json(reach.claude_state(fid, own=row["claude_hidden"]),
+                                           access.can_write(cid, fid)),
+                "ai_edit": editing.edit_state(conn, user["id"], cid, fid, fid, row["ai_edit"], row["ai_no_edit"]),
+                "can_reembed": _can_reembed(request, conn, user, cid) and row["status"] not in fs.REEMBED_SKIP}
+    folder = conn.execute("SELECT * FROM folders WHERE id = ? AND deleted_at IS NULL", (id,)).fetchone()
+    if folder is None or not access.can_read(folder["collection_id"], id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Folder not found")
+    cid = folder["collection_id"]
+    live = fs.live_folder_ids(conn, cid)
+    if id not in live:   # inside a folder in the bin
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Folder not found")
+    inside = [f for f in fs.subtree(conn, id) if f in live]
+    marks = ",".join("?" * len(inside))
+    counts = {r["status"]: r["n"] for r in conn.execute(
+        f"SELECT status, count(*) AS n FROM files WHERE folder_id IN ({marks}) AND deleted_at IS NULL GROUP BY status",
+        inside)}
+    chunks = conn.execute(f"SELECT count(*) FROM chunks c JOIN files f ON f.id = c.file_id "
+                          f"WHERE f.folder_id IN ({marks}) AND f.deleted_at IS NULL", inside).fetchone()[0]
+    return {**_folder_json(folder), "where": _where(conn, cid, folder["parent_id"]),
+            "files": sum(counts.values()), "folders": len(inside) - 1,
+            "search": {"by_status": counts, "chunks": chunks},
+            "claude_connected": connected,
+            "claude_see": _claude_json(access.reaches[cid].claude_state(id), access.can_write(cid, id)),
+            "ai_edit": editing.edit_state(conn, user["id"], cid, id, folder["parent_id"], folder["ai_edit"],
+                                          folder["ai_no_edit"]),
+            "can_reembed": _can_reembed(request, conn, user, cid)}
+
+
+class AiEdit(BaseModel):
+    allowed: bool
+
+
+@router.put("/api/files/{file_id}/ai-edit")
+def set_file_ai_edit(file_id: int, body: AiEdit, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+    access = fs.Access.of(conn, user["id"])
+    _fs_errors(lambda: fs.set_ai_edit(conn, access, fs.Item("file", file_id), body.allowed))
+    return {"id": file_id, "allowed": body.allowed}
+
+
+@router.put("/api/folders/{folder_id}/ai-edit")
+def set_folder_ai_edit(folder_id: int, body: AiEdit, user=Depends(api_user),
+                       conn: sqlite3.Connection = Depends(get_db)):
+    access = fs.Access.of(conn, user["id"])
+    _fs_errors(lambda: fs.set_ai_edit(conn, access, fs.Item("folder", folder_id), body.allowed))
+    return {"id": folder_id, "allowed": body.allowed}
+
+
+class ItemRef(BaseModel):
+    type: Literal["file", "folder"]
+    id: int
+
+
+class Reembed(BaseModel):
+    collection_id: int
+    items: list[ItemRef] = Field(default_factory=list, max_length=1000)   # none: the whole library
+
+
+@router.post("/api/reembed")
+def reembed(body: Reembed, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Read and embed files again: the chosen files and folders, or a whole library. In your own inbox, or as
+    an admin anywhere you can read."""
+    access = fs.Access.of(conn, user["id"])
+    if body.collection_id not in access.readable:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such library.")
+    if not _can_reembed(request, conn, user, body.collection_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only admins can re-embed files outside your own inbox.")
+    ids = fs.reembed_targets(conn, body.collection_id, [fs.Item(i.type, i.id) for i in body.items] or None)
+    rows = [fs.file_row(conn, i) for i in ids]
+    ids = [r["id"] for r in rows if r is not None and access.can_read(r["collection_id"], r["folder_id"])]
+    return {"queued": fs.queue_reembed(conn, ids)}
 
 
 class ClaudeVisible(BaseModel):

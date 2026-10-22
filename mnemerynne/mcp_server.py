@@ -394,7 +394,7 @@ class Tools:
             view = editing_formats.xlsx_view(loaded.data, sheet, cells)
         try:
             editing.check_edit(conn, caller.user_id, caller.can_edit, loaded.row["collection_id"],
-                               loaded.row["folder_id"], via=self.mode)
+                               loaded.row["folder_id"], via=self.mode, file_id=file_id)
             can_edit, why = True, None
         except editing.EditError as exc:
             can_edit, why = False, str(exc)
@@ -408,7 +408,7 @@ class Tools:
             tool = {"text": "edit_text", "docx": "edit_document", "xlsx": "edit_spreadsheet"}[loaded.fmt]
             raise editing.EditError(f"“{loaded.row['display_name']}” is edited with {tool}.")
         editing.check_edit(conn, caller.user_id, caller.can_edit, loaded.row["collection_id"], loaded.row["folder_id"],
-                           via=self.mode)
+                           via=self.mode, file_id=file_id)
         if version != loaded.version:
             raise editing.EditConflict(f"“{loaded.row['display_name']}” changed since that version was opened. "
                                        f"Open it again and redo the change on the new version.")

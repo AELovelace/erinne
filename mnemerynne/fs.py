@@ -331,7 +331,7 @@ def split_relative_path(relative_path: str) -> list[str]:
 # ----------------------------------------------------------------- browsing
 _FILE_COLUMNS = """
     f.id, f.collection_id, f.folder_id, f.display_name, f.status, f.progress, f.error, f.notes,
-    f.created_at, f.updated_at, f.deleted_at, f.uploaded_by, f.edited_via, f.claude_hidden, b.kind, b.mime, b.size, b.unit_count,
+    f.created_at, f.updated_at, f.deleted_at, f.uploaded_by, f.edited_via, f.claude_hidden, f.ai_edit, f.ai_no_edit, b.kind, b.mime, b.size, b.unit_count,
     b.rel_path, b.ocr_rel_path, u.username AS uploaded_by_name
 """
 _FILE_FROM = """
@@ -447,6 +447,59 @@ def set_folder_claude(conn: sqlite3.Connection, access: Access, collection_id: i
         raise Forbidden("Only people who can change this folder can change what Claude sees in it.")
     with transaction(conn):
         conn.execute("UPDATE folders SET claude_hidden = ? WHERE id = ?", (0 if visible else 1, folder_id))
+
+
+def set_ai_edit(conn: sqlite3.Connection, access: Access, item: Item, allowed: bool) -> None:
+    """Let the AI (Claude, Erynne's proposals) change this file or the files in this folder, or keep it
+    read-only for the AI. Only people who can change the place. Switching it on only counts in someone's own
+    inbox or where an admin allows AI edits (editing.check_edit)."""
+    if item.type == "file":
+        row = file_row(conn, item.id)
+        if row is None or row["deleted_at"] is not None or not access.can_read(row["collection_id"], row["folder_id"]):
+            raise NotFound("No such file.")
+        cid, fid, table = row["collection_id"], row["folder_id"], "files"
+    else:
+        row = conn.execute("SELECT collection_id FROM folders WHERE id = ? AND deleted_at IS NULL", (item.id,)).fetchone()
+        if row is None or not access.can_read(row["collection_id"], item.id):
+            raise NotFound("No such folder.")
+        cid, fid, table = row["collection_id"], item.id, "folders"
+    if not access.can_write(cid, fid):
+        raise Forbidden("Only people who can change this folder can change what the AI may do in it.")
+    with transaction(conn):
+        conn.execute(f"UPDATE {table} SET ai_edit = ?, ai_no_edit = ? WHERE id = ?",
+                     (1 if allowed else 0, 0 if allowed else 1, item.id))
+
+
+REEMBED_SKIP = ("queued", "processing", "stored")   # already on the way, or can't be read for search
+
+
+def reembed_targets(conn: sqlite3.Connection, collection_id: int, items: list[Item] | None = None) -> list[int]:
+    """Live files to read and embed again: the given files and everything in the given folders, or (no items)
+    the whole collection. Files already queued or indexing, and stored-only ones, are left out."""
+    live = live_folder_ids(conn, collection_id)
+    if items:
+        file_ids = {i.id for i in items if i.type == "file"}
+        folders = [f for i in items if i.type == "folder" and i.id in live for f in subtree(conn, i.id) if f in live]
+        file_ids |= set(_subtree_file_ids(conn, folders))
+        if not file_ids:
+            return []
+        marks = ",".join("?" * len(file_ids))
+        rows = conn.execute(f"SELECT id, folder_id, status FROM files WHERE id IN ({marks}) AND collection_id = ? "
+                            f"AND deleted_at IS NULL", (*file_ids, collection_id)).fetchall()
+    else:
+        rows = conn.execute("SELECT id, folder_id, status FROM files WHERE collection_id = ? AND deleted_at IS NULL",
+                            (collection_id,)).fetchall()
+    return sorted(r["id"] for r in rows if r["status"] not in REEMBED_SKIP
+                  and (r["folder_id"] is None or r["folder_id"] in live))
+
+
+def queue_reembed(conn: sqlite3.Connection, file_ids: list[int]) -> int:
+    """Queue files to be chunked and embedded again (the worker does it; extracted text and OCR are kept)."""
+    with transaction(conn):
+        for file_id in file_ids:
+            conn.execute("UPDATE files SET status = 'queued', progress = NULL, error = NULL WHERE id = ?", (file_id,))
+            jobs.enqueue(conn, "ingest", file_id)
+    return len(file_ids)
 
 
 def search_scope(conn: sqlite3.Connection, file_id: int) -> tuple[int, int]:

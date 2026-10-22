@@ -172,6 +172,8 @@
     state.path = data.path;
     state.canWrite = data.can_write;
     state.claude = !!data.claude;   // Claude connected: show the Claude column
+    state.canReembed = !!data.can_reembed;   // own inbox, or an admin
+    state.ai = !!data.ai;   // Claude connected or Erynne's tools: show the AI edit column
     // Expand the tree down to where we are.
     state.expanded.add("c:" + state.cid);
     data.path.forEach(function (p) { state.expanded.add("f:" + p.id); });
@@ -340,8 +342,9 @@
     renderCrumbs();
     const list = $("list");
     const claudeCol = state.mode === "browse" && state.claude;
+    const aiCol = state.mode === "browse" && state.ai;
     list.className = "fm-list " + state.view + (state.mode === "trash" ? " trash" : "")
-      + (state.mode === "search" ? " search" : "") + (claudeCol ? " with-claude" : "");
+      + (state.mode === "search" ? " search" : "") + (claudeCol ? " with-claude" : "") + (aiCol ? " with-ai" : "");
     const items = sorted(state.items);
     state.items = items;
     const frag = document.createDocumentFragment();
@@ -356,6 +359,12 @@
         if (claudeCol) {
           const h = el("span", "c-claude", "Claude");
           h.title = "Ticked: Claude can see it. Untick to keep it from Claude (Erynne still sees it).";
+          head.appendChild(h);
+        }
+        if (aiCol) {
+          const h = el("span", "c-claude", "AI edit");
+          h.title = "Ticked: Claude and Erynne may change it. In your own files you can switch it on; " +
+            "elsewhere an admin decides and you can only make things read-only.";
           head.appendChild(h);
         }
         head.append(el("span", "c-size", "Size"), el("span", "c-date", "Modified"));
@@ -416,6 +425,45 @@
     return cell;
   }
 
+  // The AI edit column: ticked when Claude (and Erynne's proposals) may change the file, or files in the
+  // folder. In your own files ticking allows it; elsewhere it can only make things read-only.
+  function aiEditCell(item) {
+    const cell = el("span", "c-claude");
+    const s = item.ai_edit;
+    if (!s) return cell;
+    const box = el("input");
+    box.type = "checkbox";
+    box.checked = s.on;
+    box.disabled = !s.can_change;
+    const describe = function () {
+      box.setAttribute("aria-label", (s.on ? "The AI may change " : "The AI can't change ") + item.name);
+      cell.title = !s.shared ? (s.why || "The AI can't edit here.")
+        : !s.can_change ? "Only people who can change this folder can change that."
+        : s.on ? "The AI may change this. Untick to make it read-only for the AI."
+        : "Read-only for the AI. Tick to let Claude and Erynne change it.";
+    };
+    describe();
+    box.addEventListener("click", function (e) { e.stopPropagation(); });
+    box.addEventListener("dblclick", function (e) { e.stopPropagation(); });
+    box.addEventListener("change", async function () {
+      const want = box.checked;
+      box.disabled = true;
+      try {
+        await api("PUT", "/api/" + (item.type === "file" ? "files/" : "folders/") + item.id + "/ai-edit", { allowed: want });
+        s.on = want;
+        if (item.type === "folder") await refresh(true);   // what's inside follows
+      } catch (err) {
+        box.checked = s.on;
+        toast(err.message, true);
+      } finally {
+        box.disabled = !s.can_change;
+        describe();
+      }
+    });
+    cell.appendChild(box);
+    return cell;
+  }
+
   function renderItem(item, index) {
     const sel = state.selected.has(key(item));
     const row = el("div", (state.view === "list" ? "row" : "tile") + (sel ? " selected" : "")
@@ -457,6 +505,7 @@
       }
       row.append(check, name, status);
       if (state.mode === "browse" && state.claude) row.appendChild(claudeCell(item));
+      if (state.mode === "browse" && state.ai) row.appendChild(aiEditCell(item));
       row.append(el("span", "c-size muted", item.type === "file" ? sizeLabel(item.size) : ""),
         el("span", "c-date muted", dateLabel(item.updated_at || item.created_at)));
     }
@@ -549,6 +598,7 @@
       if (needs.includes("one") && items.length !== 1) ok = false;
       if (needs.includes("some") && items.length === 0) ok = false;
       if (needs.includes("files") && (!items.length || items.some(function (i) { return i.type !== "file"; }))) ok = false;
+      if (needs.includes("reembed") && !state.canReembed) ok = false;
       node.disabled = !ok;
     });
     const empty = document.querySelector('[data-act="empty-bin"]');
@@ -593,6 +643,9 @@
         case "purge": await purgeItems(items); break;
         case "empty-bin": await purgeItems(state.items, true); break;
         case "retry": await api("POST", "/api/files/" + items[0].id + "/retry"); await refresh(true); break;
+        case "reembed": await reembed(items); break;
+        case "properties": if (items[0]) await showProperties(items[0]); break;
+        case "properties-here": await showProperties({ type: "folder", id: state.fid, name: "" }); break;
       }
     } catch (e) {
       toast(e.message, true);
@@ -703,6 +756,147 @@
     if (ok) await batch("purge", items, "delete");
   }
 
+  // ------------------------------------------------------ re-embedding
+  /* Read and embed again: the selected files and folders, or everything here (the folder, or the whole
+     library at its top). Extracted text and OCR are kept; only chunks and embeddings are redone. */
+  async function reembed(items) {
+    const here = state.fid ? "this folder" : (locationOf(state.cid) || {}).name || "this library";
+    const what = items.length === 1 ? "“" + items[0].name + "”" : items.length ? items.length + " items" : "everything in " + here;
+    const ok = await confirmDialog("Re-embed " + what + "?", "Files are read and embedded again in the background. " +
+      "They can't be found in answers until they're Ready again.", "Re-embed");
+    if (!ok) return;
+    let targets = items;
+    if (!items.length && state.fid) targets = [{ type: "folder", id: state.fid }];
+    const out = await api("POST", "/api/reembed", { collection_id: state.cid,
+      items: targets.map(function (i) { return { type: i.type, id: i.id }; }) });
+    toast(out.queued ? out.queued + (out.queued === 1 ? " file is" : " files are") + " being embedded again."
+      : "Nothing to re-embed: those files are already queued, or can't be searched.");
+    await refresh(true);
+  }
+
+  // ---------------------------------------------------------- properties
+  function propRow(table, label, value) {
+    if (value === null || value === undefined || value === "") return;
+    const tr = el("tr");
+    tr.append(el("th", null, label));
+    const td = el("td");
+    if (value instanceof Node) td.appendChild(value); else td.textContent = value;
+    tr.appendChild(td);
+    table.appendChild(tr);
+  }
+
+  /* A Claude switch in the Properties dialog: "see" or "edit". */
+  function claudeSwitch(item, kind, state_, label) {
+    const wrap = el("div", "props-switch");
+    const box = el("input");
+    box.type = "checkbox";
+    box.id = "props-" + kind;
+    box.checked = state_.on;
+    box.disabled = !state_.can_change;
+    const l = el("label", null, label);
+    l.htmlFor = box.id;
+    const note = el("p", "small muted");
+    const describe = function () {
+      note.textContent = !state_.shared ? (state_.why || "Not shared with Claude here (an admin setting, or a folder above).")
+        : !state_.can_change ? "Only people who can change this folder can change this."
+        : kind === "see" ? (state_.on ? "Untick to keep it" + (item.type === "folder" ? ", and everything in it," : "") + " from Claude. Erynne still sees it."
+                                      : "Hidden from Claude. Tick to let Claude see it again.")
+        : (state_.on ? "Untick to make it read-only for Claude and Erynne" + (item.type === "folder" ? " (everything in it)." : ".")
+                     : "Read-only for the AI. Tick to let Claude and Erynne change it" + (item.type === "folder" ? " (everything in it)." : "."));
+    };
+    describe();
+    box.addEventListener("change", async function () {
+      const want = box.checked;
+      box.disabled = true;
+      $("props-error").textContent = "";
+      const path = "/api/" + (item.type === "file" ? "files/" : "folders/") + item.id + (kind === "see" ? "/claude" : "/ai-edit");
+      try {
+        await api("PUT", path, kind === "see" ? { visible: want } : { allowed: want });
+        state_.on = want;
+        await refresh(true);   // the Claude and AI edit columns follow
+      } catch (e) {
+        box.checked = state_.on;
+        $("props-error").textContent = e.message;
+      } finally {
+        box.disabled = !state_.can_change;
+        describe();
+      }
+    });
+    wrap.append(box, l);
+    const block = el("div");
+    block.append(wrap, note);
+    return block;
+  }
+
+  async function showProperties(item) {
+    const dlg = $("dlg-props");
+    const body = $("props-body");
+    $("props-error").textContent = "";
+    body.replaceChildren(el("p", "muted", "Loading…"));
+    $("props-title").textContent = item.name || "Properties";
+    if (!dlg.open) dlg.showModal();
+    let p;
+    try { p = await api("GET", "/api/properties?type=" + item.type + "&id=" + item.id); }
+    catch (e) { body.replaceChildren(el("p", "error", e.message)); return; }
+    $("props-title").textContent = p.name;
+    body.replaceChildren();
+
+    const general = el("table", "props-table");
+    propRow(general, "Type", p.type === "folder" ? "Folder" : (p.kind || "file").toUpperCase() + (p.mime ? " · " + p.mime : ""));
+    propRow(general, "Where", p.where || "/");
+    if (p.type === "file") {
+      propRow(general, "Size", sizeLabel(p.size) + (p.pages ? " · " + p.pages + " page" + (p.pages === 1 ? "" : "s") : ""));
+      propRow(general, "Uploaded by", p.uploaded_by);
+      propRow(general, "Added", dateLabel(p.created_at));
+      propRow(general, "Changed", dateLabel(p.updated_at));
+      if (p.edited_via) propRow(general, "Last change via", p.edited_via.replace(":", " for "));
+    } else {
+      propRow(general, "Contains", p.files + (p.files === 1 ? " file" : " files") + (p.folders ? ", " + p.folders + (p.folders === 1 ? " folder" : " folders") : ""));
+      propRow(general, "Created", dateLabel(p.created_at));
+    }
+    body.append(el("h3", "props-h", "General"), general);
+
+    const search = el("table", "props-table");
+    if (p.type === "file") {
+      const s = p.search;
+      const badge = el("span", "badge " + s.status, statusText(Object.assign({}, p, { status: s.status, progress: s.progress })));
+      propRow(search, "Status", badge);
+      propRow(search, "Passages", s.chunks ? s.chunks + " (" + s.embedded + " embedded)" : s.status === "stored" ? "Stored only: this kind of file can't be searched" : "None yet");
+      if (s.error) propRow(search, "Error", s.error);
+    } else {
+      const parts = Object.keys(p.search.by_status).sort().map(function (k) {
+        return p.search.by_status[k] + " " + (STATUS[k] || k).toLowerCase();
+      });
+      propRow(search, "Files", parts.length ? parts.join(", ") : "None");
+      propRow(search, "Passages", String(p.search.chunks));
+    }
+    body.append(el("h3", "props-h", "Search"), search);
+    if (p.can_reembed) {
+      const b = el("button", "small", "Re-embed" + (p.type === "folder" ? " everything in it" : ""));
+      b.type = "button";
+      b.addEventListener("click", async function () {
+        b.disabled = true;
+        try {
+          const out = await api("POST", "/api/reembed", { collection_id: p.collection_id, items: [{ type: p.type, id: p.id }] });
+          toast(out.queued ? out.queued + (out.queued === 1 ? " file is" : " files are") + " being embedded again."
+            : "Nothing to re-embed right now.");
+          await refresh(true);
+          await showProperties(p);
+        } catch (e) { $("props-error").textContent = e.message; b.disabled = false; }
+      });
+      const actions = el("div", "props-actions");
+      actions.appendChild(b);
+      body.appendChild(actions);
+    }
+
+    body.appendChild(el("h3", "props-h", "Claude and AI"));
+    if (!p.claude_connected) {
+      body.appendChild(el("p", "small muted", "Connect Claude on the Claude page to use Claude. These apply to everyone's Claude."));
+    }
+    body.append(claudeSwitch(p, "see", p.claude_see, "Claude can see " + (p.type === "folder" ? "this folder" : "this file")),
+                claudeSwitch(p, "edit", p.ai_edit, "AI can edit " + (p.type === "folder" ? "files in it" : "this file")));
+  }
+
   // ----------------------------------------------------------- context menu
   function showContextMenu(x, y) {
     const menu = $("ctx");
@@ -724,16 +918,24 @@
       add("Open", "open", items.length === 1);
       add("Download", "download", items.every(function (i) { return i.type === "file"; }));
       if (items.length === 1 && items[0].type === "file" && items[0].status === "failed" && write) add("Retry indexing", "retry");
+      if (state.mode === "browse" && state.canReembed) add("Re-embed", "reembed");
       menu.appendChild(el("hr"));
       add("Rename", "rename", items.length === 1 && write);
       add("Move to…", "move", write);
       add("Copy to…", "copy");
       menu.appendChild(el("hr"));
       add("Delete", "trash", write, true);
+      menu.appendChild(el("hr"));
+      add("Properties…", "properties", items.length === 1);
     } else {
       add("New folder", "new-folder", state.mode === "browse" && state.canWrite);
       add("Upload files…", "upload-files", state.mode === "browse" && state.canWrite);
       add("Upload a folder…", "upload-folder", state.mode === "browse" && state.canWrite);
+      if (state.mode === "browse" && state.canReembed) {
+        menu.appendChild(el("hr"));
+        add("Re-embed everything here", "reembed");
+      }
+      if (state.mode === "browse" && state.fid) add("Properties of this folder…", "properties-here");
     }
     menu.hidden = false;
     const r = menu.getBoundingClientRect();

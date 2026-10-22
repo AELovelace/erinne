@@ -150,6 +150,31 @@ get a **Claude** column after Status in the file list.
   after updating rebuilds the vector index's layout once, keeping every
   embedding.
 
+**AI edit.** People with Claude connected, or with Erynne's tools, also get
+an **AI edit** column. Ticked means Claude, and Erynne's proposals, may
+change that file, or the files in that folder.
+- **In their own files:** people can switch it on for any folder or file, as
+  if it were the Agents folder.
+- **In libraries:** only an admin allows AI edits (Access → the library's
+  "Claude and Erynne can edit files here"). There the column can only make
+  things read-only.
+- **Folders:** a folder's setting covers everything inside it.
+
+**Properties and Re-embed.** Right-click → **Properties…** (or the toolbar
+button) shows:
+- the file's or folder's details
+- its search state: status, number of passages, how many are embedded, and
+  any error
+- the "Claude can see" and "AI can edit" switches
+
+**Re-embed** (toolbar, right-click, or Properties) reads and embeds files
+again in the background:
+- what it covers: the selection, or everything in the current folder or
+  library when nothing is selected
+- what's redone: chunks and embeddings only; extracted text and OCR are kept
+- who can use it: anyone in their own files; admins in any library they can
+  open. For all files at once: `sudo mnemerynne-admin reindex`.
+
 ## 5c. Domain accounts
 
 People sign in with their Mnemerynne username and password. An admin links

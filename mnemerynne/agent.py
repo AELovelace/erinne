@@ -172,6 +172,25 @@ def _digest(content: str, limit: int = DIGEST_CHARS) -> str:
     return _clip(content, limit)
 
 
+def compact_sheet(out: dict) -> dict:
+    """An opened spreadsheet's cells as one line per row ("row 5: A=Rob | C=4512")
+    instead of a JSON entry per cell: about half the tokens."""
+    if out.get("format") != "xlsx" or not isinstance(out.get("cells"), list):
+        return out
+    lines = []
+    for row in out["cells"]:
+        if not row:
+            continue
+        number = re.sub(r"^[A-Z]+", "", next(iter(row)))
+        parts = []
+        for ref, value in row.items():
+            if isinstance(value, dict):   # a formula and its last value
+                value = f"{value.get('value')} ({value.get('formula')})"
+            parts.append(f"{re.sub(r'[0-9]+$', '', ref)}={value}")
+        lines.append(f"row {number}: " + " | ".join(parts))
+    return {**{k: v for k, v in out.items() if k != "cells"}, "cells": "\n".join(lines)}
+
+
 def _size(messages: list[dict]) -> int:
     return sum(len(m.get("content") or "") + len(json.dumps(m.get("tool_calls") or "")) for m in messages)
 
@@ -190,10 +209,14 @@ def fit(messages: list[dict], budget_chars: int) -> bool:
     while _size(messages) > budget_chars and question > 1:
         del messages[1]
         question -= 1
+    # The newest result gets whatever room is left, with a hint to narrow it.
     for m in tools[-1:]:
-        if _size(messages) > budget_chars:
-            m["content"] = _digest(m["content"], DIGEST_CHARS // 2)
-    for m in tools:
+        over = _size(messages) - budget_chars
+        if over > 0:
+            keep = max(1500, len(m["content"]) - over - 200)
+            m["content"] = (m["content"][:keep] + " … (cut short to fit. For more, open a smaller range, e.g. "
+                            "cells=\"A40:T80\", or search for the words you need.)")
+    for m in tools[:-1]:
         if _size(messages) > budget_chars:
             m["content"] = _digest(m["content"], 300)
     return _size(messages) <= budget_chars
@@ -410,7 +433,7 @@ class Agent:
                     raise ToolError(f"{call.name} doesn't take {', '.join(sorted(unknown))}; it takes "
                                     f"{', '.join(sorted(self._names[call.name])) or 'nothing'}.")
                 out, file_ids = getattr(self.tools, call.name)(conn, caller, **call.arguments)
-                out = sources.number(conn, call.name, _strip_links(out))
+                out = compact_sheet(sources.number(conn, call.name, _strip_links(out)))
                 ok = True
             except (ToolError, editing.EditError, fs.FsError, TypeError, ValueError) as exc:
                 error = str(exc) or type(exc).__name__
