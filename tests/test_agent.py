@@ -37,7 +37,7 @@ class AgentLLM:
     async def chat_tools(self, messages, tools, **kwargs):
         if self.fail:
             raise httpx.ConnectError("agent model down")
-        self.calls.append((json.loads(json.dumps(messages)), [t["function"]["name"] for t in tools]))
+        self.calls.append((json.loads(json.dumps(messages)), [t["function"]["name"] for t in tools], tools))
         entry = self.script.pop(0) if self.script else ToolTurn("All done.")
         return entry(messages) if callable(entry) else entry
 
@@ -118,8 +118,8 @@ def test_only_the_agent_group_gets_tools(client, agent_llm, conn):
     assert [s["state"] for s in steps] == ["running", "done"]
     assert steps[1]["summary"] == "Searched “night audit”: 1 passage(s)"
     # The model saw the same tools Claude gets, and no links to paste.
-    messages, offered = agent_llm.calls[0]
-    assert "create_file" in offered and "query_api" in offered and len(offered) == 14
+    messages, offered, _ = agent_llm.calls[0]
+    assert "create_file" in offered and "query_api" not in offered and len(offered) == 12   # no APIs for alice
     assert "link" not in agent_llm.calls[1][0][-1]["content"]
     assert len(client.llm.answer_prompts) == answered               # the answer model wasn't used
     row = conn.execute("SELECT tool, ok, u.username FROM agent_calls JOIN users u ON u.id = user_id").fetchone()
@@ -240,7 +240,7 @@ def test_steps_are_capped(client, agent_llm, conn, settings):
     agent_llm.turns(call("find_files", name="a"), call("find_files", name="b"), ToolTurn("Here's what I found."))
     final = _final(_ask(client, "look around"))
     assert final["answer"] == "Here's what I found."
-    assert [len(offered) for _, offered in agent_llm.calls] == [14, 14, 0]      # the last turn gets no tools
+    assert [len(offered) for _, offered, _ in agent_llm.calls] == [12, 12, 0]      # the last turn gets no tools
 
 
 # -------------------------------------------------------------------- admin
@@ -384,3 +384,34 @@ def test_the_newest_result_keeps_the_room_that_is_left():
                 {"role": "tool", "content": sheet}]
     agent_mod.fit(messages, 9000)
     assert 5000 < len(messages[-1]["content"]) < 9000 and "smaller range" in messages[-1]["content"]
+
+
+def test_each_api_operation_is_a_typed_tool(client, agent_llm, conn, settings, monkeypatch):
+    from mnemerynne import apis
+    api_id = conn.execute("INSERT INTO apis(name, base_url, auth_type, ad_group) "
+                          "VALUES ('Hotel Stats', 'https://stats.test/api', 'none', 'Staff')").lastrowid
+    params = [{"name": "property", "type": "string", "in": "query", "default": "all"},
+              {"name": "days", "type": "int", "in": "query", "min": 1, "max": 31, "default": 7}]
+    conn.execute("INSERT INTO api_operations(api_id, name, path, params, description, example_questions) "
+                 "VALUES (?, 'Stats summary', '/stats/summary', ?, 'Occupancy and revenue by day.', "
+                 "'What was occupancy last week?')", (api_id, json.dumps(params)))
+    seen = []
+    monkeypatch.setattr(apis, "TRANSPORT", httpx.MockTransport(
+        lambda r: seen.append(r) or httpx.Response(200, json={"occupancyPct": 81})))
+    _login(client, "alice")
+    agent_llm.turns(call("hotel_stats_stats_summary", property=None, days=3),
+                    lambda m: ToolTurn(f"Occupancy was 81% {last_tool(m)['cite']}."))
+    events = _ask(client, "What was occupancy over the last 3 days?")
+    final = _final(events)
+    assert final["answer"] == "Occupancy was 81% [1]." and final["sources"][0]["kind"] == "api"
+    assert dict(seen[0].url.params) == {"property": "all", "days": "3"}          # null: the default
+    spec = next(s["function"] for s in agent_llm.calls[0][2] if s["function"]["name"] == "hotel_stats_stats_summary")
+    assert spec["parameters"]["properties"]["days"]["anyOf"][0] == {"type": "integer", "minimum": 1, "maximum": 31}
+    assert "What was occupancy last week?" in spec["description"]
+    assert next(e for e in events if e["type"] == "tool" and e["state"] == "done")["summary"] == \
+        "Asked Hotel Stats · Stats summary"
+    # Not in the API's group: no tool for it.
+    conn.execute("UPDATE apis SET ad_group = 'IT'")
+    agent_llm.turns(ToolTurn("Hi."))
+    _ask(client, "hello")
+    assert not any(n.startswith("hotel_stats") for n in agent_llm.calls[-1][1])

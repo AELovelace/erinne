@@ -29,13 +29,14 @@ import logging
 import re
 import sqlite3
 import time
+from dataclasses import dataclass
 from datetime import date
 from typing import Any, Callable
 
 import httpx
 from mcp.server.mcpserver.exceptions import ToolError
 
-from mnemerynne import accounts, db, editing, fs, proposals, retrieval, users
+from mnemerynne import accounts, apis, db, editing, fs, proposals, retrieval, users
 from mnemerynne.answer import ASSISTANT_NAME
 from mnemerynne.api_tokens import Caller
 from mnemerynne.balancer import BalancedTransport
@@ -98,6 +99,8 @@ files, ask internal systems (live, read-only), and draft changes to .txt, .md, .
   place. When asked to create or change a file, draft it straight away with the tools (it is only a
   proposal, so don't ask for permission first), then say briefly what you drafted and that they can
   review it and press Apply.
+- For live figures from internal systems (tickets, alerts, stats and so on), call the tool named after
+  that system and operation; don't search documents for them. Leave optional parameters null.
 - Where things are: {places}. Their Agents folder is "My inbox / Agents"; create_file with no library or
   folder puts new files there.
 - You can't delete, move or rename files.
@@ -289,6 +292,41 @@ class Sources:
         return out
 
 
+# Claude's two generic API tools; the agent gets one tool per operation instead.
+GENERIC_API_TOOLS = {"list_apis", "query_api"}
+
+
+@dataclass(frozen=True)
+class ApiTool:
+    """One internal API operation offered to the agent as a tool of its own."""
+    api: str
+    operation: str
+    params: frozenset[str]
+
+
+def api_tools(ops: list, taken: set[str] = frozenset()) -> tuple[list[dict], dict[str, ApiTool]]:
+    """Tool specs for API operations, with typed parameters (llama-server then
+    only lets the model write valid ones), and what each tool name calls.
+    Small models do much better with this than with list_apis + query_api's
+    free-form params."""
+    specs: list[dict] = []
+    by_name: dict[str, ApiTool] = {}
+    for op in ops:
+        base = re.sub(r"[^a-z0-9]+", "_", f"{op['api_name']} {op['name']}".lower()).strip("_")[:56] or "api"
+        name, n = base, 2
+        while name in by_name or name in taken:
+            name, n = f"{base}_{n}", n + 1
+        schema = apis.params_schema(op) or {"type": "object", "properties": {}, "required": []}
+        examples = [q.strip() for q in (op["example_questions"] or "").splitlines() if q.strip()][:3]
+        description = f"Live, read-only data from {op['api_name']} ({op['name']}). {op['description'] or ''}".strip()
+        if examples:
+            description += " Use it for questions like: " + "; ".join(f"“{q}”" for q in examples) + "."
+        specs.append({"type": "function", "function": {"name": name, "description": description,
+                                                       "parameters": schema}})
+        by_name[name] = ApiTool(op["api_name"], op["name"], frozenset(schema.get("properties", {})))
+    return specs, by_name
+
+
 def _summary(name: str, args: dict, out: dict) -> str:
     if "error" in out:
         return f"{_LABELS.get(name, name)}: {out['error']}"
@@ -414,8 +452,19 @@ class Agent:
             self._names = {t.name: set((t.input_schema or {}).get("properties", {})) for t in listed}
         return self._specs
 
+    def _api_tools(self, user_id: int) -> tuple[list[dict], dict[str, ApiTool]]:
+        """The API operations this person may use, as tools (per question: groups change)."""
+        conn = db.connect(self.settings.db_path)
+        try:
+            user = conn.execute("SELECT id, ad_account FROM users WHERE id = ?", (user_id,)).fetchone()
+            return api_tools(apis.allowed_operations(conn, user, self.get_directory()), set(self._names))
+        finally:
+            conn.close()
+
     # -------------------------------------------------------------- tools
-    def _run_tool(self, caller: AgentCaller, call: ToolCall, sources: Sources) -> tuple[dict, list[int]]:
+    def _run_tool(self, caller: AgentCaller, call: ToolCall, sources: Sources,
+                  api_map: dict[str, ApiTool] | None = None) -> tuple[dict, list[int]]:
+        api = (api_map or {}).get(call.name)
         conn = db.connect(self.settings.db_path)
         started, ok, file_ids, error = time.monotonic(), False, [], None
         try:
@@ -426,6 +475,16 @@ class Agent:
             try:
                 if call.error:
                     raise ToolError(call.error)
+                if api is not None:
+                    unknown = set(call.arguments) - api.params
+                    if unknown:
+                        raise ToolError(f"{call.name} doesn't take {', '.join(sorted(unknown))}; it takes "
+                                        f"{', '.join(sorted(api.params)) or 'nothing'}.")
+                    params = {k: v for k, v in call.arguments.items() if v not in (None, "")}
+                    out, file_ids = self.tools.query_api(conn, caller, api.api, api.operation, params)
+                    out = sources.number(conn, "query_api", _strip_links(out))
+                    ok = True
+                    return out, file_ids
                 if call.name not in self._names:
                     raise ToolError(f"There's no tool called “{call.name}”.")
                 unknown = set(call.arguments) - self._names[call.name]
@@ -481,7 +540,9 @@ class Agent:
             return None
         cfg, username = gate
         client = self._client_for(cfg)
-        specs = await self.specs()
+        base = [s for s in await self.specs() if s["function"]["name"] not in GENERIC_API_TOOLS]
+        api_specs, api_map = await asyncio.to_thread(self._api_tools, state["user_id"])
+        specs = base + api_specs
         caller = AgentCaller(state["user_id"], username, conversation_id, state.get("scope"))
         messages = self._messages(state, username, cfg.get("places", ""))
         sources, proposed, ran = Sources(), [], 0
@@ -501,13 +562,14 @@ class Agent:
                      "function": {"name": c.name, "arguments": json.dumps(c.arguments, ensure_ascii=False)}}
                     for c in turn.tool_calls]})
                 for call in turn.tool_calls:
+                    api = api_map.get(call.name)
                     writer({"type": "tool", "id": call.id, "name": call.name, "state": "running",
-                            "label": _LABELS.get(call.name, call.name)})
-                    out, _ = await asyncio.to_thread(self._run_tool, caller, call, sources)
+                            "label": f"Asking {api.api}" if api else _LABELS.get(call.name, call.name)})
+                    out, _ = await asyncio.to_thread(self._run_tool, caller, call, sources, api_map)
                     ran += 1
+                    summary = _summary("query_api" if api else call.name, call.arguments, out)
                     writer({"type": "tool", "id": call.id, "name": call.name,
-                            "state": "failed" if "error" in out else "done",
-                            "summary": _summary(call.name, call.arguments, out)})
+                            "state": "failed" if "error" in out else "done", "summary": summary})
                     if out.get("proposal"):
                         proposed.append(out["proposal"])
                         writer({"type": "proposal", **await asyncio.to_thread(self._proposal_view, out["proposal"])})

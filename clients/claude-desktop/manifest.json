@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "mnemerynne",
   "display_name": "Mnemerynne",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Search your Mnemerynne documents (inbox and shared libraries) from Claude, with citations, and edit text, Word and Excel files.",
   "long_description": "Lets Claude search the documents you can see in Mnemerynne and answer with the file, page and section for every claim, linking back to Mnemerynne. With a token that's allowed to edit, Claude can also create and change .txt, .md, .docx and .xlsx files in your Agents folder (and wherever an admin allows); every change keeps the previous version. Uses a personal token you create under Claude in Mnemerynne; what Claude may search and edit is set by Mnemerynne's admins.",
   "author": {
@@ -46,7 +46,7 @@
       "type": "string",
       "title": "Mnemerynne address",
       "description": "Where Mnemerynne runs. Leave as is unless an admin tells you otherwise.",
-      "default": "https://lwhittaker.net",
+      "default": "https://mnemerynne.io",
       "required": true
     }
   },
