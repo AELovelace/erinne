@@ -520,3 +520,15 @@ def test_copies_take_only_the_bytes_and_modified_time(tmp_path):
     assert os.access(dest, os.W_OK)          # the source's read-only mode didn't come along
     with pytest.raises(FileExistsError):
         share.copy_bytes(src, dest)
+
+
+def test_inbox_permissions_keep_the_server_in(tmp_path, monkeypatch):
+    written = {}
+    monkeypatch.setattr(share.os, "getuid", lambda: 990, raising=False)
+    monkeypatch.setattr(share.os, "setxattr", lambda path, name, raw: written.__setitem__(name, raw), raising=False)
+    share.make_private(tmp_path, 2000123)
+    acl = share.parse_acl(written["system.posix_acl_default"])
+    assert (0x02, 7, 990) in acl and (0x02, 7, 2000123) in acl
+    assert acl == sorted(acl, key=lambda e: (e[0], e[2]))
+    # Files the owner adds over SMB are theirs, yet the server can still read them.
+    assert share.allowed(0o660, 2000123, 1, acl, 990, frozenset(), 4)

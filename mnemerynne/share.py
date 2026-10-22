@@ -315,11 +315,15 @@ class PosixChecker:
 
 def make_private(path: Path, uid: int | None) -> None:
     """An inbox folder: only the server and (if linked) its owner's domain
-    account; new files and folders inside inherit the same."""
+    account; new files and folders inside inherit the same. The server gets a
+    named entry too: files its owner adds through SMB are owned by them, and
+    the server must still read them."""
     entries = [(_ACL_USER_OBJ, 7, 0), (_ACL_GROUP_OBJ, 0, 0), (_ACL_MASK, 7, 0), (_ACL_OTHER, 0, 0)]
-    if uid is not None:
-        entries.insert(1, (_ACL_USER, 7, uid))
-    raw = build_acl(sorted(entries))
+    service = os.getuid() if hasattr(os, "getuid") else None
+    for who in {uid, service} - {None}:
+        entries.append((_ACL_USER, 7, who))
+    # The kernel wants entries ordered by tag, then id.
+    raw = build_acl(sorted(entries, key=lambda e: (e[0], e[2])))
     try:
         os.setxattr(path, _ACL_XATTR, raw)
         os.setxattr(path, _ACL_DEFAULT_XATTR, raw)
