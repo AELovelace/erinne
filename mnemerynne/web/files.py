@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import fs, jobs, permissions, share
+from mnemerynne import editing, fs, jobs, permissions, share
 from mnemerynne.config import Settings
 from mnemerynne.ingest import markdown, store
 from mnemerynne.web.deps import api_user, get_db, get_settings, page_user
@@ -74,12 +74,14 @@ def _file_json(row: sqlite3.Row, access: fs.Access) -> dict:
         "view_url": view,
         "download_url": f"/files/{row['id']}/raw",
         "can_delete": access.can_write(row["collection_id"], row["folder_id"]),
+        # "claude:alice": last changed through Claude for alice (Versions can undo it)
+        "edited_via": row["edited_via"] if "edited_via" in row.keys() else None,
     }
 
 
 def _folder_json(row: sqlite3.Row) -> dict:
     out = {"type": "folder", "id": row["id"], "name": row["name"]}
-    for key in ("collection_id", "parent_id", "created_at", "items"):
+    for key in ("collection_id", "parent_id", "created_at", "items", "role"):
         if key in row.keys():
             out[key] = row[key]
     return out
@@ -106,6 +108,10 @@ def locations(user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)
     """The inbox and libraries the user can open, for the tree's top level.
     `writable`: may change the top level (folders carry their own `can_write`);
     `editable`: may change something somewhere in it (so it has a bin to show)."""
+    try:
+        editing.agents_folder(conn, user["id"])   # every inbox has one; made on first use
+    except (fs.FsError, OSError):
+        pass   # the share is away; it's made next time
     access = fs.Access.of(conn, user["id"])
     out = []
     for c in permissions.readable_collections(conn, user["id"]):
@@ -329,6 +335,51 @@ def retry_file(file_id: int, user=Depends(api_user), conn: sqlite3.Connection = 
     conn.execute("UPDATE files SET status = 'queued', error = NULL, progress = NULL WHERE id = ?", (file_id,))
     jobs.enqueue(conn, "ingest", file_id)
     return {"status": "queued", "id": file_id}
+
+
+# ------------------------------------------------------------------ versions
+@router.get("/api/files/{file_id}/versions")
+def file_versions(file_id: int, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Earlier versions kept when the file was changed through Claude (or restored)."""
+    access = fs.Access.of(conn, user["id"])
+    row = _readable_file(conn, access, file_id)
+    return {"versions": [{**v, "download_url": f"/files/{file_id}/versions/{v['id']}"}
+                         for v in editing.versions(conn, file_id)],
+            "can_restore": access.can_write(row["collection_id"], row["folder_id"]) and row["deleted_at"] is None}
+
+
+@router.get("/files/{file_id}/versions/{version_id}")
+def download_version(file_id: int, version_id: int, user=Depends(page_user),
+                     conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
+    row = _readable_file(conn, fs.Access.of(conn, user["id"]), file_id)
+    try:
+        v = editing.version_row(conn, file_id, version_id)
+    except editing.EditError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    path = editing.version_path(settings, v["rel_path"])
+    if not path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "That version's content is gone (it may have expired).")
+    stem, dot, ext = row["display_name"].rpartition(".")
+    name = f"{stem or ext} (before {v['created_at'][:16].replace(':', '.')}){dot}{ext if stem else ''}"
+    return FileResponse(path, media_type="application/octet-stream", filename=name,
+                        content_disposition_type="attachment", headers={"X-Content-Type-Options": "nosniff"})
+
+
+@router.post("/api/files/{file_id}/versions/{version_id}/restore")
+def restore_version(file_id: int, version_id: int, user=Depends(api_user),
+                    conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
+    """Put an earlier version back; what's there now becomes a version too, so
+    a restore can itself be undone."""
+    access = fs.Access.of(conn, user["id"])
+    row = _writable_file(conn, access, file_id)
+    if row["deleted_at"] is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Restore the file from the recycle bin first.")
+    try:
+        version = editing.restore(conn, settings, file_id, version_id, user["id"])
+    except editing.EditError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    out = _file_json(fs.file_row(conn, file_id), access)
+    return {**out, "version": version}
 
 
 # ---------------------------------------------------------------------- views

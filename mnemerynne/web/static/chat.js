@@ -180,6 +180,11 @@
         } else if (ev.type === "delta") {
           streamed += ev.text;
           renderAnswer(view.body, streamed, sources);
+        } else if (ev.type === "reset") {
+          // What streamed so far didn't hold up; a "couldn't find it" reply follows.
+          streamed = "";
+          sources = [];
+          renderAnswer(view.body, streamed, sources);
         } else if (ev.type === "final") {
           finishAnswer(view, ev);
         }

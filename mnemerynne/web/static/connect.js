@@ -25,6 +25,16 @@
       shared.appendChild(el("li", null, (c.kind === "private" ? "📥 " : "📚 ") + c.name));
     });
 
+    const editable = document.getElementById("editable");
+    editable.replaceChildren();
+    if (!data.editable.length) editable.appendChild(el("li", "muted small", "Nowhere yet."));
+    data.editable.forEach(function (p) {
+      const li = el("li");
+      li.appendChild(el("span", null, (p.folder === "Agents" ? "🤖 " : "📚 ") + p.library + (p.folder ? " / " + p.folder : "")));
+      li.appendChild(el("span", "muted small", p.why));
+      editable.appendChild(li);
+    });
+
     const days = document.getElementById("token-days");
     if (!days.options.length) {
       data.expiry_days.forEach(function (d) {
@@ -39,7 +49,7 @@
     if (!data.tokens.length) { node.replaceChildren(el("p", "muted", "No tokens yet.")); return; }
     const t = el("table", "admin-table");
     const head = el("tr");
-    ["Name", "Starts with", "Created", "Expires", "Last used", ""].forEach(function (h) { head.appendChild(el("th", null, h)); });
+    ["Name", "Starts with", "Created", "Expires", "Last used", "Can edit", ""].forEach(function (h) { head.appendChild(el("th", null, h)); });
     t.appendChild(el("thead")).appendChild(head);
     const body = el("tbody");
     data.tokens.forEach(function (tok) {
@@ -47,6 +57,24 @@
       [tok.name, tok.prefix + "…", when(tok.created_at), when(tok.expires_at), when(tok.last_used_at)].forEach(function (v) {
         tr.appendChild(el("td", null, v));
       });
+      const editCell = el("td");
+      if (tok.active) {
+        const label = el("label", "check small");
+        const box = el("input");
+        box.type = "checkbox";
+        box.checked = tok.can_edit;
+        box.setAttribute("aria-label", "Let Claude edit files with " + tok.name);
+        box.addEventListener("change", async function () {
+          showError("");
+          try { await api("PATCH", "/api/tokens/" + tok.id, { can_edit: box.checked }); } catch (e) { showError(e.message); }
+          load();
+        });
+        label.append(box, document.createTextNode(box.checked ? " yes" : " search only"));
+        editCell.appendChild(label);
+      } else {
+        editCell.textContent = "—";
+      }
+      tr.appendChild(editCell);
       const cell = el("td");
       if (tok.active) {
         const revoke = el("button", "link danger small", "Revoke");
@@ -79,6 +107,7 @@
       const made = await api("POST", "/api/tokens", {
         name: document.getElementById("token-name").value.trim(),
         days: Number(document.getElementById("token-days").value),
+        can_edit: document.getElementById("token-edit").checked,
       });
       document.getElementById("token-value").textContent = made.token;
       document.getElementById("token-reveal").hidden = false;

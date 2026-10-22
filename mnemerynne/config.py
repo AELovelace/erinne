@@ -95,6 +95,14 @@ class Settings(BaseSettings):
     libreoffice_timeout: int = 300
     trash_days: int = 30               # recycle bin items are deleted for good after this
 
+    # Claude editing files (mnemerynne/editing.py): limits per file and per
+    # call, and how long earlier versions are kept for Restore.
+    edit_max_bytes: int = 20 * 1024 * 1024
+    edit_max_cells: int = 200_000      # spreadsheets, all sheets together
+    edit_max_operations: int = 50
+    version_days: int = 30
+    version_keep: int = 20             # per file, newest first
+
     # Ingestion
     ocr_command: str = "ocrmypdf"      # run when present on PATH; skipped otherwise
     ocr_min_chars: int = 25            # pages with less text than this count as scanned

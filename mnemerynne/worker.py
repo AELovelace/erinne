@@ -7,7 +7,7 @@ import signal
 import sqlite3
 import time
 
-from mnemerynne import db, directory, fs, jobs, share
+from mnemerynne import db, directory, editing, fs, jobs, share
 from mnemerynne.clients.embed import Embedder
 from mnemerynne.config import Settings
 from mnemerynne.ingest import pipeline
@@ -103,6 +103,12 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
                         log.info("Emptied %d recycle-bin item(s) older than %d days.", removed, settings.trash_days)
                 except Exception:  # never let housekeeping stop ingestion
                     log.exception("Recycle bin cleanup failed")
+                try:
+                    dropped = editing.purge_versions(conn, settings)
+                    if dropped:
+                        log.info("Dropped %d earlier file version(s) past their keep date.", dropped)
+                except Exception:
+                    log.exception("File version cleanup failed")
     finally:
         embedder.close()
         conn.close()

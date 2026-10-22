@@ -15,7 +15,8 @@ from mnemerynne.retrieval import Hit
 
 PROMPT_VERSION = "2026-10-20.2"
 ASSISTANT_NAME = "Erynne"
-NOT_FOUND_TEXT = "I couldn't find that in your documents."
+# Shown when the model can't write its own "couldn't find it" reply.
+NOT_FOUND_TEXT = "Sorry, I couldn't find it!"
 
 ANSWER_SCHEMA = {
     "type": "object",
@@ -65,6 +66,19 @@ GENERAL_SYSTEM_PROMPT = f"""You are {ASSISTANT_NAME}, a friendly assistant for h
 - Plain text only, no JSON."""
 
 GENERAL_HISTORY_TURNS = 2
+
+SORRY_SYSTEM_PROMPT = f"""You are {ASSISTANT_NAME}, a cheerful assistant for hotel staff. You searched the user's documents for their question and found nothing that answers it.
+
+Reply with one or two short, friendly sentences: say sorry that you couldn't find it. You may suggest asking another way or checking that the right document has been uploaded.
+- Never answer the question, and never state facts, figures, policies, prices or steps, not even as a guess.
+- Vary your wording; a little playful is good. Plain text only: no lists, no quotes, no emoji."""
+
+SORRY_MAX_CHARS = 300   # anything longer is the model rambling: use NOT_FOUND_TEXT
+
+
+def build_sorry_messages(question: str) -> list[dict[str, str]]:
+    return [{"role": "system", "content": SORRY_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Their question: {question}"}]
 
 
 def build_general_messages(question: str, history: list[dict] | None = None,

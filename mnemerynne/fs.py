@@ -321,7 +321,7 @@ def split_relative_path(relative_path: str) -> list[str]:
 # ----------------------------------------------------------------- browsing
 _FILE_COLUMNS = """
     f.id, f.collection_id, f.folder_id, f.display_name, f.status, f.progress, f.error, f.notes,
-    f.created_at, f.updated_at, f.deleted_at, f.uploaded_by, b.kind, b.mime, b.size, b.unit_count,
+    f.created_at, f.updated_at, f.deleted_at, f.uploaded_by, f.edited_via, b.kind, b.mime, b.size, b.unit_count,
     b.rel_path, b.ocr_rel_path, u.username AS uploaded_by_name
 """
 _FILE_FROM = """
@@ -339,7 +339,7 @@ def browse(conn: sqlite3.Connection, access: Access, collection_id: int, folder_
     access.see(collection_id, folder_id)
     require_folder(conn, collection_id, folder_id)
     rows = conn.execute(
-        "SELECT id, name, created_at, (SELECT count(*) FROM files x WHERE x.folder_id = folders.id "
+        "SELECT id, name, created_at, role, (SELECT count(*) FROM files x WHERE x.folder_id = folders.id "
         "AND x.deleted_at IS NULL) + (SELECT count(*) FROM folders y WHERE y.parent_id = folders.id "
         "AND y.deleted_at IS NULL) AS items FROM folders WHERE collection_id = ? AND COALESCE(parent_id, 0) = ? "
         "AND deleted_at IS NULL ORDER BY name COLLATE NOCASE", (collection_id, folder_id or 0)).fetchall()
@@ -358,7 +358,7 @@ def folder_tree(conn: sqlite3.Connection, access: Access, collection_id: int) ->
     live = live_folder_ids(conn, collection_id)
     shown = live & access.visible(collection_id, live)
     return [{"id": r["id"], "parent_id": r["parent_id"], "name": r["name"],
-             "can_write": access.can_write(collection_id, r["id"])}
+             "can_write": access.can_write(collection_id, r["id"]), "role": r["role"]}
             for r in conn.execute("SELECT * FROM folders WHERE collection_id = ? ORDER BY name COLLATE NOCASE",
                                   (collection_id,)) if r["id"] in shown]
 

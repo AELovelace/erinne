@@ -7,6 +7,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from mnemerynne import answer as answer_mod
 from mnemerynne import graph as graph_mod
 from mnemerynne import memory, permissions, users, worker
 from mnemerynne.clients.llm import BadModelOutput
@@ -23,6 +24,7 @@ class FakeLLM:
         self.condense_calls = []
         self.answer_prompts = []
         self.general_prompts = []
+        self.sorry_prompts = []
         self.memory_calls = 0
         self.fail = False
         self.condense_fails = False
@@ -48,6 +50,11 @@ class FakeLLM:
     async def stream(self, messages, **kwargs):
         if self.fail:
             raise ConnectionError("model server down")
+        if messages[0]["content"] == answer_mod.SORRY_SYSTEM_PROMPT:   # nothing found: apologise
+            self.sorry_prompts.append(messages)
+            for word in ["Sorry, ", "I looked everywhere ", "but couldn't find it!"]:
+                yield word
+            return
         if kwargs.get("json_schema") is None:  # general / small talk: plain text
             self.general_prompts.append(messages)
             for word in ["Hi! ", "I can ", "help with ", "your documents."]:
@@ -137,9 +144,20 @@ def test_answer_streams_with_citation_links(chat_client, llm):
 
 def test_nothing_relevant_skips_the_model(chat_client, llm):
     _login(chat_client, "alice")
+    events = _ask(chat_client, "wifi code for the lobby")
+    final = _final(events)
+    assert final["status"] == "not_found" and final["answer"] == "Sorry, I looked everywhere but couldn't find it!"
+    streamed = "".join(e["text"] for e in events if e["type"] == "delta")
+    assert streamed == final["answer"]                                # streamed as it was written
+    assert llm.answer_prompts == []                                   # no sources: no answering call
+    assert "wifi code for the lobby" in llm.sorry_prompts[0][-1]["content"]
+
+
+def test_not_found_falls_back_to_the_fixed_reply_when_the_model_is_down(chat_client, llm):
+    _login(chat_client, "alice")
+    llm.fail = True
     final = _final(_ask(chat_client, "wifi code for the lobby"))
-    assert final["status"] == "not_found" and "couldn't find" in final["answer"]
-    assert llm.answer_prompts == []
+    assert final["status"] == "not_found" and final["answer"] == answer_mod.NOT_FOUND_TEXT
 
 
 def test_follow_up_is_condensed_using_history(chat_client, llm):

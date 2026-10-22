@@ -165,11 +165,41 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
             if text:
                 writer({"type": "delta", "text": text})
         parsed = answer_mod.parse_answer(streamer.buffer, len(hits))
+        if parsed.status == "not_found":
+            # Anything streamed was an answer that didn't pass the checks: clear it.
+            writer({"type": "reset"})
+            return {"answer": {"status": "not_found", "text": await sorry(state["question"], writer),
+                               "citations": []}}
         return {"answer": {"status": parsed.status, "text": parsed.text, "citations": parsed.citations}}
+
+    async def sorry(question: str, writer) -> str:
+        """A short "couldn't find it" in the model's own words, streamed; the
+        fixed NOT_FOUND_TEXT if the model fails, says nothing or rambles."""
+        visible, parts = ThinkFilter(), []
+        try:
+            async with asyncio.timeout(30):
+                async for delta in deps.llm.stream(answer_mod.build_sorry_messages(question),
+                                                   temperature=0.8, max_tokens=80):
+                    if shown := visible.feed(delta):
+                        parts.append(shown)
+                        writer({"type": "delta", "text": shown})
+            if shown := visible.close():
+                parts.append(shown)
+                writer({"type": "delta", "text": shown})
+        except Exception as exc:   # model down or slow: never fail the answer over an apology
+            log.warning("Couldn't write the not-found reply: %s", exc)
+        text = " ".join("".join(parts).split())
+        if text and len(text) <= answer_mod.SORRY_MAX_CHARS:
+            return text
+        if parts:
+            writer({"type": "reset"})
+        writer({"type": "delta", "text": answer_mod.NOT_FOUND_TEXT})
+        return answer_mod.NOT_FOUND_TEXT
 
     @_timed("not_found")
     async def not_found(state: State) -> dict:
-        return {"answer": {"status": "not_found", "text": answer_mod.NOT_FOUND_TEXT, "citations": []}}
+        text = await sorry(state["question"], get_stream_writer())
+        return {"answer": {"status": "not_found", "text": text, "citations": []}}
 
     @_timed("route")
     async def route_message(state: State) -> dict:

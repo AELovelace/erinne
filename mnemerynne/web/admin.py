@@ -97,15 +97,15 @@ def libraries_page(request: Request, user=Depends(page_user), conn: sqlite3.Conn
 @router.get("/api/admin/libraries")
 def list_libraries(user=Depends(admin_api_user), conn: sqlite3.Connection = Depends(get_db)):
     rows = conn.execute(
-        "SELECT c.id, c.name, c.share_path, c.created_at, c.claude_enabled, c.claude_changed_at, "
+        "SELECT c.id, c.name, c.share_path, c.created_at, c.claude_enabled, c.claude_edit, c.claude_changed_at, "
         "u.username AS claude_changed_by, "
         "(SELECT count(*) FROM files f WHERE f.collection_id = c.id AND f.deleted_at IS NULL) AS files, "
         "(SELECT COALESCE(sum(b.size), 0) FROM files f JOIN blobs b ON b.sha256 = f.blob_sha256 "
         " WHERE f.collection_id = c.id) AS bytes "
         "FROM collections c LEFT JOIN users u ON u.id = c.claude_changed_by "
         "WHERE c.kind = 'library' ORDER BY c.name COLLATE NOCASE").fetchall()
-    return {"libraries": [{**dict(r), "claude_enabled": bool(r["claude_enabled"]), "grants": _grants(conn, r["id"])}
-                          for r in rows]}
+    return {"libraries": [{**dict(r), "claude_enabled": bool(r["claude_enabled"]), "claude_edit": bool(r["claude_edit"]),
+                           "grants": _grants(conn, r["id"])} for r in rows]}
 
 
 @router.get("/api/admin/principals")
@@ -320,6 +320,33 @@ def set_inbox_claude(user_id: int, body: ClaudeBody, user=Depends(admin_api_user
         permissions.set_claude_enabled(conn, inbox, body.enabled, user["id"])
         _log(conn, user, "claude.enable" if body.enabled else "claude.disable", f"inbox of {owner['username']}")
     return {"user_id": user_id, "claude_enabled": body.enabled}
+
+
+@router.put("/api/admin/libraries/{library_id}/claude-edit")
+def set_claude_edit(library_id: int, body: ClaudeBody, user=Depends(admin_api_user),
+                    conn: sqlite3.Connection = Depends(get_db)):
+    """Let Claude change files in this library (for people who may edit them
+    and whose token allows editing), or stop it. Off by default."""
+    library = _library(conn, library_id)
+    with transaction(conn):
+        conn.execute("UPDATE collections SET claude_edit = ? WHERE id = ?", (int(body.enabled), library_id))
+        _log(conn, user, "claude.edit.on" if body.enabled else "claude.edit.off", library["name"])
+    return {"id": library_id, "claude_edit": body.enabled}
+
+
+@router.put("/api/admin/users/{user_id}/inbox-claude-edit")
+def set_inbox_claude_edit(user_id: int, body: ClaudeBody, user=Depends(admin_api_user),
+                          conn: sqlite3.Connection = Depends(get_db)):
+    """Let Claude change files anywhere in a person's inbox, not just their
+    Agents folder (which is always allowed), or stop it."""
+    owner = users.get_user_by_id(conn, user_id)
+    inbox = permissions.private_collection_id(conn, user_id) if owner else None
+    if inbox is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such user")
+    with transaction(conn):
+        conn.execute("UPDATE collections SET claude_edit = ? WHERE id = ?", (int(body.enabled), inbox))
+        _log(conn, user, "claude.edit.on" if body.enabled else "claude.edit.off", f"inbox of {owner['username']}")
+    return {"user_id": user_id, "claude_edit": body.enabled}
 
 
 # -------------------------------------------------------------------- groups

@@ -130,10 +130,12 @@ def test_folder_upload_browse_and_bulk_actions(client, conn, accounts):
                         data={"collection_id": str(inbox), "relative_path": path})
         assert r.status_code in (200, 201), r.text
     root = client.get(f"/api/browse?collection_id={inbox}").json()
-    assert [f["name"] for f in root["folders"]] == ["Reports"] and root["can_write"]
-    reports = root["folders"][0]["id"]
+    # Every inbox also has its Agents folder (Claude's workspace).
+    assert [(f["name"], f["role"]) for f in root["folders"]] == [("Agents", "agents"), ("Reports", None)]
+    assert root["can_write"]
+    reports = root["folders"][1]["id"]
     tree = client.get(f"/api/collections/{inbox}/folders").json()["folders"]
-    assert sorted(f["name"] for f in tree) == ["2026", "Reports"]
+    assert sorted(f["name"] for f in tree) == ["2026", "Agents", "Reports"]
     year = next(f["id"] for f in tree if f["name"] == "2026")
     listing = client.get(f"/api/browse?collection_id={inbox}&folder_id={year}").json()
     assert [p["name"] for p in listing["path"]] == ["Reports", "2026"]
@@ -153,7 +155,7 @@ def test_folder_upload_browse_and_bulk_actions(client, conn, accounts):
     assert not copied["ok"]
     assert [r["ok"] for r in copied["results"]] == [True, False] and copied["results"][1]["status"] == 404
     names = [f["name"] for f in client.get(f"/api/browse?collection_id={inbox}").json()["folders"]]
-    assert names == ["Reports", "Reports (2)"]
+    assert names == ["Agents", "Reports", "Reports (2)"]
 
     trashed = client.post("/api/items/trash", json={"items": [{"type": "folder", "id": reports}]}).json()
     assert trashed["ok"]

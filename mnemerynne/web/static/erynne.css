@@ -559,3 +559,10 @@ button.danger-fill { background: var(--error); }
 .ax-commits { list-style: none; padding: 0; margin: .4rem 0 .8rem; font-size: .9rem; }
 .ax-commits li { padding: .2rem 0; border-bottom: 1px solid var(--line); }
 .ax-commits code { margin-right: .4rem; }
+
+/* file versions (info pane) */
+.versions { margin-top: 1rem; border-top: 1px solid var(--line); padding-top: .6rem; }
+.versions h4 { margin: 0 0 .4rem; font-size: .95rem; }
+.version-list { list-style: none; padding: 0; margin: 0; font-size: .88rem; }
+.version-list li { padding: .45rem 0; border-bottom: 1px solid var(--line); }
+.version-actions { display: flex; gap: .8rem; margin-top: .2rem; }

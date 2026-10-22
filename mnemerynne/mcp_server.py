@@ -1,11 +1,15 @@
 """Mnemerynne's MCP endpoint: lets Claude Desktop (through the Mnemerynne extension)
-and other MCP clients search people's documents.
+and other MCP clients search people's documents, and edit text, Markdown, Word
+and Excel files where that is allowed.
 
-Everything is read-only and acts as the token's user, limited to the
-collections that user may search from Claude (permissions.claude_collection_ids):
-an fs.Access built from that set makes every file helper respect the Claude
-switches with no extra checks. Claude writes the answers; Mnemerynne only finds
-and returns passages with their citations. Every call is logged in mcp_calls.
+Everything acts as the token's user, limited to the collections that user may
+search from Claude (permissions.claude_collection_ids): an fs.Access built from
+that set makes every file helper respect the Claude switches with no extra
+checks. Claude writes the answers; Mnemerynne only finds and returns passages
+with their citations. The edit tools go through editing.py, which checks the
+token, the person's own rights and the "Claude can edit" switches (on for each
+inbox's Agents folder), and keeps every replaced version for Restore. Every
+call is logged in mcp_calls.
 """
 
 from __future__ import annotations
@@ -29,7 +33,7 @@ from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
-from mnemerynne import api_tokens, db, fs, permissions, retrieval
+from mnemerynne import api_tokens, db, editing, editing_formats, fs, permissions, retrieval
 from mnemerynne.api_tokens import Caller
 from mnemerynne.config import Settings
 from mnemerynne.ingest import store
@@ -54,10 +58,21 @@ be answered from those documents.
   screenshot, when its text looks garbled (scanned pages), or when the person asks to see the page.
 - Use list_libraries, browse_folder and find_files to see what exists or to narrow a search.
 - The `link`s are for the person to open in their browser, where they are signed in to Mnemerynne.
-  Don't fetch them yourself: they need that login. Use these tools to read documents instead."""
+  Don't fetch them yourself: they need that login. Use these tools to read documents instead.
+
+Editing files (.txt, .md, .docx, .xlsx):
+- Always open_file first and pass its `version` to the edit tool. If an edit is refused because the file
+  changed, open it again and redo the change on the new version.
+- Make the smallest change that does what was asked; don't rewrite text you weren't asked to change.
+- New files go in the person's Agents folder unless they name somewhere else (list_libraries shows where
+  you may edit). Every change keeps the previous version, which the person can restore from Files.
+- You can't delete, move or rename files; tell the person to do that in Mnemerynne if it's needed."""
 
 _READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True,
                              open_world_hint=False)
+# Changes files, but never destructively: every change keeps the previous version.
+_EDITS = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False,
+                         open_world_hint=False)
 _INBOX_WORDS = {"inbox", "my inbox", "my files", "my documents"}
 
 
@@ -210,7 +225,11 @@ class Tools:
                                   "FROM files WHERE collection_id = ? AND deleted_at IS NULL", (cid,)).fetchone()
             out.append({"library": _label(row), "id": cid, "kind": "inbox" if row["kind"] == "private" else "library",
                         "files": counts["files"], "searchable_files": counts["searchable"]})
-        return {"libraries": out}, []
+        edit = ([f"{p['library']}" + (f" / {p['folder']}" if p["folder"] else "") for p in
+                 editing.editable_places(conn, caller.user_id)] if caller.can_edit else [])
+        return {"libraries": out, "you_can_edit_in": edit,
+                **({} if caller.can_edit else {"editing": "This connection can only search; the person can turn "
+                                                          "on editing for it on the Claude page in Mnemerynne."})}, []
 
     def browse_folder(self, conn, caller: Caller, library: str, folder: str | None = None) -> tuple[dict, list[int]]:
         access = self._access(conn, caller)
@@ -267,6 +286,93 @@ class Tools:
                    f"{self.base}/files/{file_id}/pdf#page={page}")
         return [caption, Image(data=buffer.getvalue(), format="jpeg")], [file_id]
 
+    # ----------------------------------------------------------- editing
+    def _where(self, conn, row) -> str:
+        coll = conn.execute("SELECT kind, name FROM collections WHERE id = ?", (row["collection_id"],)).fetchone()
+        path = _path(conn, row["folder_id"])
+        return ("My inbox" if coll["kind"] == "private" else coll["name"]) + (f" / {path}" if path else "")
+
+    def open_file(self, conn, caller: Caller, file_id: int, start: int = 1, limit: int | None = None,
+                  sheet: str | None = None, cells: str | None = None) -> tuple[dict, list[int]]:
+        loaded = editing.load(conn, self.settings, caller.user_id, file_id)
+        if loaded.fmt == "text":
+            view = editing_formats.text_view(loaded.data, start, limit or 400)
+        elif loaded.fmt == "docx":
+            view = editing_formats.docx_view(loaded.data, start, limit or 200)
+        else:
+            view = editing_formats.xlsx_view(loaded.data, sheet, cells)
+        try:
+            editing.check_edit(conn, caller.user_id, caller.can_edit, loaded.row["collection_id"], loaded.row["folder_id"])
+            can_edit, why = True, None
+        except editing.EditError as exc:
+            can_edit, why = False, str(exc)
+        return {"file_id": file_id, "file": loaded.row["display_name"], "where": self._where(conn, loaded.row),
+                "version": loaded.version, "can_edit": can_edit, **({"why_not": why} if why else {}),
+                "link": _file_link(self.base, file_id, loaded.row["kind"]), **view}, [file_id]
+
+    def _edited(self, conn, caller: Caller, file_id: int, version: str, fmt: str, apply) -> tuple[dict, list[int]]:
+        loaded = editing.load(conn, self.settings, caller.user_id, file_id)
+        if loaded.fmt != fmt:
+            tool = {"text": "edit_text", "docx": "edit_document", "xlsx": "edit_spreadsheet"}[loaded.fmt]
+            raise editing.EditError(f"“{loaded.row['display_name']}” is edited with {tool}.")
+        editing.check_edit(conn, caller.user_id, caller.can_edit, loaded.row["collection_id"], loaded.row["folder_id"])
+        if version != loaded.version:
+            raise editing.EditConflict(f"“{loaded.row['display_name']}” changed since that version was opened. "
+                                       f"Open it again and redo the change on the new version.")
+        result = apply(loaded.data)
+        new_version = editing.save(conn, self.settings, caller, file_id, result.data, expected=version,
+                                   summary="; ".join(result.changes))
+        return {"file_id": file_id, "file": loaded.row["display_name"], "version": new_version,
+                "changes": result.changes, "link": _file_link(self.base, file_id, loaded.row["kind"]),
+                "note": "The previous version is kept; the person can restore it from Files (Versions)."}, [file_id]
+
+    def edit_text(self, conn, caller: Caller, file_id: int, version: str, edits: list[dict] | None = None,
+                  content: str | None = None) -> tuple[dict, list[int]]:
+        return self._edited(conn, caller, file_id, version, "text", lambda data: editing_formats.text_apply(
+            data, edits, content, self.settings.edit_max_operations))
+
+    def edit_document(self, conn, caller: Caller, file_id: int, version: str,
+                      operations: list[dict]) -> tuple[dict, list[int]]:
+        return self._edited(conn, caller, file_id, version, "docx", lambda data: editing_formats.docx_apply(
+            data, operations, self.settings.edit_max_operations))
+
+    def edit_spreadsheet(self, conn, caller: Caller, file_id: int, version: str,
+                         operations: list[dict]) -> tuple[dict, list[int]]:
+        return self._edited(conn, caller, file_id, version, "xlsx", lambda data: editing_formats.xlsx_apply(
+            data, operations, self.settings.edit_max_operations, self.settings.edit_max_cells))
+
+    def create_file(self, conn, caller: Caller, name: str, content: str | None = None, paragraphs: list | None = None,
+                    rows: list | None = None, sheet: str | None = None, library: str | None = None,
+                    folder: str | None = None) -> tuple[dict, list[int]]:
+        fmt = editing.format_of(name or "")
+        if fmt == "text":
+            data = editing_formats.text_new(content or "")
+        elif fmt == "docx":
+            data = editing_formats.docx_new(paragraphs if paragraphs is not None else
+                                            (content or "").split("\n\n") if content else [])
+        elif fmt == "xlsx":
+            data = editing_formats.xlsx_new(rows or [], sheet)
+        else:
+            raise editing.EditError("Name the file with .txt, .md, .docx or .xlsx at the end.")
+        collection_id = folder_id = None
+        if library:
+            access = self._access(conn, caller)
+            row = _resolve_collection(conn, access, library)
+            collection_id, folder_id = row["id"], _resolve_folder(conn, access, row["id"], folder)
+        elif folder:
+            raise editing.EditError("Name the library the folder is in, too (or leave both out for the Agents folder).")
+        file_id, version = editing.create(conn, self.settings, caller, name, data, collection_id, folder_id)
+        row = conn.execute("SELECT * FROM files f JOIN blobs b ON b.sha256 = f.blob_sha256 WHERE f.id = ?",
+                           (file_id,)).fetchone()
+        return {"file_id": file_id, "file": row["display_name"], "where": self._where(conn, row), "version": version,
+                "link": _file_link(self.base, file_id, row["kind"])}, [file_id]
+
+    def list_versions(self, conn, caller: Caller, file_id: int) -> tuple[dict, list[int]]:
+        loaded = editing.load(conn, self.settings, caller.user_id, file_id)
+        return {"file_id": file_id, "file": loaded.row["display_name"], "current_version": loaded.version,
+                "earlier_versions": editing.versions(conn, file_id),
+                "note": "The person restores a version from Files → the file's info → Versions."}, [file_id]
+
 
 # --------------------------------------------------------------- the server
 def build_server(settings: Settings, get_embedder: Callable[[], Any]) -> MCPServer:
@@ -281,7 +387,14 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any]) -> MCPServ
             conn = db.connect(settings.db_path)
             ok, file_ids = False, []
             try:
-                out, file_ids = fn(conn, caller, **args)
+                try:
+                    editing.agents_folder(conn, caller.user_id)   # every inbox has one; made on first use
+                except (fs.FsError, OSError):
+                    pass   # the share is away: the tools still work, the folder comes later
+                try:
+                    out, file_ids = fn(conn, caller, **args)
+                except (editing.EditError, fs.FsError) as exc:
+                    raise ToolError(str(exc)) from None
                 ok = True
                 return out
             finally:
@@ -333,6 +446,66 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any]) -> MCPServ
         pages that the text in search results can't show well. `file_id` and `page` come from
         search_documents results (their `file_id` and `page`) or from browse_folder/find_files."""
         return await call(ctx, "view_page", {"file_id": file_id, "page": page}, tools.view_page)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def open_file(ctx: Context, file_id: int, start: int = 1, limit: int | None = None,
+                        sheet: str | None = None, cells: str | None = None) -> dict:
+        """Open a .txt, .md, .docx or .xlsx file to read it whole or edit it. Returns its `version`
+        (pass it to the edit tool) and whether you may edit it here. Text: numbered lines from `start`
+        (`limit` lines). Word: paragraphs (p1, p2, …) and tables (t1, cells t1.r2.c3) from block `start`.
+        Excel: the sheets, and the cells of `sheet` (default the first) in `cells` (e.g. "A1:H50")."""
+        return await call(ctx, "open_file", {"file_id": file_id, "start": start, "limit": limit, "sheet": sheet,
+                                             "cells": cells}, tools.open_file)
+
+    @server.tool(annotations=_EDITS)
+    async def edit_text(ctx: Context, file_id: int, version: str, edits: list[dict] | None = None,
+                        content: str | None = None) -> dict:
+        """Change a .txt or .md file opened with open_file. `edits`: a list of {"old": exact text that
+        appears once in the file, "new": its replacement}, applied in order. Or `content`: the whole new
+        text (only when most of the file changes)."""
+        return await call(ctx, "edit_text", {"file_id": file_id, "version": version, "edits": edits,
+                                             "content": content}, tools.edit_text)
+
+    @server.tool(annotations=_EDITS)
+    async def edit_document(ctx: Context, file_id: int, version: str, operations: list[dict]) -> dict:
+        """Change a Word (.docx) file opened with open_file; ids are those open_file showed. Operations:
+        {"op": "replace_text", "paragraph": "p4", "old": "...", "new": "..."} (keeps formatting),
+        {"op": "set_paragraph", "paragraph": "p4", "text": "...", "style"?: "Heading 2"},
+        {"op": "insert_paragraph", "after" or "before": "p4" | "t1" | "end", "text": "...", "style"?: "..."},
+        {"op": "delete_paragraph", "paragraph": "p4"}, {"op": "set_cell", "cell": "t1.r2.c3", "text": "..."},
+        {"op": "add_table_row", "table": "t1", "cells": ["...", "..."], "after_row"?: 3}."""
+        return await call(ctx, "edit_document", {"file_id": file_id, "version": version, "operations": operations},
+                          tools.edit_document)
+
+    @server.tool(annotations=_EDITS)
+    async def edit_spreadsheet(ctx: Context, file_id: int, version: str, operations: list[dict]) -> dict:
+        """Change an Excel (.xlsx) file opened with open_file. Operations:
+        {"op": "set_cells", "sheet"?: "Rates", "cells": {"B4": 129.5, "C4": "=B4*1.1", "D4": "text"}},
+        {"op": "append_rows", "sheet"?: "...", "rows": [["a", 1], ["b", 2]]},
+        {"op": "insert_rows" | "delete_rows", "sheet"?: "...", "row": 5, "count"?: 2} (not in workbooks
+        with formulas), {"op": "add_sheet", "name": "..."}, {"op": "rename_sheet", "sheet": "...", "name": "..."}.
+        Send numbers as numbers. Workbooks with charts, pivot tables or pictures can't be edited here."""
+        return await call(ctx, "edit_spreadsheet", {"file_id": file_id, "version": version,
+                                                    "operations": operations}, tools.edit_spreadsheet)
+
+    @server.tool(annotations=_EDITS)
+    async def create_file(ctx: Context, name: str, content: str | None = None, paragraphs: list | None = None,
+                          rows: list | None = None, sheet: str | None = None, library: str | None = None,
+                          folder: str | None = None) -> dict:
+        """Create a new file; the extension in `name` decides the kind. .txt/.md: `content`. .docx:
+        `paragraphs`, a list of strings or {"text": "...", "style": "Heading 1"} (or `content`, paragraphs
+        separated by blank lines). .xlsx: `rows`, a list of rows (lists of values), optional `sheet` name.
+        Goes in the person's Agents folder unless `library` (and `folder`) name another place you may edit.
+        If the name is taken, it gets "(2)" added."""
+        return await call(ctx, "create_file", {"name": name, "content": content, "paragraphs": paragraphs,
+                                               "rows": rows, "sheet": sheet, "library": library, "folder": folder},
+                          tools.create_file)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def list_versions(ctx: Context, file_id: int) -> dict:
+        """Earlier versions of a file kept when it was changed through Claude, newest first, with what
+        each change was. The person can restore any of them from Files."""
+        return await call(ctx, "list_versions", {"file_id": file_id}, tools.list_versions)
 
     return server
 

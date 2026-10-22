@@ -59,7 +59,7 @@
   }
 
   function icon(item) {
-    if (item.type === "folder") return "📁";
+    if (item.type === "folder") return item.role === "agents" ? "🤖" : "📁";
     const mime = item.mime || "";
     if (item.kind === "pdf") return "📕";
     if (item.kind === "md") return "📝";
@@ -263,7 +263,7 @@
       const fk = "f:" + f.id;
       const hasKids = folders.some(function (x) { return x.parent_id === f.id; });
       const expanded = state.expanded.has(fk);
-      const node = treeNode("📁 " + f.name, {
+      const node = treeNode((f.role === "agents" ? "🤖 " : "📁 ") + f.name, {
         depth: depth, expandable: hasKids, expanded: expanded,
         current: state.mode === "browse" && state.fid === f.id,
         onToggle: function () { toggleNode(fk); },
@@ -722,7 +722,11 @@
 
     if (item.type === "folder") {
       const dl = el("dl");
-      addRow(dl, "Type", "Folder");
+      addRow(dl, "Type", item.role === "agents" ? "Agents folder" : "Folder");
+      if (item.role === "agents") {
+        pane.appendChild(el("p", "note small", "Claude can create and change files in here for you (with a token " +
+          "that's allowed to edit). Every change keeps the previous version under Versions."));
+      }
       if (item.items !== undefined) addRow(dl, "Contains", item.items + (item.items === 1 ? " item" : " items"));
       if (item.deleted_at) addRow(dl, "Deleted", dateLabel(item.deleted_at) + (item.deleted_by ? " by " + item.deleted_by : ""));
       pane.appendChild(dl);
@@ -783,9 +787,50 @@
     if (full.uploaded_by) addRow(dl, "Uploaded by", full.uploaded_by);
     addRow(dl, "Added", dateLabel(full.created_at));
     if (full.updated_at && full.updated_at !== full.created_at) addRow(dl, "Modified", dateLabel(full.updated_at));
+    if (full.edited_via && full.edited_via.indexOf("claude:") === 0) {
+      addRow(dl, "Last change", "🤖 via Claude for " + full.edited_via.slice(7));
+    }
     pane.appendChild(dl);
     if (full.error) pane.appendChild(el("p", "error small", full.error));
     if (full.notes) pane.appendChild(el("p", "note small", full.notes));
+    renderVersions(pane, full, token);
+  }
+
+  /* Earlier versions kept when Claude changed the file; Restore puts one back
+     (and keeps what's there now as a version, so it can be undone too). */
+  async function renderVersions(pane, file, token) {
+    let data;
+    try { data = await api("GET", "/api/files/" + file.id + "/versions"); } catch (e) { return; }
+    if (token !== infoToken || !data.versions.length) return;
+    const box = el("section", "versions");
+    box.appendChild(el("h4", null, "Versions"));
+    const list = el("ul", "version-list");
+    data.versions.forEach(function (v) {
+      const li = el("li");
+      li.appendChild(el("div", null, "Before " + dateLabel(v.replaced_at) + " — changed by " + v.replaced_by));
+      if (v.change) li.appendChild(el("div", "muted small", v.change));
+      const actions = el("div", "version-actions");
+      const get = el("a", "small", "Download");
+      get.href = v.download_url;
+      actions.appendChild(get);
+      if (data.can_restore) {
+        const restore = el("button", "link small", "Restore");
+        restore.type = "button";
+        restore.addEventListener("click", async function () {
+          if (!confirm("Put this version of “" + file.name + "” back? What's there now is kept as a version too.")) return;
+          try {
+            await api("POST", "/api/files/" + file.id + "/versions/" + v.id + "/restore");
+            toast("Restored an earlier version of “" + file.name + "”.");
+          } catch (e) { toast(e.message, true); }
+          await refresh(true);
+        });
+        actions.appendChild(restore);
+      }
+      li.appendChild(actions);
+      list.appendChild(li);
+    });
+    box.appendChild(list);
+    pane.appendChild(box);
   }
 
   function addRow(dl, label, value) {

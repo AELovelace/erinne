@@ -21,7 +21,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
-from mnemerynne import db, directory, mcp_server, memory, permissions, share, users
+from mnemerynne import db, directory, editing, mcp_server, memory, permissions, share, users
 from mnemerynne.answer import ASSISTANT_NAME
 from mnemerynne.auth import LoginThrottle
 from mnemerynne.clients.embed import Embedder
@@ -79,6 +79,11 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         conn = db.connect(settings.db_path)
         try:
             version = db.migrate(conn, settings.embed_dim)
+            # Every inbox has an Agents folder for Claude; inboxes on an
+            # unavailable share get theirs on first use.
+            made = editing.ensure_all_agents(conn)
+            if made:
+                log.info("Made the Agents folder in %d inbox(es).", made)
         finally:
             conn.close()
         log.info("Database ready at %s (schema v%d).", settings.db_path, version)

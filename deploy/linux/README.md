@@ -298,5 +298,6 @@ sudo systemctl restart mnemerynne-web mnemerynne-worker
 sudo systemctl stop mnemerynne-web mnemerynne-worker
 sudo -u mnemerynne cp /var/backups/mnemerynne/db/mnemerynne-YYYY-MM-DD.db /var/lib/mnemerynne/mnemerynne.db
 sudo -u mnemerynne rsync -a /var/backups/mnemerynne/blobs/ /var/lib/mnemerynne/blobs/
+sudo -u mnemerynne rsync -a /var/backups/mnemerynne/versions/ /var/lib/mnemerynne/versions/
 sudo systemctl start mnemerynne-web mnemerynne-worker
 ```

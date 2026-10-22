@@ -80,17 +80,32 @@ def _principal_sql(groups: list[int], alias: str) -> tuple[str, tuple]:
     return sql, tuple(groups)
 
 
+def _under(folder_id: int, tops: set[int], parents: dict[int, int | None]) -> bool:
+    """`folder_id` is one of `tops` or inside one of them."""
+    seen = 0
+    while folder_id is not None and seen < 10_000:
+        if folder_id in tops:
+            return True
+        folder_id = parents.get(folder_id)
+        seen += 1
+    return False
+
+
 def reach(conn: sqlite3.Connection, user_id: int) -> dict[int, Reach]:
     """Every collection the user can reach anything in, keyed by id."""
     out: dict[int, Reach] = {}
     inbox = conn.execute("SELECT id, name, claude_enabled FROM collections "
                          "WHERE kind = 'private' AND owner_user_id = ?", (user_id,)).fetchone()
     if inbox:
-        parents = {r[0]: r[1] for r in conn.execute("SELECT id, parent_id FROM folders WHERE collection_id = ?",
-                                                    (inbox["id"],))}
+        rows = conn.execute("SELECT id, parent_id, role FROM folders WHERE collection_id = ?", (inbox["id"],)).fetchall()
+        parents = {r["id"]: r["parent_id"] for r in rows}
         claude = bool(inbox["claude_enabled"])
+        # The Agents folder is Claude's workspace: shared with Claude even when
+        # the rest of the inbox isn't.
+        agents = {r["id"] for r in rows if r["role"] == "agents"}
+        claude_folders = set(parents) if claude else {f for f in parents if _under(f, agents, parents)}
         out[inbox["id"]] = Reach(inbox["id"], "private", inbox["name"], True, True, claude, set(parents),
-                                 set(parents), set(parents) if claude else set(), parents)
+                                 set(parents), claude_folders, parents)
 
     groups = _group_ids(conn, user_id)
     who, group_params = _principal_sql(groups, "g")

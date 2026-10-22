@@ -10,6 +10,12 @@
   <h2 class="admin-section">What Claude can search for you</h2>
   <ul class="grants" id="shared"><li class="muted small">Loading…</li></ul>
 
+  <h2 class="admin-section">Where Claude can change files</h2>
+  <p class="muted small">With a token that's allowed to edit, Claude can create and change text, Markdown, Word and Excel
+    files here. Every change keeps the previous version: open the file's info in Files and use <em>Versions</em> to put
+    one back. Claude can't delete, move or rename files.</p>
+  <ul class="grants" id="editable"><li class="muted small">Loading…</li></ul>
+
   <h2 class="admin-section">Set it up</h2>
   <ol class="steps">
     <li>Create a token below and copy it. It's shown only once.</li>
@@ -27,6 +33,7 @@
   <form class="new-lib" id="new-token">
     <input type="text" id="token-name" value="Claude Desktop" maxlength="80" aria-label="Token name" required>
     <select id="token-days" aria-label="Expires after"></select>
+    <label class="check small"><input type="checkbox" id="token-edit" checked> Let Claude edit files</label>
     <button type="submit">Create token</button>
   </form>
   <div class="token-reveal" id="token-reveal" hidden>

@@ -7,8 +7,10 @@ Layout:
                                      safe while the app is running)
     <dest>/blobs/ab/<sha>.pdf        uploaded files; content-addressed, never
                                      modified, so only new ones are copied
+    <dest>/versions/<file>/...       earlier versions of files Claude changed;
+                                     also never modified, copied the same way
 Restore: stop mnemerynne, copy a snapshot to <data_dir>/mnemerynne.db and the blobs
-directory to <data_dir>/blobs, start mnemerynne.
+and versions directories to <data_dir>/blobs and <data_dir>/versions, start mnemerynne.
 """
 
 from __future__ import annotations
@@ -37,10 +39,12 @@ def backup(settings: Settings, dest: Path, keep: int = 14, today: date | None = 
     tmp.replace(snapshot)
 
     copied = 0
-    if settings.blob_dir.exists():
-        for path in settings.blob_dir.rglob("*"):
+    for source, name in ((settings.blob_dir, "blobs"), (settings.data_dir / "versions", "versions")):
+        if not source.exists():
+            continue
+        for path in source.rglob("*"):
             if path.is_file():
-                target = dest / "blobs" / path.relative_to(settings.blob_dir)
+                target = dest / name / path.relative_to(source)
                 if not target.exists() or target.stat().st_size != path.stat().st_size:
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(path, target)

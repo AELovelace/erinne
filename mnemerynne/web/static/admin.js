@@ -327,6 +327,12 @@
     claudeRow.appendChild(checkbox("Shared with Claude", lib.claude_enabled, function (on) {
       change("PUT", "/api/admin/libraries/" + lib.id + "/claude", { enabled: on });
     }, "Master switch: when off, nobody can search this library from Claude"));
+    const editBox = checkbox("Claude can edit files here", lib.claude_edit, function (on) {
+      change("PUT", "/api/admin/libraries/" + lib.id + "/claude-edit", { enabled: on });
+    }, "Lets Claude create and change text, Markdown, Word and Excel files here, for people who may edit them " +
+       "themselves and whose token allows it. Every change can be undone from Versions.");
+    if (!lib.claude_enabled) editBox.classList.add("muted");
+    claudeRow.appendChild(editBox);
     if (lib.claude_changed_by) {
       claudeRow.appendChild(el("span", "muted small",
         "last changed by " + lib.claude_changed_by + ", " + (lib.claude_changed_at || "").slice(0, 16) + " UTC"));

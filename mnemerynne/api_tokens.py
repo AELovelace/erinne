@@ -23,22 +23,30 @@ class Caller:
     user_id: int
     username: str
     token_id: int
+    can_edit: bool = False     # the token may change files (where editing is otherwise allowed)
 
 
 def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def create(conn: sqlite3.Connection, user_id: int, name: str, days: int | None = 90) -> tuple[int, str]:
+def create(conn: sqlite3.Connection, user_id: int, name: str, days: int | None = 90, *,
+           can_edit: bool = False) -> tuple[int, str]:
     """Make a token; returns (id, token). The token can't be recovered later."""
     name = (name or "").strip()[:80] or "Claude Desktop"
     token = PREFIX + secrets.token_urlsafe(32)
     expires = f"+{int(days)} days" if days else None
     cur = conn.execute(
-        "INSERT INTO api_tokens(user_id, name, token_hash, prefix, expires_at) "
-        "VALUES (?, ?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE datetime('now', ?) END)",
-        (user_id, name, _hash(token), token[: len(PREFIX) + 4], expires, expires))
+        "INSERT INTO api_tokens(user_id, name, token_hash, prefix, expires_at, can_edit) "
+        "VALUES (?, ?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE datetime('now', ?) END, ?)",
+        (user_id, name, _hash(token), token[: len(PREFIX) + 4], expires, expires, int(can_edit)))
     return cur.lastrowid, token
+
+
+def set_can_edit(conn: sqlite3.Connection, token_id: int, user_id: int, can_edit: bool) -> bool:
+    """Let one of the user's own live tokens change files, or stop it."""
+    return conn.execute("UPDATE api_tokens SET can_edit = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
+                        (int(can_edit), token_id, user_id)).rowcount > 0
 
 
 def verify(conn: sqlite3.Connection, token: str | None, *, touch: bool = True) -> Caller | None:
@@ -47,22 +55,22 @@ def verify(conn: sqlite3.Connection, token: str | None, *, touch: bool = True) -
     if not token or not token.startswith((PREFIX, *LEGACY_PREFIXES)):
         return None
     row = conn.execute(
-        "SELECT t.id, t.user_id, u.username FROM api_tokens t JOIN users u ON u.id = t.user_id "
+        "SELECT t.id, t.user_id, t.can_edit, u.username FROM api_tokens t JOIN users u ON u.id = t.user_id "
         "WHERE t.token_hash = ? AND t.revoked_at IS NULL AND u.active = 1 "
         "AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))", (_hash(token),)).fetchone()
     if row is None:
         return None
     if touch:
         conn.execute("UPDATE api_tokens SET last_used_at = datetime('now') WHERE id = ?", (row["id"],))
-    return Caller(row["user_id"], row["username"], row["id"])
+    return Caller(row["user_id"], row["username"], row["id"], bool(row["can_edit"]))
 
 
 def list_for_user(conn: sqlite3.Connection, user_id: int) -> list[dict]:
     rows = conn.execute(
-        "SELECT id, name, prefix, created_at, expires_at, last_used_at, revoked_at, "
+        "SELECT id, name, prefix, created_at, expires_at, last_used_at, revoked_at, can_edit, "
         "(revoked_at IS NULL AND (expires_at IS NULL OR expires_at > datetime('now'))) AS active "
         "FROM api_tokens WHERE user_id = ? ORDER BY id DESC", (user_id,)).fetchall()
-    return [{**dict(r), "active": bool(r["active"])} for r in rows]
+    return [{**dict(r), "active": bool(r["active"]), "can_edit": bool(r["can_edit"])} for r in rows]
 
 
 def revoke(conn: sqlite3.Connection, token_id: int, user_id: int | None = None) -> bool:
