@@ -690,6 +690,7 @@
     // Only contact GitHub when someone opens Settings.
     if (tab === "settings" && !updatesLoaded) { loadUpdates(false); loadAdminGroup(); }
     if (tab === "accounts") loadAccounts();
+    if (tab === "apis" && window.ErynneApis) window.ErynneApis.load();   // admin_apis.js
   }
 
   function writeHash() {

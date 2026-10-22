@@ -60,7 +60,8 @@
     cited.forEach(function (s) {
       const li = el("li");
       li.value = s.n;
-      const label = s.file + (s.location ? " · " + s.location : (s.page_start ? " · p. " + s.page_start : ""));
+      const label = (s.kind === "api" ? "🔌 " : "") + s.file +
+        (s.location ? " · " + s.location : (s.page_start ? " · p. " + s.page_start : ""));
       if (s.url) {
         const a = el("a", null, label);
         a.href = s.url; a.target = "_blank"; a.rel = "noopener";

@@ -1,7 +1,8 @@
 """The answering flow, orchestrated with LangGraph.
 
-    load_memories -> condense -> retrieve -> (nothing found? -> not_found)
-                                           -> generate -> finish
+    load_memories -> condense -> route -> retrieve -> generate | not_found -> finish
+                                        -> general (small talk, writing help)
+                                        -> api (a live internal API, read-only)
 
 Only `condense` (follow-ups only) and `generate` call the model; the rest is
 plain code. Conversation state is checkpointed per thread (conversation id)
@@ -30,7 +31,7 @@ from langgraph.config import get_store, get_stream_writer  # noqa: E402
 from langgraph.graph import END, START, StateGraph  # noqa: E402
 
 from mnemerynne import answer as answer_mod  # noqa: E402
-from mnemerynne import db, retrieval  # noqa: E402
+from mnemerynne import apis, db, retrieval  # noqa: E402
 from mnemerynne.clients.llm import LLM, ThinkFilter  # noqa: E402
 from mnemerynne.config import Settings  # noqa: E402
 
@@ -52,6 +53,7 @@ class State(TypedDict, total=False):
     route: str
     memories: list[str]
     hits: list[dict]
+    api_operation: int   # the API operation the question matched (route "api")
     answer: dict
     turns: Annotated[list[dict], operator.add]   # conversation memory, appended per turn
 
@@ -63,6 +65,7 @@ FLOWS: dict[str, str] = {
     "search": "retrieve",
     "smalltalk": "general",
     "general": "general",
+    "api": "api",        # chosen by example-question match, not by the trained router
 }
 
 
@@ -108,6 +111,7 @@ class Deps:
     embedder: Any
     reranker: Any = None
     router: Any = None   # mnemerynne.router.Router; None routes everything to search
+    directory: Any = None   # the AD domain (API access by group); None: no APIs
 
 
 def build_graph(deps: Deps, checkpointer=None, store=None):
@@ -155,9 +159,11 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
 
     @_timed("generate")
     async def generate(state: State) -> dict:
-        hits = [retrieval.Hit(**h) for h in state["hits"]]
+        return await answer_from([retrieval.Hit(**h) for h in state["hits"]], state, get_stream_writer())
+
+    async def answer_from(hits: list, state: State, writer) -> dict:
+        """The cited answer from numbered sources (documents or a live API response)."""
         messages = answer_mod.build_messages(state["standalone"], hits, state.get("memories"))
-        writer = get_stream_writer()
         streamer = answer_mod.AnswerStreamer()
         async for delta in deps.llm.stream(messages, temperature=0.1, max_tokens=900,
                                            json_schema=answer_mod.ANSWER_SCHEMA):
@@ -203,13 +209,91 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
 
     @_timed("route")
     async def route_message(state: State) -> dict:
-        """Pick the flow from the question's embedding (no model call)."""
+        """Pick the flow from the question's embedding (no model call): an API
+        operation the person may use whose example questions it matches, else
+        the trained router's choice."""
+        vector = None
+        if deps.directory is not None:
+            vector, best = await asyncio.to_thread(api_match, state)
+            if best is not None and best[1] >= settings.api_route_threshold:
+                get_stream_writer()({"type": "route", "route": "api", "score": round(best[1], 3)})
+                return {"route": "api", "api_operation": best[0]}
         if deps.router is None:
             return {"route": "search"}
-        vector = await asyncio.to_thread(deps.embedder.embed_query, state["standalone"])
+        if vector is None:
+            vector = await asyncio.to_thread(deps.embedder.embed_query, state["standalone"])
         decision = deps.router.decide(vector)
         get_stream_writer()({"type": "route", "route": decision.route, "probabilities": decision.probabilities})
         return {"route": decision.route}
+
+    def api_match(state: State):
+        conn = db.connect(settings.db_path)
+        try:
+            user = conn.execute("SELECT id, ad_account FROM users WHERE id = ?", (state["user_id"],)).fetchone()
+            ops = apis.allowed_operations(conn, user, deps.directory)
+            if not ops:
+                return None, None
+            vector = deps.embedder.embed_query(state["standalone"])
+            return vector, apis.match(conn, vector, [o["id"] for o in ops])
+        finally:
+            conn.close()
+
+    @_timed("api")
+    async def api(state: State) -> dict:
+        """Answer from a live internal API: fill the operation's parameters
+        (one constrained model call), call it, answer from the response."""
+        writer = get_stream_writer()
+        conn = db.connect(settings.db_path)
+        try:
+            op = conn.execute("SELECT o.*, a.name AS api_name FROM api_operations o JOIN apis a ON a.id = o.api_id "
+                              "WHERE o.id = ?", (state["api_operation"],)).fetchone()
+        finally:
+            conn.close()
+        params: dict = {}
+        schema = apis.params_schema(op) if op else None
+        if schema:
+            try:
+                filled = await deps.llm.chat_json(
+                    [{"role": "user", "content": apis.fill_prompt(op, state["standalone"])}],
+                    schema, temperature=0.0, max_tokens=200)
+                params = {k: v for k, v in filled.items() if v not in (None, "")}
+            except ValueError as exc:
+                log.warning("Couldn't fill the API parameters; using the defaults. %s", exc)
+
+        def run():
+            c = db.connect(settings.db_path)
+            try:
+                # Checked again here: access may have changed since routing.
+                user = c.execute("SELECT id, ad_account FROM users WHERE id = ?", (state["user_id"],)).fetchone()
+                if op is None or op["id"] not in {o["id"] for o in apis.allowed_operations(c, user, deps.directory)}:
+                    raise apis.ApiError("you can't use that API")
+                return apis.call(c, settings, op["id"], params, user_id=state["user_id"], via="chat")
+            finally:
+                c.close()
+
+        try:
+            result = await asyncio.to_thread(run)
+            problem = result.error
+        except apis.ApiError as exc:
+            result, problem = None, str(exc)
+        if result is None or not result.ok:
+            name = op["api_name"] if op else "that API"
+            text = f"Sorry, I couldn't get an answer from {name}: {problem}."
+            writer({"type": "sources", "sources": []})
+            writer({"type": "delta", "text": text})
+            return {"answer": {"status": "not_found", "text": text, "citations": []}}
+
+        live = f"live, {result.at[11:16]} UTC" if result.at else "live"
+        text = apis.digest(result.data, settings.context_tokens * 4)
+        hit = retrieval.Hit(chunk_id=0, file_id=0, collection_id=0, file_name=result.api_name, kind="api",
+                            page_start=None, page_end=None, anchor=None,
+                            section_path=f"{result.operation_name} ({live})", text=text,
+                            tokens=max(1, len(text) // 4))
+        writer({"type": "sources", "sources": [{
+            "n": 1, "file": result.api_name, "location": live, "section": result.operation_name,
+            "url": f"/apis/calls/{result.call_id}", "kind": "api", "api_call_id": result.call_id,
+            "chunk_id": None, "file_id": None, "page_start": None, "anchor": None}]})
+        return await answer_from([hit], state, writer)
 
     @_timed("general")
     async def general(state: State) -> dict:
@@ -249,6 +333,7 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
     graph.add_node("generate", generate)
     graph.add_node("not_found", not_found)
     graph.add_node("general", general)
+    graph.add_node("api", api)
     graph.add_node("finish", finish)
     graph.add_edge(START, "load_memories")
     graph.add_edge("load_memories", "condense")
@@ -256,6 +341,7 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
     graph.add_conditional_edges("route", after_route, sorted(set(FLOWS.values())))
     graph.add_conditional_edges("retrieve", after_retrieve, ["generate", "not_found"])
     graph.add_edge("general", "finish")
+    graph.add_edge("api", "finish")
     graph.add_edge("generate", "finish")
     graph.add_edge("not_found", "finish")
     graph.add_edge("finish", END)

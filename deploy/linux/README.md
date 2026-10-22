@@ -230,6 +230,42 @@ After updating to a version with this, files uploaded earlier are still
 sudo mnemerynne-admin reclassify
 ```
 
+## 5f. Internal APIs
+
+Erynne can answer live questions from internal systems ("did every hotel send
+its night audit?", "any critical Wazuh alerts?", "what's the status of ticket
+4812?"). Admins set them up on **Access → APIs**: start from a preset (Synchro
+HRM, Gasco health, Wazuh, Atera) or a blank API.
+
+- **Read-only.** Erynne only calls the operations defined there: a fixed path
+  with typed parameters, GET, or a POST whose body is fixed on that page.
+  Redirects aren't followed, and responses are capped at 256 KB.
+- **Who.** Each API is open to one AD group, reached through people's linked
+  domain accounts (section 5c). People outside it never see the API, in
+  chat or through Claude. **Claude** only reaches an API when its *Claude
+  can query this* switch is on (off by default): whatever Claude reads goes
+  to Anthropic.
+- **Credentials** are pasted on the page, stored encrypted with a key derived
+  from `MNEMERYNNE_SECRET_KEY`, and never shown again. Keep that key stable:
+  if it changes, the credentials must be entered again. Use dedicated
+  read-only credentials: a Synchro *Device Access Token* (one per scope, so
+  `health` and `stats:all` need separate APIs or tokens), a Gasco *Health
+  Display Token*, a Wazuh user with a read-only role, and an Atera token
+  limited to reading tickets.
+- **Self-signed servers** (Synchro, Wazuh): press *Fetch from server*, compare
+  the SHA-256 fingerprint with the real one, and save it. Only that
+  certificate is then trusted for the API. For servers reached by IP, untick
+  *Check the name in the certificate*.
+- **Routing.** A chat question goes to an operation when it closely matches
+  one of the operation's *example questions*, so add a few phrased the way
+  staff ask. `MNEMERYNNE_API_ROUTE_THRESHOLD` (default 0.80) sets how close a
+  match has to be.
+- **Test** on each operation calls it now and lists the fields in the response.
+  *Recent calls* shows who asked what. A citation in chat opens the exact
+  response the answer was based on (for the person who asked, and for admins).
+  That response is stored with the call, so keep in mind that answers from
+  Atera keep ticket text in Mnemerynne's database.
+
 ## 6. Check
 
 ```sh

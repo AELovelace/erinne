@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}{{ call.api_name }} · {{ assistant_name }}{% endblock %}
+{% block body %}
+<header class="topbar">
+  <a class="brand" href="/"><span class="blossom" aria-hidden="true">🌸</span>{{ assistant_name }}</a>
+  <strong>🔌 {{ call.api_name }} · {{ call.operation_name }}</strong>
+  <span class="muted">{{ call.at }} UTC{% if call.cached %} · from the last minute's answer{% endif %}</span>
+</header>
+<main class="doc">
+  <p class="muted small">Live response Erynne read to answer{% if call.params and call.params != '{}' %}, with {{ call.params }}{% endif %}.</p>
+  {% if call.ok %}
+  <pre>{{ call.response_excerpt or "(empty)" }}</pre>
+  {% else %}
+  <p class="error">The call failed: {{ call.error }}</p>
+  {% endif %}
+</main>
+{% endblock %}

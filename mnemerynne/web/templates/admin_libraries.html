@@ -9,6 +9,7 @@
       <button type="button" role="tab" data-tab="files">Files &amp; folders</button>
       <button type="button" role="tab" data-tab="groups">Groups</button>
       <button type="button" role="tab" data-tab="accounts">Accounts</button>
+      <button type="button" role="tab" data-tab="apis">APIs</button>
       <button type="button" role="tab" data-tab="people">Who can see what</button>
       <button type="button" role="tab" data-tab="claude">Claude activity</button>
       <button type="button" role="tab" data-tab="changes">Recent changes</button>
@@ -46,6 +47,21 @@
     <datalist id="domain-accounts"></datalist>
   </section>
 
+  <section class="ax" data-panel="apis" role="tabpanel" aria-label="Internal APIs" hidden>
+    <aside class="ax-tree glass" aria-label="APIs">
+      <form class="ax-new" id="new-api">
+        <select id="new-api-preset" aria-label="Start from"></select>
+        <button type="submit" class="small">Add</button>
+      </form>
+      <ul class="tree" id="api-list"></ul>
+    </aside>
+    <section class="ax-pane glass" id="api-pane" aria-live="polite">
+      <p class="muted">Internal systems Erynne may query, read-only. Each API is open to one AD group; Claude only
+        reaches the ones you switch on for it.</p>
+    </section>
+    <datalist id="api-groups"></datalist>
+  </section>
+
   <section class="inbox admin" data-panel="people" role="tabpanel" hidden>
     <p class="muted">Each person's inbox and libraries: what they can read, edit and search from Claude, and the grants that give it.</p>
     <div id="access" class="table-wrap"></div>
@@ -70,4 +86,5 @@
 </main>
 <script src="{{ static('picker.js') }}"></script>
 <script src="{{ static('admin.js') }}"></script>
+<script src="{{ static('admin_apis.js') }}"></script>
 {% endblock %}

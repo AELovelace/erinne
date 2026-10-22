@@ -30,7 +30,7 @@ from mnemerynne.clients.rerank import Reranker
 from mnemerynne.config import Settings, get_settings
 from mnemerynne.graph import Deps, build_graph
 from mnemerynne.router import load_router
-from mnemerynne.web import admin, chat, files, memories, tokens
+from mnemerynne.web import admin, admin_apis, apis as api_pages, chat, files, memories, tokens
 from mnemerynne.web.deps import LoginRequired, api_user, get_db, is_admin, page_user
 
 log = logging.getLogger("mnemerynne.web")
@@ -106,8 +106,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         app.state.checkpointer, app.state.store = checkpointer, store
         router = svc.router if services is not None else load_router(settings)
         log.info("Routing: %s.", f"{', '.join(router.labels)}" if router else "no router trained; everything is search")
-        app.state.graph = build_graph(Deps(settings, svc.llm, svc.embedder, svc.reranker, router),
-                                      checkpointer, store)
+        app.state.graph = build_graph(Deps(settings, svc.llm, svc.embedder, svc.reranker, router,
+                                           app.state.directory), checkpointer, store)
         app.state.background = set()
         app.state.memory_writer = memory.make_writer(settings, svc.llm, store, app.state.background)
         app.state.embedder = svc.embedder
@@ -167,9 +167,11 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(memories.router)
     app.include_router(admin.router)
     app.include_router(tokens.router)
+    app.include_router(api_pages.router)
+    app.include_router(admin_apis.router)
 
     # MCP for Claude Desktop: bearer-token auth, read-only tools (mnemerynne/mcp_server.py).
-    mcp = mcp_server.build_server(settings, lambda: app.state.embedder)
+    mcp = mcp_server.build_server(settings, lambda: app.state.embedder, lambda: app.state.directory)
     app.add_route("/mcp", mcp_server.McpEndpoint(settings, mcp), methods=["GET", "POST", "DELETE"])
 
     @app.exception_handler(LoginRequired)

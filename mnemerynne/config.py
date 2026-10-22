@@ -117,6 +117,9 @@ class Settings(BaseSettings):
     retrieval_k: int = 30              # candidates from each of keyword and vector search
     context_chunks: int = 6            # chunks handed to the model
     context_tokens: int = 3000         # ...within this budget
+    # Internal APIs (mnemerynne/apis.py): a question goes to an API operation
+    # when it is at least this close (cosine) to one of its example questions.
+    api_route_threshold: float = 0.80
     fts_section_weight: float = 3.0    # bm25 weight of section_path vs body text
     # Not-found shortcut (answer without calling the model): the closest chunk is
     # farther than vector_max_distance, or there is no keyword match at all and it

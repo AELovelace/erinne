@@ -537,6 +537,16 @@ button.danger-fill { background: var(--error); }
 .ax-link input { flex: 1; min-width: 8rem; padding: .3rem .5rem; }
 .ax-share { margin-top: 1rem; padding: .8rem 1rem; border: 1px solid var(--line); border-radius: 12px; background: var(--glass-strong); }
 .ax-share p { margin: .3rem 0; }
+.api-section { margin-top: 1.2rem; }
+.api-field { display: block; margin: .5rem 0; }
+.api-field > span { display: block; }
+.api-field input, .api-field textarea, .api-field select { width: 100%; }
+.api-op { border: 1px solid var(--line); border-radius: 10px; padding: .5rem .8rem; margin: .5rem 0; }
+.api-op.editing { background: var(--glass-strong); }
+.api-op .lib-head { gap: .6rem; flex-wrap: wrap; }
+.api-test { margin-top: .6rem; border-top: 1px dashed var(--line); padding-top: .5rem; }
+.api-response { max-height: 24rem; overflow: auto; font-size: .8rem; white-space: pre-wrap; }
+.mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .ax-badge { flex: none; font-size: .75rem; color: var(--muted); padding: 0 .45rem; white-space: nowrap; }
 .ax-empty { padding: .25rem .8rem .25rem 2.4rem; }
 .ax-h { margin: 1.5rem 0 .15rem; font-size: 1.05rem; }

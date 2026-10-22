@@ -29,6 +29,8 @@ dependencies = [
     "openpyxl==3.1.5",
     "xlrd==2.0.2",
     "striprtf==0.0.34",
+    # Encrypts API credentials (mnemerynne/apis.py)
+    "cryptography==50.0.2",
 ]
 
 [dependency-groups]

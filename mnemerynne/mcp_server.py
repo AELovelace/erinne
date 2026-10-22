@@ -33,7 +33,7 @@ from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
-from mnemerynne import api_tokens, db, editing, editing_formats, fs, permissions, retrieval
+from mnemerynne import api_tokens, apis, db, editing, editing_formats, fs, permissions, retrieval
 from mnemerynne.api_tokens import Caller
 from mnemerynne.config import Settings
 from mnemerynne.ingest import store
@@ -66,7 +66,12 @@ Editing files (.txt, .md, .docx, .xlsx):
 - Make the smallest change that does what was asked; don't rewrite text you weren't asked to change.
 - New files go in the person's Agents folder unless they name somewhere else (list_libraries shows where
   you may edit). Every change keeps the previous version, which the person can restore from Files.
-- You can't delete, move or rename files; tell the person to do that in Mnemerynne if it's needed."""
+- You can't delete, move or rename files; tell the person to do that in Mnemerynne if it's needed.
+
+Internal APIs (live, read-only):
+- list_apis shows the internal systems you may query for this person (night-audit health, hotel stats,
+  IT tickets and so on); query_api calls one. Cite answers with the result's `citation` and `link`, and
+  say the figures are live as of its time. Don't guess values the response doesn't contain."""
 
 _READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True,
                              open_world_hint=False)
@@ -154,9 +159,11 @@ def _passage(hit: retrieval.Hit, base: str, library: str, n: int | None = None) 
 class Tools:
     """The tool bodies, synchronous and testable without the MCP transport."""
 
-    def __init__(self, settings: Settings, get_embedder: Callable[[], Any]):
+    def __init__(self, settings: Settings, get_embedder: Callable[[], Any],
+                 get_directory: Callable[[], Any] = lambda: None):
         self.settings = settings
         self.get_embedder = get_embedder
+        self.get_directory = get_directory
 
     @property
     def base(self) -> str:
@@ -215,6 +222,39 @@ class Tools:
         hits = retrieval._load_hits(conn, ids)
         library = _label(_collections(conn, access)[row["collection_id"]])
         return {"passages": [_passage(hits[i], self.base, library) for i in ids]}, [row["file_id"]]
+
+    def _user(self, conn, caller: Caller):
+        return conn.execute("SELECT id, ad_account FROM users WHERE id = ?", (caller.user_id,)).fetchone()
+
+    def list_apis(self, conn, caller: Caller) -> tuple[dict, list[int]]:
+        ops = apis.allowed_operations(conn, self._user(conn, caller), self.get_directory(), for_claude=True)
+        out: dict[str, dict] = {}
+        for op in ops:
+            entry = out.setdefault(op["api_name"], {"api": op["api_name"], "operations": []})
+            entry["operations"].append({
+                "operation": op["name"], "description": op["description"],
+                "parameters": [{k: v for k, v in s.items() if k in ("name", "type", "required", "options",
+                                                                    "min", "max", "default", "help")}
+                               for s in apis.param_specs(op)]})
+        if not out:
+            return {"apis": [], "note": "No internal APIs are shared with Claude for this person."}, []
+        return {"apis": list(out.values())}, []
+
+    def query_api(self, conn, caller: Caller, api: str, operation: str,
+                  params: dict | None = None) -> tuple[dict, list[int]]:
+        try:
+            op = apis.operation_for(conn, self._user(conn, caller), self.get_directory(), api, operation,
+                                    for_claude=True)
+            result = apis.call(conn, self.settings, op["id"], params, user_id=caller.user_id, via="claude")
+        except apis.ApiError as exc:
+            raise ToolError(f"{exc} Use list_apis to see what you can query.") from None
+        if not result.ok:
+            raise ToolError(f"{result.api_name} didn't answer: {result.error}.")
+        live = f"live, {result.at[11:16]} UTC"
+        return {"api": result.api_name, "operation": result.operation_name, "at": result.at + " UTC",
+                "citation": f"{result.api_name} · {result.operation_name} ({live})",
+                "link": f"{self.base}/apis/calls/{result.call_id}",
+                "data": apis.digest(result.data, 40_000)}, []
 
     def list_libraries(self, conn, caller: Caller) -> tuple[dict, list[int]]:
         access = self._access(conn, caller)
@@ -375,8 +415,9 @@ class Tools:
 
 
 # --------------------------------------------------------------- the server
-def build_server(settings: Settings, get_embedder: Callable[[], Any]) -> MCPServer:
-    tools = Tools(settings, get_embedder)
+def build_server(settings: Settings, get_embedder: Callable[[], Any],
+                 get_directory: Callable[[], Any] = lambda: None) -> MCPServer:
+    tools = Tools(settings, get_embedder, get_directory)
     server = MCPServer(name="mnemerynne", title="Mnemerynne", instructions=INSTRUCTIONS)
 
     async def call(ctx: Context, name: str, args: dict, fn) -> dict:
@@ -423,6 +464,21 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any]) -> MCPServ
         """Read a passage from search_documents together with up to `around` (0-3) passages before
         and after it in the same document, to check context before relying on it."""
         return await call(ctx, "read_passage", {"chunk_id": chunk_id, "around": around}, tools.read_passage)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def list_apis(ctx: Context) -> dict:
+        """List the internal systems (APIs) you may query live for this person, with their operations
+        and parameters. Read-only: nothing can be changed through them."""
+        return await call(ctx, "list_apis", {}, tools.list_apis)
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True,
+                                             open_world_hint=True))
+    async def query_api(ctx: Context, api: str, operation: str, params: dict | None = None) -> dict:
+        """Call one operation of an internal API from list_apis, e.g. api="Synchro HRM",
+        operation="Health", or operation="Stats summary" with params {"property": "all", "days": 7}.
+        Returns live data with a `citation` and `link` to cite."""
+        return await call(ctx, "query_api", {"api": api, "operation": operation, "params": params or {}},
+                          tools.query_api)
 
     @server.tool(annotations=_READ_ONLY)
     async def list_libraries(ctx: Context) -> dict:

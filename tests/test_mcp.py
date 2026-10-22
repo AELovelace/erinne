@@ -172,7 +172,8 @@ def test_mcp_endpoint_end_to_end(mcp_client, conn, world):
     listed = _rpc(mcp_client, token, "tools/list").json()["result"]["tools"]
     edits = {"edit_text", "edit_document", "edit_spreadsheet", "create_file"}
     assert {t["name"] for t in listed} == {"search_documents", "read_passage", "list_libraries", "browse_folder",
-                                           "find_files", "view_page", "open_file", "list_versions"} | edits
+                                           "find_files", "view_page", "open_file", "list_versions",
+                                           "list_apis", "query_api"} | edits
     assert all(t["annotations"]["readOnlyHint"] is (t["name"] not in edits) for t in listed)
     assert not any(t["annotations"].get("destructiveHint") for t in listed)   # every change can be undone
 
