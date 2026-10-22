@@ -24,7 +24,6 @@ directory beside the share.
 from __future__ import annotations
 
 import re
-import shutil
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -499,7 +498,7 @@ def _bytes_to_blob(conn: sqlite3.Connection, file_id: int, src) -> None:
     if not dest.exists():
         dest.parent.mkdir(parents=True, exist_ok=True)
         try:
-            shutil.copy2(src, dest)
+            share.copy_bytes(src, dest)   # the share's label and ACLs stay behind
         except OSError as exc:
             raise FsError(f"Couldn't copy the file off the share: {exc.strerror or exc}") from None
 

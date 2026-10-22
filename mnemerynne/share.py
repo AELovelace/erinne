@@ -209,12 +209,19 @@ def rename(src: Path, dest: Path) -> None:
         raise _fail("move it", exc) from exc
 
 
-def _copy_new(src: Path, dest: Path) -> None:
-    """Copy into a file that must not exist yet (O_EXCL: never overwrites)."""
+def copy_bytes(src: Path, dest: Path) -> None:
+    """Copy the contents and the modified time into a file that must not exist
+    yet (O_EXCL: never overwrites). Nothing else comes along: no mode bits,
+    POSIX ACLs or SELinux label (shutil.copy2/copystat would copy those
+    xattrs), so the copy inherits its permissions and label from where it lands."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     with open(src, "rb") as fin, open(dest, "xb") as fout:
         shutil.copyfileobj(fin, fout, 1024 * 1024)
-    shutil.copystat(src, dest)
+    st = src.stat()
+    os.utime(dest, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+
+_copy_new = copy_bytes
 
 
 def copy_file(src: Path, dest: Path) -> None:

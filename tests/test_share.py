@@ -508,3 +508,15 @@ def test_share_export_cli(tmp_path, root, monkeypatch, capsys):
     assert "edith's inbox: moved 1 file(s)" in capsys.readouterr().out
     with pytest.raises(SystemExit, match="Not found, or already on the share: edith"):
         main(["share-export", "--user", "edith"])
+
+
+def test_copies_take_only_the_bytes_and_modified_time(tmp_path):
+    src = _write(tmp_path / "a" / "x.txt", "content", age=3600)
+    os.chmod(src, 0o400)
+    dest = tmp_path / "b" / "x.txt"
+    share.copy_bytes(src, dest)
+    assert dest.read_text() == "content"
+    assert dest.stat().st_mtime_ns == src.stat().st_mtime_ns
+    assert os.access(dest, os.W_OK)          # the source's read-only mode didn't come along
+    with pytest.raises(FileExistsError):
+        share.copy_bytes(src, dest)

@@ -175,6 +175,9 @@ into their `Users\<name>` folder.
    ```sh
    sudo setfacl -R -m u:mnemerynne:rwX -m d:u:mnemerynne:rwX /srv/storage/share
    sudo install -d -o mnemerynne -g mnemerynne -m 700 /srv/storage/.mnemerynne-trash
+   # Same SELinux label as the share, so files restored from the bin stay readable by Samba:
+   sudo semanage fcontext -a -t samba_share_t '/srv/storage/\.mnemerynne-trash(/.*)?'
+   sudo restorecon -Rv /srv/storage/.mnemerynne-trash
    ```
    In Windows' Security tab this entry shows as *Unix User\mnemerynne*; keep it
    (Modify) on every folder, or Mnemerynne can't see or change that folder.
