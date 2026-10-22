@@ -159,6 +159,8 @@ async def ask(body: AskBody, request: Request, user=Depends(api_user),
                 if event["type"] == "final":
                     final = event
                 else:
+                    if event["type"] == "sources":
+                        await asyncio.to_thread(_add_web_urls, app.state.settings, event["sources"])
                     run.add(event)
         except Exception as exc:  # model server down, etc.
             log.exception("Answering failed")
@@ -180,6 +182,24 @@ async def ask(body: AskBody, request: Request, user=Depends(api_user),
     return _stream(run)
 
 
+def _add_web_urls(settings, sources: list[dict]) -> None:
+    """Sources from SharePoint get their "Open in SharePoint" address (in place,
+    so the final event, which shares these dicts, has it too)."""
+    from mnemerynne import sharepoint
+
+    ids = [s.get("file_id") for s in sources if s.get("file_id")]
+    if not ids:
+        return
+    conn = db.connect(settings.db_path)
+    try:
+        urls = sharepoint.web_urls(conn, ids)
+    finally:
+        conn.close()
+    for s in sources:
+        if s.get("file_id") in urls:
+            s["web_url"] = urls[s["file_id"]]
+
+
 def _background(app, coro) -> None:
     task = asyncio.create_task(coro)
     app.state.background.add(task)
@@ -196,6 +216,13 @@ async def run_events(run_id: str, request: Request, after: int = 0, user=Depends
     return _stream(run, after)
 
 
+def _external(source: dict) -> tuple:
+    """An email, event or live SharePoint source: kept as shown (there's no file to look it up by)."""
+    if source.get("kind") in ("mail", "event", "sharepoint"):
+        return source["kind"], source.get("file"), source.get("location"), source.get("url")
+    return None, None, None, None
+
+
 def _save_answer(settings, conversation_id: str, final: dict) -> int:
     conn = db.connect(settings.db_path)
     try:
@@ -208,10 +235,10 @@ def _save_answer(settings, conversation_id: str, final: dict) -> int:
                  final.get("route")),
             ).lastrowid
             conn.executemany(
-                "INSERT INTO message_sources(message_id, n, chunk_id, file_id, page_start, anchor, cited, api_call_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO message_sources(message_id, n, chunk_id, file_id, page_start, anchor, cited, api_call_id, "
+                "ext_kind, ext_title, ext_location, ext_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [(message_id, s["n"], s["chunk_id"], s["file_id"], s["page_start"], s["anchor"], int(s["cited"]),
-                  s.get("api_call_id")) for s in final["sources"]],
+                  s.get("api_call_id"), *_external(s)) for s in final["sources"]],
             )
             conn.execute("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?", (conversation_id,))
             graph_mod.log_trace(conn, conversation_id, final.get("trace") or [])
@@ -241,11 +268,17 @@ def get_conversation(conversation_id: str, request: Request, user=Depends(api_us
                 "SELECT ms.n, ms.cited, ms.page_start, ms.anchor, ms.file_id, ms.api_call_id, "
                 "COALESCE(f.display_name, ac.api_name) AS file, CASE WHEN ms.api_call_id IS NOT NULL "
                 "THEN 'api' ELSE b.kind END AS kind, COALESCE(c.section_path, ac.operation_name) AS section, "
-                "ac.at AS api_at FROM message_sources ms LEFT JOIN files f ON f.id = ms.file_id "
+                "ac.at AS api_at, f.web_url, ms.ext_kind, ms.ext_title, ms.ext_location, ms.ext_url "
+                "FROM message_sources ms LEFT JOIN files f ON f.id = ms.file_id "
                 "LEFT JOIN blobs b ON b.sha256 = f.blob_sha256 LEFT JOIN chunks c ON c.id = ms.chunk_id "
                 "LEFT JOIN api_calls ac ON ac.id = ms.api_call_id "
                 "WHERE ms.message_id = ? ORDER BY ms.n", (m["id"],))]
             for s in sources:
+                kind, title, where, url = (s.pop(k) for k in ("ext_kind", "ext_title", "ext_location", "ext_url"))
+                if kind:
+                    s.update({"kind": kind, "file": title, "location": where, "url": url})
+                    s.pop("api_at", None)
+                    continue
                 s["url"] = _source_url(s)
                 if s["kind"] == "api":
                     s["location"] = f"live, {(s.pop('api_at') or '')[11:16]} UTC"

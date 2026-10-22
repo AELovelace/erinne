@@ -8,7 +8,10 @@ Effective access is the union of everything that reaches a folder. Claude
 use additionally needs the library's (or inbox's) Claude switch.
 
 A library stored on the SMB share (share.py) ignores grants: access follows
-the share's own permissions for the user's linked domain account.
+the share's own permissions for the user's linked domain account. A
+SharePoint library (sharepoint.py) ignores them too: it is open, read-only,
+to people with a linked Microsoft account in its tenant, and each file is
+then checked against SharePoint itself (fs.Access.can_read_file).
 
 `reach()` works this out per user and collection. Retrieval must turn it
 into a search scope applied inside the search queries themselves (FTS and
@@ -90,7 +93,16 @@ class Reach:
 
 
 def _group_ids(conn: sqlite3.Connection, user_id: int) -> list[int]:
-    return [r[0] for r in conn.execute("SELECT group_id FROM group_members WHERE user_id = ?", (user_id,))]
+    """The user's Mnemerynne groups: as a member, or through the Entra group a
+    group takes in (groups.entra_key) via a linked Microsoft account."""
+    from mnemerynne.group_refs import FRESH_MINUTES
+
+    return [r[0] for r in conn.execute(
+        "SELECT group_id FROM group_members WHERE user_id = ? UNION "
+        "SELECT g.id FROM groups g JOIN entra_memberships m ON m.group_key = g.entra_key "
+        "JOIN m365_identities i ON i.id = m.identity_id JOIN m365_tenants t ON t.id = i.tenant_row "
+        "WHERE i.user_id = ? AND t.enabled = 1 AND m.refreshed_at > datetime('now', ?)",
+        (user_id, user_id, f"-{FRESH_MINUTES} minutes"))]
 
 
 def _principal_sql(groups: list[int], alias: str) -> tuple[str, tuple]:
@@ -131,13 +143,14 @@ def reach(conn: sqlite3.Connection, user_id: int) -> dict[int, Reach]:
     library_grants: dict[int, list[tuple[bool, bool]]] = {}
     for r in conn.execute(f"SELECT g.collection_id, g.can_write, g.can_claude FROM collection_grants g "
                           f"JOIN collections c ON c.id = g.collection_id "
-                          f"WHERE c.kind = 'library' AND c.share_path IS NULL AND {who}",
+                          f"WHERE c.kind = 'library' AND c.share_path IS NULL AND c.source IS NULL AND {who}",
                           (user_id, *group_params)):
         library_grants.setdefault(r[0], []).append((bool(r[1]), bool(r[2])))
     folder_grants: dict[int, dict[int, list[tuple[bool, bool]]]] = {}
     for r in conn.execute(f"SELECT f.collection_id, g.folder_id, g.can_write, g.can_claude FROM folder_grants g "
                           f"JOIN folders f ON f.id = g.folder_id JOIN collections c ON c.id = f.collection_id "
-                          f"WHERE c.kind = 'library' AND c.share_path IS NULL AND {who}", (user_id, *group_params)):
+                          f"WHERE c.kind = 'library' AND c.share_path IS NULL AND c.source IS NULL AND {who}",
+                          (user_id, *group_params)):
         folder_grants.setdefault(r[0], {}).setdefault(r[1], []).append((bool(r[2]), bool(r[3])))
 
     for cid in sorted(set(library_grants) | set(folder_grants)):
@@ -155,6 +168,18 @@ def reach(conn: sqlite3.Connection, user_id: int) -> dict[int, Reach]:
             r = share.library_reach(conn, row, user) if user else None
             if r is not None:
                 out[row["id"]] = r
+    # SharePoint: readable (never writable) with a linked account in its tenant.
+    for row in conn.execute(
+            "SELECT DISTINCT c.id, c.name, c.claude_enabled FROM collections c "
+            "JOIN sharepoint_drives d ON d.collection_id = c.id JOIN m365_tenants t ON t.id = d.tenant_row "
+            "JOIN m365_identities i ON i.tenant_row = d.tenant_row "
+            "WHERE c.source = 'sharepoint' AND t.enabled = 1 AND i.user_id = ? AND i.status = 'ok'",
+            (user_id,)).fetchall():
+        parents = {r["id"]: r["parent_id"] for r in conn.execute(
+            "SELECT id, parent_id FROM folders WHERE collection_id = ?", (row["id"],))}
+        claude = bool(row["claude_enabled"])
+        out[row["id"]] = Reach(row["id"], "library", row["name"], True, False, claude, set(parents), set(),
+                               set(parents) if claude else set(), parents)
     _apply_claude_hidden(conn, out)
     return out
 

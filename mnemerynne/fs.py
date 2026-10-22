@@ -69,16 +69,20 @@ class Access:
     reload: Callable[[], dict[int, permissions.Reach]] | None = field(default=None, repr=False)
     # Claude's view: files people took out of it (files.claude_hidden) don't count as readable.
     claude: bool = False
+    # For SharePoint files: checked against SharePoint itself with the person's own account.
+    conn: sqlite3.Connection | None = field(default=None, repr=False)
+    _sp_ok: dict[int, bool] = field(default_factory=dict, repr=False)
+    _sp_ids: set[int] | None = field(default=None, repr=False)
 
     @classmethod
     def of(cls, conn: sqlite3.Connection, user_id: int) -> "Access":
-        return cls(user_id, permissions.reach(conn, user_id), lambda: permissions.reach(conn, user_id))
+        return cls(user_id, permissions.reach(conn, user_id), lambda: permissions.reach(conn, user_id), conn=conn)
 
     @classmethod
     def for_claude(cls, conn: sqlite3.Connection, user_id: int) -> "Access":
         """Read-only access to what the user may search from Claude."""
         return cls(user_id, permissions.claude_reach(conn, user_id), lambda: permissions.claude_reach(conn, user_id),
-                   claude=True)
+                   claude=True, conn=conn)
 
     def _reach(self, collection_id: int, folder_id: int | None = None) -> permissions.Reach | None:
         r = self.reaches.get(collection_id)
@@ -110,7 +114,27 @@ class Access:
         out of its view."""
         if self.claude and row["claude_hidden"]:
             return False
-        return self.can_read(row["collection_id"], row["folder_id"])
+        if not self.can_read(row["collection_id"], row["folder_id"]):
+            return False
+        if row["collection_id"] in self._sharepoint():
+            if row["id"] not in self._sp_ok:
+                self.prefetch([row])
+            return self._sp_ok.get(row["id"], False)
+        return True
+
+    def _sharepoint(self) -> set[int]:
+        if self._sp_ids is None:
+            from mnemerynne import sharepoint
+            self._sp_ids = sharepoint.sharepoint_ids(self.conn) & set(self.reaches) if self.conn else set()
+        return self._sp_ids
+
+    def prefetch(self, rows) -> None:
+        """Check the SharePoint files among these rows in one go (before a loop of can_read_file)."""
+        ids = [r["id"] for r in rows if r["collection_id"] in self._sharepoint() and r["id"] not in self._sp_ok]
+        if ids:
+            from mnemerynne import sharepoint
+            ok = sharepoint.visible(self.conn, self.user_id, ids)
+            self._sp_ok.update({i: i in ok for i in ids})
 
     def visible(self, collection_id: int, folder_ids=()) -> set[int]:
         """Folders the user may see (to read them or reach one below). Pass the
@@ -331,7 +355,7 @@ def split_relative_path(relative_path: str) -> list[str]:
 # ----------------------------------------------------------------- browsing
 _FILE_COLUMNS = """
     f.id, f.collection_id, f.folder_id, f.display_name, f.status, f.progress, f.error, f.notes,
-    f.created_at, f.updated_at, f.deleted_at, f.uploaded_by, f.edited_via, f.claude_hidden, f.ai_edit, f.ai_no_edit, b.kind, b.mime, b.size, b.unit_count,
+    f.created_at, f.updated_at, f.deleted_at, f.uploaded_by, f.edited_via, f.claude_hidden, f.ai_edit, f.ai_no_edit, f.web_url, b.kind, b.mime, b.size, b.unit_count,
     b.rel_path, b.ocr_rel_path, u.username AS uploaded_by_name
 """
 _FILE_FROM = """
@@ -359,8 +383,8 @@ def browse(conn: sqlite3.Connection, access: Access, collection_id: int, folder_
         f"SELECT {_FILE_COLUMNS} {_FILE_FROM} WHERE f.collection_id = ? AND COALESCE(f.folder_id, 0) = ? "
         "AND f.deleted_at IS NULL ORDER BY f.display_name COLLATE NOCASE",
         (collection_id, folder_id or 0)).fetchall() if access.can_read(collection_id, folder_id) else []
-    if access.claude:
-        files = [f for f in files if not f["claude_hidden"]]
+    access.prefetch(files)
+    files = [f for f in files if access.can_read_file(f)]
     return {"folders": folders, "files": files, "path": folder_path(conn, folder_id),
             "can_write": access.can_write(collection_id, folder_id)}
 
@@ -388,10 +412,17 @@ def search_names(conn: sqlite3.Connection, access: Access, q: str, limit: int = 
         f"SELECT id, collection_id, parent_id, name FROM folders WHERE collection_id IN ({marks}) "
         "AND name LIKE ? ESCAPE '\\' ORDER BY name COLLATE NOCASE", (*readable, like))
         if r["id"] in live[r["collection_id"]] and access.can_read(r["collection_id"], r["id"])][:limit]
-    files = [r for r in conn.execute(
+    rows = [r for r in conn.execute(
         f"SELECT {_FILE_COLUMNS} {_FILE_FROM} WHERE f.collection_id IN ({marks}) AND f.deleted_at IS NULL "
         "AND f.display_name LIKE ? ESCAPE '\\' ORDER BY f.display_name COLLATE NOCASE", (*readable, like))
-        if (r["folder_id"] is None or r["folder_id"] in live[r["collection_id"]]) and access.can_read_file(r)][:limit]
+        if r["folder_id"] is None or r["folder_id"] in live[r["collection_id"]]]
+    access.prefetch(rows[:limit * 2])   # SharePoint files are checked in batches; the rest as needed
+    files = []
+    for r in rows:
+        if len(files) >= limit:
+            break
+        if access.can_read_file(r):
+            files.append(r)
     return {"folders": folders, "files": files}
 
 

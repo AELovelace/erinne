@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from mnemerynne import share, users
+from mnemerynne import group_refs, share, users
 from mnemerynne.directory import Directory
 
 ADMIN_GROUP_KEY = "admin_group"
@@ -28,8 +28,9 @@ def admin_group(conn: sqlite3.Connection) -> str:
 
 
 def set_admin_group(conn: sqlite3.Connection, name: str) -> str:
-    name = (name or "").strip()
-    if not name or len(name) > 256:
+    """One or more group references (group_refs: AD names, Entra groups), ';'-separated."""
+    name = group_refs.join(group_refs.split(name))
+    if not name or len(name) > 2000:
         raise ValueError("Pick a group.")
     conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (ADMIN_GROUP_KEY, name))
     return name
@@ -48,8 +49,7 @@ def admin_via(conn: sqlite3.Connection, user: sqlite3.Row, directory: Directory,
         return "role"
     if user["username"] in bootstrap:
         return "bootstrap"
-    account = user["ad_account"]
-    return "domain" if account and admin_group(conn).lower() in directory.groups_of(account) else None
+    return "domain" if group_refs.in_any(conn, user, directory, admin_group(conn)) else None
 
 
 # ---------------------------------------------------------------- agent group
@@ -60,19 +60,19 @@ def agent_group(conn: sqlite3.Connection) -> str:
 
 
 def set_agent_group(conn: sqlite3.Connection, name: str) -> str:
-    """Pick the group ('' turns the agent off for everyone)."""
-    name = (name or "").strip()
-    if len(name) > 256:
+    """Pick the group(s) ('' turns the agent off for everyone)."""
+    name = group_refs.join(group_refs.split(name))
+    if len(name) > 2000:
         raise ValueError("Pick a group.")
     conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (AGENT_GROUP_KEY, name))
     return name
 
 
 def is_agent_user(conn: sqlite3.Connection, user: sqlite3.Row, directory: Directory) -> bool:
-    """Only people linked to a member of the agent group; admins aren't included
-    by default (they join the group like anyone else)."""
-    group, account = agent_group(conn), user["ad_account"]
-    return bool(group) and bool(account) and group.lower() in directory.groups_of(account)
+    """Only members of the agent group(s), through their domain account or a
+    linked Microsoft account; admins aren't included by default (they join
+    the group like anyone else)."""
+    return group_refs.in_any(conn, user, directory, agent_group(conn))
 
 
 # ------------------------------------------------------------ domain accounts

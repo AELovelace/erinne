@@ -33,7 +33,8 @@ from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
-from mnemerynne import api_tokens, apis, db, editing, editing_formats, fs, permissions, proposals, retrieval
+from mnemerynne import (api_tokens, apis, db, editing, editing_formats, fs, permissions, proposals, retrieval,
+                        sharepoint)
 from mnemerynne.api_tokens import Caller
 from mnemerynne.config import Settings
 from mnemerynne.ingest import store
@@ -227,10 +228,11 @@ class Tools:
             return {"found": False, "query": query, "results": [],
                     "note": "Nothing is shared with " + ("Claude for " if self.claude else "") +
                             "you yet; ask a Mnemerynne admin."}, []
-        result = retrieval.search(conn, self.settings, self.get_embedder(), query, allowed)
+        keep = sharepoint.trimmer(conn, caller.user_id)
+        result = retrieval.search(conn, self.settings, self.get_embedder(), query, allowed, keep=keep)
         if not result.found_anything and library and not self.claude:
             notes.append(f"Nothing close in {library}; these are from everywhere.")
-            result = retrieval.search(conn, self.settings, self.get_embedder(), query, everything)
+            result = retrieval.search(conn, self.settings, self.get_embedder(), query, everything, keep=keep)
         if not result.found_anything:
             return {"found": False, "query": query, "results": [],
                     "note": " ".join(notes + ["Nothing in these documents is close to this question."

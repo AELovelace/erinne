@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import accounts, api_tokens, fs, permissions, share, updates, users
+from mnemerynne import accounts, api_tokens, fs, group_refs, permissions, share, updates, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
@@ -97,7 +97,7 @@ def libraries_page(request: Request, user=Depends(page_user), conn: sqlite3.Conn
 @router.get("/api/admin/libraries")
 def list_libraries(user=Depends(admin_api_user), conn: sqlite3.Connection = Depends(get_db)):
     rows = conn.execute(
-        "SELECT c.id, c.name, c.share_path, c.created_at, c.claude_enabled, c.claude_edit, c.claude_changed_at, "
+        "SELECT c.id, c.name, c.share_path, c.source, c.created_at, c.claude_enabled, c.claude_edit, c.claude_changed_at, "
         "u.username AS claude_changed_by, "
         "(SELECT count(*) FROM files f WHERE f.collection_id = c.id AND f.deleted_at IS NULL) AS files, "
         "(SELECT COALESCE(sum(b.size), 0) FROM files f JOIN blobs b ON b.sha256 = f.blob_sha256 "
@@ -352,10 +352,11 @@ def set_inbox_claude_edit(user_id: int, body: ClaudeBody, user=Depends(admin_api
 # -------------------------------------------------------------------- groups
 @router.get("/api/admin/groups")
 def list_groups(user=Depends(admin_api_user), conn: sqlite3.Connection = Depends(get_db)):
-    groups = conn.execute("SELECT id, name FROM groups ORDER BY name COLLATE NOCASE").fetchall()
+    groups = conn.execute("SELECT id, name, entra_key FROM groups ORDER BY name COLLATE NOCASE").fetchall()
     members = conn.execute("SELECT m.group_id, u.id, u.username FROM group_members m JOIN users u ON u.id = m.user_id "
                            "ORDER BY u.username COLLATE NOCASE").fetchall()
     return {"groups": [{"id": g["id"], "name": g["name"],
+                        "entra": group_refs.label(conn, g["entra_key"]) if g["entra_key"] else None,
                         "members": [{"id": m["id"], "name": m["username"]} for m in members if m["group_id"] == g["id"]]}
                        for g in groups]}
 
@@ -492,35 +493,38 @@ async def update_status(refresh: bool = False, user=Depends(admin_api_user),
 
 
 class AdminGroupBody(BaseModel):
-    group: str = Field(min_length=1, max_length=256)
+    group: str = Field(min_length=1, max_length=2000)   # one or more, ';'-separated (AD or "Tenant / Group")
 
 
 @router.get("/api/admin/settings/admin-group")
 async def get_admin_group(request: Request, user=Depends(admin_api_user), conn: sqlite3.Connection = Depends(get_db)):
-    """The AD group whose members are admins, and the domain's groups to pick from."""
+    """The group(s) whose members are admins (AD or Entra), and the groups to pick from."""
     directory = request.app.state.directory
-    return {"group": accounts.admin_group(conn), "domain": request.app.state.settings.ad_domain,
-            "enabled": directory.enabled, "groups": await anyio.to_thread.run_sync(directory.groups)}
+    ad = await anyio.to_thread.run_sync(directory.groups)
+    return {"group": group_refs.label(conn, accounts.admin_group(conn)), "domain": request.app.state.settings.ad_domain,
+            "enabled": directory.enabled, "groups": group_refs.choices(conn, ad)}
 
 
 @router.put("/api/admin/settings/admin-group")
 def set_admin_group(body: AdminGroupBody, request: Request, user=Depends(admin_api_user),
                     conn: sqlite3.Connection = Depends(get_db)):
     directory = request.app.state.directory
-    name = body.group.strip().rsplit("\\", 1)[-1]
-    known = directory.groups() if directory.enabled else []
-    if known and name.lower() not in {g.lower() for g in known}:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"There's no domain group '{name}'.")
-    # Don't let an admin lock themselves out by picking a group they aren't in.
-    if (user["ad_account"] and not users.is_admin(user, request.app.state.settings.admin_usernames)
-            and name.lower() not in directory.groups_of(user["ad_account"])):
+    try:
+        refs = group_refs.resolve(conn, body.group, directory.groups() if directory.enabled else [])
+    except group_refs.GroupRefError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    if not refs:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Pick a group.")
+    # Don't let an admin lock themselves out by picking groups they aren't in.
+    if (not users.is_admin(user, request.app.state.settings.admin_usernames)
+            and not group_refs.in_any(conn, user, directory, refs)):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
-                            f"You aren't in '{name}', so you'd lose admin rights. Pick a group you're in.")
+                            "You aren't in any of those groups, so you'd lose admin rights. Include one you're in.")
     with transaction(conn):
-        old = accounts.admin_group(conn)
-        accounts.set_admin_group(conn, name)
-        _log(conn, user, "settings.admin_group", name, f"was {old}")
-    return {"group": name}
+        old = group_refs.label(conn, accounts.admin_group(conn))
+        accounts.set_admin_group(conn, refs)
+        _log(conn, user, "settings.admin_group", group_refs.label(conn, refs), f"was {old}")
+    return {"group": group_refs.label(conn, refs)}
 
 
 # ------------------------------------------------------------------ accounts

@@ -77,6 +77,7 @@ def _file_json(row: sqlite3.Row, access: fs.Access) -> dict:
         # "claude:alice" / "erynne:alice": last changed by Claude, or by Erynne's
         # proposal that alice applied (Versions can undo it)
         "edited_via": row["edited_via"] if "edited_via" in row.keys() else None,
+        "web_url": row["web_url"] if "web_url" in row.keys() else None,   # SharePoint files: "Open in SharePoint"
     }
 
 
@@ -91,7 +92,7 @@ def _folder_json(row: sqlite3.Row) -> dict:
 def _readable_file(conn: sqlite3.Connection, access: fs.Access, file_id: int) -> sqlite3.Row:
     row = fs.file_row(conn, file_id)
     # Same 404 whether the file doesn't exist or isn't yours: no existence leaks.
-    if row is None or not access.can_read(row["collection_id"], row["folder_id"]):
+    if row is None or not access.can_read_file(row):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")
     return row
 
@@ -463,9 +464,9 @@ def list_files(
         f"SELECT {fs._FILE_COLUMNS} {fs._FILE_FROM} WHERE f.collection_id IN ({marks}) AND f.deleted_at IS NULL "
         "ORDER BY f.created_at DESC, f.id DESC", tuple(readable)).fetchall()
     live = {cid: fs.live_folder_ids(conn, cid) for cid in readable}
-    return {"files": [_file_json(r, access) for r in rows
-                      if (r["folder_id"] is None or r["folder_id"] in live[r["collection_id"]])
-                      and access.can_read(r["collection_id"], r["folder_id"])]}
+    rows = [r for r in rows if r["folder_id"] is None or r["folder_id"] in live[r["collection_id"]]]
+    access.prefetch(rows)
+    return {"files": [_file_json(r, access) for r in rows if access.can_read_file(r)]}
 
 
 @router.get("/api/files/{file_id}")

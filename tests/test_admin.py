@@ -130,7 +130,7 @@ def test_groups(client, conn):
 
     assert client.patch(f"/api/admin/groups/{group}", json={"name": "Sales team"}).json()["name"] == "Sales team"
     listed = client.get("/api/admin/groups").json()["groups"]
-    assert listed == [{"id": group, "name": "Sales team", "members": [{"id": bob, "name": "bob"}]}]
+    assert listed == [{"id": group, "name": "Sales team", "entra": None, "members": [{"id": bob, "name": "bob"}]}]
 
     client.delete(f"/api/admin/groups/{group}")
     assert lib not in permissions.readable_collection_ids(conn, bob)

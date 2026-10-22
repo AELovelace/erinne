@@ -25,6 +25,7 @@ class AgentLLM:
     def __init__(self):
         self.script = []
         self.calls = []        # (messages, tool names offered)
+        self.thinking = []     # the thinking flag of each call
         self.up = True
         self.fail = False
 
@@ -38,6 +39,7 @@ class AgentLLM:
         if self.fail:
             raise httpx.ConnectError("agent model down")
         self.calls.append((json.loads(json.dumps(messages)), [t["function"]["name"] for t in tools], tools))
+        self.thinking.append(kwargs.get("thinking"))
         entry = self.script.pop(0) if self.script else ToolTurn("All done.")
         return entry(messages) if callable(entry) else entry
 
@@ -353,6 +355,15 @@ def test_a_reply_the_server_cant_parse_is_asked_again_without_tools(client, agen
     final = _final(_ask(client, "How do I run the night audit?"))
     assert final["answer"] == "Run it after midnight [1]." and tried == ["parse"]
     assert agent_llm.calls[-1][1] == []                       # the retry offered no tools
+
+
+def test_a_model_that_thinks_until_it_runs_out_is_asked_again_without_thinking(client, agent_llm):
+    _login(client, "alice")
+    agent_llm.turns(ToolTurn("", [], "length"), call("search_documents", query="night audit"),
+                    lambda m: ToolTurn(f"Run it after midnight {last_tool(m)['results'][0]['cite']}."))
+    final = _final(_ask(client, "How do I run the night audit?"))
+    assert final["answer"] == "Run it after midnight [1]."
+    assert agent_llm.thinking == [True, False, True]          # only the turn that ran out drops thinking
 
 
 def test_long_conversations_are_shortened_to_fit():

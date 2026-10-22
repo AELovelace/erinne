@@ -11,7 +11,7 @@ import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from mnemerynne import apis
+from mnemerynne import apis, group_refs
 from mnemerynne.db import transaction
 from mnemerynne.ingest import markdown
 from mnemerynne.web.admin import _log
@@ -66,13 +66,14 @@ async def list_apis(request: Request, user=Depends(admin_user), conn: sqlite3.Co
         last = conn.execute("SELECT at, ok, error, via FROM api_calls WHERE api_id = ? ORDER BY id DESC LIMIT 1",
                             (r["id"],)).fetchone()
         out.append({"id": r["id"], "name": r["name"], "base_url": r["base_url"], "auth_type": r["auth_type"],
-                    "ad_group": r["ad_group"], "claude_enabled": bool(r["claude_enabled"]),
+                    "ad_group": group_refs.label(conn, r["ad_group"]), "claude_enabled": bool(r["claude_enabled"]),
                     "enabled": bool(r["enabled"]), "credential": apis.credential_status(settings, r),
                     "operations": r["operations"], "calls_24h": r["calls_24h"],
                     "last_call": dict(last) if last else None})
     directory = request.app.state.directory
     return {"apis": out, "presets": [{"key": p["key"], "name": p["name"]} for p in apis.PRESETS],
-            "groups": await anyio.to_thread.run_sync(directory.groups), "domain": settings.ad_domain,
+            "groups": group_refs.choices(conn, await anyio.to_thread.run_sync(directory.groups)),
+            "domain": settings.ad_domain,
             "secret_key_set": bool(settings.secret_key)}
 
 
@@ -146,7 +147,7 @@ def api_detail(api_id: int, request: Request, user=Depends(admin_user), conn: sq
         "base_url": a["base_url"], "auth_type": a["auth_type"], "auth_header": a["auth_header"],
         "auth_user": a["auth_user"], "credential": apis.credential_status(settings, a),
         "secret_changed_at": a["secret_changed_at"], "ca_pem": a["ca_pem"],
-        "tls_check_hostname": bool(a["tls_check_hostname"]), "ad_group": a["ad_group"],
+        "tls_check_hostname": bool(a["tls_check_hostname"]), "ad_group": group_refs.label(conn, a["ad_group"]),
         "claude_enabled": bool(a["claude_enabled"]), "enabled": bool(a["enabled"]),
         "spec": a["spec"], "spec_html": "" if spec_ops or not a["spec"] else markdown.render_html(a["spec"]),
         "spec_operations": spec_ops,
@@ -163,7 +164,7 @@ class ApiPatch(BaseModel):
     auth_user: str | None = Field(None, max_length=200)
     ca_pem: str | None = Field(None, max_length=20000)
     tls_check_hostname: bool | None = None
-    ad_group: str | None = Field(None, max_length=256)
+    ad_group: str | None = Field(None, max_length=2000)   # ';'-separated, AD or "Tenant / Group"
     claude_enabled: bool | None = None
     enabled: bool | None = None
     spec: str | None = Field(None, max_length=2_000_000)
@@ -177,10 +178,11 @@ async def update_api(api_id: int, body: ApiPatch, request: Request, user=Depends
     if "base_url" in changes:
         changes["base_url"] = _check_url(changes["base_url"])
     if "ad_group" in changes:
-        changes["ad_group"] = changes["ad_group"].strip().rsplit("\\", 1)[-1]
         known = await anyio.to_thread.run_sync(request.app.state.directory.groups)
-        if changes["ad_group"] and known and changes["ad_group"].lower() not in {g.lower() for g in known}:
-            raise _refuse(ValueError(f"There's no domain group “{changes['ad_group']}”."))
+        try:
+            changes["ad_group"] = group_refs.resolve(conn, changes["ad_group"], known)
+        except group_refs.GroupRefError as exc:
+            raise _refuse(ValueError(str(exc))) from None
     if changes.get("ca_pem"):
         try:
             import ssl

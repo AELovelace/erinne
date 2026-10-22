@@ -9,7 +9,7 @@ import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from mnemerynne import accounts, agent as agent_mod, editing, proposals
+from mnemerynne import accounts, agent as agent_mod, editing, group_refs, proposals
 from mnemerynne.db import transaction
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import admin_user, api_user, get_db
@@ -32,9 +32,11 @@ def _refused(exc: Exception) -> HTTPException:
 @router.post("/api/agent/proposals/{proposal_id}/apply")
 def apply_proposal(proposal_id: int, request: Request, user=Depends(_agent_user),
                    conn: sqlite3.Connection = Depends(get_db)):
+    from mnemerynne import m365
+
     try:
         return proposals.apply(conn, request.app.state.settings, user, proposal_id)
-    except (editing.EditError, proposals.ProposalError) as exc:
+    except (editing.EditError, proposals.ProposalError, m365.M365Error) as exc:
         raise _refused(exc) from None
 
 
@@ -50,7 +52,7 @@ def dismiss_proposal(proposal_id: int, request: Request, user=Depends(api_user),
 
 # ------------------------------------------------------------------- admin
 class AgentGroupBody(BaseModel):
-    group: str = Field(default="", max_length=256)   # '' turns the agent off
+    group: str = Field(default="", max_length=2000)   # ';'-separated, AD or "Tenant / Group"; '' turns it off
 
 
 class AgentModelBody(BaseModel):
@@ -71,11 +73,12 @@ async def _status(request: Request, conn: sqlite3.Connection) -> dict:
     balancer = getattr(request.app.state, "balancer", None)
     members = None
     group = accounts.agent_group(conn)
-    if group and directory.enabled:
-        rows = conn.execute("SELECT * FROM users WHERE active = 1 AND ad_account IS NOT NULL").fetchall()
+    if group:
+        rows = conn.execute("SELECT * FROM users WHERE active = 1").fetchall()
         members = sorted(r["username"] for r in rows if accounts.is_agent_user(conn, r, directory))
-    return {"group": group, "domain": request.app.state.settings.ad_domain, "enabled": directory.enabled,
-            "groups": await anyio.to_thread.run_sync(directory.groups), "members": members,
+    ad = await anyio.to_thread.run_sync(directory.groups)
+    return {"group": group_refs.label(conn, group), "domain": request.app.state.settings.ad_domain,
+            "enabled": directory.enabled, "groups": group_refs.choices(conn, ad), "members": members,
             "model": cfg, "reachable": reachable, "fallback": request.app.state.settings.llm_url,
             "nodes": len(balancer.nodes) if balancer is not None else 0}
 
@@ -89,14 +92,16 @@ async def get_agent(request: Request, user=Depends(admin_user), conn: sqlite3.Co
 async def set_agent_group(body: AgentGroupBody, request: Request, user=Depends(admin_user),
                           conn: sqlite3.Connection = Depends(get_db)):
     directory = request.app.state.directory
-    name = body.group.strip().rsplit("\\", 1)[-1]
     known = await anyio.to_thread.run_sync(directory.groups) if directory.enabled else []
-    if name and known and name.lower() not in {g.lower() for g in known}:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"There's no domain group '{name}'.")
+    try:
+        name = group_refs.resolve(conn, body.group, known)
+    except group_refs.GroupRefError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
     with transaction(conn):
-        old = accounts.agent_group(conn)
+        old = group_refs.label(conn, accounts.agent_group(conn))
         accounts.set_agent_group(conn, name)
-        _log(conn, user, "settings.agent_group", name or "(nobody)", f"was {old or '(nobody)'}")
+        _log(conn, user, "settings.agent_group", group_refs.label(conn, name) or "(nobody)",
+             f"was {old or '(nobody)'}")
     return await _status(request, conn)
 
 

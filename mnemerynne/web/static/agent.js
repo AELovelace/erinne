@@ -43,6 +43,7 @@
 
   const STATUS = {
     applied: "✓ Applied. The previous version is kept: Files → the file's info → Versions.",
+    saved: "✓ Saved to your Drafts. Nothing was sent.",
     dismissed: "Dismissed; nothing was changed.",
     stale: "Not applied: the file changed since Erynne drafted this. Ask her to redo it.",
   };
@@ -58,8 +59,8 @@
     card.replaceChildren();
     card.dataset.status = p.status;
     const head = el("div", "proposal-head");
-    head.append(document.createTextNode(p.kind === "create" ? "📄 New file " : "📝 Change to "),
-                el("strong", null, p.file), el("span", "muted small", " · " + p.where));
+    const what = { create: "📄 New file ", edit: "📝 Change to ", mail: "✉️ Email draft: " }[p.kind] || "";
+    head.append(document.createTextNode(what), el("strong", null, p.file), el("span", "muted small", " · " + p.where));
     card.appendChild(head);
     if (p.changes && p.changes.length && !(p.kind === "create" && p.diff)) {
       const ul = el("ul", "small proposal-changes");
@@ -68,9 +69,10 @@
       card.appendChild(ul);
     }
     if (p.diff) card.appendChild(diffView(p.diff));
+    if (p.kind === "mail") card.appendChild(el("pre", "diff mail-body", p.body || ""));
     const foot = el("div", "proposal-actions");
     if (p.status === "pending") {
-      const apply = el("button", "small", "Apply");
+      const apply = el("button", "small", p.kind === "mail" ? "Save to Drafts" : "Apply");
       apply.type = "button";
       const dismiss = el("button", "link small", "Dismiss");
       dismiss.type = "button";
@@ -79,10 +81,11 @@
       dismiss.addEventListener("click", function () { decide(card, p, "dismiss", [apply, dismiss], msg); });
       foot.append(apply, dismiss, msg);
     } else {
-      foot.appendChild(el("span", "small " + (p.status === "stale" ? "error" : "muted"), STATUS[p.status] || p.status));
+      const said = p.kind === "mail" && p.status === "applied" ? STATUS.saved : STATUS[p.status] || p.status;
+      foot.appendChild(el("span", "small " + (p.status === "stale" ? "error" : "muted"), said));
     }
     if (p.url && p.status !== "dismissed") {
-      const a = el("a", "small", "Open folder");
+      const a = el("a", "small", p.kind === "mail" ? "Open in Outlook" : "Open folder");
       a.href = p.url; a.target = "_blank"; a.rel = "noopener";
       foot.appendChild(a);
     }
@@ -91,7 +94,7 @@
 
   async function decide(card, p, action, buttons, msg) {
     buttons.forEach(function (b) { b.disabled = true; });
-    msg.textContent = action === "apply" ? "Applying…" : "";
+    msg.textContent = action === "apply" ? (p.kind === "mail" ? "Saving…" : "Applying…") : "";
     msg.className = "small muted";
     try {
       const r = await fetch("/api/agent/proposals/" + p.id + "/" + action, { method: "POST" });

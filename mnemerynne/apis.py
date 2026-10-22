@@ -87,21 +87,21 @@ def credential_status(settings: Settings, api: sqlite3.Row) -> str:
 
 
 # -------------------------------------------------------------------- access
-def _groups(directory, user) -> set[str]:
-    account = user["ad_account"] if user is not None and "ad_account" in user.keys() else None
-    return directory.groups_of(account) if account and directory is not None else set()
-
-
 def allowed_operations(conn: sqlite3.Connection, user, directory, *, for_claude: bool = False) -> list[sqlite3.Row]:
-    """Enabled operations on enabled APIs whose AD group the user is in."""
-    groups = _groups(directory, user)
+    """Enabled operations on enabled APIs whose group (AD or Entra, group_refs) the user is in."""
+    from mnemerynne import group_refs
+
+    if user is None:
+        return []
+    groups = group_refs.member_of(conn, user, directory)
     if not groups:
         return []
     rows = conn.execute(
         "SELECT o.*, a.name AS api_name, a.ad_group, a.claude_enabled FROM api_operations o "
         "JOIN apis a ON a.id = o.api_id WHERE o.enabled = 1 AND a.enabled = 1 AND a.ad_group <> '' "
         "ORDER BY a.name COLLATE NOCASE, o.name COLLATE NOCASE").fetchall()
-    return [r for r in rows if r["ad_group"].lower() in groups and (not for_claude or r["claude_enabled"])]
+    return [r for r in rows if group_refs.in_any(conn, user, directory, r["ad_group"], groups)
+            and (not for_claude or r["claude_enabled"])]
 
 
 def operation_for(conn: sqlite3.Connection, user, directory, api_name: str, operation_name: str,
@@ -467,7 +467,8 @@ def params_schema(op) -> dict | None:
         elif s["type"] == "enum":
             prop = {"type": "string", "enum": [str(o) for o in s["options"]]}
         elif s["type"] == "date":
-            prop = {"type": "string", "pattern": r"^\d{4}-\d{2}-\d{2}$"}
+            # [0-9], not \d: llama-server's schema-to-grammar turns \d into a literal and the grammar fails to parse.
+            prop = {"type": "string", "pattern": r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
         else:
             prop = {"type": "string"}
         if s.get("help"):

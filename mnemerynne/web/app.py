@@ -22,7 +22,7 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
 from mnemerynne import (balancer as balancer_mod, db, directory, editing, mcp_server, memory, permissions, share,
-                        users)
+                        sharepoint, users)
 from mnemerynne.agent import Agent
 from mnemerynne.answer import ASSISTANT_NAME
 from mnemerynne.auth import LoginThrottle
@@ -151,6 +151,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.state.directory = (services.directory if services and services.directory
                            else directory.from_settings(settings))
     share.configure(settings, app.state.directory, services.share_checker if services else None)
+    sharepoint.configure(settings)
     app.state.throttle = LoginThrottle(settings.login_max_failures, settings.login_lockout_seconds)
     app.add_middleware(
         SessionMiddleware,

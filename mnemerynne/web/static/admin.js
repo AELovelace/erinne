@@ -340,6 +340,15 @@
     box.appendChild(claudeRow);
 
     if (lib.share_path) { box.appendChild(shareNote(lib.share_path)); return box; }
+    if (lib.source === "sharepoint") {
+      const note = el("div", "ax-share");
+      note.appendChild(el("p", null, "🪟 This library is a read-only copy of a SharePoint library (Settings → Microsoft 365)."));
+      note.appendChild(el("p", "muted small", "Who can see it is decided by SharePoint: people with a linked Microsoft " +
+        "account in that tenant see the files SharePoint lets them open, checked file by file. Grants don't apply. " +
+        "Claude follows the same checks when the switch above is on."));
+      box.appendChild(note);
+      return box;
+    }
     box.appendChild(el("h3", "ax-h", "Who has access"));
     box.appendChild(el("p", "muted small", "Applies to the whole library: every folder inherits it, except folders that turn inheritance off (🔒 in the tree)."));
     box.appendChild(grantEditor(lib.grants, "/api/admin/libraries/" + lib.id + "/grants", lib.claude_enabled));
@@ -455,6 +464,21 @@
       change("DELETE", "/api/admin/groups/" + group.id);
     }));
     section.appendChild(head);
+
+    // Everyone in one Entra group can be members too (through linked Microsoft accounts).
+    const entra = el("p", "small muted");
+    entra.textContent = group.entra ? "Also everyone in the Entra group " + group.entra + ". "
+                                    : "Members are listed below. ";
+    entra.appendChild(button(group.entra ? "Change" : "Also include an Entra group", "link small", async function () {
+      let options = [];
+      try { options = (await api("GET", "/api/admin/entra-groups")).groups; } catch (e) { /* none yet */ }
+      const picked = prompt("Entra group, as “Tenant / Group”" + (group.entra ? " (empty to stop)" : "") + ":" +
+        (options.length ? "\n\ne.g. " + options.slice(0, 5).join("\n") : "\n\nNo Entra groups yet: add a tenant " +
+        "on Settings → Microsoft 365 and wait a few minutes."), group.entra || "");
+      if (picked === null) return;
+      change("PUT", "/api/admin/groups/" + group.id + "/entra", { group: picked.trim() });
+    }));
+    section.appendChild(entra);
 
     const list = el("ul", "grants");
     if (!group.members.length) list.appendChild(el("li", "muted small", "No members yet."));

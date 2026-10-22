@@ -480,10 +480,70 @@ permission to do so.
 
 Linked accounts show on the Connect page and in each user's dialog on Access →
 Accounts, where admins can unlink them. Removing a tenant unlinks everyone's
-accounts in it. Refresh tokens are stored encrypted with a key derived from
-`MNEMERYNNE_SECRET_KEY`. If Microsoft stops accepting one (password change,
-account disabled, sessions revoked), that account shows *needs linking
-again*.
+accounts in it and removes its SharePoint libraries. Refresh tokens are stored
+encrypted with a key derived from `MNEMERYNNE_SECRET_KEY`. If Microsoft stops
+accepting one (password change, account disabled, sessions revoked), that
+account shows *needs linking again*.
+
+**Entra groups.** Every group box (Administrators, the Erynne agent group,
+each API's group, each shared mailbox) takes one or more groups separated by
+`;`:
+
+- AD groups, as before;
+- Entra groups as `Tenant / Group` (e.g. `Gasco / Front Desk`), which the
+  box suggests.
+
+A Mnemerynne group (Access → Groups) can also *Also include an Entra group*,
+so library grants reach that group's members. The worker reads every
+tenant's groups, and each linked account's memberships (nested ones
+included), every `MNEMERYNNE_M365_SYNC_SECONDS` (300). It uses the app's
+`GroupMember.Read.All`. Memberships older than 30 minutes stop counting, so
+if a tenant stops answering, its members lose those rights rather than keep
+stale ones. People's Entra groups only count through an account they've
+linked.
+
+**SharePoint.** Settings → Microsoft 365 → SharePoint: pick the tenant, paste
+a site's address, tick its document libraries, and add them.
+
+1. First, in that tenant, grant the app read access to the site (it can't
+   see any site by itself under `Sites.Selected`):
+   ```powershell
+   Connect-MgGraph -Scopes "Sites.FullControl.All"
+   $site = Get-MgSite -SiteId "contoso.sharepoint.com:/sites/FrontOffice"
+   New-MgSitePermission -SiteId $site.Id -BodyParameter @{roles=@("read");
+     grantedToIdentities=@(@{application=@{id="<client id>"; displayName="Mnemerynne"}})}
+   ```
+2. Each library becomes a read-only Mnemerynne library, "Site · Library". The
+   worker keeps it in step every few minutes (Graph delta): new and changed
+   files are downloaded and indexed, renames and moves follow, deletions are
+   removed. *Sync now* does it at once.
+3. **Who sees what is SharePoint's call:**
+   - the library is open to people with a linked account in that tenant;
+   - each file is checked with that person's own account before it's
+     listed, cited or opened, and the answer is remembered for 15 minutes;
+   - grants on the Libraries tab don't apply;
+   - Claude only sees a SharePoint library when its Claude switch is on
+     (off by default), with the same per-file check.
+4. Nothing is ever written to SharePoint. Citations open the page in
+   Mnemerynne's viewer and offer *Open in SharePoint*.
+
+**Mail and calendar (the Erynne agent group only).** People in the agent
+group with a linked account get tools to:
+
+- search and read their mail;
+- see their calendar;
+- search all of SharePoint live;
+- draft emails and replies.
+
+Drafts are cards under the answer. **Save to Drafts** puts the draft in that
+account's Outlook Drafts folder. Nothing is ever sent, moved or deleted, and
+there's no code to do it. Emails and events are cited like documents and open
+in Outlook. Mail text never goes to Claude, and the tool-call log
+(`agent_calls`) keeps message ids, not mail text.
+
+*Shared mailboxes* (Settings → Microsoft 365) are listed per tenant with an
+optional group. Exchange still decides who may open them: a person needs Full
+Access there too.
 
 ## 6. Check
 

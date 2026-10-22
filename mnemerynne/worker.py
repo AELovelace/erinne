@@ -7,7 +7,7 @@ import signal
 import sqlite3
 import time
 
-from mnemerynne import db, directory, editing, fs, jobs, proposals, share
+from mnemerynne import db, directory, editing, fs, jobs, m365, proposals, share, sharepoint
 from mnemerynne.clients.embed import Embedder
 from mnemerynne.config import Settings
 from mnemerynne.ingest import pipeline
@@ -52,6 +52,21 @@ def run_one(conn: sqlite3.Connection, settings: Settings, embedder: Embedder) ->
     return True
 
 
+def m365_sync(conn: sqlite3.Connection, settings: Settings) -> None:
+    """Microsoft 365 housekeeping: Entra groups, then SharePoint libraries."""
+    if not conn.execute("SELECT 1 FROM m365_tenants WHERE enabled = 1 LIMIT 1").fetchone():
+        return
+    for name, work in (("Entra group refresh", lambda: m365.refresh_groups(conn, settings)),
+                       ("SharePoint sync", lambda: sharepoint.sync_all(conn, settings)),
+                       ("SharePoint access cache cleanup", lambda: sharepoint.purge_access_cache(conn))):
+        try:
+            log.debug("%s: %s", name, work())
+        except Exception:  # never let Microsoft stop ingestion
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            log.exception("%s failed", name)
+
+
 def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) -> None:
     conn = db.connect(settings.db_path)
     db.migrate(conn, settings.embed_dim)
@@ -67,6 +82,7 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
     signal.signal(signal.SIGINT, _stop)
 
     rt = share.configure(settings, directory.from_settings(settings))
+    sharepoint.configure(settings)
     if rt is not None:
         log.info("Share: %s (scanned every %d s).", rt.root, settings.share_scan_seconds)
 
@@ -77,6 +93,7 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
     last_recover = time.monotonic()
     last_purge = 0.0
     last_scan = 0.0
+    last_m365 = 0.0
     try:
         while not stopping:
             did_work = run_one(conn, settings, embedder)
@@ -92,6 +109,9 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
                     if conn.in_transaction:
                         conn.execute("ROLLBACK")
                     log.exception("Share scan failed")
+            if time.monotonic() - last_m365 > settings.m365_sync_seconds:
+                last_m365 = time.monotonic()
+                m365_sync(conn, settings)
             if time.monotonic() - last_recover > 300:
                 jobs.recover_stale(conn, settings.job_stale_minutes)
                 last_recover = time.monotonic()

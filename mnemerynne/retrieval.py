@@ -237,26 +237,33 @@ def search_for_user(conn: sqlite3.Connection, settings: Settings, embedder, user
     `scope` ({"collection_id", "folders"}) narrows it to one collection and,
     optionally, a set of folder ids; it can only narrow, never widen.
     """
+    from mnemerynne import sharepoint
+
     allowed = Scope.of_reach(permissions.reach(conn, user_id).values())
     if scope:
         folders = set(scope["folders"]) if scope.get("folders") is not None else None
         allowed = allowed.narrow(scope["collection_id"], folders)
-    return search(conn, settings, embedder, question, allowed, reranker)
+    return search(conn, settings, embedder, question, allowed, reranker, keep=sharepoint.trimmer(conn, user_id))
 
 
 def search(conn: sqlite3.Connection, settings: Settings, embedder, question: str, allowed,
-           reranker=None, folders: set[int] | None = None) -> SearchResult:
+           reranker=None, folders: set[int] | None = None, keep=None) -> SearchResult:
     """Hybrid search restricted to `allowed` (a Scope, or a set of collection
     ids plus optional `folders`), applied inside both queries.
+
+    `keep` (sharepoint.trimmer) drops candidates the person can't open in
+    SharePoint before anything is chosen; twice as many are fetched then, so
+    answers don't come up short.
 
     The question is also searched with known jargon swapped (synonyms.py), and
     every keyword and vector result list is fused with reciprocal rank fusion.
     """
     allowed = _as_scope(allowed, folders)
+    k = settings.retrieval_k * (2 if keep is not None else 1)
     queries = [question] + synonyms.variants(question, _synonym_groups(settings))
-    lexical_lists = [keyword_search(conn, q, allowed, settings.retrieval_k, settings.fts_section_weight)
+    lexical_lists = [keyword_search(conn, q, allowed, k, settings.fts_section_weight)
                      for q in queries]
-    vector_lists = [vector_search(conn, embedder.embed_query(q), allowed, settings.retrieval_k)
+    vector_lists = [vector_search(conn, embedder.embed_query(q), allowed, k)
                     for q in queries] if allowed else []
 
     # RRF within each phrasing (keyword + vector), then each chunk keeps its best
@@ -285,10 +292,12 @@ def search(conn: sqlite3.Connection, settings: Settings, embedder, question: str
     for chunk_id, score in fused.items():
         hits_by_id[chunk_id].score = score
     candidates = sorted(hits_by_id.values(), key=lambda h: h.score, reverse=True)
+    if keep is not None:
+        candidates = keep(candidates)
 
-    distances = [v[0][1] for v in vector_lists if v]
+    distances = [h.distance for h in candidates if h.distance is not None]
     best_distance = min(distances) if distances else None
-    lexical_count = len({c for ranked in lexical_lists for c in ranked})
+    lexical_count = sum(1 for h in candidates if h.fts_rank is not None)
     result = SearchResult(hits=[], candidates=candidates, lexical_hits=lexical_count, best_distance=best_distance)
     lexical = lexical_count > 0
 

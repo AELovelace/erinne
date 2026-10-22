@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     # Tenants are added on Settings → Microsoft 365. Empty: no Microsoft 365.
     m365_client_id: str = ""
     m365_client_secret: str = ""
+    # How often the worker refreshes Entra groups and syncs SharePoint libraries.
+    m365_sync_seconds: int = 300
 
     # Libraries and inboxes stored on the SMB share: <share_root>/<Library>/…
     # and <share_root>/<users_folder>/<username>/…. The folders on disk are the

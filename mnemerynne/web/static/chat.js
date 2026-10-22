@@ -61,7 +61,8 @@
     cited.forEach(function (s) {
       const li = el("li");
       li.value = s.n;
-      const label = (s.kind === "api" ? "🔌 " : "") + s.file +
+      const icon = { api: "🔌 ", mail: "✉️ ", event: "📅 ", sharepoint: "🪟 " }[s.kind] || "";
+      const label = icon + s.file +
         (s.location ? " · " + s.location : (s.page_start ? " · p. " + s.page_start : ""));
       if (s.url) {
         const a = el("a", null, label);
@@ -69,6 +70,11 @@
         li.appendChild(a);
       } else {
         li.appendChild(el("span", "muted", label + " (file deleted)"));
+      }
+      if (s.web_url) {
+        const sp = el("a", "small", "Open in SharePoint");
+        sp.href = s.web_url; sp.target = "_blank"; sp.rel = "noopener";
+        li.append(document.createTextNode(" · "), sp);
       }
       if (s.section) li.appendChild(el("div", "muted small", s.section));
       ol.appendChild(li);
@@ -274,7 +280,8 @@
       if (m.role === "user") { thread.appendChild(el("div", "msg user", m.content)); return; }
       const view = addAnswerShell();
       const sources = m.sources.map(function (s) {
-        return Object.assign({}, s, { location: s.kind === "pdf" && s.page_start ? "p. " + s.page_start : "" });
+        return Object.assign({}, s, { location: s.kind === "pdf" && s.page_start ? "p. " + s.page_start
+                                                                                   : (s.location || "") });
       });
       finishAnswer(view, { status: m.status, answer: m.content, sources: sources, message_id: m.id,
                            route: m.route });

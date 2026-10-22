@@ -36,8 +36,9 @@ from urllib.parse import urlencode
 
 import httpx
 
-from mnemerynne import apis
+from mnemerynne import apis, group_refs
 from mnemerynne.config import Settings
+from mnemerynne.db import transaction
 
 log = logging.getLogger("mnemerynne.m365")
 
@@ -404,6 +405,56 @@ def unlink(conn: sqlite3.Connection, identity_id: int, user_id: int | None = Non
     with _lock:
         _user_tokens.pop(identity_id, None)
     return gone
+
+
+# ------------------------------------------------------------ Entra groups
+def pages(graph: "Graph", path: str, params: dict | None = None, limit: int = 100):
+    """Every item of a paged Graph list (following @odata.nextLink)."""
+    body = graph.get(path, params)
+    for _ in range(limit):
+        yield from body.get("value", [])
+        nxt = body.get("@odata.nextLink")
+        if not nxt:
+            return
+        body = graph.get(nxt)
+
+
+def refresh_groups(conn: sqlite3.Connection, settings: Settings) -> dict:
+    """For each enabled tenant, with its app-only token: every group's name
+    (for pickers and labels) and each linked account's groups, nested ones
+    included. A tenant that fails keeps its old memberships, which go stale
+    (and stop counting) after group_refs.FRESH_MINUTES."""
+    stats = {"tenants": 0, "groups": 0, "accounts": 0, "errors": []}
+    for t in tenants(conn, enabled_only=True):
+        try:
+            graph = Graph(app_token(settings, t))
+            run = conn.execute("SELECT datetime('now')").fetchone()[0]
+            names = [(group_refs.key(t["tenant_id"], g["id"]), g.get("displayName") or g["id"])
+                     for g in pages(graph, "/groups", {"$select": "id,displayName", "$top": "999"})]
+            accounts = conn.execute("SELECT id, oid FROM m365_identities WHERE tenant_row = ?", (t["id"],)).fetchall()
+            member = {a["id"]: [group_refs.key(t["tenant_id"], g["id"]) for g in pages(
+                graph, f"/users/{a['oid']}/transitiveMemberOf/microsoft.graph.group",
+                {"$select": "id", "$top": "999"})] for a in accounts}
+        except (M365Error, httpx.HTTPError) as exc:
+            log.warning("Couldn't read %s's Entra groups: %s", t["label"], exc)
+            conn.execute("UPDATE m365_tenants SET consent_error = ? WHERE id = ?", (str(exc)[:500], t["id"]))
+            stats["errors"].append(f"{t['label']}: {exc}")
+            continue
+        with transaction(conn):
+            conn.executemany("INSERT INTO entra_groups(group_key, tenant_row, name, seen_at) VALUES (?, ?, ?, ?) "
+                             "ON CONFLICT(group_key) DO UPDATE SET name = excluded.name, seen_at = excluded.seen_at",
+                             [(k, t["id"], n, run) for k, n in names])
+            conn.execute("DELETE FROM entra_groups WHERE tenant_row = ? AND seen_at < ?", (t["id"], run))
+            for identity_id, keys in member.items():
+                conn.execute("DELETE FROM entra_memberships WHERE identity_id = ?", (identity_id,))
+                conn.executemany("INSERT OR IGNORE INTO entra_memberships(identity_id, group_key, refreshed_at) "
+                                 "VALUES (?, ?, ?)", [(identity_id, k, run) for k in keys])
+            conn.execute("UPDATE m365_tenants SET consent_ok_at = datetime('now'), consent_error = NULL "
+                         "WHERE id = ?", (t["id"],))
+        stats["tenants"] += 1
+        stats["groups"] += len(names)
+        stats["accounts"] += len(member)
+    return stats
 
 
 # -------------------------------------------------------------------- Graph

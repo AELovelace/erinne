@@ -94,6 +94,18 @@ def propose_new(conn: sqlite3.Connection, settings: Settings, caller, name: str,
                   folder_id=folder_id, file_id=None, base=None, changes=changes, diff=diff)
 
 
+def propose_mail(conn: sqlite3.Connection, caller, payload: dict) -> int:
+    """An email draft (m365_mail): saved to the person's Drafts only when they apply it."""
+    from mnemerynne import m365_mail
+
+    return conn.execute(
+        "INSERT INTO agent_proposals(user_id, conversation_id, kind, name, changes, diff, payload) "
+        "VALUES (?, ?, 'mail', ?, ?, ?, ?)",
+        (caller.user_id, getattr(caller, "conversation_id", None), (payload.get("subject") or "(no subject)")[:300],
+         json.dumps(m365_mail.draft_changes(payload)), payload.get("body", ""), m365_mail.payload_json(payload))
+    ).lastrowid
+
+
 def where(conn: sqlite3.Connection, collection_id: int, folder_id: int | None) -> str:
     coll = conn.execute("SELECT kind, name FROM collections WHERE id = ?", (collection_id,)).fetchone()
     path = "/".join(p["name"] for p in fs.folder_path(conn, folder_id))
@@ -103,6 +115,14 @@ def where(conn: sqlite3.Connection, collection_id: int, folder_id: int | None) -
 
 def view(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
     """What the chat card shows."""
+    if row["kind"] == "mail":
+        payload = json.loads(row["payload"] or "{}")
+        account = conn.execute("SELECT t.label, i.upn FROM m365_identities i JOIN m365_tenants t ON t.id = i.tenant_row "
+                               "WHERE i.id = ?", (payload.get("identity_id"),)).fetchone()
+        return {"id": row["id"], "kind": "mail", "file": row["name"], "file_id": None,
+                "where": f"{account['upn']} ({account['label']})" if account else "a Microsoft account no longer linked",
+                "changes": json.loads(row["changes"]), "diff": "", "body": payload.get("body", ""),
+                "status": row["status"], "url": row["result_url"]}
     file_id = row["result_file_id"] or row["file_id"]
     return {"id": row["id"], "kind": row["kind"], "file": row["name"], "file_id": file_id,
             "where": where(conn, row["collection_id"], row["folder_id"]), "changes": json.loads(row["changes"]),
@@ -146,6 +166,13 @@ def apply(conn: sqlite3.Connection, settings: Settings, user: sqlite3.Row, propo
     row = get(conn, proposal_id, user["id"])
     if row["status"] != "pending":
         raise ProposalError(f"This change was already {row['status']}.")
+    if row["kind"] == "mail":
+        from mnemerynne import m365_mail
+
+        link = m365_mail.save_draft(conn, settings, user["id"], json.loads(row["payload"]))
+        conn.execute("UPDATE agent_proposals SET status = 'applied', decided_at = datetime('now'), result_url = ? "
+                     "WHERE id = ?", (link, proposal_id))
+        return view(conn, get(conn, proposal_id, user["id"]))
     path = _dir(settings) / row["rel_path"]
     try:
         data = path.read_bytes()
@@ -187,7 +214,8 @@ def dismiss(conn: sqlite3.Connection, settings: Settings, user_id: int, proposal
     row = get(conn, proposal_id, user_id)
     if row["status"] == "pending":
         _decide(conn, proposal_id, "dismissed")
-        (_dir(settings) / row["rel_path"]).unlink(missing_ok=True)
+        if row["rel_path"]:
+            (_dir(settings) / row["rel_path"]).unlink(missing_ok=True)
     return view(conn, get(conn, proposal_id, user_id))
 
 

@@ -43,6 +43,8 @@
   async function change(method, url, body) {
     showError("");
     try { render(await api(method, url, body)); } catch (e) { showError(e.message); }
+    await loadSharePoint();
+    await loadMailboxes();
   }
 
   function tenantRow(t) {
@@ -137,9 +139,169 @@
       "Mnemerynne user on Accounts first."));
   }
 
+  // ---------------------------------------------------------- SharePoint
+  function renderSharePoint(data) {
+    let box = $("sharepoint-settings");
+    if (!box) {
+      box = el("div");
+      box.id = "sharepoint-settings";
+      $("m365-settings").appendChild(box);
+    }
+    box.replaceChildren(el("h3", "ax-h small", "SharePoint"));
+    box.appendChild(el("p", "muted small", "Libraries indexed into Mnemerynne, read-only. Everyone with a linked " +
+      "account in that tenant can find them; every file is checked against SharePoint for each person. A tenant " +
+      "admin first grants Mnemerynne read access to the site (Sites.Selected; deploy guide 5i)."));
+    if (data.libraries.length) {
+      const t = el("table", "admin-table");
+      const head = el("tr");
+      ["Library", "Tenant", "Files", "Last sync", ""].forEach(function (h) { head.appendChild(el("th", null, h)); });
+      t.appendChild(el("thead")).appendChild(head);
+      const body = el("tbody");
+      data.libraries.forEach(function (l) {
+        const tr = el("tr");
+        const name = el("td");
+        const link = el("a", null, l.name);
+        link.href = l.web_url || "#"; link.target = "_blank"; link.rel = "noopener";
+        name.appendChild(link);
+        if (l.status === "error") name.appendChild(el("div", "error small", l.error || "Sync failed"));
+        if (l.status === "syncing" || l.status === "new") name.appendChild(el("div", "muted small", "syncing…"));
+        const actions = el("td");
+        actions.append(button("Sync now", "link small", function () {
+          change2("POST", "/api/admin/sharepoint/" + l.id + "/sync");
+        }), document.createTextNode(" "), button("Remove", "link danger small", function () {
+          if (!confirm("Stop syncing " + l.name + " and remove Mnemerynne's copy? SharePoint itself isn't touched.")) return;
+          change2("DELETE", "/api/admin/sharepoint/" + l.id);
+        }));
+        [name, el("td", null, l.tenant), el("td", null, String(l.files)),
+         el("td", "small", l.last_sync_at ? l.last_sync_at.slice(0, 16) + " UTC" : "not yet"), actions]
+          .forEach(function (c) { tr.appendChild(c); });
+        body.appendChild(tr);
+      });
+      t.appendChild(body);
+      const wrap = el("div", "table-wrap");
+      wrap.appendChild(t);
+      box.appendChild(wrap);
+    }
+    if (!data.tenants.length) {
+      box.appendChild(el("p", "muted small", "Add a tenant above first."));
+      return;
+    }
+    const form = el("form", "ax-new");
+    const tenant = el("select");
+    data.tenants.forEach(function (tn) { const o = el("option", null, tn.label); o.value = tn.id; tenant.appendChild(o); });
+    tenant.setAttribute("aria-label", "Tenant");
+    const url = input("url", "https://contoso.sharepoint.com/sites/FrontOffice");
+    url.required = true;
+    url.setAttribute("aria-label", "Site address");
+    const find = el("button", "small", "Find libraries");
+    find.type = "submit";
+    form.append(tenant, url, find);
+    const picks = el("div");
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      picks.replaceChildren(el("p", "muted small", "Looking…"));
+      let site;
+      try { site = await api("POST", "/api/admin/sharepoint/resolve", { tenant: Number(tenant.value), url: url.value.trim() }); }
+      catch (err) { picks.replaceChildren(); showError(err.message); return; }
+      picks.replaceChildren(el("p", "small", site.name + ": pick the libraries to index."));
+      const boxes = [];
+      site.libraries.forEach(function (lib) {
+        const label = el("label", "check small");
+        const cb = el("input");
+        cb.type = "checkbox";
+        cb.value = lib.id;
+        cb.disabled = lib.added;
+        label.append(cb, document.createTextNode(" " + lib.name + (lib.added ? " (already added)" : "")));
+        picks.appendChild(label);
+        picks.appendChild(el("br"));
+        boxes.push(cb);
+      });
+      if (!site.libraries.length) picks.appendChild(el("p", "muted small", "This site has no document libraries."));
+      picks.appendChild(button("Add and start indexing", "small", async function () {
+        const ids = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
+        await change2("POST", "/api/admin/sharepoint/libraries", { tenant: Number(tenant.value), url: url.value.trim(),
+                                                                   drive_ids: ids });
+      }));
+    });
+    box.append(form, picks);
+  }
+
+  async function change2(method, path, body) {
+    showError("");
+    try { await api(method, path, body); } catch (e) { showError(e.message); }
+    await loadSharePoint();
+  }
+
+  async function loadSharePoint() {
+    try { renderSharePoint(await api("GET", "/api/admin/sharepoint")); }
+    catch (e) { showError(e.message); }
+  }
+
+  // ----------------------------------------------------- shared mailboxes
+  function renderMailboxes(data, tenants) {
+    let box = $("mailbox-settings");
+    if (!box) {
+      box = el("div");
+      box.id = "mailbox-settings";
+      $("m365-settings").appendChild(box);
+    }
+    box.replaceChildren(el("h3", "ax-h small", "Shared mailboxes"));
+    box.appendChild(el("p", "muted small", "Mailboxes Erynne's agent group may ask about (e.g. a front desk inbox), " +
+      "read with each person's own Microsoft account: Exchange still decides who can open them. An optional group " +
+      "narrows who sees them in Erynne."));
+    if (data.mailboxes.length) {
+      const list = el("ul", "grants");
+      data.mailboxes.forEach(function (m) {
+        const li = el("li");
+        li.appendChild(el("span", null, "✉️ " + m.label + " · " + m.address + " · " + m.tenant));
+        li.appendChild(el("span", "muted small", m.group ? "for " + m.group : "anyone Exchange lets in"));
+        li.appendChild(button("Remove", "link danger small", async function () {
+          showError("");
+          try { renderMailboxes(await api("DELETE", "/api/admin/m365/mailboxes/" + m.id), tenants); }
+          catch (e) { showError(e.message); }
+        }));
+        list.appendChild(li);
+      });
+      box.appendChild(list);
+    }
+    if (!tenants.length) return;
+    const form = el("form", "ax-new");
+    const tenant = el("select");
+    tenants.forEach(function (tn) { const o = el("option", null, tn.label); o.value = tn.id; tenant.appendChild(o); });
+    tenant.setAttribute("aria-label", "Tenant");
+    const address = input("email", "frontdesk@contoso.com");
+    const label = input("text", "Name, e.g. Front desk");
+    const group = input("text", "Group (optional)");
+    group.setAttribute("list", "domain-groups");
+    [address, label, group].forEach(function (i) { i.setAttribute("aria-label", i.placeholder); });
+    address.required = label.required = true;
+    const add = el("button", "small", "Add mailbox");
+    add.type = "submit";
+    form.append(tenant, address, label, group, add);
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      try {
+        renderMailboxes(await api("POST", "/api/admin/m365/mailboxes", { tenant: Number(tenant.value),
+          address: address.value.trim(), label: label.value.trim(), group: group.value.trim() }), tenants);
+      } catch (err) { showError(err.message); }
+    });
+    box.appendChild(form);
+  }
+
+  async function loadMailboxes() {
+    try {
+      const sp = await api("GET", "/api/admin/sharepoint");   // the enabled tenants
+      renderMailboxes(await api("GET", "/api/admin/m365/mailboxes"), sp.tenants);
+    } catch (e) { showError(e.message); }
+  }
+
   async function load() {
     try { render(await api("GET", "/api/admin/m365")); }
-    catch (e) { $("m365-settings").replaceChildren(el("p", "error", e.message)); }
+    catch (e) { $("m365-settings").replaceChildren(el("p", "error", e.message)); return; }
+    await loadSharePoint();
+    await loadMailboxes();
   }
 
   window.ErynneM365 = { load: load };

@@ -1040,6 +1040,11 @@
     if (via) {
       addRow(dl, "Last change", (via[1] === "claude" ? "🤖 via Claude for " : "🌸 by Erynne, applied by ") + via[2]);
     }
+    if (full.web_url) {
+      const open = el("a", null, "Open in SharePoint");
+      open.href = full.web_url; open.target = "_blank"; open.rel = "noopener";
+      addRow(dl, "SharePoint", open);
+    }
     pane.appendChild(dl);
     if (full.error) pane.appendChild(el("p", "error small", full.error));
     if (full.notes) pane.appendChild(el("p", "note small", full.notes));
