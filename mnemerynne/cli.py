@@ -287,6 +287,15 @@ def cmd_purge_trash(args):
     print(f"Deleted {removed} item(s) that were in a recycle bin for more than {days} day(s).")
 
 
+def cmd_reclassify(args):
+    from mnemerynne.ingest import store
+
+    queued = store.reclassify(_connect(), get_settings())
+    for name in queued:
+        print(f"  queued: {name}")
+    print(f"{len(queued)} file(s) that were stored only are now being made searchable.")
+
+
 def cmd_reindex(args):
     from mnemerynne import jobs
 
@@ -707,6 +716,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reextract", action="store_true",
                    help="Also re-read the files (after extraction changes); slower")
     p.set_defaults(func=cmd_reindex)
+    sub.add_parser("reclassify", help="Make stored-only files searchable that this version can read "
+                                      "(e.g. Office or code files from before they were supported)"
+                   ).set_defaults(func=cmd_reclassify)
     sub.add_parser("list-users", help="List users").set_defaults(func=cmd_list_users)
 
     p = sub.add_parser("create-user", help="Create a user (prompts for the password)")

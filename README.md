@@ -5,9 +5,11 @@ cited question answering. Each person keeps
 files in their own space; admins publish shared libraries (brand standards,
 system manuals). The **Files** page is a full file manager: folders, drag and
 drop (files and whole folders), move/copy/rename, a recycle bin and previews.
-Any file can be stored; PDF, Markdown and text files are made searchable. Erynne answers questions from the files a
-person can access and cites the file and page (or Markdown heading) for every
-claim, or says the answer isn't in their documents. It remembers follow-up
+Any file can be stored. Searchable: PDF, Markdown and text; Word, PowerPoint
+and Excel (also CSV, OpenDocument, RTF and HTML); and source code and config
+files. Erynne answers questions from the files a person can access and cites
+the file and where in it for every claim (page, heading, slide, sheet rows or
+code lines), or says the answer isn't in their documents. It remembers follow-up
 context within a conversation and facts users tell it about themselves.
 
 Everything runs locally: a FastAPI app, one SQLite database (FTS5,

@@ -88,7 +88,11 @@ class Settings(BaseSettings):
     max_file_bytes: int = 500 * 1024 * 1024
     max_pdf_bytes: int = 100 * 1024 * 1024
     max_pdf_pages: int = 5000          # the OPERA Cloud manual alone is 3,300 pages
-    max_md_bytes: int = 5 * 1024 * 1024
+    max_md_bytes: int = 5 * 1024 * 1024     # Markdown, text and code
+    max_doc_bytes: int = 50 * 1024 * 1024   # Office, OpenDocument, RTF, HTML, CSV
+    # Converts old .doc/.ppt to .docx/.pptx before reading; used when present on PATH.
+    libreoffice_command: str = "soffice"
+    libreoffice_timeout: int = 300
     trash_days: int = 30               # recycle bin items are deleted for good after this
 
     # Ingestion

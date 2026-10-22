@@ -210,6 +210,26 @@ Windows: no `\ / : * ? " < > |`, no trailing dot or space. Office lock files
 (`~$…`), `Thumbs.db`, `desktop.ini` and hidden files are ignored. Deleting a
 library on the Access page moves its folder to the trash directory.
 
+## 5e. Office documents and code
+
+Word (.docx), PowerPoint (.pptx), Excel (.xlsx, .xls), CSV, OpenDocument
+(.odt/.odp/.ods), RTF, HTML and source/config files are read directly and
+become searchable; citations name the heading, slide, sheet rows or code
+lines, and the file's text view links to them. Old binary Word and PowerPoint
+files (.doc, .ppt) need LibreOffice, which converts them first; without it
+they are stored but not searchable:
+
+```sh
+sudo dnf install libreoffice-core libreoffice-writer libreoffice-impress   # optional, for .doc/.ppt
+```
+
+After updating to a version with this, files uploaded earlier are still
+"stored only"; make them searchable with:
+
+```sh
+sudo mnemerynne-admin reclassify
+```
+
 ## 6. Check
 
 ```sh

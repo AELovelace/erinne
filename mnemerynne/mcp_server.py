@@ -117,7 +117,7 @@ def _path(conn: sqlite3.Connection, folder_id: int | None) -> str:
 def _file_link(base: str, file_id: int, kind: str) -> str:
     if kind == "pdf":
         return f"{base}/files/{file_id}/pdf"
-    if kind in ("md", "txt"):
+    if kind in ("md", "txt", "doc", "code"):
         return f"{base}/files/{file_id}/view"
     return f"{base}/files/{file_id}/raw"
 

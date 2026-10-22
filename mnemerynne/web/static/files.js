@@ -63,6 +63,10 @@
     const mime = item.mime || "";
     if (item.kind === "pdf") return "📕";
     if (item.kind === "md") return "📝";
+    if (item.kind === "code") return "🧾";
+    if (/sheet|excel|csv/.test(mime)) return "📊";
+    if (/presentation|powerpoint/.test(mime)) return "📽️";
+    if (/word|opendocument\.text|rtf/.test(mime)) return "📘";
     if (item.kind === "txt" || mime.startsWith("text/")) return "📄";
     if (mime.startsWith("image/")) return "🖼️";
     if (mime.startsWith("audio/")) return "🎵";
@@ -80,6 +84,7 @@
     if (item.kind === "md") return "Markdown";
     if (item.kind === "txt") return "Text";
     const ext = (item.name.match(/\.([a-z0-9]{1,8})$/i) || [])[1];
+    if (item.kind === "code") return ext ? "Code (" + ext.toLowerCase() + ")" : "Code";
     return ext ? ext.toUpperCase() + " file" : "File";
   }
 

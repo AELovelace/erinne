@@ -35,7 +35,7 @@ def microjames(tmp_path):
         "ghost": ["oracle"],
     }), encoding="utf-8")
     for rel in ["docs/BrandResBW/standards.pdf", "docs/Oracle/manual.pdf", "docs/Oracle/start.md",
-                "docs/Oracle/notes.docx", "docs/users/rob/mine.pdf"]:
+                "docs/Oracle/logo.png", "docs/users/rob/mine.pdf"]:
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"x")
@@ -47,7 +47,7 @@ def test_plan(microjames):
     assert [(u, r) for u, _, r in plan.users] == [("admin", "admin"), ("james", "user"), ("rob", "admin")]
     assert plan.libraries == ["BrandResBW", "Oracle"]
     assert sorted(plan.grants) == [("james", "BrandResBW"), ("rob", "BrandResBW"), ("rob", "Oracle")]
-    assert plan.file_counts["library:Oracle"] == (2, 1)  # .pdf + .md supported, .docx not
+    assert plan.file_counts["library:Oracle"] == (2, 1)  # .pdf + .md supported, .png not
     assert plan.file_counts["inbox:rob"] == (1, 0)
     warnings = " ".join(plan.warnings)
     assert "bad name" in warnings and "ghost" in warnings and "private inbox" in warnings
@@ -69,11 +69,11 @@ def test_import_files_queues_supported_documents(microjames, conn, settings, mon
         "SELECT c.name, f.display_name FROM files f JOIN collections c ON c.id = f.collection_id "
         "ORDER BY c.name, f.display_name").fetchall()
     assert [tuple(r) for r in rows] == [
-        ("BrandResBW", "standards.pdf"), ("Oracle", "manual.pdf"), ("Oracle", "notes.docx"),
+        ("BrandResBW", "standards.pdf"), ("Oracle", "logo.png"), ("Oracle", "manual.pdf"),
         ("Oracle", "start.md"), ("rob's inbox", "mine.pdf")]
-    # Searchable documents are queued; the .docx is kept but not indexed.
+    # Searchable documents are queued; the .png is kept but not indexed.
     assert conn.execute("SELECT count(*) FROM jobs WHERE status = 'queued'").fetchone()[0] == 4
-    assert conn.execute("SELECT status FROM files WHERE display_name = 'notes.docx'").fetchone()[0] == "stored"
+    assert conn.execute("SELECT status FROM files WHERE display_name = 'logo.png'").fetchone()[0] == "stored"
 
 
 def test_apply_keeps_passwords_and_is_idempotent(microjames, conn):

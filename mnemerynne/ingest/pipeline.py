@@ -10,7 +10,7 @@ from mnemerynne import fs
 from mnemerynne.clients.embed import Embedder, pack_vector
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
-from mnemerynne.ingest import Segment, chunk, markdown, ocr, pdf, store
+from mnemerynne.ingest import Segment, chunk, documents, markdown, ocr, pdf, store
 
 log = logging.getLogger("mnemerynne.ingest")
 
@@ -74,6 +74,15 @@ def _extract(conn, settings: Settings, blob: sqlite3.Row, file_id: int) -> tuple
     _set(conn, file_id, progress="Reading text")
     if blob["kind"] == "pdf":
         segments, note = _extract_pdf(conn, settings, blob, file_id)
+    elif blob["kind"] in ("doc", "code"):
+        try:
+            segments = documents.segments(store.content_path(conn, settings, file_id), blob["display_name"],
+                                          libreoffice_command=settings.libreoffice_command,
+                                          timeout=settings.libreoffice_timeout)
+        except documents.DocumentError as exc:
+            raise IngestError(str(exc)) from exc
+        note = None
+        conn.execute("UPDATE blobs SET unit_count = ? WHERE sha256 = ?", (len(segments), blob["sha256"]))
     else:
         try:
             text = markdown.decode(store.content_path(conn, settings, file_id).read_bytes())

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from html import escape
 from pathlib import Path
 from typing import Literal
 
@@ -39,8 +40,8 @@ def _fs_errors(fn):
 def _preview(row: sqlite3.Row) -> str | None:
     if row["kind"] == "pdf":
         return "pdf"
-    if row["kind"] == "md":
-        return "md"
+    if row["kind"] in ("md", "doc", "code"):
+        return "md"   # the /view page: rendered Markdown, or the text read from the file
     if row["kind"] == "txt" or (row["mime"] or "") == "text/plain":
         return "text"
     if row["mime"] in _INLINE_IMAGES:
@@ -352,13 +353,43 @@ def view_pdf(file_id: int, user=Depends(page_user), conn: sqlite3.Connection = D
     )
 
 
+def _text_view(conn: sqlite3.Connection, settings: Settings, row: sqlite3.Row) -> str:
+    """The text read from a document, code or text file, one section per unit,
+    each with the anchor its citations link to. Everything is escaped."""
+    units = conn.execute("SELECT u.* FROM blob_units u JOIN files f ON f.blob_sha256 = u.sha256 "
+                         "WHERE f.id = ? ORDER BY u.unit_no", (row["id"],)).fetchall()
+    code = row["kind"] == "code"
+    if not units:
+        if row["kind"] == "doc":
+            return "<p class='muted'>This file hasn't been read yet; its text appears here once it is searchable.</p>"
+        text = _blob_file(settings, row, prefer_ocr=False, conn=conn).read_bytes()[:2 * 1024 * 1024]
+        return f"<pre>{escape(text.decode('utf-8', errors='replace'))}</pre>"
+    parts, last = [], None
+    for u in units:
+        anchor = escape(u["anchor"] or f"s{u['unit_no'] + 1}")
+        if u["heading_path"] and u["heading_path"] != last:
+            parts.append(f'<h3 id="{anchor}">{escape(u["heading_path"])}</h3>')
+        else:
+            parts.append(f'<span id="{anchor}"></span>')
+        last = u["heading_path"]
+        if code:
+            parts.append(f"<pre>{escape(u['text'])}</pre>")
+        else:
+            parts += [f"<p>{escape(line)}</p>" for line in u["text"].splitlines() if line.strip()]
+    return "\n".join(parts)
+
+
 @router.get("/files/{file_id}/view", response_class=HTMLResponse)
 def view_markdown(request: Request, file_id: int, user=Depends(page_user),
                   conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
+    """Markdown rendered, or the text of a document, code or text file."""
     row = _readable_file(conn, fs.Access.of(conn, user["id"]), file_id)
-    if row["kind"] != "md":
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not a Markdown file")
-    html = markdown.render_html(markdown.decode(_blob_file(settings, row, prefer_ocr=False, conn=conn).read_bytes()))
+    if row["kind"] == "md":
+        html = markdown.render_html(markdown.decode(_blob_file(settings, row, prefer_ocr=False, conn=conn).read_bytes()))
+    elif row["kind"] in ("txt", "doc", "code"):
+        html = _text_view(conn, settings, row)
+    else:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No text view for this kind of file")
     response = request.app.state.templates.TemplateResponse(
         request, "file_view.html", {"file": row, "content": html})
     response.headers["Content-Security-Policy"] = _VIEW_CSP

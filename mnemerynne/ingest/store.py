@@ -24,7 +24,7 @@ from typing import BinaryIO
 from mnemerynne import jobs, share
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
-from mnemerynne.ingest import markdown, pdf
+from mnemerynne.ingest import documents, markdown, pdf
 
 _MD_SUFFIXES = (".md", ".markdown")
 _TXT_SUFFIXES = (".txt", ".text", ".log")
@@ -75,7 +75,7 @@ def receive(stream: BinaryIO, filename: str, settings: Settings) -> Received:
                 out.write(block)
         if size == 0:
             raise UploadError("The file is empty.")
-        note = _indexable(kind, tmp_path, size, settings)
+        note = _indexable(kind, tmp_path, size, settings, display_name)
     except BaseException:
         tmp_path.unlink(missing_ok=True)
         raise
@@ -94,7 +94,7 @@ def inspect(path: Path, display_name: str, settings: Settings) -> tuple[str, str
     if size > settings.max_file_bytes:
         note = f"Not searchable: files over {settings.max_file_bytes // (1024 * 1024)} MB aren't indexed."
     elif kind != "other":
-        note = _indexable(kind, path, size, settings)
+        note = _indexable(kind, path, size, settings, display_name)
     if note:
         kind = "other"
     return kind, _mime(kind, display_name), size, note
@@ -109,7 +109,7 @@ def _sniff(first_block: bytes, display_name: str) -> str:
         return "md"
     if name.endswith(_TXT_SUFFIXES):
         return "txt"
-    return "other"
+    return documents.kind_of(display_name) or "other"
 
 
 def _mime(kind: str, display_name: str) -> str:
@@ -117,12 +117,13 @@ def _mime(kind: str, display_name: str) -> str:
         return "application/pdf"
     if kind == "md":
         return "text/markdown"
-    if kind == "txt":
+    if kind in ("txt", "code"):
         return "text/plain"
-    return mimetypes.guess_type(display_name)[0] or "application/octet-stream"
+    return (documents.mime_of(display_name) or mimetypes.guess_type(display_name)[0]
+            or "application/octet-stream")
 
 
-def _indexable(kind: str, path: Path, size: int, settings: Settings) -> str | None:
+def _indexable(kind: str, path: Path, size: int, settings: Settings, display_name: str = "") -> str | None:
     """None if the file can be indexed as `kind`, else why it will only be stored."""
     if kind == "pdf":
         if size > settings.max_pdf_bytes:
@@ -140,6 +141,17 @@ def _indexable(kind: str, path: Path, size: int, settings: Settings) -> str | No
             markdown.decode(path.read_bytes())
         except markdown.MarkdownError as exc:
             return f"Not searchable: {exc}"
+    elif kind == "code":
+        if size > settings.max_md_bytes:
+            return f"Not searchable: text files over {settings.max_md_bytes // (1024 * 1024)} MB aren't indexed."
+        with open(path, "rb") as fh:
+            if b"\x00" in fh.read(8192):
+                return "Not searchable: it contains binary data."
+    elif kind == "doc":
+        if size > settings.max_doc_bytes:
+            return f"Not searchable: documents over {settings.max_doc_bytes // (1024 * 1024)} MB aren't indexed."
+        if documents.needs_libreoffice(display_name) and not documents.libreoffice(settings.libreoffice_command):
+            return "Not searchable: old Word and PowerPoint files need LibreOffice on the server."
     return None
 
 
@@ -283,3 +295,31 @@ def delete_file(conn: sqlite3.Connection, settings: Settings, file_id: int) -> b
     """Delete a file record in its own transaction (see delete_record)."""
     with transaction(conn):
         return delete_record(conn, settings, file_id)
+
+
+def reclassify(conn: sqlite3.Connection, settings: Settings) -> list[str]:
+    """Files stored as 'other' that a newer version can read (e.g. Word or code
+    files from before they were supported): re-check and queue them. Returns
+    the names queued."""
+    queued = []
+    for sha in [r[0] for r in conn.execute("SELECT sha256 FROM blobs WHERE kind = 'other'")]:
+        users = conn.execute("SELECT id, display_name FROM files WHERE blob_sha256 = ? ORDER BY id", (sha,)).fetchall()
+        if not users or not (documents.kind_of(users[0]["display_name"])
+                             or users[0]["display_name"].lower().endswith(_MD_SUFFIXES + _TXT_SUFFIXES)):
+            continue
+        try:
+            path = content_path(conn, settings, users[0]["id"])
+            kind, mime, _, note = inspect(path, users[0]["display_name"], settings)
+        except OSError:
+            continue
+        if kind == "other":
+            continue
+        with transaction(conn):
+            # The bytes stay where they are (rel_path unchanged); only what they are changes.
+            conn.execute("UPDATE blobs SET kind = ?, mime = ? WHERE sha256 = ?", (kind, mime, sha))
+            for f in users:
+                conn.execute("UPDATE files SET status = 'queued', notes = NULL, error = NULL, progress = NULL "
+                             "WHERE id = ?", (f["id"],))
+                jobs.enqueue(conn, "ingest", f["id"])
+                queued.append(f["display_name"])
+    return queued

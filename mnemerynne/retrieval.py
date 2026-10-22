@@ -44,7 +44,7 @@ class Hit:
     file_id: int
     collection_id: int
     file_name: str
-    kind: str                 # 'pdf' | 'md'
+    kind: str                 # 'pdf' | 'md' | 'txt' | 'doc' | 'code'
     page_start: int | None
     page_end: int | None
     anchor: str | None

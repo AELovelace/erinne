@@ -30,8 +30,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from mnemerynne import auth, db, permissions, users  # noqa: E402
 from mnemerynne.cli import import_folder  # noqa: E402
 from mnemerynne.config import get_settings  # noqa: E402
+from mnemerynne.ingest import documents  # noqa: E402
 
-SUPPORTED_SUFFIXES = {".pdf", ".md", ".markdown"}
+SUPPORTED_SUFFIXES = {".pdf", ".md", ".markdown", ".txt", ".text", ".log"}
 
 
 @dataclass
@@ -49,7 +50,7 @@ def _count_files(folder: Path) -> tuple[int, int]:
     supported = skipped = 0
     for path in folder.rglob("*"):
         if path.is_file():
-            if path.suffix.lower() in SUPPORTED_SUFFIXES:
+            if path.suffix.lower() in SUPPORTED_SUFFIXES or documents.kind_of(path.name):
                 supported += 1
             else:
                 skipped += 1
