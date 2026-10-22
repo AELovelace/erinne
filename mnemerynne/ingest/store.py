@@ -181,7 +181,19 @@ def store(conn: sqlite3.Connection, settings: Settings, received: Received) -> s
     return rel_path
 
 
-def add_file(
+def add_file(conn: sqlite3.Connection, settings: Settings, received: Received, collection_id: int,
+             uploaded_by: int | None, folder_id: int | None = None,
+             folder_parts: list[str] | None = None) -> tuple[int, bool]:
+    """Store the blob, create the file record and queue ingestion (see
+    _add_file). If anything fails, the upload's temp file is removed."""
+    try:
+        return _add_file(conn, settings, received, collection_id, uploaded_by, folder_id, folder_parts)
+    except BaseException:
+        received.tmp_path.unlink(missing_ok=True)
+        raise
+
+
+def _add_file(
     conn: sqlite3.Connection,
     settings: Settings,
     received: Received,

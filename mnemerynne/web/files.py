@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import fs, jobs, permissions
+from mnemerynne import fs, jobs, permissions, share
 from mnemerynne.config import Settings
 from mnemerynne.ingest import markdown, store
 from mnemerynne.web.deps import api_user, get_db, get_settings, page_user
@@ -32,6 +32,8 @@ def _fs_errors(fn):
         return fn()
     except fs.FsError as exc:
         raise HTTPException(exc.status, str(exc)) from exc
+    except share.ShareError as exc:   # e.g. the share isn't mounted
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
 
 def _preview(row: sqlite3.Row) -> str | None:

@@ -55,6 +55,10 @@ class Conflict(FsError):
     status = 409
 
 
+class Unavailable(FsError):
+    status = 503
+
+
 @dataclass
 class Access:
     """What one user may read and write, looked up once per request:
@@ -172,6 +176,8 @@ def _disk(fn):
     transaction then rolls back)."""
     try:
         return fn()
+    except share.ShareUnavailable as exc:
+        raise Unavailable(str(exc)) from None
     except share.ShareError as exc:
         raise FsError(str(exc)) from None
 
@@ -511,12 +517,15 @@ def _each(items: list[Item], op) -> list[Result]:
             results.append(Result(item, extra=extra))
         except FsError as exc:
             results.append(Result(item, ok=False, error=str(exc), status=exc.status))
+        except share.ShareError as exc:   # e.g. the share isn't mounted
+            results.append(Result(item, ok=False, error=str(exc), status=503))
     return results
 
 
 def move(conn: sqlite3.Connection, access: Access, items: list[Item], collection_id: int,
          folder_id: int | None) -> list[Result]:
     access.write(collection_id, folder_id)
+    leftovers: list = []   # share copies of files that moved off the share
 
     def one(item: Item) -> dict:
         with transaction(conn):
@@ -540,7 +549,7 @@ def move(conn: sqlite3.Connection, access: Access, items: list[Item], collection
                 elif src_share:
                     _bytes_to_blob(conn, item.id, src)
                     _clear_disk_stat(conn, item.id)
-                    _disk(lambda: share.remove(src))
+                    leftovers.append(src)   # removed once the move is committed
                 return {"name": name}
             row = _live_folder(conn, access, item.id, write=True)
             below = subtree(conn, item.id)
@@ -566,7 +575,13 @@ def move(conn: sqlite3.Connection, access: Access, items: list[Item], collection
                 _disk(lambda: share.rename(before, share.folder_dir(conn, collection_id, item.id)))
             return {"name": name}
 
-    return _each(items, one)
+    results = _each(items, one)
+    for path in leftovers:
+        try:
+            share.remove(path)
+        except share.ShareError:
+            pass  # the file is safe off the share; the next scan tidies up the stray copy
+    return results
 
 
 def _copy_file(conn: sqlite3.Connection, src: sqlite3.Row, collection_id: int, folder_id: int | None,
@@ -721,21 +736,22 @@ def _purge_file(conn: sqlite3.Connection, settings: Settings, file_id: int) -> N
 def _purge_folder(conn: sqlite3.Connection, settings: Settings, folder_id: int) -> None:
     """Delete a folder and its contents for good. Anything inside that was
     put in the bin on its own stays there as its own bin item."""
-    trash_path = conn.execute("SELECT trash_path FROM folders WHERE id = ?", (folder_id,)).fetchone()["trash_path"]
-    below = subtree(conn, folder_id)
-    for row in conn.execute(f"SELECT id FROM folders WHERE id IN ({','.join('?' * len(below))}) "
-                            "AND id != ? AND deleted_at IS NOT NULL", (*below, folder_id)).fetchall():
-        conn.execute("UPDATE folders SET parent_id = NULL WHERE id = ?", (row["id"],))
-    below = subtree(conn, folder_id)
-    marks = ",".join("?" * len(below))
-    for row in conn.execute(f"SELECT id FROM files WHERE folder_id IN ({marks}) AND deleted_at IS NULL",
-                            below).fetchall():
-        store.delete_file(conn, settings, row["id"])
-    # Subfolders cascade; separately binned files fall back to the root (SET NULL).
-    conn.execute("DELETE FROM folders WHERE id = ?", (folder_id,))
-    if trash_path:
-        # Separately binned items inside already sit in their own trash places.
-        _disk(lambda: share.remove(settings.share_trash_dir / trash_path))
+    with transaction(conn):   # all of it or none of it
+        trash_path = conn.execute("SELECT trash_path FROM folders WHERE id = ?", (folder_id,)).fetchone()["trash_path"]
+        below = subtree(conn, folder_id)
+        for row in conn.execute(f"SELECT id FROM folders WHERE id IN ({','.join('?' * len(below))}) "
+                                "AND id != ? AND deleted_at IS NOT NULL", (*below, folder_id)).fetchall():
+            conn.execute("UPDATE folders SET parent_id = NULL WHERE id = ?", (row["id"],))
+        below = subtree(conn, folder_id)
+        marks = ",".join("?" * len(below))
+        for row in conn.execute(f"SELECT id FROM files WHERE folder_id IN ({marks}) AND deleted_at IS NULL",
+                                below).fetchall():
+            store.delete_record(conn, settings, row["id"])
+        # Subfolders cascade; separately binned files fall back to the root (SET NULL).
+        conn.execute("DELETE FROM folders WHERE id = ?", (folder_id,))
+        if trash_path:
+            # Separately binned items inside already sit in their own trash places.
+            _disk(lambda: share.remove(settings.share_trash_dir / trash_path))
 
 
 def purge(conn: sqlite3.Connection, settings: Settings, access: Access, items: list[Item]) -> list[Result]:

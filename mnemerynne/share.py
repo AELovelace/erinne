@@ -42,6 +42,10 @@ class ShareError(OSError):
     """A disk operation on the share failed; the message is safe to show."""
 
 
+class ShareUnavailable(ShareError):
+    """The share isn't mounted (or configured) right now: try again later."""
+
+
 # ------------------------------------------------------------------- runtime
 class Checker(Protocol):
     def rights(self, path: Path, uid: int, gids: frozenset[int]) -> tuple[bool, bool]: ...
@@ -109,8 +113,12 @@ def is_share(conn: sqlite3.Connection, collection_id: int) -> bool:
 
 
 def _rt() -> Runtime:
+    """The share, for a disk operation: configured and mounted. Never write
+    into an empty mount point (the files would hide on the system disk)."""
     if _runtime is None:
-        raise ShareError("The share isn't configured on this server (MNEMERYNNE_SHARE_ROOT).")
+        raise ShareUnavailable("The share isn't configured on this server (MNEMERYNNE_SHARE_ROOT).")
+    if not mounted(_runtime):
+        raise ShareUnavailable("The file share isn't available right now; try again later.")
     return _runtime
 
 
@@ -168,24 +176,50 @@ def make_dir(path: Path) -> None:
         raise _fail("create the folder", exc) from exc
 
 
-def rename(src: Path, dest: Path) -> None:
-    """Move or rename within the share and trash (one filesystem). Refuses to
-    overwrite, except a change of case only."""
+def _same(a: Path, b: Path) -> bool:
     try:
-        if dest.exists() and not (src.parent == dest.parent and src.name.lower() == dest.name.lower()):
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def rename(src: Path, dest: Path) -> None:
+    """Move or rename within the share and trash (one filesystem). Never
+    replaces anything: a file goes by link + unlink, which fails if the
+    destination appeared meanwhile; only the same file under another case
+    (case-insensitive filesystems) is renamed in place."""
+    try:
+        if dest.exists() and not _same(src, dest):
             raise FileExistsError(errno.EEXIST, "exists", str(dest))
         dest.parent.mkdir(parents=True, exist_ok=True)
-        os.rename(src, dest)
+        if src.is_file() and not _same(src, dest):
+            try:
+                os.link(src, dest)
+            except OSError as exc:
+                if exc.errno == errno.EEXIST:
+                    raise
+                os.rename(src, dest)   # no hard links here (e.g. Windows tests)
+            else:
+                os.unlink(src)
+        else:
+            # Folders: rename(2) refuses a non-empty target; an empty one that
+            # appeared since the check above is all it could replace.
+            os.rename(src, dest)
     except OSError as exc:
         raise _fail("move it", exc) from exc
 
 
+def _copy_new(src: Path, dest: Path) -> None:
+    """Copy into a file that must not exist yet (O_EXCL: never overwrites)."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with open(src, "rb") as fin, open(dest, "xb") as fout:
+        shutil.copyfileobj(fin, fout, 1024 * 1024)
+    shutil.copystat(src, dest)
+
+
 def copy_file(src: Path, dest: Path) -> None:
     try:
-        if dest.exists():
-            raise FileExistsError(errno.EEXIST, "exists", str(dest))
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dest)
+        _copy_new(src, dest)
     except OSError as exc:
         raise _fail("copy it", exc) from exc
 
@@ -193,12 +227,10 @@ def copy_file(src: Path, dest: Path) -> None:
 def place(src: Path, dest: Path) -> None:
     """Put a finished upload (a temp file on another disk) at its place on the share."""
     try:
-        if dest.exists():
-            raise FileExistsError(errno.EEXIST, "exists", str(dest))
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), str(dest))
+        _copy_new(src, dest)
     except OSError as exc:
         raise _fail("save the file", exc) from exc
+    src.unlink(missing_ok=True)
 
 
 def remove(path: Path) -> None:
@@ -308,11 +340,15 @@ def library_reach(conn: sqlite3.Connection, row: sqlite3.Row, user: sqlite3.Row)
     paths: dict[int, Path | None] = {}
 
     def path_of(fid: int) -> Path | None:
-        # Binned folders take the rights of the place they were binned from.
+        # A binned folder sits in the trash with its own permissions (a rename
+        # keeps them), and what's inside it below that.
         if fid not in paths:
             f = info[fid]
-            parent = base if f["parent_id"] is None else path_of(f["parent_id"])
-            paths[fid] = None if parent is None else parent / f["name"]
+            if f["trash_path"]:
+                paths[fid] = rt.trash / f["trash_path"]
+            else:
+                parent = base if f["parent_id"] is None else path_of(f["parent_id"])
+                paths[fid] = None if parent is None else parent / f["name"]
         return paths[fid]
 
     root_read, root_write = rt.checker.rights(base, uid, gids)
@@ -323,7 +359,8 @@ def library_reach(conn: sqlite3.Connection, row: sqlite3.Row, user: sqlite3.Row)
         path = path_of(fid)
         if path is None:
             continue
-        read, write = rt.checker.rights(path, uid, gids) if path.exists() else (root_read, root_write)
+        # Not on disk (yet, or any more): nobody gets in until a scan sorts it out.
+        read, write = rt.checker.rights(path, uid, gids) if path.is_dir() else (False, False)
         if read:
             reach.read.add(fid)
             if claude_on:
@@ -348,6 +385,12 @@ def attach_inbox(conn: sqlite3.Connection, collection_id: int, username: str, ad
         return
     share_path = f"{rt.settings.users_folder}/{username}"
     path = rt.root / share_path
+    if path.is_dir() and any(path.iterdir()):
+        # Someone else's files (a deleted user's, or planted): never hand them
+        # to this inbox. Keep them in the trash for an admin.
+        keep = rt.trash / trash_name("inbox", collection_id, f"{username}-{int(time.time())}")
+        log.warning("Share: %s already had files; moved them to %s.", path, keep)
+        rename(path, keep)
     make_dir(path)
     conn.execute("UPDATE collections SET share_path = ?, share_inode = ? WHERE id = ?",
                  (share_path, path.stat().st_ino, collection_id))
@@ -440,8 +483,20 @@ def _db_tree(conn: sqlite3.Connection, collection_id: int) -> tuple[dict[tuple[s
     return folders, files
 
 
+def _usable(name: str) -> bool:
+    """A name the file manager can keep exactly as it is on disk."""
+    from mnemerynne.ingest import store
+
+    try:
+        check_name(name)
+    except ValueError:
+        return False
+    return store.clean_display_name(name) == name
+
+
 def _discover(conn: sqlite3.Connection, rt: Runtime, stats: Stats) -> None:
-    """Top-level folders become libraries; Users/<name> attaches to empty inboxes."""
+    """Top-level folders become libraries; an empty Users/<name> attaches to
+    that user's empty inbox."""
     from mnemerynne import permissions
 
     users_dir = rt.settings.users_folder.lower()
@@ -459,12 +514,18 @@ def _discover(conn: sqlite3.Connection, rt: Runtime, stats: Stats) -> None:
                 if share_path.lower() in known:
                     continue
                 inbox = conn.execute(
-                    "SELECT c.id FROM collections c JOIN users u ON u.id = c.owner_user_id "
+                    "SELECT c.id, u.ad_account FROM collections c JOIN users u ON u.id = c.owner_user_id "
                     "WHERE c.kind = 'private' AND c.share_path IS NULL AND u.username = ? COLLATE NOCASE "
                     "AND NOT EXISTS (SELECT 1 FROM files WHERE collection_id = c.id)", (sub.name,)).fetchone()
-                if inbox:
-                    conn.execute("UPDATE collections SET share_path = ?, share_inode = ? WHERE id = ?",
-                                 (share_path, sub.inode(), inbox["id"]))
+                if inbox is None:
+                    continue
+                if any(os.scandir(sub.path)):
+                    # Files someone put there are not the owner's to inherit.
+                    stats.skipped.append(f"{share_path}: not empty, so not taken as {sub.name}'s inbox")
+                    continue
+                conn.execute("UPDATE collections SET share_path = ?, share_inode = ? WHERE id = ?",
+                             (share_path, sub.inode(), inbox["id"]))
+                secure_inbox(Path(sub.path), inbox["ad_account"])
             continue
         if entry.name.lower() in known:
             continue
@@ -473,6 +534,9 @@ def _discover(conn: sqlite3.Connection, rt: Runtime, stats: Stats) -> None:
             conn.execute("UPDATE collections SET share_path = ?, name = ? WHERE id = ?",
                          (entry.name, entry.name, renamed["id"]))
             log.info("Share: library %s was renamed to %s on the share.", renamed["name"], entry.name)
+            continue
+        if not _usable(entry.name):
+            stats.skipped.append(f"{entry.name}: name can't be used for a library")
             continue
         if permissions.get_library(conn, entry.name):
             stats.skipped.append(f"{entry.name}: a library with that name isn't on the share yet")
@@ -492,9 +556,26 @@ def hash_file(path: Path) -> str:
     return sha.hexdigest()
 
 
+@dataclass
+class _Read:
+    """What pass 1 learned about a file's content, for pass 2 to apply."""
+    sha: str
+    size: int
+    mtime_ns: int
+    inspected: tuple | None   # (kind, mime, size, note) when the blob is new
+
+
+def _same_place(conn: sqlite3.Connection, rt: Runtime, collection_id: int, base: Path) -> bool:
+    """Under the lock: the collection still lives at `base`, and the share is mounted."""
+    row = conn.execute("SELECT share_path FROM collections WHERE id = ?", (collection_id,)).fetchone()
+    return (row is not None and row["share_path"] is not None and rt.root / row["share_path"] == base
+            and mounted(rt) and base.is_dir())
+
+
 def sync(conn: sqlite3.Connection, settings: Settings | None = None) -> Stats:
     """Bring the database in line with the share. Safe to run while people use
-    the file manager: every change is checked again under the write lock."""
+    the file manager: reading and hashing happen without a lock, and every
+    change is checked again under the write lock before it is applied."""
     from mnemerynne import fs, jobs
     from mnemerynne.db import transaction
     from mnemerynne.ingest import store
@@ -512,7 +593,7 @@ def sync(conn: sqlite3.Connection, settings: Settings | None = None) -> Stats:
         _discover(conn, rt, stats)
     settle_before = time.time_ns() - settings.share_settle_seconds * 1_000_000_000
 
-    # Pass 1, no lock: what changed, and the hashes of new and changed files.
+    # Pass 1, no lock: what is on disk and in the database.
     plans = []
     for c in conn.execute("SELECT id, share_path FROM collections WHERE share_path IS NOT NULL").fetchall():
         base = rt.root / c["share_path"]
@@ -528,99 +609,128 @@ def sync(conn: sqlite3.Connection, settings: Settings | None = None) -> Stats:
             if path not in disk_files and row["disk_inode"]:
                 gone[row["disk_inode"]] = (cid, path, row)
 
-    hashes: dict[tuple[int, tuple[str, ...]], str] = {}
+    # Still no lock: hash new and changed files, and inspect new content.
+    reads: dict[tuple[int, tuple[str, ...]], _Read] = {}
     for cid, base, _, disk_files, _, db_files in plans:
         for path, f in disk_files.items():
-            if f.mtime_ns > settle_before:
-                continue   # still being written; next scan
+            if f.mtime_ns > settle_before or not _usable(path[-1]):
+                continue   # still being written (next scan), or a name we can't keep
             row = db_files.get(path)
             if row is not None and (row["disk_size"], row["disk_mtime_ns"]) == (f.size, f.mtime_ns):
                 continue
-            if row is None and f.inode in gone and gone[f.inode][2]["disk_size"] == f.size:
-                continue   # a move: no need to read it
+            old = gone.get(f.inode)
+            if row is None and old and (old[2]["disk_size"], old[2]["disk_mtime_ns"]) == (f.size, f.mtime_ns):
+                continue   # a rename or move, content untouched: no need to read it
+            full = base.joinpath(*path)
             try:
-                hashes[(cid, path)] = hash_file(base.joinpath(*path))
+                sha = hash_file(full)
+                known = conn.execute("SELECT 1 FROM blobs WHERE sha256 = ?", (sha,)).fetchone()
+                inspected = None if known else store.inspect(full, path[-1], settings)
             except OSError as exc:
                 stats.skipped.append(f"{'/'.join(path)}: {exc}")
+                continue
+            reads[(cid, path)] = _Read(sha, f.size, f.mtime_ns, inspected)
 
-    # Pass 2, per collection under the write lock: re-check, then apply.
+    def unchanged(full: Path, size: int, mtime_ns: int) -> bool:
+        try:
+            return disk_stat(full)[:2] == (size, mtime_ns)
+        except OSError:
+            return False
+
+    # Pass 2, per collection under the write lock: re-check, then add, move, update.
     for cid, base, disk_folders, disk_files, _, _ in plans:
         with transaction(conn):
+            if not _same_place(conn, rt, cid, base):
+                continue
             db_folders, db_files = _db_tree(conn, cid)
             folder_ids = dict(db_folders)
             for path in sorted(disk_folders, key=len):
-                if path not in folder_ids and base.joinpath(*path).is_dir():
-                    try:
-                        check_name(path[-1])
-                    except ValueError:
-                        stats.skipped.append(f"{'/'.join(path)}: name not allowed")
-                        continue
-                    parent = folder_ids.get(path[:-1]) if len(path) > 1 else None
-                    if len(path) > 1 and parent is None:
-                        continue
-                    folder_ids[path] = fs.ensure_path(conn, cid, parent, [path[-1]], None)
-                    stats.folders_added += 1
+                if path in folder_ids or not base.joinpath(*path).is_dir():
+                    continue
+                parent = folder_ids.get(path[:-1]) if len(path) > 1 else None
+                if len(path) > 1 and parent is None:
+                    continue   # its parent was skipped
+                if not _usable(path[-1]):
+                    stats.skipped.append(f"{'/'.join(path)}: name can't be used here")
+                    continue
+                if fs._taken(conn, cid, parent, path[-1], "folder"):
+                    stats.skipped.append(f"{'/'.join(path)}: another folder differs only in upper/lower case")
+                    continue
+                folder_ids[path] = fs.ensure_path(conn, cid, parent, [path[-1]], None)
+                stats.folders_added += 1
 
             for path, f in disk_files.items():
                 full = base.joinpath(*path)
                 folder_id = folder_ids.get(path[:-1]) if len(path) > 1 else None
                 if len(path) > 1 and folder_id is None:
                     continue
+                read = reads.get((cid, path))
                 row = db_files.get(path)
                 if row is not None:
-                    sha = hashes.get((cid, path))
-                    if sha is None or not full.is_file() or disk_stat(full)[:2] != (f.size, f.mtime_ns):
+                    # Changed in place (re-checked: not edited again since it was hashed).
+                    if read is None or not unchanged(full, read.size, read.mtime_ns):
                         continue
-                    if sha != row["blob_sha256"]:
-                        note = _new_blob(conn, settings, full, sha)
-                        status = "stored" if _blob_kind(conn, sha) == "other" else "queued"
+                    if read.sha != row["blob_sha256"]:
+                        note = _new_blob(conn, read)
+                        status = "stored" if _blob_kind(conn, read.sha) == "other" else "queued"
                         conn.execute("UPDATE files SET blob_sha256 = ?, status = ?, error = NULL, progress = NULL, "
                                      "notes = ?, updated_at = datetime('now') WHERE id = ?",
-                                     (sha, status, note, row["id"]))
+                                     (read.sha, status, note, row["id"]))
                         if status == "queued":
                             jobs.enqueue(conn, "ingest", row["id"])
                         _drop_unused_blob(conn, settings, row["blob_sha256"])
                         stats.changed += 1
                     record_stat(conn, row["id"], full)
                     continue
-                if not full.is_file() or disk_stat(full)[2] != f.inode:
+                try:
+                    size, mtime_ns, inode = disk_stat(full)
+                except OSError:
                     continue
-                moved = gone.get(f.inode)
+                if inode != f.inode:
+                    continue
+                moved = gone.get(inode)
                 if moved is not None:
                     old_cid, old_path, old_row = moved
                     current = conn.execute("SELECT * FROM files WHERE id = ? AND deleted_at IS NULL",
                                            (old_row["id"],)).fetchone()
-                    old_base = rt.root / conn.execute("SELECT share_path FROM collections WHERE id = ?",
-                                                      (old_cid,)).fetchone()["share_path"]
-                    if current is not None and not old_base.joinpath(*old_path).exists():
+                    old_share = conn.execute("SELECT share_path FROM collections WHERE id = ?",
+                                             (old_cid,)).fetchone()
+                    # Only a move if the content is untouched (same size and
+                    # mtime as when it was last read); otherwise it's new content.
+                    if (current is not None and old_share is not None and old_share["share_path"]
+                            and not (rt.root / old_share["share_path"]).joinpath(*old_path).exists()
+                            and (current["disk_size"], current["disk_mtime_ns"]) == (size, mtime_ns)
+                            and not fs._taken(conn, cid, folder_id, path[-1], "file")):
                         conn.execute("UPDATE files SET collection_id = ?, folder_id = ?, display_name = ?, "
                                      "updated_at = datetime('now') WHERE id = ?",
                                      (cid, folder_id, path[-1], old_row["id"]))
                         record_stat(conn, old_row["id"], full)
                         fs._sync_scope(conn, [old_row["id"]])
-                        del gone[f.inode]
+                        del gone[inode]
                         stats.moved += 1
                         continue
-                sha = hashes.get((cid, path))
-                if sha is None:
+                if read is None or not unchanged(full, read.size, read.mtime_ns):
                     continue
                 if fs._taken(conn, cid, folder_id, path[-1], "file"):
                     stats.skipped.append(f"{'/'.join(path)}: another file differs only in upper/lower case")
                     continue
-                note = _new_blob(conn, settings, full, sha)
-                kind = _blob_kind(conn, sha)
+                note = _new_blob(conn, read)
+                kind = _blob_kind(conn, read.sha)
                 file_id = conn.execute(
                     "INSERT INTO files(collection_id, folder_id, blob_sha256, display_name, status, notes) "
                     "VALUES (?, ?, ?, ?, ?, ?)",
-                    (cid, folder_id, sha, path[-1], "stored" if kind == "other" else "queued", note)).lastrowid
+                    (cid, folder_id, read.sha, path[-1], "stored" if kind == "other" else "queued", note)).lastrowid
                 record_stat(conn, file_id, full)
                 if kind != "other":
                     jobs.enqueue(conn, "ingest", file_id)
                 stats.added += 1
-        # Deletions after every collection's additions, so moves between
-        # collections are recognised first.
-    for cid, base, disk_folders, _, _, _ in plans:
+
+    # Pass 3, after every collection's additions (so moves between collections
+    # were recognised first): what is gone from disk, re-checked under the lock.
+    for cid, base, _, _, _, _ in plans:
         with transaction(conn):
+            if not _same_place(conn, rt, cid, base):
+                continue
             db_folders, db_files = _db_tree(conn, cid)
             for path, row in db_files.items():
                 if not base.joinpath(*path).exists():
@@ -635,31 +745,33 @@ def sync(conn: sqlite3.Connection, settings: Settings | None = None) -> Stats:
                                  (fid,))
                     conn.execute("DELETE FROM folders WHERE id = ?", (fid,))
                     stats.folders_removed += 1
-    # Libraries whose folder is gone from the share (the share is mounted).
+
+    # Libraries whose folder is gone from the (still mounted) share.
     with transaction(conn):
-        for c in conn.execute("SELECT id, name, share_path FROM collections WHERE kind = 'library' "
-                              "AND share_path IS NOT NULL").fetchall():
-            if not (rt.root / c["share_path"]).is_dir():
-                for f in conn.execute("SELECT id FROM files WHERE collection_id = ?", (c["id"],)).fetchall():
-                    store.delete_record(conn, settings, f["id"])
-                conn.execute("DELETE FROM collections WHERE id = ?", (c["id"],))
-                log.info("Share: library %s is gone from the share; removed.", c["name"])
-                stats.libraries += 1
+        if mounted(rt):
+            for c in conn.execute("SELECT id, name, share_path FROM collections WHERE kind = 'library' "
+                                  "AND share_path IS NOT NULL").fetchall():
+                if not (rt.root / c["share_path"]).is_dir():
+                    for f in conn.execute("SELECT id FROM files WHERE collection_id = ?", (c["id"],)).fetchall():
+                        store.delete_record(conn, settings, f["id"])
+                    conn.execute("DELETE FROM collections WHERE id = ?", (c["id"],))
+                    log.info("Share: library %s is gone from the share; removed.", c["name"])
+                    stats.libraries += 1
     if stats:
         log.info("Share sync: %s", stats)
     return stats
 
 
-def _new_blob(conn: sqlite3.Connection, settings: Settings, path: Path, sha: str) -> str | None:
+def _new_blob(conn: sqlite3.Connection, read: _Read) -> str | None:
     """A blob row for content read from the share (the bytes stay there).
     Returns why it won't be searchable, if the blob is new and that applies."""
     from mnemerynne.ingest import store
 
-    if conn.execute("SELECT 1 FROM blobs WHERE sha256 = ?", (sha,)).fetchone():
+    if conn.execute("SELECT 1 FROM blobs WHERE sha256 = ?", (read.sha,)).fetchone() or read.inspected is None:
         return None
-    kind, mime, size, note = store.inspect(path, path.name, settings)
+    kind, mime, size, note = read.inspected
     conn.execute("INSERT INTO blobs(sha256, kind, mime, size, rel_path) VALUES (?, ?, ?, ?, ?)",
-                 (sha, kind, mime, size, store.blob_rel_path(sha, kind)))
+                 (read.sha, kind, mime, size, store.blob_rel_path(read.sha, kind)))
     return note
 
 

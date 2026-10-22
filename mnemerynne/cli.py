@@ -132,6 +132,17 @@ def cmd_delete_user(args):
     # Memories live in LangGraph's store, outside the tables that cascade, and a
     # new user may get this id again: wipe them first.
     cmd_forget_memories(args)
+    from mnemerynne import share
+
+    inbox = conn.execute("SELECT c.id, c.share_path FROM collections c JOIN users u ON u.id = c.owner_user_id "
+                         "WHERE c.kind = 'private' AND u.username = ? COLLATE NOCASE",
+                         (args.username.strip(),)).fetchone()
+    rt = share.current()
+    if inbox and inbox["share_path"] and rt is not None and (rt.root / inbox["share_path"]).exists():
+        # Off the share (nobody else may inherit it), but kept for an admin.
+        keep = rt.trash / share.trash_name("inbox", inbox["id"], args.username.lower())
+        share.rename(rt.root / inbox["share_path"], keep)
+        print(f"Moved their inbox folder to {keep}.")
     users.delete_user(conn, args.username)
     print(f"Deleted '{args.username.lower()}'.")
 

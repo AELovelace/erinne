@@ -328,3 +328,77 @@ def test_nothing_is_created_under_an_unmounted_share(client, conn, directory, ro
     root.joinpath(share.MARKER).unlink()
     assert client.post("/api/admin/libraries", json={"name": "Front Desk"}).status_code == 503
     assert not (root / "Front Desk").exists()
+
+
+# ------------------------------------------------------------------ review fixes
+def test_rename_never_replaces_another_file(root):
+    a, b = _write(root / "Lib" / "a.txt", "keep me"), _write(root / "Lib" / "b.txt", "other")
+    with pytest.raises(share.ShareError):
+        share.rename(b, a)
+    with pytest.raises(share.ShareError):
+        share.copy_file(b, a)
+    assert a.read_text() == "keep me" and b.read_text() == "other"
+
+
+def test_nothing_is_written_while_the_share_is_unmounted(client, conn, directory, root, settings):
+    (root / "Oracle").mkdir()
+    share.sync(conn, settings)
+    oracle = conn.execute("SELECT id FROM collections WHERE name = 'Oracle'").fetchone()["id"]
+    _login(client, conn, directory)
+    (root / share.MARKER).unlink()
+    r = client.post("/api/files", data={"collection_id": oracle},
+                    files={"file": ("audit.txt", io.BytesIO(b"x"), "text/plain")})
+    assert r.status_code == 503 and not (root / "Oracle" / "audit.txt").exists()
+    assert client.post("/api/folders", json={"collection_id": oracle, "name": "New"}).status_code == 503
+    assert not list(settings.tmp_dir.glob("*"))           # the upload's temp file is gone too
+
+
+def test_binned_folders_keep_their_own_rights(conn, settings, root, checker, directory):
+    _write(root / "Lib" / "Secret" / "x.txt")
+    share.sync(conn, settings)
+    jane = users.create_user(conn, "jane", "password123")
+    accounts.link(conn, jane, "jsmith", directory)
+    secret = conn.execute("SELECT id FROM folders WHERE name = 'Secret'").fetchone()["id"]
+    checker.rules = {"Lib/Secret": (False, False), f"d{secret}-Secret": (False, False)}
+    root_user = users.create_user(conn, "root", "password123", role="admin")
+    lib = conn.execute("SELECT id FROM collections WHERE name = 'Lib'").fetchone()["id"]
+    fs.trash(conn, fs.Access(root_user, {lib: permissions.Reach(lib, "library", "Lib", True, True, False,
+                                                                {secret}, {secret}, set(), {secret: None})}),
+             [fs.Item("folder", secret)])
+    reach = permissions.reach(conn, jane)[lib]
+    assert secret not in reach.read and secret not in reach.write   # not the library's rights
+
+
+def test_a_move_with_new_content_is_new_content(conn, settings, root):
+    path = _write(root / "Lib" / "a.txt", "one")
+    (root / "Lib" / "Sub").mkdir()
+    share.sync(conn, settings)
+    first = _files(conn)["a.txt"]
+    os.rename(path, root / "Lib" / "Sub" / "b.txt")
+    _write(root / "Lib" / "Sub" / "b.txt", "two, edited", age=30)
+    share.sync(conn, settings)
+    b = _files(conn)["b.txt"]
+    assert b["blob_sha256"] != first["blob_sha256"] and "a.txt" not in _files(conn)
+
+
+def test_names_the_file_manager_would_change_are_left_alone(conn, settings, root):
+    _write(root / "Lib" / "Q1  notes" / "x.txt")
+    stats = share.sync(conn, settings)
+    assert any("Q1  notes" in s for s in stats.skipped)
+    assert not (root / "Lib" / "Q1 notes").exists()           # no look-alike folder created
+    assert not share.sync(conn, settings).folders_added       # and no churn
+
+
+def test_inbox_folders_with_someone_elses_files_are_not_adopted(conn, settings, root, rt):
+    _write(root / "Users" / "mallory" / "planted.txt")
+    share.configure(Settings(_env_file=None), None)
+    uid = users.create_user(conn, "mallory", "password123")    # made while the share was off
+    share.configure(settings, rt.directory, rt.checker)
+    stats = share.sync(conn, settings)
+    assert any("not empty" in s for s in stats.skipped)
+    assert conn.execute("SELECT share_path FROM collections WHERE owner_user_id = ?", (uid,)).fetchone()[0] is None
+    # A new user with a leftover folder gets a fresh one; the old files go to the trash.
+    _write(root / "Users" / "trudy" / "old.txt")
+    users.create_user(conn, "trudy", "password123")
+    assert list((root / "Users" / "trudy").iterdir()) == []
+    assert any(p.name.startswith("inbox") for p in settings.share_trash_dir.iterdir())

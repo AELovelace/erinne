@@ -164,8 +164,10 @@ folders their linked domain account (section 5c) can open on the share, and
 can change files where that account may write; Mnemerynne's own grants don't
 apply there. Set permissions in Windows (folder → Properties → Security).
 Mnemerynne reads the Linux permissions Samba keeps in step with them, so
-leave `acl_xattr:ignore system acls` at its default (`no`). Unlinked users see
-only their inbox. Inboxes stay private: only the owner's domain account gets
+leave `acl_xattr:ignore system acls` at its default (`no`). Permissions are
+checked per folder: a file with tighter permissions than its folder is still
+visible to everyone who can open the folder, so keep restricted files in their
+own folder. Unlinked users see only their inbox. Inboxes stay private: only the owner's domain account gets
 into their `Users\<name>` folder.
 
 1. Let the service user read and write the share and its trash (new files and
