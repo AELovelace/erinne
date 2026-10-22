@@ -106,6 +106,54 @@ def cmd_share_init(args):
             print(f"  {line}")
 
 
+def cmd_share_export(args):
+    """Move inboxes and libraries stored inside Mnemerynne onto the share."""
+    from mnemerynne import share
+
+    conn = _connect()
+    rt = share.current()
+    if rt is None:
+        raise SystemExit("The share isn't configured (MNEMERYNNE_SHARE_ROOT).")
+    if not share.mounted(rt):
+        raise SystemExit(f"The share isn't mounted (no {rt.root / share.MARKER}); run share-init first.")
+    rows = conn.execute("SELECT c.id, c.kind, c.name, u.username FROM collections c "
+                        "LEFT JOIN users u ON u.id = c.owner_user_id WHERE c.share_path IS NULL "
+                        "ORDER BY c.kind = 'library', c.name COLLATE NOCASE").fetchall()
+    wanted_libs = {n.lower() for n in args.library}
+    wanted_users = {n.lower() for n in args.user}
+    targets = [r for r in rows if args.all or (r["kind"] == "library" and r["name"].lower() in wanted_libs)
+               or (r["kind"] == "private" and (r["username"] or "").lower() in wanted_users)]
+    unknown = (wanted_libs - {r["name"].lower() for r in rows if r["kind"] == "library"}) | \
+              (wanted_users - {(r["username"] or "").lower() for r in rows if r["kind"] == "private"})
+    if unknown:
+        raise SystemExit(f"Not found, or already on the share: {', '.join(sorted(unknown))}")
+    if not targets:
+        raise SystemExit("Nothing to export. Name --library/--user, or use --all.")
+    failed = False
+    for r in targets:
+        label = f"library {r['name']}" if r["kind"] == "library" else f"{r['username']}'s inbox"
+        try:
+            result = share.export(conn, r["id"], dry_run=args.dry_run)
+        except share.ShareError as exc:
+            print(f"✗ {label}: {exc} (nothing changed)")
+            failed = True
+            continue
+        if result.problem:
+            print(f"✗ {label}: {result.problem}")
+            failed = True
+            continue
+        verb = "would move" if args.dry_run else "moved"
+        print(f"✓ {label}: {verb} {result.files} file(s), {result.folders} folder(s), "
+              f"{result.bytes / 1_048_576:.1f} MB to {rt.root / result.share_path}")
+        for line in result.renamed:
+            print(f"    {'would rename' if args.dry_run else 'renamed'} {line} (not allowed in Windows)")
+        if r["kind"] == "library" and not args.dry_run:
+            print("    Access now follows the folder's permissions on the share; Mnemerynne's grants no longer "
+                  "apply. Check them in Windows (Properties → Security).")
+    if failed:
+        raise SystemExit(1)
+
+
 def cmd_share_scan(args):
     from mnemerynne import share
 
@@ -681,6 +729,12 @@ def build_parser() -> argparse.ArgumentParser:
                    ).set_defaults(func=cmd_share_init)
     sub.add_parser("share-scan", help="Sync with the share now (the worker also does this every minute)"
                    ).set_defaults(func=cmd_share_scan)
+    p = sub.add_parser("share-export", help="Move inboxes and libraries stored inside Mnemerynne onto the share")
+    p.add_argument("--library", action="append", default=[], metavar="NAME", help="A library (repeatable)")
+    p.add_argument("--user", action="append", default=[], metavar="NAME", help="A user's inbox (repeatable)")
+    p.add_argument("--all", action="store_true", help="Every inbox and library not on the share yet")
+    p.add_argument("--dry-run", action="store_true", help="Only show what would happen")
+    p.set_defaults(func=cmd_share_export)
 
     p = sub.add_parser("delete-user", help="Delete a user with their inbox (asks to confirm)")
     p.add_argument("username")

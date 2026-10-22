@@ -790,3 +790,188 @@ def _drop_unused_blob(conn: sqlite3.Connection, settings: Settings, sha: str) ->
         for rel in (row["rel_path"], row["ocr_rel_path"]):
             if rel:
                 store.blob_path(settings, rel).unlink(missing_ok=True)
+
+
+# -------------------------------------------------------------------- export
+@dataclass
+class Export:
+    """What exporting one collection to the share did (or, dry run, would do)."""
+    collection: str
+    share_path: str
+    folders: int = 0
+    files: int = 0
+    bytes: int = 0
+    renamed: list[str] = field(default_factory=list)
+    problem: str | None = None
+    done: bool = False
+
+
+def safe_name(name: str) -> str:
+    """A name Windows accepts: bad characters become "_", no trailing dot or
+    space, reserved device names get a leading "_"."""
+    cleaned = "".join("_" if ch in _BAD_CHARS else ch for ch in name).rstrip(". ") or "_"
+    if cleaned.split(".")[0].strip().lower() in _RESERVED:
+        cleaned = "_" + cleaned
+    return cleaned
+
+
+def _target(conn: sqlite3.Connection, rt: Runtime, row: sqlite3.Row) -> str:
+    if row["kind"] == "library":
+        return row["name"]
+    owner = conn.execute("SELECT username FROM users WHERE id = ?", (row["owner_user_id"],)).fetchone()
+    return f"{rt.settings.users_folder}/{owner['username']}"
+
+
+def _fix_names(conn: sqlite3.Connection, collection_id: int, apply: bool) -> list[str]:
+    """Rename folders and files whose names Windows can't use."""
+    from mnemerynne import fs
+    from mnemerynne.db import transaction
+
+    renamed = []
+
+    def run() -> None:
+        for kind, table, column, parent in (("folder", "folders", "name", "parent_id"),
+                                             ("file", "files", "display_name", "folder_id")):
+            for r in conn.execute(f"SELECT id, {column} AS name, {parent} AS parent FROM {table} "
+                                  f"WHERE collection_id = ? ORDER BY id", (collection_id,)).fetchall():
+                if safe_name(r["name"]) == r["name"]:
+                    continue
+                new = fs.unique_name(conn, collection_id, r["parent"], safe_name(r["name"]), kind, r["id"])
+                renamed.append(f"{kind} “{r['name']}” → “{new}”")
+                if apply:
+                    conn.execute(f"UPDATE {table} SET {column} = ? WHERE id = ?", (new, r["id"]))
+
+    if apply:
+        with transaction(conn):
+            run()
+    else:
+        run()
+    return renamed
+
+
+def _snapshot(conn: sqlite3.Connection, collection_id: int):
+    folders = conn.execute("SELECT id, parent_id, name, deleted_at FROM folders WHERE collection_id = ? ORDER BY id",
+                           (collection_id,)).fetchall()
+    files = conn.execute("SELECT f.id, f.folder_id, f.display_name, f.blob_sha256, f.deleted_at, b.rel_path, b.size "
+                         "FROM files f JOIN blobs b ON b.sha256 = f.blob_sha256 WHERE f.collection_id = ? ORDER BY f.id",
+                         (collection_id,)).fetchall()
+    return [tuple(r) for r in folders], [tuple(r) for r in files], folders, files
+
+
+def export(conn: sqlite3.Connection, collection_id: int, *, dry_run: bool = False) -> Export:
+    """Move a collection stored inside Mnemerynne onto the share, keeping every
+    file's id and search index. Files are copied without holding the database
+    lock; the switch is one short transaction that first checks nobody changed
+    the collection meanwhile (if they did, the copy is undone: run it again)."""
+    from mnemerynne.db import transaction
+    from mnemerynne.ingest import store
+
+    rt = _rt()
+    row = collection_row(conn, collection_id)
+    target = _target(conn, rt, row)
+    result = Export(row["name"], target)
+    if row["share_path"]:
+        result.problem = "already on the share"
+        return result
+    try:
+        check_name(target.split("/")[-1])
+    except ValueError as exc:
+        result.problem = f"rename the library first: {exc}"
+        return result
+    if row["kind"] == "library" and target.lower() == rt.settings.users_folder.lower():
+        result.problem = f"rename the library first: “{target}” is kept for inboxes"
+        return result
+    base = rt.root / target
+    if base.exists() and (not base.is_dir() or any(base.iterdir())):
+        result.problem = f"{base} already exists and isn't empty; rename one of them first"
+        return result
+    if not rt.trash.is_dir():
+        result.problem = f"{rt.trash} doesn't exist; run share-init first"
+        return result
+
+    result.renamed = _fix_names(conn, collection_id, apply=not dry_run)
+    folder_snap, file_snap, folders, files = _snapshot(conn, collection_id)
+    by_id = {f["id"]: f for f in folders}
+    paths: dict[int, Path] = {}
+
+    def folder_path(fid: int) -> Path:
+        # Same layout share.folder_dir() will compute: binned folders in the trash.
+        if fid not in paths:
+            f = by_id[fid]
+            if f["deleted_at"]:
+                paths[fid] = rt.trash / trash_name("d", fid, f["name"])
+            else:
+                paths[fid] = (base if f["parent_id"] is None else folder_path(f["parent_id"])) / f["name"]
+        return paths[fid]
+
+    def file_dest(f) -> Path:
+        if f["deleted_at"]:
+            return rt.trash / trash_name("f", f["id"], f["display_name"])
+        return (base if f["folder_id"] is None else folder_path(f["folder_id"])) / f["display_name"]
+
+    result.folders, result.files = len(folders), len(files)
+    result.bytes = sum(f["size"] for f in files)
+    missing = [f["display_name"] for f in files if not store.blob_path(rt.settings, f["rel_path"]).is_file()]
+    if missing:
+        result.problem = f"{len(missing)} file(s) are missing from blob storage, e.g. {missing[0]}"
+        return result
+    if dry_run:
+        return result
+
+    created: list[Path] = []   # undone if anything goes wrong
+    try:
+        if not base.exists():
+            make_dir(base)
+            created.append(base)
+        if row["kind"] == "private":
+            owner = conn.execute("SELECT ad_account FROM users WHERE id = ?", (row["owner_user_id"],)).fetchone()
+            secure_inbox(base, owner["ad_account"])   # before the files, so they inherit it
+        for fid in sorted(by_id, key=lambda i: len(folder_path(i).parts)):
+            path = folder_path(fid)
+            if path.exists():
+                raise ShareError(f"{path} already exists")
+            make_dir(path)
+            created.append(path)
+        for f in files:
+            dest = file_dest(f)
+            if dest.exists():
+                raise ShareError(f"{dest} already exists")
+            created.append(dest)   # ours from here on, even half-written
+            copy_file(store.blob_path(rt.settings, f["rel_path"]), dest)
+            if dest.stat().st_size != f["size"]:
+                raise ShareError(f"the copy of {f['display_name']} came out the wrong size")
+
+        with transaction(conn):
+            now_folders, now_files, _, _ = _snapshot(conn, collection_id)
+            current = collection_row(conn, collection_id)
+            if now_folders != folder_snap or now_files != file_snap or current["share_path"] or not mounted(rt):
+                raise ShareError("the collection changed while it was being copied; run the export again")
+            conn.execute("UPDATE collections SET share_path = ?, share_inode = ? WHERE id = ?",
+                         (target, base.stat().st_ino, collection_id))
+            for fid, f in by_id.items():
+                if f["deleted_at"]:
+                    conn.execute("UPDATE folders SET trash_path = ? WHERE id = ?",
+                                 (trash_name("d", fid, f["name"]), fid))
+            for f in files:
+                if f["deleted_at"]:
+                    conn.execute("UPDATE files SET trash_path = ? WHERE id = ?",
+                                 (trash_name("f", f["id"], f["display_name"]), f["id"]))
+                record_stat(conn, f["id"], file_dest(f))
+    except BaseException:
+        for path in reversed(created):
+            try:
+                remove(path)
+            except ShareError:
+                log.warning("Share: couldn't undo %s after a failed export", path)
+        raise
+
+    # Blob copies nothing outside the share uses any more (OCR'd copies stay:
+    # they are what the PDF viewer shows).
+    for f in files:
+        still = conn.execute("SELECT 1 FROM files x JOIN collections c ON c.id = x.collection_id "
+                             "WHERE x.blob_sha256 = ? AND c.share_path IS NULL LIMIT 1", (f["blob_sha256"],)).fetchone()
+        if not still:
+            store.blob_path(rt.settings, f["rel_path"]).unlink(missing_ok=True)
+    result.done = True
+    log.info("Share: exported %s to %s (%d files).", row["name"], base, len(files))
+    return result

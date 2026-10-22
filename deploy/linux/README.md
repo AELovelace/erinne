@@ -186,7 +186,17 @@ into their `Users\<name>` folder.
    sudo mnemerynne-admin share-scan     # first scan now (the worker repeats it every minute)
    ```
    `share-init` lists inboxes and libraries that still hold files inside
-   Mnemerynne; they stay where they are until they're exported to the share.
+   Mnemerynne. Move them onto the share (files keep their search index, so
+   nothing is re-embedded; names Windows can't use are renamed and listed):
+   ```sh
+   sudo mnemerynne-admin share-export --all --dry-run   # what would happen
+   sudo mnemerynne-admin share-export --user edith      # or --library Oracle, or --all
+   ```
+   Each one is copied while people keep working, then switched over in a
+   moment; if someone changed it during the copy, the copy is undone and you
+   run it again. An exported library's access then follows the share's
+   permissions, so set its folder's Security in Windows (the export creates it
+   with the share root's permissions).
 
 The worker only scans while `/srv/storage/share/.mnemerynne-share` exists, so
 an unmounted share is never mirrored as "everything deleted". Renames and

@@ -402,3 +402,109 @@ def test_inbox_folders_with_someone_elses_files_are_not_adopted(conn, settings, 
     users.create_user(conn, "trudy", "password123")
     assert list((root / "Users" / "trudy").iterdir()) == []
     assert any(p.name.startswith("inbox") for p in settings.share_trash_dir.iterdir())
+
+
+# ------------------------------------------------------------------ export
+def _classic_world(tmp_path, root):
+    """A library and an inbox stored inside Mnemerynne, made before the share."""
+    plain = Settings(_env_file=None, data_dir=tmp_path / "data", embed_dim=4)
+    conn = db.connect(plain.db_path)
+    db.migrate(conn, plain.embed_dim)
+    share.configure(plain, None)
+    edith = users.create_user(conn, "edith", "password123")
+    lib = permissions.create_library(conn, "Oracle")
+    root_access = fs.Access.of(conn, edith)
+    permissions.grant_user(conn, lib, edith, can_write=True)
+    root_access = fs.Access.of(conn, edith)
+    guides = fs.create_folder(conn, root_access, lib, None, "Guides")
+    odd = fs.create_folder(conn, root_access, lib, guides, "Q1: plans")
+    src = tmp_path / "src"
+    for name, text in [("audit.txt", "Night audit."), ("binned.txt", "Old."), ("notes.md", "# Notes")]:
+        _write(src / name, text)
+    from mnemerynne.ingest import store
+    audit, _ = store.add_path(conn, plain, src / "audit.txt", lib, edith, folder_parts=["Guides", "Q1: plans"])
+    binned, _ = store.add_path(conn, plain, src / "binned.txt", lib, edith)
+    notes, _ = store.add_path(conn, plain, src / "notes.md", permissions.private_collection_id(conn, edith), edith)
+    fs.trash(conn, fs.Access.of(conn, edith), [fs.Item("file", binned)])
+    return conn, plain, {"edith": edith, "lib": lib, "audit": audit, "binned": binned, "notes": notes, "odd": odd}
+
+
+def test_export_moves_libraries_and_inboxes_onto_the_share(tmp_path, root, directory, checker):
+    conn, plain, ids = _classic_world(tmp_path, root)
+    settings = Settings(_env_file=None, data_dir=tmp_path / "data", embed_dim=4, share_root=root,
+                        share_settle_seconds=0)
+    share.configure(settings, directory, checker)
+    settings.share_trash_dir.mkdir()
+
+    dry = share.export(conn, ids["lib"], dry_run=True)
+    assert dry.files == 2 and dry.renamed and not (root / "Oracle").exists()
+
+    result = share.export(conn, ids["lib"])
+    assert result.done and result.renamed == ["folder “Q1: plans” → “Q1_ plans”"]
+    assert (root / "Oracle" / "Guides" / "Q1_ plans" / "audit.txt").read_text() == "Night audit."
+    assert (settings.share_trash_dir / f"f{ids['binned']}-binned.txt").read_text() == "Old."
+    lib = conn.execute("SELECT * FROM collections WHERE id = ?", (ids["lib"],)).fetchone()
+    assert lib["share_path"] == "Oracle"
+    from mnemerynne.ingest import store
+    assert store.content_path(conn, settings, ids["audit"]) == root / "Oracle" / "Guides" / "Q1_ plans" / "audit.txt"
+    blob = conn.execute("SELECT b.rel_path FROM files f JOIN blobs b ON b.sha256 = f.blob_sha256 WHERE f.id = ?",
+                        (ids["audit"],)).fetchone()["rel_path"]
+    assert not store.blob_path(settings, blob).exists()            # the internal copy is gone
+
+    inbox = share.export(conn, permissions.private_collection_id(conn, ids["edith"]))
+    assert inbox.done and (root / "Users" / "edith" / "notes.md").read_text() == "# Notes"
+
+    # The scan finds everything in place: nothing added, moved or removed.
+    assert not share.sync(conn, settings)
+    # The bin still works after the export.
+    fs.restore(conn, fs.Access(ids["edith"], {ids["lib"]: permissions.Reach(
+        ids["lib"], "library", "Oracle", True, True)}), [fs.Item("file", ids["binned"])])
+    assert (root / "Oracle" / "binned.txt").read_text() == "Old."
+
+
+def test_export_refuses_a_folder_that_already_has_files(tmp_path, root, directory, checker):
+    conn, plain, ids = _classic_world(tmp_path, root)
+    settings = Settings(_env_file=None, data_dir=tmp_path / "data", embed_dim=4, share_root=root)
+    share.configure(settings, directory, checker)
+    settings.share_trash_dir.mkdir()
+    _write(root / "Oracle" / "someone else's.txt")
+    result = share.export(conn, ids["lib"])
+    assert result.problem and "isn't empty" in result.problem and not result.done
+    assert conn.execute("SELECT share_path FROM collections WHERE id = ?", (ids["lib"],)).fetchone()[0] is None
+
+
+def test_export_undoes_itself_if_the_collection_changes_meanwhile(tmp_path, root, directory, checker, monkeypatch):
+    conn, plain, ids = _classic_world(tmp_path, root)
+    settings = Settings(_env_file=None, data_dir=tmp_path / "data", embed_dim=4, share_root=root)
+    share.configure(settings, directory, checker)
+    settings.share_trash_dir.mkdir()
+    real_copy = share.copy_file
+
+    def copy_then_someone_renames(src, dest):
+        real_copy(src, dest)
+        conn.execute("UPDATE files SET display_name = 'renamed.txt' WHERE id = ?", (ids["audit"],))
+
+    monkeypatch.setattr(share, "copy_file", copy_then_someone_renames)
+    with pytest.raises(share.ShareError, match="run the export again"):
+        share.export(conn, ids["lib"])
+    assert not (root / "Oracle").exists()
+    assert not list(settings.share_trash_dir.iterdir())
+    assert conn.execute("SELECT share_path FROM collections WHERE id = ?", (ids["lib"],)).fetchone()[0] is None
+
+
+def test_share_export_cli(tmp_path, root, monkeypatch, capsys):
+    from mnemerynne.cli import main
+
+    conn, plain, ids = _classic_world(tmp_path, root)
+    (root / share.MARKER).touch()
+    settings = Settings(_env_file=None, data_dir=tmp_path / "data", embed_dim=4, share_root=root)
+    settings.share_trash_dir.mkdir()
+    monkeypatch.setattr("mnemerynne.cli.get_settings", lambda: settings)
+    main(["share-export", "--all", "--dry-run"])
+    out = capsys.readouterr().out
+    assert "edith's inbox: would move 1 file(s)" in out and "library Oracle: would move 2 file(s)" in out
+    assert not (root / "Oracle").exists()
+    main(["share-export", "--user", "edith"])
+    assert "edith's inbox: moved 1 file(s)" in capsys.readouterr().out
+    with pytest.raises(SystemExit, match="Not found, or already on the share: edith"):
+        main(["share-export", "--user", "edith"])
