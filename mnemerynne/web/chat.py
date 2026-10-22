@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from mnemerynne import answer as answer_mod
-from mnemerynne import db, fs, graph as graph_mod
+from mnemerynne import db, fs, graph as graph_mod, proposals
 from mnemerynne.web.deps import api_user, get_db
 
 log = logging.getLogger("mnemerynne.chat")
@@ -29,6 +29,7 @@ class AskBody(BaseModel):
     question: str
     conversation_id: str | None = None
     scope: Scope | None = None  # "search in" one collection or folder
+    tools: bool = True          # agent group members: let Erynne use tools for this question
 
 
 class FeedbackBody(BaseModel):
@@ -82,7 +83,8 @@ async def ask(body: AskBody, request: Request, user=Depends(api_user),
         yield _sse({"type": "conversation", "conversation_id": conversation_id})
         final = None
         try:
-            async for event in graph_mod.run_turn(app.state.graph, user_id, conversation_id, question, scope):
+            async for event in graph_mod.run_turn(app.state.graph, user_id, conversation_id, question, scope,
+                                                  body.tools):
                 if event["type"] == "final":
                     final = event
                 else:
@@ -111,7 +113,8 @@ def _save_answer(settings, conversation_id: str, final: dict) -> int:
                 "INSERT INTO messages(conversation_id, role, content, status, model, prompt_version, latency_ms, "
                 "route) VALUES (?, 'assistant', ?, ?, ?, ?, ?, ?)",
                 (conversation_id, final["answer"] or final.get("error", ""), final["status"],
-                 settings.llm_model, answer_mod.PROMPT_VERSION, final["latency_ms"], final.get("route")),
+                 final.get("model") or settings.llm_model, answer_mod.PROMPT_VERSION, final["latency_ms"],
+                 final.get("route")),
             ).lastrowid
             conn.executemany(
                 "INSERT INTO message_sources(message_id, n, chunk_id, file_id, page_start, anchor, cited, api_call_id) "
@@ -121,6 +124,7 @@ def _save_answer(settings, conversation_id: str, final: dict) -> int:
             )
             conn.execute("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?", (conversation_id,))
             graph_mod.log_trace(conn, conversation_id, final.get("trace") or [])
+            proposals.attach(conn, final.get("proposals") or [], message_id)
         return message_id
     finally:
         conn.close()
@@ -156,6 +160,9 @@ def get_conversation(conversation_id: str, user=Depends(api_user), conn: sqlite3
                 else:
                     s.pop("api_at")
         messages.append({**dict(m), "sources": sources})
+    drafted = proposals.for_messages(conn, [m["id"] for m in messages if m["role"] == "assistant"])
+    for m in messages:
+        m["proposals"] = drafted.get(m["id"], [])
     return {"id": conversation_id, "messages": messages}
 
 

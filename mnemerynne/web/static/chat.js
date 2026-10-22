@@ -10,6 +10,7 @@
   const list = document.getElementById("conversations");
   let conversationId = null;
   let scope = null;  // {collection_id, folder_id, label} or null for everything
+  const useTools = document.getElementById("use-tools");   // only for the agent group
   const scopeLabel = document.getElementById("scope-label");
 
   document.getElementById("scope").addEventListener("click", async function () {
@@ -106,11 +107,13 @@
     const wrap = el("div", "msg assistant");
     const body = el("div", "answer");
     const status = el("div", "muted small status", "Searching your documents…");
+    const steps = el("div", "steps-box");
     const sources = el("div", "sources-box");
-    wrap.append(status, body, sources);
+    const proposals = el("div", "proposals-box");
+    wrap.append(status, steps, body, sources, proposals);
     thread.appendChild(wrap);
     wrap.scrollIntoView({ block: "end", behavior: "smooth" });
-    return { wrap: wrap, body: body, status: status, sources: sources };
+    return { wrap: wrap, body: body, status: status, steps: steps, sources: sources, proposals: proposals };
   }
 
   function finishAnswer(view, final) {
@@ -161,7 +164,8 @@
       const resp = await fetch("/api/ask", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: question, conversation_id: conversationId,
-                               scope: scope ? { collection_id: scope.collection_id, folder_id: scope.folder_id } : null }) });
+                               scope: scope ? { collection_id: scope.collection_id, folder_id: scope.folder_id } : null,
+                               tools: useTools ? useTools.checked : true }) });
       if (resp.status === 401) { window.location.href = "/login"; return; }
       if (!resp.ok) {
         const err = await resp.json().catch(function () { return {}; });
@@ -173,7 +177,13 @@
         if (ev.type === "conversation") {
           conversationId = ev.conversation_id;
         } else if (ev.type === "route") {
-          if (ev.route !== "search") view.status.textContent = "Writing…";
+          if (ev.route === "agent") view.status.textContent = "Working on it…";
+          else if (ev.route !== "search") view.status.textContent = "Writing…";
+        } else if (ev.type === "tool") {
+          window.ErynneAgent.tool(view.steps, ev);
+          if (ev.state === "running") view.status.textContent = (ev.label || ev.name) + "…";
+        } else if (ev.type === "proposal") {
+          view.proposals.appendChild(window.ErynneAgent.proposal(ev));
         } else if (ev.type === "sources") {
           if (!ev.sources.length && view.status.textContent === "Writing…") continue;
           sources = ev.sources;
@@ -235,6 +245,7 @@
       });
       finishAnswer(view, { status: m.status, answer: m.content, sources: sources, message_id: m.id,
                            route: m.route });
+      (m.proposals || []).forEach(function (p) { view.proposals.appendChild(window.ErynneAgent.proposal(p)); });
     });
     loadConversations();
   }

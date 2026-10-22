@@ -3,6 +3,7 @@
     load_memories -> condense -> route -> retrieve -> generate | not_found -> finish
                                         -> general (small talk, writing help)
                                         -> api (a live internal API, read-only)
+                                        -> agent (tools; the agent group only, agent.py)
 
 Only `condense` (follow-ups only) and `generate` call the model; the rest is
 plain code. Conversation state is checkpointed per thread (conversation id)
@@ -27,8 +28,9 @@ from typing import Annotated, Any, TypedDict
 os.environ["LANGSMITH_TRACING"] = "false"
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
-from langgraph.config import get_store, get_stream_writer  # noqa: E402
+from langgraph.config import get_config, get_store, get_stream_writer  # noqa: E402
 from langgraph.graph import END, START, StateGraph  # noqa: E402
+from langgraph.types import Command  # noqa: E402
 
 from mnemerynne import answer as answer_mod  # noqa: E402
 from mnemerynne import apis, db, retrieval  # noqa: E402
@@ -54,6 +56,9 @@ class State(TypedDict, total=False):
     memories: list[str]
     hits: list[dict]
     api_operation: int   # the API operation the question matched (route "api")
+    use_tools: bool      # agent group members may switch the agent off for a question
+    proposals: list[int]   # file changes the agent proposed this turn (route "agent")
+    model: str | None    # the agent model's label, when it answered
     answer: dict
     turns: Annotated[list[dict], operator.add]   # conversation memory, appended per turn
 
@@ -66,6 +71,7 @@ FLOWS: dict[str, str] = {
     "smalltalk": "general",
     "general": "general",
     "api": "api",        # chosen by example-question match, not by the trained router
+    "agent": "agent",    # the agent group, when the agent model is reachable (agent.py)
 }
 
 
@@ -112,6 +118,7 @@ class Deps:
     reranker: Any = None
     router: Any = None   # mnemerynne.router.Router; None routes everything to search
     directory: Any = None   # the AD domain (API access by group); None: no APIs
+    agent: Any = None       # mnemerynne.agent.Agent; None: nobody gets tools in chat
 
 
 def build_graph(deps: Deps, checkpointer=None, store=None):
@@ -211,7 +218,15 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
     async def route_message(state: State) -> dict:
         """Pick the flow from the question's embedding (no model call): an API
         operation the person may use whose example questions it matches, else
-        the trained router's choice."""
+        the trained router's choice. People in the agent group go to the agent
+        (it can do all of these itself) while its model answers."""
+        if deps.agent is not None and state.get("use_tools", True):
+            ready = await deps.agent.ready(state["user_id"])
+            if ready == "ok":
+                get_stream_writer()({"type": "route", "route": "agent"})
+                return {"route": "agent"}
+            if ready == "down":
+                get_stream_writer()({"type": "route", "route": "search", "fallback": "agent model unavailable"})
         vector = None
         if deps.directory is not None:
             vector, best = await asyncio.to_thread(api_match, state)
@@ -295,6 +310,16 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
             "chunk_id": None, "file_id": None, "page_start": None, "anchor": None}]})
         return await answer_from([hit], state, writer)
 
+    @_timed("agent")
+    async def agent(state: State) -> Command:
+        """Erynne with tools (agent.py); the normal search flow if its model fails first."""
+        out = None
+        if deps.agent is not None:
+            out = await deps.agent.run(state, get_stream_writer(), get_config()["configurable"].get("thread_id"))
+        if out is None:
+            return Command(goto="retrieve", update={"route": "search"})
+        return Command(goto="finish", update=out)
+
     @_timed("general")
     async def general(state: State) -> dict:
         """Small talk and general help: plain-text reply, no documents, no citations."""
@@ -334,6 +359,7 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
     graph.add_node("not_found", not_found)
     graph.add_node("general", general)
     graph.add_node("api", api)
+    graph.add_node("agent", agent, destinations=("retrieve", "finish"))
     graph.add_node("finish", finish)
     graph.add_edge(START, "load_memories")
     graph.add_edge("load_memories", "condense")
@@ -354,7 +380,8 @@ def _source_view(n: int, hit: retrieval.Hit) -> dict:
             "page_start": hit.page_start, "anchor": hit.anchor}
 
 
-async def run_turn(graph, user_id: int, conversation_id: str, question: str, scope: dict | None = None):
+async def run_turn(graph, user_id: int, conversation_id: str, question: str, scope: dict | None = None,
+                   use_tools: bool = True):
     """Run one question through the graph, yielding stream events, then a final
     {"type": "final", ...} event with the answer, cited sources and timings."""
     trace: list = []
@@ -364,7 +391,8 @@ async def run_turn(graph, user_id: int, conversation_id: str, question: str, sco
     try:
         config = {"configurable": {"thread_id": conversation_id}}
         async for event in graph.astream({"user_id": user_id, "scope": scope, "question": question, "hits": [],
-                                          "answer": {}, "route": "search"}, config, stream_mode="custom"):
+                                          "answer": {}, "route": "search", "use_tools": use_tools,
+                                          "proposals": [], "model": None}, config, stream_mode="custom"):
             if event.get("type") == "sources":
                 sources = event["sources"]
             yield event
@@ -375,7 +403,8 @@ async def run_turn(graph, user_id: int, conversation_id: str, question: str, sco
     cited = set(a.get("citations") or [])
     yield {"type": "final", "status": a.get("status", "not_found"), "answer": a.get("text", ""),
            "citations": a.get("citations", []), "standalone": state.get("standalone", question),
-           "route": state.get("route", "search"),
+           "route": state.get("route", "search"), "proposals": state.get("proposals") or [],
+           "model": state.get("model"),
            "sources": [{**s, "cited": s["n"] in cited} for s in sources],
            "latency_ms": round((time.perf_counter() - started) * 1000), "trace": trace}
 

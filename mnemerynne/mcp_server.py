@@ -33,7 +33,7 @@ from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
-from mnemerynne import api_tokens, apis, db, editing, editing_formats, fs, permissions, retrieval
+from mnemerynne import api_tokens, apis, db, editing, editing_formats, fs, permissions, proposals, retrieval
 from mnemerynne.api_tokens import Caller
 from mnemerynne.config import Settings
 from mnemerynne.ingest import store
@@ -79,6 +79,8 @@ _READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempo
 _EDITS = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False,
                          open_world_hint=False)
 _INBOX_WORDS = {"inbox", "my inbox", "my files", "my documents"}
+_PROPOSED = ("Nothing has changed yet: the person sees this change under your answer and decides whether to "
+             "apply it. Tell them briefly what you proposed.")
 
 
 class Unauthorized(Exception):
@@ -98,7 +100,7 @@ def _label(row: sqlite3.Row) -> str:
     return "My inbox" if row["kind"] == "private" else row["name"]
 
 
-def _resolve_collection(conn: sqlite3.Connection, access: fs.Access, ref: str) -> sqlite3.Row:
+def _resolve_collection(conn: sqlite3.Connection, access: fs.Access, ref: str, claude: bool = True) -> sqlite3.Row:
     ref = (ref or "").strip()
     collections = _collections(conn, access)
     if ref.isdigit() and int(ref) in collections:
@@ -106,8 +108,15 @@ def _resolve_collection(conn: sqlite3.Connection, access: fs.Access, ref: str) -
     for row in collections.values():
         if (row["kind"] == "private" and ref.lower() in _INBOX_WORDS) or _label(row).lower() == ref.lower():
             return row
-    raise ToolError(f"There is no library called “{ref}” that you can search from Claude. "
-                    "Call list_libraries to see the names.")
+    raise ToolError(f"There is no library called “{ref}”" + (" that you can search from Claude" if claude else "")
+                    + ". Call list_libraries to see the names.")
+
+
+def _split_place(library: str | None, folder: str | None) -> tuple[str | None, str | None]:
+    """"My inbox / Agents" given as the library: the library and the folder in it."""
+    if library and "/" in library and not folder:
+        library, folder = (part.strip() for part in library.split("/", 1))
+    return library, folder
 
 
 def _resolve_folder(conn: sqlite3.Connection, access: fs.Access, collection_id: int, ref: str | None) -> int | None:
@@ -157,20 +166,31 @@ def _passage(hit: retrieval.Hit, base: str, library: str, n: int | None = None) 
 
 # -------------------------------------------------------------------- tools
 class Tools:
-    """The tool bodies, synchronous and testable without the MCP transport."""
+    """The tool bodies, synchronous and testable without the MCP transport.
+
+    mode "claude": Claude through /mcp, limited to what is shared with Claude.
+    mode "erynne": the agent in chat (agent.py), which runs here and reads what
+    the person can read; its edits and new files become proposals the person
+    applies (proposals.py) instead of changing anything.
+    """
 
     def __init__(self, settings: Settings, get_embedder: Callable[[], Any],
-                 get_directory: Callable[[], Any] = lambda: None):
+                 get_directory: Callable[[], Any] = lambda: None, *, mode: str = "claude"):
         self.settings = settings
         self.get_embedder = get_embedder
         self.get_directory = get_directory
+        self.mode = mode
 
     @property
     def base(self) -> str:
         return self.settings.public_url.rstrip("/")
 
+    @property
+    def claude(self) -> bool:
+        return self.mode == "claude"
+
     def _access(self, conn: sqlite3.Connection, caller: Caller) -> fs.Access:
-        return fs.Access.for_claude(conn, caller.user_id)
+        return editing.ai_access(conn, caller.user_id, self.mode)
 
     def search_documents(self, conn, caller: Caller, query: str, library: str | None = None,
                          folder: str | None = None, limit: int = 8) -> tuple[dict, list[int]]:
@@ -180,21 +200,42 @@ class Tools:
         if len(query) > self.settings.max_question_chars:
             raise ToolError(f"Keep the search under {self.settings.max_question_chars} characters.")
         limit = max(1, min(int(limit), 20))
+        library, folder = _split_place(library, folder)
         access = self._access(conn, caller)
-        allowed = retrieval.Scope.of_reach(access.reaches.values())
-        if library:
-            row = _resolve_collection(conn, access, library)
-            folder_id = _resolve_folder(conn, access, row["id"], folder)
-            allowed = allowed.narrow(row["id"], fs.scope_folders(conn, access, row["id"], folder_id))
-        elif folder:
-            raise ToolError("Name the library the folder is in, too.")
+        everything = allowed = retrieval.Scope.of_reach(access.reaches.values())
+        notes = []
+        # Erynne: the "Search in…" place picked in chat, unless she names one.
+        scope = getattr(caller, "scope", None)
+        if scope and not library:
+            allowed = allowed.narrow(scope["collection_id"],
+                                     set(scope["folders"]) if scope.get("folders") is not None else None)
+        try:
+            if library:
+                row = _resolve_collection(conn, access, library, self.claude)
+                folder_id = _resolve_folder(conn, access, row["id"], folder)
+                allowed = allowed.narrow(row["id"], fs.scope_folders(conn, access, row["id"], folder_id))
+            elif folder:
+                raise ToolError("Name the library the folder is in, too.")
+        except ToolError:
+            if self.claude:
+                raise
+            # Small models guess places; search everywhere rather than fail.
+            place = " / ".join(p for p in (library, folder) if p)
+            notes.append(f"Searched everywhere: there's no “{place}” here.")
+            library = None
         if not allowed:
             return {"found": False, "query": query, "results": [],
-                    "note": "Nothing is shared with Claude for you yet; ask a Mnemerynne admin."}, []
+                    "note": "Nothing is shared with " + ("Claude for " if self.claude else "") +
+                            "you yet; ask a Mnemerynne admin."}, []
         result = retrieval.search(conn, self.settings, self.get_embedder(), query, allowed)
+        if not result.found_anything and library and not self.claude:
+            notes.append(f"Nothing close in {library}; these are from everywhere.")
+            result = retrieval.search(conn, self.settings, self.get_embedder(), query, everything)
         if not result.found_anything:
             return {"found": False, "query": query, "results": [],
-                    "note": "Nothing in these documents is close to this question."}, []
+                    "note": " ".join(notes + ["Nothing in these documents is close to this question."
+                                              + (" Search again without library and folder to look everywhere."
+                                                 if library else "")])}, []
         names = {cid: _label(row) for cid, row in _collections(conn, access).items()}
         budget, picked = self.settings.mcp_max_tokens, []
         for hit in result.candidates:
@@ -205,7 +246,7 @@ class Tools:
             picked.append(hit)
             budget -= hit.tokens
         results = [_passage(h, self.base, names.get(h.collection_id, ""), n) for n, h in enumerate(picked, 1)]
-        return {"found": True, "query": query, "results": results}, sorted({h.file_id for h in picked})
+        return {"found": True, "query": query, "results": results, **({"note": " ".join(notes)} if notes else {})},             sorted({h.file_id for h in picked})
 
     def read_passage(self, conn, caller: Caller, chunk_id: int, around: int = 1) -> tuple[dict, list[int]]:
         around = max(0, min(int(around), 3))
@@ -216,7 +257,8 @@ class Tools:
         # Chunks of a file in the bin (or under a binned folder) carry collection 0.
         if row is None or row["collection_id"] == fs.TRASH_COLLECTION \
                 or not access.can_read(row["collection_id"], row["folder_id"]):
-            raise ToolError("No such passage (or it isn't shared with Claude). Use a chunk_id from search_documents.")
+            raise ToolError("No such passage" + (" (or it isn't shared with Claude)" if self.claude else "")
+                            + ". Use a chunk_id from search_documents.")
         ids = [r[0] for r in conn.execute("SELECT id FROM chunks WHERE file_id = ? AND ord BETWEEN ? AND ? ORDER BY ord",
                                           (row["file_id"], row["ord"] - around, row["ord"] + around))]
         hits = retrieval._load_hits(conn, ids)
@@ -227,7 +269,7 @@ class Tools:
         return conn.execute("SELECT id, ad_account FROM users WHERE id = ?", (caller.user_id,)).fetchone()
 
     def list_apis(self, conn, caller: Caller) -> tuple[dict, list[int]]:
-        ops = apis.allowed_operations(conn, self._user(conn, caller), self.get_directory(), for_claude=True)
+        ops = apis.allowed_operations(conn, self._user(conn, caller), self.get_directory(), for_claude=self.claude)
         out: dict[str, dict] = {}
         for op in ops:
             entry = out.setdefault(op["api_name"], {"api": op["api_name"], "operations": []})
@@ -237,15 +279,17 @@ class Tools:
                                                                     "min", "max", "default", "help")}
                                for s in apis.param_specs(op)]})
         if not out:
-            return {"apis": [], "note": "No internal APIs are shared with Claude for this person."}, []
+            return {"apis": [], "note": "No internal APIs are open to " + ("Claude for " if self.claude else "")
+                    + "this person."}, []
         return {"apis": list(out.values())}, []
 
     def query_api(self, conn, caller: Caller, api: str, operation: str,
                   params: dict | None = None) -> tuple[dict, list[int]]:
         try:
             op = apis.operation_for(conn, self._user(conn, caller), self.get_directory(), api, operation,
-                                    for_claude=True)
-            result = apis.call(conn, self.settings, op["id"], params, user_id=caller.user_id, via="claude")
+                                    for_claude=self.claude)
+            result = apis.call(conn, self.settings, op["id"], params, user_id=caller.user_id,
+                               via="claude" if self.claude else "chat")
         except apis.ApiError as exc:
             raise ToolError(f"{exc} Use list_apis to see what you can query.") from None
         if not result.ok:
@@ -253,7 +297,7 @@ class Tools:
         live = f"live, {result.at[11:16]} UTC"
         return {"api": result.api_name, "operation": result.operation_name, "at": result.at + " UTC",
                 "citation": f"{result.api_name} · {result.operation_name} ({live})",
-                "link": f"{self.base}/apis/calls/{result.call_id}",
+                "link": f"{self.base}/apis/calls/{result.call_id}", "call_id": result.call_id,
                 "data": apis.digest(result.data, 40_000)}, []
 
     def list_libraries(self, conn, caller: Caller) -> tuple[dict, list[int]]:
@@ -266,14 +310,15 @@ class Tools:
             out.append({"library": _label(row), "id": cid, "kind": "inbox" if row["kind"] == "private" else "library",
                         "files": counts["files"], "searchable_files": counts["searchable"]})
         edit = ([f"{p['library']}" + (f" / {p['folder']}" if p["folder"] else "") for p in
-                 editing.editable_places(conn, caller.user_id)] if caller.can_edit else [])
+                 editing.editable_places(conn, caller.user_id, self.mode)] if caller.can_edit else [])
         return {"libraries": out, "you_can_edit_in": edit,
                 **({} if caller.can_edit else {"editing": "This connection can only search; the person can turn "
                                                           "on editing for it on the Claude page in Mnemerynne."})}, []
 
     def browse_folder(self, conn, caller: Caller, library: str, folder: str | None = None) -> tuple[dict, list[int]]:
+        library, folder = _split_place(library, folder)
         access = self._access(conn, caller)
-        row = _resolve_collection(conn, access, library)
+        row = _resolve_collection(conn, access, library, self.claude)
         folder_id = _resolve_folder(conn, access, row["id"], folder)
         listing = fs.browse(conn, access, row["id"], folder_id)
         return {
@@ -303,12 +348,19 @@ class Tools:
         row = fs.file_row(conn, file_id)
         if row is None or row["deleted_at"] is not None or not fs.is_live_folder(conn, row["folder_id"]) \
                 or not access.can_read(row["collection_id"], row["folder_id"]):
-            raise ToolError("No such file (or it isn't shared with Claude). Use a file_id from the other tools.")
+            raise ToolError("No such file" + (" (or it isn't shared with Claude)" if self.claude else "")
+                            + ". Use a file_id from the other tools.")
         if row["kind"] != "pdf":
             raise ToolError(f"“{row['display_name']}” isn't a PDF; use read_passage for its text.")
         pages = row["unit_count"] or 0
         if not 1 <= page <= max(pages, 1):
             raise ToolError(f"“{row['display_name']}” has {pages} page(s); ask for 1-{pages}.")
+        if not self.claude:
+            # Erynne's models don't take images: hand the person the page instead.
+            return {"file": row["display_name"], "page": page, "pages": pages,
+                    "link": f"{self.base}/files/{file_id}/pdf#page={page}",
+                    "note": "You can't see images. The person can open the page with this link; use "
+                            "search_documents or read_passage for its text."}, [file_id]
         path = store.content_path(conn, self.settings, file_id)
         if not path.exists():
             raise ToolError("The file's content is missing on the server; tell a Mnemerynne admin.")
@@ -334,7 +386,7 @@ class Tools:
 
     def open_file(self, conn, caller: Caller, file_id: int, start: int = 1, limit: int | None = None,
                   sheet: str | None = None, cells: str | None = None) -> tuple[dict, list[int]]:
-        loaded = editing.load(conn, self.settings, caller.user_id, file_id)
+        loaded = editing.load(conn, self.settings, caller.user_id, file_id, via=self.mode)
         if loaded.fmt == "text":
             view = editing_formats.text_view(loaded.data, start, limit or 400)
         elif loaded.fmt == "docx":
@@ -342,7 +394,8 @@ class Tools:
         else:
             view = editing_formats.xlsx_view(loaded.data, sheet, cells)
         try:
-            editing.check_edit(conn, caller.user_id, caller.can_edit, loaded.row["collection_id"], loaded.row["folder_id"])
+            editing.check_edit(conn, caller.user_id, caller.can_edit, loaded.row["collection_id"],
+                               loaded.row["folder_id"], via=self.mode)
             can_edit, why = True, None
         except editing.EditError as exc:
             can_edit, why = False, str(exc)
@@ -351,15 +404,20 @@ class Tools:
                 "link": _file_link(self.base, file_id, loaded.row["kind"]), **view}, [file_id]
 
     def _edited(self, conn, caller: Caller, file_id: int, version: str, fmt: str, apply) -> tuple[dict, list[int]]:
-        loaded = editing.load(conn, self.settings, caller.user_id, file_id)
+        loaded = editing.load(conn, self.settings, caller.user_id, file_id, via=self.mode)
         if loaded.fmt != fmt:
             tool = {"text": "edit_text", "docx": "edit_document", "xlsx": "edit_spreadsheet"}[loaded.fmt]
             raise editing.EditError(f"“{loaded.row['display_name']}” is edited with {tool}.")
-        editing.check_edit(conn, caller.user_id, caller.can_edit, loaded.row["collection_id"], loaded.row["folder_id"])
+        editing.check_edit(conn, caller.user_id, caller.can_edit, loaded.row["collection_id"], loaded.row["folder_id"],
+                           via=self.mode)
         if version != loaded.version:
             raise editing.EditConflict(f"“{loaded.row['display_name']}” changed since that version was opened. "
                                        f"Open it again and redo the change on the new version.")
         result = apply(loaded.data)
+        if not self.claude:
+            proposal = proposals.propose_edit(conn, self.settings, caller, loaded, result.data, result.changes)
+            return {"proposal": proposal, "file_id": file_id, "file": loaded.row["display_name"],
+                    "changes": result.changes, "status": "proposed", "note": _PROPOSED}, [file_id]
         new_version = editing.save(conn, self.settings, caller, file_id, result.data, expected=version,
                                    summary="; ".join(result.changes))
         return {"file_id": file_id, "file": loaded.row["display_name"], "version": new_version,
@@ -395,12 +453,21 @@ class Tools:
         else:
             raise editing.EditError("Name the file with .txt, .md, .docx or .xlsx at the end.")
         collection_id = folder_id = None
+        library, folder = _split_place(library, folder)
         if library:
             access = self._access(conn, caller)
-            row = _resolve_collection(conn, access, library)
+            row = _resolve_collection(conn, access, library, self.claude)
             collection_id, folder_id = row["id"], _resolve_folder(conn, access, row["id"], folder)
         elif folder:
             raise editing.EditError("Name the library the folder is in, too (or leave both out for the Agents folder).")
+        if not self.claude:
+            proposal = proposals.propose_new(conn, self.settings, caller, name, data, collection_id, folder_id,
+                                             [f"new file {name}"])
+            row = conn.execute("SELECT name, collection_id, folder_id FROM agent_proposals WHERE id = ?",
+                               (proposal,)).fetchone()
+            return {"proposal": proposal, "file": row["name"],
+                    "where": proposals.where(conn, row["collection_id"], row["folder_id"]),
+                    "status": "proposed", "note": _PROPOSED}, []
         file_id, version = editing.create(conn, self.settings, caller, name, data, collection_id, folder_id)
         row = conn.execute("SELECT * FROM files f JOIN blobs b ON b.sha256 = f.blob_sha256 WHERE f.id = ?",
                            (file_id,)).fetchone()
@@ -408,7 +475,7 @@ class Tools:
                 "link": _file_link(self.base, file_id, row["kind"])}, [file_id]
 
     def list_versions(self, conn, caller: Caller, file_id: int) -> tuple[dict, list[int]]:
-        loaded = editing.load(conn, self.settings, caller.user_id, file_id)
+        loaded = editing.load(conn, self.settings, caller.user_id, file_id, via=self.mode)
         return {"file_id": file_id, "file": loaded.row["display_name"], "current_version": loaded.version,
                 "earlier_versions": editing.versions(conn, file_id),
                 "note": "The person restores a version from Files → the file's info → Versions."}, [file_id]

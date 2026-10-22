@@ -14,6 +14,7 @@ from mnemerynne.directory import Directory
 
 ADMIN_GROUP_KEY = "admin_group"
 DEFAULT_ADMIN_GROUP = "Domain Admins"
+AGENT_GROUP_KEY = "agent_group"
 
 
 class LinkError(ValueError):
@@ -41,6 +42,29 @@ def is_admin(conn: sqlite3.Connection, user: sqlite3.Row, directory: Directory,
         return True
     account = user["ad_account"]
     return bool(account) and admin_group(conn).lower() in directory.groups_of(account)
+
+
+# ---------------------------------------------------------------- agent group
+def agent_group(conn: sqlite3.Connection) -> str:
+    """The AD group whose members get Erynne with tools (mnemerynne/agent.py); '' = nobody."""
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (AGENT_GROUP_KEY,)).fetchone()
+    return row["value"] if row else ""
+
+
+def set_agent_group(conn: sqlite3.Connection, name: str) -> str:
+    """Pick the group ('' turns the agent off for everyone)."""
+    name = (name or "").strip()
+    if len(name) > 256:
+        raise ValueError("Pick a group.")
+    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (AGENT_GROUP_KEY, name))
+    return name
+
+
+def is_agent_user(conn: sqlite3.Connection, user: sqlite3.Row, directory: Directory) -> bool:
+    """Only people linked to a member of the agent group; admins aren't included
+    by default (they join the group like anyone else)."""
+    group, account = agent_group(conn), user["ad_account"]
+    return bool(group) and bool(account) and group.lower() in directory.groups_of(account)
 
 
 # ------------------------------------------------------------ domain accounts

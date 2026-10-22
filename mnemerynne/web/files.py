@@ -74,7 +74,8 @@ def _file_json(row: sqlite3.Row, access: fs.Access) -> dict:
         "view_url": view,
         "download_url": f"/files/{row['id']}/raw",
         "can_delete": access.can_write(row["collection_id"], row["folder_id"]),
-        # "claude:alice": last changed through Claude for alice (Versions can undo it)
+        # "claude:alice" / "erynne:alice": last changed by Claude, or by Erynne's
+        # proposal that alice applied (Versions can undo it)
         "edited_via": row["edited_via"] if "edited_via" in row.keys() else None,
     }
 

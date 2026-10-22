@@ -787,8 +787,9 @@
     if (full.uploaded_by) addRow(dl, "Uploaded by", full.uploaded_by);
     addRow(dl, "Added", dateLabel(full.created_at));
     if (full.updated_at && full.updated_at !== full.created_at) addRow(dl, "Modified", dateLabel(full.updated_at));
-    if (full.edited_via && full.edited_via.indexOf("claude:") === 0) {
-      addRow(dl, "Last change", "🤖 via Claude for " + full.edited_via.slice(7));
+    const via = /^(claude|erynne):(.*)$/.exec(full.edited_via || "");
+    if (via) {
+      addRow(dl, "Last change", (via[1] === "claude" ? "🤖 via Claude for " : "🌸 by Erynne, applied by ") + via[2]);
     }
     pane.appendChild(dl);
     if (full.error) pane.appendChild(el("p", "error small", full.error));

@@ -20,6 +20,11 @@
     </div>
     <div class="ask-scope">
       <button type="button" class="scope-chip" id="scope" title="Choose which documents to search">🔎 <span id="scope-label">All my documents</span> ▾</button>
+      {% if agent %}
+      <label class="tools-toggle small" title="Erynne can search, open files, ask internal systems and draft changes for you to apply">
+        <input type="checkbox" id="use-tools" checked> 🛠 Use tools
+      </label>
+      {% endif %}
     </div>
     <form id="ask-form" class="ask">
       <textarea id="question" rows="2" placeholder="e.g. How do I run the night audit?" required maxlength="2000"></textarea>
@@ -28,5 +33,6 @@
   </main>
 </div>
 <script src="{{ static('picker.js') }}"></script>
+<script src="{{ static('agent.js') }}"></script>
 <script src="{{ static('chat.js') }}"></script>
 {% endblock %}

@@ -576,3 +576,31 @@ button.danger-fill { background: var(--error); }
 .version-list { list-style: none; padding: 0; margin: 0; font-size: .88rem; }
 .version-list li { padding: .45rem 0; border-bottom: 1px solid var(--line); }
 .version-actions { display: flex; gap: .8rem; margin-top: .2rem; }
+
+/* Erynne's agent in chat (agent.js): steps, proposed file changes */
+.ask-scope { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; }
+.tools-toggle { display: inline-flex; align-items: center; gap: .3rem; color: var(--muted); cursor: pointer; }
+.steps { margin: 0 0 .4rem; }
+.steps summary { cursor: pointer; }
+.step-list { margin: .2rem 0 0; padding-left: 1.4rem; }
+.step.running { color: var(--muted); font-style: italic; }
+.step.failed { color: var(--error); }
+.proposal { margin-top: .8rem; padding: .7rem .9rem; border: 1px solid var(--line); border-radius: var(--radius);
+            background: var(--glass-strong); }
+.proposal[data-status="applied"] { border-color: var(--ok-fg); }
+.proposal[data-status="dismissed"] { opacity: .7; }
+.proposal-head { margin-bottom: .3rem; overflow-wrap: anywhere; }
+.proposal-changes { margin: .2rem 0 .4rem; padding-left: 1.2rem; }
+.proposal .diff { max-height: 18rem; overflow: auto; margin: .3rem 0 .5rem; padding: .5rem; border-radius: 8px;
+                  background: rgba(0, 0, 0, .04); font-size: .8rem; line-height: 1.4; white-space: pre-wrap;
+                  overflow-wrap: anywhere; }
+.diff .add { background: var(--ok-bg); color: var(--ok-fg); }
+.diff .del { background: var(--bad-bg); color: var(--bad-fg); }
+.diff .hunk { color: var(--muted); }
+.proposal-actions { display: flex; align-items: center; gap: .9rem; flex-wrap: wrap; }
+@media (prefers-color-scheme: dark) { .proposal .diff { background: rgba(255, 255, 255, .05); } }
+.agent-settings { display: grid; grid-template-columns: max-content minmax(0, 24rem); gap: .45rem .8rem;
+                  align-items: center; margin: .5rem 0; }
+.agent-settings input[type="text"], .agent-settings input[type="url"], .agent-settings input[type="password"],
+.agent-settings input[type="number"] { width: 100%; }
+@media (max-width: 600px) { .agent-settings { grid-template-columns: minmax(0, 1fr); } }

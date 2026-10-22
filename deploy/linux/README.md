@@ -291,6 +291,56 @@ Atera) or a blank API.
   That response is stored with the call, so keep in mind that answers from
   Atera keep ticket text in Mnemerynne's database.
 
+## 5g. Erynne agent (tools in chat)
+
+People in one AD group get Erynne with the same tools Claude has: she
+searches, reads and browses their documents, opens PDFs at a page, asks the
+internal APIs they may use, and drafts changes to `.txt`, `.md`, `.docx` and
+`.xlsx` files. Everyone else keeps the normal answers.
+
+1. **Create the group** on the domain controller (for example
+   `Erynne Agents`) and add people to it. They need their Mnemerynne user
+   linked to their domain account (section 5c). Admins aren't included
+   automatically; add them to the group like anyone else.
+2. **Run a model for it.** It needs a model that's good at tool calling,
+   served OpenAI-compatibly with tool support, for example llama-server
+   started with `--jinja`:
+
+   ```sh
+   llama-server -m Qwen3-8B-Q4_K_M.gguf --jinja --reasoning-format deepseek \
+     --ctx-size 16384 --parallel 2 --host 0.0.0.0 --port 8083
+   ```
+
+   It can live on another machine, or later behind a balancer. The answer
+   model (`MNEMERYNNE_LLM_URL`) stays as it is.
+3. **Settings → Erynne agent:** pick the group, enter the model's address
+   (e.g. `http://10.0.0.5:8083`) and a name for it, and save. The status line
+   says whether it's answering. An API key is optional, for proxies that need
+   one; it's stored encrypted and never shown again.
+
+How it behaves:
+
+- **Edits wait for a click.** Erynne never changes a file herself. Each edit
+  or new file shows as a card under her answer, with the change list (and a
+  diff for text files). Nothing happens until the person presses **Apply**.
+  Apply checks everything again: still in the group, can still edit there,
+  and the file hasn't changed since (otherwise it's refused as out of date).
+  The previous version is kept, as with Claude's edits (Files → Versions).
+  She edits only in the person's Agents folder, and in libraries where
+  *Claude and Erynne can edit files here* is on and the person can edit.
+- **What she reads.** She runs on this server, so she reads everything the
+  person can read, not only what's shared with Claude. APIs follow each API's
+  own group. A *Use tools* switch under the question box lets people ask
+  without tools.
+- **Fallback.** If the agent model is unset or not answering (checked every
+  30 seconds), or fails before doing anything, the question gets a normal
+  answer instead.
+- **Records.** Every tool call is logged in `agent_calls`, and answers
+  record the agent model's name. Proposals nobody decides on expire after
+  `MNEMERYNNE_VERSION_DAYS` (30). Their content sits in
+  `<data_dir>/proposals` until then. It isn't backed up, since it's
+  short-lived.
+
 ## 6. Check
 
 ```sh

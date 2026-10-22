@@ -22,6 +22,7 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
 from mnemerynne import db, directory, editing, mcp_server, memory, permissions, share, users
+from mnemerynne.agent import Agent
 from mnemerynne.answer import ASSISTANT_NAME
 from mnemerynne.auth import LoginThrottle
 from mnemerynne.clients.embed import Embedder
@@ -30,7 +31,7 @@ from mnemerynne.clients.rerank import Reranker
 from mnemerynne.config import Settings, get_settings
 from mnemerynne.graph import Deps, build_graph
 from mnemerynne.router import load_router
-from mnemerynne.web import admin, admin_apis, apis as api_pages, chat, files, memories, tokens
+from mnemerynne.web import admin, admin_apis, agent as agent_pages, apis as api_pages, chat, files, memories, tokens
 from mnemerynne.web.deps import LoginRequired, api_user, get_db, is_admin, page_user
 
 log = logging.getLogger("mnemerynne.web")
@@ -65,6 +66,7 @@ class Services:
     router: Any = None
     directory: Any = None   # the AD domain (mnemerynne.directory); None = from settings
     share_checker: Any = None   # share permission checks (share.Checker); None = the real POSIX ACLs
+    agent_llm: Any = None   # the agent's model client; None = built from the Settings → Erynne agent address
 
 
 def create_app(settings: Settings | None = None, services: Services | None = None) -> FastAPI:
@@ -106,8 +108,11 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         app.state.checkpointer, app.state.store = checkpointer, store
         router = svc.router if services is not None else load_router(settings)
         log.info("Routing: %s.", f"{', '.join(router.labels)}" if router else "no router trained; everything is search")
+        # Erynne with tools, for the agent group (agent.py); its model is set on Settings.
+        app.state.agent = Agent(settings, lambda: app.state.embedder, lambda: app.state.directory,
+                                (lambda cfg, key: svc.agent_llm) if svc.agent_llm is not None else None)
         app.state.graph = build_graph(Deps(settings, svc.llm, svc.embedder, svc.reranker, router,
-                                           app.state.directory), checkpointer, store)
+                                           app.state.directory, app.state.agent), checkpointer, store)
         app.state.background = set()
         app.state.memory_writer = memory.make_writer(settings, svc.llm, store, app.state.background)
         app.state.embedder = svc.embedder
@@ -120,6 +125,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             await asyncio.gather(*app.state.background, return_exceptions=True)
             await saver_conn.close()
             await store_conn.close()
+            await app.state.agent.aclose()
             if services is None:
                 svc.embedder.close()
                 await svc.llm.aclose()
@@ -169,6 +175,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(tokens.router)
     app.include_router(api_pages.router)
     app.include_router(admin_apis.router)
+    app.include_router(agent_pages.router)
 
     # MCP for Claude Desktop: bearer-token auth, read-only tools (mnemerynne/mcp_server.py).
     mcp = mcp_server.build_server(settings, lambda: app.state.embedder, lambda: app.state.directory)
@@ -225,7 +232,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             "SELECT 1 FROM files WHERE status = 'ready' AND collection_id IN "
             f"({','.join(str(i) for i in permissions.readable_collection_ids(conn, user['id'])) or 'NULL'}) "
             "LIMIT 1").fetchone() is not None
-        return _page(request, "chat.html", user, conn, active="chat", has_files=has_files)
+        return _page(request, "chat.html", user, conn, active="chat", has_files=has_files,
+                     agent=app.state.agent.allowed(conn, user))
 
     @app.get("/files", response_class=HTMLResponse)
     def files_page(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db)):
@@ -238,6 +246,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             "username": user["username"],
             "role": user["role"],
             "collections": [dict(c) for c in permissions.readable_collections(conn, user["id"])],
+            # In the agent group with a model set (the server checks again on every question).
+            "agent": app.state.agent.allowed(conn, user),
         }
 
     return app

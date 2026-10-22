@@ -327,7 +327,7 @@
     claudeRow.appendChild(checkbox("Shared with Claude", lib.claude_enabled, function (on) {
       change("PUT", "/api/admin/libraries/" + lib.id + "/claude", { enabled: on });
     }, "Master switch: when off, nobody can search this library from Claude"));
-    const editBox = checkbox("Claude can edit files here", lib.claude_edit, function (on) {
+    const editBox = checkbox("Claude and Erynne can edit files here", lib.claude_edit, function (on) {
       change("PUT", "/api/admin/libraries/" + lib.id + "/claude-edit", { enabled: on });
     }, "Lets Claude create and change text, Markdown, Word and Excel files here, for people who may edit them " +
        "themselves and whose token allows it. Every change can be undone from Versions.");
@@ -670,6 +670,103 @@
     catch (e) { $("admin-group").replaceChildren(el("p", "error", e.message)); }
   }
 
+  // ---------------------------------------------------------- Erynne agent
+  function agentField(grid, label, control) {
+    const id = "agent-" + label.toLowerCase().replace(/[^a-z]+/g, "-");
+    control.id = id;
+    const l = el("label", "small", label);
+    l.htmlFor = id;
+    grid.append(l, control);
+    return control;
+  }
+
+  function agentInput(type, value) {
+    const i = el("input");
+    i.type = type;
+    if (type === "checkbox") i.checked = !!value; else i.value = value === null || value === undefined ? "" : value;
+    return i;
+  }
+
+  function renderAgent(data) {
+    const box = $("agent-settings");
+    box.replaceChildren();
+    if (data.groups && data.groups.length) fillDatalist("domain-groups", data.groups);
+    box.appendChild(el("p", "muted", "Members of this " + (data.domain || "domain") + " group get Erynne with " +
+      "tools in chat: she searches, opens files, asks internal systems and drafts changes to .txt, .md, .docx " +
+      "and .xlsx files, which they apply with a click. Everyone else keeps the normal answers. Leave it empty " +
+      "to turn the agent off."));
+    if (!data.enabled) box.appendChild(el("p", "error", "No AD domain is configured on the server (MNEMERYNNE_AD_DOMAIN), so nobody can be in the group."));
+
+    const groupForm = el("form", "ax-new");
+    const group = agentInput("text", data.group);
+    group.setAttribute("list", "domain-groups");
+    group.setAttribute("aria-label", "Agent group");
+    group.placeholder = "No group: the agent is off";
+    const saveGroup = el("button", "small", "Save");
+    saveGroup.type = "submit";
+    groupForm.append(group, saveGroup);
+    groupForm.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      try { renderAgent(await api("PUT", "/api/admin/settings/agent-group", { group: group.value.trim() })); }
+      catch (err) { showError(err.message); }
+    });
+    box.appendChild(groupForm);
+    if (data.group && data.members) {
+      box.appendChild(el("p", "small muted", data.members.length
+        ? "In the group now: " + data.members.join(", ") + "."
+        : "No one linked to a domain account is in this group yet (Accounts tab)."));
+    }
+
+    const m = data.model;
+    box.appendChild(el("h3", "ax-h small", "Agent model"));
+    box.appendChild(el("p", "small muted", "An OpenAI-compatible server for the agent, separate from the answer " +
+      "model, e.g. a llama-server started with --jinja (Qwen3-8B), or later a balancer in front of several. " +
+      "When it's unset or doesn't answer, everyone gets the normal answers."));
+    const form = el("form");
+    const grid = el("div", "agent-settings");
+    const url = agentField(grid, "Address", agentInput("url", m.url));
+    url.placeholder = "http://127.0.0.1:8083";
+    const model = agentField(grid, "Model name", agentInput("text", m.model));
+    model.placeholder = "qwen3-8b (recorded with answers)";
+    const key = agentField(grid, "API key", agentInput("password", ""));
+    key.placeholder = m.api_key_set ? "Set; leave blank to keep" : "None (optional)";
+    key.autocomplete = "off";
+    let removeKey = null;
+    if (m.api_key_set) removeKey = agentField(grid, "Remove the key", agentInput("checkbox", false));
+    const timeout = agentField(grid, "Timeout (seconds)", agentInput("number", m.timeout));
+    const steps = agentField(grid, "Most tool steps", agentInput("number", m.max_steps));
+    const maxTokens = agentField(grid, "Tokens per turn", agentInput("number", m.max_tokens));
+    const reasoning = agentField(grid, "Thinking tokens", agentInput("number", m.reasoning_tokens));
+    const thinking = agentField(grid, "Let it think", agentInput("checkbox", m.thinking));
+    form.appendChild(grid);
+    const actions = el("div", "ax-new");
+    const save = el("button", "small", "Save");
+    save.type = "submit";
+    actions.appendChild(save);
+    const reach = data.reachable === null ? (m.url ? "not checked" : "not set: the agent is off")
+      : data.reachable ? "✓ answering" : "✗ not answering: everyone gets the normal answers";
+    actions.appendChild(el("span", "small " + (data.reachable === false ? "error" : "muted"), "Model: " + reach));
+    form.appendChild(actions);
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      const body = { url: url.value.trim(), model: model.value.trim(), timeout: Number(timeout.value),
+                     max_steps: Number(steps.value), max_tokens: Number(maxTokens.value),
+                     reasoning_tokens: Number(reasoning.value), thinking: thinking.checked };
+      if (key.value) body.api_key = key.value;
+      else if (removeKey && removeKey.checked) body.api_key = "";
+      try { renderAgent(await api("PUT", "/api/admin/settings/agent-model", body)); }
+      catch (err) { showError(err.message); }
+    });
+    box.appendChild(form);
+  }
+
+  async function loadAgent() {
+    try { renderAgent(await api("GET", "/api/admin/settings/agent")); }
+    catch (e) { $("agent-settings").replaceChildren(el("p", "error", e.message)); }
+  }
+
   let updatesLoaded = false;
   async function loadUpdates(refresh) {
     updatesLoaded = true;
@@ -688,7 +785,7 @@
     });
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
-    if (tab === "settings" && !updatesLoaded) { loadUpdates(false); loadAdminGroup(); }
+    if (tab === "settings" && !updatesLoaded) { loadUpdates(false); loadAdminGroup(); loadAgent(); }
     if (tab === "accounts") loadAccounts();
     if (tab === "apis" && window.ErynneApis) window.ErynneApis.load();   // admin_apis.js
   }

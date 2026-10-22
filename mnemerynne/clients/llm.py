@@ -6,9 +6,11 @@ talks to the same endpoint through langchain-openai.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import re
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
 import httpx
@@ -63,6 +65,69 @@ class ThinkFilter:
 
 class BadModelOutput(ValueError):
     """A schema-constrained call didn't return a JSON object; the message says why."""
+
+
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    arguments: dict
+    error: str | None = None   # the arguments weren't a JSON object: tell the model, don't run it
+
+
+@dataclass
+class ToolTurn:
+    """One model turn with tools offered: text, or tool calls to run (or both)."""
+    content: str
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    finish_reason: str | None = None
+
+
+# Tool calls the server left in the text instead of parsing them: LFM2's
+# <|tool_call_start|>[name(arg=1)]<|tool_call_end|> and Qwen/Hermes's
+# <tool_call>{"name": ..., "arguments": {...}}</tool_call>.
+_LFM_CALLS = re.compile(r"<\|tool_call_start\|>(.*?)<\|tool_call_end\|>", re.DOTALL)
+_HERMES_CALLS = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
+
+
+def _call_from(raw: dict, n: int) -> ToolCall:
+    fn = raw.get("function") or {}
+    args = fn.get("arguments")
+    error = None
+    if isinstance(args, str):
+        try:
+            args = json.loads(args) if args.strip() else {}
+        except json.JSONDecodeError:
+            args, error = {}, "The arguments weren't valid JSON."
+    if not isinstance(args, dict):
+        args, error = {}, error or "The arguments must be a JSON object."
+    return ToolCall(raw.get("id") or f"call_{n}", str(fn.get("name") or ""), args, error)
+
+
+def parse_inline_calls(text: str) -> tuple[str, list[ToolCall]]:
+    """Tool calls written into the reply text; returns (the text without them, calls)."""
+    calls: list[ToolCall] = []
+    for match in _LFM_CALLS.finditer(text):
+        try:
+            tree = ast.parse(match.group(1).strip(), mode="eval").body
+            items = tree.elts if isinstance(tree, ast.List) else [tree]
+            for item in items:
+                if not isinstance(item, ast.Call) or not isinstance(item.func, ast.Name):
+                    raise ValueError
+                calls.append(ToolCall(f"call_{len(calls)}", item.func.id,
+                                      {k.arg: ast.literal_eval(k.value) for k in item.keywords if k.arg}))
+        except (SyntaxError, ValueError):
+            calls.append(ToolCall(f"call_{len(calls)}", "", {}, "Couldn't read that tool call."))
+    for match in _HERMES_CALLS.finditer(text):
+        try:
+            raw = json.loads(match.group(1))
+            calls.append(_call_from({"function": {"name": raw.get("name"), "arguments": raw.get("arguments") or {}}},
+                                    len(calls)))
+        except (json.JSONDecodeError, AttributeError):
+            calls.append(ToolCall(f"call_{len(calls)}", "", {}, "Couldn't read that tool call."))
+    if calls:
+        text = _HERMES_CALLS.sub("", _LFM_CALLS.sub("", text))
+    return text, calls
 
 
 def strict_schema(schema: Any) -> Any:
@@ -242,6 +307,26 @@ class LLM:
         raise BadModelOutput("The model didn't return JSON" + (": " + " and ".join(why) if why else "")
                              + f". Reply began: {content[:120]!r}")
 
+    async def chat_tools(self, messages: list[dict], tools: list[dict], *, temperature: float = 0.2,
+                         max_tokens: int = 1024, thinking: bool = True) -> ToolTurn:
+        """One turn with OpenAI-style `tools` offered (llama-server needs --jinja).
+        Calls the server parsed come back in tool_calls; ones left in the text
+        (some chat templates) are parsed here."""
+        self._check_budget()
+        payload = self._payload(messages, temperature, max_tokens, None, thinking, False)
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+        body = (await self._post(payload)).json()
+        self._record_usage(body.get("usage"))
+        choice = body["choices"][0]
+        message = choice.get("message") or {}
+        calls = [_call_from(c, n) for n, c in enumerate(message.get("tool_calls") or [])]
+        content = message.get("content") or ""
+        if not calls:
+            content, calls = parse_inline_calls(content)
+        return ToolTurn(strip_reasoning(content), calls, choice.get("finish_reason"))
+
     async def stream(self, messages: list[dict[str, str]], *, temperature: float = 0.2, max_tokens: int = 512,
                      json_schema: dict | None = None) -> AsyncIterator[str]:
         """Yield content deltas as they arrive (server-sent events).
@@ -286,6 +371,21 @@ class LLM:
             return r.status_code == 200
         except httpx.HTTPError:
             return False
+
+    async def reachable(self) -> bool:
+        """The server answers and has a model loaded: llama-server's /health,
+        or /v1/models on servers and proxies without it."""
+        base = self.url.rsplit("/v1/", 1)[0]
+        for path in ("/health", "/v1/models"):
+            try:
+                r = await self._client.get(base + path, timeout=5.0)
+            except httpx.HTTPError:
+                return False
+            if r.status_code == 200:
+                return True
+            if r.status_code != 404:
+                return False   # e.g. 503 while llama-server is loading the model
+        return False
 
     async def aclose(self) -> None:
         await self._client.aclose()

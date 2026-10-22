@@ -16,6 +16,10 @@ On the share, a file open in Word or Excel (a ~$ lock file next to it) is
 refused too, and the new content replaces the old in one rename, so nobody
 ever sees half a file. The file manager's code paths (fs, store) are reused
 for creating files; the format work is in editing_formats.py.
+
+Erynne (via="erynne", the agent in chat) follows the same rules except the
+Claude sharing: she runs on this server, so she reads whatever the person can
+read. Her changes only land when the person applies them (proposals.py).
 """
 
 from __future__ import annotations
@@ -56,6 +60,15 @@ class EditForbidden(EditError):
 
 class EditConflict(EditError):
     status = 409
+
+
+ASSISTANTS = {"claude": "Claude", "erynne": "Erynne"}
+
+
+def ai_access(conn: sqlite3.Connection, user_id: int, via: str = "claude") -> fs.Access:
+    """What the assistant may read for this person: Claude only what is shared
+    with Claude (its reads leave the building); Erynne all the person can read."""
+    return fs.Access.for_claude(conn, user_id) if via == "claude" else fs.Access.of(conn, user_id)
 
 
 def format_of(name: str) -> str | None:
@@ -123,16 +136,17 @@ class Place:
 
 
 def check_edit(conn: sqlite3.Connection, user_id: int, token_can_edit: bool,
-               collection_id: int, folder_id: int | None) -> Place:
-    """Raise unless Claude may change files at this place for this person."""
-    claude = fs.Access.for_claude(conn, user_id)
-    if not claude.can_read(collection_id, folder_id):
-        raise EditNotFound("No such place (or it isn't shared with Claude).")
+               collection_id: int, folder_id: int | None, *, via: str = "claude") -> Place:
+    """Raise unless the assistant (Claude, or Erynne) may change files at this
+    place for this person."""
+    who = ASSISTANTS[via]
+    if not ai_access(conn, user_id, via).can_read(collection_id, folder_id):
+        raise EditNotFound("No such place" + (" (or it isn't shared with Claude)." if via == "claude" else "."))
     if not token_can_edit:
         raise EditForbidden("This connection can only search. To let Claude change files, open Claude in "
                             "Mnemerynne and turn on “Let Claude edit files” for this token.")
     if not fs.Access.of(conn, user_id).can_write(collection_id, folder_id):
-        raise EditForbidden("You can't change files here yourself, so Claude can't either.")
+        raise EditForbidden(f"You can't change files here yourself, so {who} can't either.")
     coll = conn.execute("SELECT kind, owner_user_id, claude_edit FROM collections WHERE id = ?",
                         (collection_id,)).fetchone()
     if coll["claude_edit"]:
@@ -140,12 +154,12 @@ def check_edit(conn: sqlite3.Connection, user_id: int, token_can_edit: bool,
     if coll["kind"] == "private" and coll["owner_user_id"] == user_id and folder_id in _agents_subtree(conn, collection_id):
         return Place(collection_id, folder_id, "agents")
     where = "your inbox outside the Agents folder" if coll["kind"] == "private" else "this library"
-    raise EditForbidden(f"Claude isn't allowed to change files in {where}. Work in your {AGENTS} folder "
-                        f"instead (create_file puts new files there), or ask an admin to let Claude edit here.")
+    raise EditForbidden(f"{who} isn't allowed to change files in {where}. Work in your {AGENTS} folder "
+                        f"instead (create_file puts new files there), or ask an admin to allow AI edits here.")
 
 
-def editable_places(conn: sqlite3.Connection, user_id: int) -> list[dict]:
-    """Where Claude may edit for this person (ignoring the token), for display."""
+def editable_places(conn: sqlite3.Connection, user_id: int, via: str = "claude") -> list[dict]:
+    """Where the assistant may edit for this person (ignoring the token), for display."""
     out = []
     try:
         agents = agents_folder(conn, user_id)
@@ -154,10 +168,10 @@ def editable_places(conn: sqlite3.Connection, user_id: int) -> list[dict]:
     if agents is not None:
         out.append({"library": "My inbox", "folder": AGENTS, "why": "your Agents folder"})
     access = fs.Access.of(conn, user_id)
-    claude = fs.Access.for_claude(conn, user_id)
+    ai = ai_access(conn, user_id, via)
     for row in conn.execute("SELECT id, kind, name FROM collections WHERE claude_edit = 1").fetchall():
         reach = access.reaches.get(row["id"])
-        if reach is None or not reach.any_write or row["id"] not in claude.readable:
+        if reach is None or not reach.any_write or row["id"] not in ai.readable:
             continue
         out.append({"library": "My inbox" if row["kind"] == "private" else row["name"],
                     "folder": None if reach.root_write else "some folders", "why": "allowed by an admin"})
@@ -174,15 +188,17 @@ class Loaded:
     fmt: str
 
 
-def load(conn: sqlite3.Connection, settings: Settings, user_id: int, file_id: int) -> Loaded:
-    """A file Claude may read, with its current bytes and version."""
+def load(conn: sqlite3.Connection, settings: Settings, user_id: int, file_id: int, *,
+         via: str = "claude") -> Loaded:
+    """A file the assistant may read, with its current bytes and version."""
     row = fs.file_row(conn, file_id)
     if row is None or row["deleted_at"] is not None or not fs.is_live_folder(conn, row["folder_id"]) \
-            or not fs.Access.for_claude(conn, user_id).can_read(row["collection_id"], row["folder_id"]):
-        raise EditNotFound("No such file (or it isn't shared with Claude). Use a file_id from the other tools.")
+            or not ai_access(conn, user_id, via).can_read(row["collection_id"], row["folder_id"]):
+        raise EditNotFound("No such file" + (" (or it isn't shared with Claude)" if via == "claude" else "")
+                           + ". Use a file_id from the other tools.")
     fmt = format_of(row["display_name"])
     if fmt is None:
-        raise EditError(f"“{row['display_name']}” isn't a file Claude can open for editing: only "
+        raise EditError(f"“{row['display_name']}” isn't a file {ASSISTANTS[via]} can open for editing: only "
                         f"{', '.join(sorted(EDITABLE))}. Use search_documents or read_passage to read it.")
     try:
         path = store.content_path(conn, settings, file_id)
@@ -288,31 +304,40 @@ def replace_content(conn: sqlite3.Connection, settings: Settings, file_id: int, 
 
 
 def save(conn: sqlite3.Connection, settings: Settings, caller, file_id: int, data: bytes, *,
-         expected: str, summary: str) -> str:
-    """Claude's change to a file, after the permission check."""
-    loaded = load(conn, settings, caller.user_id, file_id)
-    check_edit(conn, caller.user_id, caller.can_edit, loaded.row["collection_id"], loaded.row["folder_id"])
+         expected: str, summary: str, via: str = "claude") -> str:
+    """The assistant's change to a file, after the permission check."""
+    loaded = load(conn, settings, caller.user_id, file_id, via=via)
+    check_edit(conn, caller.user_id, caller.can_edit, loaded.row["collection_id"], loaded.row["folder_id"], via=via)
     return replace_content(conn, settings, file_id, data, expected=expected, actor_id=caller.user_id,
-                           via="claude", summary=summary, token_id=caller.token_id,
-                           edited_via=f"claude:{caller.username}")
+                           via=via, summary=summary, token_id=caller.token_id,
+                           edited_via=f"{via}:{caller.username}")
+
+
+def new_file_place(conn: sqlite3.Connection, user_id: int, collection_id: int | None,
+                   folder_id: int | None) -> tuple[int, int | None]:
+    """Where a new file goes: the given place, or the person's Agents folder."""
+    if collection_id is not None:
+        return collection_id, folder_id
+    try:
+        folder_id = agents_folder(conn, user_id)
+    except fs.FsError as exc:
+        raise EditConflict(str(exc)) from None
+    collection_id = permissions.private_collection_id(conn, user_id)
+    if folder_id is None or collection_id is None:
+        raise EditError("You have no inbox, so there's no Agents folder to put it in.")
+    return collection_id, folder_id
 
 
 def create(conn: sqlite3.Connection, settings: Settings, caller, name: str, data: bytes,
-           collection_id: int | None = None, folder_id: int | None = None) -> tuple[int, str]:
-    """A new file from Claude; in the caller's Agents folder unless another
-    place where Claude may edit is given. Returns (file_id, version)."""
+           collection_id: int | None = None, folder_id: int | None = None, *, via: str = "claude") -> tuple[int, str]:
+    """A new file from the assistant; in the caller's Agents folder unless
+    another place where it may edit is given. Returns (file_id, version)."""
     name = store.clean_display_name(name)
     if format_of(name) is None:
-        raise EditError(f"Claude can create {', '.join(sorted(EDITABLE))} files; “{name}” is none of those.")
-    if collection_id is None:
-        try:
-            folder_id = agents_folder(conn, caller.user_id)
-        except fs.FsError as exc:
-            raise EditConflict(str(exc)) from None
-        collection_id = permissions.private_collection_id(conn, caller.user_id)
-        if folder_id is None or collection_id is None:
-            raise EditError("You have no inbox, so there's no Agents folder to put it in.")
-    check_edit(conn, caller.user_id, caller.can_edit, collection_id, folder_id)
+        raise EditError(f"{ASSISTANTS[via]} can create {', '.join(sorted(EDITABLE))} files; "
+                        f"“{name}” is none of those.")
+    collection_id, folder_id = new_file_place(conn, caller.user_id, collection_id, folder_id)
+    check_edit(conn, caller.user_id, caller.can_edit, collection_id, folder_id, via=via)
     if len(data) > settings.edit_max_bytes:
         raise EditError(f"The file would be over {settings.edit_max_bytes // (1024 * 1024)} MB.")
     try:
@@ -320,7 +345,7 @@ def create(conn: sqlite3.Connection, settings: Settings, caller, name: str, data
         file_id, _ = store.add_file(conn, settings, received, collection_id, caller.user_id, folder_id=folder_id)
     except (store.UploadError, fs.FsError) as exc:
         raise EditError(str(exc)) from None
-    conn.execute("UPDATE files SET edited_via = ? WHERE id = ?", (f"claude:{caller.username}", file_id))
+    conn.execute("UPDATE files SET edited_via = ? WHERE id = ?", (f"{via}:{caller.username}", file_id))
     return file_id, sha256(data)
 
 
@@ -330,7 +355,8 @@ def versions(conn: sqlite3.Connection, file_id: int) -> list[dict]:
         "SELECT v.id, v.sha256, v.size, v.created_at, v.via, v.summary, u.username AS by FROM file_versions v "
         "LEFT JOIN users u ON u.id = v.created_by WHERE v.file_id = ? ORDER BY v.id DESC", (file_id,)).fetchall()
     return [{"id": r["id"], "version": r["sha256"], "size": r["size"], "replaced_at": r["created_at"],
-             "replaced_by": ("Claude for " if r["via"] == "claude" else "restore by ") + (r["by"] or "a deleted user"),
+             "replaced_by": {"claude": "Claude for ", "erynne": "Erynne for "}.get(r["via"], "restore by ")
+                            + (r["by"] or "a deleted user"),
              "change": r["summary"]} for r in rows]
 
 
