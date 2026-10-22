@@ -28,7 +28,7 @@ def _set(conn: sqlite3.Connection, file_id: int, **fields) -> None:
 
 # ------------------------------------------------------------------ extraction
 def _extract_pdf(conn, settings: Settings, blob: sqlite3.Row, file_id: int) -> tuple[list[Segment], str | None]:
-    path = store.blob_path(settings, blob["rel_path"])
+    path = store.content_path(conn, settings, file_id)
     try:
         doc = pdf.read_pdf(path)
     except pdf.PdfError as exc:
@@ -76,7 +76,7 @@ def _extract(conn, settings: Settings, blob: sqlite3.Row, file_id: int) -> tuple
         segments, note = _extract_pdf(conn, settings, blob, file_id)
     else:
         try:
-            text = markdown.decode(store.blob_path(settings, blob["rel_path"]).read_bytes())
+            text = markdown.decode(store.content_path(conn, settings, file_id).read_bytes())
         except markdown.MarkdownError as exc:
             raise IngestError(str(exc)) from exc
         # Plain text is one unit; the chunker still splits it on paragraphs.
@@ -136,7 +136,11 @@ def process_file(conn: sqlite3.Connection, settings: Settings, embedder: Embedde
         return
     _set(conn, file_id, status="processing", error=None)
 
-    segments, note = _extract(conn, settings, row, file_id)
+    try:
+        segments, note = _extract(conn, settings, row, file_id)
+    except FileNotFoundError as exc:
+        # Gone from the share since it was queued; the next scan removes it.
+        raise IngestError("The file is no longer there.") from exc
     if note:
         _set(conn, file_id, notes=note)
 

@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
-from mnemerynne import jobs
+from mnemerynne import jobs, share
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import markdown, pdf
@@ -84,6 +84,22 @@ def receive(stream: BinaryIO, filename: str, settings: Settings) -> Received:
     return Received(sha.hexdigest(), kind, size, tmp_path, display_name, _mime(kind, display_name), note)
 
 
+def inspect(path: Path, display_name: str, settings: Settings) -> tuple[str, str, int, str | None]:
+    """(kind, mime, size, note) of a file read in place on the share; the
+    same rules as uploads (note: why it is stored but not searchable)."""
+    size = path.stat().st_size
+    with open(path, "rb") as fh:
+        kind = _sniff(fh.read(_READ_SIZE), display_name)
+    note = None
+    if size > settings.max_file_bytes:
+        note = f"Not searchable: files over {settings.max_file_bytes // (1024 * 1024)} MB aren't indexed."
+    elif kind != "other":
+        note = _indexable(kind, path, size, settings)
+    if note:
+        kind = "other"
+    return kind, _mime(kind, display_name), size, note
+
+
 def _sniff(first_block: bytes, display_name: str) -> str:
     """Decide the type from the content; the extension only distinguishes text."""
     if first_block.lstrip()[:5] == b"%PDF-":
@@ -135,6 +151,20 @@ def blob_path(settings: Settings, rel_path: str) -> Path:
     return settings.blob_dir / Path(rel_path)
 
 
+def content_path(conn: sqlite3.Connection, settings: Settings, file_id: int, *, prefer_ocr: bool = False) -> Path:
+    """Where a file's bytes are: on the share for share collections (the
+    trash, if binned), in blob storage otherwise. An OCR'd copy of a scanned
+    PDF always lives in blob storage."""
+    row = conn.execute(
+        "SELECT c.share_path, b.rel_path, b.ocr_rel_path FROM files f JOIN collections c ON c.id = f.collection_id "
+        "JOIN blobs b ON b.sha256 = f.blob_sha256 WHERE f.id = ?", (file_id,)).fetchone()
+    if prefer_ocr and row["ocr_rel_path"]:
+        return blob_path(settings, row["ocr_rel_path"])
+    if row["share_path"]:
+        return share.file_path(conn, file_id)
+    return blob_path(settings, row["rel_path"])
+
+
 def store(conn: sqlite3.Connection, settings: Settings, received: Received) -> str:
     """Move the received file into blob storage; returns its relative path."""
     rel_path = blob_rel_path(received.sha256, received.kind)
@@ -169,20 +199,29 @@ def add_file(
     """
     from mnemerynne import fs  # fs builds on this module
 
+    on_share = share.is_share(conn, collection_id)
     with transaction(conn):
         if folder_parts:
             folder_id = fs.ensure_path(conn, collection_id, folder_id, folder_parts, uploaded_by)
-        store(conn, settings, received)
+        if on_share:
+            conn.execute("INSERT OR IGNORE INTO blobs(sha256, kind, mime, size, rel_path) VALUES (?, ?, ?, ?, ?)",
+                         (received.sha256, received.kind, received.mime, received.size,
+                          blob_rel_path(received.sha256, received.kind)))
+        else:
+            store(conn, settings, received)
         existing = conn.execute(
             "SELECT id FROM files WHERE collection_id = ? AND COALESCE(folder_id, 0) = ? AND blob_sha256 = ? "
             "AND deleted_at IS NULL",
             (collection_id, folder_id or 0, received.sha256),
         ).fetchone()
         if existing:
+            received.tmp_path.unlink(missing_ok=True)
             return existing["id"], False
         # The blob's kind is whatever it was first stored as.
         kind = conn.execute("SELECT kind FROM blobs WHERE sha256 = ?", (received.sha256,)).fetchone()["kind"]
         name = fs.unique_name(conn, collection_id, folder_id, received.display_name, "file")
+        if on_share:
+            fs.share_name(name)
         stored_only = kind == "other"
         file_id = conn.execute(
             "INSERT INTO files(collection_id, folder_id, blob_sha256, display_name, uploaded_by, status, notes) "
@@ -190,6 +229,12 @@ def add_file(
             (collection_id, folder_id, received.sha256, name, uploaded_by,
              "stored" if stored_only else "queued", received.note),
         ).lastrowid
+        if on_share:
+            # The bytes go to the share, not blob storage; last, so a failure
+            # leaves nothing behind (the transaction rolls back).
+            dest = share.folder_dir(conn, collection_id, folder_id) / name
+            share.place(received.tmp_path, dest)
+            share.record_stat(conn, file_id, dest)
         if not stored_only:
             jobs.enqueue(conn, "ingest", file_id)
     return file_id, True
@@ -203,26 +248,26 @@ def add_path(conn: sqlite3.Connection, settings: Settings, path: Path, collectio
     return add_file(conn, settings, received, collection_id, uploaded_by, folder_parts=folder_parts)
 
 
-def delete_file(conn: sqlite3.Connection, settings: Settings, file_id: int) -> bool:
-    """Delete a file (its chunks, vectors and jobs cascade). The blob goes too
-    once no collection uses it."""
-    orphan = None
-    with transaction(conn):
-        row = conn.execute(
-            "SELECT f.blob_sha256, b.rel_path, b.ocr_rel_path FROM files f "
-            "JOIN blobs b ON b.sha256 = f.blob_sha256 WHERE f.id = ?", (file_id,)
-        ).fetchone()
-        if row is None:
-            return False
-        conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
-        still_used = conn.execute(
-            "SELECT 1 FROM files WHERE blob_sha256 = ? LIMIT 1", (row["blob_sha256"],)
-        ).fetchone()
-        if not still_used:
-            conn.execute("DELETE FROM blobs WHERE sha256 = ?", (row["blob_sha256"],))
-            orphan = row
-    if orphan:
-        for rel in (orphan["rel_path"], orphan["ocr_rel_path"]):
+def delete_record(conn: sqlite3.Connection, settings: Settings, file_id: int) -> bool:
+    """Delete a file's record (its chunks, vectors and jobs cascade) and its
+    blob once nothing uses it, inside the caller's transaction. Bytes on the
+    share are the caller's business."""
+    row = conn.execute(
+        "SELECT f.blob_sha256, b.rel_path, b.ocr_rel_path FROM files f "
+        "JOIN blobs b ON b.sha256 = f.blob_sha256 WHERE f.id = ?", (file_id,)
+    ).fetchone()
+    if row is None:
+        return False
+    conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
+    if not conn.execute("SELECT 1 FROM files WHERE blob_sha256 = ? LIMIT 1", (row["blob_sha256"],)).fetchone():
+        conn.execute("DELETE FROM blobs WHERE sha256 = ?", (row["blob_sha256"],))
+        for rel in (row["rel_path"], row["ocr_rel_path"]):
             if rel:
                 blob_path(settings, rel).unlink(missing_ok=True)
     return True
+
+
+def delete_file(conn: sqlite3.Connection, settings: Settings, file_id: int) -> bool:
+    """Delete a file record in its own transaction (see delete_record)."""
+    with transaction(conn):
+        return delete_record(conn, settings, file_id)

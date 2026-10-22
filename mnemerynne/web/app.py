@@ -21,7 +21,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
-from mnemerynne import db, directory, mcp_server, memory, permissions, users
+from mnemerynne import db, directory, mcp_server, memory, permissions, share, users
 from mnemerynne.answer import ASSISTANT_NAME
 from mnemerynne.auth import LoginThrottle
 from mnemerynne.clients.embed import Embedder
@@ -64,6 +64,7 @@ class Services:
     reranker: Any = None
     router: Any = None
     directory: Any = None   # the AD domain (mnemerynne.directory); None = from settings
+    share_checker: Any = None   # share permission checks (share.Checker); None = the real POSIX ACLs
 
 
 def create_app(settings: Settings | None = None, services: Services | None = None) -> FastAPI:
@@ -124,6 +125,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.state.settings = settings
     app.state.directory = (services.directory if services and services.directory
                            else directory.from_settings(settings))
+    share.configure(settings, app.state.directory, services.share_checker if services else None)
     app.state.throttle = LoginThrottle(settings.login_max_failures, settings.login_lockout_seconds)
     app.add_middleware(
         SessionMiddleware,

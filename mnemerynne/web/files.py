@@ -329,9 +329,8 @@ def retry_file(file_id: int, user=Depends(api_user), conn: sqlite3.Connection = 
 
 
 # ---------------------------------------------------------------------- views
-def _blob_file(settings: Settings, row: sqlite3.Row, prefer_ocr: bool) -> Path:
-    rel = row["ocr_rel_path"] if prefer_ocr and row["ocr_rel_path"] else row["rel_path"]
-    path = store.blob_path(settings, rel)
+def _blob_file(settings: Settings, row: sqlite3.Row, prefer_ocr: bool, conn: sqlite3.Connection) -> Path:
+    path = store.content_path(conn, settings, row["id"], prefer_ocr=prefer_ocr)
     if not path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "File content is missing")
     return path
@@ -345,7 +344,7 @@ def view_pdf(file_id: int, user=Depends(page_user), conn: sqlite3.Connection = D
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not a PDF")
     # Serve the OCR'd copy when there is one, so its text is selectable too.
     return FileResponse(
-        _blob_file(settings, row, prefer_ocr=True), media_type="application/pdf",
+        _blob_file(settings, row, prefer_ocr=True, conn=conn), media_type="application/pdf",
         filename=row["display_name"], content_disposition_type="inline",
         headers={"X-Content-Type-Options": "nosniff"},
     )
@@ -357,7 +356,7 @@ def view_markdown(request: Request, file_id: int, user=Depends(page_user),
     row = _readable_file(conn, fs.Access.of(conn, user["id"]), file_id)
     if row["kind"] != "md":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not a Markdown file")
-    html = markdown.render_html(markdown.decode(_blob_file(settings, row, prefer_ocr=False).read_bytes()))
+    html = markdown.render_html(markdown.decode(_blob_file(settings, row, prefer_ocr=False, conn=conn).read_bytes()))
     response = request.app.state.templates.TemplateResponse(
         request, "file_view.html", {"file": row, "content": html})
     response.headers["Content-Security-Policy"] = _VIEW_CSP
@@ -373,10 +372,10 @@ def view_inline(file_id: int, user=Depends(page_user), conn: sqlite3.Connection 
     preview = _preview(row)
     headers = {"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox"}
     if preview == "image":
-        return FileResponse(_blob_file(settings, row, prefer_ocr=False), media_type=row["mime"],
+        return FileResponse(_blob_file(settings, row, prefer_ocr=False, conn=conn), media_type=row["mime"],
                             content_disposition_type="inline", filename=row["display_name"], headers=headers)
     if preview == "text":
-        with open(_blob_file(settings, row, prefer_ocr=False), "rb") as fh:
+        with open(_blob_file(settings, row, prefer_ocr=False, conn=conn), "rb") as fh:
             data = fh.read(_TEXT_PREVIEW_BYTES)
         return HTMLResponse(data.decode("utf-8", errors="replace"), media_type="text/plain; charset=utf-8",
                             headers=headers)
@@ -390,6 +389,6 @@ def download_raw(file_id: int, user=Depends(page_user), conn: sqlite3.Connection
     row = _readable_file(conn, fs.Access.of(conn, user["id"]), file_id)
     media = {"pdf": "application/pdf", "md": "text/markdown; charset=utf-8",
              "txt": "text/plain; charset=utf-8"}.get(row["kind"], "application/octet-stream")
-    return FileResponse(_blob_file(settings, row, prefer_ocr=False), media_type=media,
+    return FileResponse(_blob_file(settings, row, prefer_ocr=False, conn=conn), media_type=media,
                         filename=row["display_name"], content_disposition_type="attachment",
                         headers={"X-Content-Type-Options": "nosniff"})

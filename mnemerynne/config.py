@@ -47,6 +47,17 @@ class Settings(BaseSettings):
     # from one of its groups (picked on the Settings tab).
     ad_domain: str = ""
 
+    # Libraries and inboxes stored on the SMB share: <share_root>/<Library>/…
+    # and <share_root>/<users_folder>/<username>/…. The folders on disk are the
+    # source of truth; the worker scans them every share_scan_seconds, and files
+    # changed within share_settle_seconds wait for the next scan (still copying).
+    # The recycle bin lives beside the share (same disk, hidden from SMB).
+    share_root: Path | None = None
+    share_trash: Path | None = None    # default: <share_root's parent>/.mnemerynne-trash
+    users_folder: str = "Users"
+    share_scan_seconds: int = 60
+    share_settle_seconds: int = 10
+
     # Inference (llama-server)
     llm_url: str = "http://127.0.0.1:8081"
     embed_url: str = "http://127.0.0.1:8082"
@@ -137,6 +148,12 @@ class Settings(BaseSettings):
     def tmp_dir(self) -> Path:
         # Inside data_dir so finished uploads move into blobs/ with a rename.
         return self.data_dir / "tmp"
+
+    @property
+    def share_trash_dir(self) -> Path | None:
+        if self.share_root is None:
+            return None
+        return self.share_trash or self.share_root.parent / ".mnemerynne-trash"
 
     @property
     def admin_usernames(self) -> set[str]:

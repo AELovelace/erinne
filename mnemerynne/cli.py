@@ -16,9 +16,12 @@ from mnemerynne.config import get_settings
 
 
 def _connect():
+    from mnemerynne import directory, share
+
     settings = get_settings()
     conn = db.connect(settings.db_path)
     db.migrate(conn, settings.embed_dim)
+    share.configure(settings, directory.from_settings(settings))
     return conn
 
 
@@ -61,6 +64,60 @@ def cmd_list_users(args):
     for u in users.list_users(conn):
         state = "" if u["active"] else "  (disabled)"
         print(f"{u['username']:<30} {u['role']}{state}")
+
+
+def cmd_share_init(args):
+    """Prepare the SMB share: the marker that says it is mounted, the Users
+    folder and the trash, and folders for inboxes that are still empty."""
+    from mnemerynne import share
+
+    settings = get_settings()
+    conn = _connect()
+    rt = share.current()
+    if rt is None:
+        raise SystemExit("Set MNEMERYNNE_SHARE_ROOT (e.g. /srv/storage/share) first.")
+    if not rt.root.is_dir():
+        raise SystemExit(f"{rt.root} doesn't exist (is the storage mounted?).")
+    try:
+        (rt.root / share.MARKER).touch()
+        share.make_dir(rt.root / settings.users_folder)
+        share.make_dir(rt.trash)
+    except (OSError, share.ShareError) as exc:
+        raise SystemExit(f"Can't write to the share as this user: {exc}\n"
+                         "Give the service user access first (see deploy/linux/README.md, section 5d).")
+    print(f"Share ready at {rt.root} (trash: {rt.trash}).")
+    attached, waiting = 0, []
+    for row in conn.execute("SELECT c.id, u.username, u.ad_account, "
+                            "(SELECT count(*) FROM files f WHERE f.collection_id = c.id) AS files "
+                            "FROM collections c JOIN users u ON u.id = c.owner_user_id "
+                            "WHERE c.kind = 'private' AND c.share_path IS NULL").fetchall():
+        if row["files"]:
+            waiting.append(f"{row['username']}'s inbox ({row['files']} files)")
+            continue
+        share.attach_inbox(conn, row["id"], row["username"], row["ad_account"])
+        attached += 1
+    for row in conn.execute("SELECT c.name, (SELECT count(*) FROM files f WHERE f.collection_id = c.id) AS files "
+                            "FROM collections c WHERE c.kind = 'library' AND c.share_path IS NULL").fetchall():
+        waiting.append(f"library {row['name']} ({row['files']} files)")
+    print(f"{attached} empty inbox(es) now live in {settings.users_folder}/ on the share.")
+    if waiting:
+        print("Still stored inside Mnemerynne (not on the share yet):")
+        for line in waiting:
+            print(f"  {line}")
+
+
+def cmd_share_scan(args):
+    from mnemerynne import share
+
+    conn = _connect()
+    if share.current() is None:
+        raise SystemExit("The share isn't configured (MNEMERYNNE_SHARE_ROOT).")
+    stats = share.sync(conn)
+    print(f"{stats.libraries} library change(s), {stats.added} file(s) added, {stats.changed} changed, "
+          f"{stats.moved} moved, {stats.removed} removed; folders: {stats.folders_added} added, "
+          f"{stats.folders_removed} removed.")
+    for line in stats.skipped:
+        print(f"  skipped: {line}")
 
 
 def cmd_delete_user(args):
@@ -608,6 +665,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("username")
     p.add_argument("role", choices=users.ROLES)
     p.set_defaults(func=cmd_set_role)
+
+    sub.add_parser("share-init", help="Prepare the SMB share (MNEMERYNNE_SHARE_ROOT) for libraries and inboxes"
+                   ).set_defaults(func=cmd_share_init)
+    sub.add_parser("share-scan", help="Sync with the share now (the worker also does this every minute)"
+                   ).set_defaults(func=cmd_share_scan)
 
     p = sub.add_parser("delete-user", help="Delete a user with their inbox (asks to confirm)")
     p.add_argument("username")

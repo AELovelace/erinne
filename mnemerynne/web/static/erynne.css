@@ -535,6 +535,8 @@ button.danger-fill { background: var(--error); }
 .ax-new input { flex: 1; min-width: 0; }
 .ax-link { display: flex; gap: .4rem; align-items: center; }
 .ax-link input { flex: 1; min-width: 8rem; padding: .3rem .5rem; }
+.ax-share { margin-top: 1rem; padding: .8rem 1rem; border: 1px solid var(--line); border-radius: 12px; background: var(--glass-strong); }
+.ax-share p { margin: .3rem 0; }
 .ax-badge { flex: none; font-size: .75rem; color: var(--muted); padding: 0 .45rem; white-space: nowrap; }
 .ax-empty { padding: .25rem .8rem .25rem 2.4rem; }
 .ax-h { margin: 1.5rem 0 .15rem; font-size: 1.05rem; }

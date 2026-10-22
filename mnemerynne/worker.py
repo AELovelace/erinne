@@ -7,7 +7,7 @@ import signal
 import sqlite3
 import time
 
-from mnemerynne import db, fs, jobs
+from mnemerynne import db, directory, fs, jobs, share
 from mnemerynne.clients.embed import Embedder
 from mnemerynne.config import Settings
 from mnemerynne.ingest import pipeline
@@ -66,12 +66,17 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
 
+    rt = share.configure(settings, directory.from_settings(settings))
+    if rt is not None:
+        log.info("Share: %s (scanned every %d s).", rt.root, settings.share_scan_seconds)
+
     recovered = jobs.recover_stale(conn, settings.job_stale_minutes)
     if recovered:
         log.info("Requeued %d job(s) left running by a previous worker.", recovered)
     log.info("Worker ready (embedder %s).", settings.embed_url)
     last_recover = time.monotonic()
     last_purge = 0.0
+    last_scan = 0.0
     try:
         while not stopping:
             did_work = run_one(conn, settings, embedder)
@@ -79,6 +84,14 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
                 break
             if not did_work:
                 time.sleep(poll_seconds)
+            if rt is not None and time.monotonic() - last_scan > settings.share_scan_seconds:
+                last_scan = time.monotonic()
+                try:
+                    share.sync(conn, settings)
+                except Exception:  # never let a bad scan stop ingestion
+                    if conn.in_transaction:
+                        conn.execute("ROLLBACK")
+                    log.exception("Share scan failed")
             if time.monotonic() - last_recover > 300:
                 jobs.recover_stale(conn, settings.job_stale_minutes)
                 last_recover = time.monotonic()

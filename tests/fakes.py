@@ -81,3 +81,30 @@ class FakeDirectory:
 
     def groups(self):
         return list(self.group_names)
+
+    def ids_of(self, account):
+        """uid = 1000 + position; gids = 5000 + each group's position."""
+        names = sorted(self.members)
+        if account.lower() not in self.members:
+            return None
+        every = sorted({g for v in self.members.values() for g in v})
+        return 1000 + names.index(account.lower()), frozenset(5000 + every.index(g) for g in self.groups_of(account))
+
+
+class FakeShareChecker:
+    """Share permissions by path (relative to the share root, '/'-separated):
+    the nearest listed path decides; unlisted means read and write."""
+
+    def __init__(self, root, rules=None, default=(True, True)) -> None:
+        self.root = root
+        self.rules = rules or {}
+        self.default = default
+
+    def rights(self, path, uid, gids):
+        rel = path.relative_to(self.root).as_posix()
+        while True:
+            if rel in self.rules:
+                return self.rules[rel]
+            if "/" not in rel:
+                return self.default
+            rel = rel.rsplit("/", 1)[0]

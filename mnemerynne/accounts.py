@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from mnemerynne import users
+from mnemerynne import share, users
 from mnemerynne.directory import Directory
 
 ADMIN_GROUP_KEY = "admin_group"
@@ -64,9 +64,22 @@ def link(conn: sqlite3.Connection, user_id: int, ad_account: str, directory: Dir
     if taken:
         raise LinkError(f"'{ad_account}' is already linked to {taken['username']}.")
     conn.execute("UPDATE users SET ad_account = ? WHERE id = ?", (ad_account, user_id))
+    _secure_inbox(conn, user_id, ad_account)
     return ad_account
 
 
+def _secure_inbox(conn: sqlite3.Connection, user_id: int, ad_account: str | None) -> None:
+    """Only the (newly) linked domain account may open the inbox folder on the share."""
+    row = conn.execute("SELECT share_path FROM collections WHERE kind = 'private' AND owner_user_id = ?",
+                       (user_id,)).fetchone()
+    rt = share.current()
+    if row and row["share_path"] and rt is not None:
+        share.secure_inbox(rt.root / row["share_path"], ad_account)
+
+
 def unlink(conn: sqlite3.Connection, user_id: int) -> bool:
-    return conn.execute("UPDATE users SET ad_account = NULL WHERE id = ? AND ad_account IS NOT NULL",
-                        (user_id,)).rowcount > 0
+    changed = conn.execute("UPDATE users SET ad_account = NULL WHERE id = ? AND ad_account IS NOT NULL",
+                           (user_id,)).rowcount > 0
+    if changed:
+        _secure_inbox(conn, user_id, None)
+    return changed

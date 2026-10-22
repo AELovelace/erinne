@@ -22,6 +22,7 @@ class Directory(Protocol):
 
     def account_exists(self, account: str) -> bool: ...
     def groups_of(self, account: str) -> set[str]: ...
+    def ids_of(self, account: str) -> tuple[int, frozenset[int]] | None: ...
     def accounts(self) -> list[str]: ...
     def groups(self) -> list[str]: ...
 
@@ -41,6 +42,9 @@ class NoDirectory:
 
     def groups_of(self, account: str) -> set[str]:
         return set()
+
+    def ids_of(self, account: str) -> tuple[int, frozenset[int]] | None:
+        return None
 
     def accounts(self) -> list[str]:
         return []
@@ -99,6 +103,26 @@ class WinbindDirectory:
         with self._lock:
             self._cache[key] = (now, names)
         return names
+
+    def ids_of(self, account: str) -> tuple[int, frozenset[int]] | None:
+        """The account's uid and all its gids as the server sees them (for
+        checking file permissions on the share); None if it doesn't resolve."""
+        import os
+        import pwd
+        key = "ids:" + _bare(account).lower()
+        now = time.monotonic()
+        with self._lock:
+            hit = self._cache.get(key)
+            if hit and now - hit[0] < self.cache_seconds:
+                return hit[1]
+        try:
+            entry = pwd.getpwnam(self._qualified(account))
+            ids = (entry.pw_uid, frozenset(os.getgrouplist(entry.pw_name, entry.pw_gid)))
+        except (KeyError, OSError):
+            ids = None
+        with self._lock:
+            self._cache[key] = (now, ids)
+        return ids
 
     def _wbinfo(self, flag: str) -> list[str]:
         try:

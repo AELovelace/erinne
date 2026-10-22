@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import accounts, api_tokens, fs, permissions, updates, users
+from mnemerynne import accounts, api_tokens, fs, permissions, share, updates, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
@@ -34,6 +34,12 @@ def _library(conn: sqlite3.Connection, library_id: int) -> sqlite3.Row:
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Library not found")
     return row
+
+
+def _not_on_share(row: sqlite3.Row) -> None:
+    """Grants don't apply to libraries on the share: Windows permissions do."""
+    if row["share_path"]:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, permissions.SHARE_MANAGED)
 
 
 def _group(conn: sqlite3.Connection, group_id: int) -> sqlite3.Row:
@@ -91,7 +97,7 @@ def libraries_page(request: Request, user=Depends(page_user), conn: sqlite3.Conn
 @router.get("/api/admin/libraries")
 def list_libraries(user=Depends(admin_api_user), conn: sqlite3.Connection = Depends(get_db)):
     rows = conn.execute(
-        "SELECT c.id, c.name, c.created_at, c.claude_enabled, c.claude_changed_at, "
+        "SELECT c.id, c.name, c.share_path, c.created_at, c.claude_enabled, c.claude_changed_at, "
         "u.username AS claude_changed_by, "
         "(SELECT count(*) FROM files f WHERE f.collection_id = c.id AND f.deleted_at IS NULL) AS files, "
         "(SELECT COALESCE(sum(b.size), 0) FROM files f JOIN blobs b ON b.sha256 = f.blob_sha256 "
@@ -120,24 +126,51 @@ def create_library(body: LibraryName, user=Depends(admin_api_user), conn: sqlite
     name = body.name.strip()
     if permissions.get_library(conn, name):
         raise HTTPException(status.HTTP_409_CONFLICT, f"There is already a library called “{name}”.")
+    rt = share.current()
     with transaction(conn):
         library_id = permissions.create_library(conn, name)
-        # The creator can fill it straight away.
-        permissions.grant_user(conn, library_id, user["id"], can_write=True)
+        if rt is not None:
+            # A folder on the share; who can use it is set there, in Windows.
+            if not share.mounted(rt):
+                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                    f"The share ({rt.root}) isn't available right now; try again later.")
+            path = _on_disk(lambda: (share.check_name(name), rt.root / name)[1])
+            if name.lower() == rt.settings.users_folder.lower():
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"“{name}” is kept for inboxes.")
+            _on_disk(lambda: share.make_dir(path))
+            conn.execute("UPDATE collections SET share_path = ?, share_inode = ? WHERE id = ?",
+                         (name, path.stat().st_ino, library_id))
+        else:
+            # The creator can fill it straight away.
+            permissions.grant_user(conn, library_id, user["id"], can_write=True)
         _log(conn, user, "library.create", name)
     return {"id": library_id, "name": name}
+
+
+def _on_disk(fn):
+    """Run a share operation; its problems become a readable 422."""
+    try:
+        return fn()
+    except (share.ShareError, ValueError) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
 
 
 @router.patch("/api/admin/libraries/{library_id}")
 def rename_library(library_id: int, body: LibraryName, user=Depends(admin_api_user),
                    conn: sqlite3.Connection = Depends(get_db)):
-    old = _library(conn, library_id)["name"]
+    library = _library(conn, library_id)
+    old = library["name"]
     name = body.name.strip()
     other = permissions.get_library(conn, name)
     if other and other["id"] != library_id:
         raise HTTPException(status.HTTP_409_CONFLICT, f"There is already a library called “{name}”.")
     with transaction(conn):
         conn.execute("UPDATE collections SET name = ? WHERE id = ?", (name, library_id))
+        if library["share_path"]:
+            rt = share.current()
+            _on_disk(lambda: share.check_name(name))
+            conn.execute("UPDATE collections SET share_path = ? WHERE id = ?", (name, library_id))
+            _on_disk(lambda: share.rename(rt.root / library["share_path"], rt.root / name))
         _log(conn, user, "library.rename", name, f"was {old}")
     return {"id": library_id, "name": name}
 
@@ -145,13 +178,21 @@ def rename_library(library_id: int, body: LibraryName, user=Depends(admin_api_us
 @router.delete("/api/admin/libraries/{library_id}")
 def delete_library(library_id: int, user=Depends(admin_api_user), conn: sqlite3.Connection = Depends(get_db),
                    settings: Settings = Depends(get_settings)):
-    """Delete a library and everything in it (bin included), for good."""
-    name = _library(conn, library_id)["name"]
+    """Delete a library and everything in it (bin included), for good. A
+    library on the share moves, folder and all, to the share's trash
+    directory, where an admin can still recover it on the server."""
+    library = _library(conn, library_id)
+    name = library["name"]
     file_ids = [r[0] for r in conn.execute("SELECT id FROM files WHERE collection_id = ?", (library_id,))]
-    for file_id in file_ids:
-        store.delete_file(conn, settings, file_id)  # also removes blobs nothing else uses
-    conn.execute("DELETE FROM collections WHERE id = ?", (library_id,))  # folders and grants cascade
-    _log(conn, user, "library.delete", name, f"{len(file_ids)} files")
+    with transaction(conn):
+        for file_id in file_ids:
+            store.delete_record(conn, settings, file_id)  # also removes blobs nothing else uses
+        conn.execute("DELETE FROM collections WHERE id = ?", (library_id,))  # folders and grants cascade
+        if library["share_path"]:
+            rt = share.current()
+            _on_disk(lambda: share.rename(rt.root / library["share_path"],
+                                          rt.trash / share.trash_name("lib", library_id, name)))
+        _log(conn, user, "library.delete", name, f"{len(file_ids)} files")
     return {"status": "deleted", "id": library_id, "files": len(file_ids)}
 
 
@@ -166,6 +207,7 @@ class GrantBody(BaseModel):
 def set_grant(library_id: int, body: GrantBody, user=Depends(admin_api_user),
               conn: sqlite3.Connection = Depends(get_db)):
     library = _library(conn, library_id)
+    _not_on_share(library)
     who = _principal(conn, body.type, body.id)
     with transaction(conn):
         if body.access == "none":
@@ -197,6 +239,7 @@ def _folder_detail(conn: sqlite3.Connection, folder_id: int) -> dict:
     folder = _library_folder(conn, folder_id)
     return {
         "id": folder_id, "name": folder["name"], "inherit": bool(folder["inherit"]),
+        "share": bool(folder["share_path"]),
         "library": {"id": folder["collection_id"], "name": folder["library_name"]},
         "path": fs.folder_path(conn, folder_id),
         "files": conn.execute("SELECT count(*) FROM files WHERE folder_id = ? AND deleted_at IS NULL",
@@ -216,6 +259,7 @@ def folder_access(folder_id: int, user=Depends(admin_api_user), conn: sqlite3.Co
 def set_folder_grant(folder_id: int, body: GrantBody, user=Depends(admin_api_user),
                      conn: sqlite3.Connection = Depends(get_db)):
     folder = _library_folder(conn, folder_id)
+    _not_on_share(folder)
     who = _principal(conn, body.type, body.id)
     target = _folder_label(conn, folder)
     with transaction(conn):
@@ -241,6 +285,7 @@ def set_folder_inherit(folder_id: int, body: InheritBody, user=Depends(admin_api
     """Turn inheritance off to limit a folder to its own grants (hiding it from
     people who only had access through the library), or back on."""
     folder = _library_folder(conn, folder_id)
+    _not_on_share(folder)
     permissions.set_folder_inherit(conn, folder_id, body.inherit, copy_inherited=body.keep_access)
     detail = "" if body.inherit else ("inherited access copied" if body.keep_access else "own grants only")
     _log(conn, user, "folder.inherit.on" if body.inherit else "folder.inherit.off", _folder_label(conn, folder), detail)

@@ -150,6 +150,49 @@ Linking checks that the domain account exists; unlinking keeps the user and
 their files. `sudo mnemerynne-admin delete-user NAME` removes a user, with
 their inbox and memories.
 
+## 5d. Libraries on the SMB share
+
+With `MNEMERYNNE_SHARE_ROOT` set, every top-level folder of the share is a
+library and `Users\<name>` is that person's inbox. The share is the source of
+truth: what people add, rename, move or delete through `\\server\share` shows
+up in the Files tab within a minute, and what they do in the Files tab happens
+on the share straight away. The Files tab's recycle bin is
+`/srv/storage/.mnemerynne-trash`, beside the share and hidden from SMB.
+
+**Access follows the share.** In a share library, people see exactly the
+folders their linked domain account (section 5c) can open on the share, and
+can change files where that account may write; Mnemerynne's own grants don't
+apply there. Set permissions in Windows (folder → Properties → Security).
+Mnemerynne reads the Linux permissions Samba keeps in step with them, so
+leave `acl_xattr:ignore system acls` at its default (`no`). Unlinked users see
+only their inbox. Inboxes stay private: only the owner's domain account gets
+into their `Users\<name>` folder.
+
+1. Let the service user read and write the share and its trash (new files and
+   folders inherit this):
+   ```sh
+   sudo setfacl -R -m u:mnemerynne:rwX -m d:u:mnemerynne:rwX /srv/storage/share
+   sudo install -d -o mnemerynne -g mnemerynne -m 700 /srv/storage/.mnemerynne-trash
+   ```
+   In Windows' Security tab this entry shows as *Unix User\mnemerynne*; keep it
+   (Modify) on every folder, or Mnemerynne can't see or change that folder.
+2. Turn it on and prepare the share:
+   ```sh
+   echo 'MNEMERYNNE_SHARE_ROOT=/srv/storage/share' | sudo tee -a /etc/mnemerynne/mnemerynne.env
+   sudo systemctl restart mnemerynne-web mnemerynne-worker
+   sudo mnemerynne-admin share-init     # marker, Users\, trash; moves empty inboxes onto the share
+   sudo mnemerynne-admin share-scan     # first scan now (the worker repeats it every minute)
+   ```
+   `share-init` lists inboxes and libraries that still hold files inside
+   Mnemerynne; they stay where they are until they're exported to the share.
+
+The worker only scans while `/srv/storage/share/.mnemerynne-share` exists, so
+an unmounted share is never mirrored as "everything deleted". Renames and
+moves are recognised (a file keeps its search index). Names must also suit
+Windows: no `\ / : * ? " < > |`, no trailing dot or space. Office lock files
+(`~$…`), `Thumbs.db`, `desktop.ini` and hidden files are ignored. Deleting a
+library on the Access page moves its folder to the trash directory.
+
 ## 6. Check
 
 ```sh

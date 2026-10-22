@@ -290,6 +290,16 @@
     else pane.replaceChildren(el("p", "muted", "Pick a library or folder on the left to see and change who can reach it."));
   }
 
+  /* Libraries on the SMB share take their access from Windows permissions. */
+  function shareNote(where) {
+    const note = el("div", "ax-share");
+    note.appendChild(el("p", null, "📂 This library is the folder " + where + " on the file share."));
+    note.appendChild(el("p", "muted small", "Who can read and edit it is set on the share: in Windows, right-click the folder, " +
+      "Properties → Security. People see what their linked domain account can open there, " +
+      "folder by folder (see Accounts). Claude follows the same access when the switch above is on."));
+    return note;
+  }
+
   function libraryPane(lib) {
     const box = el("div");
     const head = el("div", "lib-head");
@@ -302,7 +312,10 @@
       if (!name || name.trim() === lib.name) return;
       change("PATCH", "/api/admin/libraries/" + lib.id, { name: name.trim() });
     }), button("Delete", "link danger small", function () {
-      const typed = prompt("This deletes “" + lib.name + "” and all " + lib.files + " of its files for good, for everyone.\n\nType the library name to confirm:");
+      const typed = prompt((lib.share_path
+        ? "This removes “" + lib.name + "” and its " + lib.files + " files from the share and from Erynne, for everyone (the folder is kept in the server's trash).\n\n"
+        : "This deletes “" + lib.name + "” and all " + lib.files + " of its files for good, for everyone.\n\n") +
+        "Type the library name to confirm:");
       if (typed === null) return;
       if (typed.trim() !== lib.name) { showError("The name didn't match, so nothing was deleted."); return; }
       state.selected = null;
@@ -320,6 +333,7 @@
     }
     box.appendChild(claudeRow);
 
+    if (lib.share_path) { box.appendChild(shareNote(lib.share_path)); return box; }
     box.appendChild(el("h3", "ax-h", "Who has access"));
     box.appendChild(el("p", "muted small", "Applies to the whole library: every folder inherits it, except folders that turn inheritance off (🔒 in the tree)."));
     box.appendChild(grantEditor(lib.grants, "/api/admin/libraries/" + lib.id + "/grants", lib.claude_enabled));
@@ -384,6 +398,11 @@
     head.appendChild(open);
     box.appendChild(head);
 
+    if (d.share) {
+      box.appendChild(shareNote((lib ? lib.share_path : d.library.name) + "\\" +
+        d.path.map(function (p) { return p.name; }).join("\\")));
+      return box;
+    }
     box.appendChild(inheritBlock(d));
 
     box.appendChild(el("h3", "ax-h", "Set on this folder"));

@@ -22,6 +22,8 @@ StateDirectory=mnemerynne
 StateDirectoryMode=0750
 NoNewPrivileges=true
 ProtectSystem=strict
+# The SMB share and its trash (MNEMERYNNE_SHARE_ROOT); "-" = fine if absent.
+ReadWritePaths=-/srv/storage
 ProtectHome=true
 PrivateTmp=true
 

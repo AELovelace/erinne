@@ -1,9 +1,17 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from mnemerynne import db
+from mnemerynne import db, share
 from mnemerynne.config import Settings
 from mnemerynne.web.app import create_app
+
+
+@pytest.fixture(autouse=True)
+def _no_share():
+    # share.configure() is process-wide: never let one test's share leak into the next.
+    share.configure(Settings(_env_file=None), None)
+    yield
+    share.configure(Settings(_env_file=None), None)
 
 
 @pytest.fixture

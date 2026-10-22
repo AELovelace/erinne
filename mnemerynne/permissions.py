@@ -7,6 +7,9 @@ unless its `inherit` flag is off; its own grants add to that and pass down.
 Effective access is the union of everything that reaches a folder. Claude
 use additionally needs the library's (or inbox's) Claude switch.
 
+A library stored on the SMB share (share.py) ignores grants: access follows
+the share's own permissions for the user's linked domain account.
+
 `reach()` works this out per user and collection. Retrieval must turn it
 into a search scope applied inside the search queries themselves (FTS and
 vector), never filter results afterwards.
@@ -93,13 +96,14 @@ def reach(conn: sqlite3.Connection, user_id: int) -> dict[int, Reach]:
     who, group_params = _principal_sql(groups, "g")
     library_grants: dict[int, list[tuple[bool, bool]]] = {}
     for r in conn.execute(f"SELECT g.collection_id, g.can_write, g.can_claude FROM collection_grants g "
-                          f"JOIN collections c ON c.id = g.collection_id WHERE c.kind = 'library' AND {who}",
+                          f"JOIN collections c ON c.id = g.collection_id "
+                          f"WHERE c.kind = 'library' AND c.share_path IS NULL AND {who}",
                           (user_id, *group_params)):
         library_grants.setdefault(r[0], []).append((bool(r[1]), bool(r[2])))
     folder_grants: dict[int, dict[int, list[tuple[bool, bool]]]] = {}
     for r in conn.execute(f"SELECT f.collection_id, g.folder_id, g.can_write, g.can_claude FROM folder_grants g "
                           f"JOIN folders f ON f.id = g.folder_id JOIN collections c ON c.id = f.collection_id "
-                          f"WHERE c.kind = 'library' AND {who}", (user_id, *group_params)):
+                          f"WHERE c.kind = 'library' AND c.share_path IS NULL AND {who}", (user_id, *group_params)):
         folder_grants.setdefault(r[0], {}).setdefault(r[1], []).append((bool(r[2]), bool(r[3])))
 
     for cid in sorted(set(library_grants) | set(folder_grants)):
@@ -107,6 +111,16 @@ def reach(conn: sqlite3.Connection, user_id: int) -> dict[int, Reach]:
         rows = conn.execute("SELECT id, parent_id, inherit FROM folders WHERE collection_id = ?", (cid,)).fetchall()
         out[cid] = _library_reach(cid, lib["name"], bool(lib["claude_enabled"]), library_grants.get(cid, []),
                                   folder_grants.get(cid, {}), rows)
+
+    shared = conn.execute("SELECT * FROM collections WHERE kind = 'library' AND share_path IS NOT NULL "
+                          "ORDER BY id").fetchall()
+    if shared:
+        from mnemerynne import share
+        user = conn.execute("SELECT id, ad_account FROM users WHERE id = ?", (user_id,)).fetchone()
+        for row in shared:
+            r = share.library_reach(conn, row, user) if user else None
+            if r is not None:
+                out[row["id"]] = r
     return out
 
 
@@ -257,7 +271,7 @@ def revoke_group(conn: sqlite3.Connection, collection_id: int, group_id: int) ->
 # ------------------------------------------------------------------- folders
 def library_folder(conn: sqlite3.Connection, folder_id: int) -> sqlite3.Row:
     """A folder that may take grants: one in a library (inbox folders never do)."""
-    row = conn.execute("SELECT f.*, c.kind, c.name AS library_name FROM folders f "
+    row = conn.execute("SELECT f.*, c.kind, c.share_path, c.name AS library_name FROM folders f "
                        "JOIN collections c ON c.id = f.collection_id WHERE f.id = ?", (folder_id,)).fetchone()
     if row is None:
         raise ValueError(f"Folder {folder_id} does not exist.")
@@ -270,7 +284,8 @@ def grant_folder(conn: sqlite3.Connection, folder_id: int, kind: str, principal_
                  can_write: bool = False, can_claude: bool | None = None) -> None:
     """Grant (or update) a user's or group's access to a folder and what is below it.
     `can_claude=None` keeps the grant's current Claude setting (on for a new grant)."""
-    library_folder(conn, folder_id)
+    if library_folder(conn, folder_id)["share_path"]:
+        raise ValueError(SHARE_MANAGED)
     column = {"user": "user_id", "group": "group_id"}[kind]
     claude = None if can_claude is None else int(can_claude)
     conn.execute(
@@ -289,7 +304,8 @@ def set_folder_inherit(conn: sqlite3.Connection, folder_id: int, inherit: bool, 
     """Turn a folder's inheritance on or off. With `copy_inherited`, turning it
     off first turns what the folder currently inherits into its own grants, so
     nobody loses access until those grants are removed one by one."""
-    library_folder(conn, folder_id)
+    if library_folder(conn, folder_id)["share_path"]:
+        raise ValueError(SHARE_MANAGED)
     with transaction(conn):
         if not inherit and copy_inherited:
             for g in inherited_grants(conn, folder_id):
@@ -404,6 +420,8 @@ def access_summary(conn: sqlite3.Connection, user_id: int) -> list[dict]:
         all_folders = set(r.parents)
         if r.kind == "private":
             via = ["own inbox"]
+        elif conn.execute("SELECT share_path FROM collections WHERE id = ?", (cid,)).fetchone()["share_path"]:
+            via = ["share permissions"]
         else:
             via = [row["name"] or "direct" for row in conn.execute(
                 f"SELECT gr.name FROM collection_grants g LEFT JOIN groups gr ON gr.id = g.group_id "
@@ -422,10 +440,15 @@ def access_summary(conn: sqlite3.Connection, user_id: int) -> list[dict]:
     return out
 
 
+SHARE_MANAGED = "Access to this library is set on the share: change it in Windows (folder Properties → Security)."
+
+
 def _require_library(conn: sqlite3.Connection, collection_id: int) -> None:
-    row = conn.execute("SELECT kind FROM collections WHERE id = ?", (collection_id,)).fetchone()
+    row = conn.execute("SELECT kind, share_path FROM collections WHERE id = ?", (collection_id,)).fetchone()
     if row is None:
         raise ValueError(f"Collection {collection_id} does not exist.")
     if row["kind"] != "library":
         # Private inboxes are never shared; publish a library instead.
         raise ValueError("Only libraries can be granted; private inboxes stay private.")
+    if row["share_path"]:
+        raise ValueError(SHARE_MANAGED)

@@ -14,17 +14,23 @@ bin, or under a folder in the bin, gets collection 0, which no search allows.
 Only the item that was put in the bin gets `deleted_at`; its contents keep
 their place and are hidden because an ancestor is in the bin, so restoring a
 folder brings everything back as it was.
+
+Collections on the SMB share (share.py) are real folders: every change is
+made to the database first and to the disk last, in one transaction, so a
+disk error rolls the database back. Binned share items move to the trash
+directory beside the share.
 """
 
 from __future__ import annotations
 
 import re
+import shutil
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Callable
 
-from mnemerynne import jobs, permissions
+from mnemerynne import jobs, permissions, share
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
@@ -149,6 +155,27 @@ def clean_name(name: str) -> str:
     return cleaned
 
 
+def share_name(name: str) -> str:
+    """Names in share collections must also be valid for Windows users."""
+    try:
+        return share.check_name(name)
+    except ValueError as exc:
+        raise FsError(str(exc)) from None
+
+
+def _on_share(conn: sqlite3.Connection, collection_id: int) -> bool:
+    return share.is_share(conn, collection_id)
+
+
+def _disk(fn):
+    """Run a disk operation, turning share errors into refusals (the caller's
+    transaction then rolls back)."""
+    try:
+        return fn()
+    except share.ShareError as exc:
+        raise FsError(str(exc)) from None
+
+
 def _taken(conn: sqlite3.Connection, collection_id: int, folder_id: int | None, name: str, kind: str,
            exclude_id: int | None = None) -> bool:
     if kind == "folder":
@@ -238,13 +265,19 @@ def create_folder(conn: sqlite3.Connection, access: Access, collection_id: int, 
                   name: str) -> int:
     access.write(collection_id, parent_id)
     name = clean_name(name)
+    on_share = _on_share(conn, collection_id)
+    if on_share:
+        share_name(name)
     with transaction(conn):
         require_folder(conn, collection_id, parent_id)
         if _taken(conn, collection_id, parent_id, name, "folder"):
             raise Conflict(f"There is already a folder called “{name}” here.")
-        return conn.execute(
+        folder_id = conn.execute(
             "INSERT INTO folders(collection_id, parent_id, name, created_by) VALUES (?, ?, ?, ?)",
             (collection_id, parent_id, name, access.user_id)).lastrowid
+        if on_share:
+            _disk(lambda: share.make_dir(share.folder_dir(conn, collection_id, folder_id)))
+        return folder_id
 
 
 def ensure_path(conn: sqlite3.Connection, collection_id: int, parent_id: int | None, parts: list[str],
@@ -255,14 +288,19 @@ def ensure_path(conn: sqlite3.Connection, collection_id: int, parent_id: int | N
     uploads and imports; the caller has checked write access.
     """
     folder_id = parent_id
+    on_share = _on_share(conn, collection_id)
     for part in parts:
         name = clean_name(part)
+        if on_share:
+            share_name(name)
         row = conn.execute(
             "SELECT id FROM folders WHERE collection_id = ? AND COALESCE(parent_id, 0) = ? "
             "AND lower(name) = lower(?) AND deleted_at IS NULL", (collection_id, folder_id or 0, name)).fetchone()
         folder_id = row["id"] if row else conn.execute(
             "INSERT INTO folders(collection_id, parent_id, name, created_by) VALUES (?, ?, ?, ?)",
             (collection_id, folder_id, name, user_id)).lastrowid
+        if on_share and row is None:
+            _disk(lambda: share.make_dir(share.folder_dir(conn, collection_id, folder_id)))
     return folder_id
 
 
@@ -414,16 +452,55 @@ def rename(conn: sqlite3.Connection, access: Access, item: Item, name: str) -> s
     with transaction(conn):
         if item.type == "folder":
             row = _live_folder(conn, access, item.id, write=True)
+            on_share = _on_share(conn, row["collection_id"])
+            if on_share:
+                share_name(name)
             if _taken(conn, row["collection_id"], row["parent_id"], name, "folder", item.id):
                 raise Conflict(f"There is already a folder called “{name}” here.")
+            before = share.folder_dir(conn, row["collection_id"], item.id) if on_share else None
             conn.execute("UPDATE folders SET name = ? WHERE id = ?", (name, item.id))
+            if before is not None:
+                _disk(lambda: share.rename(before, share.folder_dir(conn, row["collection_id"], item.id)))
         else:
             row = _live_file(conn, access, item.id, write=True)
+            on_share = _on_share(conn, row["collection_id"])
+            if on_share:
+                share_name(name)
             if _taken(conn, row["collection_id"], row["folder_id"], name, "file", item.id):
                 raise Conflict(f"There is already a file called “{name}” here.")
+            before = share.file_path(conn, item.id) if on_share else None
             conn.execute("UPDATE files SET display_name = ?, updated_at = datetime('now') WHERE id = ?",
                          (name, item.id))
+            if before is not None:
+                after = share.file_path(conn, item.id)
+                _disk(lambda: share.rename(before, after))
+                share.record_stat(conn, item.id, after)
     return name
+
+
+def _settings() -> Settings:
+    rt = share.current()
+    if rt is None:
+        raise FsError("The share isn't configured on this server.")
+    return rt.settings
+
+
+def _bytes_to_blob(conn: sqlite3.Connection, file_id: int, src) -> None:
+    """Make sure a file's bytes are in blob storage (it is leaving the share)."""
+    row = conn.execute("SELECT b.rel_path FROM files f JOIN blobs b ON b.sha256 = f.blob_sha256 WHERE f.id = ?",
+                       (file_id,)).fetchone()
+    dest = store.blob_path(_settings(), row["rel_path"])
+    if not dest.exists():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copy2(src, dest)
+        except OSError as exc:
+            raise FsError(f"Couldn't copy the file off the share: {exc.strerror or exc}") from None
+
+
+def _clear_disk_stat(conn: sqlite3.Connection, file_id: int) -> None:
+    conn.execute("UPDATE files SET disk_size = NULL, disk_mtime_ns = NULL, disk_inode = NULL WHERE id = ?",
+                 (file_id,))
 
 
 def _each(items: list[Item], op) -> list[Result]:
@@ -449,9 +526,21 @@ def move(conn: sqlite3.Connection, access: Access, items: list[Item], collection
                 if row["collection_id"] == collection_id and row["folder_id"] == folder_id:
                     return {"name": row["display_name"]}
                 name = unique_name(conn, collection_id, folder_id, row["display_name"], "file")
+                src_share, dst_share = _on_share(conn, row["collection_id"]), _on_share(conn, collection_id)
+                if dst_share:
+                    share_name(name)
+                src = store.content_path(conn, _settings(), item.id) if (src_share or dst_share) else None
                 conn.execute("UPDATE files SET collection_id = ?, folder_id = ?, display_name = ?, "
                              "updated_at = datetime('now') WHERE id = ?", (collection_id, folder_id, name, item.id))
                 _sync_scope(conn, [item.id])
+                if dst_share:
+                    dest = share.folder_dir(conn, collection_id, folder_id) / name
+                    _disk(lambda: share.rename(src, dest) if src_share else share.copy_file(src, dest))
+                    share.record_stat(conn, item.id, dest)
+                elif src_share:
+                    _bytes_to_blob(conn, item.id, src)
+                    _clear_disk_stat(conn, item.id)
+                    _disk(lambda: share.remove(src))
                 return {"name": name}
             row = _live_folder(conn, access, item.id, write=True)
             below = subtree(conn, item.id)
@@ -459,13 +548,22 @@ def move(conn: sqlite3.Connection, access: Access, items: list[Item], collection
                 raise FsError("A folder can't be moved into itself.")
             if row["collection_id"] == collection_id and row["parent_id"] == folder_id:
                 return {"name": row["name"]}
+            src_share, dst_share = _on_share(conn, row["collection_id"]), _on_share(conn, collection_id)
+            if src_share != dst_share:
+                raise FsError("Folders can't move between the share and a library that isn't on it yet; "
+                              "copy it instead, then delete the original.")
             name = unique_name(conn, collection_id, folder_id, row["name"], "folder")
+            if dst_share:
+                share_name(name)
+            before = share.folder_dir(conn, row["collection_id"], item.id) if src_share else None
             conn.execute("UPDATE folders SET parent_id = ?, name = ? WHERE id = ?", (folder_id, name, item.id))
             if row["collection_id"] != collection_id:
                 marks = ",".join("?" * len(below))
                 conn.execute(f"UPDATE folders SET collection_id = ? WHERE id IN ({marks})", (collection_id, *below))
                 conn.execute(f"UPDATE files SET collection_id = ? WHERE folder_id IN ({marks})", (collection_id, *below))
             _sync_scope(conn, _subtree_file_ids(conn, below))
+            if before is not None:
+                _disk(lambda: share.rename(before, share.folder_dir(conn, collection_id, item.id)))
             return {"name": name}
 
     return _each(items, one)
@@ -474,12 +572,23 @@ def move(conn: sqlite3.Connection, access: Access, items: list[Item], collection
 def _copy_file(conn: sqlite3.Connection, src: sqlite3.Row, collection_id: int, folder_id: int | None,
                user_id: int) -> int:
     name = unique_name(conn, collection_id, folder_id, src["display_name"], "file")
+    src_share, dst_share = _on_share(conn, src["collection_id"]), _on_share(conn, collection_id)
+    if dst_share:
+        share_name(name)
     stored_only = src["status"] == "stored"
     new_id = conn.execute(
         "INSERT INTO files(collection_id, folder_id, blob_sha256, display_name, uploaded_by, status, notes) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (collection_id, folder_id, src["blob_sha256"], name, user_id,
          "stored" if stored_only else "queued", src["notes"])).lastrowid
+    if src_share or dst_share:
+        source = store.content_path(conn, _settings(), src["id"])
+        if dst_share:
+            dest = share.folder_dir(conn, collection_id, folder_id) / name
+            _disk(lambda: share.copy_file(source, dest))
+            share.record_stat(conn, new_id, dest)
+        else:
+            _bytes_to_blob(conn, new_id, source)
     if not stored_only:
         # Ingestion finds the identical blob already indexed and copies its
         # chunks and vectors instead of embedding again.
@@ -502,10 +611,16 @@ def copy(conn: sqlite3.Connection, access: Access, items: list[Item], collection
                 raise FsError("A folder can't be copied into itself.")
             live = live_folder_ids(conn, src["collection_id"])
 
+            on_share = _on_share(conn, collection_id)
+
             def copy_tree(source_id: int, parent_id: int | None, name: str) -> int:
+                if on_share:
+                    share_name(name)
                 new_id = conn.execute(
                     "INSERT INTO folders(collection_id, parent_id, name, created_by) VALUES (?, ?, ?, ?)",
                     (collection_id, parent_id, name, access.user_id)).lastrowid
+                if on_share:
+                    _disk(lambda: share.make_dir(share.folder_dir(conn, collection_id, new_id)))
                 for f in conn.execute("SELECT * FROM files WHERE folder_id = ? AND deleted_at IS NULL",
                                       (source_id,)).fetchall():
                     _copy_file(conn, f, collection_id, new_id, access.user_id)
@@ -525,15 +640,25 @@ def trash(conn: sqlite3.Connection, access: Access, items: list[Item]) -> list[R
     def one(item: Item) -> None:
         with transaction(conn):
             if item.type == "file":
-                _live_file(conn, access, item.id, write=True)
-                conn.execute("UPDATE files SET deleted_at = datetime('now'), deleted_by = ? WHERE id = ?",
-                             (access.user_id, item.id))
+                row = _live_file(conn, access, item.id, write=True)
+                on_share = _on_share(conn, row["collection_id"])
+                before = share.file_path(conn, item.id) if on_share else None
+                spot = share.trash_name("f", item.id, row["display_name"]) if on_share else None
+                conn.execute("UPDATE files SET deleted_at = datetime('now'), deleted_by = ?, trash_path = ? "
+                             "WHERE id = ?", (access.user_id, spot, item.id))
                 _sync_scope(conn, [item.id])
+                if before is not None:
+                    _disk(lambda: share.rename(before, share.file_path(conn, item.id)))
             else:
-                _live_folder(conn, access, item.id, write=True)
-                conn.execute("UPDATE folders SET deleted_at = datetime('now'), deleted_by = ? WHERE id = ?",
-                             (access.user_id, item.id))
+                row = _live_folder(conn, access, item.id, write=True)
+                on_share = _on_share(conn, row["collection_id"])
+                before = share.folder_dir(conn, row["collection_id"], item.id) if on_share else None
+                spot = share.trash_name("d", item.id, row["name"]) if on_share else None
+                conn.execute("UPDATE folders SET deleted_at = datetime('now'), deleted_by = ?, trash_path = ? "
+                             "WHERE id = ?", (access.user_id, spot, item.id))
                 _sync_scope(conn, _subtree_file_ids(conn, subtree(conn, item.id)))
+                if before is not None:
+                    _disk(lambda: share.rename(before, share.folder_dir(conn, row["collection_id"], item.id)))
 
     return _each(items, one)
 
@@ -558,26 +683,45 @@ def restore(conn: sqlite3.Connection, access: Access, items: list[Item]) -> list
     def one(item: Item) -> dict:
         with transaction(conn):
             row = _binned(conn, access, item)
+            on_share = _on_share(conn, row["collection_id"])
             if item.type == "file":
                 folder = row["folder_id"] if is_live_folder(conn, row["folder_id"]) else None
                 name = unique_name(conn, row["collection_id"], folder, row["display_name"], "file", item.id)
-                conn.execute("UPDATE files SET deleted_at = NULL, deleted_by = NULL, folder_id = ?, "
-                             "display_name = ? WHERE id = ?", (folder, name, item.id))
+                before = share.file_path(conn, item.id) if on_share else None
+                conn.execute("UPDATE files SET deleted_at = NULL, deleted_by = NULL, trash_path = NULL, "
+                             "folder_id = ?, display_name = ? WHERE id = ?", (folder, name, item.id))
                 _sync_scope(conn, [item.id])
+                if before is not None:
+                    after = share.file_path(conn, item.id)
+                    _disk(lambda: share.rename(before, after))
+                    share.record_stat(conn, item.id, after)
             else:
                 parent = row["parent_id"] if is_live_folder(conn, row["parent_id"]) else None
                 name = unique_name(conn, row["collection_id"], parent, row["name"], "folder", item.id)
-                conn.execute("UPDATE folders SET deleted_at = NULL, deleted_by = NULL, parent_id = ?, name = ? "
-                             "WHERE id = ?", (parent, name, item.id))
+                before = share.folder_dir(conn, row["collection_id"], item.id) if on_share else None
+                conn.execute("UPDATE folders SET deleted_at = NULL, deleted_by = NULL, trash_path = NULL, "
+                             "parent_id = ?, name = ? WHERE id = ?", (parent, name, item.id))
                 _sync_scope(conn, _subtree_file_ids(conn, subtree(conn, item.id)))
+                if before is not None:
+                    _disk(lambda: share.rename(before, share.folder_dir(conn, row["collection_id"], item.id)))
             return {"name": name}
 
     return _each(items, one)
 
 
+def _purge_file(conn: sqlite3.Connection, settings: Settings, file_id: int) -> None:
+    """Delete a binned file for good, with its bytes in the trash if on the share."""
+    row = conn.execute("SELECT trash_path FROM files WHERE id = ?", (file_id,)).fetchone()
+    with transaction(conn):
+        store.delete_record(conn, settings, file_id)
+        if row and row["trash_path"]:
+            _disk(lambda: share.remove(settings.share_trash_dir / row["trash_path"]))
+
+
 def _purge_folder(conn: sqlite3.Connection, settings: Settings, folder_id: int) -> None:
     """Delete a folder and its contents for good. Anything inside that was
     put in the bin on its own stays there as its own bin item."""
+    trash_path = conn.execute("SELECT trash_path FROM folders WHERE id = ?", (folder_id,)).fetchone()["trash_path"]
     below = subtree(conn, folder_id)
     for row in conn.execute(f"SELECT id FROM folders WHERE id IN ({','.join('?' * len(below))}) "
                             "AND id != ? AND deleted_at IS NOT NULL", (*below, folder_id)).fetchall():
@@ -589,6 +733,9 @@ def _purge_folder(conn: sqlite3.Connection, settings: Settings, folder_id: int) 
         store.delete_file(conn, settings, row["id"])
     # Subfolders cascade; separately binned files fall back to the root (SET NULL).
     conn.execute("DELETE FROM folders WHERE id = ?", (folder_id,))
+    if trash_path:
+        # Separately binned items inside already sit in their own trash places.
+        _disk(lambda: share.remove(settings.share_trash_dir / trash_path))
 
 
 def purge(conn: sqlite3.Connection, settings: Settings, access: Access, items: list[Item]) -> list[Result]:
@@ -596,7 +743,7 @@ def purge(conn: sqlite3.Connection, settings: Settings, access: Access, items: l
     def one(item: Item) -> None:
         _binned(conn, access, item)
         if item.type == "file":
-            store.delete_file(conn, settings, item.id)
+            _purge_file(conn, settings, item.id)
         else:
             _purge_folder(conn, settings, item.id)
 
@@ -611,7 +758,7 @@ def purge_expired(conn: sqlite3.Connection, settings: Settings, days: int) -> in
     old_folders = [r[0] for r in conn.execute(
         "SELECT id FROM folders WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', ?)", (cutoff,))]
     for file_id in old_files:
-        store.delete_file(conn, settings, file_id)
+        _purge_file(conn, settings, file_id)
     for folder_id in old_folders:
         if conn.execute("SELECT 1 FROM folders WHERE id = ?", (folder_id,)).fetchone():
             _purge_folder(conn, settings, folder_id)

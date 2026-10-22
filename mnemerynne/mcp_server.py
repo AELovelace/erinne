@@ -250,7 +250,7 @@ class Tools:
         pages = row["unit_count"] or 0
         if not 1 <= page <= max(pages, 1):
             raise ToolError(f"“{row['display_name']}” has {pages} page(s); ask for 1-{pages}.")
-        path = store.blob_path(self.settings, row["rel_path"])
+        path = store.content_path(conn, self.settings, file_id)
         if not path.exists():
             raise ToolError("The file's content is missing on the server; tell a Mnemerynne admin.")
         pdf = pdfium.PdfDocument(str(path))

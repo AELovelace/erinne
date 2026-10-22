@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from mnemerynne import auth
+from mnemerynne import auth, share
 from mnemerynne.db import transaction
 
 ROLES = ("user", "admin")
@@ -40,10 +40,12 @@ def create_user(
         except sqlite3.IntegrityError as exc:
             raise UserExists(f"Username '{name}' is already taken.") from exc
         user_id = cur.lastrowid
-        conn.execute(
+        inbox = conn.execute(
             "INSERT INTO collections(kind, name, owner_user_id) VALUES ('private', ?, ?)",
             (f"{name}'s inbox", user_id),
-        )
+        ).lastrowid
+        # With the SMB share on, the inbox is the folder Users/<name> there.
+        share.attach_inbox(conn, inbox, name)
     return user_id
 
 
