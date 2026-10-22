@@ -69,11 +69,13 @@ if [ -z "${MNEMERYNNE_GPU:-}" ]; then
     [ -n "$MNEMERYNNE_GPU" ] || die "no Vulkan device matching '$GPU_MATCH'; set GPU_MATCH or MNEMERYNNE_GPU"
 fi
 echo "using $MNEMERYNNE_GPU"
-for unit in mnemerynne-generator mnemerynne-embedder; do
-    install -d "/etc/systemd/system/$unit.service.d"
-    printf '[Service]\n# Written by preinstall.sh: the llama.cpp device for Mnemerynne'"'"'s card.\nEnvironment=MNEMERYNNE_GPU=%s\n' \
-        "$MNEMERYNNE_GPU" > "/etc/systemd/system/$unit.service.d/gpu.conf"
-done
+# The generator only: the embedder runs on the 1050 Ti (CUDA0, see its unit).
+install -d /etc/systemd/system/mnemerynne-generator.service.d
+printf '[Service]\n# Written by preinstall.sh: the llama.cpp device for Mnemerynne'"'"'s card.\nEnvironment=MNEMERYNNE_GPU=%s\n' \
+    "$MNEMERYNNE_GPU" > /etc/systemd/system/mnemerynne-generator.service.d/gpu.conf
+rm -f /etc/systemd/system/mnemerynne-embedder.service.d/gpu.conf
+[ -x /opt/llama.cpp/llama-server ] || \
+    echo "WARNING: no CUDA llama.cpp in /opt/llama.cpp; mnemerynne-embedder needs it (or run it on the CPU, see its unit)" >&2
 systemctl daemon-reload
 
 step "Models in $MODELS"

@@ -2,22 +2,24 @@
 
 The box has two GPUs. MicroJames keeps the GTX 1050 Ti, with its CUDA
 llama.cpp in `/opt/llama.cpp` and its `llama-generator` (:8081) and
-`llama-embedder` (:8082, jina) services. Mnemerynne runs on the RX 580 (8 GB)
-with its own llama.cpp built for Vulkan in `/opt/llama.cpp-vulkan`, so it is
-independent of MicroJames, which can be switched off without touching it.
+`llama-embedder` (:8082, jina) services. Mnemerynne's generator runs on the
+RX 580 (8 GB) with its own llama.cpp built for Vulkan in
+`/opt/llama.cpp-vulkan`; its embedder shares the 1050 Ti and the CUDA build
+there (embedding on the RX 580 hung the GPU under load). Keep `/opt/llama.cpp`
+when MicroJames is switched off.
 
 | Service | Listens on | Does |
 |---|---|---|
 | `mnemerynne-web` | 127.0.0.1:38200 | web app, answers questions, MCP for Claude |
 | `mnemerynne-worker` | — | turns uploads into searchable chunks (OCR, embeddings) |
 | `mnemerynne-generator` | 127.0.0.1:8086 | LFM2.5-2.6B (llama-server, Vulkan) |
-| `mnemerynne-embedder` | 127.0.0.1:8085 | Qwen3-Embedding-0.6B (llama-server, Vulkan) |
+| `mnemerynne-embedder` | 127.0.0.1:8085 | Qwen3-Embedding-0.6B (llama-server, CUDA on the 1050 Ti) |
 | `mnemerynne-backup.timer` | — | nightly snapshot to `/var/backups/mnemerynne` |
 
-**VRAM:** Mnemerynne's generator (~2.5 GB with its cache) and embedder
-(~0.7 GB) use about 3.2 GB of the RX 580's 8 GB; MicroJames stays on the
-1050 Ti. Check both cards with `nvtop` after step 3. Both llama-server units
-join the `render` and `video` groups to reach the GPU.
+**VRAM:** the generator uses about 2.5 GB of the RX 580's 8 GB. The 1050 Ti
+(4 GB) holds the embedder (~0.7 GB) next to MicroJames's generator and jina
+(~2.7 GB). Check both cards with `nvtop` after step 3. The generator unit
+joins the `render` and `video` groups to reach the RX 580.
 
 ## 1. Code and prerequisites
 
@@ -34,7 +36,7 @@ creates the `mnemerynne` user, builds llama.cpp for Vulkan into
 `/opt/llama.cpp-vulkan`, downloads and checks Qwen3-Embedding, and finds
 which llama.cpp device is the RX 580 (`Vulkan1` when the 1050 Ti is also
 present). It writes that device to a `gpu.conf` drop-in for
-`mnemerynne-generator` and `mnemerynne-embedder`. It's safe to run again, for example
+`mnemerynne-generator`. It's safe to run again, for example
 after adding or removing a card. `MNEMERYNNE_GPU=Vulkan0 sudo -E bash …` skips
 the detection.
 
@@ -62,7 +64,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now mnemerynne-generator mnemerynne-embedder mnemerynne-web mnemerynne-worker mnemerynne-backup.timer
 journalctl -u mnemerynne-web -n 20 --no-pager     # "Database ready ... (schema v6)"
 journalctl -u mnemerynne-generator -n 40 --no-pager | grep -i 'RX 580'   # the model loads on the RX 580
-nvtop                                          # RX 580 about 3.5 GB used; the 1050 Ti unchanged
+nvtop                                          # RX 580: the generator; 1050 Ti: the embedder too
 ```
 
 ## 4. Import MicroJames users and documents
