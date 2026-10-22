@@ -1,4 +1,12 @@
-"""Asking questions (streamed), conversation history and feedback."""
+"""Asking questions (streamed), conversation history and feedback.
+
+A question runs as a background job on the server (a Run), not inside the
+HTTP request: the browser watches its events, and if the page is closed or
+the connection drops (a long agent turn), the answer is still finished and
+saved, and the page picks the events up again from where it was
+(/api/runs/{id}/events?after=n). Runs live in memory; a restart ends the
+ones in progress, like it always has.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +14,7 @@ import asyncio
 import json
 import logging
 import sqlite3
+import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -35,6 +44,64 @@ class AskBody(BaseModel):
 class FeedbackBody(BaseModel):
     rating: int = Field(..., description="1 = helpful, -1 = not helpful")
     comment: str | None = None
+
+
+RUN_KEEP_SECONDS = 15 * 60   # finished runs stay readable this long (a page catching up)
+
+
+class Run:
+    """One question being answered: its events so far, in order."""
+
+    def __init__(self, user_id: int, conversation_id: str, question: str):
+        self.id = uuid.uuid4().hex
+        self.user_id, self.conversation_id, self.question = user_id, conversation_id, question
+        self.events: list[dict] = []
+        self.done = False
+        self.finished_at: float | None = None
+        self._changed = asyncio.Event()
+
+    def add(self, event: dict) -> None:
+        self.events.append(event)
+        self._changed.set()
+
+    def finish(self) -> None:
+        self.done, self.finished_at = True, time.monotonic()
+        self._changed.set()
+
+    async def follow(self, after: int = 0):
+        """Events from number `after` on, waiting for new ones until the run ends."""
+        i = max(0, after)
+        while True:
+            while i < len(self.events):
+                yield self.events[i]
+                i += 1
+            if self.done:
+                return
+            self._changed.clear()
+            if i == len(self.events) and not self.done:
+                await self._changed.wait()
+
+
+def _runs(app) -> dict[str, Run]:
+    runs = getattr(app.state, "runs", None)
+    if runs is None:
+        runs = app.state.runs = {}
+    now = time.monotonic()
+    for run_id in [k for k, r in runs.items() if r.done and now - r.finished_at > RUN_KEEP_SECONDS]:
+        del runs[run_id]
+    return runs
+
+
+def running_in(app, conversation_id: str) -> Run | None:
+    return next((r for r in _runs(app).values() if r.conversation_id == conversation_id and not r.done), None)
+
+
+def _stream(run: Run, after: int = 0) -> StreamingResponse:
+    async def events():
+        async for event in run.follow(after):
+            yield _sse(event)
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 def _sse(event: dict) -> bytes:
@@ -70,6 +137,8 @@ async def ask(body: AskBody, request: Request, user=Depends(api_user),
     conversation_id = body.conversation_id
     if conversation_id:
         _own_conversation(conn, user["id"], conversation_id)
+        if running_in(request.app, conversation_id):
+            raise HTTPException(status.HTTP_409_CONFLICT, "Erynne is still answering the last question here.")
     else:
         conversation_id = uuid.uuid4().hex
         conn.execute("INSERT INTO conversations(id, user_id, title) VALUES (?, ?, ?)",
@@ -78,9 +147,11 @@ async def ask(body: AskBody, request: Request, user=Depends(api_user),
                  (conversation_id, question, scope_json))
     user_id = user["id"]
     app = request.app
+    run = Run(user_id, conversation_id, question)
+    _runs(app)[run.id] = run
+    run.add({"type": "conversation", "conversation_id": conversation_id, "run_id": run.id})
 
-    async def events():
-        yield _sse({"type": "conversation", "conversation_id": conversation_id})
+    async def work():
         final = None
         try:
             async for event in graph_mod.run_turn(app.state.graph, user_id, conversation_id, question, scope,
@@ -88,21 +159,41 @@ async def ask(body: AskBody, request: Request, user=Depends(api_user),
                 if event["type"] == "final":
                     final = event
                 else:
-                    yield _sse(event)
+                    run.add(event)
         except Exception as exc:  # model server down, etc.
             log.exception("Answering failed")
             final = {"type": "final", "status": "error", "answer": "", "citations": [], "sources": [],
                      "latency_ms": 0, "trace": [], "error": f"{type(exc).__name__}: {exc}"}
-        message_id = _save_answer(app.state.settings, conversation_id, final)
-        final["message_id"] = message_id
+        try:
+            final["message_id"] = await asyncio.to_thread(_save_answer, app.state.settings, conversation_id, final)
+        except Exception:
+            log.exception("Couldn't save the answer")
+            final["message_id"] = None
         final.pop("trace", None)
-        yield _sse(final)
+        run.add(final)
+        run.finish()
         writer = getattr(app.state, "memory_writer", None)
         if writer and final["status"] != "error":
-            app.state.background.add(asyncio.create_task(writer(user_id, conversation_id, question)))
+            _background(app, writer(user_id, conversation_id, question))
 
-    return StreamingResponse(events(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    _background(app, work())
+    return _stream(run)
+
+
+def _background(app, coro) -> None:
+    task = asyncio.create_task(coro)
+    app.state.background.add(task)
+    task.add_done_callback(app.state.background.discard)
+
+
+@router.get("/api/runs/{run_id}/events")
+async def run_events(run_id: str, request: Request, after: int = 0, user=Depends(api_user)):
+    """A question's events from number `after` on: to pick up an answer again
+    after the page was closed or the connection dropped."""
+    run = _runs(request.app).get(run_id)
+    if run is None or run.user_id != user["id"]:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "That answer is finished or gone; reload the conversation.")
+    return _stream(run, after)
 
 
 def _save_answer(settings, conversation_id: str, final: dict) -> int:
@@ -138,7 +229,8 @@ def list_conversations(user=Depends(api_user), conn: sqlite3.Connection = Depend
 
 
 @router.get("/api/conversations/{conversation_id}")
-def get_conversation(conversation_id: str, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def get_conversation(conversation_id: str, request: Request, user=Depends(api_user),
+                     conn: sqlite3.Connection = Depends(get_db)):
     _own_conversation(conn, user["id"], conversation_id)
     messages = []
     for m in conn.execute("SELECT id, role, content, status, route, created_at FROM messages "
@@ -163,7 +255,8 @@ def get_conversation(conversation_id: str, user=Depends(api_user), conn: sqlite3
     drafted = proposals.for_messages(conn, [m["id"] for m in messages if m["role"] == "assistant"])
     for m in messages:
         m["proposals"] = drafted.get(m["id"], [])
-    return {"id": conversation_id, "messages": messages}
+    run = running_in(request.app, conversation_id)
+    return {"id": conversation_id, "messages": messages, "running": run.id if run else None}
 
 
 def _source_url(s: dict) -> str | None:

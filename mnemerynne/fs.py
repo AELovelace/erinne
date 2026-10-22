@@ -67,6 +67,8 @@ class Access:
     # Re-reads `reaches` when a folder turns up that didn't exist when they were
     # read (one made since, e.g. by a folder upload); None for a fixed snapshot.
     reload: Callable[[], dict[int, permissions.Reach]] | None = field(default=None, repr=False)
+    # Claude's view: files people took out of it (files.claude_hidden) don't count as readable.
+    claude: bool = False
 
     @classmethod
     def of(cls, conn: sqlite3.Connection, user_id: int) -> "Access":
@@ -75,7 +77,8 @@ class Access:
     @classmethod
     def for_claude(cls, conn: sqlite3.Connection, user_id: int) -> "Access":
         """Read-only access to what the user may search from Claude."""
-        return cls(user_id, permissions.claude_reach(conn, user_id), lambda: permissions.claude_reach(conn, user_id))
+        return cls(user_id, permissions.claude_reach(conn, user_id), lambda: permissions.claude_reach(conn, user_id),
+                   claude=True)
 
     def _reach(self, collection_id: int, folder_id: int | None = None) -> permissions.Reach | None:
         r = self.reaches.get(collection_id)
@@ -101,6 +104,13 @@ class Access:
     def can_write(self, collection_id: int, folder_id: int | None) -> bool:
         r = self._reach(collection_id, folder_id)
         return r is not None and r.can_write(folder_id)
+
+    def can_read_file(self, row) -> bool:
+        """A file row (with collection_id, folder_id, claude_hidden): readable here, and for Claude not taken
+        out of its view."""
+        if self.claude and row["claude_hidden"]:
+            return False
+        return self.can_read(row["collection_id"], row["folder_id"])
 
     def visible(self, collection_id: int, folder_ids=()) -> set[int]:
         """Folders the user may see (to read them or reach one below). Pass the
@@ -321,7 +331,7 @@ def split_relative_path(relative_path: str) -> list[str]:
 # ----------------------------------------------------------------- browsing
 _FILE_COLUMNS = """
     f.id, f.collection_id, f.folder_id, f.display_name, f.status, f.progress, f.error, f.notes,
-    f.created_at, f.updated_at, f.deleted_at, f.uploaded_by, f.edited_via, b.kind, b.mime, b.size, b.unit_count,
+    f.created_at, f.updated_at, f.deleted_at, f.uploaded_by, f.edited_via, f.claude_hidden, b.kind, b.mime, b.size, b.unit_count,
     b.rel_path, b.ocr_rel_path, u.username AS uploaded_by_name
 """
 _FILE_FROM = """
@@ -349,6 +359,8 @@ def browse(conn: sqlite3.Connection, access: Access, collection_id: int, folder_
         f"SELECT {_FILE_COLUMNS} {_FILE_FROM} WHERE f.collection_id = ? AND COALESCE(f.folder_id, 0) = ? "
         "AND f.deleted_at IS NULL ORDER BY f.display_name COLLATE NOCASE",
         (collection_id, folder_id or 0)).fetchall() if access.can_read(collection_id, folder_id) else []
+    if access.claude:
+        files = [f for f in files if not f["claude_hidden"]]
     return {"folders": folders, "files": files, "path": folder_path(conn, folder_id),
             "can_write": access.can_write(collection_id, folder_id)}
 
@@ -379,8 +391,7 @@ def search_names(conn: sqlite3.Connection, access: Access, q: str, limit: int = 
     files = [r for r in conn.execute(
         f"SELECT {_FILE_COLUMNS} {_FILE_FROM} WHERE f.collection_id IN ({marks}) AND f.deleted_at IS NULL "
         "AND f.display_name LIKE ? ESCAPE '\\' ORDER BY f.display_name COLLATE NOCASE", (*readable, like))
-        if (r["folder_id"] is None or r["folder_id"] in live[r["collection_id"]])
-        and access.can_read(r["collection_id"], r["folder_id"])][:limit]
+        if (r["folder_id"] is None or r["folder_id"] in live[r["collection_id"]]) and access.can_read_file(r)][:limit]
     return {"folders": folders, "files": files}
 
 
@@ -401,6 +412,41 @@ def _sync_scope(conn: sqlite3.Connection, file_ids: list[int]) -> None:
         conn.execute("UPDATE chunks SET collection_id = ?, folder_id = ? WHERE file_id = ?", (*scope, file_id))
         conn.execute("UPDATE chunk_vec SET collection_id = ?, folder_id = ? "
                      "WHERE rowid IN (SELECT id FROM chunks WHERE file_id = ?)", (*scope, file_id))
+
+
+def claude_hidden(conn: sqlite3.Connection, file_id: int) -> int:
+    """files.claude_hidden, which a file's new chunks and vectors carry."""
+    row = conn.execute("SELECT claude_hidden FROM files WHERE id = ?", (file_id,)).fetchone()
+    return int(row["claude_hidden"]) if row else 0
+
+
+def set_file_claude(conn: sqlite3.Connection, access: Access, file_id: int, visible: bool) -> None:
+    """Show a file to Claude again, or take it out of Claude's view (with its chunks and vectors).
+    Only people who can change the place it's in."""
+    row = file_row(conn, file_id)
+    if row is None or row["deleted_at"] is not None or not access.can_read(row["collection_id"], row["folder_id"]):
+        raise NotFound("No such file.")
+    if not access.can_write(row["collection_id"], row["folder_id"]):
+        raise Forbidden("Only people who can change this folder can change what Claude sees in it.")
+    hidden = 0 if visible else 1
+    with transaction(conn):
+        conn.execute("UPDATE files SET claude_hidden = ? WHERE id = ?", (hidden, file_id))
+        conn.execute("UPDATE chunks SET claude_hidden = ? WHERE file_id = ?", (hidden, file_id))
+        conn.execute("UPDATE chunk_vec SET claude_hidden = ? WHERE rowid IN (SELECT id FROM chunks WHERE file_id = ?)",
+                     (hidden, file_id))
+
+
+def set_folder_claude(conn: sqlite3.Connection, access: Access, collection_id: int, folder_id: int,
+                      visible: bool) -> None:
+    """Show a folder (and what's in it) to Claude again, or take it out of Claude's view."""
+    row = conn.execute("SELECT id FROM folders WHERE id = ? AND collection_id = ? AND deleted_at IS NULL",
+                       (folder_id, collection_id)).fetchone()
+    if row is None or not access.can_read(collection_id, folder_id):
+        raise NotFound("No such folder.")
+    if not access.can_write(collection_id, folder_id):
+        raise Forbidden("Only people who can change this folder can change what Claude sees in it.")
+    with transaction(conn):
+        conn.execute("UPDATE folders SET claude_hidden = ? WHERE id = ?", (0 if visible else 1, folder_id))
 
 
 def search_scope(conn: sqlite3.Connection, file_id: int) -> tuple[int, int]:

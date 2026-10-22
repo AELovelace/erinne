@@ -37,6 +37,10 @@ class Reach:
     write: set[int] = field(default_factory=set)
     claude: set[int] = field(default_factory=set)
     parents: dict[int, int | None] = field(default_factory=dict)   # every folder in the collection
+    # What admins share with Claude, before people took folders out of its view (folders.claude_hidden):
+    # `claude` is this minus the hidden folders and everything under them.
+    claude_shared: set[int] = field(default_factory=set)
+    claude_hidden: set[int] = field(default_factory=set)              # folders hidden themselves
 
     def can_read(self, folder_id: int | None) -> bool:
         return self.root_read if folder_id is None else folder_id in self.read
@@ -67,7 +71,22 @@ class Reach:
         """The part of this reach that may be searched from Claude, read-only."""
         return Reach(self.collection_id, self.kind, self.name, root_read=self.root_claude,
                      root_claude=self.root_claude, read=set(self.claude), claude=set(self.claude),
-                     parents=self.parents)
+                     parents=self.parents, claude_shared=self.claude_shared, claude_hidden=self.claude_hidden)
+
+    def claude_state(self, folder_id: int | None, *, own: int | None = None) -> tuple[bool, bool]:
+        """For the Claude checkbox of a folder (folder_id = itself) or of a file in folder_id (own = its
+        claude_hidden): (Claude sees it, people here may change that). The checkbox can only take things out
+        of what admins share, so it's fixed when the place isn't shared or a folder above is hidden."""
+        if own is None:   # a folder
+            parent = self.parents.get(folder_id)
+            shared = folder_id in self.claude_shared
+            blocked = parent is not None and _under(parent, self.claude_hidden, self.parents)
+            hidden = folder_id in self.claude_hidden
+        else:             # a file in folder_id
+            shared = self.root_claude if folder_id is None else folder_id in self.claude_shared
+            blocked = folder_id is not None and _under(folder_id, self.claude_hidden, self.parents)
+            hidden = bool(own)
+        return shared and not blocked and not hidden, shared and not blocked
 
 
 def _group_ids(conn: sqlite3.Connection, user_id: int) -> list[int]:
@@ -136,7 +155,23 @@ def reach(conn: sqlite3.Connection, user_id: int) -> dict[int, Reach]:
             r = share.library_reach(conn, row, user) if user else None
             if r is not None:
                 out[row["id"]] = r
+    _apply_claude_hidden(conn, out)
     return out
+
+
+def _apply_claude_hidden(conn: sqlite3.Connection, reaches: dict[int, Reach]) -> None:
+    """Folders people took out of Claude's view: they and everything under them leave `claude`."""
+    hidden: dict[int, set[int]] = {}
+    if reaches:
+        marks = ",".join("?" * len(reaches))
+        for r in conn.execute(f"SELECT id, collection_id FROM folders WHERE claude_hidden = 1 "
+                              f"AND collection_id IN ({marks})", tuple(reaches)):
+            hidden.setdefault(r["collection_id"], set()).add(r["id"])
+    for cid, r in reaches.items():
+        r.claude_shared = set(r.claude)
+        r.claude_hidden = hidden.get(cid, set())
+        if r.claude_hidden:
+            r.claude = {f for f in r.claude if not _under(f, r.claude_hidden, r.parents)}
 
 
 Level = tuple[bool, bool, bool]   # (read, write, claude)

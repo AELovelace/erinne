@@ -113,6 +113,7 @@ class Scope:
     """
     whole: frozenset[int] = frozenset()
     parts: tuple[tuple[int, bool, frozenset[int]], ...] = ()
+    claude: bool = False   # Claude's search: files taken out of its view (claude_hidden) are left out
 
     @classmethod
     def collections(cls, ids, folders: set[int] | None = None) -> "Scope":
@@ -123,27 +124,27 @@ class Scope:
         return cls(parts=tuple((cid, False, frozenset(folders)) for cid in sorted(ids)))
 
     @classmethod
-    def of_reach(cls, reaches) -> "Scope":
-        """From permissions.reach() (or claude_reach()) values."""
+    def of_reach(cls, reaches, claude: bool = False) -> "Scope":
+        """From permissions.reach() (or, with claude=True, claude_reach()) values."""
         whole, parts = set(), []
         for r in reaches:
             if r.everything:
                 whole.add(r.collection_id)
             elif r.root_read or r.read:
                 parts.append((r.collection_id, r.root_read, frozenset(r.read)))
-        return cls(frozenset(whole), tuple(parts))
+        return cls(frozenset(whole), tuple(parts), claude)
 
     def narrow(self, collection_id: int, folders: set[int] | None = None) -> "Scope":
         """Only this collection, and within it only `folders` (a subtree) if given.
         It can only narrow: nothing outside the original scope gets in."""
         part = next((p for p in self.parts if p[0] == collection_id), None)
         if folders is None:
-            return Scope(self.whole & {collection_id}, (part,) if part else ())
+            return Scope(self.whole & {collection_id}, (part,) if part else (), self.claude)
         if collection_id in self.whole:
-            return Scope(parts=((collection_id, False, frozenset(folders)),))
+            return Scope(parts=((collection_id, False, frozenset(folders)),), claude=self.claude)
         if part:
-            return Scope(parts=((collection_id, False, part[2] & frozenset(folders)),))
-        return Scope()
+            return Scope(parts=((collection_id, False, part[2] & frozenset(folders)),), claude=self.claude)
+        return Scope(claude=self.claude)
 
     def branches(self) -> list[tuple[set[int], set[int] | None]]:
         """(collections, folders or None for all) pairs that each need only `IN`."""
@@ -182,11 +183,14 @@ def keyword_search(conn: sqlite3.Connection, question: str, allowed, k: int,
                    section_weight: float = 3.0, folders: set[int] | None = None) -> list[int]:
     """`allowed`: a Scope, or a set of collection ids (with optional `folders`)."""
     query = fts_query(question)
-    branches = _as_scope(allowed, folders).branches()
+    scope = _as_scope(allowed, folders)
+    branches = scope.branches()
     if not query or not branches:
         return []
     parts = [_branch_sql(c, f, "c.") for c, f in branches]   # plain SQL, so OR is fine here
     where = " OR ".join(f"({sql})" for sql, _ in parts)
+    if scope.claude:
+        where = f"({where}) AND c.claude_hidden = 0"
     rows = conn.execute(
         f"SELECT c.id FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid "
         f"WHERE chunks_fts MATCH ? AND ({where}) ORDER BY bm25(chunks_fts, ?, 1.0) LIMIT ?",
@@ -200,8 +204,11 @@ def vector_search(conn: sqlite3.Connection, query_vector: list[float], allowed, 
     """`allowed`: a Scope, or a set of collection ids (with optional `folders`)."""
     found: list[tuple[int, float]] = []
     vector = pack_vector(query_vector)
-    for collections, branch_folders in _as_scope(allowed, folders).branches():
+    scope = _as_scope(allowed, folders)
+    for collections, branch_folders in scope.branches():
         sql, params = _branch_sql(collections, branch_folders, "")
+        if scope.claude:
+            sql += " AND claude_hidden = 0"
         found += [(r[0], r[1]) for r in conn.execute(
             f"SELECT rowid, distance FROM chunk_vec WHERE embedding MATCH ? AND k = ? AND {sql} ORDER BY distance",
             (vector, k, *params))]

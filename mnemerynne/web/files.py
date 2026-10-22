@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import editing, fs, jobs, permissions, share
+from mnemerynne import api_tokens, editing, fs, jobs, permissions, share
 from mnemerynne.config import Settings
 from mnemerynne.ingest import markdown, store
 from mnemerynne.web.deps import api_user, get_db, get_settings, page_user
@@ -129,14 +129,56 @@ def folder_tree(collection_id: int, user=Depends(api_user), conn: sqlite3.Connec
     return {"folders": _fs_errors(lambda: fs.folder_tree(conn, access, collection_id))}
 
 
+def _claude_json(on_and_allowed: tuple[bool, bool], writable: bool) -> dict:
+    """The Claude checkbox: ticked when Claude sees it; changeable by people who can change the place, as
+    long as admins share it with Claude and no folder above is hidden."""
+    on, allowed = on_and_allowed
+    return {"on": on, "can_change": allowed and writable, "shared": allowed}
+
+
 @router.get("/api/browse")
 def browse(collection_id: int, folder_id: int | None = None, user=Depends(api_user),
            conn: sqlite3.Connection = Depends(get_db)):
     access = fs.Access.of(conn, user["id"])
     listing = _fs_errors(lambda: fs.browse(conn, access, collection_id, folder_id))
-    return {"folders": [_folder_json(r) for r in listing["folders"]],
-            "files": [_file_json(r, access) for r in listing["files"]],
-            "path": listing["path"], "can_write": listing["can_write"]}
+    folders = [_folder_json(r) for r in listing["folders"]]
+    files = [_file_json(r, access) for r in listing["files"]]
+    # The Claude column, for people who have Claude connected (Claude page).
+    claude = api_tokens.has_active(conn, user["id"])
+    reach = access.reaches.get(collection_id)
+    if claude and reach is not None:
+        for out, row in zip(folders, listing["folders"]):
+            out["claude"] = _claude_json(reach.claude_state(row["id"]), access.can_write(collection_id, row["id"]))
+        for out, row in zip(files, listing["files"]):
+            out["claude"] = _claude_json(reach.claude_state(row["folder_id"], own=row["claude_hidden"]),
+                                         out["can_delete"])
+    return {"folders": folders, "files": files, "path": listing["path"], "can_write": listing["can_write"],
+            "claude": claude}
+
+
+class ClaudeVisible(BaseModel):
+    visible: bool
+
+
+@router.put("/api/files/{file_id}/claude")
+def set_file_claude(file_id: int, body: ClaudeVisible, user=Depends(api_user),
+                    conn: sqlite3.Connection = Depends(get_db)):
+    """Show a file to Claude, or take it out of Claude's view (Erynne in chat still sees it)."""
+    access = fs.Access.of(conn, user["id"])
+    _fs_errors(lambda: fs.set_file_claude(conn, access, file_id, body.visible))
+    return {"id": file_id, "visible": body.visible}
+
+
+@router.put("/api/folders/{folder_id}/claude")
+def set_folder_claude(folder_id: int, body: ClaudeVisible, user=Depends(api_user),
+                      conn: sqlite3.Connection = Depends(get_db)):
+    """Show a folder and what's in it to Claude, or take it out of Claude's view."""
+    access = fs.Access.of(conn, user["id"])
+    row = conn.execute("SELECT collection_id FROM folders WHERE id = ?", (folder_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such folder.")
+    _fs_errors(lambda: fs.set_folder_claude(conn, access, row["collection_id"], folder_id, body.visible))
+    return {"id": folder_id, "visible": body.visible}
 
 
 @router.get("/api/search-names")

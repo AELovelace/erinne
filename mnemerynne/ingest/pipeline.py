@@ -115,18 +115,19 @@ def _copy_from_twin(conn, file_id: int, sha256: str) -> bool:
         return False
     with transaction(conn):
         collection_id, folder_id = fs.search_scope(conn, file_id)
+        hidden = fs.claude_hidden(conn, file_id)
         conn.execute("DELETE FROM chunks WHERE file_id = ?", (file_id,))
         for row in conn.execute("SELECT * FROM chunks WHERE file_id = ? ORDER BY ord", (twin["id"],)).fetchall():
             new_id = conn.execute(
                 "INSERT INTO chunks(file_id, collection_id, folder_id, ord, page_start, page_end, anchor, "
-                "section_path, text, tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "section_path, text, tokens, claude_hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (file_id, collection_id, folder_id, row["ord"], row["page_start"], row["page_end"], row["anchor"],
-                 row["section_path"], row["text"], row["tokens"]),
+                 row["section_path"], row["text"], row["tokens"], hidden),
             ).lastrowid
             vector = conn.execute("SELECT embedding FROM chunk_vec WHERE rowid = ?", (row["id"],)).fetchone()
             conn.execute(
-                "INSERT INTO chunk_vec(rowid, embedding, collection_id, folder_id) VALUES (?, ?, ?, ?)",
-                (new_id, vector["embedding"], collection_id, folder_id),
+                "INSERT INTO chunk_vec(rowid, embedding, collection_id, folder_id, claude_hidden) VALUES (?, ?, ?, ?, ?)",
+                (new_id, vector["embedding"], collection_id, folder_id, hidden),
             )
         _set(conn, file_id, status="ready", progress=None, error=None)
     return True
@@ -177,17 +178,18 @@ def process_file(conn: sqlite3.Connection, settings: Settings, embedder: Embedde
         if conn.execute("SELECT 1 FROM files WHERE id = ?", (file_id,)).fetchone() is None:
             return  # deleted for good meanwhile
         collection_id, folder_id = fs.search_scope(conn, file_id)
+        hidden = fs.claude_hidden(conn, file_id)
         conn.execute("DELETE FROM chunks WHERE file_id = ?", (file_id,))
         for ord_, (c, vector) in enumerate(zip(chunks, vectors)):
             chunk_id = conn.execute(
                 "INSERT INTO chunks(file_id, collection_id, folder_id, ord, page_start, page_end, anchor, "
-                "section_path, text, tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "section_path, text, tokens, claude_hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (file_id, collection_id, folder_id, ord_, c.page_start, c.page_end, c.anchor,
-                 c.section_path, c.text, c.tokens),
+                 c.section_path, c.text, c.tokens, hidden),
             ).lastrowid
             conn.execute(
-                "INSERT INTO chunk_vec(rowid, embedding, collection_id, folder_id) VALUES (?, ?, ?, ?)",
-                (chunk_id, pack_vector(vector), collection_id, folder_id),
+                "INSERT INTO chunk_vec(rowid, embedding, collection_id, folder_id, claude_hidden) VALUES (?, ?, ?, ?, ?)",
+                (chunk_id, pack_vector(vector), collection_id, folder_id, hidden),
             )
         _set(conn, file_id, status="ready", progress=None, error=None)
     log.info("File %s: %d chunks indexed.", file_id, len(chunks))

@@ -202,7 +202,7 @@ class Tools:
         limit = max(1, min(int(limit), 20))
         library, folder = _split_place(library, folder)
         access = self._access(conn, caller)
-        everything = allowed = retrieval.Scope.of_reach(access.reaches.values())
+        everything = allowed = retrieval.Scope.of_reach(access.reaches.values(), claude=access.claude)
         notes = []
         # Erynne: the "Search in…" place picked in chat, unless she names one.
         scope = getattr(caller, "scope", None)
@@ -251,12 +251,11 @@ class Tools:
     def read_passage(self, conn, caller: Caller, chunk_id: int, around: int = 1) -> tuple[dict, list[int]]:
         around = max(0, min(int(around), 3))
         access = self._access(conn, caller)
-        row = conn.execute("SELECT c.file_id, c.ord, c.collection_id, f.folder_id FROM chunks c "
+        row = conn.execute("SELECT c.file_id, c.ord, c.collection_id, f.folder_id, f.claude_hidden FROM chunks c "
                            "JOIN files f ON f.id = c.file_id WHERE c.id = ? AND f.deleted_at IS NULL",
                            (chunk_id,)).fetchone()
         # Chunks of a file in the bin (or under a binned folder) carry collection 0.
-        if row is None or row["collection_id"] == fs.TRASH_COLLECTION \
-                or not access.can_read(row["collection_id"], row["folder_id"]):
+        if row is None or row["collection_id"] == fs.TRASH_COLLECTION or not access.can_read_file(row):
             raise ToolError("No such passage" + (" (or it isn't shared with Claude)" if self.claude else "")
                             + ". Use a chunk_id from search_documents.")
         ids = [r[0] for r in conn.execute("SELECT id FROM chunks WHERE file_id = ? AND ord BETWEEN ? AND ? ORDER BY ord",
@@ -347,7 +346,7 @@ class Tools:
         access = self._access(conn, caller)
         row = fs.file_row(conn, file_id)
         if row is None or row["deleted_at"] is not None or not fs.is_live_folder(conn, row["folder_id"]) \
-                or not access.can_read(row["collection_id"], row["folder_id"]):
+                or not access.can_read_file(row):
             raise ToolError("No such file" + (" (or it isn't shared with Claude)" if self.claude else "")
                             + ". Use a file_id from the other tools.")
         if row["kind"] != "pdf":

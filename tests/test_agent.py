@@ -336,3 +336,35 @@ def test_agent_requests_take_the_balancer_path(settings):
     assert asyncio.run(go()).content == "hi"
     assert str(seen[-1].url) == node + "/v1/chat/completions"
     assert seen[-1].headers["authorization"] == "Bearer " + "k" * 24
+
+
+def test_a_reply_the_server_cant_parse_is_asked_again_without_tools(client, agent_llm):
+    _login(client, "alice")
+    tried = []
+
+    def parse_error(messages):
+        tried.append("parse")
+        request = httpx.Request("POST", "http://agent.test/v1/chat/completions")
+        raise httpx.HTTPStatusError("500", request=request, response=httpx.Response(
+            500, request=request, json={"error": {"code": 500, "message": "Failed to parse input at pos 1599: 1][3]."}}))
+
+    agent_llm.turns(call("search_documents", query="night audit"), parse_error,
+                    lambda m: ToolTurn(f"Run it after midnight {last_tool(m)['results'][0]['cite']}."))
+    final = _final(_ask(client, "How do I run the night audit?"))
+    assert final["answer"] == "Run it after midnight [1]." and tried == ["parse"]
+    assert agent_llm.calls[-1][1] == []                       # the retry offered no tools
+
+
+def test_long_conversations_are_shortened_to_fit():
+    big = json.dumps({"results": [{"cite": f"[{n}]", "file": "OPERA.pdf", "section": "Night Audit",
+                                   "text": "x" * 3000} for n in range(1, 9)]})
+    messages = [{"role": "system", "content": "s" * 500},
+                {"role": "user", "content": "earlier"}, {"role": "assistant", "content": "e" * 2000},
+                {"role": "user", "content": "now"},
+                {"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]},
+                {"role": "tool", "content": big}, {"role": "assistant", "content": "", "tool_calls": [{"id": "2"}]},
+                {"role": "tool", "content": big}]
+    assert agent_mod.fit(messages, 8000)
+    assert agent_mod._size(messages) <= 8000
+    assert "[8] OPERA.pdf" in messages[-3]["content"]           # older result: cite markers kept
+    assert any(m["content"] == "now" for m in messages)          # the question stays

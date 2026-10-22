@@ -47,13 +47,19 @@ log = logging.getLogger("mnemerynne.agent")
 
 AGENT_MODEL_KEY = "agent_model"
 MODEL_DEFAULTS: dict[str, Any] = {
-    "timeout": 120,           # seconds per model call
+    "timeout": 300,           # seconds per model call (the run goes on without the browser)
     "max_steps": 8,           # model turns with tools before it must answer
     "max_tokens": 1500,       # per model turn, on top of the reasoning budget
     "reasoning_tokens": 1024,
     "thinking": True,         # let models that think (Qwen3) do so before choosing tools
+    # Tokens one request may use on the server: its -c divided by -np (the
+    # generator's 16384 / 2). Older tool results are shortened to fit.
+    "context_tokens": 8192,
 }
-_LIMITS = {"timeout": (5, 900), "max_steps": (1, 20), "max_tokens": (200, 8000), "reasoning_tokens": (0, 16384)}
+_LIMITS = {"timeout": (5, 1800), "max_steps": (1, 20), "max_tokens": (200, 8000), "reasoning_tokens": (0, 16384),
+           "context_tokens": (2048, 262144)}
+CHARS_PER_TOKEN = 3           # a cautious guess for JSON and English, to stay under context_tokens
+DIGEST_CHARS = 1200           # an older tool result, shortened
 AGENT_MODEL_NAME = "agent"    # recorded with answers; balancers serve whatever model they run
 HEALTH_SECONDS = 30           # how long a reachability check is trusted
 TOOL_RESULT_CHARS = 12_000    # per tool result handed back to the model
@@ -149,6 +155,62 @@ def _strip_links(value: Any) -> Any:
 
 def _clip(text: str, limit: int = TOOL_RESULT_CHARS) -> str:
     return text if len(text) <= limit else text[:limit] + " … (cut short; narrow the request for more)"
+
+
+def _digest(content: str, limit: int = DIGEST_CHARS) -> str:
+    """A shortened tool result that keeps what can be cited: [n], file, the start of the text."""
+    try:
+        out = json.loads(content)
+    except ValueError:
+        return _clip(content, limit)
+    if isinstance(out, dict) and (out.get("results") or out.get("passages")):
+        found = out.get("results") or out.get("passages")
+        snippet = max(30, (limit - 20) // len(found) - 60)   # every [n] marker survives
+        lines = [f"{p.get('cite', '')} {p.get('file', '')} · {str(p.get('section', ''))[:40]}: "
+                 f"{str(p.get('text', ''))[:snippet]}" for p in found]
+        return _clip("(shortened) " + "\n".join(lines), limit)
+    return _clip(content, limit)
+
+
+def _size(messages: list[dict]) -> int:
+    return sum(len(m.get("content") or "") + len(json.dumps(m.get("tool_calls") or "")) for m in messages)
+
+
+def fit(messages: list[dict], budget_chars: int) -> bool:
+    """Shorten the conversation in place until it fits: older tool results
+    first, then earlier chat turns, then the newest tool results. False if
+    it still doesn't fit."""
+    tools = [m for m in messages if m["role"] == "tool"]
+    for m in tools[:-1]:
+        if _size(messages) <= budget_chars:
+            return True
+        m["content"] = _digest(m["content"])
+    # Earlier chat turns: everything between the system prompt and this question.
+    question = _question_index(messages)
+    while _size(messages) > budget_chars and question > 1:
+        del messages[1]
+        question -= 1
+    for m in tools[-1:]:
+        if _size(messages) > budget_chars:
+            m["content"] = _digest(m["content"], DIGEST_CHARS // 2)
+    for m in tools:
+        if _size(messages) > budget_chars:
+            m["content"] = _digest(m["content"], 300)
+    return _size(messages) <= budget_chars
+
+
+def _question_index(messages: list[dict]) -> int:
+    """Where this turn's question is: the last user message before any tool use."""
+    first_tool = next((i for i, m in enumerate(messages) if m.get("tool_calls")), len(messages))
+    return max(i for i, m in enumerate(messages[:first_tool]) if m["role"] == "user")
+
+
+def _server_said(exc: httpx.HTTPStatusError) -> str:
+    try:
+        body = exc.response.json()
+        return str((body.get("error") or {}).get("message") or body)[:300]
+    except ValueError:
+        return exc.response.text[:300]
 
 
 def _source(n: int, hit: retrieval.Hit) -> dict:
@@ -407,8 +469,7 @@ class Agent:
                 if last:   # out of steps: answer with what there is
                     messages.append({"role": "user", "content": "(You've used all your tool steps. Answer now "
                                                                 "with what you found, without tools.)"})
-                turn = await client.chat_tools(messages, [] if last else specs, temperature=0.2,
-                                               max_tokens=int(cfg["max_tokens"]), thinking=bool(cfg["thinking"]))
+                turn = await self._turn(client, messages, [] if last else specs, cfg)
                 if not turn.tool_calls or last:
                     text = turn.content
                     break
@@ -430,14 +491,21 @@ class Agent:
                     messages.append({"role": "tool", "tool_call_id": call.id, "name": call.name,
                                      "content": _clip(json.dumps(out, ensure_ascii=False, default=str))})
         except (httpx.HTTPError, OSError) as exc:
-            if ran == 0:
+            said = _server_said(exc) if isinstance(exc, httpx.HTTPStatusError) else str(exc) or type(exc).__name__
+            if ran == 0 and not isinstance(exc, httpx.TimeoutException):
                 self._mark_down()
-                log.warning("The agent model failed (%s); answering with the normal flow.", exc)
+                log.warning("The agent model failed (%s); answering with the normal flow.", said)
                 writer({"type": "route", "route": "search", "fallback": "agent model unavailable"})
                 return None
-            log.warning("The agent model failed partway through: %s", exc)
-            text = ("Sorry, I lost the connection to my model partway through, so I couldn't finish. "
-                    "Please try again in a moment.")
+            log.warning("The agent model failed after %d tool call(s): %s", ran, said)
+            if isinstance(exc, httpx.TimeoutException):
+                text = (f"Sorry, my model took longer than {cfg['timeout']} seconds on one step, so I stopped. "
+                        "Try a narrower question, or ask an admin to raise the agent timeout.")
+            elif isinstance(exc, httpx.HTTPStatusError):
+                text = "Sorry, my model refused that step, so I couldn't finish. Please try again or rephrase."
+            else:
+                text = ("Sorry, I lost the connection to my model partway through, so I couldn't finish. "
+                        "Please try again in a moment.")
         text = re.sub(r"<\|[^|>]*\|>", "", text or "").strip()
         if not text:
             text = "Sorry, I couldn't put an answer together for that. Could you ask it another way?"
@@ -447,6 +515,32 @@ class Agent:
         writer({"type": "delta", "text": text})
         return {"answer": {"status": "answered", "text": text, "citations": citations}, "proposals": proposed,
                 "model": AGENT_MODEL_NAME}
+
+    async def _turn(self, client: Any, messages: list[dict], specs: list[dict], cfg: dict):
+        """One model call, made to fit the request's context, and retried when the
+        server can't use the reply: too long (shorten more), or its tool-call
+        parser choked on the answer text, e.g. on [1][3] (ask again without tools)."""
+        reserve = int(cfg["max_tokens"]) + int(cfg["reasoning_tokens"])
+        budget = (int(cfg["context_tokens"]) - reserve) * CHARS_PER_TOKEN - len(json.dumps(specs))
+        for _ in range(3):
+            fit(messages, max(budget, 2000))
+            try:
+                return await client.chat_tools(messages, specs, temperature=0.2, max_tokens=int(cfg["max_tokens"]),
+                                               thinking=bool(cfg["thinking"]))
+            except httpx.HTTPStatusError as exc:
+                said = _server_said(exc).lower()
+                if "parse" in said and specs:
+                    log.warning("The server couldn't read the model's reply for tool calls (%s); asking again "
+                                "without tools.", said[:120])
+                    budget += len(json.dumps(specs))
+                    specs = []
+                elif "context" in said or "exceed" in said or "too long" in said:
+                    log.warning("The agent's request was too long for the model (%s); shortening.", said[:120])
+                    budget //= 2
+                else:
+                    raise
+        return await client.chat_tools(messages, specs, temperature=0.2, max_tokens=int(cfg["max_tokens"]),
+                                       thinking=bool(cfg["thinking"]))
 
     async def aclose(self) -> None:
         for client in [*self._old_clients, self._client]:

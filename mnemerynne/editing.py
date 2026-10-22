@@ -193,7 +193,7 @@ def load(conn: sqlite3.Connection, settings: Settings, user_id: int, file_id: in
     """A file the assistant may read, with its current bytes and version."""
     row = fs.file_row(conn, file_id)
     if row is None or row["deleted_at"] is not None or not fs.is_live_folder(conn, row["folder_id"]) \
-            or not ai_access(conn, user_id, via).can_read(row["collection_id"], row["folder_id"]):
+            or not ai_access(conn, user_id, via).can_read_file(row):
         raise EditNotFound("No such file" + (" (or it isn't shared with Claude)" if via == "claude" else "")
                            + ". Use a file_id from the other tools.")
     fmt = format_of(row["display_name"])

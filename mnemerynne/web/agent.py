@@ -58,6 +58,7 @@ class AgentModelBody(BaseModel):
     max_steps: int | None = None
     max_tokens: int | None = None
     reasoning_tokens: int | None = None
+    context_tokens: int | None = None
     thinking: bool | None = None
 
 

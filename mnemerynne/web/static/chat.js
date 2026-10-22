@@ -154,12 +154,69 @@
     }
   }
 
+  // The question runs on the server as a job (a "run"); this page only
+  // watches its events. When the connection drops, it picks them up again
+  // from where it was, so a long answer isn't lost.
+  function watcher(view) {
+    return { view: view, runId: null, seen: 0, streamed: "", sources: [], finished: false };
+  }
+
+  function handle(w, ev) {
+    const view = w.view;
+    w.seen += 1;
+    if (ev.type === "conversation") {
+      conversationId = ev.conversation_id;
+      w.runId = ev.run_id;
+    } else if (ev.type === "route") {
+      if (ev.route === "agent") view.status.textContent = "Working on it…";
+      else if (ev.route !== "search") view.status.textContent = "Writing…";
+    } else if (ev.type === "tool") {
+      window.ErynneAgent.tool(view.steps, ev);
+      if (ev.state === "running") view.status.textContent = (ev.label || ev.name) + "…";
+    } else if (ev.type === "proposal") {
+      view.proposals.appendChild(window.ErynneAgent.proposal(ev));
+    } else if (ev.type === "sources") {
+      if (!ev.sources.length && view.status.textContent === "Writing…") return;
+      w.sources = ev.sources;
+      view.status.textContent = w.sources.length ? "Reading " + w.sources.length + " passages…" : "Checking…";
+    } else if (ev.type === "delta") {
+      w.streamed += ev.text;
+      renderAnswer(view.body, w.streamed, w.sources);
+    } else if (ev.type === "reset") {
+      // What streamed so far didn't hold up; a "couldn't find it" reply follows.
+      w.streamed = "";
+      w.sources = [];
+      renderAnswer(view.body, w.streamed, w.sources);
+    } else if (ev.type === "final") {
+      w.finished = true;
+      finishAnswer(view, ev);
+    }
+  }
+
+  async function follow(w, resp) {
+    for await (const ev of readEvents(resp)) handle(w, ev);
+  }
+
+  // Pick a run's events up again after a dropped connection (or when a
+  // conversation still being answered is opened).
+  async function reattach(w) {
+    for (let attempt = 0; attempt < 30 && !w.finished; attempt++) {
+      if (attempt) await new Promise(function (r) { setTimeout(r, Math.min(2000 * attempt, 10000)); });
+      w.view.status.textContent = attempt ? "Reconnecting…" : w.view.status.textContent;
+      try {
+        const resp = await fetch("/api/runs/" + w.runId + "/events?after=" + w.seen);
+        if (resp.status === 404) break;          // finished long ago: the saved answer is in the conversation
+        if (!resp.ok) continue;
+        await follow(w, resp);
+      } catch (e) { /* still offline; try again */ }
+    }
+    if (!w.finished && conversationId) await openConversation(conversationId);
+  }
+
   async function ask(question) {
     addQuestion(question, scope ? scope.label : null);
-    const view = addAnswerShell();
+    const w = watcher(addAnswerShell());
     send.disabled = true;
-    let streamed = "";
-    let sources = [];
     try {
       const resp = await fetch("/api/ask", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -169,39 +226,15 @@
       if (resp.status === 401) { window.location.href = "/login"; return; }
       if (!resp.ok) {
         const err = await resp.json().catch(function () { return {}; });
-        finishAnswer(view, { status: "error" });
-        view.body.replaceChildren(el("span", "error", err.detail || resp.statusText));
+        finishAnswer(w.view, { status: "error" });
+        w.view.body.replaceChildren(el("span", "error", err.detail || resp.statusText));
         return;
       }
-      for await (const ev of readEvents(resp)) {
-        if (ev.type === "conversation") {
-          conversationId = ev.conversation_id;
-        } else if (ev.type === "route") {
-          if (ev.route === "agent") view.status.textContent = "Working on it…";
-          else if (ev.route !== "search") view.status.textContent = "Writing…";
-        } else if (ev.type === "tool") {
-          window.ErynneAgent.tool(view.steps, ev);
-          if (ev.state === "running") view.status.textContent = (ev.label || ev.name) + "…";
-        } else if (ev.type === "proposal") {
-          view.proposals.appendChild(window.ErynneAgent.proposal(ev));
-        } else if (ev.type === "sources") {
-          if (!ev.sources.length && view.status.textContent === "Writing…") continue;
-          sources = ev.sources;
-          view.status.textContent = sources.length ? "Reading " + sources.length + " passages…" : "Checking…";
-        } else if (ev.type === "delta") {
-          streamed += ev.text;
-          renderAnswer(view.body, streamed, sources);
-        } else if (ev.type === "reset") {
-          // What streamed so far didn't hold up; a "couldn't find it" reply follows.
-          streamed = "";
-          sources = [];
-          renderAnswer(view.body, streamed, sources);
-        } else if (ev.type === "final") {
-          finishAnswer(view, ev);
-        }
-      }
+      try { await follow(w, resp); } catch (e) { /* connection dropped: the answer goes on on the server */ }
+      if (!w.finished && w.runId) await reattach(w);
+      if (!w.finished) finishAnswer(w.view, { status: "error" });
     } catch (err) {
-      finishAnswer(view, { status: "error" });
+      finishAnswer(w.view, { status: "error" });
     } finally {
       send.disabled = false;
       loadConversations();
@@ -248,6 +281,13 @@
       (m.proposals || []).forEach(function (p) { view.proposals.appendChild(window.ErynneAgent.proposal(p)); });
     });
     loadConversations();
+    if (data.running) {
+      // Still being answered (the page was closed or reloaded meanwhile): watch it from the start.
+      const w = watcher(addAnswerShell());
+      w.runId = data.running;
+      send.disabled = true;
+      try { await reattach(w); } finally { send.disabled = false; }
+    }
   }
 
   function newChat() {

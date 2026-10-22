@@ -134,6 +134,22 @@ To cut someone off at once: **Access → Revoke Claude tokens**, or
 `sudo mnemerynne-admin revoke-tokens USERNAME`. **Access → Claude activity**
 shows every search and which files' text went back to Claude.
 
+**The Claude column in Files.** People with Claude connected (an active token)
+get a **Claude** column after Status in the file list.
+- **What it shows:** ticked means Claude can see that file or folder.
+  Unticking takes it out of Claude's search, browsing, passages and pages.
+  For a folder, that includes everything inside it. Ticking puts it back.
+- **Who can change it:** only people who can change that folder. It's a
+  property of the file or folder, so it applies to everyone's Claude, not
+  just their own.
+- **What it can't do:** share anything an admin hasn't shared with Claude.
+  There the box is unticked and greyed out, as it is under a hidden folder.
+- **Erynne is unaffected:** she still sees everything the person can read.
+- **How search applies it:** the flag is stored on the file's search chunks
+  and vectors, so hidden files never take up search results. The first start
+  after updating rebuilds the vector index's layout once, keeping every
+  embedding.
+
 ## 5c. Domain accounts
 
 People sign in with their Mnemerynne username and password. An admin links

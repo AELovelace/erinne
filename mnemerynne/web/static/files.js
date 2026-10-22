@@ -171,6 +171,7 @@
     state.items = data.folders.concat(data.files);
     state.path = data.path;
     state.canWrite = data.can_write;
+    state.claude = !!data.claude;   // Claude connected: show the Claude column
     // Expand the tree down to where we are.
     state.expanded.add("c:" + state.cid);
     data.path.forEach(function (p) { state.expanded.add("f:" + p.id); });
@@ -338,8 +339,9 @@
   function renderView() {
     renderCrumbs();
     const list = $("list");
+    const claudeCol = state.mode === "browse" && state.claude;
     list.className = "fm-list " + state.view + (state.mode === "trash" ? " trash" : "")
-      + (state.mode === "search" ? " search" : "");
+      + (state.mode === "search" ? " search" : "") + (claudeCol ? " with-claude" : "");
     const items = sorted(state.items);
     state.items = items;
     const frag = document.createDocumentFragment();
@@ -349,8 +351,15 @@
       head.append(el("span", "c-check"), el("span", "c-name", "Name"));
       if (state.mode === "trash") head.append(el("span", "c-where", "Original location"),
         el("span", "c-who", "Deleted by"), el("span", "c-date", "Deleted"));
-      else head.append(el("span", "c-status", state.mode === "search" ? "Location" : "Status"),
-        el("span", "c-size", "Size"), el("span", "c-date", "Modified"));
+      else {
+        head.append(el("span", "c-status", state.mode === "search" ? "Location" : "Status"));
+        if (claudeCol) {
+          const h = el("span", "c-claude", "Claude");
+          h.title = "Ticked: Claude can see it. Untick to keep it from Claude (Erynne still sees it).";
+          head.appendChild(h);
+        }
+        head.append(el("span", "c-size", "Size"), el("span", "c-date", "Modified"));
+      }
       frag.appendChild(head);
     }
     items.forEach(function (item, index) { frag.appendChild(renderItem(item, index)); });
@@ -368,6 +377,43 @@
       : state.canWrite ? "This folder is empty. Drop files here, or use Upload." : "This folder is empty.";
     updateToolbar();
     renderInfo();
+  }
+
+  // The Claude column: ticked when Claude can see the file or folder. Unticking keeps it (and, for a
+  // folder, everything in it) from Claude; it can't share what an admin hasn't shared with Claude.
+  function claudeCell(item) {
+    const cell = el("span", "c-claude");
+    const c = item.claude;
+    if (!c) return cell;
+    const box = el("input");
+    box.type = "checkbox";
+    box.checked = c.on;
+    box.disabled = !c.can_change;
+    const describe = function () {
+      box.setAttribute("aria-label", (c.on ? "Claude can see " : "Claude can't see ") + item.name);
+      cell.title = !c.shared ? "Not shared with Claude here (an admin setting, or a folder above is hidden from Claude)"
+        : !c.can_change ? (c.on ? "Claude can see this. " : "Hidden from Claude. ") + "Only people who can change this folder can change that."
+        : c.on ? "Claude can see this. Untick to keep it from Claude." : "Hidden from Claude. Tick to let Claude see it.";
+    };
+    describe();
+    box.addEventListener("click", function (e) { e.stopPropagation(); });
+    box.addEventListener("dblclick", function (e) { e.stopPropagation(); });
+    box.addEventListener("change", async function () {
+      const want = box.checked;
+      box.disabled = true;
+      try {
+        await api("PUT", "/api/" + (item.type === "file" ? "files/" : "folders/") + item.id + "/claude", { visible: want });
+        c.on = want;
+      } catch (err) {
+        box.checked = c.on;
+        toast(err.message, true);
+      } finally {
+        box.disabled = !c.can_change;
+        describe();
+      }
+    });
+    cell.appendChild(box);
+    return cell;
   }
 
   function renderItem(item, index) {
@@ -409,8 +455,9 @@
       } else {
         status.appendChild(el("span", "muted small", item.items + (item.items === 1 ? " item" : " items")));
       }
-      row.append(check, name, status,
-        el("span", "c-size muted", item.type === "file" ? sizeLabel(item.size) : ""),
+      row.append(check, name, status);
+      if (state.mode === "browse" && state.claude) row.appendChild(claudeCell(item));
+      row.append(el("span", "c-size muted", item.type === "file" ? sizeLabel(item.size) : ""),
         el("span", "c-date muted", dateLabel(item.updated_at || item.created_at)));
     }
 

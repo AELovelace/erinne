@@ -806,6 +806,8 @@
     const steps = agentField(grid, "Most tool steps", agentInput("number", m.max_steps));
     const maxTokens = agentField(grid, "Tokens per turn", agentInput("number", m.max_tokens));
     const reasoning = agentField(grid, "Thinking tokens", agentInput("number", m.reasoning_tokens));
+    const context = agentField(grid, "Context per request (tokens)", agentInput("number", m.context_tokens));
+    context.title = "The model server's -c divided by -np; older tool results are shortened to fit";
     const thinking = agentField(grid, "Let it think", agentInput("checkbox", m.thinking));
     form.appendChild(grid);
     const actions = el("div", "ax-new");
@@ -823,6 +825,7 @@
       showError("");
       const body = { timeout: Number(timeout.value), max_steps: Number(steps.value),
                      max_tokens: Number(maxTokens.value), reasoning_tokens: Number(reasoning.value),
+                     context_tokens: Number(context.value),
                      thinking: thinking.checked };
       try { renderAgent(await api("PUT", "/api/admin/settings/agent-model", body)); }
       catch (err) { showError(err.message); }

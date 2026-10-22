@@ -73,6 +73,12 @@ def list_for_user(conn: sqlite3.Connection, user_id: int) -> list[dict]:
     return [{**dict(r), "active": bool(r["active"]), "can_edit": bool(r["can_edit"])} for r in rows]
 
 
+def has_active(conn: sqlite3.Connection, user_id: int) -> bool:
+    """The person has Claude connected: a token that isn't revoked or expired."""
+    return conn.execute("SELECT 1 FROM api_tokens WHERE user_id = ? AND revoked_at IS NULL "
+                        "AND (expires_at IS NULL OR expires_at > datetime('now')) LIMIT 1", (user_id,)).fetchone() is not None
+
+
 def revoke(conn: sqlite3.Connection, token_id: int, user_id: int | None = None) -> bool:
     """Revoke one token (only the owner's when `user_id` is given)."""
     sql = "UPDATE api_tokens SET revoked_at = datetime('now') WHERE id = ? AND revoked_at IS NULL"

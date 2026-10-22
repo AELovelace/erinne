@@ -292,7 +292,7 @@ def test_v3_database_migrates_with_data_and_vectors(tmp_path):
     f = conn.execute("SELECT * FROM files").fetchone()
     assert (f["display_name"], f["status"], f["folder_id"], f["deleted_at"]) == ("g.pdf", "ready", None, None)
     assert conn.execute("SELECT mime FROM blobs").fetchone()[0] == "application/pdf"
-    assert conn.execute("SELECT rowid, collection_id, folder_id FROM chunk_vec").fetchall()[0][:] == (1, 1, 0)
+    assert conn.execute("SELECT rowid, collection_id, folder_id, claude_hidden FROM chunk_vec").fetchall()[0][:] == (1, 1, 0, 0)
     # References into the rebuilt table still cascade.
     conn.execute("DELETE FROM files WHERE id = 1")
     assert conn.execute("SELECT count(*) FROM chunks").fetchone()[0] == 0

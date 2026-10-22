@@ -147,7 +147,8 @@ def ensure_vector_table(conn: sqlite3.Connection, embed_dim: int) -> None:
 
 
 # 2: vectors carry folder_id as well as collection_id (folder-scoped search).
-VEC_LAYOUT = 2
+# 3: and claude_hidden (files taken out of Claude's view; migration 0014).
+VEC_LAYOUT = 3
 
 
 def _create_vector_table(conn: sqlite3.Connection, embed_dim: int) -> None:
@@ -156,7 +157,7 @@ def _create_vector_table(conn: sqlite3.Connection, embed_dim: int) -> None:
     conn.execute(
         f"CREATE VIRTUAL TABLE chunk_vec USING vec0("
         f"embedding float[{int(embed_dim)}] distance_metric=cosine, "
-        f"collection_id integer, folder_id integer)"
+        f"collection_id integer, folder_id integer, claude_hidden integer)"
     )
     # Keep vectors in step with chunks, including cascaded deletes.
     conn.execute(
@@ -179,7 +180,8 @@ def _upgrade_vector_table(conn: sqlite3.Connection, embed_dim: int) -> None:
         _create_vector_table(conn, embed_dim)
         # Scope comes from chunks, the source of truth.
         conn.execute(
-            "INSERT INTO chunk_vec(rowid, embedding, collection_id, folder_id) "
-            "SELECT v.id, v.embedding, c.collection_id, c.folder_id FROM temp.vec_copy v JOIN chunks c ON c.id = v.id"
+            "INSERT INTO chunk_vec(rowid, embedding, collection_id, folder_id, claude_hidden) "
+            "SELECT v.id, v.embedding, c.collection_id, c.folder_id, c.claude_hidden "
+            "FROM temp.vec_copy v JOIN chunks c ON c.id = v.id"
         )
         conn.execute("DROP TABLE temp.vec_copy")
