@@ -129,6 +129,27 @@ To cut someone off at once: **Access → Revoke Claude tokens**, or
 `sudo mnemerynne-admin revoke-tokens USERNAME`. **Access → Claude activity**
 shows every search and which files' text went back to Claude.
 
+## 5c. Domain accounts
+
+People sign in with their Mnemerynne username and password. An admin links
+each user to their domain account on **Access → Accounts**; admin rights then
+come from an AD group picked on **Access → Settings** (default `Domain Admins`).
+Users with the `admin` role stay admins regardless, so keep one as a fallback
+for when AD is unreachable.
+
+The server must be joined to the domain (winbind) first: `wbinfo -u` should
+list domain accounts and `id 'DOMAIN\someone'` should resolve. Then set the
+domain's NetBIOS name and restart:
+
+```sh
+echo 'MNEMERYNNE_AD_DOMAIN=ETERNALHOTELS' | sudo tee -a /etc/mnemerynne/mnemerynne.env
+sudo systemctl restart mnemerynne-web
+```
+
+Linking checks that the domain account exists; unlinking keeps the user and
+their files. `sudo mnemerynne-admin delete-user NAME` removes a user, with
+their inbox and memories.
+
 ## 6. Check
 
 ```sh

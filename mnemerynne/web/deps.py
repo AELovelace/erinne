@@ -7,7 +7,7 @@ from typing import Iterator
 
 from fastapi import Depends, HTTPException, Request, status
 
-from mnemerynne import db, users
+from mnemerynne import accounts, db, users
 from mnemerynne.config import Settings
 
 
@@ -48,4 +48,16 @@ def api_user(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> sq
     user = _session_user(request, conn)
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
+    return user
+
+
+def is_admin(request: Request, conn: sqlite3.Connection, user: sqlite3.Row) -> bool:
+    """Local admin, bootstrap username, or a domain user in the admin group."""
+    state = request.app.state
+    return accounts.is_admin(conn, user, state.directory, state.settings.admin_usernames)
+
+
+def admin_user(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)) -> sqlite3.Row:
+    if not is_admin(request, conn, user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Admins only")
     return user

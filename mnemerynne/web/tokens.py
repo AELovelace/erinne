@@ -9,9 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import api_tokens, permissions, users
+from mnemerynne import api_tokens, permissions
 from mnemerynne.config import Settings
-from mnemerynne.web.deps import api_user, get_db, get_settings, page_user
+from mnemerynne.web.deps import api_user, get_db, get_settings, is_admin, page_user
 
 router = APIRouter()
 
@@ -23,9 +23,10 @@ def _extension(settings: Settings):
 
 
 @router.get("/connect", response_class=HTMLResponse)
-def connect_page(request: Request, user=Depends(page_user), settings: Settings = Depends(get_settings)):
+def connect_page(request: Request, user=Depends(page_user), settings: Settings = Depends(get_settings),
+                 conn: sqlite3.Connection = Depends(get_db)):
     return request.app.state.templates.TemplateResponse(request, "connect.html", {
-        "user": user, "is_admin": users.is_admin(user, settings.admin_usernames), "active": "connect",
+        "user": user, "is_admin": is_admin(request, conn, user), "active": "connect",
         "has_extension": _extension(settings) is not None})
 
 

@@ -558,6 +558,93 @@
     box.appendChild(button("Check now", "small", function () { loadUpdates(true); }));
   }
 
+  // ------------------------------------------------------------- accounts
+  function fillDatalist(id, values) {
+    $(id).replaceChildren.apply($(id), values.map(function (v) { const o = el("option"); o.value = v; return o; }));
+  }
+
+  function linkCell(u) {
+    const cell = el("div", "ax-link");
+    if (u.ad_account) {
+      cell.append(el("span", null, u.ad_account), document.createTextNode(" "),
+        button("Unlink", "link danger small", async function () {
+          if (!confirm("Unlink " + u.username + " from " + u.ad_account + "? Their account and files stay.")) return;
+          await accountChange("DELETE", "/api/admin/users/" + u.id + "/domain-account");
+        }));
+      return cell;
+    }
+    const input = el("input");
+    input.type = "text";
+    input.setAttribute("list", "domain-accounts");
+    input.placeholder = "Domain account, e.g. jsmith";
+    input.setAttribute("aria-label", "Domain account for " + u.username);
+    input.value = u.username;  // usually the same name
+    cell.append(input, button("Link", "small", async function () {
+      await accountChange("PUT", "/api/admin/users/" + u.id + "/domain-account", { ad_account: input.value.trim() });
+    }));
+    return cell;
+  }
+
+  function renderAccounts(data) {
+    const box = $("accounts");
+    box.replaceChildren();
+    fillDatalist("domain-accounts", data.domain_accounts);
+    if (!data.enabled) box.appendChild(el("p", "error", "No AD domain is configured on the server (MNEMERYNNE_AD_DOMAIN), so accounts can't be linked."));
+    const waiting = data.users.filter(function (u) { return !u.ad_account && u.active; }).length;
+    if (waiting) box.appendChild(el("p", null, waiting + (waiting === 1 ? " user isn't" : " users aren't") + " linked to a domain account yet."));
+    box.appendChild(table(["User", "Domain account" + (data.domain ? " (" + data.domain + ")" : "")],
+      data.users.map(function (u) {
+        const who = el("div");
+        who.append(el("strong", null, u.username),
+          el("span", "muted small", (u.role === "admin" ? " · local admin" : "") + (u.active ? "" : " · deactivated")));
+        return [who, linkCell(u)];
+      })));
+  }
+
+  async function loadAccounts() {
+    try { renderAccounts(await api("GET", "/api/admin/accounts")); }
+    catch (e) { $("accounts").replaceChildren(el("p", "error", e.message)); }
+  }
+
+  async function accountChange(method, url, body) {
+    showError("");
+    try { await api(method, url, body); } catch (e) { showError(e.message); }
+    await loadAccounts();
+    await load();  // new users appear in grants and "Who can see what"
+  }
+
+  // ----------------------------------------------------------- admin group
+  function renderAdminGroup(data) {
+    const box = $("admin-group");
+    box.replaceChildren();
+    fillDatalist("domain-groups", data.groups);
+    box.appendChild(el("p", "muted", "Members of this " + (data.domain || "domain") +
+      " group are admins here. Local accounts made with mnemerynne create-user --role admin always are."));
+    if (!data.enabled) box.appendChild(el("p", "error", "No AD domain is configured on the server (MNEMERYNNE_AD_DOMAIN)."));
+    const form = el("form", "ax-new");
+    const input = el("input");
+    input.type = "text";
+    input.value = data.group;
+    input.required = true;
+    input.setAttribute("list", "domain-groups");
+    input.setAttribute("aria-label", "Admin group");
+    const save = el("button", "small", "Save");
+    save.type = "submit";
+    form.append(input, save);
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      try { renderAdminGroup(Object.assign(data, await api("PUT", "/api/admin/settings/admin-group", { group: input.value.trim() }))); }
+      catch (err) { showError(err.message); }
+    });
+    box.appendChild(form);
+  }
+
+  async function loadAdminGroup() {
+    try { renderAdminGroup(await api("GET", "/api/admin/settings/admin-group")); }
+    catch (e) { $("admin-group").replaceChildren(el("p", "error", e.message)); }
+  }
+
   let updatesLoaded = false;
   async function loadUpdates(refresh) {
     updatesLoaded = true;
@@ -576,7 +663,8 @@
     });
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
-    if (tab === "settings" && !updatesLoaded) loadUpdates(false);
+    if (tab === "settings" && !updatesLoaded) { loadUpdates(false); loadAdminGroup(); }
+    if (tab === "accounts") loadAccounts();
   }
 
   function writeHash() {

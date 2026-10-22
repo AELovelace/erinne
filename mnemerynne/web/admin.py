@@ -15,19 +15,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import api_tokens, fs, permissions, updates, users
+from mnemerynne import accounts, api_tokens, fs, permissions, updates, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
-from mnemerynne.web.deps import api_user, get_db, get_settings, page_user
+from mnemerynne.web.deps import admin_user as admin_api_user, get_db, get_settings, is_admin, page_user
 
 router = APIRouter()
-
-
-def admin_api_user(user=Depends(api_user), settings: Settings = Depends(get_settings)):
-    if not users.is_admin(user, settings.admin_usernames):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Admins only")
-    return user
 
 
 def _log(conn: sqlite3.Connection, actor: sqlite3.Row, action: str, target: str, detail: str = "") -> None:
@@ -86,8 +80,8 @@ def _folder_label(conn: sqlite3.Connection, folder: sqlite3.Row) -> str:
 
 
 @router.get("/admin/libraries", response_class=HTMLResponse)
-def libraries_page(request: Request, user=Depends(page_user), settings: Settings = Depends(get_settings)):
-    if not users.is_admin(user, settings.admin_usernames):
+def libraries_page(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db)):
+    if not is_admin(request, conn, user):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Admins only")
     return request.app.state.templates.TemplateResponse(
         request, "admin_libraries.html", {"user": user, "is_admin": True, "active": "admin"})
@@ -423,3 +417,76 @@ async def update_status(refresh: bool = False, user=Depends(admin_api_user),
     """Installed version and what's newer on GitHub (read-only: installing is
     `sudo mnemerynne-admin update` on the server)."""
     return await anyio.to_thread.run_sync(lambda: updates.check(settings, force=refresh))
+
+
+class AdminGroupBody(BaseModel):
+    group: str = Field(min_length=1, max_length=256)
+
+
+@router.get("/api/admin/settings/admin-group")
+async def get_admin_group(request: Request, user=Depends(admin_api_user), conn: sqlite3.Connection = Depends(get_db)):
+    """The AD group whose members are admins, and the domain's groups to pick from."""
+    directory = request.app.state.directory
+    return {"group": accounts.admin_group(conn), "domain": request.app.state.settings.ad_domain,
+            "enabled": directory.enabled, "groups": await anyio.to_thread.run_sync(directory.groups)}
+
+
+@router.put("/api/admin/settings/admin-group")
+def set_admin_group(body: AdminGroupBody, request: Request, user=Depends(admin_api_user),
+                    conn: sqlite3.Connection = Depends(get_db)):
+    directory = request.app.state.directory
+    name = body.group.strip().rsplit("\\", 1)[-1]
+    known = directory.groups() if directory.enabled else []
+    if known and name.lower() not in {g.lower() for g in known}:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"There's no domain group '{name}'.")
+    # Don't let an admin lock themselves out by picking a group they aren't in.
+    if (user["ad_account"] and not users.is_admin(user, request.app.state.settings.admin_usernames)
+            and name.lower() not in directory.groups_of(user["ad_account"])):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            f"You aren't in '{name}', so you'd lose admin rights. Pick a group you're in.")
+    with transaction(conn):
+        old = accounts.admin_group(conn)
+        accounts.set_admin_group(conn, name)
+        _log(conn, user, "settings.admin_group", name, f"was {old}")
+    return {"group": name}
+
+
+# ------------------------------------------------------------------ accounts
+class LinkBody(BaseModel):
+    ad_account: str = Field(min_length=1, max_length=256)
+
+
+@router.get("/api/admin/accounts")
+async def list_accounts(request: Request, user=Depends(admin_api_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Every user with the domain account they're linked to (unlinked first),
+    plus the domain accounts to pick from."""
+    directory = request.app.state.directory
+    return {"users": [{"id": r["id"], "username": r["username"], "role": r["role"], "active": bool(r["active"]),
+                       "ad_account": r["ad_account"]} for r in accounts.list_users(conn)],
+            "domain": request.app.state.settings.ad_domain, "enabled": directory.enabled,
+            "domain_accounts": await anyio.to_thread.run_sync(directory.accounts)}
+
+
+@router.put("/api/admin/users/{user_id}/domain-account")
+def link_account(user_id: int, body: LinkBody, request: Request, user=Depends(admin_api_user),
+                 conn: sqlite3.Connection = Depends(get_db)):
+    try:
+        linked = accounts.link(conn, user_id, body.ad_account, request.app.state.directory)
+    except accounts.LinkError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    _log(conn, user, "account.link", users.get_user_by_id(conn, user_id)["username"], f"to {linked}")
+    return {"status": "linked", "ad_account": linked}
+
+
+@router.delete("/api/admin/users/{user_id}/domain-account")
+def unlink_account(user_id: int, request: Request, user=Depends(admin_api_user),
+                   conn: sqlite3.Connection = Depends(get_db)):
+    target = users.get_user_by_id(conn, user_id)
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such user")
+    if target["id"] == user["id"] and not users.is_admin(user, request.app.state.settings.admin_usernames):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            "Your admin rights come from your domain account; unlinking it would lock you out.")
+    if accounts.unlink(conn, user_id):
+        _log(conn, user, "account.unlink", target["username"], f"was {target['ad_account']}")
+    return {"status": "unlinked"}

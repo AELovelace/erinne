@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     # Usernames that are always admins (comma-separated); bootstrap only.
     admin_users: str = ""
 
+    # The on-premises AD domain the server is joined to (NetBIOS name, e.g.
+    # ETERNALHOTELS). Users are linked to its accounts, and admin rights come
+    # from one of its groups (picked on the Settings tab).
+    ad_domain: str = ""
+
     # Inference (llama-server)
     llm_url: str = "http://127.0.0.1:8081"
     embed_url: str = "http://127.0.0.1:8082"

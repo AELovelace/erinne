@@ -5,18 +5,20 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 
-from mnemerynne import memory, users
-from mnemerynne.web.deps import api_user, page_user
+import sqlite3
+
+from mnemerynne import memory
+from mnemerynne.web.deps import api_user, get_db, is_admin, page_user
 
 router = APIRouter()
 
 
 @router.get("/memories", response_class=HTMLResponse)
-async def memories_page(request: Request, user=Depends(page_user)):
+async def memories_page(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db)):
     items = await memory.list_memories(request.app.state.store, user["id"])
     settings = request.app.state.settings
     return request.app.state.templates.TemplateResponse(request, "memories.html", {
-        "user": user, "is_admin": users.is_admin(user, settings.admin_usernames), "active": "memories",
+        "user": user, "is_admin": is_admin(request, conn, user), "active": "memories",
         "memories": items, "mode": settings.memory_mode})
 
 

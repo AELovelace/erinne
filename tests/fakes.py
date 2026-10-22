@@ -59,3 +59,25 @@ class FakeReranker:
 
     def scores(self, query, documents):
         return [d.lower().count(self.prefer) for d in documents]
+
+
+class FakeDirectory:
+    """An AD domain: account -> its (lower-cased) group names."""
+
+    enabled = True
+
+    def __init__(self, members: dict[str, set[str]] | None = None, groups: list[str] | None = None) -> None:
+        self.members = {k.lower(): {g.lower() for g in v} for k, v in (members or {}).items()}
+        self.group_names = groups or sorted({g for v in self.members.values() for g in v})
+
+    def account_exists(self, account):
+        return account.lower() in self.members
+
+    def groups_of(self, account):
+        return self.members.get(account.lower(), set())
+
+    def accounts(self):
+        return sorted(self.members)
+
+    def groups(self):
+        return list(self.group_names)

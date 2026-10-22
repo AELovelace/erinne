@@ -8,6 +8,7 @@
     <nav class="ax-tabs" role="tablist" aria-label="Access sections">
       <button type="button" role="tab" data-tab="files">Files &amp; folders</button>
       <button type="button" role="tab" data-tab="groups">Groups</button>
+      <button type="button" role="tab" data-tab="accounts">Accounts</button>
       <button type="button" role="tab" data-tab="people">Who can see what</button>
       <button type="button" role="tab" data-tab="claude">Claude activity</button>
       <button type="button" role="tab" data-tab="changes">Recent changes</button>
@@ -38,6 +39,13 @@
     <div id="groups" aria-live="polite"></div>
   </section>
 
+  <section class="inbox admin" data-panel="accounts" role="tabpanel" hidden>
+    <p class="muted">Link each user to their domain account. Admin rights follow the domain account's groups
+      (see Settings). Someone without a domain account needs one made in Active Directory first.</p>
+    <div id="accounts" class="table-wrap" aria-live="polite"><p class="muted">Loading…</p></div>
+    <datalist id="domain-accounts"></datalist>
+  </section>
+
   <section class="inbox admin" data-panel="people" role="tabpanel" hidden>
     <p class="muted">Each person's inbox and libraries: what they can read, edit and search from Claude, and the grants that give it.</p>
     <div id="access" class="table-wrap"></div>
@@ -53,6 +61,9 @@
   </section>
 
   <section class="inbox admin" data-panel="settings" role="tabpanel" hidden>
+    <h2 class="ax-h">Administrators</h2>
+    <div id="admin-group" aria-live="polite"><p class="muted">Loading…</p></div>
+    <datalist id="domain-groups"></datalist>
     <h2 class="ax-h">Updates</h2>
     <div id="updates" aria-live="polite"><p class="muted">Checking…</p></div>
   </section>

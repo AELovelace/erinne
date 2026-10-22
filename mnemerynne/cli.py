@@ -63,6 +63,22 @@ def cmd_list_users(args):
         print(f"{u['username']:<30} {u['role']}{state}")
 
 
+def cmd_delete_user(args):
+    conn = _connect()
+    if users.get_user(conn, args.username) is None:
+        raise SystemExit(f"No user '{args.username}'.")
+    if not args.yes:
+        answer = input(f"Delete '{args.username.lower()}', their inbox and its files, conversations and "
+                       f"Claude tokens? Type the username to confirm: ")
+        if answer.strip().lower() != args.username.strip().lower():
+            raise SystemExit("Not deleted.")
+    # Memories live in LangGraph's store, outside the tables that cascade, and a
+    # new user may get this id again: wipe them first.
+    cmd_forget_memories(args)
+    users.delete_user(conn, args.username)
+    print(f"Deleted '{args.username.lower()}'.")
+
+
 def cmd_create_library(args):
     conn = _connect()
     lib_id = permissions.create_library(conn, args.name)
@@ -592,6 +608,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("username")
     p.add_argument("role", choices=users.ROLES)
     p.set_defaults(func=cmd_set_role)
+
+    p = sub.add_parser("delete-user", help="Delete a user with their inbox (asks to confirm)")
+    p.add_argument("username")
+    p.add_argument("--yes", action="store_true", help="Don't ask")
+    p.set_defaults(func=cmd_delete_user)
 
     p = sub.add_parser("create-library", help="Create a shared library")
     p.add_argument("name")
