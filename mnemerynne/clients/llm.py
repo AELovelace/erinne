@@ -85,6 +85,25 @@ class ThinkFilter:
         return rest
 
 
+_FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL | re.IGNORECASE)
+
+
+def _loose_json(content: str, schema: dict | None = None):
+    """The reply as JSON, forgiving two near-misses: a ```json fence around it, and a bare list where
+    the schema wants an object with a single list in it (e.g. memory's {"facts": [...]})."""
+    fenced = _FENCE.match(content or "")
+    try:
+        out = json.loads(fenced.group(1) if fenced else content)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    props = (schema or {}).get("properties") or {}
+    if isinstance(out, list) and len(props) == 1:
+        (name, spec), = props.items()
+        if spec.get("type") == "array":
+            return {name: out}
+    return out
+
+
 class BadModelOutput(ValueError):
     """A schema-constrained call didn't return a JSON object; the message says why."""
 
@@ -258,8 +277,10 @@ class LLM:
         else:
             payload["temperature"] = temperature
             payload["max_tokens"] = max_tokens + self.reasoning_tokens
-            # Read by chat templates that support it (Qwen3); ignored by others.
-            payload["chat_template_kwargs"] = {"enable_thinking": bool(thinking) and json_schema is None}
+            # Read by chat templates that support it (Qwen3, deploy/linux/lfm2-no-think.jinja): answers
+            # ask to think; JSON calls don't, so llama-server's grammar holds from the first token (it
+            # can't once the model is thinking).
+            payload["chat_template_kwargs"] = {"enable_thinking": bool(thinking)}
             schema, strict = json_schema, None
         if schema is not None:
             fmt: dict[str, Any] = {"name": "response", "schema": schema}
@@ -317,10 +338,7 @@ class LLM:
         """Schema-constrained call; returns the parsed object, or raises
         BadModelOutput saying what came back instead."""
         content, choice = await self._complete(messages, temperature, max_tokens, schema, thinking)
-        try:
-            out = json.loads(content)
-        except json.JSONDecodeError:
-            out = None
+        out = _loose_json(content, schema)
         if isinstance(out, dict):
             return out
         message = choice.get("message") or {}
@@ -356,13 +374,14 @@ class LLM:
         return ToolTurn(strip_reasoning(content), calls, choice.get("finish_reason"))
 
     async def stream(self, messages: list[dict[str, str]], *, temperature: float = 0.2, max_tokens: int = 512,
-                     json_schema: dict | None = None) -> AsyncIterator[str]:
-        """Yield content deltas as they arrive (server-sent events).
+                     json_schema: dict | None = None, thinking: bool = False) -> AsyncIterator[str]:
+        """Yield content deltas as they arrive (server-sent events). thinking: let models
+        that think do so first (answers; the reply then streams after the thinking).
 
         Remote APIs: rejected sampling parameters are dropped and rate limits
         retried before any text is yielded (same rules as `_post`).
         """
-        payload = self._payload(messages, temperature, max_tokens, json_schema, False, True)
+        payload = self._payload(messages, temperature, max_tokens, json_schema, thinking, True)
         delay = 2.0
         for attempt in range(self.max_retries + 1):
             async with self._client.stream("POST", self.url, json=payload) as response:

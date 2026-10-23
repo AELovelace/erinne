@@ -175,7 +175,7 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
         messages = answer_mod.build_messages(state["standalone"], hits, state.get("memories"))
         streamer = answer_mod.AnswerStreamer()
         async for delta in deps.llm.stream(messages, temperature=0.1, max_tokens=900,
-                                           json_schema=answer_mod.ANSWER_SCHEMA):
+                                           json_schema=answer_mod.ANSWER_SCHEMA, thinking=True):
             text = streamer.feed(delta)
             if text:
                 writer({"type": "delta", "text": text})
@@ -194,7 +194,7 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
         try:
             async with asyncio.timeout(30):
                 async for delta in deps.llm.stream(answer_mod.build_sorry_messages(question),
-                                                   temperature=0.8, max_tokens=80):
+                                                   temperature=0.8, max_tokens=80, thinking=True):
                     if shown := visible.feed(delta):
                         parts.append(shown)
                         writer({"type": "delta", "text": shown})
@@ -346,7 +346,7 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
         parts = []
         # Reasoning models may think first; people only see the reply.
         visible = ThinkFilter()
-        async for delta in deps.llm.stream(messages, temperature=0.6, max_tokens=900):
+        async for delta in deps.llm.stream(messages, temperature=0.6, max_tokens=900, thinking=True):
             if shown := visible.feed(delta):
                 parts.append(shown)
                 writer({"type": "delta", "text": shown})

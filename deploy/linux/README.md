@@ -457,6 +457,10 @@ as, the RX 580 here.
 1. **On each balancer**, download and start Erynne's model on its control
    page (`http://<node>:9180`): LFM2.5 2.6B Q8 for the stock model. A
    fine-tuned GGUF has to be on Hugging Face for the balancer to download it.
+   Serve LFM2.5 there with the same chat template as the RX 580
+   (`--chat-template-file` with `deploy/linux/lfm2-no-think.jinja`, see
+   `mnemerynne-generator.service`): with LFM2.5's own template it thinks on
+   every request, and JSON calls (memories, follow-up questions) fail.
    Note its API key (`BALANCER_API_KEY` in its `.env`, or set it on its
    Settings tab). Every node needs the same key.
 2. **Settings → Balancer nodes:** enter the addresses separated by commas,

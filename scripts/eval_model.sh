@@ -16,9 +16,10 @@ PORT=8084
 mkdir -p runs
 
 run() {  # gguf label
-  # Served as in production (deploy/linux/mnemerynne-generator.service): the model thinks
-  # first, and eval-answers gives it MNEMERYNNE_LLM_REASONING_TOKENS of room to do so.
-  "$SERVER" -m "$1" --port $PORT -ngl 99 -c 8192 --jinja --reasoning-format deepseek \
+  # Served as in production (deploy/linux/mnemerynne-generator.service): the template thinks
+  # when a request asks (answers do), and eval-answers gives it MNEMERYNNE_LLM_REASONING_TOKENS.
+  "$SERVER" -m "$1" --port $PORT -ngl 99 -c 8192 --jinja \
+    --chat-template-file deploy/linux/lfm2-no-think.jinja --reasoning-format deepseek \
     > "runs/server-$2.log" 2>&1 &
   local pid=$!
   until curl -sf http://127.0.0.1:$PORT/health > /dev/null; do

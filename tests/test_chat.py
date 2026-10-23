@@ -26,6 +26,7 @@ class FakeLLM:
         self.general_prompts = []
         self.sorry_prompts = []
         self.memory_calls = 0
+        self.stream_thinking = []   # the thinking flag of each stream call
         self.fail = False
         self.condense_fails = False
 
@@ -48,6 +49,7 @@ class FakeLLM:
         raise AssertionError("unexpected schema")
 
     async def stream(self, messages, **kwargs):
+        self.stream_thinking.append(kwargs.get("thinking"))
         if self.fail:
             raise ConnectionError("model server down")
         if messages[0]["content"] == answer_mod.SORRY_SYSTEM_PROMPT:   # nothing found: apologise
@@ -136,6 +138,7 @@ def test_answer_streams_with_citation_links(chat_client, llm):
     cited = [s for s in final["sources"] if s["cited"]]
     assert cited[0]["url"].endswith("/pdf#page=1") and cited[0]["file"] == "OPERA.pdf"
     assert not llm.condense_calls  # first turn: no condense call
+    assert llm.stream_thinking and all(llm.stream_thinking)   # answers think first (JSON calls don't)
 
     conv = chat_client.get(f"/api/conversations/{events[0]['conversation_id']}").json()
     assert [m["role"] for m in conv["messages"]] == ["user", "assistant"]
@@ -343,3 +346,38 @@ def test_chat_pages_render(chat_client):
     _login(chat_client, "alice")
     assert "Ask Erynne" in chat_client.get("/").text
     assert 'id="tree"' in chat_client.get("/files").text
+
+
+# ------------------------------------------- thinking only where it's wanted
+def test_json_calls_ask_not_to_think_and_forgive_near_misses():
+    """The generator's template opens <think> only when asked (deploy/linux/lfm2-no-think.jinja):
+    JSON calls must not ask, or the grammar can't hold; answers ask."""
+    import asyncio
+
+    import httpx
+
+    from mnemerynne.clients.llm import LLM
+
+    sent, replies = [], []
+
+    def handler(request):
+        sent.append(json.loads(request.content))
+        if sent[-1].get("stream"):
+            return httpx.Response(200, text='data: {"choices": [{"delta": {"content": "Hi"}}]}\n\ndata: [DONE]\n\n')
+        return httpx.Response(200, json={"choices": [{"message": {"content": replies.pop(0)}, "finish_reason": "stop"}]})
+
+    llm = LLM("http://model.test", client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+
+    async def go():
+        replies.extend(['```json\n{"facts": ["Works nights."]}\n```', '["Works at Pendleton."]', "Sure! Here you go."])
+        fenced = await llm.chat_json([{"role": "user", "content": "x"}], memory.MEMORY_SCHEMA)
+        bare = await llm.chat_json([{"role": "user", "content": "x"}], memory.MEMORY_SCHEMA)
+        with pytest.raises(BadModelOutput):
+            await llm.chat_json([{"role": "user", "content": "x"}], memory.MEMORY_SCHEMA)
+        streamed = "".join([d async for d in llm.stream([{"role": "user", "content": "x"}],
+                                                        json_schema=answer_mod.ANSWER_SCHEMA, thinking=True)])
+        return fenced, bare, streamed
+    fenced, bare, streamed = asyncio.run(go())
+    assert fenced == {"facts": ["Works nights."]} and bare == {"facts": ["Works at Pendleton."]} and streamed == "Hi"
+    assert [s["chat_template_kwargs"]["enable_thinking"] for s in sent] == [False, False, False, True]
+    assert "response_format" in sent[-1]                       # a thinking answer still carries its schema

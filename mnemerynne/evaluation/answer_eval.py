@@ -67,7 +67,8 @@ async def _generate(llm: LLM, messages) -> tuple[str, float | None, float]:
     started = time.perf_counter()
     first = None
     parts = []
-    async for delta in llm.stream(messages, temperature=0.1, max_tokens=900, json_schema=answer_mod.ANSWER_SCHEMA):
+    async for delta in llm.stream(messages, temperature=0.1, max_tokens=900, json_schema=answer_mod.ANSWER_SCHEMA,
+                                  thinking=True):   # as graph.answer_from asks: answers think first
         if first is None:
             first = (time.perf_counter() - started) * 1000
         parts.append(delta)
