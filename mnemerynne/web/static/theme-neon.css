@@ -49,26 +49,11 @@ html[data-theme="neon"] body {
     linear-gradient(180deg, #07020d 0%, #12031f 60%, #1d0428 100%);
   background-attachment: fixed;
 }
-/* A glowing grid floor running to the horizon... */
-html[data-theme="neon"] body::before {
-  content: ""; position: fixed; z-index: 0; pointer-events: none;
-  left: -150%; right: -150%; bottom: 0; height: 200vh;
-  background-image:
-    repeating-linear-gradient(90deg, rgba(255, 46, 151, 0.55) 0 2px, transparent 2px 80px),
-    repeating-linear-gradient(0deg, rgba(255, 46, 151, 0.55) 0 2px, transparent 2px 80px);
-  transform: perspective(500px) rotateX(60deg);
-  transform-origin: 50% 100%;
-  -webkit-mask-image: linear-gradient(to top, #000 5%, transparent 55%);
-  mask-image: linear-gradient(to top, #000 5%, transparent 55%);
-  filter: drop-shadow(0 0 3px rgba(255, 46, 151, 0.9));
-  animation: neon-floor 5s linear infinite;
-}
-/* ...and faint scanlines over everything. */
+/* Faint scanlines over everything. */
 html[data-theme="neon"] body::after {
   content: ""; position: fixed; inset: 0; z-index: 60; pointer-events: none;
   background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.16) 0 1px, transparent 1px 3px);
 }
-@keyframes neon-floor { to { background-position: 0 80px, 0 80px; } }
 
 /* Falling petals become neon rain. */
 html[data-theme="neon"] .petals span {
@@ -90,9 +75,6 @@ html[data-theme="neon"] .petals span:nth-child(6) { animation-duration: 4.8s; }
 @keyframes neon-rain {
   0%   { transform: translate3d(0, -5vh, 0); }
   100% { transform: translate3d(0, 108vh, 0); }
-}
-@media (prefers-reduced-motion: reduce) {
-  html[data-theme="neon"] body::before { animation: none; }
 }
 
 /* ---------------------------------------------------- chromatic bloom */
@@ -136,13 +118,13 @@ html[data-theme="neon"] .tabs a[aria-current="page"] {
 
 /* Buttons: neon pink slabs with dark text (more readable than white on hot pink). */
 /* :where() keeps these weak, so the quiet buttons below override them. */
-html[data-theme="neon"] :where(button:not(.link, .tool, .danger-fill)),
+html[data-theme="neon"] :where(button:not(.link, .tool, .danger-fill, .tree-label, .tree-toggle, .crumb)),
 html[data-theme="neon"] .button-like,
 html[data-theme="neon"] .upload-button {
   background: var(--rose); color: #0a0010; font-weight: 600; letter-spacing: 0.04em;
   box-shadow: -2px 0 0 var(--fringe-l), 2px 0 0 var(--fringe-r), 0 0 14px rgba(255, 46, 151, 0.7);
 }
-html[data-theme="neon"] :where(button:not(.link, .tool, .danger-fill):hover:not(:disabled)),
+html[data-theme="neon"] :where(button:not(.link, .tool, .danger-fill, .tree-label, .tree-toggle, .crumb):hover:not(:disabled)),
 html[data-theme="neon"] .button-like:hover {
   background: var(--rose-deep); color: #0a0010;
   box-shadow: -3px 0 0 var(--fringe-l), 3px 0 0 var(--fringe-r), 0 0 24px rgba(255, 46, 151, 0.95);
@@ -172,6 +154,10 @@ html[data-theme="neon"] .ax-tabs button[aria-selected="true"] {
   background: var(--petal-soft); color: var(--rose); box-shadow: inset 0 -2px 0 var(--rose);
   text-shadow: 0 0 8px rgba(255, 46, 151, 0.8);
 }
+html[data-theme="neon"] .tree-row.current { box-shadow: inset 2px 0 0 var(--rose); }
+html[data-theme="neon"] .tree-row.current .tree-label,
+html[data-theme="neon"] .tree-label:hover,
+html[data-theme="neon"] .crumb:hover { color: var(--rose); text-shadow: 0 0 8px rgba(255, 46, 151, 0.8); }
 html[data-theme="neon"] button.tool.danger,
 html[data-theme="neon"] .menu button.danger { color: var(--error); }
 html[data-theme="neon"] button.danger,
