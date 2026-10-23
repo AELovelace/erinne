@@ -226,15 +226,18 @@ def _external(source: dict) -> tuple:
 
 
 def _save_answer(settings, conversation_id: str, final: dict) -> int:
+    tokens = final.get("tokens") or {}
     conn = db.connect(settings.db_path)
     try:
         with db.transaction(conn):
             message_id = conn.execute(
                 "INSERT INTO messages(conversation_id, role, content, status, model, prompt_version, latency_ms, "
-                "route) VALUES (?, 'assistant', ?, ?, ?, ?, ?, ?)",
+                "route, tokens_in, tokens_out, tokens_external, tokens_estimated) "
+                "VALUES (?, 'assistant', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (conversation_id, final["answer"] or final.get("error", ""), final["status"],
                  final.get("model") or settings.llm_model, answer_mod.PROMPT_VERSION, final["latency_ms"],
-                 final.get("route")),
+                 final.get("route"), tokens.get("in"), tokens.get("out"), tokens.get("external"),
+                 int(bool(tokens.get("estimated")))),
             ).lastrowid
             conn.executemany(
                 "INSERT INTO message_sources(message_id, n, chunk_id, file_id, page_start, anchor, cited, api_call_id, "
@@ -262,7 +265,8 @@ def get_conversation(conversation_id: str, request: Request, user=Depends(api_us
                      conn: sqlite3.Connection = Depends(get_db)):
     _own_conversation(conn, user["id"], conversation_id)
     messages = []
-    for m in conn.execute("SELECT id, role, content, status, route, model, created_at FROM messages "
+    for m in conn.execute("SELECT id, role, content, status, route, model, created_at, tokens_in, tokens_out, "
+                          "tokens_external, tokens_estimated FROM messages "
                           "WHERE conversation_id = ? ORDER BY id", (conversation_id,)).fetchall():
         sources = []
         if m["role"] == "assistant":

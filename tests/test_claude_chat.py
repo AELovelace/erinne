@@ -316,3 +316,59 @@ def test_refusals_and_models_without_a_fallback():
         [{"role": "user", "content": "x"}], []))
     assert turn.content == claude_client.REFUSED_TEXT and not turn.tool_calls
     assert "fallbacks" not in sent.sent[0] and "tools" not in sent.sent[0]
+
+
+# ------------------------------------------------------------- token counts
+def test_tokens_are_counted_per_answer_and_kept(client, claude, conn, settings, world, monkeypatch):
+    from mnemerynne.clients import llm as llm_mod
+
+    async def counted(self, messages, tools, **kwargs):
+        llm_mod.count_usage(1200, 80, external=True)
+        return await AgentLLM.chat_tools(self, messages, tools, **kwargs)
+    monkeypatch.setattr(FakeClaude, "chat_tools", counted)
+    _with_key(conn, settings, world)
+    _login(client, "alice")
+    claude.turns(ToolTurn("Hi."))
+    final = _final(_ask(client, "Hello"))
+    assert final["tokens"] == {"in": 1200, "out": 80, "external": 1280, "estimated": False}
+    row = conn.execute("SELECT tokens_in, tokens_out, tokens_external, tokens_estimated FROM messages "
+                       "WHERE role = 'assistant'").fetchone()
+    assert tuple(row) == (1200, 80, 1280, 0)
+    conversation = conn.execute("SELECT id FROM conversations").fetchone()[0]
+    shown = client.get(f"/api/conversations/{conversation}").json()["messages"][-1]
+    assert (shown["tokens_in"], shown["tokens_out"], shown["tokens_external"]) == (1200, 80, 1280)
+
+
+def test_claude_and_streamed_answers_report_what_they_used():
+    import httpx
+
+    from mnemerynne.clients import llm as llm_mod
+
+    usage = llm_mod.new_usage()
+    token = llm_mod.USAGE.set(usage)
+    try:
+        used = SimpleNamespace(input_tokens=500, output_tokens=40, cache_read_input_tokens=1000,
+                               cache_creation_input_tokens=0)
+        reply = SimpleNamespace(content=[SimpleNamespace(type="text", text="Hi.")], stop_reason="end_turn",
+                                usage=used)
+        sdk, _ = _client([reply])
+        asyncio.run(claude_client.ClaudeLLM("k", "claude-opus-5-5", client=sdk).chat_tools(
+            [{"role": "user", "content": "x"}], []))
+        assert usage == {"in": 1500, "out": 40, "external": 1540, "estimated": False}   # cached input counts
+
+        def stream(with_usage):
+            chunks = [{"choices": [{"delta": {"content": "Hello there"}}]}]
+            if with_usage:
+                chunks.append({"choices": [], "usage": {"prompt_tokens": 300, "completion_tokens": 5}})
+            body = "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
+            return httpx.MockTransport(lambda r: httpx.Response(200, text=body))
+
+        async def answer(with_usage):
+            llm = llm_mod.LLM("http://model.test", client=httpx.AsyncClient(transport=stream(with_usage)))
+            return "".join([d async for d in llm.stream([{"role": "user", "content": "x" * 400}])])
+        asyncio.run(answer(True))
+        assert (usage["in"], usage["out"], usage["estimated"]) == (1800, 45, False)
+        asyncio.run(answer(False))                                     # no usage reported: about 4 chars a token
+        assert (usage["in"], usage["out"], usage["estimated"]) == (1900, 47, True)
+    finally:
+        llm_mod.USAGE.reset(token)

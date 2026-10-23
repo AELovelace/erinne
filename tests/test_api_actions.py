@@ -80,6 +80,9 @@ def test_erynne_proposes_and_the_person_runs_it(client, agent_llm, conn, setting
     _upstream(seen)
     _, ids = _atera(conn, settings)
     _login(client, "alice")
+    listed = [t for t in client.get("/api/me/tools").json()["tools"] if t["group"] == "Internal systems"]
+    assert {t["subgroup"] for t in listed} == {"Atera (read-write)"}           # one section per API
+    assert {t["label"]: t["write"] for t in listed}["Change ticket status"] is True
     agent_llm.turns(ToolTurn("", [ToolCall("c1", "atera_read_write_change_ticket_status",
                                            {"ticketId": 4812, "status": "Resolved"})]),
                     ToolTurn("I've drafted closing ticket 4812; press Run it to do it."))

@@ -15,7 +15,7 @@ from typing import Any
 
 import anthropic
 
-from mnemerynne.clients.llm import ToolCall, ToolTurn
+from mnemerynne.clients.llm import ToolCall, ToolTurn, count_usage
 
 EFFORT = "medium"           # chat: Claude decides how hard to think, within this
 MAX_TOKENS = 16000          # per step, non-streaming
@@ -106,6 +106,11 @@ class ClaudeLLM:
             kwargs["betas"] = [FALLBACK_BETA]
             kwargs["fallbacks"] = "default"
         response = await self._client.beta.messages.create(**kwargs)
+        used = getattr(response, "usage", None)
+        if used is not None:   # cached input counts too: it's still read (and billed, at a lower rate)
+            count_usage((used.input_tokens or 0) + (getattr(used, "cache_read_input_tokens", 0) or 0)
+                        + (getattr(used, "cache_creation_input_tokens", 0) or 0), used.output_tokens or 0,
+                        external=True)
         if response.stop_reason == "refusal":
             return ToolTurn(REFUSED_TEXT, [], "refusal")
         text = "".join(b.text for b in response.content if b.type == "text")

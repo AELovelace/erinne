@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import contextvars
 import json
 import re
 from dataclasses import dataclass, field
@@ -16,6 +17,27 @@ from typing import Any, AsyncIterator
 import httpx
 
 from mnemerynne.config import Settings
+
+# Tokens one question used, for chat's token counter: graph.run_turn sets a fresh dict, and every
+# model call made while answering adds to it (Claude's under "external" too).
+USAGE: contextvars.ContextVar[dict | None] = contextvars.ContextVar("mnemerynne_usage", default=None)
+
+
+def new_usage() -> dict:
+    return {"in": 0, "out": 0, "external": 0, "estimated": False}
+
+
+def count_usage(tokens_in: int, tokens_out: int, *, external: bool = False, estimated: bool = False) -> None:
+    usage = USAGE.get()
+    if usage is None:
+        return
+    usage["in"] += int(tokens_in)
+    usage["out"] += int(tokens_out)
+    if external:
+        usage["external"] += int(tokens_in) + int(tokens_out)
+    if estimated:
+        usage["estimated"] = True
+
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _OPEN_THINK_RE = re.compile(r"<think>.*\Z", re.DOTALL | re.IGNORECASE)
@@ -171,6 +193,7 @@ class LLM:
         if not usage:
             return
         tin, tout = int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0))
+        count_usage(tin, tout)
         self.tokens_in += tin
         self.tokens_out += tout
         self.spent_usd += tin / 1e6 * self.price_in_per_m + tout / 1e6 * self.price_out_per_m
@@ -216,6 +239,8 @@ class LLM:
 
     def _payload(self, messages, temperature, max_tokens, json_schema, thinking, stream) -> dict[str, Any]:
         payload: dict[str, Any] = {"model": self.model, "messages": messages, "stream": stream}
+        if stream:
+            payload["stream_options"] = {"include_usage": True}   # the last chunk says what it used
         if self.flavor == "openai":
             # GPT-5-family reasoning models: hidden reasoning counts toward this
             # budget, temperature is fixed, effort is set instead.
@@ -356,16 +381,25 @@ class LLM:
                         delay *= 2
                         continue
                 response.raise_for_status()
+                counted, written = False, 0
                 async for line in response.aiter_lines():
                     if not line.startswith("data:"):
                         continue
                     data = line[5:].strip()
                     if data == "[DONE]":
                         break
-                    choices = json.loads(data).get("choices") or []
+                    chunk = json.loads(data)
+                    if chunk.get("usage"):
+                        self._record_usage(chunk["usage"])
+                        counted = True
+                    choices = chunk.get("choices") or []
                     delta = choices[0].get("delta", {}).get("content") if choices else None
                     if delta:
+                        written += len(delta)
                         yield delta
+                if not counted:   # a server that doesn't report usage: about 4 characters a token
+                    asked = sum(len(str(m.get("content") or "")) for m in messages)
+                    count_usage(asked // 4, written // 4, estimated=True)
                 return
 
     async def health(self) -> bool:

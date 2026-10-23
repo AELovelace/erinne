@@ -14,7 +14,7 @@
   // the server only ever narrows what a person may use, never widens it.
   const advanced = document.getElementById("advanced");
   const toolsPanel = document.getElementById("tools-panel");
-  const OFF_KEY = "erynne.toolsOff", OPEN_KEY = "erynne.advanced";
+  const OFF_KEY = "erynne.toolsOff", OPEN_KEY = "erynne.advanced", CLOSED_KEY = "erynne.toolsClosed";
   function remembered(key, fallback) {
     try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch (e) { return fallback; }
   }
@@ -24,6 +24,36 @@
   let toolsOff = new Set(remembered(OFF_KEY, []));
   let toolsLoaded = false;
 
+  // Token counter (right of Advanced settings): what the models used for this conversation.
+  const tokenCount = document.getElementById("token-count");
+  let tokens = null;
+  function resetTokens() {
+    tokens = { in: 0, out: 0, external: 0, estimated: false, last: 0 };
+    showTokens();
+  }
+  function addTokens(t) {
+    if (!t) return;
+    const used = (t.in || 0) + (t.out || 0);
+    tokens.in += t.in || 0;
+    tokens.out += t.out || 0;
+    tokens.external += t.external || 0;
+    tokens.estimated = tokens.estimated || !!t.estimated;
+    tokens.last = used;
+    showTokens();
+  }
+  function showTokens() {
+    const total = tokens.in + tokens.out;
+    const n = function (x) { return x.toLocaleString(); };
+    tokenCount.hidden = !total;
+    tokenCount.textContent = (tokens.estimated ? "≈ " : "") + n(total) + " tokens" +
+      (tokens.external ? " · " + n(tokens.external) + " external API" : "");
+    tokenCount.title = "This conversation: " + n(tokens.in) + " read, " + n(tokens.out) + " written" +
+      (tokens.last ? ". Last answer: " + n(tokens.last) : "") +
+      (tokens.external ? ". External API: " + n(tokens.external) + " (billed to your key)" : "") +
+      (tokens.estimated ? ". ≈: part of it is estimated." : "");
+  }
+  resetTokens();
+
   async function loadTools() {
     const box = document.getElementById("tool-list");
     const data = await fetch("/api/me/tools").then(function (r) { return r.ok ? r.json() : null; })
@@ -31,12 +61,42 @@
     box.replaceChildren();
     if (!data) { box.appendChild(el("p", "error small", "Couldn't load the tools.")); return; }
     toolsLoaded = true;
-    let group = null, list = null;
+    // Collapsible groups (and one per API under Internal systems); which are closed is remembered.
+    const closed = new Set(remembered(CLOSED_KEY, []));
+    const sections = {};
+    function section(parent, key, title) {
+      if (sections[key]) return sections[key];
+      const details = el("details", "tools-group");
+      details.open = !closed.has(key);
+      details.addEventListener("toggle", function () {
+        if (details.open) closed.delete(key); else closed.add(key);
+        remember(CLOSED_KEY, Array.from(closed));
+      });
+      const summary = el("summary", "small");
+      const count = el("span", "muted small tools-count");
+      summary.append(document.createTextNode(title + " "), count);
+      const list = el("ul", "tool-items");
+      details.append(summary, list);
+      // An API's own section sits in its group's list, so it goes in a list item.
+      parent.appendChild(parent.tagName === "UL" ? el("li", "tools-sub") : details);
+      if (parent.tagName === "UL") parent.lastChild.appendChild(details);
+      sections[key] = { details: details, list: list, count: count, names: [] };
+      return sections[key];
+    }
+    function recount() {
+      Object.keys(sections).forEach(function (key) {
+        const sec = sections[key];
+        const on = sec.names.filter(function (n) { return !toolsOff.has(n); }).length;
+        sec.count.textContent = on + "/" + sec.names.length;
+      });
+    }
     data.tools.forEach(function (t) {
-      if (t.group !== group) {
-        group = t.group;
-        box.appendChild(el("h3", "small tools-group", group));
-        list = box.appendChild(el("ul", "tool-items"));
+      const group = section(box, t.group, t.group);
+      group.names.push(t.name);
+      let target = group;
+      if (t.subgroup) {
+        target = section(group.list, t.group + "/" + t.subgroup, t.subgroup);
+        target.names.push(t.name);
       }
       const li = el("li");
       const label = el("label", "tools-toggle small");
@@ -46,12 +106,14 @@
       check.addEventListener("change", function () {
         if (check.checked) toolsOff.delete(t.name); else toolsOff.add(t.name);
         remember(OFF_KEY, Array.from(toolsOff));
+        recount();
       });
       label.append(check, document.createTextNode(" " + (t.write ? "✏️ " : "") + t.label));
       li.appendChild(label);
       if (t.note) li.appendChild(el("span", "muted small", " " + t.note));
-      list.appendChild(li);
+      target.list.appendChild(li);
     });
+    recount();
   }
 
   function showTools(open) {
@@ -269,6 +331,7 @@
     } else if (ev.type === "final") {
       w.finished = true;
       finishAnswer(view, ev);
+      addTokens(ev.tokens);
     }
   }
 
@@ -350,8 +413,10 @@
     const data = await r.json();
     conversationId = id;
     thread.replaceChildren();
+    resetTokens();
     data.messages.forEach(function (m) {
       if (m.role === "user") { thread.appendChild(el("div", "msg user", m.content)); return; }
+      addTokens({ in: m.tokens_in, out: m.tokens_out, external: m.tokens_external, estimated: !!m.tokens_estimated });
       const view = addAnswerShell();
       const sources = m.sources.map(function (s) {
         return Object.assign({}, s, { location: s.kind === "pdf" && s.page_start ? "p. " + s.page_start
@@ -373,6 +438,7 @@
 
   function newChat() {
     conversationId = null;
+    resetTokens();
     thread.replaceChildren(el("div", "welcome muted", "Ask a question about your documents."));
     loadConversations();
     input.focus();

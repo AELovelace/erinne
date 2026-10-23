@@ -34,7 +34,7 @@ from langgraph.types import Command  # noqa: E402
 
 from mnemerynne import answer as answer_mod  # noqa: E402
 from mnemerynne import apis, db, retrieval  # noqa: E402
-from mnemerynne.clients.llm import LLM, ThinkFilter  # noqa: E402
+from mnemerynne.clients.llm import LLM, USAGE, ThinkFilter, new_usage  # noqa: E402
 from mnemerynne.config import Settings  # noqa: E402
 
 log = logging.getLogger("mnemerynne.graph")
@@ -404,6 +404,8 @@ async def run_turn(graph, user_id: int, conversation_id: str, question: str, sco
     {"type": "final", ...} event with the answer, cited sources and timings."""
     trace: list = []
     token = _trace.set(trace)
+    usage = new_usage()
+    usage_token = USAGE.set(usage)   # every model call while answering adds to it (clients/llm.py)
     started = time.perf_counter()
     sources: list[dict] = []
     try:
@@ -418,6 +420,7 @@ async def run_turn(graph, user_id: int, conversation_id: str, question: str, sco
         state = (await graph.aget_state(config)).values
     finally:
         _trace.reset(token)
+        USAGE.reset(usage_token)
     a = state.get("answer") or {}
     cited = set(a.get("citations") or [])
     yield {"type": "final", "status": a.get("status", "not_found"), "answer": a.get("text", ""),
@@ -425,7 +428,7 @@ async def run_turn(graph, user_id: int, conversation_id: str, question: str, sco
            "route": state.get("route", "search"), "proposals": state.get("proposals") or [],
            "model": state.get("model"),
            "sources": [{**s, "cited": s["n"] in cited} for s in sources],
-           "latency_ms": round((time.perf_counter() - started) * 1000), "trace": trace}
+           "latency_ms": round((time.perf_counter() - started) * 1000), "trace": trace, "tokens": usage}
 
 
 def log_trace(conn: sqlite3.Connection, conversation_id: str, trace: list) -> None:

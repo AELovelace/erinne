@@ -653,9 +653,8 @@ class Agent:
             tool = api_map[s["function"]["name"]]
             if tool.action and not full:
                 continue
-            out.append({"name": s["function"]["name"], "label": f"{tool.api} · {tool.operation}",
-                        "group": "Internal systems", "write": tool.action,
-                        "note": "you run it" if tool.action else ""})
+            out.append({"name": s["function"]["name"], "label": tool.operation, "group": "Internal systems",
+                        "subgroup": tool.api, "write": tool.action, "note": "you run it" if tool.action else ""})
         conn = db.connect(self.settings.db_path)
         try:
             user = users.get_user_by_id(conn, user_id)

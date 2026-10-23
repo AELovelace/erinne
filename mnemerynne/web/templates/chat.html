@@ -32,6 +32,7 @@
       {% elif claude %}
       <a class="tools-toggle small" href="/settings#claude-key">🌐 Add your API key to use the external API</a>
       {% endif %}
+      <span class="token-count small muted" id="token-count" hidden></span>
     </div>
     <form id="ask-form" class="ask">
       <textarea id="question" rows="2" placeholder="e.g. How do I run the night audit?" required maxlength="2000"></textarea>

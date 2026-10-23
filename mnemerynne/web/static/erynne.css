@@ -129,9 +129,16 @@ label { display: block; margin: .9rem 0; font-size: .95rem; }
 /* Advanced settings: the tool panel on the right of the chat (chat.js). */
 .chat-layout.tools-open { grid-template-columns: 17rem 1fr 17rem; }
 .tools-panel h2 { margin: 0 0 .3rem; }
-.tools-panel .tools-group { margin: .9rem 0 .2rem; font-size: .78rem; text-transform: uppercase;
-                            letter-spacing: .04em; color: var(--muted); }
-.tools-panel .tool-items { margin: 0; }
+.tools-panel details.tools-group { margin: .7rem 0 0; }
+.tools-panel details.tools-group > summary { cursor: pointer; font-size: .78rem; text-transform: uppercase;
+                                             letter-spacing: .04em; color: var(--muted); }
+.tools-panel .tools-sub details.tools-group { margin: .2rem 0 0; }
+.tools-panel .tools-sub details.tools-group > summary { text-transform: none; letter-spacing: 0; font-size: .85rem;
+                                                        color: var(--ink); }
+.tools-panel .tools-sub { display: block; padding: 0; }
+.tools-panel .tools-sub .tool-items { margin-left: 1rem; }
+.tools-panel .tools-count { margin-left: .2rem; text-transform: none; }
+.tools-panel .tool-items { margin: .2rem 0 0; }
 .tools-panel .tool-items li { justify-content: flex-start; flex-wrap: wrap; gap: .1rem .4rem; padding: .1rem 0; }
 .history ul { list-style: none; padding: 0; margin: 1rem 0 0; }
 .history li { display: flex; align-items: center; justify-content: space-between; gap: .5rem;
@@ -630,6 +637,7 @@ button.danger-fill { background: var(--error); }
 .tools-toggle { display: inline-flex; align-items: center; gap: .3rem; margin: 0; white-space: nowrap; flex: none;
                 color: var(--muted); cursor: pointer; }
 .tools-toggle input { width: auto; margin: 0; flex: none; }
+.token-count { margin-left: auto; white-space: nowrap; }   /* right end of the row above the question box */
 .steps { margin: 0 0 .4rem; }
 .steps summary { cursor: pointer; }
 .step-list { margin: .2rem 0 0; padding-left: 1.4rem; }
