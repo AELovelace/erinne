@@ -10,11 +10,16 @@ def enqueue(conn: sqlite3.Connection, kind: str, file_id: int | None = None) -> 
 
 
 def claim(conn: sqlite3.Connection) -> sqlite3.Row | None:
-    """Atomically take the oldest due job, marking it running."""
+    """Atomically take the oldest due job, marking it running. Local files
+    (uploads, the share, edits) always go before SharePoint's (collections.source),
+    so a bulk SharePoint import never holds up what people add themselves.
+    Decided here, not when queued, so it applies to jobs already waiting."""
     return conn.execute(
         "UPDATE jobs SET status = 'running', locked_at = datetime('now'), attempts = attempts + 1 "
-        "WHERE id = (SELECT id FROM jobs WHERE status = 'queued' AND run_after <= datetime('now') "
-        "            ORDER BY id LIMIT 1) "
+        "WHERE id = (SELECT j.id FROM jobs j LEFT JOIN files f ON f.id = j.file_id "
+        "            LEFT JOIN collections c ON c.id = f.collection_id "
+        "            WHERE j.status = 'queued' AND j.run_after <= datetime('now') "
+        "            ORDER BY c.source IS NOT NULL, j.id LIMIT 1) "
         "RETURNING *"
     ).fetchone()
 

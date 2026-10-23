@@ -43,6 +43,14 @@ the machine (LangSmith is forced off).
 - **Sign in with Microsoft 365.** Single sign-on through Entra ID (OIDC), with
   each Microsoft account mapped to its domain account. A first version was
   built and then set aside in favour of local accounts.
+- **Editing any spreadsheet.** Claude and Erynne refuse to change workbooks
+  with charts, pivot tables or pictures, because openpyxl drops those parts
+  when it saves, and refuse to insert or delete rows in workbooks with
+  formulas, because the formulas below wouldn't follow
+  (`mnemerynne/editing_formats.py`). The fix is to change only the cells'
+  XML inside the .xlsx and leave every other part untouched, and to rewrite
+  formula references that point past inserted or deleted rows. About a week,
+  most of it testing against real hotel workbooks.
 
 ## How it answers
 

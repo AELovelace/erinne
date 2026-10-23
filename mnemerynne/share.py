@@ -18,10 +18,12 @@ import errno
 import hashlib
 import logging
 import os
+import re
 import shutil
 import sqlite3
 import struct
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Protocol
@@ -494,15 +496,31 @@ def _db_tree(conn: sqlite3.Connection, collection_id: int) -> tuple[dict[tuple[s
     return folders, files
 
 
-def _usable(name: str) -> bool:
-    """A name the file manager can keep exactly as it is on disk."""
+def name_problem(name: str) -> str | None:
+    """Why the file manager can't keep this name exactly as it is on disk
+    (shown in the scan's skipped list, so people know what to rename); None if it can."""
     from mnemerynne.ingest import store
 
     try:
         check_name(name)
-    except ValueError:
-        return False
-    return store.clean_display_name(name) == name
+    except ValueError as exc:
+        return str(exc)
+    if store.clean_display_name(name) == name:
+        return None
+    if len(name) > 200:
+        return "the name is longer than 200 characters"
+    if name != name.strip():
+        return "the name starts or ends with a space"
+    if any(unicodedata.category(ch)[0] == "C" for ch in name):
+        return "the name has invisible control characters"
+    if re.search(r"\s{2,}|[^\S ]", name):
+        return "the name has two spaces in a row (or a tab)"
+    return "the name can't be kept exactly as it is"
+
+
+def _usable(name: str) -> bool:
+    """A name the file manager can keep exactly as it is on disk."""
+    return name_problem(name) is None
 
 
 def _discover(conn: sqlite3.Connection, rt: Runtime, stats: Stats) -> None:
@@ -546,8 +564,8 @@ def _discover(conn: sqlite3.Connection, rt: Runtime, stats: Stats) -> None:
                          (entry.name, entry.name, renamed["id"]))
             log.info("Share: library %s was renamed to %s on the share.", renamed["name"], entry.name)
             continue
-        if not _usable(entry.name):
-            stats.skipped.append(f"{entry.name}: name can't be used for a library")
+        if (problem := name_problem(entry.name)) is not None:
+            stats.skipped.append(f"{entry.name}: can't be a library: {problem}; rename it")
             continue
         if permissions.get_library(conn, entry.name):
             stats.skipped.append(f"{entry.name}: a library with that name isn't on the share yet")
@@ -624,8 +642,11 @@ def sync(conn: sqlite3.Connection, settings: Settings | None = None) -> Stats:
     reads: dict[tuple[int, tuple[str, ...]], _Read] = {}
     for cid, base, _, disk_files, _, db_files in plans:
         for path, f in disk_files.items():
-            if f.mtime_ns > settle_before or not _usable(path[-1]):
-                continue   # still being written (next scan), or a name we can't keep
+            if f.mtime_ns > settle_before:
+                continue   # still being written: the next scan reads it
+            if (problem := name_problem(path[-1])) is not None:
+                stats.skipped.append(f"{'/'.join(path)}: {problem}; rename it")
+                continue
             row = db_files.get(path)
             if row is not None and (row["disk_size"], row["disk_mtime_ns"]) == (f.size, f.mtime_ns):
                 continue
@@ -661,8 +682,8 @@ def sync(conn: sqlite3.Connection, settings: Settings | None = None) -> Stats:
                 parent = folder_ids.get(path[:-1]) if len(path) > 1 else None
                 if len(path) > 1 and parent is None:
                     continue   # its parent was skipped
-                if not _usable(path[-1]):
-                    stats.skipped.append(f"{'/'.join(path)}: name can't be used here")
+                if (problem := name_problem(path[-1])) is not None:
+                    stats.skipped.append(f"{'/'.join(path)}: {problem}; rename it")
                     continue
                 if fs._taken(conn, cid, parent, path[-1], "folder"):
                     stats.skipped.append(f"{'/'.join(path)}: another folder differs only in upper/lower case")

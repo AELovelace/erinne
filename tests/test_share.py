@@ -148,6 +148,15 @@ def test_edits_and_deletions_on_the_share(conn, settings, root):
     assert _files(conn) == {}
 
 
+def test_names_that_cant_be_kept_are_reported_not_dropped_silently(conn, settings, root):
+    _write(root / "Oracle" / "Sundry  Marketplace Policy.docx")         # two spaces
+    _write(root / "Oracle" / "First Aid Policy 6.4.2026..docx")          # double dot is fine
+    stats = share.sync(conn, settings)
+    assert stats.added == 1 and set(_files(conn)) == {"First Aid Policy 6.4.2026..docx"}
+    assert stats.skipped == ["Sundry  Marketplace Policy.docx: the name has two spaces in a row (or a tab); "
+                             "rename it"]
+
+
 def test_files_still_being_written_wait(conn, settings, root):
     settings.share_settle_seconds = 3600
     _write(root / "Oracle" / "big.txt", "copying…", age=0)

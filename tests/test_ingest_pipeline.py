@@ -187,6 +187,16 @@ def test_file_deleted_while_queued_is_skipped(conn, settings, embedder, alice):
     assert embedder.calls == 0
 
 
+def test_local_files_go_before_a_sharepoint_backlog(conn, settings, alice):
+    remote = permissions.create_library(conn, "SharePoint Docs")
+    conn.execute("UPDATE collections SET source = 'sharepoint' WHERE id = ?", (remote,))
+    first, _ = _add(conn, settings, b"one", "one.txt", remote)
+    second, _ = _add(conn, settings, b"two", "two.txt", remote)
+    local, _ = _add(conn, settings, NOTES_MD, "notes.md", alice["inbox"])   # queued last
+    assert [jobs.claim(conn)["file_id"] for _ in range(3)] == [local, first, second]
+    assert jobs.claim(conn) is None
+
+
 def test_stale_running_jobs_are_requeued(conn, settings, alice):
     _add(conn, settings, MANUAL, "manual.pdf", alice["inbox"])
     jobs.claim(conn)
