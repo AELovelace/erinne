@@ -411,7 +411,9 @@ input.c-check { width: 1rem; height: 1rem; margin: 0; accent-color: var(--rose);
 .props-switch input:disabled { opacity: .55; }
 .props-switch + p { margin: .15rem 0 .2rem 1.5rem; }
 button.danger-fill { background: var(--error); }
-.picker-tree { max-height: 50vh; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: .3rem; }
+.picker-tree { max-height: 50vh; overflow-y: auto; overflow-x: hidden; border: 1px solid var(--line); border-radius: 10px; padding: .3rem; }
+.picker-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.picker-tree ul[hidden] { display: none; }
 
 /* upload queue */
 .queue { position: fixed; right: 1rem; bottom: 1rem; z-index: 30; width: min(24rem, calc(100vw - 2rem));

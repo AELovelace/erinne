@@ -83,7 +83,7 @@ def test_operations_that_could_escape_are_refused():
         apis.check_specs("//evil.example/x", [], "GET", "")
     with pytest.raises(apis.ApiError, match="Only POST"):
         apis.check_specs("/x", [], "GET", '{"a": 1}')
-    with pytest.raises(apis.ApiError, match="fixed JSON body"):
+    with pytest.raises(apis.ApiError, match="needs a JSON body"):
         apis.check_specs("/x", [], "POST", "not json")
 
 

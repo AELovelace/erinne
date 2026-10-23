@@ -64,7 +64,11 @@
     const dlg = el("dialog", "dlg glass picker");
     const form = el("form");
     form.method = "dialog";
-    form.appendChild(el("h2", null, opts.title));
+    const head = el("div", "picker-head");
+    const all = el("button", "link small", "Expand all");
+    all.type = "button";
+    head.append(el("h2", null, opts.title), all);
+    form.appendChild(head);
     const tree = el("ul", "tree picker-tree");
     tree.setAttribute("role", "tree");
     form.appendChild(tree);
@@ -87,13 +91,59 @@
       ok.disabled = false;
     }
 
+    // Collapsible rows: ▸/▾ for anything with folders inside; everything starts closed.
+    function setOpen(li, open) {
+      const kids = li.querySelector(":scope > ul");
+      const toggle = li.querySelector(":scope > .tree-row > .tree-toggle");
+      if (!kids || !toggle) return;
+      kids.hidden = !open;
+      toggle.textContent = open ? "▾" : "▸";
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.setAttribute("aria-label", (open ? "Collapse " : "Expand ") + li.dataset.name);
+    }
+
+    function node(label, kids, depth, name) {
+      const li = el("li");
+      li.dataset.name = name;
+      li.setAttribute("role", "treeitem");
+      const row = el("div", "tree-row");
+      row.style.paddingLeft = (depth * 0.9) + "rem";
+      const toggle = el("button", "tree-toggle", "");
+      toggle.type = "button";
+      row.append(toggle, label);
+      li.appendChild(row);
+      if (kids && kids.childElementCount) {
+        li.appendChild(kids);
+        toggle.addEventListener("click", function () { setOpen(li, kids.hidden); });
+        setOpen(li, false);
+      } else {
+        toggle.disabled = true;
+        toggle.tabIndex = -1;
+        toggle.setAttribute("aria-hidden", "true");
+      }
+      return li;
+    }
+
+    function openTo(label) {   // show the chosen place: open every row above it
+      let li = label.closest("li");
+      while (li && li.parentElement && li.parentElement !== tree) {
+        li = li.parentElement.closest("li");
+        if (li) setOpen(li, true);
+      }
+    }
+
+    all.addEventListener("click", function () {
+      const open = all.textContent === "Expand all";
+      tree.querySelectorAll("li").forEach(function (li) { setOpen(li, open); });
+      all.textContent = open ? "Collapse all" : "Expand all";
+    });
+
     function folderNodes(loc, list, parentId, depth) {
       const ul = el("ul", "tree-children");
+      ul.setAttribute("role", "group");
       list.filter(function (f) { return (f.parent_id || null) === parentId; }).forEach(function (f) {
-        const li = el("li");
         const label = el("button", "tree-label", "📁 " + f.name);
         label.type = "button";
-        label.style.paddingLeft = (0.6 + depth * 0.9) + "rem";
         if (choosable(f.can_write)) {
           label.addEventListener("click", function () {
             choose(label, { collection_id: loc.id, folder_id: f.id, label: loc.name + " / " + f.name });
@@ -102,24 +152,23 @@
           label.disabled = true;
           label.title = "You can't change this folder";
         }
-        li.appendChild(label);
-        const kids = folderNodes(loc, list, f.id, depth + 1);
-        if (kids.childElementCount) li.appendChild(kids);
+        const li = node(label, folderNodes(loc, list, f.id, depth + 1), depth, f.name);
         ul.appendChild(li);
+        if (opts.current && opts.current.collection_id === loc.id && opts.current.folder_id === f.id) {
+          pending.push([label, { collection_id: loc.id, folder_id: f.id, label: loc.name + " / " + f.name }]);
+        }
       });
       return ul;
     }
+    const pending = [];   // the current choice, selected once its row is in the tree
 
     if (opts.allowAll) {
-      const li = el("li");
       const label = el("button", "tree-label", "🌸 All my documents");
       label.type = "button";
       label.addEventListener("click", function () { choose(label, { all: true }); });
-      li.appendChild(label);
-      tree.appendChild(li);
+      tree.appendChild(node(label, null, 0, "All my documents"));
     }
     for (const loc of locations) {
-      const li = el("li");
       const label = el("button", "tree-label", (loc.kind === "private" ? "🏠 " : "📚 ") + loc.name);
       label.type = "button";
       if (choosable(loc.writable)) {
@@ -130,17 +179,16 @@
         label.disabled = true;
         label.title = "You can't change the top level of this library";
       }
-      li.appendChild(label);
+      let kids = null;
       try {
-        const list = await folders(loc.id);
-        const kids = folderNodes(loc, list, null, 1);
-        if (kids.childElementCount) li.appendChild(kids);
+        kids = folderNodes(loc, await folders(loc.id), null, 1);
       } catch (e) { /* unreadable: show the root only */ }
-      tree.appendChild(li);
+      tree.appendChild(node(label, kids, 0, loc.name));
       if (opts.current && opts.current.collection_id === loc.id && !opts.current.folder_id) {
         choose(label, { collection_id: loc.id, folder_id: null, label: loc.name });
       }
     }
+    pending.forEach(function (p) { choose(p[0], p[1]); openTo(p[0]); });
 
     return new Promise(function (resolve) {
       let confirmed = false;  // Escape and Cancel both close without choosing

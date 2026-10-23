@@ -101,19 +101,49 @@ async def create_api(body: NewApi, request: Request, user=Depends(admin_user),
             "VALUES (?, ?, ?, ?, ?, ?)",
             (name, p["description"] if p else "", url, p["auth_type"] if p else "none",
              p.get("auth_header", "") if p else "", p.get("tls_check_hostname", 1) if p else 1)).lastrowid
-        op_ids = []
-        for op in (p["operations"] if p else []):
-            params = op.get("params", [])
-            apis.check_specs(op["path"], params, op.get("method", "GET"), op.get("body", ""))
-            op_ids.append(conn.execute(
-                "INSERT INTO api_operations(api_id, name, description, example_questions, method, path, params, "
-                "body, cache_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (api_id, op["name"], op.get("description", ""), op.get("example_questions", ""),
-                 op.get("method", "GET"), op["path"], json.dumps(params), op.get("body", ""),
-                 op.get("cache_seconds", 60))).lastrowid)
+        op_ids = _preset_operations(conn, api_id, p["operations"] if p else [])
         _log(conn, user, "api.create", name, f"preset {p['key']}" if p else "")
     await _index(request, conn, op_ids)
     return {"id": api_id, "name": name}
+
+
+def _preset_operations(conn: sqlite3.Connection, api_id: int, operations: list[dict]) -> list[int]:
+    """Add a preset's operations to an API (inside the caller's transaction), skipping names it has."""
+    have = {r[0].lower() for r in conn.execute("SELECT name FROM api_operations WHERE api_id = ?", (api_id,))}
+    op_ids = []
+    for op in operations:
+        if op["name"].lower() in have:
+            continue
+        params = op.get("params", [])
+        apis.check_specs(op["path"], params, op.get("method", "GET"), op.get("body", ""))
+        op_ids.append(conn.execute(
+            "INSERT INTO api_operations(api_id, name, description, example_questions, method, path, params, "
+            "body, cache_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (api_id, op["name"], op.get("description", ""), op.get("example_questions", ""),
+             op.get("method", "GET"), op["path"], json.dumps(params), op.get("body", ""),
+             op.get("cache_seconds", 60))).lastrowid)
+    return op_ids
+
+
+class PresetBody(BaseModel):
+    preset: str
+
+
+@router.post("/{api_id}/preset-operations")
+async def add_preset_operations(api_id: int, body: PresetBody, request: Request, user=Depends(admin_user),
+                                conn: sqlite3.Connection = Depends(get_db)):
+    """Bring an existing API up to date with a preset: its operations this API doesn't have yet."""
+    a = _api(conn, api_id)
+    p = apis.preset(body.preset)
+    if p is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such preset")
+    with transaction(conn):
+        op_ids = _preset_operations(conn, api_id, p["operations"])
+        if op_ids:
+            _log(conn, user, "api.preset_operations", a["name"], f"{len(op_ids)} from {p['key']}")
+    await _index(request, conn, op_ids)
+    apis.clear_cache()
+    return {"added": len(op_ids)}
 
 
 async def _index(request: Request, conn: sqlite3.Connection, op_ids: list[int]) -> None:

@@ -37,6 +37,11 @@ MAX_RESPONSE_BYTES = 256 * 1024
 EXCERPT_CHARS = 20_000           # kept with each call, for the citation link
 PARAM_TYPES = ("string", "int", "date", "enum")
 _SAFE_STRING = re.compile(r"^[\w .,:@+\-/]{0,200}$")
+# In a POST body, * and ? are allowed too: search patterns (e.g. agent "*" for all, "FD-*").
+_SAFE_BODY_STRING = re.compile(r"^[\w .,:@+\-/*?]{0,200}$")
+# {{name}} in a POST body: a body parameter, written in as JSON (escaped inside a
+# string, a bare value elsewhere), so the model fills values but never the query's shape.
+_BODY_PLACEHOLDER = re.compile(r"\{\{([A-Za-z_]\w*)\}\}")
 _SAFE_PATH_VALUE = re.compile(r"^[\w.\-]{1,100}$")
 _PLACEHOLDER = re.compile(r"\{([A-Za-z_]\w*)\}")
 _SECRET_INFO = b"mnemerynne-api-secrets"
@@ -132,22 +137,71 @@ def check_specs(path: str, specs: list[dict], method: str, body: str) -> None:
         names.add(name)
         if s.get("type") not in PARAM_TYPES:
             raise ApiError(f"Parameter “{name}” needs a type: {', '.join(PARAM_TYPES)}.")
-        if s.get("in", "query") not in ("query", "path"):
-            raise ApiError(f"Parameter “{name}” goes in the query or the path.")
+        if s.get("in", "query") not in ("query", "path", "body"):
+            raise ApiError(f"Parameter “{name}” goes in the query, the path or the body.")
+        if s.get("in") == "body" and method != "POST":
+            raise ApiError(f"Parameter “{name}” is in the body, but only POST operations have one.")
         if s.get("type") == "enum" and not s.get("options"):
             raise ApiError(f"Parameter “{name}” is a list; give its options.")
     for placeholder in _PLACEHOLDER.findall(path):
         if not any(s["name"] == placeholder and s.get("in") == "path" for s in specs):
             raise ApiError(f"The path uses {{{placeholder}}} but there's no path parameter by that name.")
     if method == "POST":
+        in_body = {s["name"] for s in specs if s.get("in") == "body"}
+        used = set(_BODY_PLACEHOLDER.findall(body or ""))
+        if used - in_body:
+            raise ApiError(f"The body uses {{{{{sorted(used - in_body)[0]}}}}} but there's no body parameter by that name.")
+        if in_body - used:
+            raise ApiError(f"Body parameter “{sorted(in_body - used)[0]}” isn't used in the body ({{{{name}}}}).")
+        samples = {s["name"]: _sample(s) for s in specs if s.get("in") == "body"}
         try:
-            json.loads(body)
+            json.loads(render_body(body, samples))
         except ValueError as exc:
-            raise ApiError("A POST operation needs a fixed JSON body.") from exc
+            raise ApiError("A POST operation needs a JSON body (with {{name}} where body parameters go).") from exc
     elif body:
         raise ApiError("Only POST operations have a body.")
     if not path.startswith("/") or path.startswith("//") or ".." in path or "://" in path or "\\" in path:
         raise ApiError("The path must start with / and stay under the API's address.")
+
+
+def _sample(spec: dict):
+    """A valid value of the parameter's type, to check that the body is JSON once filled in."""
+    kind = spec.get("type")
+    if kind == "int":
+        return int(spec.get("min") if spec.get("min") is not None else 1)
+    if kind == "enum":
+        return str((spec.get("options") or ["x"])[0])
+    return "2026-01-01" if kind == "date" else "x"
+
+
+def render_body(template: str, values: dict) -> str:
+    """The POST body with each {{name}} filled in: escaped text inside a JSON
+    string ("now-{{hours}}h"), a JSON value elsewhere ({"size": {{count}}}).
+    A parameter without a value becomes "" or null."""
+    out, pos, in_string, escaped = [], 0, False, False
+    while pos < len(template):
+        m = _BODY_PLACEHOLDER.match(template, pos)
+        if m:
+            value = values.get(m.group(1))
+            if in_string:
+                out.append(json.dumps("" if value is None else str(value))[1:-1])
+            else:
+                out.append(json.dumps(value))
+            pos = m.end()
+            continue
+        ch = template[pos]
+        out.append(ch)
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        pos += 1
+    return "".join(out)
 
 
 def validate_params(specs: list[dict], given: dict | None) -> dict:
@@ -187,7 +241,7 @@ def validate_params(specs: list[dict], given: dict | None) -> dict:
             value = match
         else:
             value = str(value).strip()
-            if not _SAFE_STRING.match(value):
+            if not (_SAFE_BODY_STRING if s.get("in") == "body" else _SAFE_STRING).match(value):
                 raise ApiError(f"“{name}” contains characters that aren't allowed.")
         if s.get("in") == "path" and not _SAFE_PATH_VALUE.match(str(value)):
             raise ApiError(f"“{name}” can't be used in the address.")
@@ -204,7 +258,10 @@ def build_request(api, op, params: dict) -> tuple[str, str, dict, str | None]:
     if (base.scheme, base.netloc) != (built.scheme, built.netloc) or built.scheme not in ("https", "http"):
         raise ApiError("The operation's address leaves the API.")
     query = {k: v for k, v in params.items() if specs[k].get("in", "query") == "query"}
-    return op["method"], url, query, (op["body"] or None) if op["method"] == "POST" else None
+    if op["method"] != "POST":
+        return op["method"], url, query, None
+    body = {k: v for k, v in params.items() if specs[k].get("in") == "body"}
+    return op["method"], url, query, render_body(op["body"], body) if op["body"] else None
 
 
 # ------------------------------------------------------------------- calling
@@ -489,13 +546,38 @@ PRESETS: list[dict] = [
         "description": "Wazuh indexer (security alerts). Use a dedicated read-only user; only the fixed query "
                        "below is ever sent. Trust the indexer's certificate on this page.",
         "operations": [
-            {"name": "Alerts by severity (24 h)", "method": "POST", "path": "/wazuh-alerts-*/_search",
-             "cache_seconds": 120,
-             "body": json.dumps({"size": 0, "query": {"range": {"timestamp": {"gte": "now-24h"}}},
-                                 "aggs": {"levels": {"terms": {"field": "rule.level", "size": 20}}}}),
-             "description": "Count of security alerts in the last 24 hours, by rule level (12+ is critical).",
-             "example_questions": "How many security alerts were there today?\nAny critical Wazuh alerts?\n"
-                                  "What's the alert count by severity?"},
+            {"name": "Alert summary", "method": "POST", "path": "/wazuh-alerts-*/_search", "cache_seconds": 120,
+             "params": [_p("hours", "int", where="body", min=1, max=720, default=24, help="How many hours back"),
+                        _p("min_level", "int", where="body", min=0, max=15, default=0,
+                           help="Lowest rule level to count (7+ notable, 12+ critical)"),
+                        _p("agent", "string", where="body", default="*",
+                           help="Machine (agent) name; * for all, or a pattern like FD-*")],
+             "body": '{"size": 0, "query": {"bool": {"filter": [{"range": {"timestamp": {"gte": "now-{{hours}}h"}}}, {"range": {"rule.level": {"gte": {{min_level}}}}}, {"wildcard": {"agent.name": "{{agent}}"}}]}}, "aggs": {"levels": {"terms": {"field": "rule.level", "size": 16}}, "rules": {"terms": {"field": "rule.description", "size": 15}, "aggs": {"level": {"max": {"field": "rule.level"}}}}, "agents": {"terms": {"field": "agent.name", "size": 15}}, "tactics": {"terms": {"field": "rule.mitre.tactic", "size": 10}}, "sources": {"terms": {"field": "data.srcip", "size": 10}}}}',
+             "description": "Counts of security alerts by level, rule, machine, MITRE tactic and source IP, "
+                            "for a time window, minimum level and machine.",
+             "example_questions": "How many security alerts were there today?\nWhat's the alert count by severity?\n"
+                                  "Which machines have the most alerts this week?\nWhat are the top alert types?"},
+            {"name": "Alerts", "method": "POST", "path": "/wazuh-alerts-*/_search", "cache_seconds": 60,
+             "params": [_p("hours", "int", where="body", min=1, max=720, default=24, help="How many hours back"),
+                        _p("min_level", "int", where="body", min=0, max=15, default=7,
+                           help="Lowest rule level (7+ notable, 12+ critical)"),
+                        _p("agent", "string", where="body", default="*",
+                           help="Machine (agent) name; * for all, or a pattern like FD-*"),
+                        _p("count", "int", where="body", min=1, max=50, default=20, help="How many alerts")],
+             "body": '{"size": {{count}}, "sort": [{"timestamp": "desc"}], "query": {"bool": {"filter": [{"range": {"timestamp": {"gte": "now-{{hours}}h"}}}, {"range": {"rule.level": {"gte": {{min_level}}}}}, {"wildcard": {"agent.name": "{{agent}}"}}]}}, "_source": ["timestamp", "rule.level", "rule.id", "rule.description", "rule.groups", "rule.mitre.tactic", "rule.mitre.technique", "agent.name", "agent.ip", "data.srcip", "data.srcuser", "data.dstuser", "location"]}',
+             "description": "The alerts themselves, newest first: time, level, rule, MITRE tactic, machine, "
+                            "source IP and user.",
+             "example_questions": "Show me today's critical alerts.\nWhat triggered alerts on the front desk PC?\n"
+                                  "What happened on FD-01 overnight?\nList the level 12 alerts this week."},
+            {"name": "Failed logins", "method": "POST", "path": "/wazuh-alerts-*/_search", "cache_seconds": 60,
+             "params": [_p("hours", "int", where="body", min=1, max=720, default=24, help="How many hours back"),
+                        _p("agent", "string", where="body", default="*",
+                           help="Machine (agent) name; * for all, or a pattern like FD-*")],
+             "body": '{"size": 0, "query": {"bool": {"filter": [{"range": {"timestamp": {"gte": "now-{{hours}}h"}}}, {"terms": {"rule.groups": ["authentication_failed", "authentication_failures", "invalid_login"]}}, {"wildcard": {"agent.name": "{{agent}}"}}]}}, "aggs": {"agents": {"terms": {"field": "agent.name", "size": 10}}, "sources": {"terms": {"field": "data.srcip", "size": 10}}, "users": {"terms": {"field": "data.dstuser", "size": 10}}, "rules": {"terms": {"field": "rule.description", "size": 10}}, "per_hour": {"date_histogram": {"field": "timestamp", "fixed_interval": "1h", "min_doc_count": 1}}}}',
+             "description": "Failed logins: how many, on which machines, from which IPs, for which accounts, and "
+                            "per hour (to spot brute force).",
+             "example_questions": "Any failed logins today?\nIs anyone brute-forcing us?\n"
+                                  "Which accounts had failed logins this week?\nWhere are the failed logins coming from?"},
         ],
     },
     {

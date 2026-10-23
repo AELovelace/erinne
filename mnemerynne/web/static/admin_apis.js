@@ -150,6 +150,22 @@
     head.appendChild(el("h2", null, "🔌 " + d.name));
     const enabled = checkbox("Enabled", d.enabled);
     enabled.box.addEventListener("change", function () { patch({ enabled: enabled.box.checked }); });
+    // A preset with this API's name (e.g. Wazuh): bring in operations it gained since this API was made.
+    const preset = (state.list && state.list.presets || []).find(function (p) {
+      return p.name.toLowerCase() === d.name.toLowerCase();
+    });
+    if (preset) {
+      head.appendChild(button("Add preset operations", "link small", async function () {
+        const done = await run(function () {
+          return api("POST", "/api/admin/apis/" + d.id + "/preset-operations", { preset: preset.key });
+        });
+        if (done !== null) {
+          alert(done.added ? "Added " + done.added + " operation(s) from the " + preset.name + " preset."
+                           : "This API already has all of the preset's operations.");
+          await open(d.id);
+        }
+      }));
+    }
     head.append(enabled, button("Rename", "link small", function () {
       const name = prompt("New name for " + d.name, d.name);
       if (name && name.trim() !== d.name) patch({ name: name.trim() });
@@ -285,7 +301,7 @@
                                                               placeholder: "One question per line" });
     const cache = input(op ? op.cache_seconds : 60, { type: "number" });
     const enabled = checkbox("Enabled", op ? op.enabled : true);
-    const bodyField = field("Body (sent as is, never changed by the model)", body);
+    const bodyField = field("Body (fixed; the model only fills {{name}} slots, with checked values)", body);
     function toggle() { bodyField.hidden = method.value !== "POST"; }
     method.addEventListener("change", toggle);
     toggle();
@@ -294,7 +310,8 @@
                bodyField,
                field("Parameters (JSON)", params,
                      'e.g. [{"name": "days", "type": "int", "in": "query", "min": 1, "max": 31, "default": 7, ' +
-                     '"help": "How many days"}]. Types: string, int, date, enum (with "options").'),
+                     '"help": "How many days"}]. Types: string, int, date, enum (with "options"). "in": query, ' +
+                     'path, or body (POST: write {{name}} in the body where the value goes).'),
                field("Example questions", examples), field("Cache (seconds)", cache), enabled);
     box.append(button("Save", "small", function () {
       let parsed;

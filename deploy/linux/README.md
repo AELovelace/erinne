@@ -376,6 +376,25 @@ Atera) or a blank API.
   the SHA-256 fingerprint with the real one, and save it. Only that
   certificate is then trusted for the API. For servers reached by IP, untick
   *Check the name in the certificate*.
+- **Parameters in POST bodies.** A POST body can have slots written as
+  `{{name}}`, for example `"gte": "now-{{hours}}h"` or `"size": {{count}}`.
+  Each one is a parameter with `"in": "body"`, a type and limits. The model
+  (Erynne or Claude) fills them in. Values are checked against the type and
+  limits, then written into the JSON safely escaped, so the model can choose
+  a time window or a machine but can never change what the query asks.
+  Strings in a body may contain `*` and `?`, for patterns such as an agent
+  name `FD-*`.
+- **Wazuh.** The preset has three operations, each taking a time window
+  (`hours`) and a machine (`agent`, `*` for all):
+  - **Alert summary:** counts by level, rule, machine, MITRE tactic and
+    source IP, with a minimum level.
+  - **Alerts:** the alerts themselves, newest first, with a minimum level
+    and how many.
+  - **Failed logins:** by machine, source IP, account and hour.
+
+  An existing Wazuh API gets them with **Add preset operations** on its page.
+  Their responses include machine names, IP addresses and usernames. With
+  *Claude can query this* on, those go to Anthropic.
 - **Routing.** A chat question goes to an operation when it closely matches
   one of the operation's *example questions*, so add a few phrased the way
   staff ask. `MNEMERYNNE_API_ROUTE_THRESHOLD` (default 0.80) sets how close a
