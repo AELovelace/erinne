@@ -1,0 +1,213 @@
+/* Erynne — neon theme: hot pink on black, chromatic bloom (a cyan and a red
+   fringe either side of a pink glow), hard edges. Everything is scoped to
+   html[data-theme="neon"], so the sakura theme (erynne.css) is untouched;
+   this file only overrides it. Chosen per person on the Settings page. */
+
+html[data-theme="neon"] {
+  color-scheme: dark;
+  --blush: #07020d;
+  --petal: #ff2e97;
+  --petal-soft: rgba(255, 46, 151, 0.14);
+  --rose: #ff2e97;
+  --rose-deep: #ff7ac0;
+  --bark: #b0127a;
+  --ink: #ffe9f5;
+  --muted: #b98aa9;
+  --glass: rgba(12, 3, 20, 0.84);
+  --glass-strong: rgba(18, 5, 28, 0.95);
+  --line: rgba(255, 46, 151, 0.5);
+  --cyan: #00f0ff;
+  --fringe-l: rgba(0, 240, 255, 0.75);
+  --fringe-r: rgba(255, 20, 80, 0.8);
+  --bloom: 0 0 0 1px rgba(255, 46, 151, 0.35), -2px 0 0 rgba(0, 240, 255, 0.35), 2px 0 0 rgba(255, 20, 80, 0.45),
+           0 0 26px rgba(255, 46, 151, 0.28);
+  --shadow: var(--bloom);
+  --error: #ff4d6d;
+  --ok-bg: rgba(0, 255, 170, 0.12); --ok-fg: #5dffc4;
+  --bad-bg: rgba(255, 45, 85, 0.16); --bad-fg: #ff8aa0;
+  --busy-bg: rgba(255, 46, 151, 0.16); --busy-fg: #ff9ad0;
+  --scene-tint: transparent;
+  --radius: 0;
+  --serif: "Bahnschrift", "DIN Alternate", "Eurostile", "Roboto Condensed", "Arial Narrow", system-ui, sans-serif;
+  scrollbar-color: var(--rose) transparent;
+}
+
+/* Hard edges: no rounded corners anywhere. */
+html[data-theme="neon"] *,
+html[data-theme="neon"] *::before,
+html[data-theme="neon"] *::after { border-radius: 0 !important; }
+
+html[data-theme="neon"] ::selection { background: var(--rose); color: #0a0010; }
+
+/* --------------------------------------------------------------- scene */
+html[data-theme="neon"] body {
+  background-color: var(--blush);
+  background-image:
+    radial-gradient(ellipse 70% 45% at 50% 108%, rgba(255, 46, 151, 0.42), transparent 70%),
+    radial-gradient(ellipse 45% 35% at 88% 6%, rgba(0, 240, 255, 0.13), transparent 70%),
+    radial-gradient(ellipse 40% 30% at 8% 20%, rgba(180, 20, 255, 0.14), transparent 70%),
+    linear-gradient(180deg, #07020d 0%, #12031f 60%, #1d0428 100%);
+  background-attachment: fixed;
+}
+/* A glowing grid floor running to the horizon... */
+html[data-theme="neon"] body::before {
+  content: ""; position: fixed; z-index: 0; pointer-events: none;
+  left: -150%; right: -150%; bottom: 0; height: 200vh;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(255, 46, 151, 0.55) 0 2px, transparent 2px 80px),
+    repeating-linear-gradient(0deg, rgba(255, 46, 151, 0.55) 0 2px, transparent 2px 80px);
+  transform: perspective(500px) rotateX(60deg);
+  transform-origin: 50% 100%;
+  -webkit-mask-image: linear-gradient(to top, #000 5%, transparent 55%);
+  mask-image: linear-gradient(to top, #000 5%, transparent 55%);
+  filter: drop-shadow(0 0 3px rgba(255, 46, 151, 0.9));
+  animation: neon-floor 5s linear infinite;
+}
+/* ...and faint scanlines over everything. */
+html[data-theme="neon"] body::after {
+  content: ""; position: fixed; inset: 0; z-index: 60; pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.16) 0 1px, transparent 1px 3px);
+}
+@keyframes neon-floor { to { background-position: 0 80px, 0 80px; } }
+
+/* Falling petals become neon rain. */
+html[data-theme="neon"] .petals span {
+  width: 2px; height: 22px; opacity: 0.8;
+  background: linear-gradient(to bottom, transparent, var(--rose));
+  box-shadow: 0 0 8px var(--rose), 0 0 2px #fff;
+  animation-name: neon-rain;
+}
+html[data-theme="neon"] .petals span:nth-child(even) {
+  background: linear-gradient(to bottom, transparent, var(--cyan));
+  box-shadow: 0 0 8px var(--cyan), 0 0 2px #fff;
+}
+html[data-theme="neon"] .petals span:nth-child(1) { animation-duration: 3.1s; }
+html[data-theme="neon"] .petals span:nth-child(2) { animation-duration: 4.4s; }
+html[data-theme="neon"] .petals span:nth-child(3) { animation-duration: 2.7s; }
+html[data-theme="neon"] .petals span:nth-child(4) { animation-duration: 5.2s; }
+html[data-theme="neon"] .petals span:nth-child(5) { animation-duration: 3.6s; }
+html[data-theme="neon"] .petals span:nth-child(6) { animation-duration: 4.8s; }
+@keyframes neon-rain {
+  0%   { transform: translate3d(0, -5vh, 0); }
+  100% { transform: translate3d(0, 108vh, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="neon"] body::before { animation: none; }
+}
+
+/* ---------------------------------------------------- chromatic bloom */
+html[data-theme="neon"] h1,
+html[data-theme="neon"] h2,
+html[data-theme="neon"] .brand {
+  color: var(--ink);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  text-shadow: -1.5px 0 var(--fringe-l), 1.5px 0 var(--fringe-r), 0 0 10px rgba(255, 46, 151, 0.85),
+               0 0 28px rgba(255, 46, 151, 0.45);
+}
+html[data-theme="neon"] h3 { color: var(--rose); letter-spacing: 0.05em; text-shadow: 0 0 8px rgba(255, 46, 151, 0.6); }
+html[data-theme="neon"] .brand .blossom { filter: hue-rotate(-20deg) saturate(2) drop-shadow(0 0 6px var(--rose)); }
+html[data-theme="neon"] a { text-shadow: 0 0 6px rgba(255, 46, 151, 0.45); }
+
+/* Panels: square, a hard pink border, and the bloom around it. */
+html[data-theme="neon"] .glass,
+html[data-theme="neon"] .inbox,
+html[data-theme="neon"] .doc,
+html[data-theme="neon"] .history,
+html[data-theme="neon"] .login-card,
+html[data-theme="neon"] .dlg {
+  border: 1px solid var(--line);
+  box-shadow: var(--bloom);
+  -webkit-backdrop-filter: blur(8px) saturate(1.4);
+  backdrop-filter: blur(8px) saturate(1.4);
+}
+html[data-theme="neon"] .dlg::backdrop { background: rgba(7, 2, 13, 0.6); }
+
+html[data-theme="neon"] .topbar {
+  background: rgba(7, 2, 13, 0.86);
+  border-bottom: 1px solid var(--rose);
+  box-shadow: 0 0 18px rgba(255, 46, 151, 0.45), 0 1px 0 rgba(0, 240, 255, 0.35);
+}
+html[data-theme="neon"] .tabs a:hover { color: var(--ink); background: var(--petal-soft); }
+html[data-theme="neon"] .tabs a[aria-current="page"] {
+  color: var(--rose); background: var(--petal-soft);
+  box-shadow: inset 0 -2px 0 var(--rose);
+  text-shadow: 0 0 8px rgba(255, 46, 151, 0.9);
+}
+
+/* Buttons: neon pink slabs with dark text (more readable than white on hot pink). */
+/* :where() keeps these weak, so the quiet buttons below override them. */
+html[data-theme="neon"] :where(button:not(.link, .tool, .danger-fill)),
+html[data-theme="neon"] .button-like,
+html[data-theme="neon"] .upload-button {
+  background: var(--rose); color: #0a0010; font-weight: 600; letter-spacing: 0.04em;
+  box-shadow: -2px 0 0 var(--fringe-l), 2px 0 0 var(--fringe-r), 0 0 14px rgba(255, 46, 151, 0.7);
+}
+html[data-theme="neon"] :where(button:not(.link, .tool, .danger-fill):hover:not(:disabled)),
+html[data-theme="neon"] .button-like:hover {
+  background: var(--rose-deep); color: #0a0010;
+  box-shadow: -3px 0 0 var(--fringe-l), 3px 0 0 var(--fringe-r), 0 0 24px rgba(255, 46, 151, 0.95);
+}
+html[data-theme="neon"] .button-like.soft { background: var(--petal-soft); color: var(--rose); box-shadow: inset 0 0 0 1px var(--line); }
+html[data-theme="neon"] button.link { color: var(--rose); }
+html[data-theme="neon"] button.danger-fill {
+  background: var(--error); color: #0a0010; box-shadow: -2px 0 0 var(--fringe-l), 2px 0 0 var(--fringe-r), 0 0 14px rgba(255, 77, 109, 0.7);
+}
+
+/* Quiet buttons (file toolbar, menus, tabs, thumbs): text that lights up, not slabs. */
+html[data-theme="neon"] button.tool,
+html[data-theme="neon"] .menu button,
+html[data-theme="neon"] .ax-tabs button,
+html[data-theme="neon"] .feedback button {
+  background: none; color: var(--ink); box-shadow: none; font-weight: 500; letter-spacing: 0.02em;
+}
+html[data-theme="neon"] button.tool:hover:not(:disabled),
+html[data-theme="neon"] .menu button:hover:not(:disabled),
+html[data-theme="neon"] .menu button:focus-visible,
+html[data-theme="neon"] .ax-tabs button:hover {
+  background: var(--petal-soft); color: var(--rose); box-shadow: inset 0 0 0 1px var(--line);
+  text-shadow: 0 0 8px rgba(255, 46, 151, 0.8);
+}
+html[data-theme="neon"] button.tool[aria-pressed="true"],
+html[data-theme="neon"] .ax-tabs button[aria-selected="true"] {
+  background: var(--petal-soft); color: var(--rose); box-shadow: inset 0 -2px 0 var(--rose);
+  text-shadow: 0 0 8px rgba(255, 46, 151, 0.8);
+}
+html[data-theme="neon"] button.tool.danger,
+html[data-theme="neon"] .menu button.danger { color: var(--error); }
+html[data-theme="neon"] button.danger,
+html[data-theme="neon"] button.link.danger { color: var(--error); }
+
+/* Inputs: dark wells with a pink edge; focus lights them up. */
+html[data-theme="neon"] input,
+html[data-theme="neon"] textarea,
+html[data-theme="neon"] select {
+  color: var(--ink); background: rgba(255, 46, 151, 0.06); border: 1px solid var(--line);
+}
+html[data-theme="neon"] input:focus,
+html[data-theme="neon"] textarea:focus,
+html[data-theme="neon"] select:focus {
+  border-color: var(--rose); outline: 1px solid var(--cyan); outline-offset: 1px;
+  box-shadow: 0 0 0 1px var(--rose), 0 0 14px rgba(255, 46, 151, 0.6);
+}
+html[data-theme="neon"] button:focus-visible,
+html[data-theme="neon"] a:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+html[data-theme="neon"] input[type="checkbox"],
+html[data-theme="neon"] input[type="radio"] { accent-color: var(--rose); }
+
+/* ------------------------------------------------------------- details */
+html[data-theme="neon"] .msg.user { color: #0a0010; box-shadow: var(--bloom); }
+html[data-theme="neon"] a.cite { background: rgba(255, 46, 151, 0.18); }
+html[data-theme="neon"] .row:not(.head):hover,
+html[data-theme="neon"] .tile:hover { background: rgba(255, 46, 151, 0.1); }
+html[data-theme="neon"] .row.selected,
+html[data-theme="neon"] .tile.selected { background: rgba(255, 46, 151, 0.2); box-shadow: inset 2px 0 0 var(--rose); }
+html[data-theme="neon"] .history li:hover,
+html[data-theme="neon"] .history li.active { background: rgba(255, 46, 151, 0.14); }
+html[data-theme="neon"] .history li.active { box-shadow: inset 2px 0 0 var(--rose); }
+html[data-theme="neon"] .drop-overlay { background: rgba(7, 2, 13, 0.82); border-color: var(--rose); }
+html[data-theme="neon"] .proposal .diff,
+html[data-theme="neon"] .doc pre { background: rgba(255, 46, 151, 0.07); }
+html[data-theme="neon"] .doc :target { background: rgba(255, 46, 151, 0.2); box-shadow: inset 2px 0 0 var(--cyan); }
+html[data-theme="neon"] .toast { box-shadow: var(--bloom); }
+html[data-theme="neon"] .admin-table th { color: var(--rose); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.78rem; }
+html[data-theme="neon"] .props-h { color: var(--cyan); text-shadow: 0 0 6px rgba(0, 240, 255, 0.6); }

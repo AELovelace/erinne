@@ -14,6 +14,21 @@
     <tr><th>Since</th><td>{{ (user.created_at or "")[:10] }}</td></tr>
   </table>
 
+  <h2 class="admin-section" id="theme">Theme</h2>
+  <div class="theme-picker" role="radiogroup" aria-label="Theme">
+    <label class="theme-card">
+      <input type="radio" name="theme" value="sakura" {% if user.theme != 'neon' %}checked{% endif %}>
+      <span class="theme-swatch sakura" aria-hidden="true"><span></span><span></span><span></span></span>
+      <span><strong>Sakura</strong><br><span class="muted small">Blossoms over Mt Fuji. Follows your device's light or dark mode.</span></span>
+    </label>
+    <label class="theme-card">
+      <input type="radio" name="theme" value="neon" {% if user.theme == 'neon' %}checked{% endif %}>
+      <span class="theme-swatch neon" aria-hidden="true"><span></span><span></span><span></span></span>
+      <span><strong>Neon</strong><br><span class="muted small">Hot pink on black, chromatic bloom, hard edges. Always dark.</span></span>
+    </label>
+  </div>
+  <p id="theme-note" aria-live="polite" hidden></p>
+
   <h2 class="admin-section" id="password">Password</h2>
   <form class="settings-form" id="password-form" autocomplete="on">
     <input type="text" name="username" value="{{ user.username }}" autocomplete="username" hidden>

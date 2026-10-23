@@ -1,11 +1,13 @@
-"""Personal settings: everyone's own account page. Change your password, sign
-out other browsers, and link Microsoft 365 accounts (m365.js, web/m365.py)."""
+"""Personal settings: everyone's own account page. Pick a theme, change your
+password, sign out other browsers, and link Microsoft 365 accounts (m365.js,
+web/m365.py)."""
 
 from __future__ import annotations
 
 import sqlite3
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -65,6 +67,21 @@ def change_password(body: PasswordChange, request: Request, user=Depends(api_use
     throttle.clear(user["username"], client_ip)
     _keep_this_session(request, conn, user["id"])
     return {"status": "changed"}
+
+
+THEME_COOKIE = "erynne_theme"   # so the sign-in page matches, read in base.html
+
+
+class ThemeBody(BaseModel):
+    theme: Literal["sakura", "neon"]
+
+
+@router.put("/api/me/theme")
+def set_theme(body: ThemeBody, response: Response, user=Depends(api_user),
+              conn: sqlite3.Connection = Depends(get_db)):
+    conn.execute("UPDATE users SET theme = ? WHERE id = ?", (body.theme, user["id"]))
+    response.set_cookie(THEME_COOKIE, body.theme, max_age=365 * 86400, samesite="lax", httponly=True)
+    return {"theme": body.theme}
 
 
 @router.post("/api/me/sign-out-others")

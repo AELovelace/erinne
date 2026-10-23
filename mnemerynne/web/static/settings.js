@@ -13,6 +13,29 @@
     node.hidden = !text;
   }
 
+  // Themes switch at once (theme-neon.css is always loaded, scoped to data-theme), then save.
+  function applyTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    const meta = document.querySelector('meta[name="color-scheme"]');
+    if (meta) meta.content = theme === "neon" ? "dark" : "light dark";
+  }
+
+  document.querySelectorAll('input[name="theme"]').forEach(function (radio) {
+    radio.addEventListener("change", async function () {
+      const before = document.documentElement.dataset.theme;
+      applyTheme(radio.value);
+      note("theme-note", "");
+      try {
+        await api("PUT", "/api/me/theme", { theme: radio.value });
+      } catch (err) {
+        applyTheme(before);
+        const old = document.querySelector('input[name="theme"][value="' + before + '"]');
+        if (old) old.checked = true;
+        note("theme-note", err.message);
+      }
+    });
+  });
+
   $("password-form").addEventListener("submit", async function (e) {
     e.preventDefault();
     note("password-note", "");

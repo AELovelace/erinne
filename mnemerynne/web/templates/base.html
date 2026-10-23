@@ -1,12 +1,16 @@
+{#- The person's theme (Settings); signed out, the one this browser last used. -#}
+{%- set theme = (user.theme if user is defined and user else request.cookies.get('erynne_theme')) -%}
+{%- if theme not in ('sakura', 'neon') %}{% set theme = 'sakura' %}{% endif -%}
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="{{ theme }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light dark">
+  <meta name="color-scheme" content="{{ 'dark' if theme == 'neon' else 'light dark' }}">
   <title>{% block title %}{{ assistant_name }}{% endblock %}</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌸</text></svg>">
   <link rel="stylesheet" href="{{ static('erynne.css') }}">
+  <link rel="stylesheet" href="{{ static('theme-neon.css') }}">
 </head>
 <body>
   <div class="petals" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div>
