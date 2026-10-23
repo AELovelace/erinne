@@ -20,7 +20,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from mnemerynne import editing, fs
+from mnemerynne import editing, fs, permissions
 from mnemerynne.api_tokens import Caller
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
@@ -109,7 +109,7 @@ def propose_mail(conn: sqlite3.Connection, caller, payload: dict) -> int:
 def where(conn: sqlite3.Connection, collection_id: int, folder_id: int | None) -> str:
     coll = conn.execute("SELECT kind, name FROM collections WHERE id = ?", (collection_id,)).fetchone()
     path = "/".join(p["name"] for p in fs.folder_path(conn, folder_id))
-    label = "My inbox" if coll is None or coll["kind"] == "private" else coll["name"]
+    label = permissions.PRIVATE_LABEL if coll is None or coll["kind"] == "private" else coll["name"]
     return label + (f" / {path}" if path else "")
 
 

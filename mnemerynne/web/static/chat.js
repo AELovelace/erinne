@@ -130,12 +130,6 @@
     return { wrap: wrap, body: body, status: status, steps: steps, sources: sources, proposals: proposals };
   }
 
-  // "claude-opus-5-5" -> "Claude Opus 5.5"
-  function claudeName(id) {
-    const parts = id.split("-");
-    return "Claude " + parts[1].charAt(0).toUpperCase() + parts[1].slice(1) + " " + parts.slice(2).join(".");
-  }
-
   function finishAnswer(view, final) {
     view.status.remove();
     if (final.status === "error") {
@@ -148,10 +142,6 @@
       renderSources(view.sources, final.sources);
       if (final.route === "general") {
         view.wrap.insertBefore(el("div", "route-label muted small", "General answer, not from your documents"),
-                               view.body);
-      }
-      if (/^claude-/.test(final.model || "")) {
-        view.wrap.insertBefore(el("div", "route-label muted small", "Answered by " + claudeName(final.model)),
                                view.body);
       }
     }
@@ -192,11 +182,11 @@
       conversationId = ev.conversation_id;
       w.runId = ev.run_id;
     } else if (ev.type === "route") {
-      if (ev.route === "agent") view.status.textContent = ev.model === "claude" ? "Claude is working on it…"
-                                                                                 : "Working on it…";
+      if (ev.route === "agent") view.status.textContent = "Working on it…";
       else if (ev.route !== "search") view.status.textContent = "Writing…";
-      if (ev.claude && ev.fallback) {   // asked Claude, but Erynne answers: say why
-        view.wrap.insertBefore(el("div", "route-label muted small", "Answered by Erynne: " + ev.fallback), view.body);
+      if (ev.claude && ev.fallback) {   // "Use External API" was on but couldn't be used: say why
+        view.wrap.insertBefore(el("div", "route-label muted small", "Answered without the external API: " +
+                                  ev.fallback), view.body);
       }
     } else if (ev.type === "tool") {
       window.ErynneAgent.tool(view.steps, ev);

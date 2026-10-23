@@ -11,7 +11,7 @@
     <p class="muted small">It asked as “{{ name }}” and will be sent back to <code>{{ host }}</code>.</p>
     <p>It will be able to search and read, with citations:</p>
     {% if places %}
-    <ul class="grants">{% for p in places %}<li>{{ "📥" if p == "My inbox" else "📚" }} {{ p }}</li>{% endfor %}</ul>
+    <ul class="grants">{% for p in places %}<li>{{ p }}</li>{% endfor %}</ul>
     {% else %}
     <p class="muted small">Nothing yet: no library is shared with Claude for you. An admin can change that.</p>
     {% endif %}

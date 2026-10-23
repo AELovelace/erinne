@@ -41,7 +41,7 @@ def download_extension(user=Depends(page_user), settings: Settings = Depends(get
 def list_tokens(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db),
                 settings: Settings = Depends(get_settings)):
     shared = permissions.claude_collection_ids(conn, user["id"])
-    collections = [{"name": "My inbox" if c["kind"] == "private" else c["name"], "kind": c["kind"]}
+    collections = [{"name": permissions.PRIVATE_LABEL if c["kind"] == "private" else c["name"], "kind": c["kind"]}
                    for c in permissions.readable_collections(conn, user["id"]) if c["id"] in shared]
     base = settings.public_url.rstrip("/") or str(request.base_url).rstrip("/")
     try:

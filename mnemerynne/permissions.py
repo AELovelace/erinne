@@ -7,6 +7,9 @@ unless its `inherit` flag is off; its own grants add to that and pass down.
 Effective access is the union of everything that reaches a folder. Claude
 use additionally needs the library's (or inbox's) Claude switch.
 
+People see their own collection as the "File box" (PRIVATE_LABEL), and so do
+Erynne and Claude: "inbox" kept being read as their email.
+
 A library stored on the SMB share (share.py) ignores grants: access follows
 the share's own permissions for the user's linked domain account. A
 SharePoint library (sharepoint.py) ignores them too: it is open, read-only,
@@ -24,6 +27,8 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from mnemerynne.db import transaction
+
+PRIVATE_LABEL = "File box"    # a person's own collection, as people and the AI see it
 
 
 @dataclass

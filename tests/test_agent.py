@@ -154,7 +154,7 @@ def test_edits_are_proposals_until_applied(client, agent_llm, conn, settings, wo
                     ToolTurn("I drafted notes.md in your Agents folder."))
     events = _ask(client, "start a notes file")
     made = _proposal(events)
-    assert made["kind"] == "create" and made["status"] == "pending" and made["where"] == "My inbox / Agents"
+    assert made["kind"] == "create" and made["status"] == "pending" and made["where"] == "File box / Agents"
     assert "+hello" in made["diff"]
     assert conn.execute("SELECT count(*) FROM files WHERE display_name = 'notes.md'").fetchone()[0] == 0
     # The conversation remembers it under the answer.
@@ -286,7 +286,7 @@ def test_erynne_tools_forgive_guessed_places(settings, conn, world):
     out, _ = tools.search_documents(conn, alice, "night audit", library="My inbox / Agents")   # empty folder
     assert out["found"] and "these are from everywhere" in out["note"]
     made, _ = tools.create_file(conn, alice, "a.md", content="a", library="My inbox / Agents")
-    assert made["status"] == "proposed" and made["where"] == "My inbox / Agents"
+    assert made["status"] == "proposed" and made["where"] == "File box / Agents"
     # The "Search in…" place picked in chat narrows her searches.
     brand = permissions.create_library(conn, "Brand")
     permissions.grant_user(conn, brand, world["alice"])

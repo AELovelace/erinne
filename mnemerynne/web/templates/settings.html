@@ -73,11 +73,10 @@
 
   {% if claude_chat %}
   <h2 class="admin-section" id="claude-key">Claude in chat</h2>
-  <p class="muted small">Tick <em>Ask Claude</em> under the question box to have Claude answer instead of
-    {{ assistant_name }}, with the same tools, using your own Anthropic API key: the questions are billed to you.
-    Claude can hand reading-heavy parts to {{ assistant_name }}, two at a time, and like Claude she then only reads
-    what's shared with Claude. Your mail, calendar and memories never go to Claude. Changes Claude drafts are
-    proposals you apply, as with {{ assistant_name }}.</p>
+  <p class="muted small">Tick <em>Use External API</em> under the question box and {{ assistant_name }} answers
+    with Claude, using your own Anthropic API key: the questions are billed to you. She keeps her tools, and hands
+    reading-heavy parts to local helpers, two at a time, that see only what's shared with Claude, as she does then.
+    Your mail, calendar and memories never go to Claude. Changes she drafts are proposals you apply, as always.</p>
   <div id="claude-chat" aria-live="polite"><p class="muted small">Loading…</p></div>
   {% endif %}
 

@@ -129,8 +129,8 @@ def test_read_passage_and_browsing_respect_access(conn, settings, embedder, worl
         tools.read_passage(conn, bob, hit["chunk_id"])
 
     libs = tools.list_libraries(conn, alice)[0]["libraries"]
-    assert [(l["library"], l["kind"]) for l in libs] == [("My inbox", "inbox"), ("Oracle", "library")]
-    assert [l["library"] for l in tools.list_libraries(conn, bob)[0]["libraries"]] == ["My inbox"]
+    assert [(l["library"], l["kind"]) for l in libs] == [("File box", "file box"), ("Oracle", "library")]
+    assert [l["library"] for l in tools.list_libraries(conn, bob)[0]["libraries"]] == ["File box"]
 
     listing = tools.browse_folder(conn, alice, "Oracle")[0]
     assert [f["name"] for f in listing["files"]] == ["OPERA.pdf"] and listing["files"][0]["searchable"]
@@ -252,7 +252,7 @@ def test_connect_page_and_token_api(mcp_client, conn, world):
 
     listed = mcp_client.get("/api/tokens").json()
     assert [t["name"] for t in listed["tokens"]] == ["Laptop"] and "token" not in listed["tokens"][0]
-    assert {c["name"] for c in listed["shared"]} == {"My inbox", "Oracle"}
+    assert {c["name"] for c in listed["shared"]} == {"File box", "Oracle"}
     assert listed["mcp_url"].endswith("/mcp")
     assert mcp_client.get("/connect/mnemerynne.mcpb").status_code == 404
 

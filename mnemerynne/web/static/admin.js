@@ -544,9 +544,9 @@
           const on = c.claude === "everything";
           claude = checkbox(on ? "yes" : "no", on, function (value) {
             change("PUT", "/api/admin/users/" + p.id + "/inbox-claude", { enabled: value });
-          }, "May search their own inbox from Claude");
+          }, "May search their own File box from Claude");
         }
-        rows.push([i === 0 ? personCell(p) : "", c.kind === "private" ? "Inbox" : "📚 " + c.name,
+        rows.push([i === 0 ? personCell(p) : "", c.kind === "private" ? "🏠 File box" : "📚 " + c.name,
                    c.read, c.edit, claude, c.via.join(", ")]);
       });
     });
@@ -1121,7 +1121,7 @@
     const box = $("claude-settings");
     box.replaceChildren();
     if (data.groups && data.groups.length) fillDatalist("domain-groups", data.groups);
-    box.appendChild(el("p", "muted", "Members of this " + (data.domain || "domain") + " group may tick Ask Claude " +
+    box.appendChild(el("p", "muted", "Members of this " + (data.domain || "domain") + " group may tick Use External API " +
       "in chat: Claude answers with Erynne's tools, using each person's own Anthropic API key (saved on their " +
       "Settings page, billed to them). Claude reads only what's shared with Claude, can hand reading to up to two " +
       "Erynne subagents with the same limits, and never sees mail, calendar or memories. Leave it empty to turn " +

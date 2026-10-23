@@ -620,7 +620,11 @@ def sync(conn: sqlite3.Connection, settings: Settings | None = None) -> Stats:
         return stats
     with transaction(conn):
         _discover(conn, rt, stats)
-    settle_before = time.time_ns() - settings.share_settle_seconds * 1_000_000_000
+    now_ns = time.time_ns()
+    settle_before = now_ns - settings.share_settle_seconds * 1_000_000_000
+    # A write stamps the server's own clock; a time well ahead of it was set by a copy tool (robocopy, an unzip)
+    # from a machine whose clock is off, and the file is finished: waiting for it would hide it for hours.
+    copied_stamp = now_ns + 60 * 1_000_000_000
 
     # Pass 1, no lock: what is on disk and in the database.
     plans = []
@@ -642,7 +646,7 @@ def sync(conn: sqlite3.Connection, settings: Settings | None = None) -> Stats:
     reads: dict[tuple[int, tuple[str, ...]], _Read] = {}
     for cid, base, _, disk_files, _, db_files in plans:
         for path, f in disk_files.items():
-            if f.mtime_ns > settle_before:
+            if settle_before < f.mtime_ns <= copied_stamp:
                 continue   # still being written: the next scan reads it
             if (problem := name_problem(path[-1])) is not None:
                 stats.skipped.append(f"{'/'.join(path)}: {problem}; rename it")

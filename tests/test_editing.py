@@ -103,7 +103,7 @@ def test_create_open_edit_conflict_versions_restore(conn, settings, world, tools
     alice = _caller(conn, world["alice"])
     made, _ = tools.create_file(conn, alice, "plan.md", content="# Plan\n\nCheck-in at 3 pm.\n")
     row = fs.file_row(conn, made["file_id"])
-    assert made["where"] == "My inbox / Agents" and row["folder_id"] == editing.agents_folder(conn, world["alice"])
+    assert made["where"] == "File box / Agents" and row["folder_id"] == editing.agents_folder(conn, world["alice"])
     assert row["edited_via"] == "claude:alice"
 
     opened, _ = tools.open_file(conn, alice, made["file_id"])
@@ -162,7 +162,7 @@ def test_library_editing_needs_the_switch_and_write_access(conn, settings, world
     assert made["where"] == "Brand"
     with pytest.raises(editing.EditForbidden):
         tools.create_file(conn, _caller(conn, world["bob"]), "bob.txt", content="x", library="Brand")
-    assert tools.list_libraries(conn, alice)[0]["you_can_edit_in"] == ["My inbox / Agents", "Brand"]
+    assert tools.list_libraries(conn, alice)[0]["you_can_edit_in"] == ["File box / Agents", "Brand"]
 
 
 # --------------------------------------------------------------------- docx
@@ -411,7 +411,7 @@ def test_token_edit_setting_and_admin_switch(web, conn, world):
     assert not api_tokens.verify(conn, token["token"]).can_edit
     listed = web.get("/api/tokens").json()
     assert listed["tokens"][0]["can_edit"] is False
-    assert listed["editable"] == [{"library": "My inbox", "folder": "Agents", "why": "your Agents folder"}]
+    assert listed["editable"] == [{"library": "File box", "folder": "Agents", "why": "your Agents folder"}]
     assert web.put(f"/api/admin/libraries/{world['brand']}/claude-edit", json={"enabled": True}).status_code == 403
     web.post("/logout")
     _login(web, "boss")

@@ -45,9 +45,9 @@ PAGE_WIDTH_PX = 1200     # rendered page width: small print stays legible, JPEG 
 PAGE_MAX_PX = 2000       # cap on either side, for unusually long or wide pages
 
 INSTRUCTIONS = """\
-Mnemerynne holds this organisation's documents: each person's private inbox and the shared libraries they
-have been given (brand standards, system manuals and so on). Use these tools whenever a question could
-be answered from those documents.
+Mnemerynne holds this organisation's documents: each person's private File box (their own files, not
+their email) and the shared libraries they have been given (brand standards, system manuals and so on).
+Use these tools whenever a question could be answered from those documents.
 
 - Answer only from the passages the tools return, and cite every claim with the passage's `citation`
   and `link`, e.g. "Run End of Day before 2 am ([OPERA Cloud Manual · p. 412](link))".
@@ -79,7 +79,8 @@ _READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempo
 # Changes files, but never destructively: every change keeps the previous version.
 _EDITS = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False,
                          open_world_hint=False)
-_INBOX_WORDS = {"inbox", "my inbox", "my files", "my documents"}
+# Names for the person's File box a model might use (older ones too: "inbox" was its name before).
+_INBOX_WORDS = {"file box", "my file box", "filebox", "inbox", "my inbox", "my files", "my documents"}
 _PROPOSED = ("Nothing has changed yet: the person sees this change under your answer and decides whether to "
              "apply it. Tell them briefly what you proposed.")
 
@@ -98,7 +99,7 @@ def _collections(conn: sqlite3.Connection, access: fs.Access) -> dict[int, sqlit
 
 
 def _label(row: sqlite3.Row) -> str:
-    return "My inbox" if row["kind"] == "private" else row["name"]
+    return permissions.PRIVATE_LABEL if row["kind"] == "private" else row["name"]
 
 
 def _resolve_collection(conn: sqlite3.Connection, access: fs.Access, ref: str, claude: bool = True) -> sqlite3.Row:
@@ -114,7 +115,7 @@ def _resolve_collection(conn: sqlite3.Connection, access: fs.Access, ref: str, c
 
 
 def _split_place(library: str | None, folder: str | None) -> tuple[str | None, str | None]:
-    """"My inbox / Agents" given as the library: the library and the folder in it."""
+    """"File box / Agents" given as the library: the library and the folder in it."""
     if library and "/" in library and not folder:
         library, folder = (part.strip() for part in library.split("/", 1))
     return library, folder
@@ -312,7 +313,7 @@ class Tools:
                                key=lambda kv: (kv[1]["kind"] != "private", _label(kv[1]).lower())):
             counts = conn.execute("SELECT count(*) AS files, coalesce(sum(status = 'ready'), 0) AS searchable "
                                   "FROM files WHERE collection_id = ? AND deleted_at IS NULL", (cid,)).fetchone()
-            out.append({"library": _label(row), "id": cid, "kind": "inbox" if row["kind"] == "private" else "library",
+            out.append({"library": _label(row), "id": cid, "kind": "file box" if row["kind"] == "private" else "library",
                         "files": counts["files"], "searchable_files": counts["searchable"]})
         edit = ([f"{p['library']}" + (f" / {p['folder']}" if p["folder"] else "") for p in
                  editing.editable_places(conn, caller.user_id, self.mode)] if caller.can_edit else [])
@@ -387,7 +388,7 @@ class Tools:
     def _where(self, conn, row) -> str:
         coll = conn.execute("SELECT kind, name FROM collections WHERE id = ?", (row["collection_id"],)).fetchone()
         path = _path(conn, row["folder_id"])
-        return ("My inbox" if coll["kind"] == "private" else coll["name"]) + (f" / {path}" if path else "")
+        return (permissions.PRIVATE_LABEL if coll["kind"] == "private" else coll["name"]) + (f" / {path}" if path else "")
 
     def open_file(self, conn, caller: Caller, file_id: int, start: int = 1, limit: int | None = None,
                   sheet: str | None = None, cells: str | None = None) -> tuple[dict, list[int]]:
@@ -522,10 +523,10 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
     @server.tool(annotations=_READ_ONLY)
     async def search_documents(ctx: Context, query: str, library: str | None = None, folder: str | None = None,
                                limit: int = 8) -> dict:
-        """Search the user's Mnemerynne documents (their inbox and shared libraries) and return the best
+        """Search the user's Mnemerynne documents (their File box and shared libraries) and return the best
         matching passages, each with a ready-to-use `citation` and `link`. Ask in natural language;
         hotel and system jargon works. Optionally narrow to one `library` (a name from list_libraries,
-        or "inbox") and a `folder` path inside it such as "Front Office/Night Audit". `limit` is 1-20.
+        or "File box") and a `folder` path inside it such as "Front Office/Night Audit". `limit` is 1-20.
         When `found` is false the documents don't cover it: rephrase once, then say so."""
         return await call(ctx, "search_documents",
                           {"query": query, "library": library, "folder": folder, "limit": limit},
@@ -554,12 +555,12 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
 
     @server.tool(annotations=_READ_ONLY)
     async def list_libraries(ctx: Context) -> dict:
-        """List what the user can search from Claude: their inbox and each shared library, with file counts."""
+        """List what the user can search from Claude: their File box and each shared library, with file counts."""
         return await call(ctx, "list_libraries", {}, tools.list_libraries)
 
     @server.tool(annotations=_READ_ONLY)
     async def browse_folder(ctx: Context, library: str, folder: str | None = None) -> dict:
-        """List the folders and files in a library (or "inbox"), at its top level or inside `folder`
+        """List the folders and files in a library (or "File box"), at its top level or inside `folder`
         (a path such as "Front Office/Night Audit")."""
         return await call(ctx, "browse_folder", {"library": library, "folder": folder}, tools.browse_folder)
 

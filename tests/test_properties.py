@@ -60,14 +60,14 @@ def _status(conn, file_id):
 def test_file_and_folder_properties(client, conn, world):
     _login(client, "alice")
     p = client.get(f"/api/properties?type=file&id={world['plan']}").json()
-    assert p["name"] == "plan.md" and p["where"] == "My files / Plans / Deep"
+    assert p["name"] == "plan.md" and p["where"] == "File box / Plans / Deep"
     assert p["search"]["status"] == "ready" and p["search"]["chunks"] >= 1
     assert p["search"]["embedded"] == p["search"]["chunks"]
     assert p["can_reembed"] is True and p["claude_connected"] is False
     assert p["claude_see"]["on"] is True
     assert p["ai_edit"] == {"on": False, "can_change": True, "shared": True, "why": None}   # her inbox: she may allow it
     f = client.get(f"/api/properties?type=folder&id={world['plans']}").json()
-    assert (f["files"], f["folders"], f["where"]) == (1, 1, "My files")
+    assert (f["files"], f["folders"], f["where"]) == (1, 1, "File box")
     assert f["search"]["by_status"] == {"ready": 1}
     assert client.get("/api/properties?type=file&id=99999").status_code == 404
 

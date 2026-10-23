@@ -22,7 +22,9 @@ MAX_TOKENS = 16000          # per step, non-streaming
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 # A declined request is retried on another model by the API itself; Haiku has no fallback.
 FALLBACK_MODELS = {"claude-opus-5-5", "claude-sonnet-5-5"}
-REFUSED_TEXT = "Sorry, Claude declined to answer that. You can ask without Claude instead."
+# Shown as Erynne's reply: the person sees "the external API", never Claude.
+REFUSED_TEXT = ("Sorry, I can't help with that one through the external API. Try asking again with "
+                "“Use External API” switched off.")
 
 
 class ClaudeKeyError(ValueError):

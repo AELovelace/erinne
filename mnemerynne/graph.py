@@ -228,8 +228,8 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
                 get_stream_writer()({"type": "route", "route": "agent", "model": "claude"})
                 return {"route": "agent"}
             get_stream_writer()({"type": "route", "route": "search", "claude": True, "fallback":
-                                 "add your Claude API key on Settings to ask Claude" if ready == "nokey"
-                                 else "Claude isn't turned on for you"})
+                                 "add your API key on Settings to use the external API" if ready == "nokey"
+                                 else "the external API isn't turned on for you"})
             return {**await erynne_route(state), "use_claude": False}
         return await erynne_route(state)
 

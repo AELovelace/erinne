@@ -192,7 +192,7 @@ def check_edit(conn: sqlite3.Connection, user_id: int, token_can_edit: bool,
     if own_inbox and item_flags and owner_allows(conn, folder_id, file_id):
         return Place(collection_id, folder_id, "owner")
     if own_inbox:
-        raise EditForbidden(f"{who} isn't allowed to change files in your inbox outside the Agents folder. Work "
+        raise EditForbidden(f"{who} isn't allowed to change files in your File box outside the Agents folder. Work "
                             f"in your {AGENTS} folder instead (create_file puts new files there), or ask the person "
                             f"to turn on AI edit for this folder or file in Files.")
     raise EditForbidden(f"{who} isn't allowed to change files in this library. Work in your {AGENTS} folder "
@@ -233,14 +233,14 @@ def editable_places(conn: sqlite3.Connection, user_id: int, via: str = "claude")
     except (fs.FsError, OSError):
         agents = None   # the share is away; it's made next time
     if agents is not None:
-        out.append({"library": "My inbox", "folder": AGENTS, "why": "your Agents folder"})
+        out.append({"library": permissions.PRIVATE_LABEL, "folder": AGENTS, "why": "your Agents folder"})
     access = fs.Access.of(conn, user_id)
     ai = ai_access(conn, user_id, via)
     for row in conn.execute("SELECT id, kind, name FROM collections WHERE claude_edit = 1").fetchall():
         reach = access.reaches.get(row["id"])
         if reach is None or not reach.any_write or row["id"] not in ai.readable:
             continue
-        out.append({"library": "My inbox" if row["kind"] == "private" else row["name"],
+        out.append({"library": permissions.PRIVATE_LABEL if row["kind"] == "private" else row["name"],
                     "folder": None if reach.root_write else "some folders", "why": "allowed by an admin"})
     return out
 
@@ -392,7 +392,7 @@ def new_file_place(conn: sqlite3.Connection, user_id: int, collection_id: int | 
         raise EditConflict(str(exc)) from None
     collection_id = permissions.private_collection_id(conn, user_id)
     if folder_id is None or collection_id is None:
-        raise EditError("You have no inbox, so there's no Agents folder to put it in.")
+        raise EditError("You have no File box, so there's no Agents folder to put it in.")
     return collection_id, folder_id
 
 

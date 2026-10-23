@@ -118,7 +118,8 @@ def locations(user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)
     out = []
     for c in permissions.readable_collections(conn, user["id"]):
         editable = c["id"] in access.writable
-        out.append({"id": c["id"], "kind": c["kind"], "name": "My files" if c["kind"] == "private" else c["name"],
+        out.append({"id": c["id"], "kind": c["kind"],
+                    "name": permissions.PRIVATE_LABEL if c["kind"] == "private" else c["name"],
                     "writable": access.can_write(c["id"], None), "editable": editable,
                     "trash": fs.trash_count(conn, c["id"]) if editable else None})
     return {"locations": out}
@@ -180,7 +181,7 @@ def _can_reembed(request: Request, conn: sqlite3.Connection, user, collection_id
 
 def _where(conn: sqlite3.Connection, collection_id: int, folder_id: int | None) -> str:
     coll = conn.execute("SELECT kind, name FROM collections WHERE id = ?", (collection_id,)).fetchone()
-    parts = ["My files" if coll and coll["kind"] == "private" else (coll["name"] if coll else "?")]
+    parts = [permissions.PRIVATE_LABEL if coll and coll["kind"] == "private" else (coll["name"] if coll else "?")]
     return " / ".join(parts + [p["name"] for p in fs.folder_path(conn, folder_id)])
 
 

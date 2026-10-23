@@ -165,6 +165,13 @@ def test_files_still_being_written_wait(conn, settings, root):
     assert share.sync(conn, settings).added == 1
 
 
+def test_files_dated_in_the_future_are_not_left_waiting(conn, settings, root):
+    # Copied with timestamps from a machine whose clock is hours ahead: finished files, not ones being written.
+    settings.share_settle_seconds = 3600
+    _write(root / "Oracle" / "memo.docx.txt", "policy", age=-6 * 3600)
+    assert share.sync(conn, settings).added == 1
+
+
 def test_nothing_happens_when_the_share_is_not_mounted(conn, settings, root):
     _write(root / "Oracle" / "audit.txt")
     share.sync(conn, settings)

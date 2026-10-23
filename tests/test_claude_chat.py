@@ -100,7 +100,7 @@ def test_only_the_claude_group_with_a_key_gets_claude(client, claude, conn, sett
     assert client.put("/api/me/claude", json={"key": KEY}).status_code == 403
     events = _ask(client, "How do I run the night audit?")
     route = next(e for e in events if e["type"] == "route")
-    assert route["claude"] and route["fallback"] == "Claude isn't turned on for you"
+    assert route["claude"] and route["fallback"] == "the external API isn't turned on for you"
     assert _final(events)["route"] == "search" and claude.calls == []
 
     client.post("/logout")
@@ -108,7 +108,7 @@ def test_only_the_claude_group_with_a_key_gets_claude(client, claude, conn, sett
     page = client.get("/").text
     assert 'id="use-claude"' not in page and 'href="/settings#claude-key"' in page   # no key yet
     events = _ask(client, "How do I run the night audit?")
-    assert next(e for e in events if e["type"] == "route")["fallback"].startswith("add your Claude API key")
+    assert next(e for e in events if e["type"] == "route")["fallback"].startswith("add your API key")
     assert claude.calls == []
 
     _with_key(conn, settings, world)
@@ -162,15 +162,26 @@ def test_claude_reads_only_what_is_shared_with_claude(client, claude, conn, sett
     _final(_ask(client, "How do I run the night audit?"))
     messages, offered, _ = claude.calls[0]
     assert last_tool(claude.calls[1][0]).get("results", []) == []                      # inbox not shared
-    assert "create_file" in offered and "ask_erynne" in offered
+    assert "create_file" in offered and "ask_helper" in offered
     assert "view_page" not in offered and not {"search_mail", "calendar", "recent_mail"} & set(offered)
-    assert messages[0]["content"].startswith("You are Claude, answering in Erynne")
+    assert messages[0]["content"].startswith("You are Erynne") and "Claude" not in messages[0]["content"]
 
     _inbox_for_claude(conn, world, True)
     claude.turns(call("search_documents", query="night audit"),
                  lambda m: ToolTurn(f"After midnight {last_tool(m)['results'][0]['cite']}."))
     final = _final(_ask(client, "How do I run the night audit?"))
     assert final["answer"] == "After midnight [1]." and final["citations"] == [1]
+
+
+def test_tool_errors_dont_name_claude(client, claude, conn, settings, world):
+    _with_key(conn, settings, world)
+    _login(client, "alice")
+    _inbox_for_claude(conn, world, False)
+    claude.turns(call("read_passage", chunk_id=1), ToolTurn("Not found."))
+    events = _ask(client, "Read it")
+    failed = [e for e in events if e["type"] == "tool" and e["state"] == "failed"]
+    assert failed and "can't be reached this way" in failed[0]["summary"]
+    assert "Claude" not in json.dumps(events) and "Claude" not in claude.calls[1][0][-1]["content"]
 
 
 def test_earlier_answers_and_memories_go_to_claude_only_if_claude_wrote_them(client, claude, conn, settings, world):
@@ -192,7 +203,7 @@ def test_earlier_answers_and_memories_go_to_claude_only_if_claude_wrote_them(cli
 def test_claude_hands_reading_to_two_erynne_subagents_at_a_time(client, claude, local, conn, settings, world):
     _with_key(conn, settings, world)
     _login(client, "alice")
-    tasks = [ToolCall(f"t{n}", "ask_erynne", {"task": f"Find part {n} of the night audit"}) for n in range(3)]
+    tasks = [ToolCall(f"t{n}", "ask_helper", {"task": f"Find part {n} of the night audit"}) for n in range(3)]
     claude.turns(ToolTurn("", tasks), lambda m: ToolTurn("Done: " + " / ".join(
         json.loads(x["content"])["report"] for x in m if x["role"] == "tool")))
     events = _ask(client, "Summarise the night audit")
@@ -203,9 +214,10 @@ def test_claude_hands_reading_to_two_erynne_subagents_at_a_time(client, claude, 
     assert final["citations"] == [1] and final["sources"][0]["file"] == "OPERA.pdf"
     # Subagents: read-only tools, Claude's limits, their steps shown under the answer.
     offered = local.calls[0][1]
-    assert "search_documents" in offered and not {"create_file", "edit_text", "ask_erynne", "view_page"} & set(offered)
+    assert "search_documents" in offered and not {"create_file", "edit_text", "ask_helper", "view_page"} & set(offered)
     sub_steps = [e for e in events if e["type"] == "tool" and "/" in e["id"]]
-    assert sub_steps and all(e.get("label", e.get("summary", "")).startswith("Erynne: ") for e in sub_steps)
+    assert sub_steps and {e.get("label") for e in sub_steps} == {"Searching your documents", None}
+    assert "Claude" not in json.dumps(events)                     # the person never sees Claude's name
 
     _inbox_for_claude(conn, world, False)
     claude.turns(ToolTurn("", tasks[:1]), lambda m: ToolTurn(json.loads(m[-1]["content"])["report"]))
@@ -219,7 +231,7 @@ def test_no_subagents_when_erynnes_model_is_down(client, claude, local, conn, se
     claude.turns(ToolTurn("Fine."))
     _final(_ask(client, "Hello"))
     messages, offered, _ = claude.calls[0]
-    assert "ask_erynne" not in offered and "do the reading yourself" in messages[0]["content"]
+    assert "ask_helper" not in offered and "do the reading yourself" in messages[0]["content"]
 
 
 def test_claudes_edits_are_proposals_the_person_applies(client, claude, conn, settings, world):

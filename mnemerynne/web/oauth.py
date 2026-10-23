@@ -90,7 +90,7 @@ def authorize(request: Request, conn: sqlite3.Connection = Depends(get_db)):
                                         "redirect_uri": redirect_uri, "challenge": params["code_challenge"],
                                         "state": params.get("state")}
     shared = permissions.claude_collection_ids(conn, user["id"])
-    places = [("My inbox" if c["kind"] == "private" else c["name"])
+    places = [("📥 " + permissions.PRIVATE_LABEL if c["kind"] == "private" else "📚 " + c["name"])
               for c in permissions.readable_collections(conn, user["id"]) if c["id"] in shared]
     return _page(request, "oauth_consent.html", user=user, nonce=nonce, places=places,
                  app=oauth.who(json.loads(row["redirect_uris"])), name=row["name"],

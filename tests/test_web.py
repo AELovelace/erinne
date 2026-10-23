@@ -32,7 +32,7 @@ def test_login_and_inbox(client, conn):
     assert page.status_code == 200 and "files.js" in page.text
     locations = client.get("/api/locations").json()["locations"]
     assert [(l["kind"], l["name"], l["writable"]) for l in locations] == [
-        ("private", "My files", True), ("library", "BrandResBW", False)]
+        ("private", "File box", True), ("library", "BrandResBW", False)]
     assert [c["kind"] for c in client.get("/api/me").json()["collections"]] == ["private", "library"]
 
 
