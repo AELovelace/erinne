@@ -501,6 +501,7 @@ button.danger-fill { background: var(--error); }
 @media (prefers-color-scheme: dark) { .doc :target { background: rgba(240, 138, 162, .18); box-shadow: none; } }
 
 /* ------------------------------------------------------- falling petals */
+.parallax { display: none; }   /* the neon theme's city backdrop (theme-neon.css, parallax.js) */
 .petals { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 0; }
 .petals span {
   position: absolute; top: -2rem; width: 14px; height: 11px;

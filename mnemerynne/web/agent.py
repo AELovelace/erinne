@@ -8,12 +8,13 @@ import sqlite3
 
 import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from mnemerynne import accounts, agent as agent_mod, claude_chat, editing, group_refs, proposals
 from mnemerynne.db import transaction
 from mnemerynne.web.admin import _log
-from mnemerynne.web.deps import admin_user, api_user, get_db
+from mnemerynne.web.deps import admin_user, api_user, get_db, is_admin, page_user
 
 router = APIRouter()
 
@@ -32,14 +33,34 @@ def _refused(exc: Exception) -> HTTPException:
 
 # ---------------------------------------------------------------- proposals
 @router.post("/api/agent/proposals/{proposal_id}/apply")
-def apply_proposal(proposal_id: int, request: Request, user=Depends(_agent_user),
+def apply_proposal(proposal_id: int, request: Request, user=Depends(api_user),
                    conn: sqlite3.Connection = Depends(get_db)):
+    """File changes and mail drafts: still in the agent or Claude group. API actions check
+    instead that the person may still use the operation (they can come from Claude's connector)."""
     from mnemerynne import m365
 
     try:
-        return proposals.apply(conn, request.app.state.settings, user, proposal_id)
+        if proposals.get(conn, proposal_id, user["id"])["kind"] != "api":
+            _agent_user(request, user, conn)
+        return proposals.apply(conn, request.app.state.settings, user, proposal_id, request.app.state.directory)
     except (editing.EditError, proposals.ProposalError, m365.M365Error) as exc:
         raise _refused(exc) from None
+
+
+@router.get("/proposals", response_class=HTMLResponse)
+def proposals_page(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Where Claude's connector sends people to apply what it proposed (chat shows them under answers)."""
+    return request.app.state.templates.TemplateResponse(request, "proposals.html", {
+        "user": user, "is_admin": is_admin(request, conn, user), "active": "proposals"})
+
+
+@router.get("/api/agent/proposals")
+def list_proposals(user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+    """The person's pending proposals, then the last few decided ones."""
+    rows = conn.execute("SELECT * FROM agent_proposals WHERE user_id = ? AND (status = 'pending' OR "
+                        "decided_at > datetime('now', '-7 days')) ORDER BY status <> 'pending', id DESC LIMIT 50",
+                        (user["id"],)).fetchall()
+    return {"proposals": [proposals.view(conn, r) for r in rows]}
 
 
 @router.post("/api/agent/proposals/{proposal_id}/dismiss")

@@ -1,6 +1,6 @@
-{#- The person's theme (Settings); signed out, the one this browser last used. -#}
+{#- The person's theme (Settings); signed out, the one this browser last used, else neon. -#}
 {%- set theme = (user.theme if user is defined and user else request.cookies.get('erynne_theme')) -%}
-{%- if theme not in ('sakura', 'neon') %}{% set theme = 'sakura' %}{% endif -%}
+{%- if theme not in ('sakura', 'neon') %}{% set theme = 'neon' %}{% endif -%}
 <!doctype html>
 <html lang="en" data-theme="{{ theme }}">
 <head>
@@ -13,7 +13,9 @@
   <link rel="stylesheet" href="{{ static('theme-neon.css') }}">
 </head>
 <body>
+  <div class="parallax" aria-hidden="true"></div>
   <div class="petals" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div>
   {% block body %}{% endblock %}
+  <script src="{{ static('parallax.js') }}" defer></script>
 </body>
 </html>

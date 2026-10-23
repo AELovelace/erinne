@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Changes to apply · {{ assistant_name }}{% endblock %}
+{% block body %}
+{% include "_nav.html" %}
+<main class="inbox">
+  <h1>Changes waiting for you</h1>
+  <p class="muted">What {{ assistant_name }} or Claude proposed for you to check: closing a ticket, resolving an alert,
+    a change to a file. Nothing happens until you press Run it or Apply.</p>
+  <div id="proposals" aria-live="polite"><p class="muted">Loading…</p></div>
+</main>
+<script src="{{ static('agent.js') }}"></script>
+<script>
+(function () {
+  "use strict";
+  const box = document.getElementById("proposals");
+  fetch("/api/agent/proposals").then(function (r) { return r.json(); }).then(function (data) {
+    box.replaceChildren();
+    if (!data.proposals.length) {
+      const p = document.createElement("p");
+      p.className = "muted";
+      p.textContent = "Nothing waiting.";
+      box.appendChild(p);
+      return;
+    }
+    data.proposals.forEach(function (p) {
+      const card = window.ErynneAgent.proposal(p);
+      card.id = "p" + p.id;
+      box.appendChild(card);
+    });
+    const wanted = location.hash && document.getElementById(location.hash.slice(1));
+    if (wanted) { wanted.classList.add("wanted"); wanted.scrollIntoView({ block: "center" }); }
+  }).catch(function () { box.textContent = "Couldn't load your changes; reload the page."; });
+})();
+</script>
+{% endblock %}

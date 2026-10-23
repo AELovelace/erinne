@@ -43,7 +43,7 @@ def _op_json(r: sqlite3.Row) -> dict:
     return {"id": r["id"], "name": r["name"], "description": r["description"], "method": r["method"],
             "path": r["path"], "params": apis.param_specs(r), "body": r["body"],
             "example_questions": r["example_questions"], "cache_seconds": r["cache_seconds"],
-            "enabled": bool(r["enabled"])}
+            "enabled": bool(r["enabled"]), "action": bool(r["action"])}
 
 
 def _check_url(url: str) -> str:
@@ -162,13 +162,14 @@ def _preset_operations(conn: sqlite3.Connection, api_id: int, operations: list[d
         if op["name"].lower() in have:
             continue
         params = op.get("params", [])
-        apis.check_specs(op["path"], params, op.get("method", "GET"), op.get("body", ""))
+        action = bool(op.get("action", False))
+        apis.check_specs(op["path"], params, op.get("method", "GET"), op.get("body", ""), action)
         op_ids.append(conn.execute(
             "INSERT INTO api_operations(api_id, name, description, example_questions, method, path, params, "
-            "body, cache_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "body, cache_seconds, action) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (api_id, op["name"], op.get("description", ""), op.get("example_questions", ""),
              op.get("method", "GET"), op["path"], json.dumps(params), op.get("body", ""),
-             op.get("cache_seconds", 60))).lastrowid)
+             0 if action else op.get("cache_seconds", 60), int(action))).lastrowid)
     return op_ids
 
 
@@ -336,29 +337,32 @@ class Operation(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
     description: str = Field("", max_length=2000)
     example_questions: str = Field("", max_length=4000)
-    method: Literal["GET", "POST"] = "GET"
+    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"] = "GET"
     path: str = Field(..., min_length=1, max_length=500)
     params: list[dict] = Field(default_factory=list, max_length=30)
     body: str = Field("", max_length=20000)
     cache_seconds: int = Field(60, ge=0, le=86400)
     enabled: bool = True
+    action: bool = False    # changes data: proposed by Erynne or Claude, run only when the person applies it
 
 
 def _save_op(conn, api_id: int, op_id: int | None, body: Operation) -> int:
     try:
-        apis.check_specs(body.path, body.params, body.method, body.body)
+        apis.check_specs(body.path, body.params, body.method, body.body, body.action)
     except apis.ApiError as exc:
         raise _refuse(exc) from None
     values = (body.name.strip(), body.description, body.example_questions, body.method, body.path,
-              json.dumps(body.params), body.body if body.method == "POST" else "", body.cache_seconds,
-              int(body.enabled))
+              json.dumps(body.params), body.body if body.method in apis.BODY_METHODS else "",
+              0 if body.action else body.cache_seconds, int(body.enabled), int(body.action))
     try:
         if op_id is None:
             return conn.execute(
                 "INSERT INTO api_operations(name, description, example_questions, method, path, params, body, "
-                "cache_seconds, enabled, api_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (*values, api_id)).lastrowid
+                "cache_seconds, enabled, action, api_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (*values, api_id)).lastrowid
         conn.execute("UPDATE api_operations SET name = ?, description = ?, example_questions = ?, method = ?, "
-                     "path = ?, params = ?, body = ?, cache_seconds = ?, enabled = ? WHERE id = ?", (*values, op_id))
+                     "path = ?, params = ?, body = ?, cache_seconds = ?, enabled = ?, action = ? WHERE id = ?",
+                     (*values, op_id))
         return op_id
     except sqlite3.IntegrityError:
         raise HTTPException(status.HTTP_409_CONFLICT, f"There is already an operation called “{body.name}”.") from None
@@ -398,13 +402,16 @@ def delete_operation(op_id: int, user=Depends(admin_user), conn: sqlite3.Connect
 
 class TestCall(BaseModel):
     params: dict = Field(default_factory=dict)
+    really_change: bool = False   # an action's test really does it: the page asks first
 
 
 @router.post("/operations/{op_id}/test")
 async def test_operation(op_id: int, body: TestCall, request: Request, user=Depends(admin_user),
                          conn: sqlite3.Connection = Depends(get_db)):
     """Call it now (never from the cache) and show the response and its fields."""
-    _op(conn, op_id)
+    op = _op(conn, op_id)
+    if op["action"] and not body.really_change:
+        raise _refuse(ValueError(f"“{op['name']}” changes data in {op['api_name']}: testing it really does it."))
     settings = request.app.state.settings
     try:
         result = await anyio.to_thread.run_sync(

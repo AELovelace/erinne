@@ -33,8 +33,8 @@ from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
-from mnemerynne import (api_tokens, apis, db, editing, editing_formats, fs, permissions, proposals, retrieval,
-                        sharepoint)
+from mnemerynne import (api_tokens, apis, claude_links, db, editing, editing_formats, fs, permissions, proposals,
+                        retrieval, sharepoint)
 from mnemerynne.api_tokens import Caller
 from mnemerynne.config import Settings
 from mnemerynne.ingest import store
@@ -59,7 +59,11 @@ Use these tools whenever a question could be answered from those documents.
   screenshot, when its text looks garbled (scanned pages), or when the person asks to see the page.
 - Use list_libraries, browse_folder and find_files to see what exists or to narrow a search.
 - The `link`s are for the person to open in their browser, where they are signed in to Mnemerynne.
-  Don't fetch them yourself: they need that login. Use these tools to read documents instead.
+  Don't fetch them yourself: they need that login. Cite with `link`.
+- Results that point at a file may also carry `fetch`: a private address for you, not the person, that
+  your web fetch tool can open to read that file's text (from the cited page on, with a "more" address
+  for the rest). It expires after a while; if it no longer works, search again for a fresh one. Never
+  show a `fetch` address to the person or cite it. The tools above stay the first way to read.
 
 Editing files (.txt, .md, .docx, .xlsx):
 - Always open_file first and pass its `version` to the edit tool. If an edit is refused because the file
@@ -69,10 +73,13 @@ Editing files (.txt, .md, .docx, .xlsx):
   you may edit). Every change keeps the previous version, which the person can restore from Files.
 - You can't delete, move or rename files; tell the person to do that in Mnemerynne if it's needed.
 
-Internal APIs (live, read-only):
+Internal APIs (live):
 - list_apis shows the internal systems you may query for this person (night-audit health, hotel stats,
   IT tickets and so on); query_api calls one. Cite answers with the result's `citation` and `link`, and
-  say the figures are live as of its time. Don't guess values the response doesn't contain."""
+  say the figures are live as of its time. Don't guess values the response doesn't contain.
+- Operations marked changes_data (closing a ticket, resolving an alert) only go through
+  propose_api_action: it returns an `approve` link for the person, who applies it in Mnemerynne. Check
+  the current state with query_api first, and never say the change is made."""
 
 _READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True,
                              open_world_hint=False)
@@ -281,6 +288,7 @@ class Tools:
             entry = out.setdefault(op["api_name"], {"api": op["api_name"], "operations": []})
             entry["operations"].append({
                 "operation": op["name"], "description": op["description"],
+                **({"changes_data": True} if op["action"] else {}),
                 "parameters": [{k: v for k, v in s.items() if k in ("name", "type", "required", "options",
                                                                     "min", "max", "default", "help")}
                                for s in apis.param_specs(op)]})
@@ -294,6 +302,9 @@ class Tools:
         try:
             op = apis.operation_for(conn, self._user(conn, caller), self.get_directory(), api, operation,
                                     for_claude=self.claude)
+            if op["action"]:
+                raise ToolError(f"“{operation}” changes data in {api}: use propose_api_action, and the person "
+                                "applies it.")
             result = apis.call(conn, self.settings, op["id"], params, user_id=caller.user_id,
                                via="claude" if self.claude else "chat")
         except apis.ApiError as exc:
@@ -306,6 +317,24 @@ class Tools:
                 "link": f"{self.base}/apis/calls/{result.call_id}", "call_id": result.call_id,
                 "data": apis.digest(result.data, 40_000)}, []
 
+    def propose_api_action(self, conn, caller: Caller, api: str, operation: str,
+                           params: dict | None = None) -> tuple[dict, list[int]]:
+        """An operation that changes data becomes a proposal the person applies (proposals.propose_api)."""
+        try:
+            op = apis.operation_for(conn, self._user(conn, caller), self.get_directory(), api, operation,
+                                    for_claude=self.claude)
+            if not op["action"]:
+                raise ToolError(f"“{operation}” only reads; use query_api.")
+            proposal = proposals.propose_api(conn, caller, op, params)
+        except apis.ApiError as exc:
+            raise ToolError(f"{exc} Use list_apis to see the operations and their parameters.") from None
+        out = {"proposal": proposal, "api": op["api_name"], "operation": op["name"], "status": "proposed"}
+        if self.propose:
+            return {**out, "note": _PROPOSED}, []
+        return {**out, "approve": f"{self.base}/proposals#p{proposal}",
+                "note": "Nothing has changed yet. Give the person the approve link: they check it and apply it "
+                        "in Mnemerynne themselves. Don't say it's done."}, []
+
     def list_libraries(self, conn, caller: Caller) -> tuple[dict, list[int]]:
         access = self._access(conn, caller)
         out = []
@@ -313,7 +342,8 @@ class Tools:
                                key=lambda kv: (kv[1]["kind"] != "private", _label(kv[1]).lower())):
             counts = conn.execute("SELECT count(*) AS files, coalesce(sum(status = 'ready'), 0) AS searchable "
                                   "FROM files WHERE collection_id = ? AND deleted_at IS NULL", (cid,)).fetchone()
-            out.append({"library": _label(row), "id": cid, "kind": "file box" if row["kind"] == "private" else "library",
+            out.append({"library": _label(row), "id": cid,
+                        "kind": "file box" if row["kind"] == "private" else "library",
                         "files": counts["files"], "searchable_files": counts["searchable"]})
         edit = ([f"{p['library']}" + (f" / {p['folder']}" if p["folder"] else "") for p in
                  editing.editable_places(conn, caller.user_id, self.mode)] if caller.can_edit else [])
@@ -510,7 +540,7 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
                 except (editing.EditError, fs.FsError) as exc:
                     raise ToolError(str(exc)) from None
                 ok = True
-                return out
+                return claude_links.attach(conn, tools.base, caller, out)
             finally:
                 conn.execute("INSERT INTO mcp_calls(user_id, token_id, grant_id, tool, args, file_ids, ok, ms) "
                              "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -541,7 +571,8 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
     @server.tool(annotations=_READ_ONLY)
     async def list_apis(ctx: Context) -> dict:
         """List the internal systems (APIs) you may query live for this person, with their operations
-        and parameters. Read-only: nothing can be changed through them."""
+        and parameters. Operations marked changes_data are proposed with propose_api_action, never run
+        by you: the person applies them."""
         return await call(ctx, "list_apis", {}, tools.list_apis)
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True,
@@ -552,6 +583,14 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
         Returns live data with a `citation` and `link` to cite."""
         return await call(ctx, "query_api", {"api": api, "operation": operation, "params": params or {}},
                           tools.query_api)
+
+    @server.tool(annotations=_EDITS)
+    async def propose_api_action(ctx: Context, api: str, operation: str, params: dict | None = None) -> dict:
+        """Propose an operation from list_apis marked changes_data (e.g. close a ticket, resolve an alert),
+        with its params. Nothing happens yet: you get an `approve` link to give the person, who checks
+        it and applies it in Mnemerynne. Never say the change is made."""
+        return await call(ctx, "propose_api_action", {"api": api, "operation": operation, "params": params or {}},
+                          tools.propose_api_action)
 
     @server.tool(annotations=_READ_ONLY)
     async def list_libraries(ctx: Context) -> dict:

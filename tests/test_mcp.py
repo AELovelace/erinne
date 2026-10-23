@@ -170,7 +170,7 @@ def test_mcp_endpoint_end_to_end(mcp_client, conn, world):
     assert init.json()["result"]["serverInfo"]["name"] == "mnemerynne"
 
     listed = _rpc(mcp_client, token, "tools/list").json()["result"]["tools"]
-    edits = {"edit_text", "edit_document", "edit_spreadsheet", "create_file"}
+    edits = {"edit_text", "edit_document", "edit_spreadsheet", "create_file", "propose_api_action"}
     assert {t["name"] for t in listed} == {"search_documents", "read_passage", "list_libraries", "browse_folder",
                                            "find_files", "view_page", "open_file", "list_versions",
                                            "list_apis", "query_api"} | edits

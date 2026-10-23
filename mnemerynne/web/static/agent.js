@@ -59,7 +59,8 @@
     card.replaceChildren();
     card.dataset.status = p.status;
     const head = el("div", "proposal-head");
-    const what = { create: "📄 New file ", edit: "📝 Change to ", mail: "✉️ Email draft: " }[p.kind] || "";
+    const what = { create: "📄 New file ", edit: "📝 Change to ", mail: "✉️ Email draft: ",
+                   api: "⚙️ Change in " }[p.kind] || "";
     head.append(document.createTextNode(what), el("strong", null, p.file), el("span", "muted small", " · " + p.where));
     card.appendChild(head);
     if (p.changes && p.changes.length && !(p.kind === "create" && p.diff)) {
@@ -70,9 +71,10 @@
     }
     if (p.diff) card.appendChild(diffView(p.diff));
     if (p.kind === "mail") card.appendChild(el("pre", "diff mail-body", p.body || ""));
+    if (p.kind === "api" && p.body) card.appendChild(el("p", "muted small", p.body));
     const foot = el("div", "proposal-actions");
     if (p.status === "pending") {
-      const apply = el("button", "small", p.kind === "mail" ? "Save to Drafts" : "Apply");
+      const apply = el("button", "small", { mail: "Save to Drafts", api: "Run it" }[p.kind] || "Apply");
       apply.type = "button";
       const dismiss = el("button", "link small", "Dismiss");
       dismiss.type = "button";
@@ -81,11 +83,12 @@
       dismiss.addEventListener("click", function () { decide(card, p, "dismiss", [apply, dismiss], msg); });
       foot.append(apply, dismiss, msg);
     } else {
-      const said = p.kind === "mail" && p.status === "applied" ? STATUS.saved : STATUS[p.status] || p.status;
+      const said = p.status === "applied" && p.kind === "mail" ? STATUS.saved
+                 : p.status === "applied" && p.kind === "api" ? "✓ Done." : STATUS[p.status] || p.status;
       foot.appendChild(el("span", "small " + (p.status === "stale" ? "error" : "muted"), said));
     }
     if (p.url && p.status !== "dismissed") {
-      const a = el("a", "small", p.kind === "mail" ? "Open in Outlook" : "Open folder");
+      const a = el("a", "small", { mail: "Open in Outlook", api: "See what it answered" }[p.kind] || "Open folder");
       a.href = p.url; a.target = "_blank"; a.rel = "noopener";
       foot.appendChild(a);
     }
@@ -94,7 +97,7 @@
 
   async function decide(card, p, action, buttons, msg) {
     buttons.forEach(function (b) { b.disabled = true; });
-    msg.textContent = action === "apply" ? (p.kind === "mail" ? "Saving…" : "Applying…") : "";
+    msg.textContent = action === "apply" ? ({ mail: "Saving…", api: "Running…" }[p.kind] || "Applying…") : "";
     msg.className = "small muted";
     try {
       const r = await fetch("/api/agent/proposals/" + p.id + "/" + action, { method: "POST" });

@@ -9,6 +9,10 @@ whose file changed in the meantime turns 'stale': Erynne has to redo it.
 
 The proposed bytes live under <data_dir>/proposals until it is decided;
 worker.py drops decided and old ones.
+
+API actions (kind 'api', apis.py) wait the same way: closing a ticket or
+resolving an alert is only called when the person applies it, after checking
+again that they may use that operation, and the call is linked from the card.
 """
 
 from __future__ import annotations
@@ -106,6 +110,21 @@ def propose_mail(conn: sqlite3.Connection, caller, payload: dict) -> int:
     ).lastrowid
 
 
+def propose_api(conn: sqlite3.Connection, caller, op: sqlite3.Row, params: dict | None) -> int:
+    """An API action (apis.py: op["action"]) the person applies; its parameters are checked now, so a
+    card never offers what can't run."""
+    from mnemerynne import apis
+
+    checked = apis.validate_params(apis.param_specs(op), params)
+    changes = [f"{name}: {value}" for name, value in checked.items()]
+    return conn.execute(
+        "INSERT INTO agent_proposals(user_id, conversation_id, kind, name, changes, diff, payload) "
+        "VALUES (?, ?, 'api', ?, ?, ?, ?)",
+        (caller.user_id, getattr(caller, "conversation_id", None), f"{op['api_name']} · {op['name']}",
+         json.dumps(changes), op["description"] or "", json.dumps({"operation_id": op["id"], "params": checked}))
+    ).lastrowid
+
+
 def where(conn: sqlite3.Connection, collection_id: int, folder_id: int | None) -> str:
     coll = conn.execute("SELECT kind, name FROM collections WHERE id = ?", (collection_id,)).fetchone()
     path = "/".join(p["name"] for p in fs.folder_path(conn, folder_id))
@@ -115,6 +134,11 @@ def where(conn: sqlite3.Connection, collection_id: int, folder_id: int | None) -
 
 def view(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
     """What the chat card shows."""
+    if row["kind"] == "api":
+        api = row["name"].split(" · ")[0]
+        return {"id": row["id"], "kind": "api", "file": row["name"], "file_id": None, "where": api,
+                "changes": json.loads(row["changes"]), "diff": "", "body": row["diff"],
+                "status": row["status"], "url": row["result_url"]}
     if row["kind"] == "mail":
         payload = json.loads(row["payload"] or "{}")
         account = conn.execute("SELECT t.label, i.upn FROM m365_identities i JOIN m365_tenants t ON t.id = i.tenant_row "
@@ -160,12 +184,16 @@ def _decide(conn: sqlite3.Connection, proposal_id: int, status: str, result_file
                  "result_file_id = COALESCE(?, result_file_id) WHERE id = ?", (status, result_file_id, proposal_id))
 
 
-def apply(conn: sqlite3.Connection, settings: Settings, user: sqlite3.Row, proposal_id: int) -> dict:
-    """Save a pending proposal as the person (every check made again). The
-    caller has checked the person is still in the agent group."""
+def apply(conn: sqlite3.Connection, settings: Settings, user: sqlite3.Row, proposal_id: int,
+          directory=None) -> dict:
+    """Save a pending proposal as the person (every check made again). For files and mail the
+    caller has checked the person is still in the agent (or Claude) group; an API action checks
+    here that they may still use its operation (directory: their groups)."""
     row = get(conn, proposal_id, user["id"])
     if row["status"] != "pending":
         raise ProposalError(f"This change was already {row['status']}.")
+    if row["kind"] == "api":
+        return _apply_api(conn, settings, user, row, directory)
     if row["kind"] == "mail":
         from mnemerynne import m365_mail
 
@@ -199,6 +227,27 @@ def apply(conn: sqlite3.Connection, settings: Settings, user: sqlite3.Row, propo
         _decide(conn, proposal_id, "applied", file_id)
     path.unlink(missing_ok=True)
     return view(conn, get(conn, proposal_id, user["id"]))
+
+
+def _apply_api(conn: sqlite3.Connection, settings: Settings, user: sqlite3.Row, row: sqlite3.Row,
+               directory) -> dict:
+    from mnemerynne import apis
+
+    payload = json.loads(row["payload"] or "{}")
+    person = conn.execute("SELECT id, ad_account FROM users WHERE id = ?", (user["id"],)).fetchone()
+    if payload.get("operation_id") not in {o["id"] for o in apis.allowed_operations(conn, person, directory)}:
+        raise ProposalError("You can't use that operation any more (it was removed, turned off, or you left "
+                            "its group), so nothing was changed.")
+    try:
+        result = apis.call(conn, settings, payload["operation_id"], payload.get("params"), user_id=user["id"],
+                           via="apply")
+    except apis.ApiError as exc:
+        raise ProposalError(f"Nothing was changed: {exc}") from None
+    if not result.ok:
+        raise ProposalError(f"{result.api_name} refused it, so nothing was changed: {result.error}.")
+    conn.execute("UPDATE agent_proposals SET status = 'applied', decided_at = datetime('now'), result_url = ? "
+                 "WHERE id = ?", (f"/apis/calls/{result.call_id}", row["id"]))
+    return view(conn, get(conn, row["id"], user["id"]))
 
 
 def _changed(conn: sqlite3.Connection, settings: Settings, row: sqlite3.Row) -> bool:

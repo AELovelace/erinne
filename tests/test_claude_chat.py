@@ -162,7 +162,7 @@ def test_claude_reads_only_what_is_shared_with_claude(client, claude, conn, sett
     _final(_ask(client, "How do I run the night audit?"))
     messages, offered, _ = claude.calls[0]
     assert last_tool(claude.calls[1][0]).get("results", []) == []                      # inbox not shared
-    assert "create_file" in offered and "ask_helper" in offered
+    assert "create_file" in offered and "ask_minerynne" in offered
     assert "view_page" not in offered and not {"search_mail", "calendar", "recent_mail"} & set(offered)
     assert messages[0]["content"].startswith("You are Erynne") and "Claude" not in messages[0]["content"]
 
@@ -203,7 +203,7 @@ def test_earlier_answers_and_memories_go_to_claude_only_if_claude_wrote_them(cli
 def test_claude_hands_reading_to_two_erynne_subagents_at_a_time(client, claude, local, conn, settings, world):
     _with_key(conn, settings, world)
     _login(client, "alice")
-    tasks = [ToolCall(f"t{n}", "ask_helper", {"task": f"Find part {n} of the night audit"}) for n in range(3)]
+    tasks = [ToolCall(f"t{n}", "ask_minerynne", {"task": f"Find part {n} of the night audit"}) for n in range(3)]
     claude.turns(ToolTurn("", tasks), lambda m: ToolTurn("Done: " + " / ".join(
         json.loads(x["content"])["report"] for x in m if x["role"] == "tool")))
     events = _ask(client, "Summarise the night audit")
@@ -214,9 +214,15 @@ def test_claude_hands_reading_to_two_erynne_subagents_at_a_time(client, claude, 
     assert final["citations"] == [1] and final["sources"][0]["file"] == "OPERA.pdf"
     # Subagents: read-only tools, Claude's limits, their steps shown under the answer.
     offered = local.calls[0][1]
-    assert "search_documents" in offered and not {"create_file", "edit_text", "ask_helper", "view_page"} & set(offered)
+    assert "search_documents" in offered and not {"create_file", "edit_text", "ask_minerynne", "view_page"} & set(offered)
     sub_steps = [e for e in events if e["type"] == "tool" and "/" in e["id"]]
-    assert sub_steps and {e.get("label") for e in sub_steps} == {"Searching your documents", None}
+    assert {e["label"] for e in sub_steps if e["state"] == "running"} == {
+        f"MinErynne {n}: Searching your documents" for n in (1, 2, 3)}
+    assert {e["summary"].split(":")[0] for e in sub_steps if e["state"] == "done"} == {
+        "MinErynne 1", "MinErynne 2", "MinErynne 3"}
+    sent = [e for e in events if e["type"] == "tool" and e["name"] == "ask_minerynne"]
+    assert [e["label"] for e in sent if e["state"] == "running"] == [f"Sending MinErynne {n} to read" for n in (1, 2, 3)]
+    assert {e["summary"] for e in sent if e["state"] == "done"} == {f"MinErynne {n}: Reported back" for n in (1, 2, 3)}
     assert "Claude" not in json.dumps(events)                     # the person never sees Claude's name
 
     _inbox_for_claude(conn, world, False)
@@ -231,7 +237,7 @@ def test_no_subagents_when_erynnes_model_is_down(client, claude, local, conn, se
     claude.turns(ToolTurn("Fine."))
     _final(_ask(client, "Hello"))
     messages, offered, _ = claude.calls[0]
-    assert "ask_helper" not in offered and "do the reading yourself" in messages[0]["content"]
+    assert "ask_minerynne" not in offered and "do the reading yourself" in messages[0]["content"]
 
 
 def test_claudes_edits_are_proposals_the_person_applies(client, claude, conn, settings, world):

@@ -1124,7 +1124,7 @@
     box.appendChild(el("p", "muted", "Members of this " + (data.domain || "domain") + " group may tick Use External API " +
       "in chat: Claude answers with Erynne's tools, using each person's own Anthropic API key (saved on their " +
       "Settings page, billed to them). Claude reads only what's shared with Claude, can hand reading to up to two " +
-      "Erynne subagents with the same limits, and never sees mail, calendar or memories. Leave it empty to turn " +
+      "MinErynnes (small local Erynnes) with the same limits, and never sees mail, calendar or memories. Leave it empty to turn " +
       "it off."));
     if (!data.enabled) box.appendChild(el("p", "error", "No AD domain is configured on the server (MNEMERYNNE_AD_DOMAIN), so nobody can be in the group."));
     if (!data.secret_key_set) box.appendChild(el("p", "error", "MNEMERYNNE_SECRET_KEY isn't set on the server, so nobody can save a key yet."));
@@ -1151,6 +1151,43 @@
           }).join(", ") + "."
         : "No one linked to a domain account is in this group yet (Accounts tab)."));
     }
+  }
+
+  function renderClaudeLinks(data) {
+    const box = $("claude-links-settings");
+    box.replaceChildren();
+    box.appendChild(el("p", "muted", "When Claude (through the connector) finds a file, it also gets a private " +
+      "address it can open itself to read that file's text, without signing in. Each address belongs to one " +
+      "person's Claude connection, works only while the file is still shared with Claude, ends when the " +
+      "connection is removed, and expires after the time below (at most " + data.limits.fetches + " reads). " +
+      "Anyone given the address could read that file's text until then, e.g. from a shared Claude chat."));
+    if (!data.public_url) box.appendChild(el("p", "error", "MNEMERYNNE_PUBLIC_URL isn't set on the server, so there's no address to hand out."));
+    const form = el("form", "ax-new");
+    const on = agentInput("checkbox", data.enabled);
+    on.setAttribute("aria-label", "Links on");
+    const minutes = agentInput("number", data.minutes);
+    minutes.min = data.limits.minutes[0];
+    minutes.max = data.limits.minutes[1];
+    minutes.setAttribute("aria-label", "Minutes each link lasts");
+    const save = el("button", "small", "Save");
+    save.type = "submit";
+    const onLabel = el("label", "check small");
+    onLabel.append(on, document.createTextNode(" On, lasting"));
+    form.append(onLabel, minutes, el("span", "small muted", "minutes"), save);
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      try {
+        renderClaudeLinks(await api("PUT", "/api/admin/settings/claude-links",
+                                    { enabled: on.checked, minutes: Number(minutes.value) }));
+      } catch (err) { showError(err.message); }
+    });
+    box.appendChild(form);
+  }
+
+  async function loadClaudeLinks() {
+    try { renderClaudeLinks(await api("GET", "/api/admin/settings/claude-links")); }
+    catch (e) { $("claude-links-settings").replaceChildren(el("p", "error", e.message)); }
   }
 
   async function loadClaude() {
@@ -1182,7 +1219,7 @@
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
     if (tab === "settings" && !updatesLoaded) {
-      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadAgent(); loadClaude();
+      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadAgent(); loadClaude(); loadClaudeLinks();
       if (window.ErynneM365) window.ErynneM365.load();   // admin_m365.js
     }
     if (tab === "accounts") loadAccounts();

@@ -62,14 +62,16 @@ def test_sign_out_other_browsers(settings, conn, alice):
 def test_pick_a_theme(settings, conn, alice):
     with TestClient(_app(settings)) as c:
         _login(c)
-        assert 'data-theme="sakura"' in c.get("/settings").text                 # the default
+        page = c.get("/settings").text
+        assert 'data-theme="neon"' in page and 'content="dark"' in page          # the default
+        assert "theme-neon.css" in page and "parallax.js" in page
         assert c.put("/api/me/theme", json={"theme": "vaporwave"}).status_code == 422
-        r = c.put("/api/me/theme", json={"theme": "neon"})
-        assert r.status_code == 200 and r.cookies.get("erynne_theme") == "neon"
-        assert users.get_user(conn, "alice")["theme"] == "neon"
-        page = c.get("/files").text
-        assert 'data-theme="neon"' in page and 'content="dark"' in page and "theme-neon.css" in page
+        r = c.put("/api/me/theme", json={"theme": "sakura"})
+        assert r.status_code == 200 and r.cookies.get("erynne_theme") == "sakura"
+        assert users.get_user(conn, "alice")["theme"] == "sakura"
+        assert 'data-theme="sakura"' in c.get("/files").text
         c.post("/logout")
-        assert 'data-theme="neon"' in c.get("/login").text                       # signed out: the cookie
+        assert 'data-theme="sakura"' in c.get("/login").text                     # signed out: the cookie
         c.cookies.set("erynne_theme", "<script>")
-        assert 'data-theme="sakura"' in c.get("/login").text                     # anything else: sakura
+        assert 'data-theme="neon"' in c.get("/login").text                       # anything else: neon
+        assert c.get("/static/parallax/city-8/5.png").status_code == 200

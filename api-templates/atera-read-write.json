@@ -1,0 +1,79 @@
+{
+  "format": "mnemerynne-api-template",
+  "name": "Atera (read-write)",
+  "base_url": "https://api.atera.com/api/v3",
+  "auth_type": "bearer",
+  "description": "Atera changes that Erynne or Claude may **propose**: a ticket's status or priority, an internal note on a ticket, resolving an alert. None of them runs until the person presses **Run it** on the proposal. Keep the read-only **Atera** API for questions; this one is only for changes.\n\n**Setup**\n\n1. Create a separate Atera API key for this entry, and paste it as the credential here (Bearer).\n2. Edit **Add internal note**: in its body, replace `technician@example.com` with the email of the Atera technician the notes should come from.\n3. Set the AD group to IT (or whoever may make these changes), then test each operation on a test ticket or alert. Testing a change really makes it.\n4. Leave Claude's switch off until you've tried it from Erynne's chat.\n\nTicket statuses are your account's own: the **Ticket statuses** operation lists them, and a status has to be one of those names.",
+  "operations": [
+    {
+      "name": "Ticket statuses",
+      "description": "The ticket statuses this Atera account uses (e.g. Open, Pending, Resolved, Closed), to pick the exact name before changing a ticket's status.",
+      "path": "/tickets/statuses",
+      "params": [],
+      "cache_seconds": 300,
+      "example_questions": ["What ticket statuses are there in Atera?", "Which statuses can a ticket have?"]
+    },
+    {
+      "name": "Ticket",
+      "description": "One ticket in full: title, status, priority, customer, technician and dates. Check it before proposing a change.",
+      "path": "/tickets/{ticketId}",
+      "params": [
+        {"name": "ticketId", "type": "int", "in": "path", "required": true, "min": 1, "help": "Ticket number"}
+      ],
+      "cache_seconds": 0,
+      "example_questions": ["What's the current status of ticket 4812?", "Who is ticket 1200 assigned to?"]
+    },
+    {
+      "name": "Change ticket status",
+      "action": true,
+      "description": "Set one ticket's status, e.g. to Resolved or Closed. Proposed: the person runs it.",
+      "method": "PUT",
+      "path": "/tickets/{ticketId}",
+      "body": {"TicketStatus": "{{status}}"},
+      "params": [
+        {"name": "ticketId", "type": "int", "in": "path", "required": true, "min": 1, "help": "Ticket number"},
+        {"name": "status", "type": "string", "in": "body", "required": true,
+         "help": "A status name from Ticket statuses, exactly as listed, e.g. Resolved"}
+      ],
+      "example_questions": ["Close ticket 4812.", "Mark ticket 1200 as resolved.", "Set ticket 4812 to pending."]
+    },
+    {
+      "name": "Change ticket priority",
+      "action": true,
+      "description": "Set one ticket's priority. Proposed: the person runs it.",
+      "method": "PUT",
+      "path": "/tickets/{ticketId}",
+      "body": {"TicketPriority": "{{priority}}"},
+      "params": [
+        {"name": "ticketId", "type": "int", "in": "path", "required": true, "min": 1, "help": "Ticket number"},
+        {"name": "priority", "type": "enum", "in": "body", "required": true,
+         "options": ["Low", "Medium", "High", "Critical"], "help": "The new priority"}
+      ],
+      "example_questions": ["Make ticket 4812 high priority.", "Lower ticket 1200 to low priority."]
+    },
+    {
+      "name": "Add internal note",
+      "action": true,
+      "description": "Add a technician-only note to a ticket (the customer doesn't see it). Proposed: the person runs it.",
+      "method": "POST",
+      "path": "/tickets/{ticketId}/comments",
+      "body": {"CommentText": "{{text}}", "TechnicianCommentDetails": {"TechnicianEmail": "technician@example.com", "IsInternal": true}},
+      "params": [
+        {"name": "ticketId", "type": "int", "in": "path", "required": true, "min": 1, "help": "Ticket number"},
+        {"name": "text", "type": "text", "in": "body", "required": true, "help": "The note"}
+      ],
+      "example_questions": ["Add a note to ticket 4812 that the printer was replaced.", "Note on ticket 1200: waiting on the vendor."]
+    },
+    {
+      "name": "Resolve alert",
+      "action": true,
+      "description": "Mark one Atera alert as resolved. Proposed: the person runs it.",
+      "method": "PUT",
+      "path": "/alerts/{alertId}",
+      "params": [
+        {"name": "alertId", "type": "int", "in": "path", "required": true, "min": 1, "help": "Alert ID"}
+      ],
+      "example_questions": ["Resolve alert 5531.", "Mark the disk space alert 5531 as resolved."]
+    }
+  ]
+}

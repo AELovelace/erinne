@@ -33,8 +33,8 @@ from mnemerynne.config import Settings, get_settings
 from mnemerynne.graph import Deps, build_graph
 from mnemerynne.router import load_router
 from mnemerynne.web import (admin, admin_apis, agent as agent_pages, apis as api_pages, balancer as balancer_pages, chat,
-                            files, m365 as m365_pages, memories, oauth as oauth_pages, settings as settings_pages,
-                            tokens)
+                            claude_links as claude_link_pages, files, m365 as m365_pages, memories,
+                            oauth as oauth_pages, settings as settings_pages, tokens)
 from mnemerynne.web.deps import LoginRequired, api_user, get_db, is_admin, page_user
 
 log = logging.getLogger("mnemerynne.web")
@@ -200,6 +200,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(oauth_pages.router)
     app.include_router(balancer_pages.router)
     app.include_router(settings_pages.router)
+    app.include_router(claude_link_pages.router)
 
     # MCP for Claude Desktop: bearer-token auth, read-only tools (mnemerynne/mcp_server.py).
     mcp = mcp_server.build_server(settings, lambda: app.state.embedder, lambda: app.state.directory)

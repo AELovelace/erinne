@@ -1,7 +1,8 @@
 /* Erynne — neon theme: hot pink on black, chromatic bloom (a cyan and a red
    fringe either side of a pink glow), hard edges. Everything is scoped to
    html[data-theme="neon"], so the sakura theme (erynne.css) is untouched;
-   this file only overrides it. Chosen per person on the Settings page. */
+   this file only overrides it. Chosen per person on the Settings page; the
+   default for new accounts and signed-out pages. */
 
 html[data-theme="neon"] {
   color-scheme: dark;
@@ -49,6 +50,40 @@ html[data-theme="neon"] body {
     linear-gradient(180deg, #07020d 0%, #12031f 60%, #1d0428 100%);
   background-attachment: fixed;
 }
+/* Parallax cities (parallax.js): a slideshow of pixel-art skylines whose
+   layers drift sideways, nearer ones faster. Each layer is a strip one tile
+   wider than the screen that slides left by exactly one tile (the art is
+   16:9, sized to the screen's height) and loops. The gradients above show
+   until the first city has loaded. */
+html[data-theme="neon"] .parallax {
+  display: block; position: fixed; top: 0; left: 0; width: 100%; height: 100vh;
+  z-index: 0; overflow: hidden; pointer-events: none;
+}
+html[data-theme="neon"] .parallax-scene {
+  position: absolute; inset: 0; opacity: 0; transition: opacity 3s ease;   /* FADE_MS in parallax.js */
+  filter: saturate(1.15);
+}
+html[data-theme="neon"] .parallax-scene.on { opacity: 1; }
+html[data-theme="neon"] .parallax-layer {
+  position: absolute; top: 0; left: 0; height: 100%; width: calc(100% + 100vh * 16 / 9);
+  background-repeat: repeat-x; background-size: auto 100%; background-position: left bottom;
+  image-rendering: pixelated;
+  animation: parallax-drift linear infinite; will-change: transform;
+}
+@keyframes parallax-drift {
+  to { transform: translate3d(calc(-100vh * 16 / 9), 0, 0); }
+}
+/* Night over the city: darker at the edges, the pink glow from below, so text stays readable. */
+html[data-theme="neon"] .parallax::after {
+  content: ""; position: absolute; inset: 0; z-index: 1;
+  background:
+    radial-gradient(ellipse 70% 45% at 50% 108%, rgba(255, 46, 151, 0.32), transparent 70%),
+    linear-gradient(180deg, rgba(7, 2, 13, 0.66) 0%, rgba(7, 2, 13, 0.34) 35%, rgba(7, 2, 13, 0.4) 70%, rgba(7, 2, 13, 0.7) 100%);
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="neon"] .parallax-layer { animation: none; }
+}
+
 /* Faint scanlines over everything. */
 html[data-theme="neon"] body::after {
   content: ""; position: fixed; inset: 0; z-index: 60; pointer-events: none;

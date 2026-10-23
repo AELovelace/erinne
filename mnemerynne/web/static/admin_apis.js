@@ -316,8 +316,9 @@
   function operationCard(d, op) {
     const card = el("div", "api-op");
     const head = el("div", "lib-head");
-    head.appendChild(el("strong", null, (op.enabled ? "" : "⏸ ") + op.name));
+    head.appendChild(el("strong", null, (op.enabled ? "" : "⏸ ") + (op.action ? "✏️ " : "") + op.name));
     head.appendChild(el("code", "small", op.method + " " + op.path));
+    if (op.action) head.appendChild(el("span", "tag", "changes data: the person applies it"));
     head.append(button("Edit", "link small", function () { card.replaceWith(operationEditor(d, op)); }),
                 button("Test", "link small", function () { toggleTest(card, op); }));
     card.appendChild(head);
@@ -334,7 +335,10 @@
     const box = el("div", "api-op editing");
     const name = input(op ? op.name : "");
     const description = input(op ? op.description : "", { multiline: true, rows: 2 });
-    const method = select([["GET", "GET"], ["POST", "POST (fixed body)"]], op ? op.method : "GET");
+    const method = select([["GET", "GET"], ["POST", "POST (fixed body)"], ["PUT", "PUT (action)"],
+                           ["PATCH", "PATCH (action)"], ["DELETE", "DELETE (action)"]], op ? op.method : "GET");
+    const action = checkbox("Changes data (an action): Erynne and Claude only propose it; the person applies it",
+                            op ? op.action : false);
     const path = input(op ? op.path : "/", { placeholder: "/tickets/{ticketId}" });
     const body = input(op ? op.body : "", { multiline: true, rows: 4, placeholder: "{\"size\": 0}" });
     const params = input(JSON.stringify(op ? op.params : [], null, 1), { multiline: true, rows: 5 });
@@ -343,24 +347,29 @@
     const cache = input(op ? op.cache_seconds : 60, { type: "number" });
     const enabled = checkbox("Enabled", op ? op.enabled : true);
     const bodyField = field("Body (fixed; the model only fills {{name}} slots, with checked values)", body);
-    function toggle() { bodyField.hidden = method.value !== "POST"; }
+    function toggle() {
+      bodyField.hidden = ["POST", "PUT", "PATCH"].indexOf(method.value) < 0;
+      if (["PUT", "PATCH", "DELETE"].indexOf(method.value) >= 0) action.box.checked = true;
+    }
     method.addEventListener("change", toggle);
     toggle();
     box.append(field("Name", name), field("Description (helps the model fill parameters)", description),
-               field("Method", method), field("Path", path, "Relative to the API address; {name} for path parameters."),
+               field("Method", method), action,
+               field("Path", path, "Relative to the API address; {name} for path parameters."),
                bodyField,
                field("Parameters (JSON)", params,
                      'e.g. [{"name": "days", "type": "int", "in": "query", "min": 1, "max": 31, "default": 7, ' +
-                     '"help": "How many days"}]. Types: string, int, date, enum (with "options"). "in": query, ' +
-                     'path, or body (POST: write {{name}} in the body where the value goes).'),
+                     '"help": "How many days"}]. Types: string, int, date, enum (with "options"), and for ' +
+                     'actions text (free text up to 2000 characters, body only). "in": query, path, or body ' +
+                     '(write {{name}} in the body where the value goes).'),
                field("Example questions", examples), field("Cache (seconds)", cache), enabled);
     box.append(button("Save", "small", function () {
       let parsed;
       try { parsed = JSON.parse(params.value || "[]"); } catch (e) { showError("Parameters aren't valid JSON."); return; }
       const payload = { name: name.value.trim(), description: description.value, method: method.value,
-                        path: path.value.trim(), body: method.value === "POST" ? body.value : "",
+                        path: path.value.trim(), body: bodyField.hidden ? "" : body.value,
                         params: parsed, example_questions: examples.value, cache_seconds: Number(cache.value) || 0,
-                        enabled: enabled.box.checked };
+                        enabled: enabled.box.checked, action: action.box.checked };
       run(async function () {
         if (op) await api("PUT", "/api/admin/apis/operations/" + op.id, payload);
         else await api("POST", "/api/admin/apis/" + d.id + "/operations", payload);
@@ -391,9 +400,12 @@
     box.append(button("Run now", "small", function () {
       const params = {};
       Object.keys(inputs).forEach(function (k) { if (inputs[k].value !== "") params[k] = inputs[k].value; });
+      if (op.action && !confirm("“" + op.name + "” changes data. Testing it really does it, with these values. " +
+                                "Go ahead?")) return;
       out.replaceChildren(el("p", "muted small", "Calling…"));
       run(async function () {
-        const r = await api("POST", "/api/admin/apis/operations/" + op.id + "/test", { params: params });
+        const r = await api("POST", "/api/admin/apis/operations/" + op.id + "/test",
+                            { params: params, really_change: !!op.action });
         out.replaceChildren();
         if (!r.ok) { out.appendChild(el("p", "error", "Failed: " + r.error)); return; }
         out.appendChild(el("p", "small", "✓ HTTP " + r.status + (r.truncated ? " (cut at 256 KB)" : "")));

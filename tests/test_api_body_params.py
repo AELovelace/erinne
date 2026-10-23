@@ -32,7 +32,7 @@ def test_admin_input_is_checked():
         apis.check_specs("/x", good, "POST", '{"gte": "now-{{days}}h"}')
     with pytest.raises(apis.ApiError, match="isn't used in the body"):
         apis.check_specs("/x", good, "POST", '{"gte": "now-24h"}')
-    with pytest.raises(apis.ApiError, match="only POST"):
+    with pytest.raises(apis.ApiError, match="GET operations have none"):
         apis.check_specs("/x", good, "GET", "")
     with pytest.raises(apis.ApiError, match="JSON body"):
         apis.check_specs("/x", good, "POST", '{"gte": {{hours}}')

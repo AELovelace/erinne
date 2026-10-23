@@ -35,7 +35,8 @@ def create_user(
     with transaction(conn):
         try:
             cur = conn.execute(
-                "INSERT INTO users(username, pw_hash, role) VALUES (?, ?, ?)", (name, pw_hash, role)
+                # New accounts start on the neon theme; the column default is still 'sakura' (0022).
+                "INSERT INTO users(username, pw_hash, role, theme) VALUES (?, ?, ?, 'neon')", (name, pw_hash, role)
             )
         except sqlite3.IntegrityError as exc:
             raise UserExists(f"Username '{name}' is already taken.") from exc

@@ -23,7 +23,9 @@ report per hotel", "failures in the last N days". Don't design them as a
 general query endpoint. A free-form query field can't be exposed through a
 template; the parameter rules below make that impossible on purpose.
 
-Every call is a GET, or a POST with your fixed body. Calls don't follow
+Every reading call is a GET, or a POST with your fixed body. Operations that
+change something are **actions** (see *Actions* below): the AI only proposes
+them, and they run when the person presses *Run it*. Calls don't follow
 redirects, time out after 20 seconds, keep at most 256 KB of the response, are
 cached briefly and are logged. The AI sees a trimmed version of the response
 (long lists are shortened), so **return small, flat JSON**: a few columns,
@@ -81,7 +83,8 @@ admin.
 |---|---|---|
 | `name` | yes | Unique within the template (ignoring case), at most 80 characters. |
 | `description` | no | One sentence on what it returns. **The AI reads this** when filling in parameters, so say what the data covers. |
-| `method` | no | `GET` (default) or `POST`. |
+| `method` | no | `GET` (default) or `POST`; actions may also use `PUT`, `PATCH` or `DELETE`. |
+| `action` | no | `true` if the operation changes data (see *Actions*). Default `false`. |
 | `path` | yes | Starts with `/`; no `..`, `//`, `\` or `://`. May contain `{name}` for a path parameter, e.g. `/tickets/{ticketId}`. |
 | `params` | no | Up to 30 parameters (below). |
 | `body` | POST only | The fixed JSON body, with `{{name}}` where body parameters go (below). A JSON object, or a string (see *Bodies*). |
@@ -97,7 +100,7 @@ admin.
 | Field | Meaning |
 |---|---|
 | `name` | Letters, digits and `_`, starting with a letter or `_`, at most 41 characters. Unique in the operation. |
-| `type` | `int`, `date` (`YYYY-MM-DD`), `enum` (one of `options`; matched ignoring case) or `string`. |
+| `type` | `int`, `date` (`YYYY-MM-DD`), `enum` (one of `options`; matched ignoring case), `string`, or `text` (actions only, in the body: free text up to 2000 characters, e.g. a comment). |
 | `in` | `query` (default; added to the URL's query string), `path` (fills `{name}` in the path) or `body` (fills `{{name}}` in a POST body). |
 | `required` | `true` if the call makes no sense without it. |
 | `default` | Used when the question doesn't say. |
@@ -136,6 +139,32 @@ body isn't valid JSON until filled in, so write it as a **string** instead:
 
 Keep bodies on one line inside strings: JSON strings can't contain raw newlines.
 
+## Actions
+
+An action is an operation that changes something: close a ticket, resolve an
+alert, add a comment. Mark it `"action": true`. Then:
+
+- Erynne and Claude never call it. They propose it with the values filled in,
+  and the person sees a card (in chat, or on Mnemerynne's *Changes waiting for
+  you* page when Claude proposed it through the connector) and presses
+  *Run it*. Only then is it called, after checking again that they may.
+- It may use `PUT`, `PATCH` or `DELETE` as well as `POST`. A `PUT` or `DELETE`
+  may have no body (e.g. `PUT /alerts/{alertId}` to resolve an alert).
+- It's never cached, and an admin's *Test* asks for confirmation, because it
+  really makes the change.
+- Questions are never routed straight to it; only the agent can propose it.
+
+Make each action do **one thing** and send only its own fields, e.g. *Change
+ticket status* sends only the status. Then an optional parameter left empty can
+never blank another field. Pair actions with a reading operation that shows the
+current state (e.g. *Ticket*), so the AI checks before it proposes, and with
+one that lists valid values when they're account-specific (e.g. *Ticket
+statuses*).
+
+Put actions in a **separate template** from the reading operations (e.g.
+"Atera" and "Atera (read-write)"), so they get their own credential and AD
+group. See [atera-read-write.json](atera-read-write.json).
+
 ## Description
 
 The template's `description` is the admin's setup sheet, shown on the API's
@@ -151,8 +180,9 @@ page. Include:
 
 ## Rules of thumb
 
-- **Read-only.** Back each operation with a read-only credential or endpoint.
-  Mnemerynne won't write, but the credential is your real safety boundary.
+- **Read-only, unless it's an action.** Back reading operations with a
+  read-only credential; put actions in their own template with their own
+  credential. The credential is your real safety boundary.
 - **Answer questions, return little.** Aggregate on your side; cap rows (e.g.
   `maxRows`, `LIMIT`); select only the columns that answer the question.
 - **No personal data** unless the admin is told, in the description, which
@@ -170,4 +200,5 @@ page. Include:
 - [ ] POST bodies: every `{{name}}` matches a body parameter; a string body where a placeholder stands bare.
 - [ ] Responses are small JSON and contain no personal data, or the description says which do.
 - [ ] The `description` tells the admin how to make a read-only credential and check the certificate.
+- [ ] Anything that changes data is `"action": true`, does one thing, and lives in its own template.
 - [ ] The file is valid JSON (`python -m json.tool your-template.json`).

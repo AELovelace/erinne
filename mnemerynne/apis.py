@@ -11,6 +11,10 @@ itself is built here, so it can't reach anything an admin didn't set up.
   account). Claude additionally needs the API's Claude switch.
 - Calls: GET (or an admin-fixed POST), no redirects, 20 s timeout, 256 KB cap,
   short cache, and every call recorded in api_calls.
+- Actions: operations marked as changing data (close a ticket, acknowledge an
+  alert; PUT, PATCH, DELETE or POST) never run from chat or Claude. They become
+  proposals (proposals.propose_api) that the person applies; only then, or an
+  admin's Test, calls them, never from the cache.
 """
 
 from __future__ import annotations
@@ -35,7 +39,12 @@ from mnemerynne.config import Settings
 TIMEOUT = 20.0
 MAX_RESPONSE_BYTES = 256 * 1024
 EXCERPT_CHARS = 20_000           # kept with each call, for the citation link
-PARAM_TYPES = ("string", "int", "date", "enum")
+PARAM_TYPES = ("string", "int", "date", "enum", "text")
+TEXT_MAX = 2000   # a "text" parameter: free text (a ticket comment) in an action's body, always JSON-escaped
+READ_METHODS = ("GET", "POST")                       # a reading POST has a fixed body (e.g. a search)
+ACTION_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
+BODY_METHODS = ("POST", "PUT", "PATCH")
+ACTION_VIAS = ("apply", "test")                      # the only ways an action is called
 _SAFE_STRING = re.compile(r"^[\w .,:@+\-/]{0,200}$")
 # In a POST body, * and ? are allowed too: search patterns (e.g. agent "*" for all, "FD-*").
 _SAFE_BODY_STRING = re.compile(r"^[\w .,:@+\-/*?]{0,200}$")
@@ -127,8 +136,11 @@ def param_specs(op) -> list[dict]:
     return [s for s in specs if isinstance(s, dict) and s.get("name")]
 
 
-def check_specs(path: str, specs: list[dict], method: str, body: str) -> None:
+def check_specs(path: str, specs: list[dict], method: str, body: str, action: bool = False) -> None:
     """Admin input: refuse operations that couldn't be called safely."""
+    if method not in (ACTION_METHODS if action else READ_METHODS):
+        raise ApiError(f"{method} changes data: mark the operation as an action (the person applies it)."
+                       if method in ACTION_METHODS else f"“{method}” isn't a method operations can use.")
     names = set()
     for s in specs:
         name = s.get("name", "")
@@ -139,14 +151,16 @@ def check_specs(path: str, specs: list[dict], method: str, body: str) -> None:
             raise ApiError(f"Parameter “{name}” needs a type: {', '.join(PARAM_TYPES)}.")
         if s.get("in", "query") not in ("query", "path", "body"):
             raise ApiError(f"Parameter “{name}” goes in the query, the path or the body.")
-        if s.get("in") == "body" and method != "POST":
-            raise ApiError(f"Parameter “{name}” is in the body, but only POST operations have one.")
+        if s.get("in") == "body" and method not in BODY_METHODS:
+            raise ApiError(f"Parameter “{name}” is in the body, but {method} operations have none.")
         if s.get("type") == "enum" and not s.get("options"):
             raise ApiError(f"Parameter “{name}” is a list; give its options.")
+        if s.get("type") == "text" and not (action and s.get("in") == "body"):
+            raise ApiError(f"Parameter “{name}” is free text: only actions take it, and only in the body.")
     for placeholder in _PLACEHOLDER.findall(path):
         if not any(s["name"] == placeholder and s.get("in") == "path" for s in specs):
             raise ApiError(f"The path uses {{{placeholder}}} but there's no path parameter by that name.")
-    if method == "POST":
+    if method == "POST" or (method in BODY_METHODS and body):
         in_body = {s["name"] for s in specs if s.get("in") == "body"}
         used = set(_BODY_PLACEHOLDER.findall(body or ""))
         if used - in_body:
@@ -157,9 +171,12 @@ def check_specs(path: str, specs: list[dict], method: str, body: str) -> None:
         try:
             json.loads(render_body(body, samples))
         except ValueError as exc:
-            raise ApiError("A POST operation needs a JSON body (with {{name}} where body parameters go).") from exc
+            raise ApiError(f"A {method} operation needs a JSON body (with {{{{name}}}} where body parameters go).") \
+                from exc
     elif body:
-        raise ApiError("Only POST operations have a body.")
+        raise ApiError(f"{method} operations have no body.")
+    elif any(s.get("in") == "body" for s in specs):
+        raise ApiError("Body parameters need a body to go in ({{name}} where each goes).")
     if not path.startswith("/") or path.startswith("//") or ".." in path or "://" in path or "\\" in path:
         raise ApiError("The path must start with / and stay under the API's address.")
 
@@ -233,6 +250,10 @@ def validate_params(specs: list[dict], given: dict | None) -> dict:
                 value = date.fromisoformat(str(value)).isoformat()
             except ValueError:
                 raise ApiError(f"“{name}” must be a date like 2026-10-22.") from None
+        elif kind == "text":
+            value = str(value).strip()
+            if len(value) > TEXT_MAX or any(ord(c) < 32 and c not in "\n\t" for c in value):
+                raise ApiError(f"“{name}” must be plain text of at most {TEXT_MAX} characters.")
         elif kind == "enum":
             options = [str(o) for o in s.get("options") or []]
             match = next((o for o in options if o.lower() == str(value).strip().lower()), None)
@@ -258,7 +279,7 @@ def build_request(api, op, params: dict) -> tuple[str, str, dict, str | None]:
     if (base.scheme, base.netloc) != (built.scheme, built.netloc) or built.scheme not in ("https", "http"):
         raise ApiError("The operation's address leaves the API.")
     query = {k: v for k, v in params.items() if specs[k].get("in", "query") == "query"}
-    if op["method"] != "POST":
+    if op["method"] not in BODY_METHODS:
         return op["method"], url, query, None
     body = {k: v for k, v in params.items() if specs[k].get("in") == "body"}
     return op["method"], url, query, render_body(op["body"], body) if op["body"] else None
@@ -345,13 +366,15 @@ def call(conn: sqlite3.Connection, settings: Settings, op_id: int, params: dict 
     if op is None:
         raise ApiError("That API operation no longer exists.")
     api = conn.execute("SELECT * FROM apis WHERE id = ?", (op["api_id"],)).fetchone()
+    if op["action"] and via not in ACTION_VIAS:
+        raise ApiError(f"“{op['name']}” changes data in {api['name']}: it runs only when the person applies it.")
     params = validate_params(param_specs(op), params)
     key = (op_id, json.dumps(params, sort_keys=True))
     now = time.monotonic()
     with _cache_lock:
         hit = _cache.get(key)
     started = time.perf_counter()
-    if hit and hit[0] > now and via != "test":
+    if hit and hit[0] > now and via != "test" and not op["action"]:
         result = CallResult(0, True, api["name"], op["name"], "", hit[1].status_code, hit[1].data,
                             cached=True, truncated=hit[1].truncated)
         raw_len = None
@@ -380,7 +403,7 @@ def call(conn: sqlite3.Connection, settings: Settings, op_id: int, params: dict 
             message = str(exc)
             result.error = ("couldn't verify the API's certificate; check the trusted certificate on the APIs page"
                             if "CERTIFICATE" in message.upper() else f"couldn't reach {api['name']}: {message[:200]}")
-        if result.ok and op["cache_seconds"] > 0:
+        if result.ok and op["cache_seconds"] > 0 and not op["action"]:
             with _cache_lock:
                 _cache[key] = (now + op["cache_seconds"], result)
     excerpt = None
@@ -646,7 +669,8 @@ _TEMPLATE_KEYS = {"format", "name", "description", "base_url", "auth_type", "aut
 # Set by hand on the API, never brought in by a file.
 _TEMPLATE_REFUSED = {"secret", "token", "password", "credential", "ca_pem", "certificate", "ad_group",
                      "claude_enabled"}
-_OP_KEYS = {"name", "description", "example_questions", "method", "path", "params", "body", "cache_seconds"}
+_OP_KEYS = {"name", "description", "example_questions", "method", "path", "params", "body", "cache_seconds",
+            "action"}
 MAX_TEMPLATE_OPERATIONS = 50
 
 
@@ -693,8 +717,9 @@ def parse_template(text: str) -> dict:
             raise ApiError(f"Operation {i} needs a name of its own (at most 80 characters).")
         names.add(op_name.lower())
         method = op.get("method", "GET")
-        if method not in ("GET", "POST"):
-            raise ApiError(f"“{op_name}”: the method is GET or POST.")
+        action = op.get("action", False)
+        if not isinstance(action, bool):
+            raise ApiError(f"“{op_name}”: action is true or false.")
         # A body may be written as a JSON object, or as text when a {{name}} stands bare (e.g. [{{count}}]).
         body = op.get("body", "")
         if isinstance(body, (dict, list)):
@@ -711,12 +736,12 @@ def parse_template(text: str) -> dict:
         if not isinstance(body, str) or len(body) > 20000 or not isinstance(examples, str) or len(examples) > 4000:
             raise ApiError(f"“{op_name}”: the body or example questions are too long or the wrong kind.")
         try:
-            check_specs(str(op.get("path") or ""), params, method, body)
+            check_specs(str(op.get("path") or ""), params, method, body, action)
         except ApiError as exc:
             raise ApiError(f"“{op_name}”: {exc}") from None
         out_ops.append({"name": op_name, "description": str(op.get("description") or "")[:2000],
                         "example_questions": examples, "method": method, "path": op["path"], "params": params,
-                        "body": body if method == "POST" else "", "cache_seconds": cache})
+                        "body": body if method in BODY_METHODS else "", "cache_seconds": cache, "action": action})
     return {"name": name, "description": str(t.get("description") or "")[:20000], "base_url": base_url,
             "auth_type": auth_type, "auth_header": auth_header, "auth_user": str(t.get("auth_user") or "")[:200],
             "tls_check_hostname": 0 if t.get("tls_check_hostname") is False else 1, "operations": out_ops}

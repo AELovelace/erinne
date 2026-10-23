@@ -260,7 +260,8 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
         conn = db.connect(settings.db_path)
         try:
             user = conn.execute("SELECT id, ad_account FROM users WHERE id = ?", (state["user_id"],)).fetchone()
-            ops = apis.allowed_operations(conn, user, deps.directory)
+            # Actions (they change data) are never routed to: only the agent proposes them.
+            ops = [o for o in apis.allowed_operations(conn, user, deps.directory) if not o["action"]]
             if not ops:
                 return None, None
             vector = deps.embedder.embed_query(state["standalone"])
