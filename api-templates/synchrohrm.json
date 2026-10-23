@@ -1,0 +1,92 @@
+{
+  "format": "mnemerynne-api-template",
+  "name": "SynchroHRM",
+  "base_url": "https://synchro.eternalhotels.com",
+  "auth_type": "bearer",
+  "description": "SynchroHRM night-audit reports and NetSuite postings, through its read-only SQL endpoint (`POST /api/device/sql`). Only the fixed queries below are ever sent; Erynne and Claude fill in the property, date and counts.\n\n**Setup**\n\n1. In SynchroHRM, Settings → Device Access Tokens: issue a token named *Mnemerynne* with **Can read: Read-only SQL queries**, and paste it as the credential here (Bearer).\n2. Press **Fetch from server** and compare the fingerprint with the one on the SynchroHRM host (`openssl s_client -connect localhost:443 </dev/null | openssl x509 -noout -fingerprint -sha256`). Save only if they match. If calls then fail on the certificate name, untick *Check the name in the certificate*.\n3. Set the AD group (accounting or ops), then press **Test** on each operation.\n\n**Claude:** these operations return only statistics and posting status. Don't add operations that read the parsed report tables (e.g. `opera_in_house_guest_rows`, `opera_arrival_rows`) while Claude's switch is on: they hold guest names.",
+  "operations": [
+    {
+      "name": "Latest reports per property",
+      "description": "For each hotel: the latest business date with parsed night-audit reports, and how many report files it has.",
+      "method": "POST",
+      "path": "/api/device/sql",
+      "body": {"sql": "SELECT property_slug, max(report_date) AS latest_business_date, count(*) AS files FROM attachments WHERE status = 'parsed' AND superseded_by_attachment_id IS NULL GROUP BY property_slug ORDER BY latest_business_date", "maxRows": 50},
+      "params": [],
+      "cache_seconds": 60,
+      "example_questions": [
+        "Did every hotel send its reports?",
+        "Which hotel is behind on night audit?",
+        "What's the latest night audit date for each property?",
+        "Are any hotels missing their night audit reports?"
+      ]
+    },
+    {
+      "name": "Parse failures",
+      "description": "Night-audit report files that failed to parse in the last few days: when, which hotel, the file and the error.",
+      "method": "POST",
+      "path": "/api/device/sql",
+      "body": {"sql": "SELECT received_at, property_slug, attachment_name, parse_error FROM attachments WHERE status = 'failed' AND received_at >= datetime('now', ?) ORDER BY received_at DESC", "params": ["-{{days}} days"], "maxRows": 200},
+      "params": [
+        {"name": "days", "type": "int", "in": "body", "min": 1, "max": 30, "default": 3, "help": "How many days back"}
+      ],
+      "cache_seconds": 60,
+      "example_questions": [
+        "Did any night audit reports fail to parse?",
+        "Which report files failed this week?",
+        "Are there any parse errors in SynchroHRM?",
+        "Why didn't a hotel's report import?"
+      ]
+    },
+    {
+      "name": "Day's statistics vs NetSuite",
+      "description": "One hotel's statistics for one business date (account, value, unit) with the NetSuite posting status, transaction ID and any error.",
+      "method": "POST",
+      "path": "/api/device/sql",
+      "body": {"sql": "SELECT a.account_number, a.value, a.unit, p.status, p.netsuite_tran_id, p.error_message FROM analytics_daily_values a LEFT JOIN netsuite_sdu_posting_attempts p ON p.property_slug = a.property_slug AND p.report_date = a.business_date WHERE a.property_slug = ? AND a.business_date = ?", "params": ["{{property}}", "{{date}}"], "maxRows": 500},
+      "params": [
+        {"name": "property", "type": "enum", "in": "body", "required": true, "help": "The hotel",
+         "options": ["best-western-pendleton-inn", "bw-plus-dayton-hotel-and-suites", "best-western-plus-kennewick-inn", "comfort-inn-and-suites-wa184", "comfort-inn-wa701", "hampton-inn-and-suites-by-hilton-la-grande-or", "hampton-inn-and-suites-by-hilton-salem-or", "home2-suites-by-hilton-salem-or", "holiday-inn-express-ellensburg", "holiday-inn-express-pendleton", "red-lion-hotel-pasco-airport-and-conference-center", "sleep-inn-wa102"]},
+        {"name": "date", "type": "date", "in": "body", "required": true, "help": "The business date"}
+      ],
+      "cache_seconds": 60,
+      "example_questions": [
+        "What were the Pendleton Best Western's stats yesterday?",
+        "Did Home2 Salem's numbers post to NetSuite for October 21?",
+        "Show the daily statistics for the Kennewick Best Western.",
+        "What did the Holiday Inn Express Ellensburg post to NetSuite yesterday?"
+      ]
+    },
+    {
+      "name": "Unresolved NetSuite failures",
+      "description": "NetSuite postings that failed and haven't since gone through: hotel, report date, posting unit, error and when it was tried.",
+      "method": "POST",
+      "path": "/api/device/sql",
+      "body": {"sql": "SELECT f.property_slug, f.report_date, f.posting_unit, f.error_message, f.finished_at FROM netsuite_sdu_posting_attempts f WHERE f.status = 'failed' AND NOT EXISTS (SELECT 1 FROM netsuite_sdu_posting_attempts s WHERE s.external_id = f.external_id AND s.status IN ('submitted', 'already_exists')) ORDER BY f.finished_at DESC", "maxRows": 200},
+      "params": [],
+      "cache_seconds": 60,
+      "example_questions": [
+        "Are there any NetSuite posting failures?",
+        "Which hotels failed to post to NetSuite?",
+        "What's stuck in NetSuite?",
+        "Did any statistics fail to post?"
+      ]
+    },
+    {
+      "name": "Recent mailbox polls",
+      "description": "SynchroHRM's latest mailbox polls: when, status, messages seen, attachments parsed and failed, and notes.",
+      "method": "POST",
+      "path": "/api/device/sql",
+      "body": "{\"sql\": \"SELECT started_at, status, messages_seen, attachments_parsed, attachments_failed, notes FROM ingest_runs ORDER BY id DESC LIMIT ?\", \"params\": [{{count}}], \"maxRows\": 50}",
+      "params": [
+        {"name": "count", "type": "int", "in": "body", "min": 1, "max": 50, "default": 10, "help": "How many polls"}
+      ],
+      "cache_seconds": 30,
+      "example_questions": [
+        "Is SynchroHRM picking up the night audit emails?",
+        "When did SynchroHRM last check the mailbox?",
+        "Show the recent mailbox polls.",
+        "Is the report mailbox import working?"
+      ]
+    }
+  ]
+}

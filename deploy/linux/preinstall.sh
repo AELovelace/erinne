@@ -8,7 +8,6 @@
 # Overrides (environment):
 #   LLAMA_TAG=b11756        llama.cpp release to build
 #   GPU_MATCH='RX 580'      text identifying Mnemerynne's card in --list-devices
-#   MNEMERYNNE_GPU=Vulkan1      skip detection and use this llama.cpp device
 #
 # MicroJames's CUDA build in /opt/llama.cpp is not touched.
 set -euo pipefail
@@ -62,17 +61,17 @@ semanage fcontext -a -t bin_t "$LLAMA_DIR(/.*)?" 2>/dev/null || true
 restorecon -R "$LLAMA_DIR"
 
 step "Mnemerynne's GPU"
-devices=$(LD_LIBRARY_PATH=$LLAMA_DIR "$LLAMA_DIR/llama-server" --list-devices 2>&1)
+# mnemerynne-generator loads only Mesa's Radeon Vulkan driver, so its card is
+# always Vulkan0 (see the unit). Check that with the same restriction.
+RADEON_ICD=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
+[ -f "$RADEON_ICD" ] || die "no $RADEON_ICD; is mesa-vulkan-drivers installed?"
+devices=$(VK_DRIVER_FILES=$RADEON_ICD VK_ICD_FILENAMES=$RADEON_ICD LD_LIBRARY_PATH=$LLAMA_DIR \
+    "$LLAMA_DIR/llama-server" --list-devices 2>&1)
 echo "$devices" | grep -E '^\s*Vulkan[0-9]+:' || true
-if [ -z "${MNEMERYNNE_GPU:-}" ]; then
-    MNEMERYNNE_GPU=$(echo "$devices" | grep -F "$GPU_MATCH" | grep -oE 'Vulkan[0-9]+' | head -1 || true)
-    [ -n "$MNEMERYNNE_GPU" ] || die "no Vulkan device matching '$GPU_MATCH'; set GPU_MATCH or MNEMERYNNE_GPU"
-fi
-echo "using $MNEMERYNNE_GPU"
-# The generator only: the embedder runs on the 1050 Ti (CUDA0, see its unit).
-install -d /etc/systemd/system/mnemerynne-generator.service.d
-printf '[Service]\n# Written by preinstall.sh: the llama.cpp device for Mnemerynne'"'"'s card.\nEnvironment=MNEMERYNNE_GPU=%s\n' \
-    "$MNEMERYNNE_GPU" > /etc/systemd/system/mnemerynne-generator.service.d/gpu.conf
+echo "$devices" | grep -E '^\s*Vulkan0:' | grep -qF "$GPU_MATCH" \
+    || die "Vulkan0 with only the Radeon driver isn't '$GPU_MATCH'; set GPU_MATCH or check the card"
+# Older installs pinned a device number here, which could point at the wrong card.
+rm -f /etc/systemd/system/mnemerynne-generator.service.d/gpu.conf
 rm -f /etc/systemd/system/mnemerynne-embedder.service.d/gpu.conf
 [ -x /opt/llama.cpp/llama-server ] || \
     echo "WARNING: no CUDA llama.cpp in /opt/llama.cpp; mnemerynne-embedder needs it (or run it on the CPU, see its unit)" >&2
@@ -96,6 +95,6 @@ fi
 
 step "Done"
 cat <<EOF
-llama.cpp $LLAMA_TAG (Vulkan) is in $LLAMA_DIR and Mnemerynne will use $MNEMERYNNE_GPU.
+llama.cpp $LLAMA_TAG (Vulkan) is in $LLAMA_DIR and the generator will use the $GPU_MATCH (Vulkan0).
 Next, from deploy/linux/README.md: uv sync (section 1), then settings (2) and services (3).
 EOF

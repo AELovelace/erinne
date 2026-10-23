@@ -53,6 +53,49 @@ def _check_url(url: str) -> str:
     return url
 
 
+# ----------------------------------------------------------------- templates
+class TemplateUpload(BaseModel):
+    template: str = Field(..., max_length=500_000)   # the file's text
+
+
+@router.post("/templates", status_code=status.HTTP_201_CREATED)
+def upload_template(body: TemplateUpload, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Add an API template (or replace the uploaded one with the same name)."""
+    try:
+        t = apis.parse_template(body.template)
+    except apis.ApiError as exc:
+        raise _refuse(exc) from None
+    if any(p["name"].lower() == t["name"].lower() for p in apis.PRESETS):
+        raise HTTPException(status.HTTP_409_CONFLICT, f"“{t['name']}” is a built-in preset; name the template "
+                                                      "something else.")
+    with transaction(conn):
+        old = conn.execute("SELECT id FROM api_templates WHERE name = ?", (t["name"],)).fetchone()
+        if old:
+            conn.execute("UPDATE api_templates SET name = ?, template = ?, uploaded_by = ?, "
+                         "uploaded_at = datetime('now') WHERE id = ?",
+                         (t["name"], json.dumps(t), user["username"], old["id"]))
+            template_id = old["id"]
+        else:
+            template_id = conn.execute("INSERT INTO api_templates(name, template, uploaded_by) VALUES (?, ?, ?)",
+                                       (t["name"], json.dumps(t), user["username"])).lastrowid
+        _log(conn, user, "api.template", t["name"],
+             f"{'replaced' if old else 'uploaded'}, {len(t['operations'])} operation(s)")
+    return {"key": f"upload-{template_id}", "name": t["name"], "operations": len(t["operations"]),
+            "replaced": bool(old)}
+
+
+@router.delete("/templates/{template_id}")
+def delete_template(template_id: int, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Remove an uploaded template. APIs made from it stay as they are."""
+    row = conn.execute("SELECT name FROM api_templates WHERE id = ?", (template_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such template")
+    with transaction(conn):
+        conn.execute("DELETE FROM api_templates WHERE id = ?", (template_id,))
+        _log(conn, user, "api.template", row["name"], "removed")
+    return {"status": "deleted"}
+
+
 # ---------------------------------------------------------------------- APIs
 @router.get("")
 async def list_apis(request: Request, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
@@ -71,7 +114,10 @@ async def list_apis(request: Request, user=Depends(admin_user), conn: sqlite3.Co
                     "operations": r["operations"], "calls_24h": r["calls_24h"],
                     "last_call": dict(last) if last else None})
     directory = request.app.state.directory
-    return {"apis": out, "presets": [{"key": p["key"], "name": p["name"]} for p in apis.PRESETS],
+    presets = [{"key": p["key"], "name": p["name"], "uploaded": False} for p in apis.PRESETS]
+    presets += [{"key": p["key"], "name": p["name"], "uploaded": True, "template_id": p["template_id"]}
+                for p in apis.uploaded_templates(conn)]
+    return {"apis": out, "presets": presets,
             "groups": group_refs.choices(conn, await anyio.to_thread.run_sync(directory.groups)),
             "domain": settings.ad_domain,
             "secret_key_set": bool(settings.secret_key)}
@@ -86,7 +132,7 @@ class NewApi(BaseModel):
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_api(body: NewApi, request: Request, user=Depends(admin_user),
                      conn: sqlite3.Connection = Depends(get_db)):
-    p = apis.preset(body.preset) if body.preset else None
+    p = apis.preset(body.preset, conn) if body.preset else None
     if body.preset and p is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such preset")
     name = (body.name or (p["name"] if p else "")).strip()
@@ -97,10 +143,11 @@ async def create_api(body: NewApi, request: Request, user=Depends(admin_user),
     url = _check_url(body.base_url or (p["base_url"] if p else ""))
     with transaction(conn):
         api_id = conn.execute(
-            "INSERT INTO apis(name, description, base_url, auth_type, auth_header, tls_check_hostname) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO apis(name, description, base_url, auth_type, auth_header, auth_user, tls_check_hostname) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (name, p["description"] if p else "", url, p["auth_type"] if p else "none",
-             p.get("auth_header", "") if p else "", p.get("tls_check_hostname", 1) if p else 1)).lastrowid
+             p.get("auth_header", "") if p else "", p.get("auth_user", "") if p else "",
+             p.get("tls_check_hostname", 1) if p else 1)).lastrowid
         op_ids = _preset_operations(conn, api_id, p["operations"] if p else [])
         _log(conn, user, "api.create", name, f"preset {p['key']}" if p else "")
     await _index(request, conn, op_ids)
@@ -134,7 +181,7 @@ async def add_preset_operations(api_id: int, body: PresetBody, request: Request,
                                 conn: sqlite3.Connection = Depends(get_db)):
     """Bring an existing API up to date with a preset: its operations this API doesn't have yet."""
     a = _api(conn, api_id)
-    p = apis.preset(body.preset)
+    p = apis.preset(body.preset, conn)
     if p is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such preset")
     with transaction(conn):

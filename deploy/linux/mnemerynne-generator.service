@@ -6,11 +6,15 @@ After=network.target
 Type=simple
 User=mnemerynne
 Group=mnemerynne
-# The RX 580 is reached through /dev/dri (Vulkan). MNEMERYNNE_GPU, the llama.cpp
-# device (e.g. Vulkan1), comes from the gpu.conf drop-in that preinstall.sh
-# writes; without it the unit fails rather than picking the wrong card.
+# The RX 580 is reached through /dev/dri (Vulkan). Only Mesa's Radeon driver is
+# loaded, so the RX 580 is the only Vulkan device and always Vulkan0. With the
+# NVIDIA driver also visible, the Vulkan device numbers can swap after a driver
+# update, which put this model on the 1050 Ti next to the embedder.
+# VK_DRIVER_FILES is the current loader's name, VK_ICD_FILENAMES the older one.
 SupplementaryGroups=render video
 Environment=LD_LIBRARY_PATH=/opt/llama.cpp-vulkan
+Environment=VK_DRIVER_FILES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
+Environment=VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
 # Mesa keeps its compiled shaders here; without it every start recompiles them.
 CacheDirectory=mnemerynne-llama
 Environment=XDG_CACHE_HOME=/var/cache/mnemerynne-llama
@@ -26,7 +30,7 @@ Environment=XDG_CACHE_HOME=/var/cache/mnemerynne-llama
 # turns thinking off instead: JSON from the first token, but erinne-0.1 then
 # refused questions it answers fine when it may think (21 Oct 2026), so only
 # use that for a model trained and evaluated that way.
-ExecStart=/opt/llama.cpp-vulkan/llama-server --host 127.0.0.1 --port 8086 -dev ${MNEMERYNNE_GPU} -ngl 99 \
+ExecStart=/opt/llama.cpp-vulkan/llama-server --host 127.0.0.1 --port 8086 -dev Vulkan0 -ngl 99 \
     -m /opt/models/LFM2.5-2.6B-Q4_K_M.gguf -c 16384 -np 2 \
     --jinja --reasoning-format deepseek
 Restart=on-failure

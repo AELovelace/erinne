@@ -640,8 +640,102 @@ def openapi_operations(spec_text: str) -> list[dict]:
     return out
 
 
-def preset(key: str) -> dict | None:
-    return next((p for p in PRESETS if p["key"] == key), None)
+TEMPLATE_FORMAT = "mnemerynne-api-template"
+_TEMPLATE_KEYS = {"format", "name", "description", "base_url", "auth_type", "auth_header", "auth_user",
+                  "tls_check_hostname", "operations"}
+# Set by hand on the API, never brought in by a file.
+_TEMPLATE_REFUSED = {"secret", "token", "password", "credential", "ca_pem", "certificate", "ad_group",
+                     "claude_enabled"}
+_OP_KEYS = {"name", "description", "example_questions", "method", "path", "params", "body", "cache_seconds"}
+MAX_TEMPLATE_OPERATIONS = 50
+
+
+def parse_template(text: str) -> dict:
+    """An uploaded API template, checked like the admin page checks each field,
+    in the shape of PRESETS. Refuses credentials, certificates and access."""
+    try:
+        t = json.loads(text)
+    except ValueError as exc:
+        raise ApiError(f"The template isn't JSON ({exc}).") from None
+    if not isinstance(t, dict) or t.get("format") != TEMPLATE_FORMAT:
+        raise ApiError(f'A template is a JSON object with "format": "{TEMPLATE_FORMAT}".')
+    refused = sorted(_TEMPLATE_REFUSED & set(t))
+    if refused:
+        raise ApiError(f"A template can't hold “{refused[0]}”: credentials, certificates, the AD group and "
+                       "Claude's switch are set on the API after it's made.")
+    unknown = sorted(set(t) - _TEMPLATE_KEYS)
+    if unknown:
+        raise ApiError(f"Unknown template field “{unknown[0]}”.")
+    name = str(t.get("name") or "").strip()
+    if not name or len(name) > 80:
+        raise ApiError("The template needs a name (at most 80 characters).")
+    base_url = str(t.get("base_url") or "").strip().rstrip("/")
+    if not base_url.startswith(("https://", "http://")) or " " in base_url or len(base_url) > 500:
+        raise ApiError("The template's base_url must start with https:// (or http://).")
+    auth_type = t.get("auth_type", "none")
+    if auth_type not in ("none", "bearer", "header", "basic"):
+        raise ApiError("auth_type is one of none, bearer, header or basic.")
+    auth_header = str(t.get("auth_header") or "")
+    if auth_header and not all(c.isalnum() or c == "-" for c in auth_header):
+        raise ApiError("A header name has only letters, digits and dashes.")
+    ops = t.get("operations")
+    if not isinstance(ops, list) or not ops or len(ops) > MAX_TEMPLATE_OPERATIONS:
+        raise ApiError(f"The template needs 1 to {MAX_TEMPLATE_OPERATIONS} operations.")
+    out_ops, names = [], set()
+    for i, op in enumerate(ops, 1):
+        if not isinstance(op, dict):
+            raise ApiError(f"Operation {i} isn't an object.")
+        unknown = sorted(set(op) - _OP_KEYS)
+        if unknown:
+            raise ApiError(f"Operation {i} has an unknown field “{unknown[0]}”.")
+        op_name = str(op.get("name") or "").strip()
+        if not op_name or len(op_name) > 80 or op_name.lower() in names:
+            raise ApiError(f"Operation {i} needs a name of its own (at most 80 characters).")
+        names.add(op_name.lower())
+        method = op.get("method", "GET")
+        if method not in ("GET", "POST"):
+            raise ApiError(f"“{op_name}”: the method is GET or POST.")
+        # A body may be written as a JSON object, or as text when a {{name}} stands bare (e.g. [{{count}}]).
+        body = op.get("body", "")
+        if isinstance(body, (dict, list)):
+            body = json.dumps(body, ensure_ascii=False)
+        examples = op.get("example_questions", "")
+        if isinstance(examples, list):
+            examples = "\n".join(str(e).strip() for e in examples)
+        params = op.get("params", [])
+        cache = op.get("cache_seconds", 60)
+        if not isinstance(params, list) or len(params) > 30 or not all(isinstance(p, dict) for p in params):
+            raise ApiError(f"“{op_name}”: params is a list of at most 30 parameters.")
+        if not isinstance(cache, int) or isinstance(cache, bool) or not 0 <= cache <= 86400:
+            raise ApiError(f"“{op_name}”: cache_seconds is a whole number from 0 to 86400.")
+        if not isinstance(body, str) or len(body) > 20000 or not isinstance(examples, str) or len(examples) > 4000:
+            raise ApiError(f"“{op_name}”: the body or example questions are too long or the wrong kind.")
+        try:
+            check_specs(str(op.get("path") or ""), params, method, body)
+        except ApiError as exc:
+            raise ApiError(f"“{op_name}”: {exc}") from None
+        out_ops.append({"name": op_name, "description": str(op.get("description") or "")[:2000],
+                        "example_questions": examples, "method": method, "path": op["path"], "params": params,
+                        "body": body if method == "POST" else "", "cache_seconds": cache})
+    return {"name": name, "description": str(t.get("description") or "")[:20000], "base_url": base_url,
+            "auth_type": auth_type, "auth_header": auth_header, "auth_user": str(t.get("auth_user") or "")[:200],
+            "tls_check_hostname": 0 if t.get("tls_check_hostname") is False else 1, "operations": out_ops}
+
+
+def uploaded_templates(conn: sqlite3.Connection) -> list[dict]:
+    """Uploaded templates as presets, keyed "upload-<id>"."""
+    out = []
+    for r in conn.execute("SELECT id, template FROM api_templates ORDER BY name COLLATE NOCASE"):
+        out.append({**json.loads(r["template"]), "key": f"upload-{r['id']}", "template_id": r["id"]})
+    return out
+
+
+def preset(key: str, conn: sqlite3.Connection | None = None) -> dict | None:
+    """A built-in preset, or (given conn) an uploaded template."""
+    found = next((p for p in PRESETS if p["key"] == key), None)
+    if found is None and conn is not None:
+        found = next((p for p in uploaded_templates(conn) if p["key"] == key), None)
+    return found
 
 
 def fetch_certificate(base_url: str) -> tuple[str, str]:

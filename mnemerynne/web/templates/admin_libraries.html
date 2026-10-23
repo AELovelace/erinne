@@ -96,6 +96,11 @@
         <select id="new-api-preset" aria-label="Start from"></select>
         <button type="submit" class="small">Add</button>
       </form>
+      <div class="ax-new">
+        <button type="button" class="link small" id="upload-api-template">Upload template…</button>
+        <button type="button" class="link danger small" id="remove-api-template" hidden>Remove template</button>
+        <input type="file" id="api-template-file" accept=".json,application/json" hidden>
+      </div>
       <ul class="tree" id="api-list"></ul>
     </aside>
     <section class="ax-pane glass" id="api-pane" aria-live="polite">

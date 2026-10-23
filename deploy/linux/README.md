@@ -34,12 +34,10 @@ sudo restorecon -R /opt/mnemerynne
 
 `preinstall.sh` installs the packages (uv, ocrmypdf, the Vulkan build tools),
 creates the `mnemerynne` user, builds llama.cpp for Vulkan into
-`/opt/llama.cpp-vulkan`, downloads and checks Qwen3-Embedding, and finds
-which llama.cpp device is the RX 580 (`Vulkan1` when the 1050 Ti is also
-present). It writes that device to a `gpu.conf` drop-in for
-`mnemerynne-generator`. It's safe to run again, for example
-after adding or removing a card. `MNEMERYNNE_GPU=Vulkan0 sudo -E bash …` skips
-the detection.
+`/opt/llama.cpp-vulkan`, downloads and checks Qwen3-Embedding, and checks
+that the RX 580 is `Vulkan0` when only Mesa's Radeon Vulkan driver is loaded.
+`mnemerynne-generator` loads only that driver, so it can't land on the 1050 Ti.
+It's safe to run again, for example after adding or removing a card.
 
 If the repo is private, `git clone` asks for a GitHub username and a personal
 access token (read-only, for this repo) instead of a password.

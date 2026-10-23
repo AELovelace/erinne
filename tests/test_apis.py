@@ -1,5 +1,6 @@
 import base64
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -195,6 +196,79 @@ def test_admin_sets_up_an_api_from_a_preset(admin_client, conn):
     _upstream(lambda r: httpx.Response(200, json={"status": "ok", "sites": {"total": 12, "missing": 0}}))
     tested = admin_client.post(f"/api/admin/apis/operations/{tickets}/test", json={"params": {}}).json()
     assert tested["ok"] and {"path": "sites.total", "type": "number"} in tested["fields"]
+
+
+SYNCHRO = Path(__file__).parent.parent / "api-templates" / "synchrohrm.json"
+
+
+def test_admin_uploads_a_template_and_makes_an_api_from_it(admin_client, conn):
+    up = admin_client.post("/api/admin/apis/templates", json={"template": SYNCHRO.read_text("utf-8")})
+    assert up.status_code == 201 and up.json()["operations"] == 5 and not up.json()["replaced"]
+    listed = admin_client.get("/api/admin/apis").json()["presets"]
+    assert {"key": up.json()["key"], "name": "SynchroHRM", "uploaded": True} in [
+        {k: p[k] for k in ("key", "name", "uploaded")} for p in listed]
+
+    made = admin_client.post("/api/admin/apis", json={"preset": up.json()["key"]}).json()
+    detail = admin_client.get(f"/api/admin/apis/{made['id']}").json()
+    assert detail["base_url"] == "https://synchro.eternalhotels.com" and detail["auth_type"] == "bearer"
+    assert detail["credential"] == "missing" and detail["ad_group"] == "" and not detail["claude_enabled"]
+    ops = {o["name"]: o["id"] for o in detail["operations"]}
+    assert len(ops) == 5 and conn.execute("SELECT count(*) FROM api_examples").fetchone()[0] == 20
+
+    admin_client.put(f"/api/admin/apis/{made['id']}/credential", json={"secret": "shrm_x"})
+    seen = _upstream(lambda r: httpx.Response(200, json={"columns": [], "rows": []}))
+    assert admin_client.post(f"/api/admin/apis/operations/{ops['Parse failures']}/test",
+                             json={"params": {}}).json()["ok"]
+    assert admin_client.post(f"/api/admin/apis/operations/{ops['Recent mailbox polls']}/test",
+                             json={"params": {"count": 5}}).json()["ok"]
+    assert admin_client.post(f"/api/admin/apis/operations/{ops["Day's statistics vs NetSuite"]}/test",
+                             json={"params": {"property": "sleep-inn-wa102", "date": "2026-10-21"}}).json()["ok"]
+    sent = [json.loads(r.content) for r in seen]
+    assert seen[0].url == "https://synchro.eternalhotels.com/api/device/sql"
+    assert seen[0].headers["Authorization"] == "Bearer shrm_x"
+    assert sent[0]["params"] == ["-3 days"] and sent[1]["params"] == [5]
+    assert sent[2]["params"] == ["sleep-inn-wa102", "2026-10-21"] and sent[2]["maxRows"] == 500
+    refused = admin_client.post(f"/api/admin/apis/operations/{ops["Day's statistics vs NetSuite"]}/test",
+                                json={"params": {"property": "x'; DROP TABLE attachments;--", "date": "2026-10-21"}})
+    assert refused.status_code == 422 and len(seen) == 3
+
+    # Uploading again replaces it; removing it leaves the API alone.
+    again = admin_client.post("/api/admin/apis/templates", json={"template": SYNCHRO.read_text("utf-8")}).json()
+    assert again["replaced"] and again["key"] == up.json()["key"]
+    template_id = int(up.json()["key"].removeprefix("upload-"))
+    assert admin_client.delete(f"/api/admin/apis/templates/{template_id}").json() == {"status": "deleted"}
+    assert not [p for p in admin_client.get("/api/admin/apis").json()["presets"] if p["uploaded"]]
+    assert len(admin_client.get(f"/api/admin/apis/{made['id']}").json()["operations"]) == 5
+
+
+def _template(**changes):
+    t = {"format": "mnemerynne-api-template", "name": "Stats", "base_url": "https://stats.test",
+         "operations": [{"name": "Summary", "path": "/summary"}]}
+    t.update(changes)
+    return json.dumps(t)
+
+
+@pytest.mark.parametrize("text, message", [
+    ("not json", "isn't JSON"),
+    (json.dumps({"name": "Stats"}), '"format"'),
+    (_template(secret="tok"), "can't hold “secret”"),
+    (_template(ad_group="IT"), "can't hold “ad_group”"),
+    (_template(claude_enabled=True), "can't hold “claude_enabled”"),
+    (_template(base_url="ftp://x"), "base_url"),
+    (_template(operations=[]), "1 to 50 operations"),
+    (_template(operations=[{"name": "A", "path": "/../admin"}]), "stay under"),
+    (_template(operations=[{"name": "A", "path": "/a", "method": "POST", "body": {"q": "{{x}}"}}]), "{{x}}"),
+    (_template(operations=[{"name": "A", "path": "/a"}, {"name": "a", "path": "/b"}]), "name of its own"),
+    (_template(operations=[{"name": "A", "path": "/a", "headers": {}}]), "unknown field"),
+])
+def test_bad_templates_are_refused(admin_client, text, message):
+    r = admin_client.post("/api/admin/apis/templates", json={"template": text})
+    assert r.status_code == 422 and message in r.json()["detail"]
+
+
+def test_a_template_cant_take_a_built_in_preset_name(admin_client):
+    r = admin_client.post("/api/admin/apis/templates", json={"template": _template(name="wazuh")})
+    assert r.status_code == 409
 
 
 def test_admin_api_pages_are_admin_only(settings, conn, directory):

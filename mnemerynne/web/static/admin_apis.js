@@ -89,9 +89,13 @@
       list.appendChild(li);
     });
     const presetSelect = $("new-api-preset");
+    const chosen = presetSelect.value;
     presetSelect.replaceChildren();
-    [["", "Blank API…"]].concat(state.list.presets.map(function (p) { return [p.key, p.name + " (preset)"]; }))
-      .forEach(function (o) { const opt = el("option", null, o[1]); opt.value = o[0]; presetSelect.appendChild(opt); });
+    [["", "Blank API…"]].concat(state.list.presets.map(function (p) {
+      return [p.key, p.name + (p.uploaded ? " (template)" : " (preset)")];
+    })).forEach(function (o) { const opt = el("option", null, o[1]); opt.value = o[0]; presetSelect.appendChild(opt); });
+    if (state.list.presets.some(function (p) { return p.key === chosen; })) presetSelect.value = chosen;
+    showRemoveTemplate();
     const groups = $("api-groups");
     groups.replaceChildren.apply(groups, state.list.groups.map(function (g) { const o = el("option"); o.value = g; return o; }));
   }
@@ -118,6 +122,41 @@
     }
     const made = await run(function () { return api("POST", "/api/admin/apis", body); });
     if (made) { state.selected = made.id; await load(); }
+  });
+
+  // ----------------------------------------------------------- templates
+  function chosenTemplate() {
+    const key = $("new-api-preset").value;
+    return (state.list && state.list.presets || []).find(function (p) { return p.key === key && p.uploaded; });
+  }
+
+  function showRemoveTemplate() { $("remove-api-template").hidden = !chosenTemplate(); }
+
+  $("new-api-preset").addEventListener("change", showRemoveTemplate);
+
+  $("upload-api-template").addEventListener("click", function () { $("api-template-file").click(); });
+
+  $("api-template-file").addEventListener("change", async function () {
+    const file = this.files[0];
+    this.value = "";
+    if (!file) return;
+    const text = await file.text();
+    const done = await run(function () { return api("POST", "/api/admin/apis/templates", { template: text }); });
+    if (!done) return;
+    await load();
+    $("new-api-preset").value = done.key;
+    showRemoveTemplate();
+    alert((done.replaced ? "Replaced" : "Uploaded") + " the “" + done.name + "” template (" + done.operations +
+          " operations). Press Add to make an API from it.");
+  });
+
+  $("remove-api-template").addEventListener("click", async function () {
+    const t = chosenTemplate();
+    if (!t || !confirm("Remove the “" + t.name + "” template? APIs already made from it stay as they are.")) return;
+    if (await run(function () { return api("DELETE", "/api/admin/apis/templates/" + t.template_id); }) !== null) {
+      $("new-api-preset").value = "";
+      await load();
+    }
   });
 
   // -------------------------------------------------------------- detail
@@ -150,7 +189,8 @@
     head.appendChild(el("h2", null, "🔌 " + d.name));
     const enabled = checkbox("Enabled", d.enabled);
     enabled.box.addEventListener("change", function () { patch({ enabled: enabled.box.checked }); });
-    // A preset with this API's name (e.g. Wazuh): bring in operations it gained since this API was made.
+    // A preset or uploaded template with this API's name (e.g. Wazuh): bring in operations it gained since
+    // this API was made.
     const preset = (state.list && state.list.presets || []).find(function (p) {
       return p.name.toLowerCase() === d.name.toLowerCase();
     });
@@ -160,8 +200,9 @@
           return api("POST", "/api/admin/apis/" + d.id + "/preset-operations", { preset: preset.key });
         });
         if (done !== null) {
-          alert(done.added ? "Added " + done.added + " operation(s) from the " + preset.name + " preset."
-                           : "This API already has all of the preset's operations.");
+          const kind = preset.uploaded ? "template" : "preset";
+          alert(done.added ? "Added " + done.added + " operation(s) from the " + preset.name + " " + kind + "."
+                           : "This API already has all of the " + kind + "'s operations.");
           await open(d.id);
         }
       }));
