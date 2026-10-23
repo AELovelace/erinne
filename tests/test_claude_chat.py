@@ -101,7 +101,7 @@ def test_only_the_claude_group_with_a_key_gets_claude(client, claude, conn, sett
     events = _ask(client, "How do I run the night audit?")
     route = next(e for e in events if e["type"] == "route")
     assert route["claude"] and route["fallback"] == "the external API isn't turned on for you"
-    assert _final(events)["route"] == "search" and claude.calls == []
+    assert claude.calls == []                                                   # Erynne answered instead
 
     client.post("/logout")
     _login(client, "alice")
@@ -189,7 +189,6 @@ def test_earlier_answers_and_memories_go_to_claude_only_if_claude_wrote_them(cli
     _login(client, "alice")
     events = _ask(client, "How do I run the night audit?", claude=False)          # Erynne answers this one
     conversation = next(e for e in events if e["type"] == "conversation")["conversation_id"]
-    assert _final(events)["route"] != "agent"
     claude.turns(ToolTurn("Claude's answer."))
     _final(_ask(client, "And after that?", conversation_id=conversation))
     messages = claude.calls[-1][0]

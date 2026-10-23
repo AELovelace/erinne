@@ -125,6 +125,20 @@ def propose_api(conn: sqlite3.Connection, caller, op: sqlite3.Row, params: dict 
     ).lastrowid
 
 
+def in_agents_folder(conn: sqlite3.Connection, user_id: int, row: sqlite3.Row) -> bool:
+    """A file proposal that stays inside the person's own Agents folder: all that people outside the
+    agent group may change (accounts.is_agent_user), checked when it's proposed and when it's applied."""
+    own = permissions.private_collection_id(conn, user_id)
+    if row["kind"] == "create":
+        place = (row["collection_id"], row["folder_id"])
+    elif row["kind"] == "edit":
+        f = conn.execute("SELECT collection_id, folder_id FROM files WHERE id = ?", (row["file_id"],)).fetchone()
+        place = (f["collection_id"], f["folder_id"]) if f else (None, None)
+    else:
+        return False
+    return own is not None and place[0] == own and place[1] in editing._agents_subtree(conn, own)
+
+
 def where(conn: sqlite3.Connection, collection_id: int, folder_id: int | None) -> str:
     coll = conn.execute("SELECT kind, name FROM collections WHERE id = ?", (collection_id,)).fetchone()
     path = "/".join(p["name"] for p in fs.folder_path(conn, folder_id))

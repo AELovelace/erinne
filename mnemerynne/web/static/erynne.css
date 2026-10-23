@@ -126,6 +126,13 @@ label { display: block; margin: .9rem 0; font-size: .95rem; }
                height: calc(100vh - 3.6rem); }
 .history { padding: 1rem; overflow-y: auto; }
 .history #new-chat { width: 100%; }
+/* Advanced settings: the tool panel on the right of the chat (chat.js). */
+.chat-layout.tools-open { grid-template-columns: 17rem 1fr 17rem; }
+.tools-panel h2 { margin: 0 0 .3rem; }
+.tools-panel .tools-group { margin: .9rem 0 .2rem; font-size: .78rem; text-transform: uppercase;
+                            letter-spacing: .04em; color: var(--muted); }
+.tools-panel .tool-items { margin: 0; }
+.tools-panel .tool-items li { justify-content: flex-start; flex-wrap: wrap; gap: .1rem .4rem; padding: .1rem 0; }
 .history ul { list-style: none; padding: 0; margin: 1rem 0 0; }
 .history li { display: flex; align-items: center; justify-content: space-between; gap: .5rem;
               padding: .4rem .6rem; border-radius: 10px; }
@@ -531,6 +538,7 @@ button.danger-fill { background: var(--error); }
 @media (max-width: 760px) {
   .chat-layout { grid-template-columns: 1fr; padding: .5rem; }
   .history { display: none; }
+  .tools-panel:not([hidden]) { display: block; }   /* below the chat on phones */
   .msg.user { max-width: 92%; }
   .msg.assistant { margin-right: 0; }
   .inbox, .doc { margin: .75rem; padding: 1.1rem; }

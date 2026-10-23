@@ -263,7 +263,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             "LIMIT 1").fetchone() is not None
         claude = claude_chat.is_claude_user(conn, user, app.state.directory)
         return _page(request, "chat.html", user, conn, active="chat", has_files=has_files,
-                     agent=app.state.agent.allowed(conn, user), claude=claude,
+                     agent=app.state.agent.allowed(conn, user), agent_full=app.state.agent.full(conn, user),
+                     claude=claude,
                      claude_key=claude and claude_chat.status(conn, settings, user["id"])["key"] == "set")
 
     @app.get("/files", response_class=HTMLResponse)
@@ -277,8 +278,10 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             "username": user["username"],
             "role": user["role"],
             "collections": [dict(c) for c in permissions.readable_collections(conn, user["id"])],
-            # In the agent group with a model set (the server checks again on every question).
+            # Erynne's tools (everyone), and whether they may change files anywhere (the agent group);
+            # the server checks again on every question.
             "agent": app.state.agent.allowed(conn, user),
+            "agent_full": app.state.agent.full(conn, user),
         }
 
     return app

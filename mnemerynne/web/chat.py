@@ -40,6 +40,7 @@ class AskBody(BaseModel):
     scope: Scope | None = None  # "search in" one collection or folder
     tools: bool = True          # agent group members: let Erynne use tools for this question
     claude: bool = False        # Claude group members: have Claude answer, with their own key
+    disabled_tools: list[str] = Field(default_factory=list, max_length=300)   # switched off in Advanced settings
 
 
 class FeedbackBody(BaseModel):
@@ -156,7 +157,7 @@ async def ask(body: AskBody, request: Request, user=Depends(api_user),
         final = None
         try:
             async for event in graph_mod.run_turn(app.state.graph, user_id, conversation_id, question, scope,
-                                                  body.tools, body.claude):
+                                                  body.tools, body.claude, [t[:100] for t in body.disabled_tools]):
                 if event["type"] == "final":
                     final = event
                 else:

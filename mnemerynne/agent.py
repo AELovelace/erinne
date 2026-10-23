@@ -1,9 +1,12 @@
 """Erynne with tools: the agent flow in chat.
 
-Members of the AD group picked on Settings (accounts.agent_group) get Erynne
-with the same tools Claude has through /mcp: search, read, browse, view
-pages, internal APIs, and editing .txt/.md/.docx/.xlsx files. Everyone else
-keeps the fixed answering flow in graph.py.
+Everyone gets Erynne with the same tools Claude has through /mcp: search,
+read, browse, view pages, internal APIs, and editing .txt/.md/.docx/.xlsx
+files. The AD group picked on Settings (accounts.agent_group) decides how much
+she may change: its members anywhere they may edit, plus email drafts and API
+actions; everyone else only files in their own Agents folder (checked when
+proposed and when applied). People can switch single tools off for their
+questions (chat's Advanced settings); that only ever narrows what they get.
 
     route -> agent: model turn -> tool calls -> model turn -> ... -> answer
 
@@ -82,6 +85,21 @@ HISTORY_TURNS = 4
 # larger than a turn, so fit() never shortens the history it must get back intact.
 CLAUDE_LIMITS = {"max_tokens": 16000, "reasoning_tokens": 0, "context_tokens": 900_000, "thinking": False}
 DELEGATE_TOOL = "ask_minerynne"
+# Tools that change files; outside the agent group only in the person's Agents folder.
+FILE_WRITE_TOOLS = {"edit_text", "edit_document", "edit_spreadsheet", "create_file"}
+# What the chat's tool panel calls each tool, by group.
+TOOL_GROUPS = {
+    "Documents": {"search_documents": "Search documents", "read_passage": "Read passages",
+                  "list_libraries": "List libraries", "browse_folder": "Browse folders",
+                  "find_files": "Find files by name", "view_page": "Show PDF pages", "open_file": "Open files",
+                  "list_versions": "Earlier versions"},
+    "Changes to files": {"create_file": "Create files", "edit_text": "Edit text and Markdown",
+                         "edit_document": "Edit Word documents", "edit_spreadsheet": "Edit spreadsheets"},
+    "Microsoft 365": {"search_mail": "Search mail", "recent_mail": "Recent mail", "read_mail": "Read an email",
+                      "calendar": "Calendar", "search_sharepoint": "Search SharePoint",
+                      "draft_reply": "Draft replies", "draft_mail": "Draft new emails"},
+}
+MAIL_WRITE_TOOLS = {"draft_reply", "draft_mail"}
 MAX_SUBAGENTS = 2           # MinErynnes (local Erynne instances) Claude runs at once (the generator's -np 2)
 # Tools a subagent may use: reading only. view_page hands back an image, which
 # neither model path here passes on, so neither gets it.
@@ -490,10 +508,12 @@ class AgentCaller(Caller):
     """The person, as the tools see them; carries the conversation (for
     proposals) and the "Search in…" place picked in chat (for searches)."""
 
-    def __init__(self, user_id: int, username: str, conversation_id: str | None, scope: dict | None = None):
+    def __init__(self, user_id: int, username: str, conversation_id: str | None, scope: dict | None = None,
+                 agents_only: bool = False):
         super().__init__(user_id, username, None, True)
         object.__setattr__(self, "conversation_id", conversation_id)
         object.__setattr__(self, "scope", scope)
+        object.__setattr__(self, "agents_only", agents_only)   # outside the agent group
 
 
 # ---------------------------------------------------------------- subagents
@@ -578,8 +598,8 @@ class Agent:
             if user is None or not user["active"]:
                 return None
             cfg = model_config(conn)
-            if not accounts.is_agent_user(conn, user, self.get_directory()):
-                return None
+            # Everyone gets the agent; the agent group may change more (see the module docstring).
+            cfg["full"] = accounts.is_agent_user(conn, user, self.get_directory())
             cfg["places"] = _places(conn, fs.Access.of(conn, user_id))
             return cfg, user["username"]
         finally:
@@ -597,13 +617,54 @@ class Agent:
             if creds is None:
                 return "nokey"
             local = model_config(conn)
+            local["full"] = accounts.is_agent_user(conn, user, self.get_directory())
             local["places"] = _places(conn, fs.Access.for_claude(conn, user_id))
             return {**local, **CLAUDE_LIMITS}, local, user["username"], *creds
         finally:
             conn.close()
 
     def allowed(self, conn: sqlite3.Connection, user: sqlite3.Row) -> bool:
+        """Everyone active gets the agent (the agent group only changes how much it may change)."""
+        return bool(user["active"])
+
+    def full(self, conn: sqlite3.Connection, user: sqlite3.Row) -> bool:
+        """May change files anywhere they may edit, draft email and propose API actions."""
         return accounts.is_agent_user(conn, user, self.get_directory())
+
+    async def tool_list(self, user_id: int) -> dict:
+        """The tools this person can switch on or off in chat, by group, and whether they may change
+        files anywhere (the agent group) or only in their Agents folder."""
+        gate = await asyncio.to_thread(self._gate, user_id)
+        if gate is None:
+            return {"tools": [], "full": False}
+        full = gate[0]["full"]
+        listed = {s["function"]["name"] for s in await self.specs()} - GENERIC_API_TOOLS
+        api_specs, api_map = await asyncio.to_thread(self._api_tools, user_id)
+        mail_specs = (await asyncio.to_thread(self._mail_tools, user_id))[0] if full else []
+        out = []
+        for group, names in TOOL_GROUPS.items():
+            available = listed | {s["function"]["name"] for s in mail_specs}
+            for name, label in names.items():
+                if name in available:
+                    out.append({"name": name, "label": label, "group": group,
+                                "write": name in FILE_WRITE_TOOLS | MAIL_WRITE_TOOLS,
+                                "note": "" if full or name not in FILE_WRITE_TOOLS else "Agents folder only"})
+        for s in api_specs:
+            tool = api_map[s["function"]["name"]]
+            if tool.action and not full:
+                continue
+            out.append({"name": s["function"]["name"], "label": f"{tool.api} · {tool.operation}",
+                        "group": "Internal systems", "write": tool.action,
+                        "note": "you run it" if tool.action else ""})
+        conn = db.connect(self.settings.db_path)
+        try:
+            user = users.get_user_by_id(conn, user_id)
+            if claude_chat.is_claude_user(conn, user, self.get_directory()):
+                out.append({"name": DELEGATE_TOOL, "label": "MinErynnes", "group": "External API",
+                            "write": False, "note": "helpers the external API may send"})
+        finally:
+            conn.close()
+        return {"tools": out, "full": full}
 
     def _client_for(self, cfg: dict) -> Any:
         key = (cfg["timeout"], cfg["reasoning_tokens"])
@@ -718,6 +779,13 @@ class Agent:
                     raise ToolError(f"{call.name} doesn't take {', '.join(sorted(unknown))}; it takes "
                                     f"{', '.join(sorted(self._names[call.name])) or 'nothing'}.")
                 out, file_ids = getattr(tools, call.name)(conn, caller, **call.arguments)
+                if call.name in FILE_WRITE_TOOLS and getattr(caller, "agents_only", False) and out.get("proposal"):
+                    row = proposals.get(conn, out["proposal"], caller.user_id)
+                    if not proposals.in_agents_folder(conn, caller.user_id, row):
+                        proposals.dismiss(conn, self.settings, caller.user_id, row["id"])
+                        conn.execute("DELETE FROM agent_proposals WHERE id = ?", (row["id"],))
+                        raise ToolError(f"I can only change files in {caller.username}'s Agents folder "
+                                        f"(“{permissions.PRIVATE_LABEL} / Agents”). Put it there instead.")
                 out = compact_sheet(sources.number(conn, call.name, _strip_links(out)))
                 ok = True
             except (ToolError, editing.EditError, fs.FsError, TypeError, ValueError) as exc:
@@ -746,7 +814,7 @@ class Agent:
 
     # ---------------------------------------------------------------- run
     def _messages(self, state: dict, username: str, places: str, claude: bool = False,
-                  delegate: bool = False) -> list[dict]:
+                  delegate: bool = False, agents_only: bool = False) -> list[dict]:
         """For Claude: no memories, and only earlier answers Claude wrote (claude_chat.py)."""
         system = SYSTEM_PROMPT.format(name=ASSISTANT_NAME, user=username, today=date.today().isoformat(),
                                       places=f"they can search {places}" if places else "they have no documents yet")
@@ -755,6 +823,9 @@ class Agent:
                 f"{DELEGATE_TOOL} hands a reading-heavy part to a MinErynne (up to {MAX_SUBAGENTS} at once); she "
                 f"reports back with [n] markers you can cite." if delegate
                 else "No MinErynnes are available right now; do the reading yourself."))
+        if agents_only:
+            system += (f"\n- You can only create or change files in {username}'s Agents folder "
+                       f"(“{permissions.PRIVATE_LABEL} / Agents”), nowhere else.")
         memories = [] if claude else state.get("memories") or []
         if memories:
             system += "\n\nWhat " + username + " has told you about themselves:\n" + "\n".join(f"- {m}" for m in memories)
@@ -783,17 +854,24 @@ class Agent:
                 return None
             cfg, username = gate
             local, model, client, tools = None, AGENT_MODEL_NAME, self._client_for(gate[0]), self.tools
+        full = bool(cfg.get("full"))
+        off = set(state.get("disabled_tools") or [])   # switched off in chat's tool panel
         base = [s for s in await self.specs()
                 if s["function"]["name"] not in GENERIC_API_TOOLS | (NO_IMAGES if claude else set())]
         api_specs, api_map = await asyncio.to_thread(self._api_tools, state["user_id"], claude)
-        # Mail, calendar and SharePoint never go to Claude.
-        mail_specs, mail = ([], None) if claude else await asyncio.to_thread(self._mail_tools, state["user_id"])
+        if not full:   # API actions: the agent group only
+            api_specs = [s for s in api_specs if not api_map[s["function"]["name"]].action]
+        # Mail, calendar and SharePoint: the agent group, and never Claude.
+        mail_specs, mail = (([], None) if claude or not full
+                            else await asyncio.to_thread(self._mail_tools, state["user_id"]))
         delegate = None
-        if claude and await self.reachable(local):
+        if claude and DELEGATE_TOOL not in off and await self.reachable(local):
             delegate = _Delegate(self, local, username, asyncio.Semaphore(MAX_SUBAGENTS))
-        specs = base + api_specs + mail_specs + ([DELEGATE_SPEC] if delegate else [])
-        caller = AgentCaller(state["user_id"], username, conversation_id, state.get("scope"))
-        messages = self._messages(state, username, cfg.get("places", ""), claude, delegate is not None)
+        specs = [s for s in base + api_specs + mail_specs + ([DELEGATE_SPEC] if delegate else [])
+                 if s["function"]["name"] not in off]
+        caller = AgentCaller(state["user_id"], username, conversation_id, state.get("scope"), agents_only=not full)
+        messages = self._messages(state, username, cfg.get("places", ""), claude, delegate is not None,
+                                  agents_only=not full)
         sources, proposed, progress = Sources(), [], {"ran": 0}
         text = None
         try:

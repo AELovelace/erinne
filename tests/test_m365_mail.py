@@ -231,4 +231,8 @@ def test_mail_tools_are_only_for_the_agent_group(client, conn, world):
     client.post("/logout")
     client.post("/login", data={"username": "bob", "password": "password123"})
     _ask(client, "what's in my inbox?")
-    assert client.agent_llm.calls == []                                   # bob isn't in the agent group
+    offered = {t["function"]["name"] for t in client.agent_llm.calls[-1][2]}   # bob gets Erynne's tools...
+    assert "search_documents" in offered
+    assert not offered & {"search_mail", "recent_mail", "read_mail", "calendar", "draft_reply", "draft_mail",
+                          "search_sharepoint"}                              # ...but no mail: not in the agent group
+    assert not [t for t in client.get("/api/me/tools").json()["tools"] if t["group"] == "Microsoft 365"]

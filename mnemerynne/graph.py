@@ -58,6 +58,7 @@ class State(TypedDict, total=False):
     api_operation: int   # the API operation the question matched (route "api")
     use_tools: bool      # agent group members may switch the agent off for a question
     use_claude: bool     # Claude group members may have Claude answer (agent.py, claude_chat.py)
+    disabled_tools: list[str]   # tools switched off in chat's Advanced settings (agent.py)
     proposals: list[int]   # file changes the agent proposed this turn (route "agent")
     model: str | None    # the agent model's label, when it answered
     answer: dict
@@ -398,7 +399,7 @@ def _source_view(n: int, hit: retrieval.Hit) -> dict:
 
 
 async def run_turn(graph, user_id: int, conversation_id: str, question: str, scope: dict | None = None,
-                   use_tools: bool = True, use_claude: bool = False):
+                   use_tools: bool = True, use_claude: bool = False, disabled_tools: list[str] | None = None):
     """Run one question through the graph, yielding stream events, then a final
     {"type": "final", ...} event with the answer, cited sources and timings."""
     trace: list = []
@@ -409,7 +410,7 @@ async def run_turn(graph, user_id: int, conversation_id: str, question: str, sco
         config = {"configurable": {"thread_id": conversation_id}}
         async for event in graph.astream({"user_id": user_id, "scope": scope, "question": question, "hits": [],
                                           "answer": {}, "route": "search", "use_tools": use_tools,
-                                          "use_claude": use_claude,
+                                          "use_claude": use_claude, "disabled_tools": disabled_tools or [],
                                           "proposals": [], "model": None}, config, stream_mode="custom"):
             if event.get("type") == "sources":
                 sources = event["sources"]

@@ -1052,10 +1052,11 @@
     const box = $("agent-settings");
     box.replaceChildren();
     if (data.groups && data.groups.length) fillDatalist("domain-groups", data.groups);
-    box.appendChild(el("p", "muted", "Members of this " + (data.domain || "domain") + " group get Erynne with " +
-      "tools in chat: she searches, opens files, asks internal systems and drafts changes to .txt, .md, .docx " +
-      "and .xlsx files, which they apply with a click. Everyone else keeps the normal answers. Leave it empty " +
-      "to turn the agent off."));
+    box.appendChild(el("p", "muted", "Everyone gets Erynne with tools in chat: she searches, opens files and asks " +
+      "internal systems, and drafts changes to .txt, .md, .docx and .xlsx files that people apply with a click. " +
+      "Members of this " + (data.domain || "domain") + " group may have her change files anywhere they may edit, " +
+      "draft their email and propose API actions; everyone else only in their own Agents folder. People can " +
+      "switch single tools off in chat (Advanced settings). Leave it empty to keep everyone to their Agents folder."));
     if (!data.enabled) box.appendChild(el("p", "error", "No AD domain is configured on the server (MNEMERYNNE_AD_DOMAIN), so nobody can be in the group."));
 
     const groupForm = el("form", "ax-new");

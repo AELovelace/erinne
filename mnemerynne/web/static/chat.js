@@ -10,7 +10,68 @@
   const list = document.getElementById("conversations");
   let conversationId = null;
   let scope = null;  // {collection_id, folder_id, label} or null for everything
-  const useTools = document.getElementById("use-tools");   // only for the agent group
+  // Advanced settings: a panel of Erynne's tools to switch single ones off. Remembered in this browser;
+  // the server only ever narrows what a person may use, never widens it.
+  const advanced = document.getElementById("advanced");
+  const toolsPanel = document.getElementById("tools-panel");
+  const OFF_KEY = "erynne.toolsOff", OPEN_KEY = "erynne.advanced";
+  function remembered(key, fallback) {
+    try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch (e) { return fallback; }
+  }
+  function remember(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* storage off */ }
+  }
+  let toolsOff = new Set(remembered(OFF_KEY, []));
+  let toolsLoaded = false;
+
+  async function loadTools() {
+    const box = document.getElementById("tool-list");
+    const data = await fetch("/api/me/tools").then(function (r) { return r.ok ? r.json() : null; })
+                                              .catch(function () { return null; });
+    box.replaceChildren();
+    if (!data) { box.appendChild(el("p", "error small", "Couldn't load the tools.")); return; }
+    toolsLoaded = true;
+    let group = null, list = null;
+    data.tools.forEach(function (t) {
+      if (t.group !== group) {
+        group = t.group;
+        box.appendChild(el("h3", "small tools-group", group));
+        list = box.appendChild(el("ul", "tool-items"));
+      }
+      const li = el("li");
+      const label = el("label", "tools-toggle small");
+      const check = el("input");
+      check.type = "checkbox";
+      check.checked = !toolsOff.has(t.name);
+      check.addEventListener("change", function () {
+        if (check.checked) toolsOff.delete(t.name); else toolsOff.add(t.name);
+        remember(OFF_KEY, Array.from(toolsOff));
+      });
+      label.append(check, document.createTextNode(" " + (t.write ? "✏️ " : "") + t.label));
+      li.appendChild(label);
+      if (t.note) li.appendChild(el("span", "muted small", " " + t.note));
+      list.appendChild(li);
+    });
+  }
+
+  function showTools(open) {
+    if (!toolsPanel) return;
+    toolsPanel.hidden = !open;
+    toolsPanel.parentElement.classList.toggle("tools-open", open);
+    remember(OPEN_KEY, open);
+    if (open && !toolsLoaded) loadTools();
+  }
+  if (advanced) {
+    advanced.checked = !!remembered(OPEN_KEY, false);
+    showTools(advanced.checked);
+    advanced.addEventListener("change", function () { showTools(advanced.checked); });
+    document.getElementById("tools-reset").addEventListener("click", function () {
+      toolsOff = new Set();
+      remember(OFF_KEY, []);
+      toolsLoaded = false;
+      loadTools();
+    });
+  }
   const useClaude = document.getElementById("use-claude");  // only for the Claude group, with a key saved
   if (useClaude) {
     // Remembered in this browser only; the server checks the group and key on every question.
@@ -240,7 +301,7 @@
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: question, conversation_id: conversationId,
                                scope: scope ? { collection_id: scope.collection_id, folder_id: scope.folder_id } : null,
-                               tools: useTools ? useTools.checked : true,
+                               tools: true, disabled_tools: Array.from(toolsOff),
                                claude: useClaude ? useClaude.checked : false }) });
       if (resp.status === 401) { window.location.href = "/login"; return; }
       if (!resp.ok) {

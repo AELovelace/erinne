@@ -14,6 +14,27 @@ def _no_share():
     share.configure(Settings(_env_file=None), None)
 
 
+class _NoAgentModel:
+    """Stands in for the agent's model where a test doesn't give one (Services.agent_llm): never
+    answers, so questions take the normal flow without trying the network."""
+
+    async def reachable(self):
+        return False
+
+    async def chat_tools(self, *args, **kwargs):
+        raise OSError("no agent model in tests")
+
+    async def aclose(self):
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _no_agent_model(monkeypatch):
+    # Everyone gets the agent now: without this, every chat test would try 127.0.0.1:8081.
+    from mnemerynne import agent
+    monkeypatch.setattr(agent.Agent, "_default_client", lambda self, cfg: _NoAgentModel())
+
+
 @pytest.fixture
 def settings(tmp_path):
     # Small vectors keep tests fast; production uses the embedder's real size.

@@ -19,14 +19,6 @@ from mnemerynne.web.deps import admin_user, api_user, get_db, is_admin, page_use
 router = APIRouter()
 
 
-def _agent_user(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
-    """Still in the agent group, or the Claude group (checked again for every Apply)."""
-    directory = request.app.state.directory
-    if not (accounts.is_agent_user(conn, user, directory) or claude_chat.is_claude_user(conn, user, directory)):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Erynne's tools aren't turned on for you.")
-    return user
-
-
 def _refused(exc: Exception) -> HTTPException:
     return HTTPException(getattr(exc, "status", status.HTTP_400_BAD_REQUEST), str(exc))
 
@@ -35,16 +27,26 @@ def _refused(exc: Exception) -> HTTPException:
 @router.post("/api/agent/proposals/{proposal_id}/apply")
 def apply_proposal(proposal_id: int, request: Request, user=Depends(api_user),
                    conn: sqlite3.Connection = Depends(get_db)):
-    """File changes and mail drafts: still in the agent or Claude group. API actions check
-    instead that the person may still use the operation (they can come from Claude's connector)."""
+    """Mail drafts: still in the agent group. File changes: the agent group anywhere they may edit,
+    everyone else only in their own Agents folder. API actions check instead that the person may still
+    use the operation (they can come from Claude's connector)."""
     from mnemerynne import m365
 
     try:
-        if proposals.get(conn, proposal_id, user["id"])["kind"] != "api":
-            _agent_user(request, user, conn)
+        row = proposals.get(conn, proposal_id, user["id"])
+        if row["kind"] != "api" and not accounts.is_agent_user(conn, user, request.app.state.directory):
+            if row["kind"] == "mail" or not proposals.in_agents_folder(conn, user["id"], row):
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "Outside the agent group, Erynne only changes files "
+                                                               "in your Agents folder.")
         return proposals.apply(conn, request.app.state.settings, user, proposal_id, request.app.state.directory)
     except (editing.EditError, proposals.ProposalError, m365.M365Error) as exc:
         raise _refused(exc) from None
+
+
+@router.get("/api/me/tools")
+async def my_tools(request: Request, user=Depends(api_user)):
+    """The tools chat's Advanced settings lists for this person (switching one on never adds access)."""
+    return await request.app.state.agent.tool_list(user["id"])
 
 
 @router.get("/proposals", response_class=HTMLResponse)

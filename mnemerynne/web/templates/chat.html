@@ -21,8 +21,8 @@
     <div class="ask-scope">
       <button type="button" class="scope-chip" id="scope" title="Choose which documents to search">🔎 <span id="scope-label">All my documents</span> ▾</button>
       {% if agent %}
-      <label class="tools-toggle small" title="Erynne can search, open files, ask internal systems and draft changes for you to apply">
-        <input type="checkbox" id="use-tools" checked> 🛠 Use tools
+      <label class="tools-toggle small" title="Choose which tools {{ assistant_name }} may use for your questions">
+        <input type="checkbox" id="advanced" aria-controls="tools-panel"> ⚙ Advanced settings
       </label>
       {% endif %}
       {% if claude and claude_key %}
@@ -38,6 +38,15 @@
       <button type="submit" id="send">Ask</button>
     </form>
   </main>
+  {% if agent %}
+  <aside class="history tools-panel" id="tools-panel" aria-label="Tools" hidden>
+    <h2 class="small">Tools</h2>
+    <p class="muted small">What {{ assistant_name }} may use for your questions. Switching one off applies from your
+      next question.{% if not agent_full %} She can only change files in your Agents folder.{% endif %}</p>
+    <div id="tool-list" aria-live="polite"><p class="muted small">Loading…</p></div>
+    <button type="button" class="link small" id="tools-reset">Switch them all back on</button>
+  </aside>
+  {% endif %}
 </div>
 <script src="{{ static('picker.js') }}"></script>
 <script src="{{ static('agent.js') }}"></script>

@@ -97,18 +97,22 @@ def _proposal(events):
 
 
 # --------------------------------------------------------------------- gate
-def test_only_the_agent_group_gets_tools(client, agent_llm, conn):
-    _login(client, "bob")
-    assert client.get("/api/me").json()["agent"] is False
-    assert 'id="use-tools"' not in client.get("/").text
-    final = _final(_ask(client, "How do I run the night audit?"))
-    assert final["route"] == "search" and agent_llm.calls == []
+def test_everyone_gets_tools_and_the_agent_group_may_change_more(client, agent_llm, conn):
+    _login(client, "bob")                                                   # not in the agent group
+    me = client.get("/api/me").json()
+    assert me["agent"] is True and me["agent_full"] is False
+    page = client.get("/").text
+    assert 'id="advanced"' in page and "She can only change files in your Agents folder." in page
+    agent_llm.turns(ToolTurn("Hello Bob."))
+    assert _final(_ask(client, "How do I run the night audit?"))["route"] == "agent"
+    assert "only create or change files in bob's Agents folder" in agent_llm.calls[0][0][0]["content"]
 
     client.post("/logout")
     _login(client, "alice")
+    agent_llm.calls.clear()
     answered = len(client.llm.answer_prompts)
-    assert client.get("/api/me").json()["agent"] is True
-    assert 'id="use-tools"' in client.get("/").text
+    assert client.get("/api/me").json()["agent_full"] is True
+    assert "only change files in your Agents folder" not in client.get("/").text
     agent_llm.turns(call("search_documents", query="night audit"),
                     lambda m: ToolTurn(f"Run it after midnight {last_tool(m)['results'][0]['cite']}."))
     events = _ask(client, "How do I run the night audit?")
@@ -130,11 +134,28 @@ def test_only_the_agent_group_gets_tools(client, agent_llm, conn):
     assert tuple(saved) == ("agent", agent_mod.AGENT_MODEL_NAME)
 
 
-def test_no_group_means_nobody(client, agent_llm, conn, settings):
+def test_no_group_means_everyone_works_in_their_agents_folder(client, agent_llm, conn, settings):
     _login(client, "alice")
     accounts.set_agent_group(conn, "")
-    assert _final(_ask(client, "night audit"))["route"] == "search"
-    assert client.get("/api/me").json()["agent"] is False and agent_llm.calls == []
+    assert _final(_ask(client, "night audit"))["route"] == "agent"
+    assert client.get("/api/me").json()["agent_full"] is False
+
+
+def test_single_tools_can_be_switched_off(client, agent_llm):
+    _login(client, "alice")
+    listed = client.get("/api/me/tools").json()
+    tools = {t["name"]: t for t in listed["tools"]}
+    assert listed["full"] and tools["create_file"]["write"] and not tools["search_documents"]["write"]
+    assert tools["create_file"]["group"] == "Changes to files" and tools["create_file"]["note"] == ""
+    with client.stream("POST", "/api/ask", json={"question": "night audit",
+                                                 "disabled_tools": ["create_file", "edit_text"]}) as r:
+        r.read()
+    offered = agent_llm.calls[-1][1]
+    assert "search_documents" in offered and not {"create_file", "edit_text"} & set(offered)
+    client.post("/logout")
+    _login(client, "bob")
+    bob = {t["name"]: t for t in client.get("/api/me/tools").json()["tools"]}
+    assert bob["create_file"]["note"] == "Agents folder only"
 
 
 def test_tools_can_be_switched_off_for_a_question(client, agent_llm):
@@ -210,11 +231,22 @@ def test_apply_and_tools_follow_the_rules(client, agent_llm, conn, directory, wo
     assert "can't change files here yourself" in final["answer"]
     assert conn.execute("SELECT ok FROM agent_calls ORDER BY id DESC").fetchone()[0] == 0
 
-    agent_llm.turns(call("create_file", name="y.md", content="y"), ToolTurn("Drafted."))
-    made = _proposal(_ask(client, "make y"))
-    directory.members["alice"] = {"staff"}                                  # left the group
-    assert client.post(f"/api/agent/proposals/{made['id']}/apply").status_code == 403
-    assert client.post(f"/api/agent/proposals/{made['id']}/dismiss").json()["status"] == "dismissed"
+    conn.execute("UPDATE collections SET claude_edit = 1 WHERE id = ?", (brand,))   # AI edits allowed in Brand
+    permissions.grant_user(conn, brand, world["alice"], can_write=True)
+    agent_llm.turns(call("create_file", name="y.md", content="y", library="Brand"), ToolTurn("Drafted."))
+    in_brand = _proposal(_ask(client, "make y in Brand"))
+    agent_llm.turns(call("create_file", name="z.md", content="z"), ToolTurn("Drafted."))
+    in_agents = _proposal(_ask(client, "make z"))
+    directory.members["alice"] = {"staff"}                                  # left the agent group
+    assert client.post(f"/api/agent/proposals/{in_brand['id']}/apply").status_code == 403   # outside Agents
+    assert client.post(f"/api/agent/proposals/{in_agents['id']}/apply").json()["status"] == "applied"
+    assert client.post(f"/api/agent/proposals/{in_brand['id']}/dismiss").json()["status"] == "dismissed"
+    # And she can't propose outside her Agents folder any more, though she may edit Brand herself.
+    agent_llm.turns(call("create_file", name="w.md", content="w", library="Brand"),
+                    lambda m: ToolTurn("Couldn't: " + last_tool(m)["error"]))
+    assert "can only change files in alice's Agents folder" in _final(_ask(client, "make w in Brand"))["answer"]
+    assert conn.execute("SELECT count(*) FROM agent_proposals WHERE name = 'w.md'").fetchone()[0] == 0
+    made = in_brand
     client.post("/logout")
     _login(client, "bob")
     assert client.post(f"/api/agent/proposals/{made['id']}/dismiss").status_code == 404    # not his
@@ -306,9 +338,11 @@ def test_old_own_address_settings_are_ignored(conn, settings):
     assert agent_mod.model_config(conn) == {**agent_mod.MODEL_DEFAULTS, "max_steps": 3}
 
 
-def test_agent_requests_take_the_balancer_path(settings):
+def test_agent_requests_take_the_balancer_path(settings, monkeypatch):
     """No llm_factory: the agent's client goes to the least busy balancer node, then MNEMERYNNE_LLM_URL."""
     import asyncio
+
+    monkeypatch.undo()   # the real default client, not conftest's stand-in
 
     import httpx
 

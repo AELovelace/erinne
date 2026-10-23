@@ -126,7 +126,7 @@ def _wait_for(predicate, timeout=5.0):
 def test_answer_streams_with_citation_links(chat_client, llm):
     _login(chat_client, "alice")
     events = _ask(chat_client, "How do I run the night audit?")
-    kinds = [e["type"] for e in events]
+    kinds = [e["type"] for e in events if e["type"] != "route"]   # route: the agent's model isn't there in tests
     assert kinds[0] == "conversation" and kinds[1] == "sources" and "delta" in kinds and kinds[-1] == "final"
     final = _final(events)
     assert final["status"] == "answered" and final["citations"] == [1]
