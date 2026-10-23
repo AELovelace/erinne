@@ -173,14 +173,18 @@ class Tools:
     mode "erynne": the agent in chat (agent.py), which runs here and reads what
     the person can read; its edits and new files become proposals the person
     applies (proposals.py) instead of changing anything.
+    propose: edits become proposals (default: in "erynne" mode only). Claude
+    in chat (claude_chat.py) is mode "claude" with propose=True.
     """
 
     def __init__(self, settings: Settings, get_embedder: Callable[[], Any],
-                 get_directory: Callable[[], Any] = lambda: None, *, mode: str = "claude"):
+                 get_directory: Callable[[], Any] = lambda: None, *, mode: str = "claude",
+                 propose: bool | None = None):
         self.settings = settings
         self.get_embedder = get_embedder
         self.get_directory = get_directory
         self.mode = mode
+        self.propose = mode != "claude" if propose is None else propose
 
     @property
     def base(self) -> str:
@@ -415,7 +419,7 @@ class Tools:
             raise editing.EditConflict(f"“{loaded.row['display_name']}” changed since that version was opened. "
                                        f"Open it again and redo the change on the new version.")
         result = apply(loaded.data)
-        if not self.claude:
+        if self.propose:
             proposal = proposals.propose_edit(conn, self.settings, caller, loaded, result.data, result.changes)
             return {"proposal": proposal, "file_id": file_id, "file": loaded.row["display_name"],
                     "changes": result.changes, "status": "proposed", "note": _PROPOSED}, [file_id]
@@ -461,7 +465,7 @@ class Tools:
             collection_id, folder_id = row["id"], _resolve_folder(conn, access, row["id"], folder)
         elif folder:
             raise editing.EditError("Name the library the folder is in, too (or leave both out for the Agents folder).")
-        if not self.claude:
+        if self.propose:
             proposal = proposals.propose_new(conn, self.settings, caller, name, data, collection_id, folder_id,
                                              [f"new file {name}"])
             row = conn.execute("SELECT name, collection_id, folder_id FROM agent_proposals WHERE id = ?",

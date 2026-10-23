@@ -24,8 +24,9 @@ def test_everyone_gets_a_settings_page(settings, conn, alice):
         _login(c)
         page = c.get("/settings")
         assert page.status_code == 200 and 'id="password-form"' in page.text and 'id="m365-section"' in page.text
-        assert 'href="/settings"' in c.get("/").text                  # in the nav
-        assert 'id="m365-section"' not in c.get("/connect").text        # moved here from the Claude page
+        assert 'id="claude-title"' in page.text                         # the Claude page is its right half
+        nav = c.get("/").text
+        assert 'href="/settings"' in nav and 'href="/connect"' not in nav   # one tab for both
 
 
 def test_change_your_own_password(settings, conn, alice):

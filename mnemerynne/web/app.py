@@ -21,8 +21,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
-from mnemerynne import (balancer as balancer_mod, db, directory, editing, mcp_server, memory, permissions, share,
-                        sharepoint, users)
+from mnemerynne import (balancer as balancer_mod, claude_chat, db, directory, editing, mcp_server, memory,
+                        permissions, share, sharepoint, users)
 from mnemerynne.agent import Agent
 from mnemerynne.answer import ASSISTANT_NAME
 from mnemerynne.auth import LoginThrottle
@@ -72,6 +72,7 @@ class Services:
     directory: Any = None   # the AD domain (mnemerynne.directory); None = from settings
     share_checker: Any = None   # share permission checks (share.Checker); None = the real POSIX ACLs
     agent_llm: Any = None   # the agent's model client; None = the balancer nodes, then MNEMERYNNE_LLM_URL
+    claude_llm: Any = None  # Claude's client in chat (tests); None = the Anthropic API with each person's key
     balancer: Any = None    # balancer.Balancer (tests pass one with a fake transport); None = a real one
 
 
@@ -124,7 +125,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         log.info("Routing: %s.", f"{', '.join(router.labels)}" if router else "no router trained; everything is search")
         # Erynne with tools, for the agent group (agent.py); same model path as the answers.
         app.state.agent = Agent(settings, lambda: app.state.embedder, lambda: app.state.directory,
-                                (lambda cfg: svc.agent_llm) if svc.agent_llm is not None else None, balancer)
+                                (lambda cfg: svc.agent_llm) if svc.agent_llm is not None else None, balancer,
+                                (lambda key, model, timeout: svc.claude_llm) if svc.claude_llm is not None else None)
         app.state.graph = build_graph(Deps(settings, svc.llm, svc.embedder, svc.reranker, router,
                                            app.state.directory, app.state.agent), checkpointer, store)
         app.state.background = set()
@@ -258,8 +260,10 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             "SELECT 1 FROM files WHERE status = 'ready' AND collection_id IN "
             f"({','.join(str(i) for i in permissions.readable_collection_ids(conn, user['id'])) or 'NULL'}) "
             "LIMIT 1").fetchone() is not None
+        claude = claude_chat.is_claude_user(conn, user, app.state.directory)
         return _page(request, "chat.html", user, conn, active="chat", has_files=has_files,
-                     agent=app.state.agent.allowed(conn, user))
+                     agent=app.state.agent.allowed(conn, user), claude=claude,
+                     claude_key=claude and claude_chat.status(conn, settings, user["id"])["key"] == "set")
 
     @app.get("/files", response_class=HTMLResponse)
     def files_page(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db)):

@@ -39,6 +39,7 @@ class AskBody(BaseModel):
     conversation_id: str | None = None
     scope: Scope | None = None  # "search in" one collection or folder
     tools: bool = True          # agent group members: let Erynne use tools for this question
+    claude: bool = False        # Claude group members: have Claude answer, with their own key
 
 
 class FeedbackBody(BaseModel):
@@ -155,7 +156,7 @@ async def ask(body: AskBody, request: Request, user=Depends(api_user),
         final = None
         try:
             async for event in graph_mod.run_turn(app.state.graph, user_id, conversation_id, question, scope,
-                                                  body.tools):
+                                                  body.tools, body.claude):
                 if event["type"] == "final":
                     final = event
                 else:
@@ -260,7 +261,7 @@ def get_conversation(conversation_id: str, request: Request, user=Depends(api_us
                      conn: sqlite3.Connection = Depends(get_db)):
     _own_conversation(conn, user["id"], conversation_id)
     messages = []
-    for m in conn.execute("SELECT id, role, content, status, route, created_at FROM messages "
+    for m in conn.execute("SELECT id, role, content, status, route, model, created_at FROM messages "
                           "WHERE conversation_id = ? ORDER BY id", (conversation_id,)).fetchall():
         sources = []
         if m["role"] == "assistant":

@@ -31,6 +31,8 @@ dependencies = [
     "striprtf==0.0.34",
     # Encrypts API credentials (mnemerynne/apis.py)
     "cryptography==50.0.2",
+    # Erynne on Claude, with each person's own API key (mnemerynne/clients/claude.py)
+    "anthropic==1.17.0",
 ]
 
 [dependency-groups]

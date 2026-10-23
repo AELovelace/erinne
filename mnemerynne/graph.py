@@ -57,6 +57,7 @@ class State(TypedDict, total=False):
     hits: list[dict]
     api_operation: int   # the API operation the question matched (route "api")
     use_tools: bool      # agent group members may switch the agent off for a question
+    use_claude: bool     # Claude group members may have Claude answer (agent.py, claude_chat.py)
     proposals: list[int]   # file changes the agent proposed this turn (route "agent")
     model: str | None    # the agent model's label, when it answered
     answer: dict
@@ -219,7 +220,21 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
         """Pick the flow from the question's embedding (no model call): an API
         operation the person may use whose example questions it matches, else
         the trained router's choice. People in the agent group go to the agent
-        (it can do all of these itself) while its model answers."""
+        (it can do all of these itself) while its model answers; people who
+        asked for Claude go to the agent with Claude, when they may."""
+        if deps.agent is not None and state.get("use_claude"):
+            ready = await deps.agent.ready(state["user_id"], claude=True)
+            if ready == "ok":
+                get_stream_writer()({"type": "route", "route": "agent", "model": "claude"})
+                return {"route": "agent"}
+            get_stream_writer()({"type": "route", "route": "search", "claude": True, "fallback":
+                                 "add your Claude API key on Settings to ask Claude" if ready == "nokey"
+                                 else "Claude isn't turned on for you"})
+            return {**await erynne_route(state), "use_claude": False}
+        return await erynne_route(state)
+
+    async def erynne_route(state: State) -> dict:
+        """Erynne's own routing: the agent, an API operation, or the trained router."""
         if deps.agent is not None and state.get("use_tools", True):
             ready = await deps.agent.ready(state["user_id"])
             if ready == "ok":
@@ -342,7 +357,8 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
     async def finish(state: State) -> dict:
         a = state["answer"]
         return {"turns": [{"question": state["question"], "standalone": state.get("standalone", ""),
-                           "answer": a["text"], "status": a["status"], "route": state.get("route", "search")}]}
+                           "answer": a["text"], "status": a["status"], "route": state.get("route", "search"),
+                           "model": state.get("model")}]}
 
     def after_route(state: State) -> str:
         return FLOWS.get(state.get("route", "search"), "retrieve")
@@ -381,7 +397,7 @@ def _source_view(n: int, hit: retrieval.Hit) -> dict:
 
 
 async def run_turn(graph, user_id: int, conversation_id: str, question: str, scope: dict | None = None,
-                   use_tools: bool = True):
+                   use_tools: bool = True, use_claude: bool = False):
     """Run one question through the graph, yielding stream events, then a final
     {"type": "final", ...} event with the answer, cited sources and timings."""
     trace: list = []
@@ -392,6 +408,7 @@ async def run_turn(graph, user_id: int, conversation_id: str, question: str, sco
         config = {"configurable": {"thread_id": conversation_id}}
         async for event in graph.astream({"user_id": user_id, "scope": scope, "question": question, "hits": [],
                                           "answer": {}, "route": "search", "use_tools": use_tools,
+                                          "use_claude": use_claude,
                                           "proposals": [], "model": None}, config, stream_mode="custom"):
             if event.get("type") == "sources":
                 sources = event["sources"]

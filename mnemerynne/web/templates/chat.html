@@ -25,6 +25,13 @@
         <input type="checkbox" id="use-tools" checked> 🛠 Use tools
       </label>
       {% endif %}
+      {% if claude and claude_key %}
+      <label class="tools-toggle small" title="Claude answers instead, with your own API key. It reads only what's shared with Claude.">
+        <input type="checkbox" id="use-claude"> ✳ Ask Claude
+      </label>
+      {% elif claude %}
+      <a class="tools-toggle small" href="/settings#claude-key">✳ Add your Claude key to ask Claude</a>
+      {% endif %}
     </div>
     <form id="ask-form" class="ask">
       <textarea id="question" rows="2" placeholder="e.g. How do I run the night audit?" required maxlength="2000"></textarea>

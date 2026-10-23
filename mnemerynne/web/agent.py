@@ -1,5 +1,6 @@
-"""Erynne's agent: applying or dismissing her proposed file changes, and the
-admin settings (who gets the agent, which model it uses)."""
+"""Erynne's agent: applying or dismissing her proposed file changes (or
+Claude's, in chat), and the admin settings (who gets the agent, which model it
+uses, and who may ask Claude in chat)."""
 
 from __future__ import annotations
 
@@ -9,7 +10,7 @@ import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from mnemerynne import accounts, agent as agent_mod, editing, group_refs, proposals
+from mnemerynne import accounts, agent as agent_mod, claude_chat, editing, group_refs, proposals
 from mnemerynne.db import transaction
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import admin_user, api_user, get_db
@@ -18,8 +19,9 @@ router = APIRouter()
 
 
 def _agent_user(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
-    """Still in the agent group (checked again for every Apply)."""
-    if not accounts.is_agent_user(conn, user, request.app.state.directory):
+    """Still in the agent group, or the Claude group (checked again for every Apply)."""
+    directory = request.app.state.directory
+    if not (accounts.is_agent_user(conn, user, directory) or claude_chat.is_claude_user(conn, user, directory)):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Erynne's tools aren't turned on for you.")
     return user
 
@@ -117,3 +119,42 @@ async def set_agent_model(body: AgentModelBody, request: Request, user=Depends(a
     except (ValueError, TypeError) as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
     return await _status(request, conn)
+
+
+# ------------------------------------------------------------ Claude in chat
+async def _claude_status(request: Request, conn: sqlite3.Connection) -> dict:
+    """Who may ask Claude in chat, and which of them saved their own key."""
+    directory = request.app.state.directory
+    group = claude_chat.claude_group(conn)
+    members = None
+    if group:
+        rows = conn.execute("SELECT u.*, c.user_id AS has_key FROM users u LEFT JOIN user_claude c "
+                            "ON c.user_id = u.id WHERE u.active = 1").fetchall()
+        members = sorted(({"username": r["username"], "key": r["has_key"] is not None} for r in rows
+                          if claude_chat.is_claude_user(conn, r, directory)), key=lambda m: m["username"].lower())
+    ad = await anyio.to_thread.run_sync(directory.groups)
+    return {"group": group_refs.label(conn, group), "domain": request.app.state.settings.ad_domain,
+            "enabled": directory.enabled, "groups": group_refs.choices(conn, ad), "members": members,
+            "secret_key_set": bool(request.app.state.settings.secret_key)}
+
+
+@router.get("/api/admin/settings/claude")
+async def get_claude(request: Request, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+    return await _claude_status(request, conn)
+
+
+@router.put("/api/admin/settings/claude-group")
+async def set_claude_group(body: AgentGroupBody, request: Request, user=Depends(admin_user),
+                           conn: sqlite3.Connection = Depends(get_db)):
+    directory = request.app.state.directory
+    known = await anyio.to_thread.run_sync(directory.groups) if directory.enabled else []
+    try:
+        name = group_refs.resolve(conn, body.group, known)
+    except group_refs.GroupRefError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    with transaction(conn):
+        old = group_refs.label(conn, claude_chat.claude_group(conn))
+        claude_chat.set_claude_group(conn, name)
+        _log(conn, user, "settings.claude_group", group_refs.label(conn, name) or "(nobody)",
+             f"was {old or '(nobody)'}")
+    return await _claude_status(request, conn)

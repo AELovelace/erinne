@@ -241,7 +241,11 @@ def test_mcp_rate_limit(settings, conn, world, embedder):
 # ------------------------------------------------------------ web pages/API
 def test_connect_page_and_token_api(mcp_client, conn, world):
     mcp_client.post("/login", data={"username": "alice", "password": "password123"})
-    assert "Use Erynne from Claude" in mcp_client.get("/connect").text
+    moved = mcp_client.get("/connect", follow_redirects=False)   # the Claude half of Settings now
+    assert moved.status_code == 308 and moved.headers["location"] == "/settings#claude"
+    page = mcp_client.get("/settings").text
+    assert 'id="claude-title"' in page and 'id="new-token"' in page
+    assert "claude_chat.js" not in page   # alice isn't in the Claude group
     made = mcp_client.post("/api/tokens", json={"name": "Laptop", "days": 30})
     assert made.status_code == 201 and made.json()["token"].startswith("mnemerynne_")
     assert mcp_client.post("/api/tokens", json={"name": "x", "days": 7}).status_code == 422

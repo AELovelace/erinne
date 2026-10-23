@@ -541,6 +541,16 @@ button.danger-fill { background: var(--error); }
 .token-reveal { border: 1px solid var(--line); border-radius: 10px; padding: .6rem .9rem; margin: .8rem 0; background: var(--glass-strong); }
 .token-reveal code { word-break: break-all; flex: 1; }
 .connect code { font-size: .85rem; }
+/* Settings: two pages side by side, Erynne's and Claude's, with the same margin all round as on top. */
+.settings-page { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; margin: 1.5rem;
+                 align-items: start; }
+.settings-page > .inbox { max-width: none; margin: 0; }
+@media (max-width: 1000px) { .settings-page { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .settings-page { margin: .75rem; gap: .75rem; } }
+.claude-key-form { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .5rem 0; }
+.claude-key-form input[type="password"] { flex: 1 1 16rem; min-width: 0; margin: 0; }
+.claude-key-form select { font: inherit; color: var(--ink); background: var(--glass-strong); border: 1px solid var(--line);
+                          border-radius: 8px; padding: .3rem .4rem; }
 .new-lib select { font: inherit; color: var(--ink); background: var(--glass-strong); border: 1px solid var(--line);
   border-radius: 8px; padding: .25rem .4rem; }
 
@@ -608,7 +618,9 @@ button.danger-fill { background: var(--error); }
 
 /* Erynne's agent in chat (agent.js): steps, proposed file changes */
 .ask-scope { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; }
-.tools-toggle { display: inline-flex; align-items: center; gap: .3rem; color: var(--muted); cursor: pointer; }
+.tools-toggle { display: inline-flex; align-items: center; gap: .3rem; margin: 0; white-space: nowrap; flex: none;
+                color: var(--muted); cursor: pointer; }
+.tools-toggle input { width: auto; margin: 0; flex: none; }
 .steps { margin: 0 0 .4rem; }
 .steps summary { cursor: pointer; }
 .step-list { margin: .2rem 0 0; padding-left: 1.4rem; }

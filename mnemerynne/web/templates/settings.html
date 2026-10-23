@@ -2,8 +2,9 @@
 {% block title %}Settings · {{ assistant_name }}{% endblock %}
 {% block body %}
 {% include "_nav.html" %}
-<main class="inbox admin settings">
-  <h1>Your settings</h1>
+<main class="settings-page">
+<section class="inbox admin settings" aria-labelledby="erynne-title">
+  <h1 id="erynne-title">{{ assistant_name }}</h1>
 
   <h2 class="admin-section">Your account</h2>
   <table class="props-table">
@@ -62,10 +63,82 @@
   <h2 class="admin-section">More</h2>
   <ul class="grants">
     <li><a href="/memories">What {{ assistant_name }} remembers about you</a></li>
-    <li><a href="/connect">Use {{ assistant_name }} from Claude</a></li>
   </ul>
+</section>
+
+<section class="inbox admin connect" id="claude" aria-labelledby="claude-title">
+  <h1 id="claude-title">Claude</h1>
+  <p class="muted">What Claude reads (passages, pages, internal system results) is sent to Anthropic, so Claude only
+    reaches what's listed under <a href="#claude-shared">What Claude can search for you</a>.</p>
+
+  {% if claude_chat %}
+  <h2 class="admin-section" id="claude-key">Claude in chat</h2>
+  <p class="muted small">Tick <em>Ask Claude</em> under the question box to have Claude answer instead of
+    {{ assistant_name }}, with the same tools, using your own Anthropic API key: the questions are billed to you.
+    Claude can hand reading-heavy parts to {{ assistant_name }}, two at a time, and like Claude she then only reads
+    what's shared with Claude. Your mail, calendar and memories never go to Claude. Changes Claude drafts are
+    proposals you apply, as with {{ assistant_name }}.</p>
+  <div id="claude-chat" aria-live="polite"><p class="muted small">Loading…</p></div>
+  {% endif %}
+
+  <h2 class="admin-section">Claude on the web and phone</h2>
+  <p class="muted small">Add {{ assistant_name }} to claude.ai as a connector and it works in Claude on the web, the
+    phone apps and Desktop, with no token to paste. Claude asks you to sign in here and approve it once.</p>
+  <div class="grant-add"><code class="mcp-address"></code><button type="button" class="small copy-mcp">Copy address</button></div>
+  <ol class="steps">
+    <li><strong>Claude Team or Enterprise:</strong> an organisation owner adds it once for everyone, in the
+      organisation's connector settings (<em>Add custom connector</em>): name it {{ assistant_name }} and paste the
+      address above. Each person then finds {{ assistant_name }} in their own connector settings and presses Connect.</li>
+    <li><strong>A personal Claude plan:</strong> add it yourself in your settings under Connectors, with
+      <em>Add custom connector</em> and the address above, then Connect.</li>
+    <li>Claude sends you here to sign in and approve. After that, turn it on in a chat from the tools menu.</li>
+    <li><strong>Claude Code:</strong> <code>claude mcp add --transport http {{ assistant_name|lower }} <span class="mcp-address"></span></code>,
+      then <code>/mcp</code> in Claude Code to sign in.</li>
+  </ol>
+  <p class="muted small">Connected this way:</p>
+  <div id="claude-connections" aria-live="polite"><p class="muted small">Loading…</p></div>
+
+  <h2 class="admin-section" id="claude-shared">What Claude can search for you</h2>
+  <ul class="grants" id="shared"><li class="muted small">Loading…</li></ul>
+
+  <h2 class="admin-section">Where Claude can change files</h2>
+  <p class="muted small">With a token that's allowed to edit, Claude can create and change text, Markdown, Word and Excel
+    files here. Every change keeps the previous version: open the file's info in Files and use <em>Versions</em> to put
+    one back. Claude can't delete, move or rename files.</p>
+  <ul class="grants" id="editable"><li class="muted small">Loading…</li></ul>
+
+  <h2 class="admin-section">Claude Desktop</h2>
+  <ol class="steps">
+    <li>Create a token below and copy it. It's shown only once.</li>
+    {% if has_extension %}
+    <li><a href="/connect/mnemerynne.mcpb">Download the Mnemerynne extension</a> and double-click it. Claude Desktop opens an install dialog.</li>
+    <li>Paste your token when it asks. The Mnemerynne address is already filled in.</li>
+    {% else %}
+    <li>The Claude Desktop extension isn't published yet; ask an admin. Claude Code users can connect now with the command below.</li>
+    {% endif %}
+    <li>Ask Claude something your documents answer, e.g. “What does the night audit checklist say about rate changes?”</li>
+  </ol>
+  <p class="small muted">Claude Code: <code id="cc-command">claude mcp add --transport http mnemerynne <span id="mcp-url"></span> --header "Authorization: Bearer YOUR_TOKEN"</code></p>
+
+  <h2 class="admin-section">Your tokens</h2>
+  <form class="new-lib" id="new-token">
+    <input type="text" id="token-name" value="Claude Desktop" maxlength="80" aria-label="Token name" required>
+    <select id="token-days" aria-label="Expires after"></select>
+    <label class="check small"><input type="checkbox" id="token-edit" checked> Let Claude edit files</label>
+    <button type="submit">Create token</button>
+  </form>
+  <div class="token-reveal" id="token-reveal" hidden>
+    <p><strong>Your new token</strong>. Copy it now; it won't be shown again.</p>
+    <div class="grant-add"><code id="token-value"></code><button type="button" class="small" id="token-copy">Copy</button></div>
+  </div>
+  <p class="error" id="token-error" hidden></p>
+  <div id="tokens" class="table-wrap"></div>
+</section>
 </main>
 <script src="{{ static('picker.js') }}"></script>
 <script src="{{ static('settings.js') }}"></script>
 <script src="{{ static('m365.js') }}"></script>
+<script src="{{ static('connect.js') }}"></script>
+<script src="{{ static('claude_connect.js') }}"></script>
+{% if claude_chat %}<script src="{{ static('claude_chat.js') }}"></script>{% endif %}
 {% endblock %}

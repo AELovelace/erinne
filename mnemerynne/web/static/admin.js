@@ -1117,6 +1117,47 @@
     box.appendChild(form);
   }
 
+  function renderClaude(data) {
+    const box = $("claude-settings");
+    box.replaceChildren();
+    if (data.groups && data.groups.length) fillDatalist("domain-groups", data.groups);
+    box.appendChild(el("p", "muted", "Members of this " + (data.domain || "domain") + " group may tick Ask Claude " +
+      "in chat: Claude answers with Erynne's tools, using each person's own Anthropic API key (saved on their " +
+      "Settings page, billed to them). Claude reads only what's shared with Claude, can hand reading to up to two " +
+      "Erynne subagents with the same limits, and never sees mail, calendar or memories. Leave it empty to turn " +
+      "it off."));
+    if (!data.enabled) box.appendChild(el("p", "error", "No AD domain is configured on the server (MNEMERYNNE_AD_DOMAIN), so nobody can be in the group."));
+    if (!data.secret_key_set) box.appendChild(el("p", "error", "MNEMERYNNE_SECRET_KEY isn't set on the server, so nobody can save a key yet."));
+
+    const form = el("form", "ax-new");
+    const group = agentInput("text", data.group);
+    group.setAttribute("list", "domain-groups");
+    group.setAttribute("aria-label", "Claude group");
+    group.placeholder = "No group: Claude in chat is off";
+    const save = el("button", "small", "Save");
+    save.type = "submit";
+    form.append(group, save);
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      try { renderClaude(await api("PUT", "/api/admin/settings/claude-group", { group: group.value.trim() })); }
+      catch (err) { showError(err.message); }
+    });
+    box.appendChild(form);
+    if (data.group && data.members) {
+      box.appendChild(el("p", "small muted", data.members.length
+        ? "In the group now: " + data.members.map(function (m) {
+            return m.username + (m.key ? " (key saved)" : " (no key yet)");
+          }).join(", ") + "."
+        : "No one linked to a domain account is in this group yet (Accounts tab)."));
+    }
+  }
+
+  async function loadClaude() {
+    try { renderClaude(await api("GET", "/api/admin/settings/claude")); }
+    catch (e) { $("claude-settings").replaceChildren(el("p", "error", e.message)); }
+  }
+
   async function loadAgent() {
     try { renderAgent(await api("GET", "/api/admin/settings/agent")); }
     catch (e) { $("agent-settings").replaceChildren(el("p", "error", e.message)); }
@@ -1141,7 +1182,7 @@
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
     if (tab === "settings" && !updatesLoaded) {
-      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadAgent();
+      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadAgent(); loadClaude();
       if (window.ErynneM365) window.ErynneM365.load();   // admin_m365.js
     }
     if (tab === "accounts") loadAccounts();
