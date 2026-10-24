@@ -37,10 +37,11 @@ main() {
     esac
     [ "$(id -u)" = 0 ] || [ -n "${MNEMERYNNE_UPDATE_TEST:-}" ] || die "run it with sudo: sudo mnemerynne-admin $mode"
 
-    # Service settings: where the data is and which port the app listens on.
-    local DATA_DIR=/var/lib/mnemerynne PORT=38200 BRANCH=main
+    # Service settings: where the data is and which address and port the app listens on.
+    local DATA_DIR=/var/lib/mnemerynne HOST=127.0.0.1 PORT=38200 BRANCH=main
     if [ -r "$ENV_FILE" ]; then
         DATA_DIR=$(env_value MNEMERYNNE_DATA_DIR "$DATA_DIR")
+        HOST=$(env_value MNEMERYNNE_HOST "$HOST")
         PORT=$(env_value MNEMERYNNE_PORT "$PORT")
         BRANCH=$(env_value MNEMERYNNE_UPDATE_BRANCH "$BRANCH")
     fi
@@ -200,12 +201,23 @@ schema_version() {
 }
 
 wait_healthy() {
-    local i
+    local i url
+    url="http://$(health_host "$HOST"):$PORT/healthz"
     for i in $(seq 1 45); do
-        if curl -sf "http://127.0.0.1:$PORT/healthz" 2>/dev/null | grep -q '"ok"'; then return 0; fi
+        if curl -sf "$url" 2>/dev/null | grep -q '"ok"'; then return 0; fi
         sleep 2
     done
     return 1
+}
+
+health_host() {  # HOST: where to reach the app that listens on MNEMERYNNE_HOST
+    case $1 in
+        ''|0.0.0.0) echo 127.0.0.1 ;;    # every address: loopback is one of them
+        ::|'[::]') echo '[::1]' ;;
+        \[*) echo "$1" ;;
+        *:*) echo "[$1]" ;;              # an IPv6 address needs brackets in a URL
+        *) echo "$1" ;;                  # a specific address, e.g. the LAN IP: only it answers
+    esac
 }
 
 write_status() {  # RESULT FROM TO MESSAGE: last.json, which the Settings page shows
