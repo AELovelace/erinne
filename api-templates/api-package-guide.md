@@ -6,7 +6,8 @@ describing a few fixed, read-only requests. The Mnemerynne admin uploads it
 (Access → APIs → *Upload template…*), picks it from the list, presses **Add**,
 then enters the credential and chooses who may use it.
 
-A working example is [synchrohrm.json](synchrohrm.json).
+A working example is [atera-read-write.json](atera-read-write.json) (actions);
+the built-in presets in `mnemerynne/apis.py` (`PRESETS`) show reading operations.
 
 ## How Mnemerynne uses your API
 

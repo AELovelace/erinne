@@ -378,7 +378,8 @@ def browse(conn: sqlite3.Connection, access: Access, collection_id: int, folder_
         "AND y.deleted_at IS NULL) AS items FROM folders WHERE collection_id = ? AND COALESCE(parent_id, 0) = ? "
         "AND deleted_at IS NULL ORDER BY name COLLATE NOCASE", (collection_id, folder_id or 0)).fetchall()
     visible = access.visible(collection_id, [r["id"] for r in rows])
-    folders = [r for r in rows if r["id"] in visible]
+    folders = [{**dict(r), "items": n} for r in rows if r["id"] in visible
+               for n in [_visible_items(conn, access, collection_id, r["id"], visible)]]
     files = conn.execute(
         f"SELECT {_FILE_COLUMNS} {_FILE_FROM} WHERE f.collection_id = ? AND COALESCE(f.folder_id, 0) = ? "
         "AND f.deleted_at IS NULL ORDER BY f.display_name COLLATE NOCASE",
@@ -387,6 +388,20 @@ def browse(conn: sqlite3.Connection, access: Access, collection_id: int, folder_
     files = [f for f in files if access.can_read_file(f)]
     return {"folders": folders, "files": files, "path": folder_path(conn, folder_id),
             "can_write": access.can_write(collection_id, folder_id)}
+
+
+def _visible_items(conn: sqlite3.Connection, access: Access, collection_id: int, folder_id: int,
+                   visible: set[int]) -> int:
+    """How many things browse() would list inside a folder for this user: the subfolders they may see,
+    and (if they may read the folder) its files, less those taken out of Claude's view for Claude.
+    SharePoint files aren't checked one by one here; that would ask SharePoint for every folder."""
+    subfolders = sum(1 for r in conn.execute("SELECT id FROM folders WHERE parent_id = ? AND deleted_at IS NULL",
+                                             (folder_id,)) if r["id"] in visible)
+    if not access.can_read(collection_id, folder_id):
+        return subfolders
+    files = conn.execute("SELECT claude_hidden FROM files WHERE folder_id = ? AND deleted_at IS NULL",
+                         (folder_id,)).fetchall()
+    return subfolders + sum(1 for f in files if not (access.claude and f["claude_hidden"]))
 
 
 def file_counts(conn: sqlite3.Connection, access: Access, collection_id: int) -> tuple[int, int, int]:

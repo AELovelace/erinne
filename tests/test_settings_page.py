@@ -72,6 +72,7 @@ def test_pick_a_theme(settings, conn, alice):
         assert 'data-theme="sakura"' in c.get("/files").text
         c.post("/logout")
         assert 'data-theme="sakura"' in c.get("/login").text                     # signed out: the cookie
+        c.cookies.clear()      # set() alone adds a second cookie beside the server's, which is sent first
         c.cookies.set("erynne_theme", "<script>")
         assert 'data-theme="neon"' in c.get("/login").text                       # anything else: neon
         assert c.get("/static/parallax/city-8/5.png").status_code == 200

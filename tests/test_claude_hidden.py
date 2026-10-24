@@ -139,6 +139,20 @@ def test_library_counts_match_what_claude_can_browse(client, conn, settings, emb
     assert claude.browse_folder(conn, alice, "File box")[0]["files"] == []
 
 
+def test_folder_item_counts_leave_out_what_claude_cant_see(client, conn, settings, embedder, world):
+    alice = _caller(conn, world["alice"])
+    claude = Tools(settings, lambda: embedder)
+
+    def plans():
+        return {f["name"]: f for f in claude.browse_folder(conn, alice, "File box")[0]["folders"]}["Plans"]
+
+    assert plans()["items"] == 1
+    _login(client, "alice")
+    client.put(f"/api/files/{world['plan']}/claude", json={"visible": False})
+    assert plans()["items"] == 0
+    assert _rows(client, world["inbox"])[1]["Plans"]["items"] == 1          # the person still sees it
+
+
 def test_files_with_the_same_content_are_pointed_out(conn, settings, embedder, world):
     # The same content uploaded to the same folder is the same file; in another folder it's a copy.
     same = b"# Secret\n\nAlice's secret pool code is 4411.\n"

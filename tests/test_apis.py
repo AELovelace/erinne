@@ -1,6 +1,5 @@
 import base64
 import json
-from pathlib import Path
 
 import httpx
 import pytest
@@ -331,47 +330,66 @@ def test_admin_sets_up_an_api_from_a_preset(admin_client, conn):
     assert tested["ok"] and {"path": "sites.total", "type": "number"} in tested["fields"]
 
 
-SYNCHRO = Path(__file__).parent.parent / "api-templates" / "synchrohrm.json"
+# A read-only SQL service like the ones api-templates/api-package-guide.md describes.
+REPORTS = json.dumps({
+    "format": "mnemerynne-api-template", "name": "Hotel Reports", "base_url": "https://reports.test",
+    "auth_type": "bearer", "description": "Night-audit reports through a read-only SQL endpoint.",
+    "operations": [
+        {"name": "Parse failures", "method": "POST", "path": "/api/sql",
+         "body": {"sql": "SELECT * FROM failures WHERE at >= datetime('now', ?)", "params": ["-{{days}} days"]},
+         "params": [{"name": "days", "type": "int", "in": "body", "min": 1, "max": 30, "default": 3}],
+         "example_questions": ["Did any reports fail to parse?", "Which report files failed this week?"]},
+        {"name": "Recent polls", "method": "POST", "path": "/api/sql",
+         "body": '{"sql": "SELECT * FROM polls ORDER BY at DESC LIMIT ?", "params": [{{count}}]}',
+         "params": [{"name": "count", "type": "int", "in": "body", "min": 1, "max": 50, "default": 10}],
+         "example_questions": ["When was the mailbox last checked?", "Show the recent mailbox polls."]},
+        {"name": "Day's statistics", "method": "POST", "path": "/api/sql",
+         "body": {"sql": "SELECT * FROM stats WHERE hotel = ? AND day = ?", "params": ["{{hotel}}", "{{day}}"],
+                  "maxRows": 500},
+         "params": [{"name": "hotel", "type": "enum", "in": "body", "required": True, "options": ["north", "south"]},
+                    {"name": "day", "type": "date", "in": "body", "required": True}],
+         "example_questions": ["What were yesterday's statistics for North?", "Show South's stats for Oct 21."]},
+    ]})
 
 
 def test_admin_uploads_a_template_and_makes_an_api_from_it(admin_client, conn):
-    up = admin_client.post("/api/admin/apis/templates", json={"template": SYNCHRO.read_text("utf-8")})
-    assert up.status_code == 201 and up.json()["operations"] == 5 and not up.json()["replaced"]
+    up = admin_client.post("/api/admin/apis/templates", json={"template": REPORTS})
+    assert up.status_code == 201 and up.json()["operations"] == 3 and not up.json()["replaced"]
     listed = admin_client.get("/api/admin/apis").json()["presets"]
-    assert {"key": up.json()["key"], "name": "SynchroHRM", "uploaded": True} in [
+    assert {"key": up.json()["key"], "name": "Hotel Reports", "uploaded": True} in [
         {k: p[k] for k in ("key", "name", "uploaded")} for p in listed]
 
     made = admin_client.post("/api/admin/apis", json={"preset": up.json()["key"]}).json()
     detail = admin_client.get(f"/api/admin/apis/{made['id']}").json()
-    assert detail["base_url"] == "https://synchro.eternalhotels.com" and detail["auth_type"] == "bearer"
+    assert detail["base_url"] == "https://reports.test" and detail["auth_type"] == "bearer"
     assert detail["credential"] == "missing" and detail["ad_group"] == "" and not detail["claude_enabled"]
     ops = {o["name"]: o["id"] for o in detail["operations"]}
-    assert len(ops) == 5 and conn.execute("SELECT count(*) FROM api_examples").fetchone()[0] == 20
+    assert len(ops) == 3 and conn.execute("SELECT count(*) FROM api_examples").fetchone()[0] == 6
 
-    admin_client.put(f"/api/admin/apis/{made['id']}/credential", json={"secret": "shrm_x"})
+    admin_client.put(f"/api/admin/apis/{made['id']}/credential", json={"secret": "rep_x"})
     seen = _upstream(lambda r: httpx.Response(200, json={"columns": [], "rows": []}))
     assert admin_client.post(f"/api/admin/apis/operations/{ops['Parse failures']}/test",
                              json={"params": {}}).json()["ok"]
-    assert admin_client.post(f"/api/admin/apis/operations/{ops['Recent mailbox polls']}/test",
+    assert admin_client.post(f"/api/admin/apis/operations/{ops['Recent polls']}/test",
                              json={"params": {"count": 5}}).json()["ok"]
-    assert admin_client.post(f"/api/admin/apis/operations/{ops["Day's statistics vs NetSuite"]}/test",
-                             json={"params": {"property": "sleep-inn-wa102", "date": "2026-10-21"}}).json()["ok"]
+    assert admin_client.post(f"/api/admin/apis/operations/{ops["Day's statistics"]}/test",
+                             json={"params": {"hotel": "North", "day": "2026-10-21"}}).json()["ok"]
     sent = [json.loads(r.content) for r in seen]
-    assert seen[0].url == "https://synchro.eternalhotels.com/api/device/sql"
-    assert seen[0].headers["Authorization"] == "Bearer shrm_x"
+    assert seen[0].url == "https://reports.test/api/sql"
+    assert seen[0].headers["Authorization"] == "Bearer rep_x"
     assert sent[0]["params"] == ["-3 days"] and sent[1]["params"] == [5]
-    assert sent[2]["params"] == ["sleep-inn-wa102", "2026-10-21"] and sent[2]["maxRows"] == 500
-    refused = admin_client.post(f"/api/admin/apis/operations/{ops["Day's statistics vs NetSuite"]}/test",
-                                json={"params": {"property": "x'; DROP TABLE attachments;--", "date": "2026-10-21"}})
+    assert sent[2]["params"] == ["north", "2026-10-21"] and sent[2]["maxRows"] == 500
+    refused = admin_client.post(f"/api/admin/apis/operations/{ops["Day's statistics"]}/test",
+                                json={"params": {"hotel": "x'; DROP TABLE stats;--", "day": "2026-10-21"}})
     assert refused.status_code == 422 and len(seen) == 3
 
     # Uploading again replaces it; removing it leaves the API alone.
-    again = admin_client.post("/api/admin/apis/templates", json={"template": SYNCHRO.read_text("utf-8")}).json()
+    again = admin_client.post("/api/admin/apis/templates", json={"template": REPORTS}).json()
     assert again["replaced"] and again["key"] == up.json()["key"]
     template_id = int(up.json()["key"].removeprefix("upload-"))
     assert admin_client.delete(f"/api/admin/apis/templates/{template_id}").json() == {"status": "deleted"}
     assert not [p for p in admin_client.get("/api/admin/apis").json()["presets"] if p["uploaded"]]
-    assert len(admin_client.get(f"/api/admin/apis/{made['id']}").json()["operations"]) == 5
+    assert len(admin_client.get(f"/api/admin/apis/{made['id']}").json()["operations"]) == 3
 
 
 def _template(**changes):
