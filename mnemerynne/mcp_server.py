@@ -72,11 +72,17 @@ Editing files (.txt, .md, .docx, .xlsx):
 - New files go in the person's Agents folder unless they name somewhere else (list_libraries shows where
   you may edit). Every change keeps the previous version, which the person can restore from Files.
 - You can't delete, move or rename files; tell the person to do that in Mnemerynne if it's needed.
+- You can't save images (screenshots, photos) or other files you didn't write: give the person the
+  `upload` link from list_libraries, which opens their Agents folder for them to add the file.
 
 Internal APIs (live):
 - list_apis shows the internal systems you may query for this person (night-audit health, hotel stats,
   IT tickets and so on); query_api calls one. Cite answers with the result's `citation` and `link`, and
   say the figures are live as of its time. Don't guess values the response doesn't contain.
+- Long lists come in pages: when the result's `rows` has a `next_offset`, call query_api again with
+  the same params and that `offset` before concluding something isn't there. Call APIs marked
+  one_at_a_time one after another, not in parallel.
+- When search_documents finds nothing but returns `try_api`, the answer is probably live data: query it.
 - Operations marked changes_data (closing a ticket, resolving an alert) only go through
   propose_api_action: it returns an `approve` link for the person, who applies it in Mnemerynne. Check
   the current state with query_api first, and never say the change is made."""
@@ -158,6 +164,23 @@ def _file_link(base: str, file_id: int, kind: str) -> str:
     if kind in ("md", "txt", "doc", "code"):
         return f"{base}/files/{file_id}/view"
     return f"{base}/files/{file_id}/raw"
+
+
+def _duplicates(conn: sqlite3.Connection, access: fs.Access, file_ids: list[int]) -> dict[int, list[int]]:
+    """For each of these files, the other files the caller can read with exactly the same content."""
+    if not file_ids:
+        return {}
+    marks = ",".join("?" * len(file_ids))
+    rows = conn.execute(
+        f"SELECT o.id AS original, f.id, f.collection_id, f.folder_id, f.claude_hidden FROM files o "
+        f"JOIN files f ON f.blob_sha256 = o.blob_sha256 AND f.id <> o.id AND f.deleted_at IS NULL "
+        f"WHERE o.id IN ({marks}) ORDER BY f.id", file_ids).fetchall()
+    access.prefetch(rows)
+    out: dict[int, list[int]] = defaultdict(list)
+    for r in rows:
+        if fs.is_live_folder(conn, r["folder_id"]) and access.can_read_file(r):
+            out[r["original"]].append(r["id"])
+    return out
 
 
 def _passage(hit: retrieval.Hit, base: str, library: str, n: int | None = None) -> dict:
@@ -246,10 +269,13 @@ class Tools:
             notes.append(f"Nothing close in {library}; these are from everywhere.")
             result = retrieval.search(conn, self.settings, self.get_embedder(), query, everything, keep=keep)
         if not result.found_anything:
-            return {"found": False, "query": query, "results": [],
+            hint = self._api_hint(conn, caller, query)
+            tip = ([f"This may be live data rather than a document: try query_api with api “{hint['api']}” "
+                    f"and operation “{hint['operation']}” (see list_apis)."] if hint else [])
+            return {"found": False, "query": query, "results": [], **({"try_api": hint} if hint else {}),
                     "note": " ".join(notes + ["Nothing in these documents is close to this question."
                                               + (" Search again without library and folder to look everywhere."
-                                                 if library else "")])}, []
+                                                 if library else "")] + tip)}, []
         names = {cid: _label(row) for cid, row in _collections(conn, access).items()}
         budget, picked = self.settings.mcp_max_tokens, []
         for hit in result.candidates:
@@ -281,11 +307,26 @@ class Tools:
     def _user(self, conn, caller: Caller):
         return conn.execute("SELECT id, ad_account FROM users WHERE id = ?", (caller.user_id,)).fetchone()
 
+    def _api_hint(self, conn, caller: Caller, query: str) -> dict | None:
+        """The reading API operation whose example questions are closest to a search that found
+        nothing in the documents, if it is close enough (settings.api_hint_threshold)."""
+        ops = [o for o in apis.allowed_operations(conn, self._user(conn, caller), self.get_directory(),
+                                                  for_claude=self.claude) if not o["action"]]
+        if not ops:
+            return None
+        best = apis.match(conn, self.get_embedder().embed_query(query), [o["id"] for o in ops])
+        if best is None or best[1] < self.settings.api_hint_threshold:
+            return None
+        op = next(o for o in ops if o["id"] == best[0])
+        return {"api": op["api_name"], "operation": op["name"]}
+
     def list_apis(self, conn, caller: Caller) -> tuple[dict, list[int]]:
         ops = apis.allowed_operations(conn, self._user(conn, caller), self.get_directory(), for_claude=self.claude)
         out: dict[str, dict] = {}
         for op in ops:
             entry = out.setdefault(op["api_name"], {"api": op["api_name"], "operations": []})
+            if op["one_at_a_time"]:
+                entry["one_at_a_time"] = True
             entry["operations"].append({
                 "operation": op["name"], "description": op["description"],
                 **({"changes_data": True} if op["action"] else {}),
@@ -298,7 +339,7 @@ class Tools:
         return {"apis": list(out.values())}, []
 
     def query_api(self, conn, caller: Caller, api: str, operation: str,
-                  params: dict | None = None) -> tuple[dict, list[int]]:
+                  params: dict | None = None, offset: int = 0) -> tuple[dict, list[int]]:
         try:
             op = apis.operation_for(conn, self._user(conn, caller), self.get_directory(), api, operation,
                                     for_claude=self.claude)
@@ -312,10 +353,19 @@ class Tools:
         if not result.ok:
             raise ToolError(f"{result.api_name} didn't answer: {result.error}.")
         live = f"live, {result.at[11:16]} UTC"
+        data, rows = apis.page(result.data, offset or 0, 40_000)
+        notes = []
+        if rows and "next_offset" in rows:
+            notes.append(f"Rows {rows['offset'] + 1}–{rows['offset'] + rows['returned']} of {rows['total']}: call "
+                         f"again with the same params and offset={rows['next_offset']} for the next ones.")
+        if result.truncated:
+            notes.append("The API's answer was over 256 KB and was cut off, so this isn't all of it: narrow the "
+                         "params (a shorter period, one property) if the part you need is missing.")
         return {"api": result.api_name, "operation": result.operation_name, "at": result.at + " UTC",
                 "citation": f"{result.api_name} · {result.operation_name} ({live})",
                 "link": f"{self.base}/apis/calls/{result.call_id}", "call_id": result.call_id,
-                "data": apis.digest(result.data, 40_000)}, []
+                **({"rows": rows} if rows else {}), **({"note": " ".join(notes)} if notes else {}),
+                "data": data}, []
 
     def propose_api_action(self, conn, caller: Caller, api: str, operation: str,
                            params: dict | None = None) -> tuple[dict, list[int]]:
@@ -340,14 +390,21 @@ class Tools:
         out = []
         for cid, row in sorted(_collections(conn, access).items(),
                                key=lambda kv: (kv[1]["kind"] != "private", _label(kv[1]).lower())):
-            counts = conn.execute("SELECT count(*) AS files, coalesce(sum(status = 'ready'), 0) AS searchable "
-                                  "FROM files WHERE collection_id = ? AND deleted_at IS NULL", (cid,)).fetchone()
+            files, searchable, total = fs.file_counts(conn, access, cid)
             out.append({"library": _label(row), "id": cid,
                         "kind": "file box" if row["kind"] == "private" else "library",
-                        "files": counts["files"], "searchable_files": counts["searchable"]})
+                        "files": files, "searchable_files": searchable,
+                        # Files in folders this connection can't open, or taken out of Claude's view.
+                        **({"not_shown": total - files} if total > files else {})})
         edit = ([f"{p['library']}" + (f" / {p['folder']}" if p["folder"] else "") for p in
                  editing.editable_places(conn, caller.user_id, self.mode)] if caller.can_edit else [])
-        return {"libraries": out, "you_can_edit_in": edit,
+        try:
+            agents = editing.agents_folder(conn, caller.user_id)
+        except (fs.FsError, OSError):
+            agents = None   # the share is away; no upload link this time
+        inbox = permissions.private_collection_id(conn, caller.user_id)
+        upload = ({"upload": f"{self.base}/files#c={inbox}&f={agents}"} if agents and inbox else {})
+        return {"libraries": out, "you_can_edit_in": edit, **upload,
                 **({} if caller.can_edit else {"editing": "This connection can only search; the person can turn "
                                                           "on editing for it on the Claude page in Mnemerynne."})}, []
 
@@ -357,11 +414,13 @@ class Tools:
         row = _resolve_collection(conn, access, library, self.claude)
         folder_id = _resolve_folder(conn, access, row["id"], folder)
         listing = fs.browse(conn, access, row["id"], folder_id)
+        same = _duplicates(conn, access, [f["id"] for f in listing["files"]])
         return {
             "library": _label(row), "path": _path(conn, folder_id) or "/",
             "folders": [{"name": f["name"], "id": f["id"], "items": f["items"]} for f in listing["folders"]],
             "files": [{"name": f["display_name"], "file_id": f["id"], "type": f["kind"], "pages": f["unit_count"],
-                       "searchable": f["status"] == "ready", "link": _file_link(self.base, f["id"], f["kind"])}
+                       "searchable": f["status"] == "ready", "link": _file_link(self.base, f["id"], f["kind"]),
+                       **({"same_content_as": same[f["id"]]} if f["id"] in same else {})}
                       for f in listing["files"]],
         }, []
 
@@ -369,12 +428,14 @@ class Tools:
         access = self._access(conn, caller)
         found = fs.search_names(conn, access, name, limit=50)
         names = {cid: _label(row) for cid, row in _collections(conn, access).items()}
+        same = _duplicates(conn, access, [f["id"] for f in found["files"]])
         return {
             "folders": [{"name": f["name"], "library": names[f["collection_id"]], "path": _path(conn, f["id"])}
                         for f in found["folders"]],
             "files": [{"name": f["display_name"], "file_id": f["id"], "library": names[f["collection_id"]],
                        "folder": _path(conn, f["folder_id"]) or "/", "type": f["kind"],
-                       "searchable": f["status"] == "ready", "link": _file_link(self.base, f["id"], f["kind"])}
+                       "searchable": f["status"] == "ready", "link": _file_link(self.base, f["id"], f["kind"]),
+                       **({"same_content_as": same[f["id"]]} if f["id"] in same else {})}
                       for f in found["files"]],
         }, []
 
@@ -487,7 +548,8 @@ class Tools:
         elif fmt == "xlsx":
             data = editing_formats.xlsx_new(rows or [], sheet)
         else:
-            raise editing.EditError("Name the file with .txt, .md, .docx or .xlsx at the end.")
+            raise editing.EditError("Name the file with .txt, .md, .docx or .xlsx at the end. To save an image or "
+                                    "another kind of file, give the person the upload link from list_libraries.")
         collection_id = folder_id = None
         library, folder = _split_place(library, folder)
         if library:
@@ -577,12 +639,15 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True,
                                              open_world_hint=True))
-    async def query_api(ctx: Context, api: str, operation: str, params: dict | None = None) -> dict:
+    async def query_api(ctx: Context, api: str, operation: str, params: dict | None = None,
+                        offset: int = 0) -> dict:
         """Call one operation of an internal API from list_apis, e.g. api="Atera",
         operation="Tickets", or operation="Ticket" with params {"ticketId": 4812}.
-        Returns live data with a `citation` and `link` to cite."""
-        return await call(ctx, "query_api", {"api": api, "operation": operation, "params": params or {}},
-                          tools.query_api)
+        Returns live data with a `citation` and `link` to cite. Long lists come in pages: `rows` says
+        which rows you got; call again with `offset` = its `next_offset` for more. APIs marked
+        one_at_a_time take one call at a time, so call them one after another, not in parallel."""
+        return await call(ctx, "query_api", {"api": api, "operation": operation, "params": params or {},
+                                             "offset": offset}, tools.query_api)
 
     @server.tool(annotations=_EDITS)
     async def propose_api_action(ctx: Context, api: str, operation: str, params: dict | None = None) -> dict:
@@ -594,7 +659,8 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
 
     @server.tool(annotations=_READ_ONLY)
     async def list_libraries(ctx: Context) -> dict:
-        """List what the user can search from Claude: their File box and each shared library, with file counts."""
+        """List what the user can search from Claude: their File box and each shared library, with file counts,
+        where you may edit, and an `upload` link for the person to add files you can't write (images)."""
         return await call(ctx, "list_libraries", {}, tools.list_libraries)
 
     @server.tool(annotations=_READ_ONLY)

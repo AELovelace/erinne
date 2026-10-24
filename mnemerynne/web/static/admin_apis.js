@@ -249,10 +249,12 @@
     }
     auth.addEventListener("change", toggle);
     toggle();
-    s.append(field("Address", url), field("Authentication", auth), headerField, userField,
+    const oneAtATime = checkbox("It runs one query at a time (calls wait their turn instead of failing with HTTP 429)",
+                                d.one_at_a_time);
+    s.append(field("Address", url), field("Authentication", auth), headerField, userField, oneAtATime,
              button("Save connection", "small", function () {
                patch({ base_url: url.value.trim(), auth_type: auth.value, auth_header: header.value.trim(),
-                       auth_user: user.value.trim() });
+                       auth_user: user.value.trim(), one_at_a_time: oneAtATime.box.checked });
              }));
 
     if (d.auth_type !== "none") {

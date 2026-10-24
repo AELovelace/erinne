@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Sadgirlsclub · Directory</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="../base1/cockpit.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="grid-scene" aria-hidden="true"></div>
+  <main>
+    <header class="masthead">
+      <div><p class="eyebrow">ERYNNE / HOME NETWORK</p><h1>SADGIRLSCLUB<span class="cursor">_</span></h1><p class="subtitle">Your people. Your space.</p></div>
+      <div class="connection"><span class="light"></span><span id="domain">CONNECTING</span><span class="version">DIRECTORY / 01</span></div>
+    </header>
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <section class="stats" aria-label="Directory overview">
+      <div><span class="stat-label">DOMAIN USERS</span><strong id="user-count">—</strong><span>People with a place here</span></div>
+      <div><span class="stat-label">DOMAIN GROUPS</span><strong id="group-count">—</strong><span>Organize access together</span></div>
+      <div class="stat-note"><span class="stat-label">ADMINISTRATION</span><p>Keep your circle connected.</p><span>Accounts and groups for your Windows domain.</span></div>
+    </section>
+    <section class="workspace" aria-label="Directory management">
+      <aside class="directory-list">
+        <nav aria-label="Object type"><button id="users-tab" class="tab active" aria-pressed="true">Users</button><button id="groups-tab" class="tab" aria-pressed="false">Groups</button></nav>
+        <div class="list-tools"><label class="sr-only" for="search">Search directory</label><input id="search" type="search" placeholder="Find someone…" autocomplete="off"><button id="refresh" class="icon-button" aria-label="Refresh directory" title="Refresh">↻</button></div>
+        <label id="group-filter" class="group-filter" hidden title="Hide built-in and protected system groups"><input id="hide-builtins" type="checkbox" checked>Hide built-in groups</label>
+        <div class="list-heading"><span id="list-heading">PEOPLE</span><button id="create" class="small-button">+ New user</button></div>
+        <div id="object-list" class="objects" aria-label="Directory entries"><p class="empty">Loading your directory…</p></div>
+        <p id="list-count" class="list-count"></p>
+      </aside>
+      <article id="detail" class="detail" aria-live="polite"><div class="welcome"><span class="orb">✧</span><p class="eyebrow">A LITTLE ORDER. A LOT OF HEART.</p><h2>Everyone belongs somewhere.</h2><p>Select a user or group to manage their place in your domain.</p></div></article>
+    </section>
+    <footer><span>SADGIRLSCLUB.LOCAL <span class="pink">/</span> DIRECTORY CONTROL</span><span>Secure Cockpit session · Administrative access required</span></footer>
+  </main>
+  <dialog id="dialog" aria-labelledby="dialog-title">
+    <form id="form">
+      <p class="eyebrow">SADGIRLSCLUB / DIRECTORY</p><h2 id="dialog-title"></h2><p id="dialog-description"></p>
+      <div id="fields"></div><p id="form-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button id="cancel" type="button" class="secondary">Cancel</button><button id="submit" type="submit">Save</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

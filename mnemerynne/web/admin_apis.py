@@ -143,11 +143,11 @@ async def create_api(body: NewApi, request: Request, user=Depends(admin_user),
     url = _check_url(body.base_url or (p["base_url"] if p else ""))
     with transaction(conn):
         api_id = conn.execute(
-            "INSERT INTO apis(name, description, base_url, auth_type, auth_header, auth_user, tls_check_hostname) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO apis(name, description, base_url, auth_type, auth_header, auth_user, tls_check_hostname, "
+            "one_at_a_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (name, p["description"] if p else "", url, p["auth_type"] if p else "none",
              p.get("auth_header", "") if p else "", p.get("auth_user", "") if p else "",
-             p.get("tls_check_hostname", 1) if p else 1)).lastrowid
+             p.get("tls_check_hostname", 1) if p else 1, p.get("one_at_a_time", 0) if p else 0)).lastrowid
         op_ids = _preset_operations(conn, api_id, p["operations"] if p else [])
         _log(conn, user, "api.create", name, f"preset {p['key']}" if p else "")
     await _index(request, conn, op_ids)
@@ -225,7 +225,8 @@ def api_detail(api_id: int, request: Request, user=Depends(admin_user), conn: sq
         "base_url": a["base_url"], "auth_type": a["auth_type"], "auth_header": a["auth_header"],
         "auth_user": a["auth_user"], "credential": apis.credential_status(settings, a),
         "secret_changed_at": a["secret_changed_at"], "ca_pem": a["ca_pem"],
-        "tls_check_hostname": bool(a["tls_check_hostname"]), "ad_group": group_refs.label(conn, a["ad_group"]),
+        "tls_check_hostname": bool(a["tls_check_hostname"]), "one_at_a_time": bool(a["one_at_a_time"]),
+        "ad_group": group_refs.label(conn, a["ad_group"]),
         "claude_enabled": bool(a["claude_enabled"]), "enabled": bool(a["enabled"]),
         "spec": a["spec"], "spec_html": "" if spec_ops or not a["spec"] else markdown.render_html(a["spec"]),
         "spec_operations": spec_ops,
@@ -242,6 +243,7 @@ class ApiPatch(BaseModel):
     auth_user: str | None = Field(None, max_length=200)
     ca_pem: str | None = Field(None, max_length=20000)
     tls_check_hostname: bool | None = None
+    one_at_a_time: bool | None = None
     ad_group: str | None = Field(None, max_length=2000)   # ';'-separated, AD or "Tenant / Group"
     claude_enabled: bool | None = None
     enabled: bool | None = None
@@ -272,7 +274,7 @@ async def update_api(api_id: int, body: ApiPatch, request: Request, user=Depends
         raise _refuse(ValueError("A header name has only letters, digits and dashes."))
     if not changes:
         return {"status": "unchanged"}
-    for key in ("tls_check_hostname", "claude_enabled", "enabled"):
+    for key in ("tls_check_hostname", "one_at_a_time", "claude_enabled", "enabled"):
         if key in changes:
             changes[key] = int(changes[key])
     with transaction(conn):

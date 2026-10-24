@@ -389,6 +389,21 @@ def browse(conn: sqlite3.Connection, access: Access, collection_id: int, folder_
             "can_write": access.can_write(collection_id, folder_id)}
 
 
+def file_counts(conn: sqlite3.Connection, access: Access, collection_id: int) -> tuple[int, int, int]:
+    """(reachable, searchable, all) files in a collection: those browse() would show somewhere (not in
+    the bin, in a folder the user may see and read, for Claude not taken out of its view), how many of
+    those are searchable, and every live file whether the user can reach it or not."""
+    live = live_folder_ids(conn, collection_id)
+    shown = live & access.visible(collection_id, live)
+    rows = conn.execute("SELECT id, collection_id, folder_id, claude_hidden, status FROM files "
+                        "WHERE collection_id = ? AND deleted_at IS NULL", (collection_id,)).fetchall()
+    total = sum(1 for r in rows if r["folder_id"] is None or r["folder_id"] in live)
+    rows = [r for r in rows if r["folder_id"] is None or r["folder_id"] in shown]
+    access.prefetch(rows)
+    rows = [r for r in rows if access.can_read_file(r)]
+    return len(rows), sum(1 for r in rows if r["status"] == "ready"), total
+
+
 def folder_tree(conn: sqlite3.Connection, access: Access, collection_id: int) -> list[dict]:
     access.see(collection_id, None)
     live = live_folder_ids(conn, collection_id)

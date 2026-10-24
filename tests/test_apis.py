@@ -143,6 +143,139 @@ def test_digest_trims_long_lists():
     assert ("tickets[].id", "number") in apis.infer_shape(data)
 
 
+def test_digest_keeps_a_list_whole_when_it_fits():
+    rows = [{"account": 900000 + n, "value": n} for n in range(351)]
+    assert json.loads(apis.digest({"rows": rows}, 40_000)) == {"rows": rows}
+
+
+def test_pages_walk_the_longest_list():
+    data = {"columns": ["account", "value"], "rows": [[900000 + n, "x" * 40] for n in range(351)]}
+    text, info = apis.page(data, 0, 4000)
+    first = json.loads(text)
+    assert first["columns"] == ["account", "value"] and first["rows"][0][0] == 900000
+    assert info["list"] == "rows" and info["total"] == 351 and info["offset"] == 0
+    assert info["next_offset"] == info["returned"] == len(first["rows"]) < 351
+    seen, offset = [], 0
+    while offset is not None:
+        text, info = apis.page(data, offset, 4000)
+        seen += json.loads(text)["rows"]
+        offset = info.get("next_offset")
+    assert seen == data["rows"]
+    assert apis.page({"status": "ok"}, 0, 4000) == ('{"status":"ok"}', None)
+    assert apis.page([1, 2, 3], 2, 4000) == ("[3]", {"list": None, "total": 3, "offset": 2, "returned": 1})
+
+
+def test_claude_pages_through_a_long_answer(conn, settings, directory):
+    _api(conn, settings, claude=True)
+    ivan = users.create_user(conn, "ivan", "password123")
+    accounts.link(conn, ivan, "ivan", directory)
+    rows = [{"account_number": str(900000 + n), "value": n, "label": "x" * 150} for n in range(351)]
+    seen = _upstream(lambda r: httpx.Response(200, json={"columns": ["account_number", "value"], "rows": rows}))
+    tools = Tools(settings, lambda: None, lambda: directory)
+    caller = Caller(ivan, "ivan", 1)
+    got, offset = [], 0
+    while True:
+        out, _ = tools.query_api(conn, caller, "Hotel Stats", "Stats summary", {"days": 2}, offset=offset)
+        got += json.loads(out["data"])["rows"]
+        if "next_offset" not in out["rows"]:
+            break
+        assert f"offset={out['rows']['next_offset']}" in out["note"]
+        offset = out["rows"]["next_offset"]
+    assert got == rows and out["rows"]["total"] == 351 and offset > 0
+    assert len(seen) == 1                                   # later pages come from the cache
+
+
+def test_a_search_that_finds_nothing_points_at_a_matching_api(conn, settings, directory):
+    from fakes import KeywordEmbedder
+
+    embedder = KeywordEmbedder()
+    _, op_id = _api(conn, settings, claude=True)
+    conn.execute("UPDATE api_operations SET example_questions = 'How many late checkouts were there?'")
+    apis.index_examples(conn, embedder, op_id)
+    ivan = users.create_user(conn, "ivan", "password123")
+    accounts.link(conn, ivan, "ivan", directory)
+    tools = Tools(settings, lambda: embedder, lambda: directory)
+    out, _ = tools.search_documents(conn, Caller(ivan, "ivan", 1), "late checkout report")
+    assert out["found"] is False and out["try_api"] == {"api": "Hotel Stats", "operation": "Stats summary"}
+    assert "try query_api" in out["note"]
+    out, _ = tools.search_documents(conn, Caller(ivan, "ivan", 1), "secret")
+    assert out["found"] is False and "try_api" not in out
+
+
+def test_a_cut_off_answer_says_so(conn, settings, directory):
+    _api(conn, settings, claude=True)
+    ivan = users.create_user(conn, "ivan", "password123")
+    accounts.link(conn, ivan, "ivan", directory)
+    _upstream(lambda r: httpx.Response(200, content=b'{"rows": [' + b'"x",' * apis.MAX_RESPONSE_BYTES))
+    out, _ = Tools(settings, lambda: None, lambda: directory).query_api(conn, Caller(ivan, "ivan", 1),
+                                                                        "Hotel Stats", "Stats summary")
+    assert "over 256 KB" in out["note"]
+
+
+def test_one_at_a_time_apis_queue_their_calls(conn, settings, monkeypatch):
+    import threading
+    import time as clock
+
+    from mnemerynne import db
+
+    monkeypatch.setattr(apis, "RETRY_429_AFTER", 0)
+    _, op_id = _api(conn, settings)
+    running, most, lock = [0], [0], threading.Lock()
+
+    def slow(request):
+        with lock:
+            running[0] += 1
+            most[0] = max(most[0], running[0])
+        clock.sleep(0.3)
+        with lock:
+            running[0] -= 1
+        return httpx.Response(200, json={"ok": True})
+
+    def both():
+        most[0] = 0
+        start, results = threading.Barrier(2), []
+
+        def one(days):
+            c = db.connect(settings.db_path)
+            start.wait()
+            results.append(apis.call(c, settings, op_id, {"days": days}, user_id=None, via="test"))
+            c.close()
+
+        threads = [threading.Thread(target=one, args=(d,)) for d in (1, 2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        return results
+
+    _upstream(slow)
+    assert all(r.ok for r in both()) and most[0] == 2      # side by side by default
+    conn.execute("UPDATE apis SET one_at_a_time = 1")
+    assert all(r.ok for r in both()) and most[0] == 1      # one after the other
+
+
+def test_a_429_is_tried_once_more(conn, settings, monkeypatch):
+    monkeypatch.setattr(apis, "RETRY_429_AFTER", 0)
+    _, op_id = _api(conn, settings)
+    answers = iter([httpx.Response(429, json={"error": "Another query is still running"}),
+                    httpx.Response(200, json={"ok": True})])
+    seen = _upstream(lambda r: next(answers))
+    assert apis.call(conn, settings, op_id, {}, user_id=None, via="test").ok and len(seen) == 2
+    _upstream(lambda r: httpx.Response(429, json={"error": "Another query is still running"}))
+    failed = apis.call(conn, settings, op_id, {"days": 3}, user_id=None, via="test")
+    assert "HTTP 429: Another query is still running" in failed.error
+
+
+def test_list_apis_says_which_run_one_at_a_time(conn, settings, directory):
+    _api(conn, settings, claude=True)
+    ivan = users.create_user(conn, "ivan", "password123")
+    accounts.link(conn, ivan, "ivan", directory)
+    tools = Tools(settings, lambda: None, lambda: directory)
+    assert "one_at_a_time" not in tools.list_apis(conn, Caller(ivan, "ivan", 1))[0]["apis"][0]
+    conn.execute("UPDATE apis SET one_at_a_time = 1")
+    assert tools.list_apis(conn, Caller(ivan, "ivan", 1))[0]["apis"][0]["one_at_a_time"] is True
+
+
 # ------------------------------------------------------------------- access
 def test_operations_follow_the_ad_group_and_claude_switch(conn, settings, directory):
     _api(conn, settings, group="IT", claude=False)
@@ -264,6 +397,15 @@ def _template(**changes):
 def test_bad_templates_are_refused(admin_client, text, message):
     r = admin_client.post("/api/admin/apis/templates", json={"template": text})
     assert r.status_code == 422 and message in r.json()["detail"]
+
+
+def test_one_at_a_time_comes_from_a_template_or_the_admin(admin_client, conn):
+    up = admin_client.post("/api/admin/apis/templates", json={"template": _template(one_at_a_time=True)}).json()
+    made = admin_client.post("/api/admin/apis", json={"preset": up["key"]}).json()
+    assert admin_client.get(f"/api/admin/apis/{made['id']}").json()["one_at_a_time"] is True
+    assert admin_client.patch(f"/api/admin/apis/{made['id']}", json={"one_at_a_time": False}).json() == {
+        "status": "saved"}
+    assert conn.execute("SELECT one_at_a_time FROM apis WHERE id = ?", (made["id"],)).fetchone()[0] == 0
 
 
 def test_a_template_cant_take_a_built_in_preset_name(admin_client):

@@ -10,7 +10,9 @@ itself is built here, so it can't reach anything an admin didn't set up.
 - Who may use an API: members of its AD group (through their linked domain
   account). Claude additionally needs the API's Claude switch.
 - Calls: GET (or an admin-fixed POST), no redirects, 20 s timeout, 256 KB cap,
-  short cache, and every call recorded in api_calls.
+  short cache, and every call recorded in api_calls. Calls to an API that runs
+  one query at a time (apis.one_at_a_time) wait their turn; a reading call that
+  gets HTTP 429 is tried once more.
 - Actions: operations marked as changing data (close a ticket, acknowledge an
   alert; PUT, PATCH, DELETE or POST) never run from chat or Claude. They become
   proposals (proposals.propose_api) that the person applies; only then, or an
@@ -37,6 +39,8 @@ import numpy as np
 from mnemerynne.config import Settings
 
 TIMEOUT = 20.0
+QUEUE_WAIT = 30.0                # a call to a one-at-a-time API waits this long for the one before it
+RETRY_429_AFTER = 1.5            # seconds before trying a reading call again after HTTP 429
 MAX_RESPONSE_BYTES = 256 * 1024
 EXCERPT_CHARS = 20_000           # kept with each call, for the citation link
 PARAM_TYPES = ("string", "int", "date", "enum", "text")
@@ -111,7 +115,7 @@ def allowed_operations(conn: sqlite3.Connection, user, directory, *, for_claude:
     if not groups:
         return []
     rows = conn.execute(
-        "SELECT o.*, a.name AS api_name, a.ad_group, a.claude_enabled FROM api_operations o "
+        "SELECT o.*, a.name AS api_name, a.ad_group, a.claude_enabled, a.one_at_a_time FROM api_operations o "
         "JOIN apis a ON a.id = o.api_id WHERE o.enabled = 1 AND a.enabled = 1 AND a.ad_group <> '' "
         "ORDER BY a.name COLLATE NOCASE, o.name COLLATE NOCASE").fetchall()
     return [r for r in rows if group_refs.in_any(conn, user, directory, r["ad_group"], groups)
@@ -302,6 +306,19 @@ class CallResult:
 
 _cache: dict[tuple, tuple[float, CallResult]] = {}
 _cache_lock = threading.Lock()
+_turns: dict[int, threading.Lock] = {}     # api id -> held while a call to a one-at-a-time API runs
+_turns_lock = threading.Lock()
+
+
+def _turn(api) -> threading.Lock | None:
+    """The API's lock, held (for up to QUEUE_WAIT) if it runs one query at a time; None otherwise."""
+    if not api["one_at_a_time"]:
+        return None
+    with _turns_lock:
+        lock = _turns.setdefault(api["id"], threading.Lock())
+    if not lock.acquire(timeout=QUEUE_WAIT):
+        raise ApiError(f"{api['name']} runs one query at a time and is still busy; try again in a moment")
+    return lock
 
 
 def _ssl(api) -> ssl.SSLContext | bool:
@@ -381,9 +398,15 @@ def call(conn: sqlite3.Connection, settings: Settings, op_id: int, params: dict 
     else:
         result = CallResult(0, False, api["name"], op["name"], "")
         raw_len = None
+        turn = None
         try:
             method, url, query, body = build_request(api, op, params)
-            status, ctype, raw, truncated = _fetch(api, method, url, query, body, _headers(settings, api))
+            headers = _headers(settings, api)
+            turn = _turn(api)
+            status, ctype, raw, truncated = _fetch(api, method, url, query, body, headers)
+            if status == 429 and not op["action"]:
+                time.sleep(RETRY_429_AFTER)
+                status, ctype, raw, truncated = _fetch(api, method, url, query, body, headers)
             raw_len = len(raw)
             text = raw.decode("utf-8", errors="replace")
             result.status_code, result.truncated = status, truncated
@@ -403,6 +426,9 @@ def call(conn: sqlite3.Connection, settings: Settings, op_id: int, params: dict 
             message = str(exc)
             result.error = ("couldn't verify the API's certificate; check the trusted certificate on the APIs page"
                             if "CERTIFICATE" in message.upper() else f"couldn't reach {api['name']}: {message[:200]}")
+        finally:
+            if turn is not None:
+                turn.release()
         if result.ok and op["cache_seconds"] > 0 and not op["action"]:
             with _cache_lock:
                 _cache[key] = (now + op["cache_seconds"], result)
@@ -440,15 +466,58 @@ def _trim(value, items: int):
     return value
 
 
+DIGEST_ITEMS = (500, 200, 100, 50, 20, 10, 5, 3, 1)   # list lengths to try, longest first
+
+
 def digest(data, max_chars: int) -> str:
     """The response as compact text that fits the model's context."""
     if isinstance(data, str):
         return data[:max_chars]
-    for items in (50, 20, 10, 5, 3, 1):
+    for items in DIGEST_ITEMS:
         text = json.dumps(_trim(data, items), ensure_ascii=False, separators=(",", ":"))
         if len(text) <= max_chars:
             return text
     return text[:max_chars] + "…"
+
+
+def _main_list(data, path: tuple = ()) -> tuple[tuple, list] | None:
+    """The longest list in a response (at most three levels down) and the keys that lead to it."""
+    best = (path, data) if isinstance(data, list) else None
+    if isinstance(data, dict) and len(path) < 3:
+        for key, value in data.items():
+            found = _main_list(value, path + (key,))
+            if found and (best is None or len(found[1]) > len(best[1])):
+                best = found
+    return best
+
+
+def _put(data, path: tuple, value):
+    """A copy of data with the value at path replaced."""
+    if not path:
+        return value
+    return {**data, path[0]: _put(data[path[0]], path[1:], value)}
+
+
+def page(data, offset: int, max_chars: int) -> tuple[str, dict | None]:
+    """The response as compact text, its longest list from row `offset` on, as many rows as fit;
+    and where that page is ({list, total, offset, returned, next_offset}), or None if it has no list."""
+    found = None if isinstance(data, str) else _main_list(data)
+    if not found or not found[1]:
+        return digest(data, max_chars), None
+    path, rows = found
+    offset = max(0, min(int(offset), len(rows)))
+    text = ""
+    for items in DIGEST_ITEMS:
+        chunk = rows[offset:offset + items]
+        text = json.dumps(_trim(_put(data, path, chunk), items), ensure_ascii=False, separators=(",", ":"))
+        if len(text) <= max_chars:
+            break
+    else:
+        chunk, text = rows[offset:offset + 1], text[:max_chars] + "…"
+    info = {"list": ".".join(map(str, path)) or None, "total": len(rows), "offset": offset, "returned": len(chunk)}
+    if offset + len(chunk) < len(rows):
+        info["next_offset"] = offset + len(chunk)
+    return text, info
 
 
 def infer_shape(data, prefix: str = "", out: list | None = None, limit: int = 200) -> list[tuple[str, str]]:
@@ -665,7 +734,7 @@ def openapi_operations(spec_text: str) -> list[dict]:
 
 TEMPLATE_FORMAT = "mnemerynne-api-template"
 _TEMPLATE_KEYS = {"format", "name", "description", "base_url", "auth_type", "auth_header", "auth_user",
-                  "tls_check_hostname", "operations"}
+                  "tls_check_hostname", "one_at_a_time", "operations"}
 # Set by hand on the API, never brought in by a file.
 _TEMPLATE_REFUSED = {"secret", "token", "password", "credential", "ca_pem", "certificate", "ad_group",
                      "claude_enabled"}
@@ -744,7 +813,8 @@ def parse_template(text: str) -> dict:
                         "body": body if method in BODY_METHODS else "", "cache_seconds": cache, "action": action})
     return {"name": name, "description": str(t.get("description") or "")[:20000], "base_url": base_url,
             "auth_type": auth_type, "auth_header": auth_header, "auth_user": str(t.get("auth_user") or "")[:200],
-            "tls_check_hostname": 0 if t.get("tls_check_hostname") is False else 1, "operations": out_ops}
+            "tls_check_hostname": 0 if t.get("tls_check_hostname") is False else 1,
+            "one_at_a_time": 1 if t.get("one_at_a_time") is True else 0, "operations": out_ops}
 
 
 def uploaded_templates(conn: sqlite3.Connection) -> list[dict]:

@@ -27,9 +27,9 @@ Every reading call is a GET, or a POST with your fixed body. Operations that
 change something are **actions** (see *Actions* below): the AI only proposes
 them, and they run when the person presses *Run it*. Calls don't follow
 redirects, time out after 20 seconds, keep at most 256 KB of the response, are
-cached briefly and are logged. The AI sees a trimmed version of the response
-(long lists are shortened), so **return small, flat JSON**: a few columns,
-dozens of rows, not thousands.
+cached briefly and are logged. The AI sees the response's longest list a page at
+a time (as many rows as fit, with an offset to ask for the next ones), so
+**return small, flat JSON**: a few columns, dozens of rows, not thousands.
 
 ## The file
 
@@ -53,6 +53,7 @@ dozens of rows, not thousands.
 | `auth_header` | for `header` | The header name, letters, digits and dashes, e.g. `X-API-Key`. |
 | `auth_user` | for `basic` | The user name. |
 | `tls_check_hostname` | no | `false` if the server is reached by an address its certificate doesn't name (e.g. an IP). The admin pins the certificate either way. Default `true`. |
+| `one_at_a_time` | no | `true` if the API answers only one request at a time (e.g. HTTP 429 while another query runs). Mnemerynne then queues calls to it instead of sending them side by side, and tells Claude. The admin can change it on the API's page. Default `false`. |
 | `description` | no | Markdown for the admin. Put the setup steps here (see *Description* below). |
 | `operations` | yes | 1 to 50 operations. |
 

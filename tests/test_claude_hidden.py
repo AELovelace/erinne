@@ -123,6 +123,38 @@ def test_a_hidden_folder_hides_everything_under_it(client, conn, settings, embed
     assert "777" not in _texts(claude.search_documents(conn, alice, "budget plan number")[0])
 
 
+def test_library_counts_match_what_claude_can_browse(client, conn, settings, embedder, world):
+    alice = _caller(conn, world["alice"])
+    claude = Tools(settings, lambda: embedder)
+
+    def inbox():
+        return claude.list_libraries(conn, alice)[0]["libraries"][0]
+
+    assert inbox()["files"] == 2 and "not_shown" not in inbox()
+    _login(client, "alice")
+    client.put(f"/api/folders/{world['folder']}/claude", json={"visible": False})
+    assert (inbox()["files"], inbox()["searchable_files"], inbox()["not_shown"]) == (1, 1, 1)
+    client.put(f"/api/files/{world['note']}/claude", json={"visible": False})
+    assert (inbox()["files"], inbox()["not_shown"]) == (0, 2)
+    assert claude.browse_folder(conn, alice, "File box")[0]["files"] == []
+
+
+def test_files_with_the_same_content_are_pointed_out(conn, settings, embedder, world):
+    # The same content uploaded to the same folder is the same file; in another folder it's a copy.
+    same = b"# Secret\n\nAlice's secret pool code is 4411.\n"
+    copy = store.add_file(conn, settings, store.receive(io.BytesIO(same), "alice-1.md", settings),
+                          world["inbox"], None, folder_id=world["folder"])[0]
+    alice = _caller(conn, world["alice"])
+    claude = Tools(settings, lambda: embedder)
+    top = {f["name"]: f for f in claude.browse_folder(conn, alice, "File box")[0]["files"]}
+    plans = {f["name"]: f for f in claude.browse_folder(conn, alice, "File box", "Plans")[0]["files"]}
+    assert top["alice.md"]["same_content_as"] == [copy] and plans["alice-1.md"]["same_content_as"] == [world["note"]]
+    assert "same_content_as" not in plans["plan.md"]
+    assert {f["name"]: f.get("same_content_as") for f in claude.find_files(conn, alice, "alice")[0]["files"]} == {
+        "alice.md": [copy], "alice-1.md": [world["note"]]}
+    assert claude.list_libraries(conn, alice)[0]["upload"].startswith(f"/files#c={world['inbox']}&f=")
+
+
 def test_only_people_who_can_change_the_place_can_toggle(client, conn, settings, embedder, world):
     api_tokens.create(conn, world["alice"], "laptop")
     _login(client, "alice")                       # reads Oracle, can't change it

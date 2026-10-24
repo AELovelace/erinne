@@ -1,5 +1,89 @@
 # Mnemerynne/Erynne on Fedora (pilot next to MicroJames)
 
+## Optional: Sadgirlsclub directory interface in Cockpit
+
+`deploy/cockpit-sadgirlsclub/` is a neon-themed web interface for an existing
+Samba AD DC. It uses Cockpit's authenticated session and administrative-access
+bridge; it adds no listening port or public route. It creates domain users and
+global security groups, shows memberships, adds/removes user memberships, resets
+passwords, enables/disables/unlocks users, and deletes ordinary users/groups with
+typed confirmation. Built-in, critical, and machine accounts are read-only.
+The Groups tab defaults to **Hide built-in groups**; uncheck it to inspect them.
+The filter uses group SIDs and critical-object metadata, so renamed or localized
+system groups are also hidden. Search combines with the filter, counts show how
+many groups are hidden, and the overview total still includes all groups.
+It does not provision domains, edit GPOs or shares, assign folder ACLs, or create
+Mnemerynne web accounts. Nested group membership editing is outside this version.
+
+From a checkout containing these files on the NAS:
+
+```sh
+sudo bash deploy/linux/install-sadgirlsclub-admin.sh
+```
+
+Open Cockpit at `https://192.168.1.5:9090`, enable **Administrative access**, and
+choose **Sadgirlsclub Directory** under Tools. Sign out and back in if the new
+entry is not visible. Keep this administration interface on your internal network.
+The installer preserves an older UI in `/root/sadgirlsclub-ui-backup-*`, installs
+root-owned static files and `/usr/local/libexec/sadgirlsclub-admin`, restores
+SELinux labels, and performs a read-only directory check. It requires existing
+Cockpit, Samba AD, Python 3, and SELinux utilities; it downloads no dependencies.
+
+The helper accepts one bounded JSON request on stdin. It invokes fixed local
+binaries without a shell. Group listing uses the distro's Samba Python bindings
+for one read-only local directory query; all changes still use `samba-tool`.
+Passwords go through a pipe to Samba's interactive
+password prompts in a detached session, never in command arguments. It serializes
+UI writes and audits operation names, targets, and outcomes to the system journal
+under `sadgirlsclub-admin`, without passwords. Samba enforces password policy.
+Administrative access remains full host administration; this UI is not a delegated
+helpdesk security boundary. A successful change followed by a failed refresh is
+reported separately so the user does not repeat a completed write.
+
+Local checks (no live directory writes):
+
+```sh
+python3 -m unittest discover -s python -p 'test_sadgirlsclub_admin.py' -v
+node --check deploy/cockpit-sadgirlsclub/app.js
+bash -n deploy/linux/install-sadgirlsclub-admin.sh
+```
+
+For live acceptance, create an expendable user and group, add/remove membership,
+reset the test user's password, disable/enable the user, and delete both after
+typing the exact confirmation. Verify with `samba-tool user list` and
+`samba-tool group listmembers`. Check that built-in objects remain read-only and
+that accounts or group names containing HTML render as text. Local mock checks
+cannot establish compatibility with the NAS's Cockpit bridge or Samba policy.
+
+`tests/sadgirlsclub-ui-smoke.js` supplies a browser-only fake Cockpit bridge and
+workflow checks. In a temporary preview copy of the page, replace the
+`../base1/cockpit.js` script with that fixture. Open with `?smoke` to exercise
+creation, password confirmation/reset, enable/disable, membership changes,
+deletion/cancellation, built-in protection/filtering, search, safe text rendering, and
+viewport width. The result is reported in `body.dataset.testResult`. Without
+`?smoke` it displays explicitly labeled sample data for visual review. Never
+install the fixture on the NAS; the installer copies only the four production
+static files. Desktop and 500-pixel viewport checks passed in headless Chrome.
+
+## Home NAS share alias
+
+On the existing `NAS` controller in `SADGIRLSCLUB.LOCAL`, run
+`sudo bash deploy/linux/add-mnemerynne-nas-alias.sh` to add
+`mnemerynne.sadgirlsclub.local` as a DNS CNAME pointing to
+`nas.sadgirlsclub.local`, and register short/qualified `cifs` SPNs on `NAS$`.
+The DNS command prompts for the domain Administrator password. The script keeps
+the DC hostname and identity, requires no service restart, and tolerates its own
+existing entries on reruns. It refuses conflicting DNS aliases or SPN ownership;
+if a later step fails, earlier additive entries may remain for a corrected rerun.
+Clients using domain DNS can access `\\mnemerynne.sadgirlsclub.local\share`;
+the short `\\mnemerynne\share` also requires the domain DNS search suffix.
+This does not rename Windows network-discovery listings or change web certificates.
+Verify from a Windows client with `Resolve-DnsName mnemerynne.sadgirlsclub.local
+-Server 192.168.1.5`, then open the qualified UNC path in Explorer. Local shell
+syntax checks do not establish live DNS or SMB authentication success.
+
+## Existing two-GPU pilot deployment
+
 The box has two GPUs. MicroJames keeps the GTX 1050 Ti, with its CUDA
 llama.cpp in `/opt/llama.cpp` and its `llama-generator` (:8081) and
 `llama-embedder` (:8082, jina) services. Mnemerynne's generator runs on the
