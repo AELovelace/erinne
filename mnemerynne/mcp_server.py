@@ -33,8 +33,8 @@ from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
-from mnemerynne import (api_tokens, apis, claude_links, db, editing, editing_formats, fs, permissions, proposals,
-                        retrieval, sharepoint)
+from mnemerynne import (activity, api_tokens, apis, claude_links, comments, db, editing, editing_formats, fs,
+                        permissions, proposals, retrieval, sharepoint)
 from mnemerynne.api_tokens import Caller
 from mnemerynne.config import Settings
 from mnemerynne.ingest import store
@@ -71,7 +71,16 @@ Editing files (.txt, .md, .docx, .xlsx):
 - Make the smallest change that does what was asked; don't rewrite text you weren't asked to change.
 - New files go in the person's Agents folder unless they name somewhere else (list_libraries shows where
   you may edit). Every change keeps the previous version, which the person can restore from Files.
-- You can't delete, move or rename files; tell the person to do that in Mnemerynne if it's needed.
+- create_folder makes a folder where you may edit (the Agents folder unless they name somewhere else);
+  then pass it as create_file's `folder`. rename_item and move_item rename or move a file or folder
+  between places you may edit. delete_item only proposes moving it to the recycle bin: give the person
+  the `approve` link, and never say it's deleted.
+
+Working with others (people, and other people's Claude):
+- list_changes shows what was added, changed, commented on or binned in a library or folder since a
+  time, and by whom: use it to notice replies instead of browsing and guessing.
+- Talk about a document with add_comment (reply_to answers a comment) and read the thread with
+  list_comments, rather than editing someone else's document to leave a message.
 - You can't save images (screenshots, photos) or other files you didn't write: give the person the
   `upload` link from list_libraries, which opens their Agents folder for them to add the file.
 
@@ -572,6 +581,120 @@ class Tools:
         return {"file_id": file_id, "file": row["display_name"], "where": self._where(conn, row), "version": version,
                 "link": _file_link(self.base, file_id, row["kind"])}, [file_id]
 
+    def create_folder(self, conn, caller: Caller, name: str, library: str | None = None,
+                      folder: str | None = None) -> tuple[dict, list[int]]:
+        if self.propose:
+            raise ToolError("Folders can't be proposed in chat; the person makes them in Files.")
+        collection_id = parent_id = None
+        library, folder = _split_place(library, folder)
+        if library:
+            access = self._access(conn, caller)
+            row = _resolve_collection(conn, access, library, self.claude)
+            collection_id, parent_id = row["id"], _resolve_folder(conn, access, row["id"], folder)
+        elif folder:
+            raise editing.EditError("Name the library the folder goes in, too (or leave both out for the "
+                                    "Agents folder).")
+        folder_id, created = editing.create_folder(conn, caller, name, collection_id, parent_id, via=self.mode)
+        row = conn.execute("SELECT collection_id FROM folders WHERE id = ?", (folder_id,)).fetchone()
+        coll = conn.execute("SELECT kind, name FROM collections WHERE id = ?", (row["collection_id"],)).fetchone()
+        library = permissions.PRIVATE_LABEL if coll["kind"] == "private" else coll["name"]
+        return {"folder_id": folder_id, "library": library, "folder": _path(conn, folder_id), "created": created,
+                "link": f"{self.base}/files#c={row['collection_id']}&f={folder_id}",
+                **({} if created else {"note": "It was already there; nothing changed."})}, []
+
+    def _item(self, file_id: int | None, folder_id: int | None) -> fs.Item:
+        if (file_id is None) == (folder_id is None):
+            raise ToolError("Give either file_id or folder_id (from browse_folder or find_files).")
+        return fs.Item("file", file_id) if file_id is not None else fs.Item("folder", folder_id)
+
+    def _place(self, conn, caller: Caller, library: str | None, folder: str | None) -> tuple[int | None, int | None]:
+        """A named place (library, folder path), or (None, None) for the person's Agents folder."""
+        library, folder = _split_place(library, folder)
+        if not library:
+            if folder:
+                raise editing.EditError("Name the library the folder is in, too (or leave both out for the "
+                                        "Agents folder).")
+            return None, None
+        access = self._access(conn, caller)
+        row = _resolve_collection(conn, access, library, self.claude)
+        return row["id"], _resolve_folder(conn, access, row["id"], folder)
+
+    def _no_proposals(self) -> None:
+        if self.propose:
+            raise ToolError("This can't be proposed in chat; the person does it in Files.")
+
+    def rename_item(self, conn, caller: Caller, name: str, file_id: int | None = None,
+                    folder_id: int | None = None) -> tuple[dict, list[int]]:
+        self._no_proposals()
+        item = self._item(file_id, folder_id)
+        new = editing.rename_item(conn, caller, item, name, via=self.mode)
+        return {"renamed": item.type, "id": item.id, "name": new}, [item.id] if item.type == "file" else []
+
+    def move_item(self, conn, caller: Caller, file_id: int | None = None, folder_id: int | None = None,
+                  library: str | None = None, folder: str | None = None) -> tuple[dict, list[int]]:
+        self._no_proposals()
+        item = self._item(file_id, folder_id)
+        collection_id, parent_id = self._place(conn, caller, library, folder)
+        name = editing.move_item(conn, caller, item, collection_id, parent_id, via=self.mode)
+        table = "files" if item.type == "file" else "folders"
+        row = conn.execute(f"SELECT collection_id, {'folder_id' if item.type == 'file' else 'parent_id'} AS place "
+                           f"FROM {table} WHERE id = ?", (item.id,)).fetchone()
+        return {"moved": item.type, "id": item.id, "name": name,
+                "where": proposals.where(conn, row["collection_id"], row["place"])}, \
+            [item.id] if item.type == "file" else []
+
+    def delete_item(self, conn, caller: Caller, file_id: int | None = None,
+                    folder_id: int | None = None) -> tuple[dict, list[int]]:
+        self._no_proposals()
+        item = self._item(file_id, folder_id)
+        proposal = proposals.propose_delete(conn, caller, item, via=self.mode)
+        return {"proposal": proposal, "status": "proposed", "approve": f"{self.base}/proposals#p{proposal}",
+                "note": "Nothing is deleted yet. Give the person the approve link: they check it and move it to the "
+                        "recycle bin in Mnemerynne themselves. Don't say it's done."}, []
+
+    def list_changes(self, conn, caller: Caller, library: str, folder: str | None = None,
+                     since: str | None = None) -> tuple[dict, list[int]]:
+        library, folder = _split_place(library, folder)
+        access = self._access(conn, caller)
+        row = _resolve_collection(conn, access, library, self.claude)
+        folder_id = _resolve_folder(conn, access, row["id"], folder)
+        try:
+            moment = activity.parse_since(since)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from None
+        found = activity.changes(conn, access, row["id"], folder_id, moment)
+        for entry in found:
+            kind = conn.execute("SELECT b.kind FROM files f JOIN blobs b ON b.sha256 = f.blob_sha256 WHERE f.id = ?",
+                                (entry["file_id"],)).fetchone()["kind"]
+            entry["link"] = _file_link(self.base, entry["file_id"], kind)
+        return {"library": _label(row), "folder": _path(conn, folder_id) or "/", "since": moment + " UTC",
+                "files": found, **({} if found else {"note": "Nothing changed here since then."}),
+                **({"note": f"Showing the {activity.MAX_FILES} most recent; ask for a later `since`."}
+                   if len(found) >= activity.MAX_FILES else {})}, [e["file_id"] for e in found]
+
+    def list_comments(self, conn, caller: Caller, file_id: int) -> tuple[dict, list[int]]:
+        try:
+            found = comments.listing(conn, self._access(conn, caller), file_id)
+        except comments.CommentError as exc:
+            raise ToolError(str(exc)) from None
+        return {"file_id": file_id, "comments": found,
+                **({} if found else {"note": "No comments yet."})}, [file_id]
+
+    def add_comment(self, conn, caller: Caller, file_id: int, text: str,
+                    reply_to: int | None = None) -> tuple[dict, list[int]]:
+        self._no_proposals()
+        if not caller.can_edit:
+            raise ToolError("This connection can only search. To let Claude comment, open Claude in Mnemerynne and "
+                            "turn on “Let Claude edit files” for this token.")
+        try:
+            comment_id = comments.add(conn, self._access(conn, caller), file_id, text, via="claude",
+                                      reply_to=reply_to)
+        except comments.CommentError as exc:
+            raise ToolError(str(exc)) from None
+        return {"comment_id": comment_id, "file_id": file_id, **({"reply_to": reply_to} if reply_to else {}),
+                "note": "Saved. People see it in Files (the file's details), and other agents with list_comments."}, \
+            [file_id]
+
     def list_versions(self, conn, caller: Caller, file_id: int) -> tuple[dict, list[int]]:
         loaded = editing.load(conn, self.settings, caller.user_id, file_id, via=self.mode)
         return {"file_id": file_id, "file": loaded.row["display_name"], "current_version": loaded.version,
@@ -734,6 +857,57 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
         return await call(ctx, "create_file", {"name": name, "content": content, "paragraphs": paragraphs,
                                                "rows": rows, "sheet": sheet, "library": library, "folder": folder},
                           tools.create_file)
+
+    @server.tool(annotations=_EDITS)
+    async def create_folder(ctx: Context, name: str, library: str | None = None, folder: str | None = None) -> dict:
+        """Create a folder called `name` in the person's Agents folder, or inside `folder` of `library` when
+        they name another place you may edit (list_libraries shows where). Returns its `library` and `folder`
+        path to pass to create_file. If it already exists, it is returned unchanged."""
+        return await call(ctx, "create_folder", {"name": name, "library": library, "folder": folder},
+                          tools.create_folder)
+
+    @server.tool(annotations=_EDITS)
+    async def rename_item(ctx: Context, name: str, file_id: int | None = None, folder_id: int | None = None) -> dict:
+        """Rename a file (give file_id; it keeps its extension) or a folder (folder_id), where you may edit.
+        Ids come from browse_folder, find_files or list_changes."""
+        return await call(ctx, "rename_item", {"name": name, "file_id": file_id, "folder_id": folder_id},
+                          tools.rename_item)
+
+    @server.tool(annotations=_EDITS)
+    async def move_item(ctx: Context, file_id: int | None = None, folder_id: int | None = None,
+                        library: str | None = None, folder: str | None = None) -> dict:
+        """Move a file (file_id) or folder (folder_id) into `folder` of `library`, or into the person's Agents
+        folder when both are left out. Both places must be ones you may edit (list_libraries shows where).
+        If the name is taken there, it gets " (2)" added."""
+        return await call(ctx, "move_item", {"file_id": file_id, "folder_id": folder_id, "library": library,
+                                             "folder": folder}, tools.move_item)
+
+    @server.tool(annotations=_EDITS)
+    async def delete_item(ctx: Context, file_id: int | None = None, folder_id: int | None = None) -> dict:
+        """Propose moving a file (file_id) or folder (folder_id) to the recycle bin. Nothing happens yet: you
+        get an `approve` link to give the person, who checks it and applies it in Mnemerynne. Never say it's
+        deleted."""
+        return await call(ctx, "delete_item", {"file_id": file_id, "folder_id": folder_id}, tools.delete_item)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def list_changes(ctx: Context, library: str, folder: str | None = None, since: str | None = None) -> dict:
+        """What happened in a library (or a `folder` path in it, and below) since `since` (UTC, e.g.
+        "2026-10-24" or "2026-10-24 14:30"; default the last 24 hours): files added, changed, commented on or
+        moved to the recycle bin, when and by whom ("Claude for rob" = Rob's Claude), newest first."""
+        return await call(ctx, "list_changes", {"library": library, "folder": folder, "since": since},
+                          tools.list_changes)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def list_comments(ctx: Context, file_id: int) -> dict:
+        """The comments on a file, oldest first, with who wrote each and when; replies carry reply_to."""
+        return await call(ctx, "list_comments", {"file_id": file_id}, tools.list_comments)
+
+    @server.tool(annotations=_EDITS)
+    async def add_comment(ctx: Context, file_id: int, text: str, reply_to: int | None = None) -> dict:
+        """Comment on a file you can read (`reply_to`: a comment_id from list_comments to answer it). Use this to
+        talk to people or other agents about a document instead of editing it."""
+        return await call(ctx, "add_comment", {"file_id": file_id, "text": text, "reply_to": reply_to},
+                          tools.add_comment)
 
     @server.tool(annotations=_READ_ONLY)
     async def list_versions(ctx: Context, file_id: int) -> dict:

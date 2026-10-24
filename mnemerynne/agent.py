@@ -87,6 +87,10 @@ CLAUDE_LIMITS = {"max_tokens": 16000, "reasoning_tokens": 0, "context_tokens": 9
 DELEGATE_TOOL = "ask_minerynne"
 # Tools that change files; outside the agent group only in the person's Agents folder.
 FILE_WRITE_TOOLS = {"edit_text", "edit_document", "edit_spreadsheet", "create_file"}
+# Connector tools chat's assistants don't get: changes with no proposal form (they only propose changes),
+# and the tools for working with other people's agents, which would only crowd a small model's choices.
+CONNECTOR_ONLY_TOOLS = {"create_folder", "rename_item", "move_item", "delete_item", "add_comment",
+                        "list_changes", "list_comments"}
 # What the chat's tool panel calls each tool, by group.
 TOOL_GROUPS = {
     "Documents": {"search_documents": "Search documents", "read_passage": "Read passages",
@@ -856,7 +860,8 @@ class Agent:
         full = bool(cfg.get("full"))
         off = set(state.get("disabled_tools") or [])   # switched off in chat's tool panel
         base = [s for s in await self.specs()
-                if s["function"]["name"] not in GENERIC_API_TOOLS | (NO_IMAGES if claude else set())]
+                if s["function"]["name"] not in GENERIC_API_TOOLS | CONNECTOR_ONLY_TOOLS
+                | (NO_IMAGES if claude else set())]
         api_specs, api_map = await asyncio.to_thread(self._api_tools, state["user_id"], claude)
         if not full:   # API actions: the agent group only
             api_specs = [s for s in api_specs if not api_map[s["function"]["name"]].action]

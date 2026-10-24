@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import api_tokens, editing, fs, jobs, permissions, share
+from mnemerynne import api_tokens, comments, editing, fs, jobs, permissions, share
 from mnemerynne.config import Settings
 from mnemerynne.ingest import markdown, store
 from mnemerynne.web.deps import api_user, get_db, get_settings, is_admin, page_user
@@ -526,6 +526,31 @@ def download_version(file_id: int, version_id: int, user=Depends(page_user),
     name = f"{stem or ext} (before {v['created_at'][:16].replace(':', '.')}){dot}{ext if stem else ''}"
     return FileResponse(path, media_type="application/octet-stream", filename=name,
                         content_disposition_type="attachment", headers={"X-Content-Type-Options": "nosniff"})
+
+
+class CommentBody(BaseModel):
+    text: str = Field(..., max_length=comments.MAX_CHARS)
+    reply_to: int | None = None
+
+
+@router.get("/api/files/{file_id}/comments")
+def file_comments(file_id: int, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Comments people (and Claude, through the connector) left on the file."""
+    try:
+        return {"comments": comments.listing(conn, fs.Access.of(conn, user["id"]), file_id)}
+    except comments.CommentError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from None
+
+
+@router.post("/api/files/{file_id}/comments", status_code=status.HTTP_201_CREATED)
+def add_file_comment(file_id: int, body: CommentBody, user=Depends(api_user),
+                     conn: sqlite3.Connection = Depends(get_db)):
+    access = fs.Access.of(conn, user["id"])
+    try:
+        comments.add(conn, access, file_id, body.text, via="web", reply_to=body.reply_to)
+        return {"comments": comments.listing(conn, access, file_id)}
+    except comments.CommentError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
 
 
 @router.post("/api/files/{file_id}/versions/{version_id}/restore")

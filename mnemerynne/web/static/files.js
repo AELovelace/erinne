@@ -1048,7 +1048,71 @@
     pane.appendChild(dl);
     if (full.error) pane.appendChild(el("p", "error small", full.error));
     if (full.notes) pane.appendChild(el("p", "note small", full.notes));
+    renderComments(pane, full, token);
     renderVersions(pane, full, token);
+  }
+
+  /* Comments on the file, from people here and from Claude through the connector
+     (e.g. one person's Claude answering another's). */
+  function renderComments(pane, file, token) {
+    const box = el("section", "comments");
+    box.appendChild(el("h4", null, "Comments"));
+    const list = el("ul", "comment-list");
+    const form = el("form", "comment-form");
+    const replying = el("div", "small muted");
+    replying.hidden = true;
+    const text = el("textarea");
+    text.rows = 2; text.maxLength = 4000; text.placeholder = "Add a comment…";
+    const send = el("button", "small", "Comment");
+    send.type = "submit";
+    let replyTo = null;
+
+    function reset() { replyTo = null; replying.hidden = true; replying.replaceChildren(); }
+
+    function show(items) {
+      const by = {};
+      items.forEach(function (c) { by[c.comment_id] = c.by; });
+      list.replaceChildren();
+      if (!items.length) list.appendChild(el("li", "muted small", "No comments yet."));
+      items.forEach(function (c) {
+        const li = el("li", c.reply_to ? "reply" : null);
+        li.appendChild(el("div", "small muted", (c.reply_to ? "↳ to " + (by[c.reply_to] || "a comment") + " · " : "")
+                                                + c.by + " · " + dateLabel(c.at.replace(" UTC", ""))));
+        li.appendChild(el("div", "comment-text", c.text));
+        const reply = el("button", "link small", "Reply");
+        reply.type = "button";
+        reply.addEventListener("click", function () {
+          replyTo = c.comment_id;
+          const cancel = el("button", "link small", "cancel");
+          cancel.type = "button";
+          cancel.addEventListener("click", reset);
+          replying.replaceChildren(document.createTextNode("Replying to " + c.by + " "), cancel);
+          replying.hidden = false;
+          text.focus();
+        });
+        li.appendChild(reply);
+        list.appendChild(li);
+      });
+    }
+
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      if (!text.value.trim()) return;
+      send.disabled = true;
+      try {
+        const data = await api("POST", "/api/files/" + file.id + "/comments", { text: text.value, reply_to: replyTo });
+        text.value = "";
+        reset();
+        show(data.comments);
+      } catch (err) { toast(err.message, true); }
+      send.disabled = false;
+    });
+    form.append(replying, text, send);
+    box.append(list, form);
+    pane.appendChild(box);
+    api("GET", "/api/files/" + file.id + "/comments")
+      .then(function (data) { if (token === infoToken) show(data.comments); })
+      .catch(function () { box.remove(); });
   }
 
   /* Earlier versions kept when Claude changed the file; Restore puts one back

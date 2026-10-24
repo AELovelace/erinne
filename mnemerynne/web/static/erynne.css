@@ -632,6 +632,16 @@ button.danger-fill { background: var(--error); }
 .version-list li { padding: .45rem 0; border-bottom: 1px solid var(--line); }
 .version-actions { display: flex; gap: .8rem; margin-top: .2rem; }
 
+/* file comments (info pane) */
+.comments { margin-top: 1rem; border-top: 1px solid var(--line); padding-top: .6rem; }
+.comments h4 { margin: 0 0 .4rem; font-size: .95rem; }
+.comment-list { list-style: none; padding: 0; margin: 0 0 .5rem; font-size: .88rem; }
+.comment-list li { padding: .45rem 0; border-bottom: 1px solid var(--line); }
+.comment-list li.reply { padding-left: 1rem; }
+.comment-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: .15rem 0; }
+.comment-form { display: flex; flex-direction: column; gap: .35rem; align-items: flex-start; }
+.comment-form textarea { width: 100%; box-sizing: border-box; resize: vertical; }
+
 /* Erynne's agent in chat (agent.js): steps, proposed file changes */
 .ask-scope { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; }
 .tools-toggle { display: inline-flex; align-items: center; gap: .3rem; margin: 0; white-space: nowrap; flex: none;

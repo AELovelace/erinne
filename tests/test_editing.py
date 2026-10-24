@@ -98,6 +98,30 @@ def test_who_may_edit_what(conn, settings, world):
         check(conn, a, True, world["brand"], None)                              # not shared with Claude
 
 
+def test_claude_makes_folders_where_it_may_edit(conn, settings, world, tools):
+    alice = _caller(conn, world["alice"])
+    made, _ = tools.create_folder(conn, alice, "Red Lion")
+    assert (made["library"], made["folder"], made["created"]) == ("File box", "Agents/Red Lion", True)
+    assert made["link"] == f"/files#c={world['inbox']}&f={made['folder_id']}"
+    again, _ = tools.create_folder(conn, alice, "red lion")                     # asking twice is harmless
+    assert again["folder_id"] == made["folder_id"] and not again["created"] and "already" in again["note"]
+    # create_file takes the folder it returned.
+    out, _ = tools.create_file(conn, alice, "note.md", content="hi", library=made["library"], folder=made["folder"])
+    assert out["where"] == "File box / Agents/Red Lion"
+
+    with pytest.raises(editing.EditForbidden, match="this library"):
+        tools.create_folder(conn, alice, "Agents", library="Brand")              # library switch is off
+    conn.execute("UPDATE collections SET claude_edit = 1 WHERE id = ?", (world["brand"],))
+    top, _ = tools.create_folder(conn, alice, "Agents", library="Brand")
+    assert (top["library"], top["folder"]) == ("Brand", "Agents")
+    with pytest.raises(editing.EditForbidden, match="outside the Agents folder"):
+        tools.create_folder(conn, alice, "Loose", library="File box")            # File box root
+    with pytest.raises(editing.EditForbidden, match="can only search"):
+        tools.create_folder(conn, _caller(conn, world["alice"], can_edit=False), "Nope")
+    with pytest.raises(editing.EditError):
+        tools.create_folder(conn, alice, "bad/name")
+
+
 # ---------------------------------------------------------------- text flow
 def test_create_open_edit_conflict_versions_restore(conn, settings, world, tools):
     alice = _caller(conn, world["alice"])

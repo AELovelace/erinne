@@ -125,6 +125,32 @@ def propose_api(conn: sqlite3.Connection, caller, op: sqlite3.Row, params: dict 
     ).lastrowid
 
 
+def propose_delete(conn: sqlite3.Connection, caller, item: fs.Item, *, via: str = "claude") -> int:
+    """Moving a file or folder to the recycle bin, which the person applies (with their own rights). Only
+    where the assistant could change it anyway (editing.check_item_edit)."""
+    row = editing.check_item_edit(conn, caller, item, via=via)
+    if item.type == "file":
+        name, folder_id, file_id = row["display_name"], row["folder_id"], row["id"]
+        changes = ["Move this file to the recycle bin (it can be restored from there)."]
+    else:
+        below = fs.subtree(conn, item.id)
+        marks = ",".join("?" * len(below))
+        inside = conn.execute(f"SELECT count(*) FROM files WHERE folder_id IN ({marks}) AND deleted_at IS NULL",
+                              below).fetchone()[0]
+        name, folder_id, file_id = row["name"], row["parent_id"], None
+        changes = [f"Move this folder and the {inside} file(s) in it to the recycle bin (it can be restored "
+                   f"from there)."]
+    pending = conn.execute("SELECT id FROM agent_proposals WHERE user_id = ? AND kind = 'delete' AND status = 'pending' "
+                           "AND payload = ?", (caller.user_id, json.dumps({"type": item.type, "id": item.id}))).fetchone()
+    if pending:
+        return pending["id"]
+    return conn.execute(
+        "INSERT INTO agent_proposals(user_id, conversation_id, kind, file_id, collection_id, folder_id, name, changes, "
+        "payload) VALUES (?, ?, 'delete', ?, ?, ?, ?, ?, ?)",
+        (caller.user_id, getattr(caller, "conversation_id", None), file_id, row["collection_id"], folder_id, name,
+         json.dumps(changes), json.dumps({"type": item.type, "id": item.id}))).lastrowid
+
+
 def in_agents_folder(conn: sqlite3.Connection, user_id: int, row: sqlite3.Row) -> bool:
     """A file proposal that stays inside the person's own Agents folder: all that people outside the
     agent group may change (accounts.is_agent_user), checked when it's proposed and when it's applied."""
@@ -208,6 +234,16 @@ def apply(conn: sqlite3.Connection, settings: Settings, user: sqlite3.Row, propo
         raise ProposalError(f"This change was already {row['status']}.")
     if row["kind"] == "api":
         return _apply_api(conn, settings, user, row, directory)
+    if row["kind"] == "delete":
+        payload = json.loads(row["payload"])
+        try:
+            result = fs.trash(conn, fs.Access.of(conn, user["id"]), [fs.Item(payload["type"], payload["id"])])[0]
+        except fs.FsError as exc:
+            raise ProposalError(f"Nothing was deleted: {exc}") from None
+        if not result.ok:
+            raise ProposalError(f"Nothing was deleted: {result.error}")
+        _decide(conn, proposal_id, "applied")
+        return view(conn, get(conn, proposal_id, user["id"]))
     if row["kind"] == "mail":
         from mnemerynne import m365_mail
 

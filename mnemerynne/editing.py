@@ -417,6 +417,91 @@ def create(conn: sqlite3.Connection, settings: Settings, caller, name: str, data
     return file_id, sha256(data)
 
 
+def check_item_edit(conn: sqlite3.Connection, caller, item: fs.Item, *, via: str = "claude") -> sqlite3.Row:
+    """Raise unless the assistant may rename, move or bin this file or folder for the caller: it may edit
+    where the item sits and the item itself, and for a folder nothing inside is read-only for the AI."""
+    who = ASSISTANTS[via]
+    if item.type == "file":
+        row = conn.execute("SELECT * FROM files WHERE id = ? AND deleted_at IS NULL", (item.id,)).fetchone()
+        if row is None or not fs.is_live_folder(conn, row["folder_id"]) or \
+                not ai_access(conn, caller.user_id, via).can_read_file(row):
+            raise EditNotFound("No such file" + (" (or it isn't shared with Claude)." if via == "claude" else "."))
+        check_edit(conn, caller.user_id, caller.can_edit, row["collection_id"], row["folder_id"], via=via,
+                   file_id=item.id)
+        return row
+    row = conn.execute("SELECT * FROM folders WHERE id = ? AND deleted_at IS NULL", (item.id,)).fetchone()
+    if row is None or not fs.is_live_folder(conn, item.id):
+        raise EditNotFound("No such folder.")
+    if row["role"]:
+        raise EditForbidden(f"“{row['name']}” is the {row['role'].capitalize()} folder; it stays as it is.")
+    check_edit(conn, caller.user_id, caller.can_edit, row["collection_id"], row["parent_id"], via=via)
+    check_edit(conn, caller.user_id, caller.can_edit, row["collection_id"], item.id, via=via)
+    below = fs.subtree(conn, item.id)
+    marks = ",".join("?" * len(below))
+    locked = conn.execute(
+        f"SELECT name FROM folders WHERE id IN ({marks}) AND ai_no_edit = 1 UNION ALL "
+        f"SELECT display_name FROM files WHERE folder_id IN ({marks}) AND ai_no_edit = 1 AND deleted_at IS NULL "
+        f"LIMIT 1", (*below, *below)).fetchone()
+    if locked:
+        raise EditForbidden(f"“{locked[0]}” inside it is read-only for the AI, so {who} can't move or delete "
+                            f"the folder.")
+    return row
+
+
+def rename_item(conn: sqlite3.Connection, caller, item: fs.Item, name: str, *, via: str = "claude") -> str:
+    """Rename a file or folder where the assistant may edit; a file keeps its extension. Returns the name."""
+    if "/" in (name or "") or "\\" in (name or ""):
+        raise EditError("Give just the new name, without / or \\; use move_item to put it somewhere else.")
+    row = check_item_edit(conn, caller, item, via=via)
+    if item.type == "file":
+        old, new = Path(row["display_name"]).suffix.lower(), Path(name.strip()).suffix.lower()
+        if old != new:
+            raise EditError(f"Keep the extension: “{row['display_name']}” is a {old or 'no-extension'} file.")
+    try:
+        return fs.rename(conn, fs.Access.of(conn, caller.user_id), item, name)
+    except fs.FsError as exc:
+        raise EditError(str(exc)) from None
+
+
+def move_item(conn: sqlite3.Connection, caller, item: fs.Item, collection_id: int | None, folder_id: int | None,
+              *, via: str = "claude") -> str:
+    """Move a file or folder from one place where the assistant may edit to another (the Agents folder
+    when no place is given). Returns its name there, which gets " (2)" if the name was taken."""
+    check_item_edit(conn, caller, item, via=via)
+    collection_id, folder_id = new_file_place(conn, caller.user_id, collection_id, folder_id)
+    check_edit(conn, caller.user_id, caller.can_edit, collection_id, folder_id, via=via)
+    try:
+        result = fs.move(conn, fs.Access.of(conn, caller.user_id), [item], collection_id, folder_id)[0]
+    except fs.FsError as exc:
+        raise EditError(str(exc)) from None
+    if not result.ok:
+        raise EditError(result.error or "It couldn't be moved.")
+    return result.extra["name"]
+
+
+def create_folder(conn: sqlite3.Connection, caller, name: str, collection_id: int | None = None,
+                  parent_id: int | None = None, *, via: str = "claude") -> tuple[int, bool]:
+    """A new folder from the assistant, inside a place where it may edit (the caller's Agents folder
+    unless another is given). Returns (folder_id, created); a folder of that name already there is
+    returned as it is, so asking twice is harmless."""
+    if "/" in (name or "") or "\\" in (name or ""):
+        # The name cleaner would keep only the last part; say so instead of making something else.
+        raise EditError("Give one folder name, without / or \\. To make a folder inside another, name the "
+                        "outer one as `folder`.")
+    collection_id, parent_id = new_file_place(conn, caller.user_id, collection_id, parent_id)
+    check_edit(conn, caller.user_id, caller.can_edit, collection_id, parent_id, via=via)
+    try:
+        name = fs.clean_name(name)
+        return fs.create_folder(conn, fs.Access.of(conn, caller.user_id), collection_id, parent_id, name), True
+    except fs.Conflict:
+        row = conn.execute("SELECT id FROM folders WHERE collection_id = ? AND COALESCE(parent_id, 0) = ? "
+                           "AND lower(name) = lower(?) AND deleted_at IS NULL",
+                           (collection_id, parent_id or 0, name)).fetchone()
+        return row["id"], False
+    except fs.FsError as exc:
+        raise EditError(str(exc)) from None
+
+
 # ---------------------------------------------------------------- versions
 def versions(conn: sqlite3.Connection, file_id: int) -> list[dict]:
     rows = conn.execute(

@@ -29,12 +29,13 @@ def apply_proposal(proposal_id: int, request: Request, user=Depends(api_user),
                    conn: sqlite3.Connection = Depends(get_db)):
     """Mail drafts: still in the agent group. File changes: the agent group anywhere they may edit,
     everyone else only in their own Agents folder. API actions check instead that the person may still
-    use the operation (they can come from Claude's connector)."""
+    use the operation, and deletes bin with the person's own rights (both can come from Claude's connector)."""
     from mnemerynne import m365
 
     try:
         row = proposals.get(conn, proposal_id, user["id"])
-        if row["kind"] != "api" and not accounts.is_agent_user(conn, user, request.app.state.directory):
+        if row["kind"] not in ("api", "delete") and not accounts.is_agent_user(conn, user,
+                                                                               request.app.state.directory):
             if row["kind"] == "mail" or not proposals.in_agents_folder(conn, user["id"], row):
                 raise HTTPException(status.HTTP_403_FORBIDDEN, "Outside the agent group, Erynne only changes files "
                                                                "in your Agents folder.")
