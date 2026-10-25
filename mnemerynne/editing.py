@@ -159,6 +159,21 @@ def no_edit_reason(conn: sqlite3.Connection, folder_id: int | None, file_id: int
     return f"“{name}” is read-only for the AI (AI edit is off for it in Files)." if name else None
 
 
+def no_edit_item(conn: sqlite3.Connection, folder_id: int | None, file_id: int | None = None) -> fs.Item | None:
+    """The file, or the nearest folder at or above folder_id, whose "AI can edit" is switched off (the one
+    no_edit_reason names); None if nothing is."""
+    if file_id is not None and conn.execute("SELECT ai_no_edit FROM files WHERE id = ?", (file_id,)).fetchone()[0]:
+        return fs.Item("file", file_id)
+    if folder_id is None:
+        return None
+    row = conn.execute(
+        "WITH RECURSIVE up(id, parent_id, flag, depth) AS ("
+        " SELECT id, parent_id, ai_no_edit, 0 FROM folders WHERE id = ? UNION ALL"
+        " SELECT f.id, f.parent_id, f.ai_no_edit, up.depth + 1 FROM folders f JOIN up ON f.id = up.parent_id)"
+        " SELECT id FROM up WHERE flag = 1 ORDER BY depth LIMIT 1", (folder_id,)).fetchone()
+    return fs.Item("folder", row["id"]) if row is not None else None
+
+
 def owner_allows(conn: sqlite3.Connection, folder_id: int | None, file_id: int | None = None) -> bool:
     """The inbox owner switched "AI can edit" on for this file or a folder at or above folder_id."""
     return _chain_flag(conn, "ai_edit", folder_id, file_id) is not None
@@ -166,17 +181,18 @@ def owner_allows(conn: sqlite3.Connection, folder_id: int | None, file_id: int |
 
 def check_edit(conn: sqlite3.Connection, user_id: int, token_can_edit: bool,
                collection_id: int, folder_id: int | None, *, via: str = "claude", file_id: int | None = None,
-               item_flags: bool = True) -> Place:
+               item_flags: bool = True, ai: fs.Access | None = None, own: fs.Access | None = None) -> Place:
     """Raise unless the assistant (Claude, or Erynne) may change files at this
     place for this person. file_id: the file being changed (its own switches count too).
-    item_flags=False leaves out the per-folder and per-file switches (to show them)."""
+    item_flags=False leaves out the per-folder and per-file switches (to show them).
+    ai, own: the assistant's and the person's Access, when the caller already has them (EditCheck)."""
     who = ASSISTANTS[via]
-    if not ai_access(conn, user_id, via).can_read(collection_id, folder_id):
+    if not (ai or ai_access(conn, user_id, via)).can_read(collection_id, folder_id):
         raise EditNotFound("No such place" + (" (or it isn't shared with Claude)." if via == "claude" else "."))
     if not token_can_edit:
         raise EditForbidden("This connection can only search. To let Claude change files, open Claude in "
                             "Mnemerynne and turn on “Let Claude edit files” for this token.")
-    if not fs.Access.of(conn, user_id).can_write(collection_id, folder_id):
+    if not (own or fs.Access.of(conn, user_id)).can_write(collection_id, folder_id):
         raise EditForbidden(f"You can't change files here yourself, so {who} can't either.")
     if item_flags:
         why = no_edit_reason(conn, folder_id, file_id)
@@ -197,6 +213,26 @@ def check_edit(conn: sqlite3.Connection, user_id: int, token_can_edit: bool,
                             f"to turn on AI edit for this folder or file in Files.")
     raise EditForbidden(f"{who} isn't allowed to change files in this library. Work in your {AGENTS} folder "
                         f"instead (create_file puts new files there), or ask an admin to allow AI edits here.")
+
+
+class EditCheck:
+    """check_edit for many items at once (the `editable` flag on listings): the Access lookups are made once."""
+
+    def __init__(self, conn: sqlite3.Connection, user_id: int, token_can_edit: bool, via: str = "claude"):
+        self.conn, self.user_id, self.token_can_edit, self.via = conn, user_id, token_can_edit, via
+        self.ai = ai_access(conn, user_id, via)
+        self.own = fs.Access.of(conn, user_id)
+
+    def allows(self, collection_id: int, folder_id: int | None, file_id: int | None = None) -> bool:
+        """The assistant may change this file (file_id) or files in this folder."""
+        if not self.token_can_edit:
+            return False
+        try:
+            check_edit(self.conn, self.user_id, True, collection_id, folder_id, via=self.via, file_id=file_id,
+                       ai=self.ai, own=self.own)
+            return True
+        except EditError:
+            return False
 
 
 def edit_state(conn: sqlite3.Connection, user_id: int, collection_id: int, place: int | None,
@@ -458,9 +494,19 @@ def rename_item(conn: sqlite3.Connection, caller, item: fs.Item, name: str, *, v
         if old != new:
             raise EditError(f"Keep the extension: “{row['display_name']}” is a {old or 'no-extension'} file.")
     try:
-        return fs.rename(conn, fs.Access.of(conn, caller.user_id), item, name)
+        new = fs.rename(conn, fs.Access.of(conn, caller.user_id), item, name)
     except fs.FsError as exc:
         raise EditError(str(exc)) from None
+    _credit(conn, caller, item, via)
+    return new
+
+
+def _credit(conn: sqlite3.Connection, caller, item: fs.Item, via: str) -> None:
+    """A file the assistant renamed or moved: list_changes says who did it, not "someone in Files". Kept
+    apart from edited_via (who changed the content); it counts while moved_at is still the file's updated_at."""
+    if item.type == "file":
+        conn.execute("UPDATE files SET moved_via = ?, moved_at = updated_at WHERE id = ?",
+                     (f"{via}:{caller.username}", item.id))
 
 
 def move_item(conn: sqlite3.Connection, caller, item: fs.Item, collection_id: int | None, folder_id: int | None,
@@ -475,7 +521,9 @@ def move_item(conn: sqlite3.Connection, caller, item: fs.Item, collection_id: in
     except fs.FsError as exc:
         raise EditError(str(exc)) from None
     if not result.ok:
-        raise EditError(result.error or "It couldn't be moved.")
+        raise {404: EditNotFound, 403: EditForbidden, 409: EditConflict}.get(result.status, EditError)(
+            result.error or "It couldn't be moved.")
+    _credit(conn, caller, item, via)
     return result.extra["name"]
 
 

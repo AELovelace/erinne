@@ -13,6 +13,8 @@ worker.py drops decided and old ones.
 API actions (kind 'api', apis.py) wait the same way: closing a ticket or
 resolving an alert is only called when the person applies it, after checking
 again that they may use that operation, and the call is linked from the card.
+So do Claude's deletes (kind 'delete') and its requests to edit where it is
+refused (kind 'access'): the person applies them with their own rights.
 """
 
 from __future__ import annotations
@@ -151,6 +153,44 @@ def propose_delete(conn: sqlite3.Connection, caller, item: fs.Item, *, via: str 
          json.dumps(changes), json.dumps({"type": item.type, "id": item.id}))).lastrowid
 
 
+def propose_access(conn: sqlite3.Connection, caller, target: fs.Item, name: str, collection_id: int,
+                   folder_id: int | None, changes: list[str]) -> int:
+    """Letting the AI edit somewhere it is refused, which the person applies: target is the file or folder
+    whose "AI can edit" switch goes on (their own File box, or clearing a read-only switch), or a library
+    ({type: "library"}), which only an admin can apply. The tool has worked out which (request_edit_access)."""
+    payload = json.dumps({"type": target.type, "id": target.id})
+    pending = conn.execute("SELECT id FROM agent_proposals WHERE user_id = ? AND kind = 'access' AND status = 'pending' "
+                           "AND payload = ?", (caller.user_id, payload)).fetchone()
+    if pending:
+        return pending["id"]
+    return conn.execute(
+        "INSERT INTO agent_proposals(user_id, conversation_id, kind, file_id, collection_id, folder_id, name, changes, "
+        "payload) VALUES (?, ?, 'access', ?, ?, ?, ?, ?, ?)",
+        (caller.user_id, getattr(caller, "conversation_id", None), target.id if target.type == "file" else None,
+         collection_id, folder_id, name, json.dumps(changes), payload)).lastrowid
+
+
+def _apply_access(conn: sqlite3.Connection, user: sqlite3.Row, row: sqlite3.Row, admin: bool) -> None:
+    payload = json.loads(row["payload"])
+    if payload["type"] == "library":
+        if not admin:
+            raise ProposalError("Only a Mnemerynne admin can let the AI edit a whole library, so nothing changed. "
+                                "Ask an admin to allow AI edits for it (Access → Files & folders).")
+        library = conn.execute("SELECT name FROM collections WHERE id = ? AND kind = 'library'",
+                               (payload["id"],)).fetchone()
+        if library is None:
+            raise ProposalError("That library is gone, so nothing changed.")
+        with transaction(conn):
+            conn.execute("UPDATE collections SET claude_edit = 1 WHERE id = ?", (payload["id"],))
+            conn.execute("INSERT INTO access_log(actor_id, actor_name, action, target, detail) VALUES (?, ?, ?, ?, ?)",
+                         (user["id"], user["username"], "claude.edit.on", library["name"], "requested by Claude"))
+        return
+    try:
+        fs.set_ai_edit(conn, fs.Access.of(conn, user["id"]), fs.Item(payload["type"], payload["id"]), True)
+    except fs.FsError as exc:
+        raise ProposalError(f"Nothing changed: {exc}") from None
+
+
 def in_agents_folder(conn: sqlite3.Connection, user_id: int, row: sqlite3.Row) -> bool:
     """A file proposal that stays inside the person's own Agents folder: all that people outside the
     agent group may change (accounts.is_agent_user), checked when it's proposed and when it's applied."""
@@ -225,15 +265,20 @@ def _decide(conn: sqlite3.Connection, proposal_id: int, status: str, result_file
 
 
 def apply(conn: sqlite3.Connection, settings: Settings, user: sqlite3.Row, proposal_id: int,
-          directory=None) -> dict:
+          directory=None, *, admin: bool = False) -> dict:
     """Save a pending proposal as the person (every check made again). For files and mail the
     caller has checked the person is still in the agent (or Claude) group; an API action checks
-    here that they may still use its operation (directory: their groups)."""
+    here that they may still use its operation (directory: their groups). admin: the person is a
+    Mnemerynne admin (only they can apply a library-wide access request)."""
     row = get(conn, proposal_id, user["id"])
     if row["status"] != "pending":
         raise ProposalError(f"This change was already {row['status']}.")
     if row["kind"] == "api":
         return _apply_api(conn, settings, user, row, directory)
+    if row["kind"] == "access":
+        _apply_access(conn, user, row, admin)
+        _decide(conn, proposal_id, "applied")
+        return view(conn, get(conn, proposal_id, user["id"]))
     if row["kind"] == "delete":
         payload = json.loads(row["payload"])
         try:

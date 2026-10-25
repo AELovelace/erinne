@@ -90,7 +90,7 @@ FILE_WRITE_TOOLS = {"edit_text", "edit_document", "edit_spreadsheet", "create_fi
 # Connector tools chat's assistants don't get: changes with no proposal form (they only propose changes),
 # and the tools for working with other people's agents, which would only crowd a small model's choices.
 CONNECTOR_ONLY_TOOLS = {"create_folder", "rename_item", "move_item", "delete_item", "add_comment",
-                        "list_changes", "list_comments"}
+                        "list_changes", "list_comments", "request_edit_access"}
 # What the chat's tool panel calls each tool, by group.
 TOOL_GROUPS = {
     "Documents": {"search_documents": "Search documents", "read_passage": "Read passages",
