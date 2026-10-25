@@ -78,8 +78,19 @@ def _copy_tree(source: Path, target: Path, *, private: bool) -> int:
     return copied
 
 
+class BackupError(Exception):
+    """A backup that was refused; the message says what to change."""
+
+
+def _inside(path: Path, folder: Path) -> bool:
+    return path.resolve().is_relative_to(folder.resolve())
+
+
 def backup(settings: Settings, dest: Path, keep: int = 14, today: date | None = None) -> dict:
     today = today or date.today()
+    if settings.share_root is not None and _inside(dest, settings.share_root):
+        raise BackupError(f"{dest} is inside the SMB share ({settings.share_root}), where people could read "
+                          f"the backed-up secret key. Set MNEMERYNNE_BACKUP_DIR to a folder outside it.")
     _private_dir(dest)
     db_dir = dest / "db"
     _private_dir(db_dir)

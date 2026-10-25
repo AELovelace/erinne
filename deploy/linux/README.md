@@ -805,9 +805,28 @@ sudo systemctl restart mnemerynne-web mnemerynne-worker
 
 ## Backups
 
-`mnemerynne-backup.timer` writes to `/var/backups/mnemerynne` every night at
-02:30 and keeps 14 days. Everything in it is readable only by `mnemerynne`
-(folders 0700, files 0600). It holds:
+`mnemerynne-backup.timer` writes to `MNEMERYNNE_BACKUP_DIR` (default
+`/var/backups/mnemerynne`) every night at 02:30 and keeps 14 days. Everything
+in it is readable only by `mnemerynne` (folders 0700, files 0600).
+
+**Where.** Put it on a disk that outlives the boot drive, such as the NAS's
+storage array, but never inside the SMB share (`MNEMERYNNE_SHARE_ROOT`): the
+backup refuses, because people could read the copied secret key there. For
+example, with the array mounted at `/srv/storage` and the share at
+`/srv/storage/share`:
+
+```sh
+sudo install -d -o mnemerynne -g mnemerynne -m 700 /srv/storage/backups/mnemerynne
+echo 'MNEMERYNNE_BACKUP_DIR=/srv/storage/backups/mnemerynne' | sudo tee -a /etc/mnemerynne/mnemerynne.env
+sudo restorecon -R /srv/storage/backups
+sudo systemctl start mnemerynne-backup.service && journalctl -u mnemerynne-backup -n 5 --no-pager
+```
+
+The unit may write anywhere under `/srv` (file permissions still apply), so a
+folder there needs no drop-in. Elsewhere, add it with
+`sudo systemctl edit mnemerynne-backup`: `[Service]` / `ReadWritePaths=/your/folder`.
+
+It holds:
 
 - **`db/`:** one database snapshot per day.
 - **`config/YYYY-MM-DD/`:** that day's copy of `/etc/mnemerynne/mnemerynne.env`,
@@ -861,9 +880,12 @@ link.
    newest.
 
    ```sh
-   sudo mnemerynne-admin restore --from /var/backups/mnemerynne --list
-   sudo mnemerynne-admin restore --from /var/backups/mnemerynne --date YYYY-MM-DD --force
+   sudo mnemerynne-admin restore --list
+   sudo mnemerynne-admin restore --date YYYY-MM-DD --force
    ```
+
+   It reads `MNEMERYNNE_BACKUP_DIR`; `--from /some/folder` reads another
+   (a copy brought back from off the box).
 
    - `--force` is only needed when `/var/lib/mnemerynne/mnemerynne.db` exists.
      The current database (with its `-wal`/`-shm` files) is moved to
@@ -879,7 +901,7 @@ link.
      file back, using the command it prints:
 
      ```sh
-     sudo install -o root -g mnemerynne -m 640 /var/backups/mnemerynne/config/YYYY-MM-DD/mnemerynne.env /etc/mnemerynne/mnemerynne.env
+     sudo install -o root -g mnemerynne -m 640 BACKUP_DIR/config/YYYY-MM-DD/mnemerynne.env /etc/mnemerynne/mnemerynne.env
      ```
 
      Alternatively, set `MNEMERYNNE_SECRET_KEY` from your off-box copy.

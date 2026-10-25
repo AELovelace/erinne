@@ -7,9 +7,13 @@ User=mnemerynne
 Group=mnemerynne
 WorkingDirectory=/opt/mnemerynne
 EnvironmentFile=/etc/mnemerynne/mnemerynne.env
-ExecStart=/opt/mnemerynne/.venv/bin/mnemerynne backup --dest /var/backups/mnemerynne --keep 14
+# Writes to MNEMERYNNE_BACKUP_DIR (default /var/backups/mnemerynne).
+ExecStart=/opt/mnemerynne/.venv/bin/mnemerynne backup --keep 14
 StateDirectory=mnemerynne
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/backups/mnemerynne
+# The backup folder, and the data folder: SQLite writes the database's -shm
+# file even to read it. /srv covers a data or backup folder on the NAS's
+# storage drive; "-" = fine if absent. File permissions still apply.
+ReadWritePaths=-/var/backups/mnemerynne -/var/lib/mnemerynne -/srv

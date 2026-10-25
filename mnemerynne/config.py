@@ -125,6 +125,10 @@ class Settings(BaseSettings):
     version_keep: int = 20             # per file, newest first
 
     # Backups and housekeeping (mnemerynne/backup.py, mnemerynne/retention.py).
+    # Where `mnemerynne backup` writes and `restore` reads: put it on a disk
+    # that survives the boot drive (e.g. the NAS's storage array), never inside
+    # share_root, where SMB users could read the copied secret key.
+    backup_dir: Path = Path("/var/backups/mnemerynne")
     # The settings file is copied beside each database snapshot: it holds the
     # secret key that API credentials and Microsoft 365 links are encrypted
     # with. Empty: not copied.

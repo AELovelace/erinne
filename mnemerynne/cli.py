@@ -512,9 +512,13 @@ def _eval_answers_agent(args, settings, conn, items) -> dict:
 def cmd_backup(args):
     from pathlib import Path
 
-    from mnemerynne.backup import backup
+    from mnemerynne.backup import BackupError, backup
 
-    result = backup(get_settings(), Path(args.dest), keep=args.keep)
+    settings = get_settings()
+    try:
+        result = backup(settings, Path(args.dest) if args.dest else settings.backup_dir, keep=args.keep)
+    except BackupError as exc:
+        raise SystemExit(f"Not backed up: {exc}") from exc
     print(f"Snapshot {result['snapshot']}; {result['blobs_copied']} new file(s) copied; "
           f"pruned {len(result['pruned'])} old snapshot(s); kept {', '.join(result['config']) or 'no settings files'}.")
     for warning in result["warnings"]:
@@ -526,11 +530,11 @@ def cmd_restore(args):
 
     from mnemerynne.backup import RestoreError, restore, snapshots
 
-    source = Path(args.source)
+    settings = get_settings()
+    source = Path(args.source) if args.source else settings.backup_dir
     if args.list:
         print("\n".join(snapshots(source)) or f"No snapshots in {source / 'db'}.")
         return
-    settings = get_settings()
     try:
         result = restore(settings, source, args.date, force=args.force)
     except RestoreError as exc:
@@ -773,12 +777,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_gen_sft)
 
     p = sub.add_parser("backup", help="Snapshot the database and copy new files")
-    p.add_argument("--dest", required=True)
+    p.add_argument("--dest", help="The backup folder (default: MNEMERYNNE_BACKUP_DIR)")
     p.add_argument("--keep", type=int, default=14, help="Daily database snapshots to keep")
     p.set_defaults(func=cmd_backup)
 
     p = sub.add_parser("restore", help="Put a backup back (stop the services first)")
-    p.add_argument("--from", dest="source", required=True, help="The backup folder (backup's --dest)")
+    p.add_argument("--from", dest="source", help="The backup folder (default: MNEMERYNNE_BACKUP_DIR)")
     p.add_argument("--date", help="YYYY-MM-DD of the snapshot (default: the newest)")
     p.add_argument("--list", action="store_true", help="List the snapshots and stop")
     p.add_argument("--force", action="store_true",

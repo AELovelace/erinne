@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from mnemerynne import apis, db, users
-from mnemerynne.backup import RestoreError, backup, env_secret_key, restore
+from mnemerynne.backup import BackupError, RestoreError, backup, env_secret_key, restore
 from mnemerynne.cli import main
 from mnemerynne.ingest import store
 
@@ -148,6 +148,29 @@ def test_restore_cli_lists_and_restores(conn, settings, tmp_path, monkeypatch, c
     out = capsys.readouterr().out
     assert "Restored the 2026-10-01 snapshot" in out and "no settings file" in out
     assert fresh.db_path.exists()
+
+
+def test_backup_and_restore_default_to_the_backup_dir(conn, settings, tmp_path, monkeypatch, capsys):
+    # The timer's unit passes no --dest: MNEMERYNNE_BACKUP_DIR decides, e.g. the NAS storage drive.
+    settings = settings.model_copy(update={"backup_env_file": None, "backup_dir": tmp_path / "storage" / "backups"})
+    monkeypatch.setattr("mnemerynne.cli.get_settings", lambda: settings)
+    main(["backup"])
+    assert len(list((settings.backup_dir / "db").glob("mnemerynne-*.db"))) == 1
+    capsys.readouterr()
+    main(["restore", "--list"])
+    assert capsys.readouterr().out.strip() == date.today().isoformat()
+
+
+def test_backup_refuses_a_folder_inside_the_smb_share(conn, settings, tmp_path, monkeypatch):
+    share = tmp_path / "share"
+    share.mkdir()
+    settings = settings.model_copy(update={"share_root": share, "backup_dir": share / ".mnemerynne" / "backups"})
+    with pytest.raises(BackupError, match="inside the SMB share"):
+        backup(settings, settings.backup_dir)
+    monkeypatch.setattr("mnemerynne.cli.get_settings", lambda: settings)
+    with pytest.raises(SystemExit, match="Not backed up"):
+        main(["backup"])
+    assert not settings.backup_dir.exists()
 
 
 def test_forget_memories_cli(conn, settings, monkeypatch, capsys):
