@@ -171,7 +171,7 @@ def test_mcp_endpoint_end_to_end(mcp_client, conn, world):
 
     listed = _rpc(mcp_client, token, "tools/list").json()["result"]["tools"]
     edits = {"edit_text", "edit_document", "edit_spreadsheet", "create_file", "create_folder", "rename_item",
-             "move_item", "delete_item", "add_comment", "propose_api_action"}
+             "move_item", "delete_item", "add_comment", "propose_api_action", "request_edit_access"}
     assert {t["name"] for t in listed} == {"search_documents", "read_passage", "list_libraries", "browse_folder",
                                            "find_files", "view_page", "open_file", "list_versions",
                                            "list_changes", "list_comments", "list_apis", "query_api"} | edits
@@ -186,6 +186,7 @@ def test_mcp_endpoint_end_to_end(mcp_client, conn, world):
 
     bad = _rpc(mcp_client, token, "tools/call", {"name": "browse_folder", "arguments": {"library": "Nope"}})
     assert bad.json()["result"]["isError"]
+    assert "[not_found] There is no library called “Nope”" in bad.json()["result"]["content"][0]["text"]
 
     logged = conn.execute("SELECT tool, file_ids, ok FROM mcp_calls ORDER BY id").fetchall()
     assert [(r["tool"], r["ok"]) for r in logged] == [("search_documents", 1), ("browse_folder", 0)]

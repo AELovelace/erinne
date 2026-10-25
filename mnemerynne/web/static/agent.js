@@ -60,7 +60,7 @@
     card.dataset.status = p.status;
     const head = el("div", "proposal-head");
     const what = { create: "📄 New file ", edit: "📝 Change to ", mail: "✉️ Email draft: ",
-                   api: "⚙️ Change in ", delete: "🗑️ Delete " }[p.kind] || "";
+                   api: "⚙️ Change in ", delete: "🗑️ Delete ", access: "🔓 Let the AI edit " }[p.kind] || "";
     head.append(document.createTextNode(what), el("strong", null, p.file), el("span", "muted small", " · " + p.where));
     card.appendChild(head);
     if (p.changes && p.changes.length && !(p.kind === "create" && p.diff)) {
@@ -74,8 +74,8 @@
     if (p.kind === "api" && p.body) card.appendChild(el("p", "muted small", p.body));
     const foot = el("div", "proposal-actions");
     if (p.status === "pending") {
-      const apply = el("button", "small", { mail: "Save to Drafts", api: "Run it", delete: "Move to recycle bin" }[p.kind]
-                                          || "Apply");
+      const apply = el("button", "small", { mail: "Save to Drafts", api: "Run it", delete: "Move to recycle bin",
+                                            access: "Allow" }[p.kind] || "Apply");
       apply.type = "button";
       const dismiss = el("button", "link small", "Dismiss");
       dismiss.type = "button";
@@ -86,7 +86,8 @@
     } else {
       const said = p.status === "applied" && p.kind === "mail" ? STATUS.saved
                  : p.status === "applied" && p.kind === "api" ? "✓ Done."
-                 : p.status === "applied" && p.kind === "delete" ? "✓ In the recycle bin." : STATUS[p.status] || p.status;
+                 : p.status === "applied" && p.kind === "delete" ? "✓ In the recycle bin."
+                 : p.status === "applied" && p.kind === "access" ? "✓ The AI can edit here now." : STATUS[p.status] || p.status;
       foot.appendChild(el("span", "small " + (p.status === "stale" ? "error" : "muted"), said));
     }
     if (p.url && p.status !== "dismissed") {

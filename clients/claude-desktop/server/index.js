@@ -16,7 +16,7 @@ const https = require("https");
 const path = require("path");
 const tls = require("tls");
 
-const VERSION = "0.1.0";
+const VERSION = "0.4.0";   // keep in step with manifest.json
 const base = (process.env.MNEMERYNNE_URL || "").trim().replace(/\/+$/, "");
 const token = (process.env.MNEMERYNNE_TOKEN || "").trim();
 

@@ -429,22 +429,38 @@ def folder_tree(conn: sqlite3.Connection, access: Access, collection_id: int) ->
                                   (collection_id,)) if r["id"] in shown]
 
 
-def search_names(conn: sqlite3.Connection, access: Access, q: str, limit: int = 200) -> dict:
-    """Files and folders whose name contains `q`, anywhere the user can read."""
+_LOOSE_RE = re.compile(r"[\s\-_.]+")
+
+
+def loose(name: str | None) -> str:
+    """A name for forgiving matching: any case (not just ASCII), with spaces, hyphens, underscores and dots
+    left out, so "IT Ops", "it-ops" and "IT_OPS" are the same."""
+    return _LOOSE_RE.sub("", (name or "").casefold())
+
+
+def search_names(conn: sqlite3.Connection, access: Access, q: str, limit: int = 200, *,
+                 forgiving: bool = False) -> dict:
+    """Files and folders whose name contains `q`, anywhere the user can read. forgiving: compare
+    loose() names (Claude's find_files), so "IT Ops" finds "it-ops notes"."""
     q = (q or "").strip()
     readable = access.readable
     if not q or not readable:
         return {"folders": [], "files": []}
     marks = ",".join("?" * len(readable))
-    like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    if forgiving and loose(q):
+        conn.create_function("mnemerynne_loose", 1, loose, deterministic=True)
+        match, arg = "instr(mnemerynne_loose({}), ?) > 0", loose(q)
+    else:
+        match = "{} LIKE ? ESCAPE '\\'"
+        arg = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
     live = {cid: live_folder_ids(conn, cid) for cid in readable}
     folders = [r for r in conn.execute(
         f"SELECT id, collection_id, parent_id, name FROM folders WHERE collection_id IN ({marks}) "
-        "AND name LIKE ? ESCAPE '\\' ORDER BY name COLLATE NOCASE", (*readable, like))
+        f"AND {match.format('name')} ORDER BY name COLLATE NOCASE", (*readable, arg))
         if r["id"] in live[r["collection_id"]] and access.can_read(r["collection_id"], r["id"])][:limit]
     rows = [r for r in conn.execute(
         f"SELECT {_FILE_COLUMNS} {_FILE_FROM} WHERE f.collection_id IN ({marks}) AND f.deleted_at IS NULL "
-        "AND f.display_name LIKE ? ESCAPE '\\' ORDER BY f.display_name COLLATE NOCASE", (*readable, like))
+        f"AND {match.format('f.display_name')} ORDER BY f.display_name COLLATE NOCASE", (*readable, arg))
         if r["folder_id"] is None or r["folder_id"] in live[r["collection_id"]]]
     access.prefetch(rows[:limit * 2])   # SharePoint files are checked in batches; the rest as needed
     files = []
@@ -863,7 +879,8 @@ def restore(conn: sqlite3.Connection, access: Access, items: list[Item]) -> list
                 name = unique_name(conn, row["collection_id"], folder, row["display_name"], "file", item.id)
                 before = share.file_path(conn, item.id) if on_share else None
                 conn.execute("UPDATE files SET deleted_at = NULL, deleted_by = NULL, trash_path = NULL, "
-                             "folder_id = ?, display_name = ? WHERE id = ?", (folder, name, item.id))
+                             "folder_id = ?, display_name = ?, restored_at = datetime('now'), restored_by = ? "
+                             "WHERE id = ?", (folder, name, access.user_id, item.id))
                 _sync_scope(conn, [item.id])
                 if before is not None:
                     after = share.file_path(conn, item.id)
@@ -874,7 +891,8 @@ def restore(conn: sqlite3.Connection, access: Access, items: list[Item]) -> list
                 name = unique_name(conn, row["collection_id"], parent, row["name"], "folder", item.id)
                 before = share.folder_dir(conn, row["collection_id"], item.id) if on_share else None
                 conn.execute("UPDATE folders SET deleted_at = NULL, deleted_by = NULL, trash_path = NULL, "
-                             "parent_id = ?, name = ? WHERE id = ?", (parent, name, item.id))
+                             "parent_id = ?, name = ?, restored_at = datetime('now'), restored_by = ? "
+                             "WHERE id = ?", (parent, name, access.user_id, item.id))
                 _sync_scope(conn, _subtree_file_ids(conn, subtree(conn, item.id)))
                 if before is not None:
                     _disk(lambda: share.rename(before, share.folder_dir(conn, row["collection_id"], item.id)))

@@ -33,8 +33,8 @@ from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
-from mnemerynne import (activity, api_tokens, apis, claude_links, comments, db, editing, editing_formats, fs,
-                        permissions, proposals, retrieval, sharepoint)
+from mnemerynne import (accounts, activity, api_tokens, apis, claude_links, comments, db, editing, editing_formats,
+                        fs, permissions, proposals, retrieval, sharepoint)
 from mnemerynne.api_tokens import Caller
 from mnemerynne.config import Settings
 from mnemerynne.ingest import store
@@ -57,7 +57,11 @@ Use these tools whenever a question could be answered from those documents.
 - Use read_passage to see the text around a hit before relying on a fragment.
 - Use view_page to look at a PDF page as an image when a passage mentions a table, figure, form or
   screenshot, when its text looks garbled (scanned pages), or when the person asks to see the page.
-- Use list_libraries, browse_folder and find_files to see what exists or to narrow a search.
+- Use list_libraries, browse_folder and find_files to see what exists or to narrow a search. Libraries and
+  folders can be named (any case; "IT Ops" finds "IT-OPS") or given by the ids these tools return; a
+  folder given as a number is an id, as text a path.
+- When a tool refuses, its message carries a code: [not_found], [not_allowed], [conflict],
+  [rate_limited] (wait and try again), [unavailable] (try again later) or [invalid] (fix the request).
 - The `link`s are for the person to open in their browser, where they are signed in to Mnemerynne.
   Don't fetch them yourself: they need that login. Cite with `link`.
 - Results that point at a file may also carry `fetch`: a private address for you, not the person, that
@@ -66,19 +70,25 @@ Use these tools whenever a question could be answered from those documents.
   show a `fetch` address to the person or cite it. The tools above stay the first way to read.
 
 Editing files (.txt, .md, .docx, .xlsx):
-- Always open_file first and pass its `version` to the edit tool. If an edit is refused because the file
-  changed, open it again and redo the change on the new version.
+- Always open_file first and pass its `version` to the edit tool: edit_text (.txt, .md), edit_document
+  (.docx) or edit_spreadsheet (.xlsx). If an edit is refused because the file changed ([conflict]), open
+  it again and redo the change on the new version.
+- browse_folder, find_files and search_documents mark each item `editable` for you. Where it is false,
+  don't try: request_edit_access returns an `approve` link for the person when it's theirs to allow, or
+  says who can. Never say access is granted until they've applied it.
+- list_versions shows a file's earlier versions (from edits through Claude or Erynne, and restores).
 - Make the smallest change that does what was asked; don't rewrite text you weren't asked to change.
 - New files go in the person's Agents folder unless they name somewhere else (list_libraries shows where
   you may edit). Every change keeps the previous version, which the person can restore from Files.
 - create_folder makes a folder where you may edit (the Agents folder unless they name somewhere else);
   then pass it as create_file's `folder`. rename_item and move_item rename or move a file or folder
-  between places you may edit. delete_item only proposes moving it to the recycle bin: give the person
-  the `approve` link, and never say it's deleted.
+  between places you may edit (move_item: what moves is file_id or folder_id; where it goes is to_library
+  and to_folder). delete_item only proposes moving it to the recycle bin: give the person the `approve`
+  link, and never say it's deleted.
 
 Working with others (people, and other people's Claude):
-- list_changes shows what was added, changed, commented on or binned in a library or folder since a
-  time, and by whom: use it to notice replies instead of browsing and guessing.
+- list_changes shows what was added, changed, renamed or moved, commented on, binned or restored in a
+  library or folder since a time, and by whom: use it to notice replies instead of browsing and guessing.
 - Talk about a document with add_comment (reply_to answers a comment) and read the thread with
   list_comments, rather than editing someone else's document to leave a message.
 - You can't save images (screenshots, photos) or other files you didn't write: give the person the
@@ -111,6 +121,31 @@ class Unauthorized(Exception):
     pass
 
 
+# Every refusal reaches the model as "[code] message" (build_server), so an agent can react to the code
+# without parsing the sentence.
+ERROR_CODES = ("not_found", "not_allowed", "conflict", "rate_limited", "unavailable", "invalid")
+
+
+class Refused(ToolError):
+    """A ToolError with one of ERROR_CODES; the message stays plain (Erynne's tools show it as it is)."""
+
+    def __init__(self, message: str, code: str = "invalid"):
+        super().__init__(message)
+        self.code = code
+
+
+def error_code(exc: Exception) -> str:
+    """The ERROR_CODES entry for a refusal from the tools, the edit checks or the file manager."""
+    if isinstance(exc, Refused):
+        return exc.code
+    status = getattr(exc, "status", None)
+    if isinstance(exc, (editing.EditError, fs.FsError)) and status in (403, 404, 409, 503):
+        return {403: "not_allowed", 404: "not_found", 409: "conflict", 503: "unavailable"}[status]
+    if str(exc).startswith(("No such", "There is no", "No folder")):
+        return "not_found"
+    return "invalid"
+
+
 # ------------------------------------------------------------------ helpers
 def _collections(conn: sqlite3.Connection, access: fs.Access) -> dict[int, sqlite3.Row]:
     if not access.readable:
@@ -124,42 +159,81 @@ def _label(row: sqlite3.Row) -> str:
     return permissions.PRIVATE_LABEL if row["kind"] == "private" else row["name"]
 
 
-def _resolve_collection(conn: sqlite3.Connection, access: fs.Access, ref: str, claude: bool = True) -> sqlite3.Row:
-    ref = (ref or "").strip()
+def _is_id(ref) -> bool:
+    return isinstance(ref, int) and not isinstance(ref, bool)
+
+
+def _resolve_collection(conn: sqlite3.Connection, access: fs.Access, ref: int | str, claude: bool = True) -> sqlite3.Row:
+    """A library by id (a number) or name. Names match exactly (any case) first, then forgivingly
+    ("IT Ops" for "IT-OPS", fs.loose); a name made of digits is tried as an id last."""
     collections = _collections(conn, access)
+    missing = (" that you can search from Claude" if claude else "") + ". Call list_libraries to see the names."
+    if _is_id(ref):
+        if ref in collections:
+            return collections[ref]
+        raise Refused(f"There is no library with id {ref}{missing}", "not_found")
+    ref = str(ref or "").strip()
+    inbox = {fs.loose(w) for w in _INBOX_WORDS}
+    for row in collections.values():
+        if (row["kind"] == "private" and ref.lower() in _INBOX_WORDS) or _label(row).casefold() == ref.casefold():
+            return row
+    key = fs.loose(ref)
+    close = [row for row in collections.values()
+             if key and (fs.loose(_label(row)) == key or (row["kind"] == "private" and key in inbox))]
+    if len(close) == 1:
+        return close[0]
+    if len(close) > 1:
+        raise Refused(f"“{ref}” could be any of: {', '.join(sorted(_label(r) for r in close))}. Give the exact "
+                      f"name.", "invalid")
     if ref.isdigit() and int(ref) in collections:
         return collections[int(ref)]
-    for row in collections.values():
-        if (row["kind"] == "private" and ref.lower() in _INBOX_WORDS) or _label(row).lower() == ref.lower():
-            return row
-    raise ToolError(f"There is no library called “{ref}”" + (" that you can search from Claude" if claude else "")
-                    + ". Call list_libraries to see the names.")
+    raise Refused(f"There is no library called “{ref}”{missing}", "not_found")
 
 
-def _split_place(library: str | None, folder: str | None) -> tuple[str | None, str | None]:
+def _split_place(library, folder) -> tuple:
     """"File box / Agents" given as the library: the library and the folder in it."""
-    if library and "/" in library and not folder:
+    if isinstance(library, str) and "/" in library and folder in (None, ""):
         library, folder = (part.strip() for part in library.split("/", 1))
     return library, folder
 
 
-def _resolve_folder(conn: sqlite3.Connection, access: fs.Access, collection_id: int, ref: str | None) -> int | None:
-    """A folder id from an id or a path like 'Front Office/Night Audit' (case-insensitive),
-    among the folders the user may see."""
-    ref = (ref or "").strip().strip("/")
-    if not ref:
+def _resolve_folder(conn: sqlite3.Connection, access: fs.Access, collection_id: int, ref: int | str | None) -> int | None:
+    """A folder among those the user may see: by id (a number), or by a path like 'Front Office/Night Audit',
+    each part matched exactly (any case) first, then forgivingly (fs.loose). A path made of digits, such as
+    "2025", is a folder's name; only if no folder has that name is it tried as an id."""
+    if ref is None:
         return None
     live = fs.live_folder_ids(conn, collection_id) & access.visible(collection_id)
-    if ref.isdigit() and int(ref) in live:
-        return int(ref)
+    if _is_id(ref):
+        if ref in live:
+            return ref
+        raise Refused(f"No folder with id {ref} in that library. Call browse_folder or find_files for ids.",
+                      "not_found")
+    ref = str(ref).strip().strip("/")
+    if not ref:
+        return None
+    try:
+        return _folder_by_path(conn, collection_id, live, ref)
+    except Refused as exc:
+        if exc.code == "not_found" and ref.isdigit() and int(ref) in live:
+            return int(ref)
+        raise
+
+
+def _folder_by_path(conn: sqlite3.Connection, collection_id: int, live: set[int], ref: str) -> int:
     parent = None
     for part in [p.strip() for p in ref.split("/") if p.strip()]:
-        row = conn.execute("SELECT id FROM folders WHERE collection_id = ? AND COALESCE(parent_id, 0) = ? "
-                           "AND lower(name) = lower(?) AND deleted_at IS NULL",
-                           (collection_id, parent or 0, part)).fetchone()
-        if row is None or row["id"] not in live:
-            raise ToolError(f"No folder “{ref}” in that library. Call browse_folder to see its folders.")
-        parent = row["id"]
+        children = [r for r in conn.execute(
+            "SELECT id, name FROM folders WHERE collection_id = ? AND COALESCE(parent_id, 0) = ? "
+            "AND deleted_at IS NULL", (collection_id, parent or 0)) if r["id"] in live]
+        found = [r for r in children if r["name"].casefold() == part.casefold()] or \
+            [r for r in children if fs.loose(part) and fs.loose(r["name"]) == fs.loose(part)]
+        if len(found) > 1:
+            raise Refused(f"“{part}” could be any of: {', '.join(sorted(r['name'] for r in found))}. Give the exact "
+                          f"name, or the folder's id.", "invalid")
+        if not found:
+            raise Refused(f"No folder “{ref}” in that library. Call browse_folder to see its folders.", "not_found")
+        parent = found[0]["id"]
     return parent
 
 
@@ -192,14 +266,22 @@ def _duplicates(conn: sqlite3.Connection, access: fs.Access, file_ids: list[int]
     return out
 
 
-def _passage(hit: retrieval.Hit, base: str, library: str, n: int | None = None) -> dict:
+def _api_code(exc: Exception) -> str:
+    text = str(exc)
+    if "still busy" in text:
+        return "rate_limited"
+    return "not_found" if text.startswith("There's no API operation") else "invalid"
+
+
+def _passage(hit: retrieval.Hit, base: str, library: str, n: int | None = None,
+             editable: bool | None = None) -> dict:
     # PDFs: file · page · section. Markdown's location is its last heading,
     # which the section path already ends with.
     page = hit.location if hit.kind == "pdf" else ""
     citation = " · ".join(p for p in (hit.file_name, page, hit.section_path) if p)
     out = {"citation": citation, "link": base + hit.url, "file": hit.file_name, "file_id": hit.file_id,
            "library": library, "location": hit.location, "section": hit.section_path,
-           "chunk_id": hit.chunk_id, "text": hit.text}
+           "chunk_id": hit.chunk_id, "text": hit.text, **({"editable": editable} if editable is not None else {})}
     if hit.kind == "pdf" and hit.page_start:
         out["page"] = hit.page_start   # for view_page
     return {"n": n, **out} if n is not None else out
@@ -236,6 +318,11 @@ class Tools:
 
     def _access(self, conn: sqlite3.Connection, caller: Caller) -> fs.Access:
         return editing.ai_access(conn, caller.user_id, self.mode)
+
+    def _editable(self, conn: sqlite3.Connection, caller: Caller) -> editing.EditCheck:
+        """For the `editable` flag on listings: may the assistant change this file, or files in this folder
+        (the content of .txt, .md, .docx and .xlsx files; renaming and moving any file)?"""
+        return editing.EditCheck(conn, caller.user_id, caller.can_edit, self.mode)
 
     def search_documents(self, conn, caller: Caller, query: str, library: str | None = None,
                          folder: str | None = None, limit: int = 8) -> tuple[dict, list[int]]:
@@ -294,8 +381,15 @@ class Tools:
                 continue
             picked.append(hit)
             budget -= hit.tokens
-        results = [_passage(h, self.base, names.get(h.collection_id, ""), n) for n, h in enumerate(picked, 1)]
-        return {"found": True, "query": query, "results": results, **({"note": " ".join(notes)} if notes else {})},             sorted({h.file_id for h in picked})
+        check = self._editable(conn, caller)
+        marks = ",".join("?" * len(picked))
+        folders = {r["id"]: r["folder_id"] for r in conn.execute(
+            f"SELECT id, folder_id FROM files WHERE id IN ({marks})", [h.file_id for h in picked])}
+        results = [_passage(h, self.base, names.get(h.collection_id, ""), n,
+                            check.allows(h.collection_id, folders.get(h.file_id), h.file_id))
+                   for n, h in enumerate(picked, 1)]
+        return {"found": True, "query": query, "results": results, **({"note": " ".join(notes)} if notes else {})}, \
+            sorted({h.file_id for h in picked})
 
     def read_passage(self, conn, caller: Caller, chunk_id: int, around: int = 1) -> tuple[dict, list[int]]:
         around = max(0, min(int(around), 3))
@@ -358,9 +452,10 @@ class Tools:
             result = apis.call(conn, self.settings, op["id"], params, user_id=caller.user_id,
                                via="claude" if self.claude else "chat")
         except apis.ApiError as exc:
-            raise ToolError(f"{exc} Use list_apis to see what you can query.") from None
+            raise Refused(f"{exc} Use list_apis to see what you can query.", _api_code(exc)) from None
         if not result.ok:
-            raise ToolError(f"{result.api_name} didn't answer: {result.error}.")
+            raise Refused(f"{result.api_name} didn't answer: {result.error}.",
+                          "rate_limited" if "429" in str(result.error) else "unavailable")
         live = f"live, {result.at[11:16]} UTC"
         data, rows = apis.page(result.data, offset or 0, 40_000)
         notes = []
@@ -386,7 +481,7 @@ class Tools:
                 raise ToolError(f"“{operation}” only reads; use query_api.")
             proposal = proposals.propose_api(conn, caller, op, params)
         except apis.ApiError as exc:
-            raise ToolError(f"{exc} Use list_apis to see the operations and their parameters.") from None
+            raise Refused(f"{exc} Use list_apis to see the operations and their parameters.", _api_code(exc)) from None
         out = {"proposal": proposal, "api": op["api_name"], "operation": op["name"], "status": "proposed"}
         if self.propose:
             return {**out, "note": _PROPOSED}, []
@@ -417,33 +512,51 @@ class Tools:
                 **({} if caller.can_edit else {"editing": "This connection can only search; the person can turn "
                                                           "on editing for it on the Claude page in Mnemerynne."})}, []
 
-    def browse_folder(self, conn, caller: Caller, library: str, folder: str | None = None) -> tuple[dict, list[int]]:
+    def browse_folder(self, conn, caller: Caller, library: int | str,
+                      folder: int | str | None = None) -> tuple[dict, list[int]]:
         library, folder = _split_place(library, folder)
         access = self._access(conn, caller)
         row = _resolve_collection(conn, access, library, self.claude)
         folder_id = _resolve_folder(conn, access, row["id"], folder)
         listing = fs.browse(conn, access, row["id"], folder_id)
         same = _duplicates(conn, access, [f["id"] for f in listing["files"]])
+        check = self._editable(conn, caller)
         return {
-            "library": _label(row), "path": _path(conn, folder_id) or "/",
-            "folders": [{"name": f["name"], "id": f["id"], "items": f["items"]} for f in listing["folders"]],
+            "library": _label(row), "library_id": row["id"], "path": _path(conn, folder_id) or "/",
+            **({"folder_id": folder_id} if folder_id is not None else {}),
+            "editable": check.allows(row["id"], folder_id),
+            "folders": [{"name": f["name"], "id": f["id"], "folder_id": f["id"], "items": f["items"],
+                         "editable": check.allows(row["id"], f["id"])} for f in listing["folders"]],
             "files": [{"name": f["display_name"], "file_id": f["id"], "type": f["kind"], "pages": f["unit_count"],
-                       "searchable": f["status"] == "ready", "link": _file_link(self.base, f["id"], f["kind"]),
+                       "searchable": f["status"] == "ready", "editable": check.allows(row["id"], folder_id, f["id"]),
+                       "link": _file_link(self.base, f["id"], f["kind"]),
                        **({"same_content_as": same[f["id"]]} if f["id"] in same else {})}
                       for f in listing["files"]],
         }, []
 
     def find_files(self, conn, caller: Caller, name: str) -> tuple[dict, list[int]]:
+        """Names that contain `name`, forgivingly (any case; spaces, hyphens, underscores and dots ignored):
+        libraries, folders and files. Folders carry their folder_id, files the folder_id they are in."""
         access = self._access(conn, caller)
-        found = fs.search_names(conn, access, name, limit=50)
-        names = {cid: _label(row) for cid, row in _collections(conn, access).items()}
+        found = fs.search_names(conn, access, name, limit=50, forgiving=True)
+        collections = _collections(conn, access)
+        names = {cid: _label(row) for cid, row in collections.items()}
+        key = fs.loose(name)
+        libraries = [{"library": label, "id": cid} for cid, label in sorted(names.items(), key=lambda kv: kv[1].lower())
+                     if key and key in fs.loose(label)]
         same = _duplicates(conn, access, [f["id"] for f in found["files"]])
+        check = self._editable(conn, caller)
         return {
-            "folders": [{"name": f["name"], "library": names[f["collection_id"]], "path": _path(conn, f["id"])}
+            **({"libraries": libraries} if libraries else {}),
+            "folders": [{"name": f["name"], "folder_id": f["id"], "library": names[f["collection_id"]],
+                         "path": _path(conn, f["id"]), "editable": check.allows(f["collection_id"], f["id"])}
                         for f in found["folders"]],
             "files": [{"name": f["display_name"], "file_id": f["id"], "library": names[f["collection_id"]],
-                       "folder": _path(conn, f["folder_id"]) or "/", "type": f["kind"],
-                       "searchable": f["status"] == "ready", "link": _file_link(self.base, f["id"], f["kind"]),
+                       "folder": _path(conn, f["folder_id"]) or "/",
+                       **({"folder_id": f["folder_id"]} if f["folder_id"] is not None else {}), "type": f["kind"],
+                       "searchable": f["status"] == "ready",
+                       "editable": check.allows(f["collection_id"], f["folder_id"], f["id"]),
+                       "link": _file_link(self.base, f["id"], f["kind"]),
                        **({"same_content_as": same[f["id"]]} if f["id"] in same else {})}
                       for f in found["files"]],
         }, []
@@ -559,14 +672,7 @@ class Tools:
         else:
             raise editing.EditError("Name the file with .txt, .md, .docx or .xlsx at the end. To save an image or "
                                     "another kind of file, give the person the upload link from list_libraries.")
-        collection_id = folder_id = None
-        library, folder = _split_place(library, folder)
-        if library:
-            access = self._access(conn, caller)
-            row = _resolve_collection(conn, access, library, self.claude)
-            collection_id, folder_id = row["id"], _resolve_folder(conn, access, row["id"], folder)
-        elif folder:
-            raise editing.EditError("Name the library the folder is in, too (or leave both out for the Agents folder).")
+        collection_id, folder_id = self._place(conn, caller, library, folder)
         if self.propose:
             proposal = proposals.propose_new(conn, self.settings, caller, name, data, collection_id, folder_id,
                                              [f"new file {name}"])
@@ -585,15 +691,7 @@ class Tools:
                       folder: str | None = None) -> tuple[dict, list[int]]:
         if self.propose:
             raise ToolError("Folders can't be proposed in chat; the person makes them in Files.")
-        collection_id = parent_id = None
-        library, folder = _split_place(library, folder)
-        if library:
-            access = self._access(conn, caller)
-            row = _resolve_collection(conn, access, library, self.claude)
-            collection_id, parent_id = row["id"], _resolve_folder(conn, access, row["id"], folder)
-        elif folder:
-            raise editing.EditError("Name the library the folder goes in, too (or leave both out for the "
-                                    "Agents folder).")
+        collection_id, parent_id = self._place(conn, caller, library, folder)
         folder_id, created = editing.create_folder(conn, caller, name, collection_id, parent_id, via=self.mode)
         row = conn.execute("SELECT collection_id FROM folders WHERE id = ?", (folder_id,)).fetchone()
         coll = conn.execute("SELECT kind, name FROM collections WHERE id = ?", (row["collection_id"],)).fetchone()
@@ -604,18 +702,26 @@ class Tools:
 
     def _item(self, file_id: int | None, folder_id: int | None) -> fs.Item:
         if (file_id is None) == (folder_id is None):
-            raise ToolError("Give either file_id or folder_id (from browse_folder or find_files).")
+            raise Refused("Give either file_id or folder_id (from browse_folder or find_files).")
         return fs.Item("file", file_id) if file_id is not None else fs.Item("folder", folder_id)
 
-    def _place(self, conn, caller: Caller, library: str | None, folder: str | None) -> tuple[int | None, int | None]:
-        """A named place (library, folder path), or (None, None) for the person's Agents folder."""
+    def _place(self, conn, caller: Caller, library: int | str | None,
+               folder: int | str | None) -> tuple[int | None, int | None]:
+        """A place: a library (name or id) and a folder in it (path or id), a folder id alone, or (None, None)
+        for the person's Agents folder."""
         library, folder = _split_place(library, folder)
-        if not library:
-            if folder:
-                raise editing.EditError("Name the library the folder is in, too (or leave both out for the "
-                                        "Agents folder).")
-            return None, None
         access = self._access(conn, caller)
+        if library in (None, ""):
+            if _is_id(folder):
+                row = conn.execute("SELECT collection_id FROM folders WHERE id = ?", (folder,)).fetchone()
+                if row is None or row["collection_id"] not in _collections(conn, access):
+                    raise Refused(f"No folder with id {folder}. Call browse_folder or find_files for ids.",
+                                  "not_found")
+                return row["collection_id"], _resolve_folder(conn, access, row["collection_id"], folder)
+            if folder not in (None, ""):
+                raise editing.EditError("Name the library the folder is in, too, or give the folder's id (or leave "
+                                        "both out for the Agents folder).")
+            return None, None
         row = _resolve_collection(conn, access, library, self.claude)
         return row["id"], _resolve_folder(conn, access, row["id"], folder)
 
@@ -631,8 +737,18 @@ class Tools:
         return {"renamed": item.type, "id": item.id, "name": new}, [item.id] if item.type == "file" else []
 
     def move_item(self, conn, caller: Caller, file_id: int | None = None, folder_id: int | None = None,
-                  library: str | None = None, folder: str | None = None) -> tuple[dict, list[int]]:
+                  library: int | str | None = None, folder: int | str | None = None,
+                  to_library: int | str | None = None, to_folder: int | str | None = None) -> tuple[dict, list[int]]:
+        """file_id or folder_id is what moves; to_library and to_folder (or the older library and folder) are
+        where it goes."""
         self._no_proposals()
+        if file_id is not None and folder_id is not None:
+            raise Refused("folder_id is a folder to move, not where to put it. Give file_id alone (or folder_id "
+                          "alone) and the destination as to_library and to_folder (a path, or a folder id).")
+        if {to_library, to_folder} - {None, ""} and {library, folder} - {None, ""}:
+            raise Refused("Give the destination once, as to_library and to_folder.")
+        if {to_library, to_folder} - {None, ""}:
+            library, folder = to_library, to_folder
         item = self._item(file_id, folder_id)
         collection_id, parent_id = self._place(conn, caller, library, folder)
         name = editing.move_item(conn, caller, item, collection_id, parent_id, via=self.mode)
@@ -652,7 +768,7 @@ class Tools:
                 "note": "Nothing is deleted yet. Give the person the approve link: they check it and move it to the "
                         "recycle bin in Mnemerynne themselves. Don't say it's done."}, []
 
-    def list_changes(self, conn, caller: Caller, library: str, folder: str | None = None,
+    def list_changes(self, conn, caller: Caller, library: int | str, folder: int | str | None = None,
                      since: str | None = None) -> tuple[dict, list[int]]:
         library, folder = _split_place(library, folder)
         access = self._access(conn, caller)
@@ -661,16 +777,108 @@ class Tools:
         try:
             moment = activity.parse_since(since)
         except ValueError as exc:
-            raise ToolError(str(exc)) from None
+            raise Refused(str(exc)) from None
         found = activity.changes(conn, access, row["id"], folder_id, moment)
+        folders = activity.folder_changes(conn, access, row["id"], folder_id, moment)
         for entry in found:
+            if "binned" in entry:
+                entry["in_recycle_bin"] = True    # no link: it doesn't open from the bin
+                continue
             kind = conn.execute("SELECT b.kind FROM files f JOIN blobs b ON b.sha256 = f.blob_sha256 WHERE f.id = ?",
                                 (entry["file_id"],)).fetchone()["kind"]
             entry["link"] = _file_link(self.base, entry["file_id"], kind)
+        for entry in folders:
+            if "binned" in entry:
+                entry["in_recycle_bin"] = True
+            else:
+                entry["link"] = f"{self.base}/files#c={row['id']}&f={entry['folder_id']}"
+        full = len(found) >= activity.MAX_FILES or len(folders) >= activity.MAX_FILES
         return {"library": _label(row), "folder": _path(conn, folder_id) or "/", "since": moment + " UTC",
-                "files": found, **({} if found else {"note": "Nothing changed here since then."}),
+                "files": found, **({"folders": folders} if folders else {}),
+                **({} if found or folders else {"note": "Nothing changed here since then."}),
                 **({"note": f"Showing the {activity.MAX_FILES} most recent; ask for a later `since`."}
-                   if len(found) >= activity.MAX_FILES else {})}, [e["file_id"] for e in found]
+                   if full else {})}, [e["file_id"] for e in found]
+
+    def request_edit_access(self, conn, caller: Caller, file_id: int | None = None, folder_id: int | None = None,
+                            library: int | str | None = None, folder: int | str | None = None) -> tuple[dict, list[int]]:
+        """Where the assistant may not edit: what would let it, as a proposal the person applies when it is
+        theirs to give (AI edit in their own File box, or a read-only switch they can clear; a whole library
+        when they are an admin), or else who to ask."""
+        if sum(x not in (None, "") for x in (file_id, folder_id, library if library is not None else folder)) != 1:
+            raise Refused("Give one of file_id, folder_id, or library (and folder).")
+        access = self._access(conn, caller)
+        if file_id is not None:
+            row = fs.file_row(conn, file_id)
+            if row is None or row["deleted_at"] is not None or not fs.is_live_folder(conn, row["folder_id"]) \
+                    or not access.can_read_file(row):
+                raise Refused("No such file" + (" (or it isn't shared with Claude)" if self.claude else "")
+                              + ". Use a file_id from the other tools.", "not_found")
+            cid, fid, name = row["collection_id"], row["folder_id"], row["display_name"]
+        elif folder_id is not None:
+            row = conn.execute("SELECT collection_id, name FROM folders WHERE id = ?", (folder_id,)).fetchone()
+            if row is None or row["collection_id"] not in _collections(conn, access):
+                raise Refused(f"No folder with id {folder_id}. Call browse_folder or find_files for ids.", "not_found")
+            cid, fid = row["collection_id"], _resolve_folder(conn, access, row["collection_id"], folder_id)
+            name = row["name"]
+        else:
+            cid, fid = self._place(conn, caller, library, folder)
+            name = None
+        coll = conn.execute("SELECT kind, name, owner_user_id, claude_edit FROM collections WHERE id = ?",
+                            (cid,)).fetchone()
+        name = name or (_path(conn, fid).rsplit("/", 1)[-1] if fid else _label(coll))
+        where = proposals.where(conn, cid, fid)
+        try:
+            editing.check_edit(conn, caller.user_id, caller.can_edit, cid, fid, via=self.mode, file_id=file_id)
+            return {"editable": True, "where": where, "note": "You may already edit here; go ahead."}, []
+        except editing.EditNotFound:
+            raise
+        except editing.EditForbidden:
+            pass
+        who = editing.ASSISTANTS[self.mode]
+        if not caller.can_edit:
+            return {"editable": False, "status": "needs_person", "link": f"{self.base}/settings#claude",
+                    "note": "This connection can only search. The person turns on “Let Claude edit files” for it on "
+                            "their Claude settings (link); then try again."}, []
+        if not fs.Access.of(conn, caller.user_id).can_write(cid, fid):
+            return {"editable": False, "status": "not_possible", "where": where,
+                    "note": "The person can't change files here themselves, so they can't let you either. Only a "
+                            "Mnemerynne admin can give them edit access to it."}, []
+        own_inbox = coll["kind"] == "private" and coll["owner_user_id"] == caller.user_id
+        blocked = editing.no_edit_item(conn, fid, file_id)
+        if not own_inbox and not coll["claude_edit"] and coll["kind"] != "library":
+            return {"editable": False, "status": "needs_admin", "where": where,
+                    "note": "This is someone else's File box: only a Mnemerynne admin can let the AI edit in it. "
+                            "Meanwhile work in the person's own Agents folder."}, []
+        if not own_inbox and not coll["claude_edit"]:
+            user = conn.execute("SELECT * FROM users WHERE id = ?", (caller.user_id,)).fetchone()
+            if not accounts.is_admin(conn, user, self.get_directory(), self.settings.admin_usernames):
+                return {"editable": False, "status": "needs_admin", "where": where,
+                        "note": f"Only a Mnemerynne admin can let the AI edit in {_label(coll)} (Access → Files & "
+                                f"folders → {_label(coll)} → Claude can edit). Tell the person; meanwhile work in "
+                                f"their Agents folder."}, []
+            target, changes = fs.Item("library", cid), [
+                f"Let the AI edit in the whole {_label(coll)} library, for everyone who can change files there "
+                f"(you're an admin; you can switch it off again in Access → Files & folders)."]
+        elif blocked is not None:
+            target = blocked
+            label = name if blocked.type == "file" and blocked.id == file_id else \
+                conn.execute(f"SELECT {'display_name' if blocked.type == 'file' else 'name'} FROM "
+                             f"{blocked.type}s WHERE id = ?", (blocked.id,)).fetchone()[0]
+            changes = [f"Turn “AI can edit” back on for “{label}”: it is read-only for the AI now."]
+        elif file_id is not None or fid is not None:
+            target = fs.Item("file", file_id) if file_id is not None else fs.Item("folder", fid)
+            changes = [f"Let the AI edit “{name}” in your File box (you can switch it off again in Files)."]
+        else:
+            return {"editable": False, "status": "not_possible", "where": where,
+                    "note": "AI edit is switched on per folder or file in the File box, not for all of it. Ask for "
+                            "a folder or file in it, or work in the Agents folder."}, []
+        proposal = proposals.propose_access(conn, caller, target, name, cid, fid, changes)
+        out = {"proposal": proposal, "status": "proposed", "editable": False, "where": where, "changes": changes}
+        if self.propose:
+            return {**out, "note": _PROPOSED}, []
+        return {**out, "approve": f"{self.base}/proposals#p{proposal}",
+                "note": f"Nothing has changed yet. Give the person the approve link: once they allow it there, "
+                        f"{who} can edit here. Don't say it's done."}, []
 
     def list_comments(self, conn, caller: Caller, file_id: int) -> tuple[dict, list[int]]:
         try:
@@ -722,8 +930,8 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
                     pass   # the share is away: the tools still work, the folder comes later
                 try:
                     out, file_ids = fn(conn, caller, **args)
-                except (editing.EditError, fs.FsError) as exc:
-                    raise ToolError(str(exc)) from None
+                except (ToolError, editing.EditError, fs.FsError) as exc:
+                    raise ToolError(f"[{error_code(exc)}] {exc}") from None
                 ok = True
                 return claude_links.attach(conn, tools.base, caller, out)
             finally:
@@ -736,12 +944,13 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
         return await anyio.to_thread.run_sync(work)
 
     @server.tool(annotations=_READ_ONLY)
-    async def search_documents(ctx: Context, query: str, library: str | None = None, folder: str | None = None,
-                               limit: int = 8) -> dict:
+    async def search_documents(ctx: Context, query: str, library: int | str | None = None,
+                               folder: int | str | None = None, limit: int = 8) -> dict:
         """Search the user's Mnemerynne documents (their File box and shared libraries) and return the best
-        matching passages, each with a ready-to-use `citation` and `link`. Ask in natural language;
-        hotel and system jargon works. Optionally narrow to one `library` (a name from list_libraries,
-        or "File box") and a `folder` path inside it such as "Front Office/Night Audit". `limit` is 1-20.
+        matching passages, each with a ready-to-use `citation` and `link`, and `editable` (whether you may
+        change that file). Ask in natural language; hotel and system jargon works. Optionally narrow to one
+        `library` (a name from list_libraries, "File box", or its id) and a `folder` in it (a path such as
+        "Front Office/Night Audit", or a folder id). `limit` is 1-20.
         When `found` is false the documents don't cover it: rephrase once, then say so."""
         return await call(ctx, "search_documents",
                           {"query": query, "library": library, "folder": folder, "limit": limit},
@@ -787,14 +996,17 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
         return await call(ctx, "list_libraries", {}, tools.list_libraries)
 
     @server.tool(annotations=_READ_ONLY)
-    async def browse_folder(ctx: Context, library: str, folder: str | None = None) -> dict:
-        """List the folders and files in a library (or "File box"), at its top level or inside `folder`
-        (a path such as "Front Office/Night Audit")."""
+    async def browse_folder(ctx: Context, library: int | str, folder: int | str | None = None) -> dict:
+        """List the folders and files in a library (a name, "File box", or its id), at its top level or inside
+        `folder` (a path such as "Front Office/Night Audit", or a folder id). Every folder and file says whether
+        it is `editable` for you: whether you may change that file, or files in that folder."""
         return await call(ctx, "browse_folder", {"library": library, "folder": folder}, tools.browse_folder)
 
     @server.tool(annotations=_READ_ONLY)
     async def find_files(ctx: Context, name: str) -> dict:
-        """Find files and folders whose name contains `name`, across everything the user can search."""
+        """Find libraries, folders and files whose name contains `name`, across everything the user can
+        search. Matching ignores case, spaces, hyphens and underscores ("IT Ops" finds "IT-OPS"). Folders come
+        with their folder_id and files with theirs (and the folder_id they are in), plus `editable`."""
         return await call(ctx, "find_files", {"name": name}, tools.find_files)
 
     @server.tool(annotations=_READ_ONLY, structured_output=False)
@@ -847,22 +1059,24 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
 
     @server.tool(annotations=_EDITS)
     async def create_file(ctx: Context, name: str, content: str | None = None, paragraphs: list | None = None,
-                          rows: list | None = None, sheet: str | None = None, library: str | None = None,
-                          folder: str | None = None) -> dict:
+                          rows: list | None = None, sheet: str | None = None, library: int | str | None = None,
+                          folder: int | str | None = None) -> dict:
         """Create a new file; the extension in `name` decides the kind. .txt/.md: `content`. .docx:
         `paragraphs`, a list of strings or {"text": "...", "style": "Heading 1"} (or `content`, paragraphs
         separated by blank lines). .xlsx: `rows`, a list of rows (lists of values), optional `sheet` name.
-        Goes in the person's Agents folder unless `library` (and `folder`) name another place you may edit.
-        If the name is taken, it gets "(2)" added."""
+        Goes in the person's Agents folder unless `library` (and `folder`, a path) name another place you may
+        edit, or `folder` is a folder id. If the name is taken, it gets "(2)" added."""
         return await call(ctx, "create_file", {"name": name, "content": content, "paragraphs": paragraphs,
                                                "rows": rows, "sheet": sheet, "library": library, "folder": folder},
                           tools.create_file)
 
     @server.tool(annotations=_EDITS)
-    async def create_folder(ctx: Context, name: str, library: str | None = None, folder: str | None = None) -> dict:
-        """Create a folder called `name` in the person's Agents folder, or inside `folder` of `library` when
-        they name another place you may edit (list_libraries shows where). Returns its `library` and `folder`
-        path to pass to create_file. If it already exists, it is returned unchanged."""
+    async def create_folder(ctx: Context, name: str, library: int | str | None = None,
+                            folder: int | str | None = None) -> dict:
+        """Create a folder called `name` in the person's Agents folder, or inside `folder` (a path in `library`,
+        or a folder id) when they name another place you may edit (list_libraries shows where). Returns its
+        `folder_id`, `library` and `folder` path to pass to create_file. If it already exists, it is returned
+        unchanged."""
         return await call(ctx, "create_folder", {"name": name, "library": library, "folder": folder},
                           tools.create_folder)
 
@@ -875,12 +1089,15 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
 
     @server.tool(annotations=_EDITS)
     async def move_item(ctx: Context, file_id: int | None = None, folder_id: int | None = None,
-                        library: str | None = None, folder: str | None = None) -> dict:
-        """Move a file (file_id) or folder (folder_id) into `folder` of `library`, or into the person's Agents
-        folder when both are left out. Both places must be ones you may edit (list_libraries shows where).
-        If the name is taken there, it gets " (2)" added."""
+                        to_library: int | str | None = None, to_folder: int | str | None = None,
+                        library: int | str | None = None, folder: int | str | None = None) -> dict:
+        """Move one file (file_id) or one folder (folder_id: the folder being moved) to `to_folder` of
+        `to_library` (a path, or just a folder id as to_folder), or into the person's Agents folder when both
+        are left out. Both places must be ones you may edit (list_libraries shows where). If the name is taken
+        there, it gets " (2)" added. (`library` and `folder` are older names for to_library and to_folder.)"""
         return await call(ctx, "move_item", {"file_id": file_id, "folder_id": folder_id, "library": library,
-                                             "folder": folder}, tools.move_item)
+                                             "folder": folder, "to_library": to_library, "to_folder": to_folder},
+                          tools.move_item)
 
     @server.tool(annotations=_EDITS)
     async def delete_item(ctx: Context, file_id: int | None = None, folder_id: int | None = None) -> dict:
@@ -890,12 +1107,25 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
         return await call(ctx, "delete_item", {"file_id": file_id, "folder_id": folder_id}, tools.delete_item)
 
     @server.tool(annotations=_READ_ONLY)
-    async def list_changes(ctx: Context, library: str, folder: str | None = None, since: str | None = None) -> dict:
-        """What happened in a library (or a `folder` path in it, and below) since `since` (UTC, e.g.
-        "2026-10-24" or "2026-10-24 14:30"; default the last 24 hours): files added, changed, commented on or
-        moved to the recycle bin, when and by whom ("Claude for rob" = Rob's Claude), newest first."""
+    async def list_changes(ctx: Context, library: int | str, folder: int | str | None = None,
+                           since: str | None = None) -> dict:
+        """What happened in a library (or a `folder` in it, a path or id, and below) since `since` (UTC, e.g.
+        "2026-10-24" or "2026-10-24 14:30"; default the last 24 hours): files added, changed, renamed or moved,
+        commented on, moved to the recycle bin or restored, and folders made, binned or restored, when and by
+        whom ("Claude for rob" = Rob's Claude), newest first."""
         return await call(ctx, "list_changes", {"library": library, "folder": folder, "since": since},
                           tools.list_changes)
+
+    @server.tool(annotations=_EDITS)
+    async def request_edit_access(ctx: Context, file_id: int | None = None, folder_id: int | None = None,
+                                  library: int | str | None = None, folder: int | str | None = None) -> dict:
+        """Ask for permission to edit where you aren't allowed (`editable` is false, or an edit was refused
+        with [not_allowed]): a file, a folder, or a place (`library` and `folder`). When it's the person's to
+        give, you get an `approve` link for them; nothing changes until they apply it. Otherwise `note` says
+        who can allow it."""
+        return await call(ctx, "request_edit_access", {"file_id": file_id, "folder_id": folder_id,
+                                                       "library": library, "folder": folder},
+                          tools.request_edit_access)
 
     @server.tool(annotations=_READ_ONLY)
     async def list_comments(ctx: Context, file_id: int) -> dict:
