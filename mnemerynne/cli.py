@@ -177,9 +177,6 @@ def cmd_delete_user(args):
                        f"Claude tokens? Type the username to confirm: ")
         if answer.strip().lower() != args.username.strip().lower():
             raise SystemExit("Not deleted.")
-    # Memories live in LangGraph's store, outside the tables that cascade, and a
-    # new user may get this id again: wipe them first.
-    cmd_forget_memories(args)
     from mnemerynne import share
 
     inbox = conn.execute("SELECT c.id, c.share_path FROM collections c JOIN users u ON u.id = c.owner_user_id "
@@ -191,7 +188,7 @@ def cmd_delete_user(args):
         keep = rt.trash / share.trash_name("inbox", inbox["id"], args.username.lower())
         share.rename(rt.root / inbox["share_path"], keep)
         print(f"Moved their inbox folder to {keep}.")
-    users.delete_user(conn, args.username)
+    users.delete_user(conn, args.username)  # also their memories and conversation history
     print(f"Deleted '{args.username.lower()}'.")
 
 
@@ -457,28 +454,56 @@ def cmd_backup(args):
 
     result = backup(get_settings(), Path(args.dest), keep=args.keep)
     print(f"Snapshot {result['snapshot']}; {result['blobs_copied']} new file(s) copied; "
-          f"pruned {len(result['pruned'])} old snapshot(s).")
+          f"pruned {len(result['pruned'])} old snapshot(s); kept {', '.join(result['config']) or 'no settings files'}.")
+    for warning in result["warnings"]:
+        print(f"Warning: {warning}")
+
+
+def cmd_restore(args):
+    from pathlib import Path
+
+    from mnemerynne.backup import RestoreError, restore, snapshots
+
+    source = Path(args.source)
+    if args.list:
+        print("\n".join(snapshots(source)) or f"No snapshots in {source / 'db'}.")
+        return
+    settings = get_settings()
+    try:
+        result = restore(settings, source, args.date, force=args.force)
+    except RestoreError as exc:
+        raise SystemExit(f"Not restored: {exc}") from exc
+    print(f"Restored the {result['date']} snapshot to {result['database']}; "
+          f"{result['blobs_copied']} file(s) copied back.")
+    if result["moved_aside"]:
+        print(f"The database it replaced is in {result['moved_aside']}.")
+    if result["files"]:
+        print(f"Also restored: {', '.join(result['files'])}.")
+    if result["missing_blobs"]:
+        print(f"Warning: {result['missing_blobs']} file(s) in the database have no bytes in the backup; "
+              f"they will fail to open. Check {source / 'blobs'}.")
+    env = result["env_backup"]
+    if result["secret_key"] == "matches":
+        print("The secret key matches this backup: stored credentials will work.")
+    elif env:
+        print(f"The secret key in use differs from the one this backup was made with, so stored API "
+              f"credentials and Microsoft 365 links won't decrypt. If this box lost its settings, put "
+              f"the backed-up file back:\n"
+              f"  sudo install -o root -g mnemerynne -m 640 {env} /etc/mnemerynne/mnemerynne.env")
+    else:
+        print("This backup has no settings file. Stored credentials only work with the secret key the "
+              "backup was made with (MNEMERYNNE_SECRET_KEY): use your off-box copy.")
+    print("Then start the services: sudo systemctl start mnemerynne-web mnemerynne-worker")
 
 
 def cmd_forget_memories(args):
-    import sqlite3
-
-    from langgraph.store.sqlite import SqliteStore
-
-    from mnemerynne.graph import memory_namespace
-
     settings = get_settings()
     conn = _connect()
     user = users.get_user(conn, args.username)
     if user is None:
         raise SystemExit(f"No user '{args.username}'.")
-    store_conn = sqlite3.connect(settings.db_path, isolation_level=None, check_same_thread=False)
-    store = SqliteStore(store_conn)
-    store.setup()
-    items = store.search(memory_namespace(user["id"]), limit=10_000)
-    for item in items:  # deleted without displaying them: admins can wipe, not read
-        store.delete(memory_namespace(user["id"]), item.key)
-    print(f"Forgot {len(items)} memory item(s) for '{user['username']}'.")
+    count = users.forget_memories(settings.db_path, user["id"])
+    print(f"Forgot {count} memory item(s) for '{user['username']}'.")
 
 
 def run_migrate_microjames(argv: list[str]) -> None:
@@ -686,6 +711,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dest", required=True)
     p.add_argument("--keep", type=int, default=14, help="Daily database snapshots to keep")
     p.set_defaults(func=cmd_backup)
+
+    p = sub.add_parser("restore", help="Put a backup back (stop the services first)")
+    p.add_argument("--from", dest="source", required=True, help="The backup folder (backup's --dest)")
+    p.add_argument("--date", help="YYYY-MM-DD of the snapshot (default: the newest)")
+    p.add_argument("--list", action="store_true", help="List the snapshots and stop")
+    p.add_argument("--force", action="store_true",
+                   help="Replace an existing database (it is moved aside, not deleted)")
+    p.set_defaults(func=cmd_restore)
 
     p = sub.add_parser("forget-memories", help="Delete everything Erynne remembers about a user")
     p.add_argument("username")

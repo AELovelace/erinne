@@ -96,10 +96,47 @@ def set_active(conn: sqlite3.Connection, username: str, active: bool) -> bool:
     return cur.rowcount > 0
 
 
+def forget_memories(db_path, user_id: int) -> int:
+    """Delete everything Erynne remembers about a user (LangGraph's store). Returns the count."""
+    from langgraph.store.sqlite import SqliteStore
+
+    from mnemerynne.graph import memory_namespace
+
+    store_conn = sqlite3.connect(db_path, isolation_level=None, check_same_thread=False)
+    try:
+        store = SqliteStore(store_conn)
+        store.setup()
+        items = store.search(memory_namespace(user_id), limit=10_000)
+        for item in items:  # deleted without reading them: admins can wipe, not read
+            store.delete(memory_namespace(user_id), item.key)
+        return len(items)
+    finally:
+        store_conn.close()
+
+
 def delete_user(conn: sqlite3.Connection, username: str) -> bool:
-    """Delete a user; their private collection and its files cascade away."""
-    cur = conn.execute("DELETE FROM users WHERE username = ?", (username.strip().lower(),))
-    return cur.rowcount > 0
+    """Delete a user. Their private collection, files and conversations cascade away; their
+    memories, the conversations' LangGraph checkpoints and the traces kept per conversation
+    live outside those cascades and are deleted here (a new user may get this id again)."""
+    row = conn.execute("SELECT id FROM users WHERE username = ?", (username.strip().lower(),)).fetchone()
+    if row is None:
+        return False
+    user_id = row[0]
+    db_file = conn.execute("PRAGMA database_list").fetchone()[2]
+    if db_file:  # "" for an in-memory database
+        forget_memories(db_file, user_id)
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    threads = [r[0] for r in conn.execute("SELECT id FROM conversations WHERE user_id = ?", (user_id,))]
+    with transaction(conn):
+        for thread in threads:
+            # conversations.id is the LangGraph thread_id; as SqliteSaver.delete_thread does.
+            for table in ("checkpoints", "writes"):
+                if table in tables:
+                    conn.execute(f"DELETE FROM {table} WHERE thread_id = ?", (thread,))
+            conn.execute("DELETE FROM graph_runs WHERE conversation_id = ?", (thread,))
+        conn.execute("DELETE FROM agent_calls WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    return True
 
 
 def is_admin(user: sqlite3.Row, bootstrap_admins: set[str] = frozenset()) -> bool:
