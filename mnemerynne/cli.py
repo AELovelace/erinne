@@ -14,6 +14,10 @@ import sys
 from mnemerynne import db, permissions, users
 from mnemerynne.config import get_settings
 
+# How long `serve` lets open requests finish when stopped; mnemerynne-web's
+# TimeoutStopSec leaves room for it.
+SHUTDOWN_GRACE_SECONDS = 10
+
 
 def _connect():
     from mnemerynne import directory, share
@@ -677,8 +681,11 @@ def cmd_serve(args):
 
     settings = get_settings()
     # proxy_headers + FORWARDED_ALLOW_IPS let login throttling see real client
-    # IPs behind nginx.
-    uvicorn.run(create_app(settings), host=settings.host, port=settings.port, proxy_headers=True)
+    # IPs behind nginx. timeout_graceful_shutdown: streamed answers and MCP
+    # clients hold connections open, and uvicorn would otherwise wait for them
+    # until systemd kills it (a 90 s stall on every restart and update).
+    uvicorn.run(create_app(settings), host=settings.host, port=settings.port, proxy_headers=True,
+                timeout_graceful_shutdown=SHUTDOWN_GRACE_SECONDS)
 
 
 def build_parser() -> argparse.ArgumentParser:

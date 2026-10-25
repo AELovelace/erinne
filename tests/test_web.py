@@ -9,6 +9,20 @@ def test_healthz(client):
     assert client.get("/healthz").json() == {"status": "ok", "schema": len(db._migration_files())}
 
 
+def test_serve_never_waits_forever_for_open_connections(settings, monkeypatch):
+    # Streamed answers and MCP clients keep connections open; without a grace
+    # limit a restart stalls until systemd kills the process.
+    import uvicorn
+
+    from mnemerynne import cli
+    seen = {}
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: seen.update(kwargs))
+    cli.cmd_serve(None)
+    assert seen["proxy_headers"] is True
+    assert 0 < seen["timeout_graceful_shutdown"] <= 20
+
+
 def test_inbox_requires_login(client):
     r = client.get("/", follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/login"

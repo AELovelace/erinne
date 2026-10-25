@@ -13,6 +13,8 @@ Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/mnemerynne/.venv/bin/mnemerynne serve
 Restart=on-failure
 RestartSec=5
+# serve gives open requests 10 s to finish; never wait systemd's default 90 s.
+TimeoutStopSec=30
 # /var/lib/mnemerynne, created with the right owner and SELinux label.
 StateDirectory=mnemerynne
 StateDirectoryMode=0750
