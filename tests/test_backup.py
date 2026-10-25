@@ -56,7 +56,7 @@ def test_backup_keeps_settings_file_and_data_files_per_snapshot(conn, settings, 
     dest = tmp_path / "backups"
     result = backup(settings, dest, keep=1, today=date(2026, 10, 1))
     assert result["config"] == ["mnemerynne.env", "router.json"] and result["warnings"] == []
-    assert env_secret_key(dest / "config" / "2026-10-01" / "mnemerynne.env") == "test-secret"
+    assert env_secret_key(dest / "config" / "2026-10-01" / "mnemerynne.env") == settings.secret_key
     assert (dest / "versions" / "1" / "v1.md").read_bytes() == b"# Before"
     if os.name == "posix":  # a backup holds every document and the key to every credential
         assert stat.S_IMODE((dest / "db").stat().st_mode) == 0o700

@@ -105,9 +105,10 @@ def test_delete_user_removes_conversation_history_and_memories(conn, settings):
 
 def test_proxy_body_limits_match_the_app_upload_limit():
     limit = Settings(_env_file=None).max_file_bytes
-    caddy = re.search(r"max_size\s+(\d+)MiB", (DEPLOY / "Caddyfile-mnemerynne").read_text(encoding="utf-8"))
+    caddy = [re.search(r"max_size\s+(\d+)MiB", (DEPLOY / name).read_text(encoding="utf-8"))
+             for name in ("Caddyfile-mnemerynne", "Caddyfile-mnemerynne-public")]
     nginx = re.search(r"client_max_body_size\s+(\d+)m;", (DEPLOY / "nginx-mnemerynne.conf").read_text(encoding="utf-8"))
-    for found in (caddy, nginx):
+    for found in (*caddy, nginx):
         proxy = int(found.group(1)) * 1024 * 1024
         # Room for the multipart overhead, but not so much that the proxy waves through what the app refuses.
         assert limit < proxy <= limit + 32 * 1024 * 1024

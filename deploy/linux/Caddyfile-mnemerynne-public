@@ -12,9 +12,9 @@ erynne.example.org {
     # No "tls internal": Caddy gets a Let's Encrypt certificate by itself, which
     # claude.ai's servers and every browser trust.
 
-    # Keep in step with MNEMERYNNE_MAX_FILE_BYTES (plus multipart overhead).
+    # Uploads up to 500 MiB (MNEMERYNNE_MAX_FILE_BYTES) plus multipart overhead.
     request_body {
-        max_size 110MB
+        max_size 510MiB
     }
 
     header {
