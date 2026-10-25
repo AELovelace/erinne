@@ -97,10 +97,15 @@ def test_session_cookie_https_only_follows_the_public_address(tmp_path):
 
 
 # -------------------------------------------------------------- rate limits
+def _register_limit():
+    return next(limit for prefix, _, limit, _ in security.PUBLIC_LIMITS if prefix == "/oauth/register")
+
+
 def test_oauth_registration_is_rate_limited_per_ip(client):
     body = {"redirect_uris": ["http://127.0.0.1:5000/callback"], "client_name": "x"}
-    codes = [client.post("/oauth/register", json=body).status_code for _ in range(11)]
-    assert codes[-1] == 429 and 429 not in codes[:10]
+    limit = _register_limit()
+    codes = [client.post("/oauth/register", json=body).status_code for _ in range(limit + 1)]
+    assert codes[-1] == 429 and 429 not in codes[:limit]
     r = client.post("/oauth/register", json=body)
     assert r.json()["error"] == "rate_limited" and r.headers["retry-after"] == "3600"
     assert r.headers["x-content-type-options"] == "nosniff"
@@ -112,7 +117,7 @@ def test_limits_are_per_client_ip(settings, conn):
     # One client runs the app's startup; the second shares it (startup can't run twice).
     with TestClient(app, client=("203.0.113.5", 1)) as a:
         b = TestClient(app, client=("203.0.113.6", 1))
-        for _ in range(10):
+        for _ in range(_register_limit()):
             a.post("/oauth/register", json=body)
         assert a.post("/oauth/register", json=body).status_code == 429
         assert b.post("/oauth/register", json=body).status_code != 429

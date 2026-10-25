@@ -133,9 +133,11 @@ class RateLimiter:
 
 # (path prefix, methods or None for all, requests, window seconds). Endpoints
 # that need no sign-in; signed-in pages and /mcp have their own checks.
+# claude.ai registers and refreshes for everyone from a few shared addresses,
+# so its endpoints allow more than one person would ever need.
 PUBLIC_LIMITS: list[tuple[str, frozenset[str] | None, int, int]] = [
-    ("/oauth/register", None, 10, 3600),
-    ("/oauth/token", None, 60, 60),
+    ("/oauth/register", None, 30, 3600),
+    ("/oauth/token", None, 120, 60),
     ("/oauth/revoke", None, 60, 60),
     ("/oauth/authorize", None, 60, 60),
     ("/.well-known/", None, 120, 60),

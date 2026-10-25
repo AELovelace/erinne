@@ -703,7 +703,7 @@ behind it. What the app does about that:
   sniffing, no full URLs in Referer, and HSTS over HTTPS.
 - **Rate limits per client IP** on what anyone can reach: sign-in (30 a
   minute, and 20 failures across any usernames lock that IP out for 5
-  minutes), app registration (10 an hour), the other OAuth endpoints and
+  minutes), app registration (30 an hour), the other OAuth endpoints and
   Claude's text links. Over the limit is a 429 with `Retry-After`. The real
   client IP comes from Caddy (`FORWARDED_ALLOW_IPS=127.0.0.1`), so keep that.
 - **Admin networks.** With `MNEMERYNNE_ADMIN_NETWORKS=192.168.1.0/24`
