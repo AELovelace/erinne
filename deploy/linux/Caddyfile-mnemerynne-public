@@ -1,0 +1,39 @@
+# Mnemerynne on the internet, for /etc/caddy/Caddyfile (README section 5j).
+# Use it instead of Caddyfile-mnemerynne once the box is reachable from outside.
+# Replace the hostname with the public one: it must match MNEMERYNNE_PUBLIC_URL,
+# resolve to the router's public address, and have ports 80 and 443 forwarded
+# to this box. Replace 192.168.1.0/24 with the networks admins work from (the
+# office LAN, the VPN); keep MNEMERYNNE_ADMIN_NETWORKS the same.
+#
+# Remove Fedora's default ":80 { root * /usr/share/caddy ... }" block from the
+# Caddyfile, or plain-HTTP requests land on Caddy's test page.
+
+erynne.example.org {
+    # No "tls internal": Caddy gets a Let's Encrypt certificate by itself, which
+    # claude.ai's servers and every browser trust.
+
+    # Keep in step with MNEMERYNNE_MAX_FILE_BYTES (plus multipart overhead).
+    request_body {
+        max_size 110MB
+    }
+
+    header {
+        -Server
+    }
+
+    # The admin console only from the admin networks. The app checks the same
+    # thing (MNEMERYNNE_ADMIN_NETWORKS); this keeps the pages out of sight too.
+    @admin_from_outside {
+        path /admin /admin/* /api/admin/*
+        not remote_ip 192.168.1.0/24
+    }
+    respond @admin_from_outside 404
+
+    # flush_interval -1: answers (/api/ask) and MCP replies are passed on as
+    # they come. Caddy replaces any X-Forwarded-For a client sends, and the app
+    # trusts it only from 127.0.0.1 (FORWARDED_ALLOW_IPS), so rate limits and
+    # login throttling count real client addresses.
+    reverse_proxy 127.0.0.1:38200 {
+        flush_interval -1
+    }
+}

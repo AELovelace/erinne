@@ -39,7 +39,7 @@ def _no_agent_model(monkeypatch):
 def settings(tmp_path):
     # Small vectors keep tests fast; production uses the embedder's real size.
     # _env_file=None: never pick up the developer's .env (API keys, teacher settings).
-    return Settings(_env_file=None, data_dir=tmp_path / "data", secret_key="test-secret", embed_dim=4)
+    return Settings(_env_file=None, data_dir=tmp_path / "data", secret_key="test-secret-key-for-the-test-suite-only", embed_dim=4)
 
 
 @pytest.fixture

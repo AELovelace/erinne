@@ -18,12 +18,19 @@ class Settings(BaseSettings):
     # Web / sessions
     host: str = "127.0.0.1"
     port: int = 38200
+    # Signs sessions and encrypts stored credentials. A server others can reach
+    # (public_url set, or host not loopback) refuses to start without a real one.
     secret_key: str = ""
     session_max_age: int = 24 * 3600
-    session_https_only: bool = False
+    # Session cookie only over HTTPS. Unset: on whenever public_url is https.
+    session_https_only: bool | None = None
     # The address people open Erynne at, e.g. https://erynne.example.internal;
     # links handed to Claude are built on it (relative links when empty).
     public_url: str = ""
+    # Admin rights only count from these networks (comma-separated CIDRs, e.g.
+    # "192.168.1.0/24"); from anywhere else admins are treated as ordinary
+    # users. Empty: admin rights from any network.
+    admin_networks: str = ""
 
     # Where `mnemerynne-admin update` gets new versions, for the Settings page's
     # "updates available" check: owner/name on GitHub (empty = the checkout's
@@ -35,8 +42,10 @@ class Settings(BaseSettings):
     mcp_calls_per_minute: int = 60     # per token
     mcp_max_tokens: int = 4000         # passage text returned by one search
 
-    # Login throttling: lock a username+IP pair after this many failures.
+    # Login throttling: lock a username+IP pair after this many failures, and
+    # an IP (any usernames, e.g. password spraying) after login_ip_max_failures.
     login_max_failures: int = 5
+    login_ip_max_failures: int = 20
     login_lockout_seconds: int = 300
 
     # Usernames that are always admins (comma-separated); bootstrap only.

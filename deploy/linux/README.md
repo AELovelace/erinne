@@ -688,6 +688,59 @@ in Outlook. Mail text never goes to Claude, and the tool-call log
 optional group. Exchange still decides who may open them: a person needs Full
 Access there too.
 
+## 5j. On the internet
+
+claude.ai's servers call `/mcp` and `/oauth/*`, so the connector needs the
+box reachable from the internet, and with it the sign-in page and everything
+behind it. What the app does about that:
+
+- **Secret key.** `mnemerynne-web` refuses to start when
+  `MNEMERYNNE_PUBLIC_URL` is set (or it listens beyond loopback) and
+  `MNEMERYNNE_SECRET_KEY` is missing, the example value, or under 32
+  characters.
+- **Cookies and headers.** Session cookies are HTTPS-only when the public
+  URL is https. Every response says: no framing by other sites, no MIME
+  sniffing, no full URLs in Referer, and HSTS over HTTPS.
+- **Rate limits per client IP** on what anyone can reach: sign-in (30 a
+  minute, and 20 failures across any usernames lock that IP out for 5
+  minutes), app registration (10 an hour), the other OAuth endpoints and
+  Claude's text links. Over the limit is a 429 with `Retry-After`. The real
+  client IP comes from Caddy (`FORWARDED_ALLOW_IPS=127.0.0.1`), so keep that.
+- **Admin networks.** With `MNEMERYNNE_ADMIN_NETWORKS=192.168.1.0/24`
+  (comma-separated; add the VPN), admins signed in from anywhere else are
+  ordinary users: no Access page, no admin API.
+
+To open it up:
+
+1. A public hostname (e.g. `erynne.example.org`) pointing at the router's
+   public address, with ports 80 and 443 forwarded to this box. Port 80 is
+   only for Let's Encrypt's check; Caddy redirects it to HTTPS.
+2. Use `Caddyfile-mnemerynne-public` instead of `Caddyfile-mnemerynne`:
+
+   ```sh
+   sed -e 's/erynne.example.org/YOUR-PUBLIC-HOSTNAME/' -e 's#192.168.1.0/24#YOUR-ADMIN-NETWORKS#' \
+     /opt/mnemerynne/deploy/linux/Caddyfile-mnemerynne-public > /tmp/mnemerynne-public.caddy
+   sudoedit /etc/caddy/Caddyfile     # replace the old Mnemerynne site with /tmp/mnemerynne-public.caddy
+   sudo firewall-cmd --permanent --add-service=http --add-service=https && sudo firewall-cmd --reload
+   sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
+   ```
+
+   It drops `tls internal` (Caddy fetches a Let's Encrypt certificate), and
+   answers 404 to the admin console from outside the admin networks.
+3. In `/etc/mnemerynne/mnemerynne.env`: `MNEMERYNNE_PUBLIC_URL=https://YOUR-PUBLIC-HOSTNAME`,
+   `MNEMERYNNE_ADMIN_NETWORKS=` the same networks, and remove
+   `MNEMERYNNE_SESSION_HTTPS_ONLY=false` if an old file has it. Restart
+   `mnemerynne-web`.
+4. Check from outside the network (a phone off Wi-Fi):
+   `curl -sI https://YOUR-PUBLIC-HOSTNAME/login` shows
+   `strict-transport-security` and `x-frame-options`, and
+   `https://YOUR-PUBLIC-HOSTNAME/admin/libraries` is a 404.
+
+Staff on the LAN who open the public hostname may arrive from the router's
+address rather than their own (hairpin NAT). If admins lose the Access page
+on the LAN, point the public hostname at this box's LAN address in internal
+DNS.
+
 ## 6. Check
 
 ```sh

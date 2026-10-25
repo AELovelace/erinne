@@ -56,10 +56,13 @@ def validate_password(password: str) -> str:
 
 
 class LoginThrottle:
-    """In-memory failure counter per (username, client IP)."""
+    """In-memory failure counters per (username, client IP), and per client IP
+    across all usernames (password spraying). Locking a username everywhere
+    would let anyone lock a person out, so there's no per-username-only count."""
 
-    def __init__(self, max_failures: int, window_seconds: int) -> None:
+    def __init__(self, max_failures: int, window_seconds: int, ip_max_failures: int | None = None) -> None:
         self.max_failures = max_failures
+        self.ip_max_failures = ip_max_failures
         self.window_seconds = window_seconds
         self._failures: dict[str, list[float]] = {}
         self._lock = threading.Lock()
@@ -67,6 +70,10 @@ class LoginThrottle:
     @staticmethod
     def _key(username: str, client_ip: str) -> str:
         return f"{(username or '').strip().lower()}|{client_ip}"
+
+    @staticmethod
+    def _ip_key(client_ip: str) -> str:
+        return f"\0ip|{client_ip}"   # \0 can't start a username
 
     def _recent(self, key: str, now: float) -> list[float]:
         cutoff = now - self.window_seconds
@@ -79,14 +86,19 @@ class LoginThrottle:
 
     def locked_out(self, username: str, client_ip: str) -> bool:
         with self._lock:
-            return len(self._recent(self._key(username, client_ip), time.monotonic())) >= self.max_failures
+            now = time.monotonic()
+            if len(self._recent(self._key(username, client_ip), now)) >= self.max_failures:
+                return True
+            return (self.ip_max_failures is not None
+                    and len(self._recent(self._ip_key(client_ip), now)) >= self.ip_max_failures)
 
     def record_failure(self, username: str, client_ip: str) -> None:
-        key = self._key(username, client_ip)
         with self._lock:
             now = time.monotonic()
-            self._failures[key] = self._recent(key, now) + [now]
+            for key in (self._key(username, client_ip), self._ip_key(client_ip)):
+                self._failures[key] = self._recent(key, now) + [now]
 
     def clear(self, username: str, client_ip: str) -> None:
+        # Only this username's count: one correct password mustn't wipe an IP's spraying record.
         with self._lock:
             self._failures.pop(self._key(username, client_ip), None)

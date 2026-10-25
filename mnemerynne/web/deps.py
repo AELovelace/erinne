@@ -9,6 +9,7 @@ from fastapi import Depends, HTTPException, Request, status
 
 from mnemerynne import accounts, db, users
 from mnemerynne.config import Settings
+from mnemerynne.web import security
 
 
 class LoginRequired(Exception):
@@ -53,8 +54,11 @@ def api_user(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> sq
 
 
 def is_admin(request: Request, conn: sqlite3.Connection, user: sqlite3.Row) -> bool:
-    """Local admin, bootstrap username, or a domain user in the admin group."""
+    """Local admin, bootstrap username, or a domain user in the admin group,
+    signed in from a network admin rights count from (MNEMERYNNE_ADMIN_NETWORKS)."""
     state = request.app.state
+    if not security.admin_network_ok(state.settings, request.client.host if request.client else ""):
+        return False
     return accounts.is_admin(conn, user, state.directory, state.settings.admin_usernames)
 
 

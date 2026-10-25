@@ -34,7 +34,7 @@ from mnemerynne.graph import Deps, build_graph
 from mnemerynne.router import load_router
 from mnemerynne.web import (admin, admin_apis, agent as agent_pages, apis as api_pages, balancer as balancer_pages, chat,
                             claude_links as claude_link_pages, files, m365 as m365_pages, memories,
-                            oauth as oauth_pages, settings as settings_pages, tokens)
+                            oauth as oauth_pages, security, settings as settings_pages, tokens)
 from mnemerynne.web.deps import LoginRequired, api_user, get_db, is_admin, page_user
 
 log = logging.getLogger("mnemerynne.web")
@@ -78,10 +78,10 @@ class Services:
 
 def create_app(settings: Settings | None = None, services: Services | None = None) -> FastAPI:
     settings = settings or get_settings()
-    secret_key = settings.secret_key
-    if not secret_key:
-        log.warning("MNEMERYNNE_SECRET_KEY is not set; using a random key, so sessions end on restart.")
-        secret_key = secrets.token_urlsafe(48)
+    secret_key = security.check_secret_key(settings) or secrets.token_urlsafe(48)
+    security.parse_networks(settings.admin_networks)   # a typo fails at start, not on every admin request
+    if security.exposed(settings) and not settings.public_url:
+        log.warning("MNEMERYNNE_PUBLIC_URL is not set; links and OAuth addresses follow the request's Host.")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -157,14 +157,15 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                            else directory.from_settings(settings))
     share.configure(settings, app.state.directory, services.share_checker if services else None)
     sharepoint.configure(settings)
-    app.state.throttle = LoginThrottle(settings.login_max_failures, settings.login_lockout_seconds)
+    app.state.throttle = LoginThrottle(settings.login_max_failures, settings.login_lockout_seconds,
+                                       settings.login_ip_max_failures)
     app.add_middleware(
         SessionMiddleware,
         secret_key=secret_key,
         session_cookie="mnemerynne_session",
         max_age=settings.session_max_age,
         same_site="lax",
-        https_only=settings.session_https_only,
+        https_only=security.https_only(settings),
     )
 
     @app.middleware("http")
@@ -174,6 +175,10 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         if request.method not in _SAFE_METHODS and _cross_site(request) and request.url.path not in _OAUTH_API:
             return JSONResponse({"detail": "Cross-site request refused."}, status_code=status.HTTP_403_FORBIDDEN)
         return await call_next(request)
+
+    # Added last, so they run first: refused requests get the headers too.
+    app.add_middleware(security.PublicRateLimit)
+    app.add_middleware(security.SecurityHeaders, settings=settings)
 
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
     templates = Jinja2Templates(directory=_HERE / "templates")

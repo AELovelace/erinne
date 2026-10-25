@@ -16,7 +16,7 @@ BASE = "https://mnemerynne.test"
 @pytest.fixture
 def client(settings, conn, world, embedder):  # noqa: F811
     settings.public_url = BASE
-    with TestClient(create_app(settings, Services(llm=None, embedder=embedder))) as c:
+    with TestClient(create_app(settings, Services(llm=None, embedder=embedder)), base_url=BASE) as c:
         yield c
 
 

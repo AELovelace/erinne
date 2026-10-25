@@ -344,7 +344,7 @@ def share_world(tmp_path):
     root = tmp_path / "storage" / "share"
     root.mkdir(parents=True)
     (root / share.MARKER).write_text("")
-    settings = Settings(_env_file=None, data_dir=tmp_path / "data", secret_key="test-secret", embed_dim=4,
+    settings = Settings(_env_file=None, data_dir=tmp_path / "data", secret_key="test-secret-key-for-the-test-suite-only", embed_dim=4,
                         ad_domain="ETERNALHOTELS", share_root=root, share_settle_seconds=0)
     directory = FakeDirectory({"jsmith": {"Domain Users"}})
     share.configure(settings, directory, FakeShareChecker(root))

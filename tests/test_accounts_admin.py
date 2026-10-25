@@ -9,7 +9,7 @@ from mnemerynne.web.app import Services, create_app
 
 @pytest.fixture
 def settings(tmp_path):
-    return Settings(_env_file=None, data_dir=tmp_path / "data", secret_key="test-secret", embed_dim=4,
+    return Settings(_env_file=None, data_dir=tmp_path / "data", secret_key="test-secret-key-for-the-test-suite-only", embed_dim=4,
                     ad_domain="ETERNALHOTELS")
 
 

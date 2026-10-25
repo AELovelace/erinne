@@ -157,7 +157,7 @@ def test_claude_proposes_through_the_connector_and_the_person_approves(conn, set
     assert out["approve"] == f"https://mnemerynne.test/proposals#p{out['proposal']}" and "Don't say" in out["note"]
     assert seen == []
 
-    with TestClient(create_app(settings, Services(llm=None, embedder=world["embedder"], directory=directory))) as c:
+    with TestClient(create_app(settings, Services(llm=None, embedder=world["embedder"], directory=directory)), base_url="https://mnemerynne.test") as c:
         _login(c, "bob")
         assert c.get("/api/agent/proposals").json()["proposals"] == []          # only your own
         c.post("/logout")
@@ -176,7 +176,7 @@ def test_claude_proposes_through_the_connector_and_the_person_approves(conn, set
 def test_the_atera_template_and_testing_an_action(settings, conn, world, directory):
     seen = []
     _upstream(seen)
-    with TestClient(create_app(settings, Services(llm=None, embedder=world["embedder"], directory=directory))) as c:
+    with TestClient(create_app(settings, Services(llm=None, embedder=world["embedder"], directory=directory)), base_url="https://mnemerynne.test") as c:
         _login(c, "boss")
         conn.execute("UPDATE users SET role = 'admin' WHERE username = 'boss'")
         up = c.post("/api/admin/apis/templates", json={"template": open(ATERA, encoding="utf-8").read()}).json()
