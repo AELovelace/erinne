@@ -116,7 +116,22 @@ particular "off-topic" items that the documents actually answer).
 ```sh
 uv run mnemerynne eval-retrieval eval/gold/dev.jsonl --verified-only
 uv run mnemerynne eval-answers eval/gold/dev.jsonl --generator http://127.0.0.1:8081 --label qwen3-8b --out runs/answers-qwen3.json
+uv run mnemerynne eval-answers eval/gold/dev.jsonl --agent --as rob --label agent-lfm2.5 --out runs/answers-agent.json
 ```
+
+`eval-answers` alone measures the cited-JSON flow, which chat only uses when
+the agent can't answer. `--agent` measures what chat actually does: each
+question goes through the tool-using agent as that person (`--as`, or each
+item's `as_user`), on the same model path as the web app (balancer nodes,
+then `MNEMERYNNE_LLM_URL`; `--agent-url` for one server). It is read-only:
+tools that draft changes are switched off and the agent group's extra reach
+is never used, but tool calls are logged in `agent_calls`
+(`eval:<item id>`) and read-only API operations really run. Items whose
+supporting files that person can't read are skipped and counted. Besides the
+usual scores it reports tool calls, model turns, fallbacks (the agent model
+didn't answer) and uncited answers. An answer counts as a refusal when it
+cites nothing and says it couldn't find it. `eval-gate` only compares agent
+reports with agent reports.
 
 Embedder bake-off (2026-10-20, unverified gold, no gate):
 

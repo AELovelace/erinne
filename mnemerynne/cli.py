@@ -393,7 +393,6 @@ def cmd_eval_retrieval(args):
 
 def cmd_eval_answers(args):
     import asyncio
-    import json
     from pathlib import Path
 
     from mnemerynne.answer import PROMPT_VERSION
@@ -408,6 +407,9 @@ def cmd_eval_answers(args):
     items = load_gold([Path(p) for p in args.gold], split=args.split, verified_only=args.verified_only)
     if args.limit:
         items = items[: args.limit]
+    if args.agent:
+        _write_report(args, _eval_answers_agent(args, settings, conn, items))
+        return
 
     async def run():
         restrict = None
@@ -438,13 +440,69 @@ def cmd_eval_answers(args):
     report = asyncio.run(run())
     report["config"] = {"generator": args.generator or settings.llm_url, "label": args.label,
                         "prompt_version": PROMPT_VERSION, "split": args.split, "rerank": args.rerank_url or None}
+    _write_report(args, report)
+
+
+def _write_report(args, report: dict) -> None:
+    import json
+    from pathlib import Path
+
     for key, value in report["summary"].items():
-        print(f"{key:>20}: {value}")
+        print(f"{key:>28}: {value}")
     if args.out:
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
         print(f"Report: {out}")
+
+
+def _eval_answers_agent(args, settings, conn, items) -> dict:
+    """eval-answers --agent: each question through the chat agent, as --as (or each item's as_user),
+    with the web app's model path: the balancer nodes, then MNEMERYNNE_LLM_URL (or --agent-url alone)."""
+    import asyncio
+
+    from mnemerynne import balancer as balancer_mod
+    from mnemerynne import directory, sharepoint
+    from mnemerynne.clients.embed import Embedder
+    from mnemerynne.clients.llm import LLM
+    from mnemerynne.evaluation.agent_eval import PROMPT_VERSION, ReadOnlyAgent, evaluate_agent
+
+    if args.as_user and users.get_user(conn, args.as_user) is None:
+        raise SystemExit(f"No user '{args.as_user}'.")
+    if args.agent_url:
+        settings.llm_url = args.agent_url
+    sharepoint.configure(settings)
+    cfg = balancer_mod.load_config(conn)
+    nodes = [] if args.agent_url else cfg["nodes"]
+
+    async def run():
+        balancer = balancer_mod.Balancer()
+        balancer.configure(nodes, balancer_mod.api_key(settings, cfg))
+        poller = None
+        if nodes:
+            await balancer.poll_once()   # which nodes are ready before the first question
+            poller = asyncio.create_task(balancer.run())
+        embedder = Embedder(settings)
+        the_directory = directory.from_settings(settings)
+        agent = ReadOnlyAgent(settings, lambda: embedder, lambda: the_directory, balancer=balancer)
+        judge = None if args.no_judge else LLM(args.judge or settings.llm_url, timeout=settings.llm_timeout)
+        try:
+            return await evaluate_agent(conn, agent, judge, items, args.as_user)
+        finally:
+            if poller:
+                poller.cancel()
+            await agent.aclose()
+            await balancer.aclose()
+            embedder.close()
+            if judge:
+                await judge.aclose()
+
+    report = asyncio.run(run())
+    report["config"] = {"generator": args.agent_url or (f"{len(nodes)} balancer node(s), then {settings.llm_url}"
+                                                        if nodes else settings.llm_url),
+                        "path": "agent", "as": args.as_user or "each item's as_user", "label": args.label,
+                        "prompt_version": PROMPT_VERSION, "split": args.split}
+    return report
 
 
 def cmd_backup(args):
@@ -738,6 +796,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rerank-url", default="")
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--out", default=None)
+    p.add_argument("--agent", action="store_true",
+                   help="Evaluate what chat answers with: the tool-using agent (read-only; nothing is proposed)")
+    p.add_argument("--as", dest="as_user", default=None,
+                   help="With --agent: ask every question as this user (default: each item's as_user)")
+    p.add_argument("--agent-url", default=None,
+                   help="With --agent: this model server only, instead of the balancer nodes and MNEMERYNNE_LLM_URL")
     p.set_defaults(func=cmd_eval_answers)
 
     sub.add_parser(
