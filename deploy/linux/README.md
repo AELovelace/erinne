@@ -803,12 +803,97 @@ sudo install -m 755 deploy/linux/mnemerynne-admin /usr/local/bin/
 sudo systemctl restart mnemerynne-web mnemerynne-worker
 ```
 
-## Restore from backup
+## Backups
+
+`mnemerynne-backup.timer` writes to `/var/backups/mnemerynne` every night at
+02:30 and keeps 14 days. Everything in it is readable only by `mnemerynne`
+(folders 0700, files 0600). It holds:
+
+- **`db/`:** one database snapshot per day.
+- **`config/YYYY-MM-DD/`:** that day's copy of `/etc/mnemerynne/mnemerynne.env`,
+  plus `router.json`, `synonyms.txt` and `mnemerynne.mcpb`.
+- **`blobs/` and `versions/`:** the uploaded files and their earlier versions.
+  Only new files are copied each night.
+
+Files on the SMB share aren't included. Back the share up with the NAS.
+
+**The secret key.** `MNEMERYNNE_SECRET_KEY` in the settings file encrypts the
+stored API credentials, Microsoft 365 links and Claude keys. A backup restored
+without the matching key keeps every document, but those secrets are lost, and
+each one has to be entered or linked again.
+
+The backup copies the settings file for you, but that copy sits on the same
+disk as everything else. Keep the key off the box too, for example in the
+password manager:
 
 ```sh
-sudo systemctl stop mnemerynne-web mnemerynne-worker
-sudo -u mnemerynne cp /var/backups/mnemerynne/db/mnemerynne-YYYY-MM-DD.db /var/lib/mnemerynne/mnemerynne.db
-sudo -u mnemerynne rsync -a /var/backups/mnemerynne/blobs/ /var/lib/mnemerynne/blobs/
-sudo -u mnemerynne rsync -a /var/backups/mnemerynne/versions/ /var/lib/mnemerynne/versions/
-sudo systemctl start mnemerynne-web mnemerynne-worker
+sudo grep '^MNEMERYNNE_SECRET_KEY=' /etc/mnemerynne/mnemerynne.env
 ```
+
+Copy the backups off the box as well (another disk, the NAS or cloud
+storage). A backup on the disk that died doesn't help.
+
+**Logs.** The worker deletes old log rows every hour:
+
+| Log | Kept for | Setting |
+|---|---|---|
+| Claude's tool calls | 90 days | `MNEMERYNNE_MCP_CALLS_DAYS` |
+| Internal API calls | 90 days | `MNEMERYNNE_API_CALLS_DAYS` |
+| Erynne agent tool calls | 90 days | `MNEMERYNNE_AGENT_CALLS_DAYS` |
+| Answer timings | 30 days | `MNEMERYNNE_GRAPH_RUNS_DAYS` |
+
+It also deletes Claude connections (OAuth apps) that haven't been used for 30
+days (`MNEMERYNNE_OAUTH_CLIENT_DAYS`), and app registrations that never
+connected after a day. Set any of these to `0` to keep everything.
+
+Once an API call is deleted, older answers that cite it lose their "API call"
+link.
+
+## Restore from backup
+
+1. Stop the services. The restore refuses to run while they're up.
+
+   ```sh
+   sudo systemctl stop mnemerynne-web mnemerynne-worker
+   ```
+
+2. List the snapshots, then restore one. Leave out `--date` to restore the
+   newest.
+
+   ```sh
+   sudo mnemerynne-admin restore --from /var/backups/mnemerynne --list
+   sudo mnemerynne-admin restore --from /var/backups/mnemerynne --date YYYY-MM-DD --force
+   ```
+
+   - `--force` is only needed when `/var/lib/mnemerynne/mnemerynne.db` exists.
+     The current database (with its `-wal`/`-shm` files) is moved to
+     `/var/lib/mnemerynne/pre-restore-<time>/`, not deleted.
+   - Before and after copying, the restore checks the database with SQLite's
+     integrity check.
+   - It copies blobs, versions, `router.json`, `synonyms.txt` and
+     `mnemerynne.mcpb` back.
+
+3. Read what it says about the secret key. It never writes to `/etc`.
+   - **"matches":** stored credentials will work.
+   - **"differs":** this happens on a rebuilt box. Put the backed-up settings
+     file back, using the command it prints:
+
+     ```sh
+     sudo install -o root -g mnemerynne -m 640 /var/backups/mnemerynne/config/YYYY-MM-DD/mnemerynne.env /etc/mnemerynne/mnemerynne.env
+     ```
+
+     Alternatively, set `MNEMERYNNE_SECRET_KEY` from your off-box copy.
+
+4. Start the services:
+
+   ```sh
+   sudo systemctl start mnemerynne-web mnemerynne-worker
+   ```
+
+**On a new box:**
+
+1. Do sections 1 and 2 (the code and the settings file).
+2. Restore the backup.
+3. Do section 3 (services).
+
+Skip section 4: the restored database already has the users and documents.

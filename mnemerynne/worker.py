@@ -7,7 +7,7 @@ import signal
 import sqlite3
 import time
 
-from mnemerynne import db, directory, editing, fs, jobs, m365, proposals, share, sharepoint
+from mnemerynne import db, directory, editing, fs, jobs, m365, proposals, retention, share, sharepoint
 from mnemerynne.clients.embed import Embedder
 from mnemerynne.config import Settings
 from mnemerynne.ingest import pipeline
@@ -135,6 +135,13 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
                         log.info("Expired %d change(s) Erynne proposed that nobody applied.", expired)
                 except Exception:
                     log.exception("Proposal cleanup failed")
+                try:
+                    purged = retention.purge(conn, settings)
+                    if purged:
+                        log.info("Deleted log rows past their keep date: %s.",
+                                 ", ".join(f"{n} from {table}" for table, n in purged.items()))
+                except Exception:
+                    log.exception("Log cleanup failed")
     finally:
         embedder.close()
         conn.close()

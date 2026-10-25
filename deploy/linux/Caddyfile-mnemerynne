@@ -10,9 +10,11 @@ erynne.example.internal {
     # into the Claude extension as ca.pem (see deploy/linux/README.md).
     tls internal
 
-    # PDFs up to 100 MB (MNEMERYNNE_MAX_PDF_BYTES) plus multipart overhead.
+    # Uploads up to 500 MiB (MNEMERYNNE_MAX_FILE_BYTES) plus multipart overhead.
+    # Keep the two in step: a body over this never reaches the app, and the
+    # person only sees "Too large to upload" instead of the app's message.
     request_body {
-        max_size 110MB
+        max_size 510MiB
     }
 
     # flush_interval -1: answers (/api/ask) and MCP replies are passed on

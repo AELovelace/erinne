@@ -35,6 +35,10 @@ class UploadError(ValueError):
     """The upload was rejected; the message is safe to show to the user."""
 
 
+class TooLarge(UploadError):
+    """Over max_file_bytes (HTTP 413)."""
+
+
 @dataclass
 class Received:
     sha256: str
@@ -70,7 +74,7 @@ def receive(stream: BinaryIO, filename: str, settings: Settings) -> Received:
                     kind = _sniff(block, display_name)
                 size += len(block)
                 if size > limit:
-                    raise UploadError(f"File is larger than the {limit // (1024 * 1024)} MB limit.")
+                    raise TooLarge(f"File is larger than the {limit // (1024 * 1024)} MB upload limit.")
                 sha.update(block)
                 out.write(block)
         if size == 0:

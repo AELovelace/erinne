@@ -1330,7 +1330,8 @@
         settle(job, body, xhr.status === 200);
       } else {
         job.state = "failed";
-        job.detail = (body && body.detail) || "Upload failed (" + xhr.status + ")";
+        // A 413 without a body comes from the proxy, before the app sees the file.
+        job.detail = (body && body.detail) || (xhr.status === 413 ? "Too large to upload" : "Upload failed (" + xhr.status + ")");
       }
       finish(job);
     });

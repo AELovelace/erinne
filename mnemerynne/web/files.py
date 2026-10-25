@@ -438,7 +438,7 @@ def upload(
     try:
         received = store.receive(file.file, file.filename or "", settings)
     except store.UploadError as exc:
-        code = status.HTTP_413_CONTENT_TOO_LARGE if "larger than" in str(exc) else status.HTTP_400_BAD_REQUEST
+        code = status.HTTP_413_CONTENT_TOO_LARGE if isinstance(exc, store.TooLarge) else status.HTTP_400_BAD_REQUEST
         raise HTTPException(code, str(exc)) from exc
     parts = fs.split_relative_path(relative_path) if relative_path else None
     file_id, created = _fs_errors(lambda: store.add_file(conn, settings, received, target, user["id"],

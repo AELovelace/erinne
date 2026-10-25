@@ -124,6 +124,21 @@ class Settings(BaseSettings):
     version_days: int = 30
     version_keep: int = 20             # per file, newest first
 
+    # Backups and housekeeping (mnemerynne/backup.py, mnemerynne/retention.py).
+    # The settings file is copied beside each database snapshot: it holds the
+    # secret key that API credentials and Microsoft 365 links are encrypted
+    # with. Empty: not copied.
+    backup_env_file: Path | None = Path("/etc/mnemerynne/mnemerynne.env")
+    # Logs that record what people asked and what came back are deleted after
+    # this many days by the worker (hourly); 0 keeps them forever.
+    mcp_calls_days: int = 90           # Claude's tool calls (Access → Claude activity)
+    api_calls_days: int = 90           # internal API calls; older answers lose their "API call" link
+    agent_calls_days: int = 90         # Erynne agent tool calls
+    graph_runs_days: int = 30          # per-step timings of answers
+    # OAuth apps (Claude connections) with no live connection are deleted after
+    # this many days without use, with their revoked connections; 0 keeps them.
+    oauth_client_days: int = 30
+
     # Ingestion
     ocr_command: str = "ocrmypdf"      # run when present on PATH; skipped otherwise
     ocr_min_chars: int = 25            # pages with less text than this count as scanned
