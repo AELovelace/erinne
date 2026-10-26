@@ -14,7 +14,18 @@ def test_library_admin(client, conn):
     client.post("/logout")
 
     _login(client, "boss")
-    assert "Who can see what" in client.get("/admin/libraries").text
+    page = client.get("/admin/libraries").text
+    assert "Who can see what" in page
+    # The Settings tab is one tab panel holding two cards: this box's settings, then connectors.
+    assert page.count('data-panel="settings"') == 1 and 'class="ax-split" data-panel="settings"' in page
+    local, connectors = page.index('id="ax-local-title"'), page.index('id="ax-connectors-title"')
+    assert local < page.index('id="admin-group"') < page.index('id="agent-settings"') \
+        < page.index('id="balancer-settings"') < page.index('id="updates"') < connectors
+    assert connectors < page.index('id="m365-settings"') < page.index('id="claude-settings"') \
+        < page.index('id="claude-links-settings"')
+    for block in ("admin-group", "agent-settings", "balancer-settings", "updates", "m365-settings",
+                  "claude-settings", "claude-links-settings", "domain-groups"):
+        assert page.count(f'id="{block}"') == 1, block
     lib = client.post("/api/admin/libraries", json={"name": "Brand Standards"}).json()["id"]
     assert client.post("/api/admin/libraries", json={"name": "brand standards"}).status_code == 409
     assert lib in permissions.writable_collection_ids(conn, boss)  # the creator can fill it

@@ -583,6 +583,13 @@ button.danger-fill { background: var(--error); }
 .ax { display: grid; grid-template-columns: 18rem minmax(0, 1fr); gap: .9rem; flex: 1; min-height: 0; }
 .ax[hidden], .ax-page .inbox[hidden] { display: none; }
 .ax-page .inbox { width: 100%; margin: 0 auto; overflow: auto; }
+/* Access → Settings: this box's settings on the left, connectors on the right, like the Settings page. */
+.ax-split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; flex: 1; min-height: 0;
+  align-items: start; }
+.ax-split[hidden] { display: none; }
+.ax-split > .inbox { max-width: none; max-height: 100%; }
+.ax-split-title { margin: 0; font-size: 1.3rem; }
+.ax-split .ax-split-title + .ax-h { margin-top: 1rem; }
 .ax-tree { overflow: auto; padding: .6rem .3rem; }
 .ax-pane { overflow: auto; padding: 1.1rem 1.4rem; }
 .ax-pane h2 { margin: 0; font-size: 1.25rem; }
@@ -618,7 +625,7 @@ button.danger-fill { background: var(--error); }
 }
 @media (max-width: 800px) {
   .ax-page { height: auto; }
-  .ax { grid-template-columns: 1fr; }
+  .ax, .ax-split { grid-template-columns: 1fr; }
   .ax-tree { max-height: 40vh; }
 }
 .ax-commits { list-style: none; padding: 0; margin: .4rem 0 .8rem; font-size: .9rem; }

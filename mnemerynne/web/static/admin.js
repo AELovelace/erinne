@@ -1083,7 +1083,7 @@
     const m = data.model;
     box.appendChild(el("h3", "ax-h small", "Agent model"));
     box.appendChild(el("p", "small muted", "The agent uses the same model as the answers: the balancer nodes " +
-      "above, the least busy first, then " + data.fallback + " when none answers. If nothing answers, " +
+      "below, the least busy first, then " + data.fallback + " when none answers. If nothing answers, " +
       "everyone gets the normal answers. These are its limits:"));
     const form = el("form");
     const grid = el("div", "agent-settings");

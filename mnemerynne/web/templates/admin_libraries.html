@@ -132,23 +132,29 @@
     <div id="log" class="table-wrap"></div>
   </section>
 
-  <section class="inbox admin" data-panel="settings" role="tabpanel" hidden>
-    <h2 class="ax-h">Administrators</h2>
-    <div id="admin-group" aria-live="polite"><p class="muted">Loading…</p></div>
-    <datalist id="domain-groups"></datalist>
-    <h2 class="ax-h">Balancer nodes</h2>
-    <div id="balancer-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-    <h2 class="ax-h">Microsoft 365</h2>
-    <div id="m365-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-    <h2 class="ax-h">Erynne agent</h2>
-    <div id="agent-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-    <h2 class="ax-h">Claude in chat</h2>
-    <div id="claude-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-    <h2 class="ax-h">Links Claude can open</h2>
-    <div id="claude-links-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-    <h2 class="ax-h">Updates</h2>
-    <div id="updates" aria-live="polite"><p class="muted">Checking…</p></div>
-  </section>
+  <div class="ax-split" data-panel="settings" role="tabpanel" hidden>
+    <section class="inbox admin" aria-labelledby="ax-local-title">
+      <h2 class="ax-split-title" id="ax-local-title">This box</h2>
+      <h2 class="ax-h">Administrators</h2>
+      <div id="admin-group" aria-live="polite"><p class="muted">Loading…</p></div>
+      <datalist id="domain-groups"></datalist>
+      <h2 class="ax-h">Erynne agent</h2>
+      <div id="agent-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      <h2 class="ax-h">Balancer nodes</h2>
+      <div id="balancer-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      <h2 class="ax-h">Updates</h2>
+      <div id="updates" aria-live="polite"><p class="muted">Checking…</p></div>
+    </section>
+    <section class="inbox admin" aria-labelledby="ax-connectors-title">
+      <h2 class="ax-split-title" id="ax-connectors-title">Connectors</h2>
+      <h2 class="ax-h">Microsoft 365</h2>
+      <div id="m365-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      <h2 class="ax-h">Claude in chat</h2>
+      <div id="claude-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      <h2 class="ax-h">Links Claude can open</h2>
+      <div id="claude-links-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+    </section>
+  </div>
 </main>
 <script src="{{ static('picker.js') }}"></script>
 <script src="{{ static('admin.js') }}"></script>
