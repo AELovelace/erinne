@@ -164,6 +164,32 @@ def test_pages_walk_the_longest_list():
     assert apis.page([1, 2, 3], 2, 4000) == ("[3]", {"list": None, "total": 3, "offset": 2, "returned": 1})
 
 
+def test_find_keeps_only_the_rows_that_mention_a_phrase():
+    data = {"page": 1, "items": [{"TicketID": 1, "TicketTitle": "Internet outage at Comfort Inn Kennewick Richland"},
+                                 {"TicketID": 2, "TicketTitle": "Printer jam", "CustomerName": "Red Lion Pasco"},
+                                 {"TicketID": 3, "TicketTitle": "VPN", "LastTechnicianComment": "called kennewick"}]}
+    text, info = apis.page(data, 0, 4000, find=" Kennewick ")
+    assert json.loads(text)["items"] == [data["items"][0], data["items"][2]]        # any field, any case
+    assert info == {"list": "items", "total": 2, "offset": 0, "returned": 2, "matched_of": 3}
+    text, info = apis.page(data, 0, 4000, find="nothing like it")
+    assert json.loads(text)["items"] == [] and info["total"] == 0 and info["matched_of"] == 3
+    assert apis.page(data, 0, 4000, find="  ")[1]["total"] == 3                   # blank: no filter
+
+
+def test_claude_searches_an_answer_by_keyword(conn, settings, directory):
+    _api(conn, settings, claude=True)
+    ivan = users.create_user(conn, "ivan", "password123")
+    accounts.link(conn, ivan, "ivan", directory)
+    rows = [{"account_number": str(900000 + n), "label": "Kennewick" if n % 100 == 0 else "x"} for n in range(351)]
+    _upstream(lambda r: httpx.Response(200, json={"columns": ["account_number", "label"], "rows": rows}))
+    tools = Tools(settings, lambda: None, lambda: directory)
+    out, _ = tools.query_api(conn, Caller(ivan, "ivan", 1), "Hotel Stats", "Stats summary", {"days": 2},
+                             find="kennewick")
+    assert [r["account_number"] for r in json.loads(out["data"])["rows"]] == ["900000", "900100", "900200", "900300"]
+    assert out["rows"]["total"] == 4 and out["rows"]["matched_of"] == 351 and "next_offset" not in out["rows"]
+    assert "4 of the 351 rows" in out["note"] and "other pages" in out["note"]
+
+
 def test_claude_pages_through_a_long_answer(conn, settings, directory):
     _api(conn, settings, claude=True)
     ivan = users.create_user(conn, "ivan", "password123")
@@ -311,7 +337,9 @@ def admin_client(settings, conn, directory):
 def test_admin_sets_up_an_api_from_a_preset(admin_client, conn):
     made = admin_client.post("/api/admin/apis", json={"preset": "atera"}).json()
     detail = admin_client.get(f"/api/admin/apis/{made['id']}").json()
-    assert [o["name"] for o in detail["operations"]] == ["Tickets", "Ticket", "Ticket comments"]
+    assert [o["name"] for o in detail["operations"]] == [
+        "Tickets", "Ticket", "Ticket comments", "Ticket statuses", "Tickets by status", "Customer's tickets",
+        "Customers", "Tickets modified since", "Alerts", "Alert"]
     assert detail["credential"] == "missing"
     assert conn.execute("SELECT count(*) FROM api_examples").fetchone()[0] > 0   # indexed for routing
 

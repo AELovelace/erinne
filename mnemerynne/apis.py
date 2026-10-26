@@ -498,13 +498,19 @@ def _put(data, path: tuple, value):
     return {**data, path[0]: _put(data[path[0]], path[1:], value)}
 
 
-def page(data, offset: int, max_chars: int) -> tuple[str, dict | None]:
+def page(data, offset: int, max_chars: int, find: str | None = None) -> tuple[str, dict | None]:
     """The response as compact text, its longest list from row `offset` on, as many rows as fit;
-    and where that page is ({list, total, offset, returned, next_offset}), or None if it has no list."""
+    and where that page is ({list, total, offset, returned, next_offset}), or None if it has no list.
+    With `find`, only the rows whose text mentions it (any field, ignoring case) are kept and
+    `total` counts those; `matched_of` says how many rows the API returned."""
     found = None if isinstance(data, str) else _main_list(data)
     if not found or not found[1]:
         return digest(data, max_chars), None
     path, rows = found
+    matched_of = None
+    if find and find.strip():
+        needle = find.strip().lower()
+        matched_of, rows = len(rows), [r for r in rows if needle in json.dumps(r, ensure_ascii=False).lower()]
     offset = max(0, min(int(offset), len(rows)))
     text = ""
     for items in DIGEST_ITEMS:
@@ -515,6 +521,8 @@ def page(data, offset: int, max_chars: int) -> tuple[str, dict | None]:
     else:
         chunk, text = rows[offset:offset + 1], text[:max_chars] + "…"
     info = {"list": ".".join(map(str, path)) or None, "total": len(rows), "offset": offset, "returned": len(chunk)}
+    if matched_of is not None:
+        info["matched_of"] = matched_of
     if offset + len(chunk) < len(rows):
         info["next_offset"] = offset + len(chunk)
     return text, info
@@ -691,6 +699,57 @@ PRESETS: list[dict] = [
              "params": [_p("ticketId", "int", where="path", required=True, min=1, help="Ticket number")],
              "description": "Public and internal comments on one ticket.",
              "example_questions": "What are the comments on ticket 4812?\nWhat did the technician say on ticket 1200?"},
+            {"name": "Ticket statuses", "path": "/tickets/statuses", "cache_seconds": 300,
+             "description": "The ticket statuses this account uses (e.g. Open, Pending, Resolved, Closed): the exact "
+                            "names to filter tickets by.",
+             "example_questions": "What ticket statuses are there?\nWhich statuses can a ticket have in Atera?"},
+            {"name": "Tickets by status", "path": "/tickets/noComments", "cache_seconds": 60,
+             "params": [_p("ticketStatus", "string", required=True,
+                           help="A status name exactly as Atera has it (see Ticket statuses), e.g. Open"),
+                        _p("page", "int", min=1, max=50, default=1),
+                        _p("itemsInPage", "int", min=1, max=50, default=50)],
+             "description": "Tickets in one status (Open, Pending, Resolved, Closed, or your own), with title, "
+                            "priority, customer, technician and dates; 50 a page.",
+             "example_questions": "Which tickets are pending?\nList the open tickets.\n"
+                                  "What tickets were resolved?\nShow me the closed tickets."},
+            {"name": "Customer's tickets", "path": "/tickets/noComments", "cache_seconds": 60,
+             "params": [_p("customerId", "int", required=True, min=1,
+                           help="The customer's CustomerID (see Customers)"),
+                        _p("ticketStatus", "string", help="Only this status, e.g. Open; empty for all"),
+                        _p("page", "int", min=1, max=50, default=1),
+                        _p("itemsInPage", "int", min=1, max=50, default=50)],
+             "description": "One customer's (site's) tickets, optionally in one status: title, status, priority, "
+                            "technician and dates. Find the CustomerID with Customers first.",
+             "example_questions": "What tickets does the Comfort Inn have open?\nShow me Red Lion Pasco's tickets.\n"
+                                  "Which tickets are there for customer 1200?\nAny tickets for the Kennewick site?"},
+            {"name": "Customers", "path": "/customers", "cache_seconds": 300,
+             "params": [_p("page", "int", min=1, max=50, default=1),
+                        _p("itemsInPage", "int", min=1, max=50, default=50)],
+             "description": "The customers (sites) in Atera with their CustomerID, name, domain and address, to "
+                            "find the ID for Customer's tickets.",
+             "example_questions": "What customers are in Atera?\nWhat's the Atera customer ID for the Comfort Inn?\n"
+                                  "List the Atera sites."},
+            {"name": "Tickets modified since", "path": "/tickets/lastmodified", "cache_seconds": 60,
+             "params": [_p("date", "date", required=True, help="Tickets changed on or after this date (UTC)"),
+                        _p("page", "int", min=1, max=50, default=1),
+                        _p("itemsInPage", "int", min=1, max=50, default=50)],
+             "description": "Tickets changed on or after a date (Atera's last-modified list): title, status, "
+                            "priority, customer, technician and dates.",
+             "example_questions": "Which tickets changed this week?\nWhat tickets were updated since Monday?\n"
+                                  "What moved on the ticket queue since 2026-10-20?"},
+            {"name": "Alerts", "path": "/alerts", "cache_seconds": 60,
+             "params": [_p("alertStatus", "enum", options=["Open", "Resolved", "Snoozed"], default="Open",
+                           help="Which alerts"),
+                        _p("page", "int", min=1, max=50, default=1),
+                        _p("itemsInPage", "int", min=1, max=50, default=50)],
+             "description": "Atera alerts by status (Open by default): alert ID, title, severity, device, customer, "
+                            "when it was raised and its ticket if any.",
+             "example_questions": "What alerts are open in Atera?\nAre there any open alerts?\n"
+                                  "Which alerts are snoozed?\nShow me the Atera alerts."},
+            {"name": "Alert", "path": "/alerts/{alertId}", "cache_seconds": 60,
+             "params": [_p("alertId", "int", where="path", required=True, min=1, help="Alert ID")],
+             "description": "One Atera alert in full: title, message, severity, device, customer, status and dates.",
+             "example_questions": "What is alert 5531 about?\nShow me alert 5531.\nIs alert 5531 still open?"},
         ],
     },
 ]

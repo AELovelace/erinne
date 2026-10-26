@@ -448,7 +448,7 @@ class Tools:
         return {"apis": list(out.values())}, []
 
     def query_api(self, conn, caller: Caller, api: str, operation: str,
-                  params: dict | None = None, offset: int = 0) -> tuple[dict, list[int]]:
+                  params: dict | None = None, offset: int = 0, find: str | None = None) -> tuple[dict, list[int]]:
         try:
             op = apis.operation_for(conn, self._user(conn, caller), self.get_directory(), api, operation,
                                     for_claude=self.claude)
@@ -463,8 +463,11 @@ class Tools:
             raise Refused(f"{result.api_name} didn't answer: {result.error}.",
                           "rate_limited" if "429" in str(result.error) else "unavailable")
         live = f"live, {result.at[11:16]} UTC"
-        data, rows = apis.page(result.data, offset or 0, 40_000)
+        data, rows = apis.page(result.data, offset or 0, 40_000, find=find)
         notes = []
+        if rows and "matched_of" in rows:
+            notes.append(f"{rows['total']} of the {rows['matched_of']} rows the API returned mention "
+                         f"“{find.strip()}”. Rows the API didn't return (its other pages) weren't searched.")
         if rows and "next_offset" in rows:
             notes.append(f"Rows {rows['offset'] + 1}–{rows['offset'] + rows['returned']} of {rows['total']}: call "
                          f"again with the same params and offset={rows['next_offset']} for the next ones.")
@@ -978,14 +981,17 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
     @server.tool(annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True,
                                              open_world_hint=True))
     async def query_api(ctx: Context, api: str, operation: str, params: dict | None = None,
-                        offset: int = 0) -> dict:
+                        offset: int = 0, find: str | None = None) -> dict:
         """Call one operation of an internal API from list_apis, e.g. api="Atera",
         operation="Tickets", or operation="Ticket" with params {"ticketId": 4812}.
         Returns live data with a `citation` and `link` to cite. Long lists come in pages: `rows` says
-        which rows you got; call again with `offset` = its `next_offset` for more. APIs marked
-        one_at_a_time take one call at a time, so call them one after another, not in parallel."""
+        which rows you got; call again with `offset` = its `next_offset` for more. `find` keeps only
+        the rows that mention a word or phrase in any field (e.g. find="Kennewick" on Tickets, to see
+        whether a ticket is already open). It searches what the API returned, so to search everything,
+        step through the API's own pages (its page param) too. APIs marked one_at_a_time take one
+        call at a time, so call them one after another, not in parallel."""
         return await call(ctx, "query_api", {"api": api, "operation": operation, "params": params or {},
-                                             "offset": offset}, tools.query_api)
+                                             "offset": offset, "find": find}, tools.query_api)
 
     @server.tool(annotations=_EDITS)
     async def propose_api_action(ctx: Context, api: str, operation: str, params: dict | None = None) -> dict:

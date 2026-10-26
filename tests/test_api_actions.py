@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from mnemerynne import api_tokens, apis
 from mnemerynne.clients.llm import ToolCall, ToolTurn
 from mnemerynne.mcp_server import Tools
+from mcp.server.mcpserver.exceptions import ToolError
 from mnemerynne.web.app import Services, create_app
 from test_agent import GROUP, AgentLLM, agent_llm, client, directory, world  # noqa: F401 (fixtures)
 from test_chat import _ask, _final, _login
@@ -172,6 +173,36 @@ def test_claude_proposes_through_the_connector_and_the_person_approves(conn, set
     assert body["TechnicianCommentDetails"] == {"TechnicianEmail": "technician@example.com", "IsInternal": True}
 
 
+def test_claude_proposes_a_new_ticket_from_a_finding(conn, settings, world, directory):
+    """A security check's finding becomes a ticket: Claude proposes it with the contact looked up
+    first, the person runs it; apostrophes and newlines survive, defaults fill the rest."""
+    seen = []
+    _upstream(seen)
+    _atera(conn, settings)
+    conn.execute("UPDATE apis SET claude_enabled = 1")
+    settings.public_url = "https://mnemerynne.test"
+    tools = Tools(settings, lambda: None, lambda: directory)
+    caller = api_tokens.verify(conn, api_tokens.create(conn, world["alice"], "laptop")[1])
+    tools.query_api(conn, caller, "Atera (read-write)", "Contact by email", {"Email": "jane@example.com"})
+    assert seen[-1].method == "GET" and seen[-1].url.path == "/api/v3/contacts" and seen[-1].url.params["Email"] == "jane@example.com"
+    with pytest.raises(ToolError, match="endUserId"):                            # never without a contact
+        tools.propose_api_action(conn, caller, "Atera (read-write)", "Create ticket",
+                                 {"title": "x", "description": "y"})
+    out, _ = tools.propose_api_action(conn, caller, "Atera (read-write)", "Create ticket",
+                                      {"title": "PrintHost's stale credential", "endUserId": 77, "priority": "high",
+                                       "description": "The print service on PrintHost still runs as svc_print,\n"
+                                                      "whose password was last set in 2023."})
+    assert len(seen) == 1                                                        # only the lookup ran
+    with TestClient(create_app(settings, Services(llm=None, embedder=world["embedder"], directory=directory)), base_url="https://mnemerynne.test") as c:
+        _login(c, "alice")
+        assert c.post(f"/api/agent/proposals/{out['proposal']}/apply").json()["status"] == "applied"
+    assert seen[-1].method == "POST" and seen[-1].url.path == "/api/v3/tickets"
+    assert json.loads(seen[-1].content) == {
+        "TicketTitle": "PrintHost's stale credential", "EndUserID": 77, "TicketPriority": "High",
+        "TicketType": "Incident", "TicketImpact": "Minor",
+        "Description": "The print service on PrintHost still runs as svc_print,\nwhose password was last set in 2023."}
+
+
 # ------------------------------------------------------------------ admins
 def test_the_atera_template_and_testing_an_action(settings, conn, world, directory):
     seen = []
@@ -182,8 +213,9 @@ def test_the_atera_template_and_testing_an_action(settings, conn, world, directo
         up = c.post("/api/admin/apis/templates", json={"template": open(ATERA, encoding="utf-8").read()}).json()
         made = c.post("/api/admin/apis", json={"preset": up["key"]}).json()
         ops = {o["name"]: o for o in c.get(f"/api/admin/apis/{made['id']}").json()["operations"]}
-        assert [n for n, o in ops.items() if o["action"]] == ["Change ticket status", "Change ticket priority",
-                                                              "Add internal note", "Resolve alert"]
+        assert [n for n, o in ops.items() if o["action"]] == ["Create ticket", "Change ticket status",
+                                                              "Change ticket priority", "Add internal note",
+                                                              "Resolve alert"]
         assert all(o["cache_seconds"] == 0 for o in ops.values() if o["action"])
         c.put(f"/api/admin/apis/{made['id']}/credential", json={"secret": "tok"})
         url = f"/api/admin/apis/operations/{ops['Resolve alert']['id']}/test"

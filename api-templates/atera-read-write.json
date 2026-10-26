@@ -3,7 +3,7 @@
   "name": "Atera (read-write)",
   "base_url": "https://api.atera.com/api/v3",
   "auth_type": "bearer",
-  "description": "Atera changes that Erynne or Claude may **propose**: a ticket's status or priority, an internal note on a ticket, resolving an alert. None of them runs until the person presses **Run it** on the proposal. Keep the read-only **Atera** API for questions; this one is only for changes.\n\n**Setup**\n\n1. Create a separate Atera API key for this entry, and paste it as the credential here (Bearer).\n2. Edit **Add internal note**: in its body, replace `technician@example.com` with the email of the Atera technician the notes should come from.\n3. Set the AD group to IT (or whoever may make these changes), then test each operation on a test ticket or alert. Testing a change really makes it.\n4. Leave Claude's switch off until you've tried it from Erynne's chat.\n\nTicket statuses are your account's own: the **Ticket statuses** operation lists them, and a status has to be one of those names.",
+  "description": "Atera changes that Erynne or Claude may **propose**: a new ticket, a ticket's status or priority, an internal note on a ticket, resolving an alert. None of them runs until the person presses **Run it** on the proposal. Keep the read-only **Atera** API for questions; this one is only for changes.\n\n**Setup**\n\n1. Create a separate Atera API key for this entry, and paste it as the credential here (Bearer).\n2. Edit **Add internal note**: in its body, replace `technician@example.com` with the email of the Atera technician the notes should come from.\n3. **Create ticket** needs the Atera contact the ticket is for (its EndUserID): the assistant looks it up with **Contact by email** first. It never makes new contacts. Contact by email returns names, emails and phone numbers, so leave Claude's switch off if that mustn't go to Anthropic.\n4. Set the AD group to IT (or whoever may make these changes), then test each operation on a test ticket or alert. Testing a change really makes it.\n5. Leave Claude's switch off until you've tried it from Erynne's chat.\n\nTicket statuses are your account's own: the **Ticket statuses** operation lists them, and a status has to be one of those names.",
   "operations": [
     {
       "name": "Ticket statuses",
@@ -22,6 +22,38 @@
       ],
       "cache_seconds": 0,
       "example_questions": ["What's the current status of ticket 4812?", "Who is ticket 1200 assigned to?"]
+    },
+    {
+      "name": "Contact by email",
+      "description": "The Atera contact (end user) with a given email: EndUserID, name, customer. Look it up before proposing Create ticket, which needs the EndUserID. Returns personal data.",
+      "path": "/contacts",
+      "params": [
+        {"name": "Email", "type": "string", "in": "query", "required": true, "help": "The person's email address, exactly as in Atera"}
+      ],
+      "cache_seconds": 300,
+      "example_questions": ["What's the Atera contact ID for jane@example.com?", "Find the Atera contact with email jane@example.com.", "Which Atera end user is jane@example.com?"]
+    },
+    {
+      "name": "Create ticket",
+      "action": true,
+      "description": "Open a new ticket for an existing Atera contact: title, description, priority, type and impact. Proposed: the person runs it. Needs the contact's EndUserID (Contact by email). Never makes a contact.",
+      "method": "POST",
+      "path": "/tickets",
+      "body": "{\"TicketTitle\": \"{{title}}\", \"Description\": \"{{description}}\", \"EndUserID\": {{endUserId}}, \"TicketPriority\": \"{{priority}}\", \"TicketType\": \"{{type}}\", \"TicketImpact\": \"{{impact}}\"}",
+      "params": [
+        {"name": "title", "type": "text", "in": "body", "required": true, "help": "A short, one-line title"},
+        {"name": "description", "type": "text", "in": "body", "required": true,
+         "help": "What's wrong, where it was seen and what should happen; include the evidence (e.g. the check's finding)"},
+        {"name": "endUserId", "type": "int", "in": "body", "required": true, "min": 1,
+         "help": "The contact's EndUserID from Contact by email (who the ticket is for)"},
+        {"name": "priority", "type": "enum", "in": "body", "default": "Medium",
+         "options": ["Low", "Medium", "High", "Critical"], "help": "The priority"},
+        {"name": "type", "type": "enum", "in": "body", "default": "Incident",
+         "options": ["Incident", "Problem", "Request", "Change"], "help": "Incident for something broken or a security finding, Request for something wanted"},
+        {"name": "impact", "type": "enum", "in": "body", "default": "Minor",
+         "options": ["NoImpact", "Minor", "Major", "ServerIssue", "SiteDown", "Crisis"], "help": "How much it affects work"}
+      ],
+      "example_questions": ["Open a ticket for PrintHost's stale credential.", "Create a high-priority ticket for the backup failure on FS-01.", "Raise a ticket for jane@example.com: her VPN won't connect.", "Log a ticket about the second-floor printer jamming."]
     },
     {
       "name": "Change ticket status",
@@ -63,6 +95,28 @@
         {"name": "text", "type": "text", "in": "body", "required": true, "help": "The note"}
       ],
       "example_questions": ["Add a note to ticket 4812 that the printer was replaced.", "Note on ticket 1200: waiting on the vendor."]
+    },
+    {
+      "name": "Alerts",
+      "description": "Atera alerts by status (Open by default): alert ID, title, severity, device, customer, when it was raised and its ticket if any. Check before proposing Resolve alert.",
+      "path": "/alerts",
+      "params": [
+        {"name": "alertStatus", "type": "enum", "in": "query", "options": ["Open", "Resolved", "Snoozed"], "default": "Open", "help": "Which alerts"},
+        {"name": "page", "type": "int", "in": "query", "min": 1, "max": 50, "default": 1, "help": "Page number"},
+        {"name": "itemsInPage", "type": "int", "in": "query", "min": 1, "max": 50, "default": 50, "help": "Alerts per page"}
+      ],
+      "cache_seconds": 60,
+      "example_questions": ["What alerts are open in Atera?", "Are there any open alerts?", "Which alerts are snoozed?", "Show me the Atera alerts."]
+    },
+    {
+      "name": "Alert",
+      "description": "One Atera alert in full: title, message, severity, device, customer, status and dates.",
+      "path": "/alerts/{alertId}",
+      "params": [
+        {"name": "alertId", "type": "int", "in": "path", "required": true, "min": 1, "help": "Alert ID"}
+      ],
+      "cache_seconds": 60,
+      "example_questions": ["What is alert 5531 about?", "Show me alert 5531.", "Is alert 5531 still open?"]
     },
     {
       "name": "Resolve alert",
