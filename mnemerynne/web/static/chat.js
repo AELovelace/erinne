@@ -140,6 +140,24 @@
     try { useClaude.checked = localStorage.getItem("erynne.askClaude") === "1"; } catch (e) { /* storage off */ }
     useClaude.addEventListener("change", function () {
       try { localStorage.setItem("erynne.askClaude", useClaude.checked ? "1" : "0"); } catch (e) { /* storage off */ }
+      if (useClaude.checked && useBfgguf && useBfgguf.checked) { useBfgguf.checked = false; rememberBfgguf(); }
+    });
+  }
+  const useBfgguf = document.getElementById("use-bfgguf");  // only for the experimental group, with BFGguf set up
+  function rememberBfgguf() {
+    try { localStorage.setItem("erynne.askBfgguf", useBfgguf.checked ? "1" : "0"); } catch (e) { /* storage off */ }
+  }
+  if (useBfgguf) {
+    // Remembered in this browser only; the server checks the group and the BFGguf on every question.
+    try { useBfgguf.checked = localStorage.getItem("erynne.askBfgguf") === "1"; } catch (e) { /* storage off */ }
+    if (useBfgguf.checked && useClaude && useClaude.checked) useBfgguf.checked = false;
+    useBfgguf.addEventListener("change", function () {
+      rememberBfgguf();
+      // One or the other: both would mean Claude, so untick Claude.
+      if (useBfgguf.checked && useClaude && useClaude.checked) {
+        useClaude.checked = false;
+        try { localStorage.setItem("erynne.askClaude", "0"); } catch (e) { /* storage off */ }
+      }
     });
   }
   const scopeLabel = document.getElementById("scope-label");
@@ -268,6 +286,9 @@
                                view.body);
       }
     }
+    if (final.model && String(final.model).indexOf("bfgguf:") === 0 && final.status !== "error") {
+      view.wrap.insertBefore(el("div", "route-label muted small", "🧠 BFGguf · " + final.model.slice(7)), view.body);
+    }
     if (final.message_id && final.status !== "error") view.wrap.appendChild(feedbackButtons(final.message_id));
   }
 
@@ -310,6 +331,10 @@
       if (ev.claude && ev.fallback) {   // "Use External API" was on but couldn't be used: say why
         view.wrap.insertBefore(el("div", "route-label muted small", "Answered without the external API: " +
                                   ev.fallback), view.body);
+      }
+      if (ev.bfgguf && ev.fallback) {   // BFGguf was on but couldn't be used: say why
+        view.wrap.insertBefore(el("div", "route-label muted small", "Answered without BFGguf: " + ev.fallback),
+                               view.body);
       }
     } else if (ev.type === "tool") {
       window.ErynneAgent.tool(view.steps, ev);
@@ -365,7 +390,8 @@
         body: JSON.stringify({ question: question, conversation_id: conversationId,
                                scope: scope ? { collection_id: scope.collection_id, folder_id: scope.folder_id } : null,
                                tools: true, disabled_tools: Array.from(toolsOff),
-                               claude: useClaude ? useClaude.checked : false }) });
+                               claude: useClaude ? useClaude.checked : false,
+                               bfgguf: useBfgguf ? useBfgguf.checked : false }) });
       if (resp.status === 401) { window.location.href = "/login"; return; }
       if (!resp.ok) {
         const err = await resp.json().catch(function () { return {}; });

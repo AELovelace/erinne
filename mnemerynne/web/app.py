@@ -21,7 +21,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
-from mnemerynne import (balancer as balancer_mod, claude_chat, db, directory, editing, mcp_server, memory,
+from mnemerynne import (balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, mcp_server, memory,
                         permissions, share, sharepoint, users)
 from mnemerynne.agent import Agent
 from mnemerynne.answer import ASSISTANT_NAME
@@ -32,7 +32,8 @@ from mnemerynne.clients.rerank import Reranker
 from mnemerynne.config import Settings, get_settings
 from mnemerynne.graph import Deps, build_graph
 from mnemerynne.router import load_router
-from mnemerynne.web import (admin, admin_apis, agent as agent_pages, apis as api_pages, balancer as balancer_pages, chat,
+from mnemerynne.web import (admin, admin_apis, agent as agent_pages, apis as api_pages, balancer as balancer_pages,
+                            bfgguf as bfgguf_pages, chat,
                             claude_links as claude_link_pages, editor as editor_pages, files, help as help_pages,
                             m365 as m365_pages, memories, oauth as oauth_pages, security,
                             settings as settings_pages, tokens, wiki as wiki_pages)
@@ -75,6 +76,7 @@ class Services:
     agent_llm: Any = None   # the agent's model client; None = the balancer nodes, then MNEMERYNNE_LLM_URL
     claude_llm: Any = None  # Claude's client in chat (tests); None = the Anthropic API with each person's key
     balancer: Any = None    # balancer.Balancer (tests pass one with a fake transport); None = a real one
+    bfgguf_transport: Any = None   # the HTTP transport under BFGguf's clients (tests); None = the network
 
 
 def create_app(settings: Settings | None = None, services: Services | None = None) -> FastAPI:
@@ -104,6 +106,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         balancer = (services.balancer if services and services.balancer is not None else balancer_mod.Balancer())
         balancer.configure(nodes, node_key)
         app.state.balancer = balancer
+        app.state.bfgguf_transport = services.bfgguf_transport if services else None
         if nodes:
             log.info("Answer model: %d balancer node(s), %s when none answers.", len(nodes), settings.llm_url)
         svc = services or Services(
@@ -205,6 +208,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(m365_pages.router)
     app.include_router(oauth_pages.router)
     app.include_router(balancer_pages.router)
+    app.include_router(bfgguf_pages.router)
     app.include_router(settings_pages.router)
     app.include_router(claude_link_pages.router)
     app.include_router(help_pages.router)
@@ -273,7 +277,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         claude = claude_chat.is_claude_user(conn, user, app.state.directory)
         return _page(request, "chat.html", user, conn, active="chat", has_files=has_files,
                      agent=app.state.agent.allowed(conn, user), agent_full=app.state.agent.full(conn, user),
-                     claude=claude,
+                     claude=claude, bfgguf=bfgguf.available(conn, user, app.state.directory) == "ok",
                      claude_key=claude and claude_chat.status(conn, settings, user["id"])["key"] == "set")
 
     @app.get("/files", response_class=HTMLResponse)
@@ -292,6 +296,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             # the server checks again on every question.
             "agent": app.state.agent.allowed(conn, user),
             "agent_full": app.state.agent.full(conn, user),
+            # The experimental group, with BFGguf set up: chat offers the BFGguf toggle.
+            "bfgguf": bfgguf.available(conn, user, app.state.directory) == "ok",
         }
 
     return app

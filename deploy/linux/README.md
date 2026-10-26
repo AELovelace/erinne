@@ -606,6 +606,52 @@ How it behaves:
   (5g). The embedder stays on this box, next to the files it indexes.
 - **The balancers don't know about each other.** Each one spreads requests
   over its own cards. Spreading them between boxes happens here.
+- **Roles.** Each node is a **balancer** node (the small models, one per
+  card) or a **BFGguf** node (one big model over all its cards; see 5h-i).
+  The Role column shows which, with **Make BFGguf** / **Make balancer** to
+  swap it. A swap stops one set of models and loads the other, which can take
+  a few minutes. Normal answers only go to balancer nodes, so swapping the
+  last one sends them to `MNEMERYNNE_LLM_URL` until it's swapped back.
+
+## 5h-i. BFGguf (experimental: a much bigger model)
+
+BFGguf lets an **experimental group** try a much bigger model before anyone
+else. Members get a 🧠 **BFGguf** toggle in chat. A question asked with it is
+answered entirely by BFGguf: the follow-up rewrite, the cited answer, small
+talk, API parameters and the agent's tools. The answer is saved as
+`bfgguf:<model>` and labelled in chat.
+
+1. **Settings → Experimental:** pick the group (AD or Entra, like the Claude
+   group). Leave it empty to turn experimental features off.
+2. **Where BFGguf runs**, in the same section. It must answer before it's
+   saved:
+   - **Balancer nodes in the BFGguf role.** Swap a node under Balancer nodes
+     (5h). The node runs Qwen3.6-35B-A3B over both its cards and keeps it
+     loaded. No address or key needed: the balancer key is used, and requests
+     go to the least busy BFGguf node.
+   - **A server on the network:** any OpenAI-compatible server (llama-server,
+     vLLM, LM Studio), its address without `/v1`, an optional model name and
+     key.
+   - **A hosted API:** an OpenAI-compatible API over `https://` with its model
+     name and key. It receives the question, the passages and tool results
+     Erynne finds, and the person's memories, and its tokens count as external
+     in chat's counter. Only use it if the group accepts that.
+
+How it behaves:
+- **MinErynnes.** While at least one balancer node (balancer role) is ready,
+  BFGguf can send up to two MinErynnes to read for it, on the usual model
+  over the balancer's cards, as Claude does. People can switch them off in
+  Advanced settings.
+- **Falling back.** If BFGguf doesn't answer, the person isn't in the group,
+  or it isn't set up, the usual model answers and chat says why. A BFGguf
+  failure never marks the usual model down.
+- **Scripts:** `POST /api/bfgguf` with
+  `{"messages": [{"role": "user", "content": "…"}], "max_tokens": 1024, "temperature": 0.2}`
+  returns `{"model", "content", "usage"}`. It's a plain completion with no
+  documents or tools. Sign in, or send a personal access key as
+  `Authorization: Bearer mnemerynne_…`. Experimental group only, 20 requests a
+  minute per person. For Erynne's whole answer on BFGguf, send
+  `"bfgguf": true` to `/api/ask`.
 
 ## 5i. Microsoft 365
 

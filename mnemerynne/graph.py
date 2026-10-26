@@ -34,7 +34,7 @@ from langgraph.types import Command  # noqa: E402
 
 from mnemerynne import answer as answer_mod  # noqa: E402
 from mnemerynne import apis, db, retrieval  # noqa: E402
-from mnemerynne.clients.llm import LLM, USAGE, ThinkFilter, new_usage  # noqa: E402
+from mnemerynne.clients.llm import ACTIVE_LLM, LLM, USAGE, ThinkFilter, answer_llm, new_usage  # noqa: E402
 from mnemerynne.config import Settings  # noqa: E402
 
 log = logging.getLogger("mnemerynne.graph")
@@ -58,6 +58,7 @@ class State(TypedDict, total=False):
     api_operation: int   # the API operation the question matched (route "api")
     use_tools: bool      # agent group members may switch the agent off for a question
     use_claude: bool     # Claude group members may have Claude answer (agent.py, claude_chat.py)
+    use_bfgguf: bool     # the experimental group asked BFGguf; its client is ACTIVE_LLM (bfgguf.py)
     disabled_tools: list[str]   # tools switched off in chat's Advanced settings (agent.py)
     proposals: list[int]   # file changes the agent proposed this turn (route "agent")
     model: str | None    # the agent model's label, when it answered
@@ -141,7 +142,7 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
         history = "\n".join(f"User: {t['question']}\n{answer_mod.ASSISTANT_NAME}: {t['answer'][:400]}"
                             for t in turns[-HISTORY_TURNS:])
         try:
-            out = await deps.llm.chat_json(
+            out = await answer_llm(deps.llm).chat_json(
                 [{"role": "user", "content": _CONDENSE_PROMPT.format(history=history, question=question)}],
                 CONDENSE_SCHEMA, temperature=0.0, max_tokens=120)
             standalone = str(out.get("question") or "").strip() or question
@@ -174,7 +175,7 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
         """The cited answer from numbered sources (documents or a live API response)."""
         messages = answer_mod.build_messages(state["standalone"], hits, state.get("memories"))
         streamer = answer_mod.AnswerStreamer()
-        async for delta in deps.llm.stream(messages, temperature=0.1, max_tokens=900,
+        async for delta in answer_llm(deps.llm).stream(messages, temperature=0.1, max_tokens=900,
                                            json_schema=answer_mod.ANSWER_SCHEMA, thinking=True):
             text = streamer.feed(delta)
             if text:
@@ -193,7 +194,7 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
         visible, parts = ThinkFilter(), []
         try:
             async with asyncio.timeout(30):
-                async for delta in deps.llm.stream(answer_mod.build_sorry_messages(question),
+                async for delta in answer_llm(deps.llm).stream(answer_mod.build_sorry_messages(question),
                                                    temperature=0.8, max_tokens=80, thinking=True):
                     if shown := visible.feed(delta):
                         parts.append(shown)
@@ -285,7 +286,7 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
         schema = apis.params_schema(op) if op else None
         if schema:
             try:
-                filled = await deps.llm.chat_json(
+                filled = await answer_llm(deps.llm).chat_json(
                     [{"role": "user", "content": apis.fill_prompt(op, state["standalone"])}],
                     schema, temperature=0.0, max_tokens=200)
                 params = {k: v for k, v in filled.items() if v not in (None, "")}
@@ -346,7 +347,7 @@ def build_graph(deps: Deps, checkpointer=None, store=None):
         parts = []
         # Reasoning models may think first; people only see the reply.
         visible = ThinkFilter()
-        async for delta in deps.llm.stream(messages, temperature=0.6, max_tokens=900, thinking=True):
+        async for delta in answer_llm(deps.llm).stream(messages, temperature=0.6, max_tokens=900, thinking=True):
             if shown := visible.feed(delta):
                 parts.append(shown)
                 writer({"type": "delta", "text": shown})
@@ -399,20 +400,24 @@ def _source_view(n: int, hit: retrieval.Hit) -> dict:
 
 
 async def run_turn(graph, user_id: int, conversation_id: str, question: str, scope: dict | None = None,
-                   use_tools: bool = True, use_claude: bool = False, disabled_tools: list[str] | None = None):
+                   use_tools: bool = True, use_claude: bool = False, disabled_tools: list[str] | None = None,
+                   llm: LLM | None = None, model_label: str | None = None):
     """Run one question through the graph, yielding stream events, then a final
-    {"type": "final", ...} event with the answer, cited sources and timings."""
+    {"type": "final", ...} event with the answer, cited sources and timings.
+    llm: a model that answers the whole turn instead of the usual one (BFGguf), saved as model_label."""
     trace: list = []
     token = _trace.set(trace)
     usage = new_usage()
     usage_token = USAGE.set(usage)   # every model call while answering adds to it (clients/llm.py)
+    llm_token = ACTIVE_LLM.set(llm)  # every node's model call, and the agent's, use it (answer_llm)
     started = time.perf_counter()
     sources: list[dict] = []
     try:
         config = {"configurable": {"thread_id": conversation_id}}
         async for event in graph.astream({"user_id": user_id, "scope": scope, "question": question, "hits": [],
                                           "answer": {}, "route": "search", "use_tools": use_tools,
-                                          "use_claude": use_claude, "disabled_tools": disabled_tools or [],
+                                          "use_claude": use_claude, "use_bfgguf": llm is not None,
+                                          "disabled_tools": disabled_tools or [],
                                           "proposals": [], "model": None}, config, stream_mode="custom"):
             if event.get("type") == "sources":
                 sources = event["sources"]
@@ -421,12 +426,13 @@ async def run_turn(graph, user_id: int, conversation_id: str, question: str, sco
     finally:
         _trace.reset(token)
         USAGE.reset(usage_token)
+        ACTIVE_LLM.reset(llm_token)
     a = state.get("answer") or {}
     cited = set(a.get("citations") or [])
     yield {"type": "final", "status": a.get("status", "not_found"), "answer": a.get("text", ""),
            "citations": a.get("citations", []), "standalone": state.get("standalone", question),
            "route": state.get("route", "search"), "proposals": state.get("proposals") or [],
-           "model": state.get("model"),
+           "model": state.get("model") or model_label,
            "sources": [{**s, "cited": s["n"] in cited} for s in sources],
            "latency_ms": round((time.perf_counter() - started) * 1000), "trace": trace, "tokens": usage}
 

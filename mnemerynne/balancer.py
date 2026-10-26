@@ -11,6 +11,11 @@ nodes set, or none answering, requests go to MNEMERYNNE_LLM_URL as before.
 
 The balancers don't know about each other: each one balances only its own
 cards, and this module spreads requests between boxes.
+
+Each node also reports its role: "balancer" (small models, one per card) or
+"bfgguf" (one big model over all its cards, bfgguf.py). Only balancer nodes
+take the answer model's requests; BFGguf nodes take BFGguf's (BfgTransport),
+and an admin can swap a node's role from Settings (set_role).
 """
 
 from __future__ import annotations
@@ -38,6 +43,8 @@ POLL_TIMEOUT = 1.0
 CHECK_TIMEOUT = 5.0      # when an admin saves the list
 DOWN_SECONDS = 30.0
 MAX_NODES = 16
+ROLES = ("balancer", "bfgguf")
+ROLE_TIMEOUT = 300.0     # a role swap stops one set of models and loads the other
 _NODE = re.compile(r"^https?://[A-Za-z0-9.\-\[\]:]+$")
 
 
@@ -119,6 +126,8 @@ class Node:
     down_until: float = 0.0
     polled_at: float | None = None      # wall clock
     sent: deque = field(default_factory=deque)   # wall-clock times of answers sent here
+    role: str = "balancer"              # "balancer" or "bfgguf", as the node last reported
+    switching: bool = False             # mid-way through a role swap: takes nothing
 
     def busy(self) -> float:
         return (self.in_flight + self.pending) / max(1, self.slots)
@@ -178,6 +187,10 @@ class Balancer:
         if node.reachable is False:
             log.info("Balancer %s answers again.", node.url)
         node.reachable, node.error, node.polled_at = True, "", self.wall()
+        report = r.json()
+        # Balancers from before roles don't report one: they are balancer nodes.
+        node.role = report.get("role") if report.get("role") in ROLES else "balancer"
+        node.switching = bool(report.get("switching"))
         node.models = [str(m.get("id", "")) for m in ready]
         node.in_flight = sum(int(m.get("in_flight", 0)) for m in ready)
         node.slots = sum(int(m.get("slots", 0)) for m in ready)
@@ -193,12 +206,41 @@ class Balancer:
                 log.exception("Polling the balancer nodes failed")
             await asyncio.sleep(POLL_SECONDS)
 
-    def candidates(self) -> list[Node]:
-        """Ready nodes that aren't sitting out, least busy first (ties: earlier in the list)."""
+    def candidates(self, role: str = "balancer") -> list[Node]:
+        """Ready nodes in this role that aren't sitting out or swapping roles, least busy first (ties:
+        earlier in the list). The answer model uses balancer nodes; BFGguf uses bfgguf nodes."""
         now = self.clock()
         order = {id(n): i for i, n in enumerate(self.nodes)}
-        return sorted((n for n in self.nodes if n.ready and n.down_until <= now),
+        return sorted((n for n in self.nodes if n.ready and n.role == role and not n.switching
+                       and n.down_until <= now),
                       key=lambda n: (n.busy(), order[id(n)]))
+
+    def ready_nodes(self) -> list[Node]:
+        """Balancer nodes that can take a request now (MinErynnes for BFGguf need one)."""
+        return self.candidates("balancer")
+
+    async def set_role(self, url: str, role: str, anyway: bool = False) -> None:
+        """Ask a node to swap role (POST /v1/balancer/role). Raises ValueError with the node's reason."""
+        if role not in ROLES:
+            raise ValueError(f"The role is one of: {', '.join(ROLES)}.")
+        node = next((n for n in self.nodes if n.url == url), None)
+        if node is None:
+            raise ValueError("That isn't one of the balancer nodes.")
+        try:
+            r = await self._client.post(url + "/v1/balancer/role", json={"role": role, "anyway": anyway},
+                                        headers=self._headers(), timeout=ROLE_TIMEOUT)
+        except httpx.HTTPError as exc:
+            raise ValueError(f"The node {_why(exc)}.") from None
+        if r.status_code == 404:
+            raise ValueError("That node's mnemerynne-balancer is too old to swap roles; update it.")
+        if r.status_code != 200:
+            try:
+                detail = str(r.json().get("detail") or "")
+            except (ValueError, AttributeError):
+                detail = ""
+            raise ValueError(detail or f"The node {_status_error(r.status_code)}.")
+        node.switching, node.role = False, role
+        await self._poll(node)
 
     def sent_to(self, node: Node) -> None:
         node.pending += 1
@@ -218,7 +260,8 @@ class Balancer:
         for n in self.nodes:
             while n.sent and wall - n.sent[0] > 3600:
                 n.sent.popleft()
-            out.append({"url": n.url, "reachable": n.reachable, "ready": n.ready, "models": n.models,
+            out.append({"url": n.url, "role": n.role, "switching": n.switching,
+                        "reachable": n.reachable, "ready": n.ready, "models": n.models,
                         "in_flight": n.in_flight + n.pending, "slots": n.slots, "error": n.error,
                         "sitting_out_s": max(0, round(n.down_until - now)),
                         "polled_s_ago": round(wall - n.polled_at) if n.polled_at else None,
@@ -273,6 +316,59 @@ class BalancedTransport(httpx.AsyncBaseTransport):
                 continue
             return response   # Streams from here on: no retries once a node answered.
         return await self.inner.handle_async_request(request)
+
+    async def aclose(self) -> None:
+        await self.inner.aclose()
+
+
+# BFGguf on the balancer: requests go to this placeholder address, and BfgTransport sends them to the
+# least busy bfgguf node instead, with the balancer key and that node's model name.
+BFGGUF_URL = "http://bfgguf.balancer"
+
+
+class NoBfggufNode(httpx.TransportError):
+    pass
+
+
+class BfgTransport(httpx.AsyncBaseTransport):
+    """BFGguf's HTTP transport when it runs on the balancer: each request goes to the least busy
+    bfgguf node, then the next; there is no fallback address. The JSON body's "model" becomes the
+    node's model, so the node's router matches it."""
+
+    def __init__(self, balancer: Balancer, inner: httpx.AsyncBaseTransport | None = None):
+        self.balancer = balancer
+        self.inner = inner or httpx.AsyncHTTPTransport()
+
+    def _to(self, request: httpx.Request, node: Node, body: bytes) -> httpx.Request:
+        if body and node.models:
+            try:
+                payload = json.loads(body)
+                if isinstance(payload, dict) and "model" in payload:
+                    payload["model"] = node.models[0]
+                    body = json.dumps(payload).encode()
+            except ValueError:
+                pass
+        headers = [(k, v) for k, v in request.headers.multi_items()
+                   if k.lower() not in ("host", "authorization", "content-length")]
+        headers += list(self.balancer._headers().items())
+        return httpx.Request(request.method, node.url + request.url.raw_path.decode(), headers=headers,
+                             content=body, extensions=request.extensions)
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        body = await request.aread()
+        for node in self.balancer.candidates("bfgguf"):
+            self.balancer.sent_to(node)
+            try:
+                response = await self.inner.handle_async_request(self._to(request, node, body))
+            except httpx.TransportError as exc:
+                self.balancer.failed(node, _why(exc))
+                continue
+            if response.status_code >= 500 or response.status_code in (401, 403):
+                await response.aclose()
+                self.balancer.failed(node, _status_error(response.status_code))
+                continue
+            return response
+        raise NoBfggufNode("No BFGguf node is ready.")
 
     async def aclose(self) -> None:
         await self.inner.aclose()

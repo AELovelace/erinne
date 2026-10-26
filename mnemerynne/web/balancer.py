@@ -1,4 +1,5 @@
-"""Admins: Settings → Balancer nodes (the boxes Erynne's answer model runs on)."""
+"""Admins: Settings → Balancer nodes (the boxes Erynne's answer model runs on), and swapping a
+node between its usual role and BFGguf (bfgguf.py)."""
 
 from __future__ import annotations
 
@@ -19,6 +20,12 @@ router = APIRouter()
 class BalancerBody(BaseModel):
     nodes: str | None = Field(default=None, max_length=4000)      # comma-separated; '' = none (use LLM_URL)
     api_key: str | None = Field(default=None, max_length=2000)    # None: keep; '': remove
+
+
+class RoleBody(BaseModel):
+    url: str = Field(..., max_length=300)
+    role: str = Field(..., pattern="^(balancer|bfgguf)$")
+    anyway: bool = False   # start the BFGguf even if the node thinks it won't fit
 
 
 def _status(request: Request, conn: sqlite3.Connection) -> dict:
@@ -63,4 +70,19 @@ async def set_balancer(body: BalancerBody, request: Request, user=Depends(admin_
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
     balancer.configure(nodes, key if nodes else "")
     await balancer.poll_once()
+    return _status(request, conn)
+
+
+@router.post("/api/admin/settings/balancer/role")
+async def set_role(body: RoleBody, request: Request, user=Depends(admin_user),
+                   conn: sqlite3.Connection = Depends(get_db)):
+    """Swap a node between "balancer" (the usual small models) and "bfgguf" (the big model on all its
+    cards). The node stops one set and loads the other, which can take a few minutes."""
+    balancer = request.app.state.balancer
+    try:
+        await balancer.set_role(body.url, body.role, body.anyway)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    with transaction(conn):
+        _log(conn, user, "settings.balancer_role", body.url, body.role + (" (anyway)" if body.anyway else ""))
     return _status(request, conn)

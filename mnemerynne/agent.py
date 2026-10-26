@@ -53,13 +53,13 @@ import anthropic
 import httpx
 from mcp.server.mcpserver.exceptions import ToolError
 
-from mnemerynne import (accounts, apis, claude_chat, db, editing, fs, m365_mail, permissions, proposals, retrieval,
+from mnemerynne import (accounts, apis, bfgguf, claude_chat, db, editing, fs, m365_mail, permissions, proposals, retrieval,
                         users)
 from mnemerynne.answer import ASSISTANT_NAME
 from mnemerynne.api_tokens import Caller
 from mnemerynne.balancer import BalancedTransport
 from mnemerynne.clients.claude import ClaudeLLM
-from mnemerynne.clients.llm import LLM, ToolCall
+from mnemerynne.clients.llm import ACTIVE_LLM, LLM, ToolCall
 from mnemerynne.config import Settings
 from mnemerynne.mcp_server import Tools, build_server
 
@@ -180,6 +180,10 @@ files, ask internal systems (live, read-only), and draft changes to .txt, .md, .
 CLAUDE_EXTRA = """
 - You are {name} to {user}: stay in that role. Don't bring up which model or company is behind you; if asked,
   say you can't share details of the technology behind you.
+- {delegate}"""
+
+# BFGguf (bfgguf.py): Erynne on a bigger model, with MinErynnes when a balancer node is ready.
+BFGGUF_EXTRA = """
 - {delegate}"""
 
 SUBAGENT_PROMPT = """You are a MinErynne, a helper reading for {name} on part of a question from {user}.
@@ -534,8 +538,12 @@ class _Delegate:
     Each is numbered for the question, and her steps show under the answer as
     "MinErynne 1: Searching your documents"."""
 
-    def __init__(self, agent: "Agent", cfg: dict, username: str, slots: asyncio.Semaphore):
+    def __init__(self, agent: "Agent", cfg: dict, username: str, slots: asyncio.Semaphore,
+                 tools: Tools | None = None, for_claude: bool = True):
+        """tools / for_claude: the MinErynnes' reach. Claude's by default; BFGguf's are Erynne's own."""
         self.agent, self.cfg, self.username, self.slots = agent, cfg, username, slots
+        self.tools = tools or agent.claude_tools
+        self.for_claude = for_claude
         self._numbers: dict[str, int] = {}
 
     def number(self, call_id: str) -> int:
@@ -549,7 +557,7 @@ class _Delegate:
             return {"error": call.error or "Give the MinErynne a task."}
         agent = self.agent
         specs = [s for s in await agent.specs() if s["function"]["name"] in READ_ONLY_TOOLS]
-        api_specs = [s for s in (await asyncio.to_thread(agent._api_tools, caller.user_id, True))[0]
+        api_specs = [s for s in (await asyncio.to_thread(agent._api_tools, caller.user_id, self.for_claude))[0]
                      if not api_map.get(s["function"]["name"], ApiTool("", "", frozenset())).action]
         messages = [{"role": "system", "content": SUBAGENT_PROMPT.format(
                         name=ASSISTANT_NAME, user=self.username, today=date.today().isoformat(),
@@ -558,7 +566,7 @@ class _Delegate:
         async with self.slots:
             try:
                 report = await agent._loop(agent._client_for(self.cfg), messages, specs + api_specs, self.cfg,
-                                           caller, sources, api_map, None, agent.claude_tools, writer, [],
+                                           caller, sources, api_map, None, self.tools, writer, [],
                                            {"ran": 0}, event_prefix=call.id + "/",
                                            label_prefix=f"MinErynne {self.number(call.id)}: ")
             except (httpx.HTTPError, OSError) as exc:
@@ -672,6 +680,9 @@ class Agent:
             if claude_chat.is_claude_user(conn, user, self.get_directory()):
                 out.append({"name": DELEGATE_TOOL, "label": "MinErynnes", "group": "External API",
                             "write": False, "note": "helpers the external API may send"})
+            elif bfgguf.is_experimental_user(conn, user, self.get_directory()):
+                out.append({"name": DELEGATE_TOOL, "label": "MinErynnes", "group": "Experimental",
+                            "write": False, "note": "helpers BFGguf may send"})
         finally:
             conn.close()
         return {"tools": out, "full": full}
@@ -708,7 +719,13 @@ class Agent:
         gate = await asyncio.to_thread(self._gate, user_id)
         if gate is None:
             return "off"
+        if ACTIVE_LLM.get() is not None:
+            return "ok"   # BFGguf answers this turn; chat.py checked it answers before starting
         return "ok" if await self.reachable(gate[0]) else "down"
+
+    def minerynnes_available(self) -> bool:
+        """BFGguf may send MinErynnes while a balancer node (in the balancer role) is ready."""
+        return self.balancer is not None and bool(self.balancer.ready_nodes())
 
     async def specs(self) -> list[dict]:
         """The same tools, descriptions and argument schemas Claude gets."""
@@ -824,13 +841,18 @@ class Agent:
 
     # ---------------------------------------------------------------- run
     def _messages(self, state: dict, username: str, places: str, claude: bool = False,
-                  delegate: bool = False, agents_only: bool = False) -> list[dict]:
+                  delegate: bool = False, agents_only: bool = False, bfg: bool = False) -> list[dict]:
         """The system prompt, the person's memories and the conversation so far; the same for Claude
         (the person chose to send them under their own key)."""
         system = SYSTEM_PROMPT.format(name=ASSISTANT_NAME, user=username, today=date.today().isoformat(),
                                       places=f"they can search {places}" if places else "they have no documents yet")
         if claude:
             system += CLAUDE_EXTRA.format(name=ASSISTANT_NAME, user=username, delegate=(
+                f"{DELEGATE_TOOL} hands a reading-heavy part to a MinErynne (up to {MAX_SUBAGENTS} at once); she "
+                f"reports back with [n] markers you can cite." if delegate
+                else "No MinErynnes are available right now; do the reading yourself."))
+        elif bfg:
+            system += BFGGUF_EXTRA.format(delegate=(
                 f"{DELEGATE_TOOL} hands a reading-heavy part to a MinErynne (up to {MAX_SUBAGENTS} at once); she "
                 f"reports back with [n] markers you can cite." if delegate
                 else "No MinErynnes are available right now; do the reading yourself."))
@@ -853,6 +875,7 @@ class Agent:
         (state["use_claude"]). None when the model failed before anything happened: the caller then
         uses the normal flow."""
         claude = bool(state.get("use_claude"))
+        bfg = None if claude else ACTIVE_LLM.get()   # BFGguf answers this turn (graph.run_turn)
         if claude:
             gate = await asyncio.to_thread(self._claude_gate, state["user_id"])
             if not isinstance(gate, tuple):
@@ -864,7 +887,11 @@ class Agent:
             if gate is None:
                 return None
             cfg, username = gate
-            local, model, client, tools = None, AGENT_MODEL_NAME, self._client_for(gate[0]), self.tools
+            if bfg is not None:
+                # The BFGguf's own client (chat.py closes it); its MinErynnes run on the usual model.
+                local, model, client, tools = cfg, None, bfg, self.tools
+            else:
+                local, model, client, tools = None, AGENT_MODEL_NAME, self._client_for(gate[0]), self.tools
         full = bool(cfg.get("full"))
         off = set(state.get("disabled_tools") or [])   # switched off in chat's tool panel
         base = [s for s in await self.specs()
@@ -878,11 +905,15 @@ class Agent:
         delegate = None
         if claude and DELEGATE_TOOL not in off and await self.reachable(local):
             delegate = _Delegate(self, local, username, asyncio.Semaphore(MAX_SUBAGENTS))
+        elif bfg is not None and DELEGATE_TOOL not in off and self.minerynnes_available() \
+                and await self.reachable(local):
+            delegate = _Delegate(self, local, username, asyncio.Semaphore(MAX_SUBAGENTS), self.tools,
+                                 for_claude=False)
         specs = [s for s in base + api_specs + mail_specs + ([DELEGATE_SPEC] if delegate else [])
                  if s["function"]["name"] not in off]
         caller = AgentCaller(state["user_id"], username, conversation_id, state.get("scope"), agents_only=not full)
         messages = self._messages(state, username, cfg.get("places", ""), claude, delegate is not None,
-                                  agents_only=not full)
+                                  agents_only=not full, bfg=bfg is not None)
         sources, proposed, progress = Sources(), [], {"ran": 0}
         text = None
         try:
@@ -900,7 +931,8 @@ class Agent:
         except (httpx.HTTPError, OSError) as exc:
             said = _server_said(exc) if isinstance(exc, httpx.HTTPStatusError) else str(exc) or type(exc).__name__
             if progress["ran"] == 0 and not isinstance(exc, httpx.TimeoutException):
-                self._mark_down()
+                if bfg is None:   # BFGguf failing says nothing about the usual model
+                    self._mark_down()
                 log.warning("The agent model failed (%s); answering with the normal flow.", said)
                 writer({"type": "route", "route": "search", "fallback": "agent model unavailable"})
                 return None

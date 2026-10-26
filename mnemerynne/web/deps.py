@@ -53,6 +53,23 @@ def api_user(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> sq
     return user
 
 
+def api_user_or_token(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> sqlite3.Row:
+    """The signed-in user, or for scripts the owner of a personal access key sent as
+    `Authorization: Bearer mnemerynne_…` (the same keys as Claude's connector)."""
+    from mnemerynne import api_tokens
+
+    user = _session_user(request, conn)
+    if user is not None:
+        return user
+    auth = request.headers.get("authorization", "")
+    caller = api_tokens.verify(conn, auth[7:].strip()) if auth.lower().startswith("bearer ") else None
+    user = users.get_user_by_id(conn, caller.user_id) if caller else None
+    if user is None or not user["active"]:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated",
+                            headers={"WWW-Authenticate": "Bearer"})
+    return user
+
+
 def is_admin(request: Request, conn: sqlite3.Connection, user: sqlite3.Row) -> bool:
     """Local admin, bootstrap username, or a domain user in the admin group,
     signed in from a network admin rights count from (MNEMERYNNE_ADMIN_NETWORKS)."""

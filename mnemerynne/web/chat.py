@@ -22,6 +22,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from mnemerynne import answer as answer_mod
+from mnemerynne import bfgguf as bfgguf_mod
 from mnemerynne import db, fs, graph as graph_mod, proposals
 from mnemerynne.web.deps import api_user, get_db
 
@@ -40,6 +41,7 @@ class AskBody(BaseModel):
     scope: Scope | None = None  # "search in" one collection or folder
     tools: bool = True          # agent group members: let Erynne use tools for this question
     claude: bool = False        # Claude group members: have Claude answer, with their own key
+    bfgguf: bool = False        # the experimental group: have BFGguf answer the whole question (bfgguf.py)
     disabled_tools: list[str] = Field(default_factory=list, max_length=300)   # switched off in Advanced settings
 
 
@@ -149,15 +151,31 @@ async def ask(body: AskBody, request: Request, user=Depends(api_user),
                  (conversation_id, question, scope_json))
     user_id = user["id"]
     app = request.app
+    # BFGguf: decided here (the group and its settings), checked to answer in work().
+    bfg_status = bfgguf_mod.available(conn, user, app.state.directory) if body.bfgguf and not body.claude else None
+    bfg_cfg = bfgguf_mod.load_config(conn) if bfg_status == "ok" else None
     run = Run(user_id, conversation_id, question)
     _runs(app)[run.id] = run
     run.add({"type": "conversation", "conversation_id": conversation_id, "run_id": run.id})
 
     async def work():
         final = None
+        bfg = label = None
+        why = bfg_status if bfg_status not in (None, "ok") else None
+        if bfg_cfg is not None:
+            bfg = bfgguf_mod.client(app.state.settings, bfg_cfg, app.state.balancer,
+                                    getattr(app.state, "bfgguf_transport", None))
+            if await bfg.reachable():
+                label = bfgguf_mod.label(bfg_cfg, app.state.balancer)
+            else:
+                await bfg.aclose()
+                bfg, why = None, "down"
+        if why:   # asked for BFGguf but the usual model answers: say why
+            run.add({"type": "route", "route": "search", "bfgguf": True, "fallback": bfgguf_mod.FALLBACKS[why]})
         try:
             async for event in graph_mod.run_turn(app.state.graph, user_id, conversation_id, question, scope,
-                                                  body.tools, body.claude, [t[:100] for t in body.disabled_tools]):
+                                                  body.tools, body.claude, [t[:100] for t in body.disabled_tools],
+                                                  llm=bfg, model_label=label):
                 if event["type"] == "final":
                     final = event
                 else:
@@ -168,6 +186,9 @@ async def ask(body: AskBody, request: Request, user=Depends(api_user),
             log.exception("Answering failed")
             final = {"type": "final", "status": "error", "answer": "", "citations": [], "sources": [],
                      "latency_ms": 0, "trace": [], "error": f"{type(exc).__name__}: {exc}"}
+        finally:
+            if bfg is not None:
+                await bfg.aclose()
         try:
             final["message_id"] = await asyncio.to_thread(_save_answer, app.state.settings, conversation_id, final)
         except Exception:

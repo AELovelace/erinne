@@ -23,6 +23,15 @@ from mnemerynne.config import Settings
 USAGE: contextvars.ContextVar[dict | None] = contextvars.ContextVar("mnemerynne_usage", default=None)
 
 
+# The model answering this question when it isn't the usual one: BFGguf (bfgguf.py, set by graph.run_turn
+# for the whole turn). Every model call in the answer flow and the agent loop asks answer_llm() for it.
+ACTIVE_LLM: contextvars.ContextVar["LLM | None"] = contextvars.ContextVar("mnemerynne_active_llm", default=None)
+
+
+def answer_llm(default: "LLM") -> "LLM":
+    return ACTIVE_LLM.get() or default
+
+
 def new_usage() -> dict:
     return {"in": 0, "out": 0, "external": 0, "estimated": False}
 
@@ -212,17 +221,20 @@ class LLM:
         if not usage:
             return
         tin, tout = int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0))
-        count_usage(tin, tout)
+        count_usage(tin, tout, external=self.external)
         self.tokens_in += tin
         self.tokens_out += tout
         self.spent_usd += tin / 1e6 * self.price_in_per_m + tout / 1e6 * self.price_out_per_m
 
     def __init__(self, base_url: str, *, model: str = "local", timeout: float = 120.0,
                  client: httpx.AsyncClient | None = None, flavor: str = "llamacpp",
-                 api_key: str = "", max_retries: int = 4, reasoning_tokens: int = 0) -> None:
+                 api_key: str = "", max_retries: int = 4, reasoning_tokens: int = 0,
+                 external: bool = False) -> None:
         self.url = base_url.rstrip("/") + "/v1/chat/completions"
         self.model = model
         self.flavor = flavor
+        # A hosted API (BFGguf on an outside service): its tokens count as external in chat's counter.
+        self.external = external
         self.max_retries = max_retries
         # Added to every local call's max_tokens: room to think before the answer.
         self.reasoning_tokens = reasoning_tokens
@@ -418,7 +430,7 @@ class LLM:
                         yield delta
                 if not counted:   # a server that doesn't report usage: about 4 characters a token
                     asked = sum(len(str(m.get("content") or "")) for m in messages)
-                    count_usage(asked // 4, written // 4, estimated=True)
+                    count_usage(asked // 4, written // 4, external=self.external, estimated=True)
                 return
 
     async def health(self) -> bool:

@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import accounts, agent as agent_mod, claude_chat, editing, group_refs, proposals
+from mnemerynne import accounts, agent as agent_mod, apis, bfgguf, claude_chat, editing, group_refs, proposals
 from mnemerynne.db import transaction
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import admin_user, api_user, get_db, is_admin, page_user
@@ -235,3 +235,81 @@ async def set_claude_group(body: AgentGroupBody, request: Request, user=Depends(
         _log(conn, user, "settings.claude_group", group_refs.label(conn, name) or "(nobody)",
              f"was {old or '(nobody)'}")
     return await _claude_status(request, conn)
+
+
+# -------------------------------------------------- experimental (BFGguf)
+class BfggufBody(BaseModel):
+    kind: str = Field(..., pattern="^(balancer|local|openai)$")
+    url: str = Field("", max_length=500)
+    model: str = Field("", max_length=200)
+    timeout: int = bfgguf.DEFAULT_TIMEOUT
+    api_key: str | None = Field(default=None, max_length=2000)   # None: keep; '': remove
+
+
+async def _experimental_status(request: Request, conn: sqlite3.Connection) -> dict:
+    """Who is in the experimental group, and where BFGguf runs (never its key)."""
+    directory = request.app.state.directory
+    group = bfgguf.experimental_group(conn)
+    members = None
+    if group:
+        rows = conn.execute("SELECT * FROM users WHERE active = 1").fetchall()
+        members = sorted((r["username"] for r in rows if bfgguf.is_experimental_user(conn, r, directory)),
+                         key=str.lower)
+    ad = await anyio.to_thread.run_sync(directory.groups)
+    nodes = [n for n in request.app.state.balancer.view() if n["role"] == "bfgguf"]
+    return {"group": group_refs.label(conn, group), "domain": request.app.state.settings.ad_domain,
+            "enabled": directory.enabled, "groups": group_refs.choices(conn, ad), "members": members,
+            "bfgguf": bfgguf.view(bfgguf.load_config(conn)), "bfgguf_nodes": nodes,
+            "secret_key_set": bool(request.app.state.settings.secret_key)}
+
+
+@router.get("/api/admin/settings/experimental")
+async def get_experimental(request: Request, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+    return await _experimental_status(request, conn)
+
+
+@router.put("/api/admin/settings/experimental-group")
+async def set_experimental_group(body: AgentGroupBody, request: Request, user=Depends(admin_user),
+                                 conn: sqlite3.Connection = Depends(get_db)):
+    directory = request.app.state.directory
+    known = await anyio.to_thread.run_sync(directory.groups) if directory.enabled else []
+    try:
+        name = group_refs.resolve(conn, body.group, known)
+    except group_refs.GroupRefError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    with transaction(conn):
+        old = group_refs.label(conn, bfgguf.experimental_group(conn))
+        bfgguf.set_experimental_group(conn, name)
+        _log(conn, user, "settings.experimental_group", group_refs.label(conn, name) or "(nobody)",
+             f"was {old or '(nobody)'}")
+    return await _experimental_status(request, conn)
+
+
+@router.put("/api/admin/settings/bfgguf")
+async def set_bfgguf(body: BfggufBody, request: Request, user=Depends(admin_user),
+                     conn: sqlite3.Connection = Depends(get_db)):
+    """Where BFGguf runs. It must answer with the new settings before they are saved."""
+    app = request.app
+    try:
+        checked = bfgguf.check(body.kind, body.url, body.model, body.timeout)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    try:
+        trial = bfgguf.merged(app.state.settings, bfgguf.load_config(conn), checked, body.api_key)
+    except apis.ApiError as exc:   # no MNEMERYNNE_SECRET_KEY to encrypt the key with
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    client = bfgguf.client(app.state.settings, trial, app.state.balancer, getattr(app.state, "bfgguf_transport", None))
+    try:
+        ok = await client.reachable()
+    finally:
+        await client.aclose()
+    if not ok:
+        where = "No balancer node is in the BFGguf role and ready" if checked["kind"] == "balancer" \
+            else f"{checked['url']} didn't answer (/health or /v1/models)"
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Not saved: {where}.")
+    with transaction(conn):
+        bfgguf.save_config(conn, trial)
+        _log(conn, user, "settings.bfgguf", checked["kind"],
+             " ".join(x for x in (checked["url"], checked["model"]) if x)
+             + ("; key set" if body.api_key else "; key removed" if body.api_key == "" else ""))
+    return await _experimental_status(request, conn)

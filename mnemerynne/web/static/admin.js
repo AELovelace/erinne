@@ -998,7 +998,33 @@
   // -------------------------------------------------------- balancer nodes
   let balancerTimer = null;
 
-  function balancerRow(n) {
+  // Swap a node between the usual small models and BFGguf (the big model over all its cards).
+  async function swapRole(n, rows) {
+    const to = n.role === "bfgguf" ? "balancer" : "bfgguf";
+    const others = rows.filter(function (r) { return r.url !== n.url && r.role === "balancer"; }).length;
+    let ask = to === "bfgguf"
+      ? "Make " + n.url + " a BFGguf node? It stops its small models and loads BFGguf on all its cards; " +
+        "that can take a few minutes."
+      : "Make " + n.url + " a balancer node again? It unloads BFGguf and starts its small models.";
+    if (to === "bfgguf" && !others) ask += "\n\nIt's the last balancer node: until it's switched back, normal " +
+      "answers come from the fallback address, and BFGguf gets no MinErynnes.";
+    if (!confirm(ask)) return;
+    showError("");
+    let anyway = false;
+    for (;;) {
+      try {
+        renderBalancer(await api("POST", "/api/admin/settings/balancer/role", { url: n.url, role: to, anyway: anyway }));
+        return;
+      } catch (err) {
+        // The balancer's "needs about X GB but only Y GB is free across the cards" refusal.
+        if (!anyway && /free across the cards|fit/i.test(err.message) && confirm(err.message + "\n\nStart it anyway?")) { anyway = true; continue; }
+        showError(err.message);
+        return;
+      }
+    }
+  }
+
+  function balancerRow(n, rows) {
     let stateText;
     if (n.reachable === null) stateText = "not asked yet";
     else if (!n.reachable) stateText = "✗ " + n.error;
@@ -1006,7 +1032,15 @@
     else if (!n.ready) stateText = "answering, but no model is ready";
     else stateText = "✓ " + n.models.join(", ");
     const bad = n.reachable === false || n.sitting_out_s > 0;
-    return [n.url, el("span", "small" + (bad ? " error" : ""), stateText), n.ready ? n.in_flight + " / " + n.slots : "–",
+    const role = el("span", "small");
+    role.appendChild(document.createTextNode(n.switching ? "switching… " : n.role === "bfgguf" ? "🧠 BFGguf " : "Balancer "));
+    if (n.reachable && !n.switching) {
+      const swap = el("button", "link small", n.role === "bfgguf" ? "Make balancer" : "Make BFGguf");
+      swap.type = "button";
+      swap.addEventListener("click", function () { swapRole(n, rows); });
+      role.appendChild(swap);
+    }
+    return [n.url, role, el("span", "small" + (bad ? " error" : ""), stateText), n.ready ? n.in_flight + " / " + n.slots : "–",
             String(n.sent_last_hour), n.polled_s_ago === null ? "–" : n.polled_s_ago + " s ago"];
   }
 
@@ -1058,7 +1092,8 @@
     const wrap = $("balancer-status");
     if (!wrap) return;
     if (!rows.length) { wrap.replaceChildren(); return; }
-    wrap.replaceChildren(table(["Node", "State", "In flight / slots", "Answers (1 h)", "Checked"], rows.map(balancerRow)));
+    wrap.replaceChildren(table(["Node", "Role", "State", "In flight / slots", "Answers (1 h)", "Checked"],
+                               rows.map(function (n) { return balancerRow(n, rows); })));
   }
 
   async function loadBalancer() {
@@ -1196,6 +1231,107 @@
     }
   }
 
+  // ----------------------------------------------------- experimental (BFGguf)
+  function renderExperimental(data) {
+    const box = $("experimental-settings");
+    box.replaceChildren();
+    if (data.groups && data.groups.length) fillDatalist("domain-groups", data.groups);
+    box.appendChild(el("p", "muted", "Members of this " + (data.domain || "domain") + " group get experimental " +
+      "features. Now: a 🧠 BFGguf toggle in chat, which has BFGguf (a much bigger model) answer the whole question " +
+      "with Erynne's documents and tools, sending MinErynnes to read while a balancer node is up; and POST " +
+      "/api/bfgguf for scripts. Leave it empty to turn it off."));
+    if (!data.enabled) box.appendChild(el("p", "error", "No AD domain is configured on the server (MNEMERYNNE_AD_DOMAIN), so nobody can be in the group."));
+    const groupForm = el("form", "ax-new");
+    const group = agentInput("text", data.group);
+    group.setAttribute("list", "domain-groups");
+    group.setAttribute("aria-label", "Experimental group");
+    group.placeholder = "No group: experimental features are off";
+    const saveGroup = el("button", "small", "Save");
+    saveGroup.type = "submit";
+    groupForm.append(group, saveGroup);
+    groupForm.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      try { renderExperimental(await api("PUT", "/api/admin/settings/experimental-group", { group: group.value.trim() })); }
+      catch (err) { showError(err.message); }
+    });
+    box.appendChild(groupForm);
+    if (data.group && data.members) {
+      box.appendChild(el("p", "small muted", data.members.length ? "In the group now: " + data.members.join(", ") + "."
+        : "No one linked to a domain account is in this group yet (Accounts tab)."));
+    }
+
+    const b = data.bfgguf;
+    box.appendChild(el("h3", "small", "Where BFGguf runs"));
+    const form = el("form");
+    const grid = el("div", "agent-settings");
+    const field = function (label, id, control) {
+      control.id = id;
+      const l = el("label", "small", label);
+      l.htmlFor = id;
+      grid.append(l, control);
+      return control;
+    };
+    const kind = el("select");
+    [["balancer", "Balancer nodes in the BFGguf role"], ["local", "A server on the network (OpenAI-compatible)"],
+     ["openai", "A hosted API (OpenAI-compatible, with a key)"]].forEach(function (o) {
+      const opt = el("option", null, o[1]);
+      opt.value = o[0];
+      kind.appendChild(opt);
+    });
+    kind.value = b.kind || "balancer";
+    field("Runs on", "bfgguf-kind", kind);
+    const url = field("Address", "bfgguf-url", agentInput("text", b.url));
+    url.placeholder = "http://10.0.5.30:8080";
+    const model = field("Model", "bfgguf-model", agentInput("text", b.model));
+    const key = field("API key", "bfgguf-key", agentInput("password", ""));
+    key.autocomplete = "off";
+    const timeout = field("Timeout (s)", "bfgguf-timeout", agentInput("number", b.timeout));
+    timeout.min = 10; timeout.max = 1800;
+    const nodesNote = el("p", "small muted");
+    const hostedNote = el("p", "small error", "A hosted API receives each question, the passages and tool results " +
+      "Erynne finds, and the person's memories; its tokens count as external.");
+    function sync() {
+      const onBalancer = kind.value === "balancer";
+      [url, key].forEach(function (c) { c.disabled = onBalancer; });
+      model.placeholder = onBalancer ? "Optional: the node's model is used" : kind.value === "openai" ? "Required" : "Optional (\"local\")";
+      key.placeholder = b.api_key_set ? "Set; leave blank to keep" : kind.value === "openai" ? "Required by most hosted APIs" : "Optional";
+      nodesNote.hidden = !onBalancer;
+      nodesNote.textContent = data.bfgguf_nodes.length
+        ? "BFGguf nodes now: " + data.bfgguf_nodes.map(function (n) {
+            return n.url + (n.ready ? " (" + n.models.join(", ") + ")" : " (not ready)");
+          }).join("; ") + "."
+        : "No balancer node is in the BFGguf role yet: switch one under Balancer nodes above.";
+      hostedNote.hidden = kind.value !== "openai";
+    }
+    kind.addEventListener("change", sync);
+    sync();
+    form.append(grid, nodesNote, hostedNote);
+    const actions = el("div", "ax-new");
+    const save = el("button", "small", "Save");
+    save.type = "submit";
+    actions.append(save, el("span", "small muted", b.kind ? "Set up." : "Not set up yet."),
+                   el("span", "small muted", "BFGguf must answer before this is saved."));
+    form.appendChild(actions);
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      const body = { kind: kind.value, url: url.value.trim(), model: model.value.trim(),
+                     timeout: Number(timeout.value) || 300 };
+      if (key.value && kind.value !== "balancer") body.api_key = key.value;
+      save.disabled = true;
+      try { renderExperimental(await api("PUT", "/api/admin/settings/bfgguf", body)); }
+      catch (err) { showError(err.message); }
+      finally { save.disabled = false; }
+    });
+    box.appendChild(form);
+  }
+
+  async function loadExperimental() {
+    try { renderExperimental(await api("GET", "/api/admin/settings/experimental")); }
+    catch (e) { $("experimental-settings").replaceChildren(el("p", "error", e.message)); }
+  }
+
   function renderChatGPT(data) {
     const box = $("chatgpt-settings");
     box.replaceChildren();
@@ -1294,7 +1430,7 @@
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
     if (tab === "settings" && !updatesLoaded) {
-      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeLinks(); loadChatGPT();
+      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeLinks(); loadChatGPT(); loadExperimental();
       if (window.ErynneM365) window.ErynneM365.load();   // admin_m365.js
     }
     if (tab === "accounts") loadAccounts();

@@ -32,6 +32,11 @@
       {% elif claude %}
       <a class="tools-toggle small" href="/preferences#claude-key">🌐 Add your API key to use the external API</a>
       {% endif %}
+      {% if bfgguf %}
+      <label class="tools-toggle small" title="Experimental: answer with BFGguf, a much bigger model, instead of the usual one. Slower; with your documents and tools as usual, and MinErynnes when a balancer is up.">
+        <input type="checkbox" id="use-bfgguf"> 🧠 BFGguf
+      </label>
+      {% endif %}
       <span class="token-count small muted" id="token-count" hidden></span>
     </div>
     <form id="ask-form" class="ask">
