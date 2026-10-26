@@ -22,7 +22,7 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
 from mnemerynne import (balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, mcp_server, memory,
-                        messages as messages_mod, permissions, remote, share, sharepoint, users)
+                        diagnostics, messages as messages_mod, permissions, remote, share, sharepoint, users)
 from mnemerynne.agent import Agent
 from mnemerynne.answer import ASSISTANT_NAME
 from mnemerynne.auth import LoginThrottle
@@ -91,6 +91,7 @@ class Services:
 
 def create_app(settings: Settings | None = None, services: Services | None = None) -> FastAPI:
     settings = settings or get_settings()
+    diagnostics.install_log_capture()   # the last few hundred log lines, for the diagnose tool
     secret_key = security.check_secret_key(settings) or secrets.token_urlsafe(48)
     security.parse_networks(settings.admin_networks)   # a typo fails at start, not on every admin request
     if security.exposed(settings) and not settings.public_url:

@@ -954,6 +954,43 @@
     catch (e) { $("admin-group").replaceChildren(el("p", "error", e.message)); }
   }
 
+  // ------------------------------------------------------------ development
+  function renderDev(data) {
+    const box = $("dev-settings");
+    box.replaceChildren();
+    fillDatalist("domain-groups", data.groups);
+    box.appendChild(el("p", "muted", "Members of this " + (data.domain || "domain") + " group may pull Mnemerynne's raw " +
+      "internals from their Claude with the diagnose tool (tool-call logs with errors, retrieval scores for a question, " +
+      "a file's indexing state, the job queue, recent server log, effective settings without secrets), to find out why " +
+      "a tool call or a search went wrong. Nothing it returns changes anything. Leave it empty to switch diagnostics off."));
+    if (!data.directory) box.appendChild(el("p", "error", "No AD domain is configured on the server (MNEMERYNNE_AD_DOMAIN), so nobody can be in the group."));
+    const form = el("form", "ax-new");
+    const input = el("input");
+    input.type = "text";
+    input.value = data.group || "";
+    input.placeholder = "No group: diagnostics are off";
+    input.setAttribute("list", "domain-groups");
+    input.setAttribute("aria-label", "Development group");
+    const save = el("button", "small", "Save");
+    save.type = "submit";
+    form.append(input, save);
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      try { renderDev(await api("PUT", "/api/admin/settings/diagnostics", { group: input.value.trim() })); }
+      catch (err) { showError(err.message); }
+    });
+    box.appendChild(form);
+    box.appendChild(el("p", "muted small", data.enabled
+      ? "On for: " + (data.members.length ? data.members.join(", ") : "nobody yet (no linked account in that group).")
+      : "Off."));
+  }
+
+  async function loadDev() {
+    try { renderDev(await api("GET", "/api/admin/settings/diagnostics")); }
+    catch (e) { $("dev-settings").replaceChildren(el("p", "error", e.message)); }
+  }
+
   // ------------------------------------------------------ organisation wiki
   function renderWikiLibrary(data) {
     const box = $("wiki-settings");
@@ -1430,7 +1467,7 @@
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
     if (tab === "settings" && !updatesLoaded) {
-      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeLinks(); loadChatGPT(); loadExperimental();
+      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeLinks(); loadChatGPT(); loadExperimental(); loadDev();
       if (window.ErynneM365) window.ErynneM365.load();   // admin_m365.js
     }
     if (tab === "accounts") loadAccounts();

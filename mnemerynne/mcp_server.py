@@ -33,7 +33,7 @@ from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
-from mnemerynne import (messages, notices, accounts, activity, api_tokens, apis, claude_links, comments, db, editing, editing_formats,
+from mnemerynne import (diagnostics, messages, notices, accounts, activity, api_tokens, apis, claude_links, comments, db, editing, editing_formats,
                         fs, permissions, proposals, retrieval, sharepoint)
 from mnemerynne.api_tokens import Caller
 from mnemerynne.config import Settings
@@ -1023,6 +1023,43 @@ class Tools:
                 "note": "Sent. They see it under Messages in Mnemerynne (and their Claude with list_messages); "
                         "it isn't an email."}, []
 
+    def diagnose(self, conn, caller: Caller, what: str, query: str | None = None, file_id: int | None = None,
+                 chunk_id: int | None = None, tool: str | None = None, failed_only: bool = False,
+                 since_minutes: int = 60, limit: int = 50, level: str = "INFO",
+                 status: str | None = None) -> tuple[dict, list[int]]:
+        """Raw internals for an admin's connection while Development diagnostics are on (diagnostics.py)."""
+        if not diagnostics.enabled(conn):
+            raise Refused("Development diagnostics are off: an admin names the group that may use them under "
+                          "Access → Settings → Development.", "not_allowed")
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (caller.user_id,)).fetchone()
+        if not diagnostics.allowed(conn, user, self.get_directory()):
+            raise Refused("Only people in the development group may pull diagnostics (Access → Settings → "
+                          "Development).", "not_allowed")
+        what = (what or "").strip().lower()
+        if what not in diagnostics.KINDS:
+            raise Refused(f"what is one of {', '.join(diagnostics.KINDS)}.", "invalid")
+        if what == "calls":
+            return {"what": what, **diagnostics.calls(conn, tool=tool, failed_only=failed_only,
+                                                       since_minutes=since_minutes, limit=limit)}, []
+        if what == "search":
+            if not query:
+                raise Refused("search needs `query`: the question to trace.", "invalid")
+            return {"what": what, **diagnostics.search_trace(conn, self.settings, self.get_embedder(), caller.user_id,
+                                                              query, limit)}, []
+        if what == "file":
+            if file_id is None:
+                raise Refused("file needs `file_id`.", "invalid")
+            return {"what": what, **diagnostics.file_state(conn, self.settings, file_id)}, []
+        if what == "chunk":
+            if chunk_id is None:
+                raise Refused("chunk needs `chunk_id` (a passage's chunk_id from search_documents).", "invalid")
+            return {"what": what, **diagnostics.chunk_state(conn, chunk_id)}, []
+        if what == "jobs":
+            return {"what": what, **diagnostics.jobs(conn, status, limit)}, []
+        if what == "log":
+            return {"what": what, "records": diagnostics.recent_log(limit, level, tool)}, []
+        return {"what": what, **diagnostics.config(conn, self.settings)}, []
+
     def list_versions(self, conn, caller: Caller, file_id: int) -> tuple[dict, list[int]]:
         loaded = editing.load(conn, self.settings, caller.user_id, file_id, via=self.mode)
         return {"file_id": file_id, "file": loaded.row["display_name"], "current_version": loaded.version,
@@ -1182,7 +1219,7 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
 
         def work():
             conn = db.connect(settings.db_path)
-            ok, file_ids = False, []
+            ok, file_ids, error = False, [], None
             try:
                 try:
                     editing.agents_folder(conn, caller.user_id)   # every inbox has one; made on first use
@@ -1191,14 +1228,19 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
                 try:
                     out, file_ids = fn(conn, caller, **args)
                 except (ToolError, editing.EditError, fs.FsError) as exc:
-                    raise ToolError(f"[{error_code(exc)}] {exc}") from None
+                    error = f"[{error_code(exc)}] {exc}"
+                    raise ToolError(error) from None
+                except Exception as exc:   # a bug: logged with the call (diagnostics), then raised as before
+                    error = f"{type(exc).__name__}: {exc}"
+                    raise
                 ok = True
                 return claude_links.attach(conn, tools.base, caller, out)
             finally:
-                conn.execute("INSERT INTO mcp_calls(user_id, token_id, grant_id, tool, args, file_ids, ok, ms) "
-                             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                conn.execute("INSERT INTO mcp_calls(user_id, token_id, grant_id, tool, args, file_ids, ok, ms, error) "
+                             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                              (caller.user_id, caller.token_id, caller.grant_id, name, json.dumps(args),
-                              json.dumps(file_ids), int(ok), int((time.monotonic() - started) * 1000)))
+                              json.dumps(file_ids), int(ok), int((time.monotonic() - started) * 1000),
+                              None if error is None else error[:2000]))
                 conn.close()
 
         return await anyio.to_thread.run_sync(work)
@@ -1426,6 +1468,23 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
         person if unsure), optionally with a `link` to a page here (a file, a wiki page, a proposal). They
         see it under Messages, with "Claude for <name>" as the sender. It isn't email."""
         return await call(ctx, "send_message", {"to": to, "text": text, "link": link}, tools.send_message)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def diagnose(ctx: Context, what: str, query: str | None = None, file_id: int | None = None,
+                       chunk_id: int | None = None, tool: str | None = None, failed_only: bool = False,
+                       since_minutes: int = 60, limit: int = 50, level: str = "INFO",
+                       status: str | None = None) -> dict:
+        """Development diagnostics (only for people in the development group an admin names under Access →
+        Settings → Development; off while no group is set): Mnemerynne's raw internals, to find out why a tool
+        call or a search went wrong. `what`: "calls" (the tool-call logs with each failure's error; `tool`, `failed_only`,
+        `since_minutes`), "search" (what retrieval scored for `query` as this person: candidates, ranks,
+        distances and the not-found gate), "file" (`file_id`: its indexing state, jobs and errors), "chunk"
+        (`chunk_id`: one passage as indexed), "jobs" (the ingestion queue; `status`), "log" (the server's
+        recent log lines; `level`, `tool` as a logger prefix) or "config" (effective settings, no secrets).
+        Nothing here changes anything."""
+        return await call(ctx, "diagnose", {"what": what, "query": query, "file_id": file_id, "chunk_id": chunk_id,
+                                            "tool": tool, "failed_only": failed_only, "since_minutes": since_minutes,
+                                            "limit": limit, "level": level, "status": status}, tools.diagnose)
 
     @server.tool(annotations=_READ_ONLY)
     async def list_versions(ctx: Context, file_id: int) -> dict:

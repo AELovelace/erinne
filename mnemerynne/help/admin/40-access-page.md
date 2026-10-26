@@ -60,4 +60,9 @@ Two columns.
 - **Claude in chat**: the group that may use its own Anthropic API key in chat. See [Claude in chat](claude-in-chat.md).
 - **Links Claude can open**: whether Claude gets short-lived text links and for how long. See [Claude](claude.md#links-claude-can-open).
 
+**Experimental** (full width, at the bottom)
+
+- **Experimental features**: the group that gets features still being tried out.
+- **Development diagnostics**: the group whose members' Claude may pull raw diagnostics with the `diagnose` tool; empty = off ([Troubleshooting](troubleshooting.md#development-diagnostics)).
+
 The address bar keeps the tab (`#tab=settings`), so links to a tab can be shared with other admins.

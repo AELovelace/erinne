@@ -1,5 +1,9 @@
 # Troubleshooting
 
+## Development diagnostics
+
+For your own Claude: name a domain (or Entra) group under **Access → Settings → Development**, and the connector's `diagnose` tool, for the connections of people in that group only, returns raw internals: the three tool-call logs with each failure's error (`calls`, with `failed_only`, `tool`, `since_minutes`), what retrieval scored for a question as you (`search`: every candidate's fused score, keyword and vector ranks, cosine distance, which were chosen, and the not-found gate's decision with its thresholds), a file's indexing state with its jobs and errors (`file`), one passage as indexed (`chunk`), the ingestion queue (`jobs`), the server's last few hundred log lines (`log`) and the effective settings without secrets (`config`). Nothing it returns changes anything. Clear the group when done (no group, no diagnostics); the change is in Recent changes.
+
 ## Where to look first
 
 ```sh

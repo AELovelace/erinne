@@ -177,7 +177,7 @@ def test_mcp_endpoint_end_to_end(mcp_client, conn, world):
     assert {t["name"] for t in listed} == {"search_documents", "read_passage", "list_libraries", "browse_folder",
                                            "find_files", "view_page", "open_file", "list_versions",
                                            "list_changes", "list_comments", "list_apis", "query_api",
-                                           "list_proposals", "get_proposal", "list_messages"} | edits
+                                           "list_proposals", "get_proposal", "list_messages", "diagnose"} | edits
     assert all(t["annotations"]["readOnlyHint"] is (t["name"] not in edits) for t in listed)
     assert not any(t["annotations"].get("destructiveHint") for t in listed)   # every change can be undone
 

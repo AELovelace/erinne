@@ -47,6 +47,7 @@
     {"name": "propose_batch", "description": "Propose several API changes under one approval"},
     {"name": "list_messages", "description": "Your unread notes, system messages and announcements"},
     {"name": "send_message", "description": "Leave a short note for a colleague inside Mnemerynne"},
+    {"name": "diagnose", "description": "Development diagnostics for admins, while switched on"},
     {"name": "list_apis", "description": "List the internal systems Claude may query for you"},
     {"name": "query_api", "description": "Read live data from an internal system"},
     {"name": "propose_api_action", "description": "Propose a change in an internal system (you apply it)"}

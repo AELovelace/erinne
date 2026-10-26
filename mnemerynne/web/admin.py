@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import accounts, api_tokens, fs, group_refs, messages, permissions, share, updates, users
+from mnemerynne import accounts, api_tokens, diagnostics, fs, group_refs, messages, permissions, share, updates, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
@@ -494,6 +494,45 @@ async def update_status(refresh: bool = False, user=Depends(admin_api_user),
 
 class AdminGroupBody(BaseModel):
     group: str = Field(min_length=1, max_length=2000)   # one or more, ';'-separated (AD or "Tenant / Group")
+
+
+class DiagnosticsBody(BaseModel):
+    group: str = Field("", max_length=2000)   # group_refs text; empty switches diagnostics off
+
+
+async def _diagnostics_status(request: Request, conn: sqlite3.Connection) -> dict:
+    directory = request.app.state.directory
+    ad = await anyio.to_thread.run_sync(directory.groups) if directory.enabled else []
+    value = diagnostics.group(conn)
+    members = []
+    if value:
+        rows = conn.execute("SELECT * FROM users WHERE active = 1").fetchall()
+        members = sorted(r["username"] for r in rows if group_refs.in_any(conn, r, directory, value))
+    return {"group": group_refs.label(conn, value), "enabled": bool(value), "members": members,
+            "domain": request.app.state.settings.ad_domain, "directory": directory.enabled,
+            "groups": group_refs.choices(conn, ad)}
+
+
+@router.get("/api/admin/settings/diagnostics")
+async def get_diagnostics(request: Request, user=Depends(admin_api_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Development diagnostics: the group whose members' Claude may pull raw internals (diagnose)."""
+    return await _diagnostics_status(request, conn)
+
+
+@router.put("/api/admin/settings/diagnostics")
+async def set_diagnostics(body: DiagnosticsBody, request: Request, user=Depends(admin_api_user),
+                          conn: sqlite3.Connection = Depends(get_db)):
+    directory = request.app.state.directory
+    known = await anyio.to_thread.run_sync(directory.groups) if directory.enabled else []
+    try:
+        value = group_refs.resolve(conn, body.group, known) if body.group.strip() else ""
+    except group_refs.GroupRefError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    with transaction(conn):
+        old = group_refs.label(conn, diagnostics.group(conn))
+        diagnostics.set_group(conn, value)
+        _log(conn, user, "settings.diagnostics", group_refs.label(conn, value) or "(off)", f"was {old or '(off)'}")
+    return await _diagnostics_status(request, conn)
 
 
 @router.get("/api/admin/settings/admin-group")

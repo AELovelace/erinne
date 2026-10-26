@@ -715,7 +715,9 @@ button.danger-fill { background: var(--error); }
 .ax-split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; flex: 1; min-height: 0;
   align-items: start; }
 .ax-split[hidden] { display: none; }
-.ax-split > .inbox { max-width: none; max-height: 100%; }
+.ax-split { overflow: auto; }                      /* three sections: the panel scrolls as one */
+.ax-split > .inbox { max-width: none; max-height: none; }
+.ax-split > .ax-split-wide { grid-column: 1 / -1; }   /* Experimental: full width, at the bottom */
 .ax-split-title { margin: 0; font-size: 1.3rem; }
 .ax-split .ax-split-title + .ax-h { margin-top: 1rem; }
 .ax-tree { overflow: auto; padding: .6rem .3rem; }

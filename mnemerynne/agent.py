@@ -96,7 +96,7 @@ FILE_WRITE_TOOLS = {"edit_text", "edit_document", "edit_spreadsheet", "create_fi
 # the proposal status tools (chat shows its proposals as cards under the answer instead).
 CONNECTOR_ONLY_TOOLS = {"create_folder", "rename_item", "move_item", "delete_item", "add_comment",
                         "list_changes", "list_comments", "request_edit_access", "list_proposals", "get_proposal",
-                        "withdraw_proposal", "propose_batch"}
+                        "withdraw_proposal", "propose_batch", "diagnose"}
 # What the chat's tool panel calls each tool, by group.
 TOOL_GROUPS = {
     "Documents": {"search_documents": "Search documents", "read_passage": "Read passages",
