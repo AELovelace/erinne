@@ -5,6 +5,7 @@
     <a href="/files" {% if active == 'files' %}aria-current="page"{% endif %}>Files</a>
     <a href="/wiki" {% if active == 'wiki' %}aria-current="page"{% endif %}>Wiki</a>
     {% if has_remote %}<a href="/remote" {% if active == 'remote' %}aria-current="page"{% endif %}>Remote</a>{% endif %}
+    {% if has_rooms %}<a href="/rooms" {% if active == 'rooms' %}aria-current="page"{% endif %}>Rooms<span class="badge unread" id="nav-rooms" {% if not nav_rooms %}hidden{% endif %}>{{ nav_rooms or '' }}</span></a>{% endif %}
     <a href="/messages" {% if active == 'messages' %}aria-current="page"{% endif %}>Messages<span class="badge unread" id="nav-unread" {% if not nav_unread %}hidden{% endif %}>{{ nav_unread or '' }}</span></a>
     <a href="/preferences" {% if active == 'preferences' %}aria-current="page"{% endif %}>Preferences</a>
     {% if is_admin %}<a href="/admin/libraries" {% if active == 'admin' %}aria-current="page"{% endif %}>Access</a>{% endif %}

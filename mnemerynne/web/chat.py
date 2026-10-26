@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 
 from mnemerynne import answer as answer_mod
 from mnemerynne import bfgguf as bfgguf_mod
-from mnemerynne import db, fs, graph as graph_mod, proposals
+from mnemerynne import db, feedback as feedback_mod, fs, graph as graph_mod, proposals
 from mnemerynne.web.deps import api_user, get_db
 
 log = logging.getLogger("mnemerynne.chat")
@@ -347,7 +347,9 @@ def feedback(message_id: int, body: FeedbackBody, user=Depends(api_user),
                        "WHERE m.id = ? AND m.role = 'assistant'", (message_id,)).fetchone()
     if row is None or row[0] != user["id"]:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Message not found")
-    conn.execute("DELETE FROM feedback WHERE message_id = ? AND user_id = ?", (message_id, user["id"]))
-    conn.execute("INSERT INTO feedback(message_id, user_id, rating, comment) VALUES (?, ?, ?, ?)",
-                 (message_id, user["id"], body.rating, (body.comment or "")[:2000] or None))
+    with db.transaction(conn):
+        conn.execute("DELETE FROM feedback WHERE message_id = ? AND user_id = ?", (message_id, user["id"]))
+        feedback_id = conn.execute("INSERT INTO feedback(message_id, user_id, rating, comment) VALUES (?, ?, ?, ?)",
+                                   (message_id, user["id"], body.rating, (body.comment or "")[:2000] or None)).lastrowid
+        feedback_mod.archive(conn, feedback_id)   # kept for admins whatever later happens to the conversation
     return {"status": "ok"}

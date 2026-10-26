@@ -204,9 +204,31 @@ def test_feedback_and_delete(chat_client, conn):
     assert chat_client.post(f"/api/messages/{message_id}/feedback", json={"rating": 5}).status_code == 422
     assert chat_client.post(f"/api/messages/{message_id}/feedback", json={"rating": -1, "comment": "meh"}).json()
     assert conn.execute("SELECT rating FROM feedback").fetchone()[0] == -1
+    assert chat_client.post(f"/api/messages/{message_id}/feedback", json={"rating": 1}).json()   # changed mind
     assert chat_client.delete(f"/api/conversations/{cid}").json()["status"] == "deleted"
     assert chat_client.get(f"/api/conversations/{cid}").status_code == 404
     assert conn.execute("SELECT count(*) FROM checkpoints WHERE thread_id = ?", (cid,)).fetchone()[0] == 0
+    # The archive keeps both ratings, with their snapshot, after the conversation (and its feedback) is gone.
+    assert conn.execute("SELECT count(*) FROM feedback").fetchone()[0] == 0
+    rows = conn.execute("SELECT * FROM feedback_archive ORDER BY id").fetchall()
+    assert [(r["rating"], r["comment"]) for r in rows] == [(-1, "meh"), (1, None)]
+    first = rows[0]
+    assert first["message_id"] == message_id and first["conversation_id"] == cid and first["username"] == "alice"
+    assert first["question"] == "night audit" and first["answer"] and first["status"] == "answered"
+    sources = json.loads(first["sources"])
+    assert sources and all(s["text"] for s in sources) and any(s["cited"] for s in sources)
+
+
+def test_feedback_from_before_the_archive_is_archived_once(chat_client, conn):
+    from mnemerynne import feedback
+    _login(chat_client, "alice")
+    message_id = _final(_ask(chat_client, "night audit"))["message_id"]
+    user_id = conn.execute("SELECT id FROM users WHERE username = 'alice'").fetchone()[0]
+    conn.execute("INSERT INTO feedback(message_id, user_id, rating) VALUES (?, ?, 1)", (message_id, user_id))
+    assert feedback.backfill(conn) == 1
+    assert feedback.backfill(conn) == 0   # start-up runs it every time
+    row = conn.execute("SELECT * FROM feedback_archive").fetchone()
+    assert row["rating"] == 1 and row["question"] == "night audit" and json.loads(row["tool_calls"]) == []
 
 
 def test_model_failure_is_reported_and_saved(chat_client, llm, conn):

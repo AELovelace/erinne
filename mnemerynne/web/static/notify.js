@@ -69,6 +69,12 @@
       if (!r.ok) return;
       const data = await r.json();
       setBadge(data.unread || 0);
+      const rooms = document.getElementById("nav-rooms");   // Rooms: unread mentions and DMs
+      if (rooms) {
+        const n = (data.rooms && (data.rooms.mentions + data.rooms.dms)) || 0;
+        rooms.textContent = n ? String(n) : "";
+        rooms.hidden = !n;
+      }
       if (!host) return;
       const pending = data.announcements || [];
       const ids = new Set(pending.map(function (a) { return a.id; }));

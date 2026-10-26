@@ -1396,6 +1396,66 @@
     box.appendChild(form);
   }
 
+  // ------------------------------------------------------------- Rooms
+  function renderRooms(data) {
+    const box = $("rooms-settings");
+    box.replaceChildren();
+    box.appendChild(el("p", "muted", "Rooms is the team chat (channels and direct messages). Anyone can message " +
+      "anyone; this group may make channels (leave it empty for everyone). Admins can archive any channel, and " +
+      "delete any message from the room itself."));
+    const onForm = el("form", "ax-new");
+    const on = agentInput("checkbox", data.enabled);
+    on.setAttribute("aria-label", "Rooms on");
+    const onLabel = el("label", "check small");
+    onLabel.append(on, document.createTextNode(" Rooms is on for this organisation"));
+    const saveOn = el("button", "small", "Save");
+    saveOn.type = "submit";
+    onForm.append(onLabel, saveOn, el("span", "small muted", data.enabled
+      ? "Turning it off hides Rooms from everyone (and from Claude); messages are kept for when it's back."
+      : "Off: nobody sees Rooms. Turn it on to give everyone the Rooms tab."));
+    onForm.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      if (data.enabled && !on.checked && !confirm("Turn Rooms off for everyone? Messages are kept.")) return;
+      try { renderRooms(await api("PUT", "/api/admin/settings/rooms", { enabled: on.checked })); }
+      catch (err) { showError(err.message); }
+    });
+    box.appendChild(onForm);
+    if (!data.enabled && !data.channels.length) return;
+    const form = el("form", "ax-new");
+    const group = agentInput("text", data.creators);
+    group.setAttribute("list", "domain-groups");
+    group.setAttribute("aria-label", "Who may make channels");
+    group.placeholder = "Everyone may make channels";
+    const save = el("button", "small", "Save");
+    save.type = "submit";
+    form.append(group, save);
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      try { renderRooms(await api("PUT", "/api/admin/settings/rooms", { group: group.value.trim() })); }
+      catch (err) { showError(err.message); }
+    });
+    box.appendChild(form);
+    if (!data.channels.length) { box.appendChild(el("p", "small muted", "No channels yet.")); return; }
+    box.appendChild(table(["Channel", "Who", "Messages", "Last", ""], data.channels.map(function (c) {
+      const toggle = el("button", "link small", c.archived ? "Unarchive" : "Archive");
+      toggle.type = "button";
+      toggle.addEventListener("click", async function () {
+        if (!confirm((c.archived ? "Unarchive" : "Archive") + " #" + c.name + "?")) return;
+        try { await api("PATCH", "/api/rooms/" + c.id, { archived: !c.archived }); loadRooms(); }
+        catch (err) { showError(err.message); }
+      });
+      return ["#" + c.name + (c.archived ? " (archived)" : ""),
+              c.visibility === "group" ? "group: " + c.group : c.visibility, String(c.messages), c.last_at || "–", toggle];
+    })));
+  }
+
+  async function loadRooms() {
+    try { renderRooms(await api("GET", "/api/admin/settings/rooms")); }
+    catch (e) { $("rooms-settings").replaceChildren(el("p", "error", e.message)); }
+  }
+
   async function loadChatGPT() {
     try { renderChatGPT(await api("GET", "/api/admin/settings/chatgpt")); }
     catch (e) { $("chatgpt-settings").replaceChildren(el("p", "error", e.message)); }
@@ -1467,7 +1527,7 @@
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
     if (tab === "settings" && !updatesLoaded) {
-      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeLinks(); loadChatGPT(); loadExperimental(); loadDev();
+      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeLinks(); loadChatGPT(); loadExperimental(); loadRooms(); loadDev();
       if (window.ErynneM365) window.ErynneM365.load();   // admin_m365.js
     }
     if (tab === "accounts") loadAccounts();

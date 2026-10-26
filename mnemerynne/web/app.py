@@ -21,9 +21,13 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
-from mnemerynne import (balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, mcp_server, memory,
-                        diagnostics, messages as messages_mod, permissions, remote, share, sharepoint, users)
+from mnemerynne import (balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, feedback as feedback_mod,
+                        mcp_server, memory,
+                        diagnostics, messages as messages_mod, permissions, remote, rooms as rooms_mod, rooms_bus, share,
+                        sharepoint,
+                        users)
 from mnemerynne.agent import Agent
+from mnemerynne.rooms_erynne import RoomErynne
 from mnemerynne.answer import ASSISTANT_NAME
 from mnemerynne.auth import LoginThrottle
 from mnemerynne.clients.embed import Embedder
@@ -35,7 +39,8 @@ from mnemerynne.router import load_router
 from mnemerynne.web import (admin, admin_apis, admin_notices, admin_remote, agent as agent_pages, apis as api_pages, balancer as balancer_pages,
                             bfgguf as bfgguf_pages, chat,
                             claude_links as claude_link_pages, editor as editor_pages, files, help as help_pages,
-                            m365 as m365_pages, memories, messages as message_pages, oauth as oauth_pages, remote as remote_pages, security,
+                            m365 as m365_pages, memories, messages as message_pages, oauth as oauth_pages, remote as remote_pages,
+                            rooms as room_pages, security,
                             settings as settings_pages, tokens, wiki as wiki_pages)
 from mnemerynne.web.deps import LoginRequired, api_user, get_db, is_admin, page_user
 
@@ -107,6 +112,10 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             made = editing.ensure_all_agents(conn)
             if made:
                 log.info("Made the Agents folder in %d inbox(es).", made)
+            with db.transaction(conn):
+                archived = feedback_mod.backfill(conn)
+            if archived:
+                log.info("Archived %d rating(s) given before the feedback archive.", archived)
             cfg = balancer_mod.load_config(conn)
             nodes, node_key = cfg["nodes"], balancer_mod.api_key(settings, cfg)
         finally:
@@ -117,6 +126,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         balancer = (services.balancer if services and services.balancer is not None else balancer_mod.Balancer())
         balancer.configure(nodes, node_key)
         app.state.balancer = balancer
+        app.state.rooms_bus = rooms_bus.Bus(settings.db_path)   # Rooms' live streams
         app.state.bfgguf_transport = services.bfgguf_transport if services else None
         if nodes:
             log.info("Answer model: %d balancer node(s), %s when none answers.", len(nodes), settings.llm_url)
@@ -145,6 +155,11 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         app.state.graph = build_graph(Deps(settings, svc.llm, svc.embedder, svc.reranker, router,
                                            app.state.directory, app.state.agent), checkpointer, store)
         app.state.background = set()
+        # Erynne answering @mentions in Rooms, reading only what everyone in the room may read.
+        app.state.rooms_erynne = RoomErynne(
+            settings, app.state.agent, app.state.rooms_bus, app.state.background, lambda: app.state.embedder,
+            lambda: app.state.directory, balancer, app.state.bfgguf_transport,
+            (lambda cfg: svc.agent_llm) if svc.agent_llm is not None else None)
         app.state.memory_writer = memory.make_writer(settings, svc.llm, store, app.state.background)
         app.state.embedder = svc.embedder
         poller = asyncio.create_task(balancer.run())
@@ -208,7 +223,10 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             if user is None:
                 return {}
             admin = is_admin(request, conn, user)
+            unread_rooms = rooms_mod.unread_summary(conn, user, app.state.directory)
             return {"nav_unread": messages_mod.unread_count(conn, user_id),
+                    "has_rooms": rooms_mod.enabled(conn),
+                    "nav_rooms": unread_rooms["mentions"] + unread_rooms["dms"],
                     "has_remote": bool(remote.apps_for(conn, user, app.state.directory, admin))}
         except sqlite3.Error:
             return {}
@@ -245,6 +263,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(editor_pages.router)
     app.include_router(wiki_pages.router)
     app.include_router(message_pages.router)
+    app.include_router(room_pages.router)
+    app.include_router(room_pages.admin_router)
     app.include_router(admin_notices.router)
     app.include_router(remote_pages.router)
     app.include_router(admin_remote.router)

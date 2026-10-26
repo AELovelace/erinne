@@ -34,6 +34,9 @@ def purge(conn: sqlite3.Connection, settings: Settings) -> dict[str, int]:
             if n:
                 out[table] = n
 
+    from mnemerynne import rooms   # messages with files on disk, and the live-delivery log
+    out.update(rooms.purge(conn, settings))
+
     # Codes and tokens past their expiry are useless; a day's grace keeps refresh-token
     # reuse detection working around the boundary.
     n = conn.execute("DELETE FROM oauth_codes WHERE expires_at < datetime('now', '-1 day')").rowcount

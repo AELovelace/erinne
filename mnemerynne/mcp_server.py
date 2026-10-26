@@ -33,7 +33,7 @@ from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
-from mnemerynne import (diagnostics, messages, notices, accounts, activity, api_tokens, apis, claude_links, comments, db, editing, editing_formats,
+from mnemerynne import (diagnostics, messages, notices, rooms, accounts, activity, api_tokens, apis, claude_links, comments, db, editing, editing_formats,
                         fs, permissions, proposals, retrieval, sharepoint)
 from mnemerynne.api_tokens import Caller
 from mnemerynne.config import Settings
@@ -46,7 +46,8 @@ log = logging.getLogger("mnemerynne.mcp")
 # 1.0.0: the "Road to 1.0" blockers (editable flags, request_edit_access,
 # forgiving names, ids or paths, error codes), verified live 2026-10-25.
 # 1.1.0: admin approvals (status awaiting_admin), list_proposals and get_proposal.
-MCP_VERSION = "1.2.0"
+# 1.3.0: Rooms (channels and direct messages): list_rooms, read_room, post_to_room, react_in_room.
+MCP_VERSION = "1.3.0"
 
 PAGE_WIDTH_PX = 1200     # rendered page width: small print stays legible, JPEG stays ~100-300 KB
 PAGE_MAX_PX = 2000       # cap on either side, for unusually long or wide pages
@@ -104,6 +105,11 @@ Working with others (people, and other people's Claude):
   they see it under Messages); it isn't email. list_messages shows the person's own unread notes,
   what Mnemerynne told them (a proposal decided, a comment on their file) and announcements waiting
   for them; mention those when they're relevant.
+- Rooms are the team's chat: channels (#front-office) and direct messages. list_rooms shows the
+  person's rooms with unread counts; read_room reads one (a channel name, "@username" for a DM, or an
+  id; `thread` for one thread); post_to_room writes there as "Claude for <name>" (reply in a thread
+  with `thread`); react_in_room adds an emoji. Everyone in the room reads what you post: write only what
+  the person asked you to say, and never paste documents they didn't ask you to share.
 
 Internal APIs (live):
 - list_apis shows the internal systems you may query for this person (night-audit health, hotel stats,
@@ -1023,6 +1029,80 @@ class Tools:
                 "note": "Sent. They see it under Messages in Mnemerynne (and their Claude with list_messages); "
                         "it isn't an email."}, []
 
+    # ------------------------------------------------------------- rooms
+    def _room_user(self, conn, caller: Caller) -> sqlite3.Row:
+        if not rooms.enabled(conn):
+            raise Refused("Rooms isn't turned on in this organisation's Mnemerynne.", "not_allowed")
+        return conn.execute("SELECT * FROM users WHERE id = ?", (caller.user_id,)).fetchone()
+
+    def _room_message(self, m: dict) -> dict:
+        out = {"message_id": m["id"], "from": m["who"], "at": m["created_at"] + " UTC",
+               "text": "(deleted)" if m["deleted"] else m["body"]}
+        if m.get("replies"):
+            out["replies"] = m["replies"]
+        if m.get("edited_at"):
+            out["edited"] = True
+        if m.get("reactions"):
+            out["reactions"] = {r["emoji"]: len(r["users"]) for r in m["reactions"]}
+        if m.get("attachments"):
+            out["files"] = [a["name"] for a in m["attachments"]]
+        return out
+
+    def list_rooms(self, conn, caller: Caller) -> tuple[dict, list[int]]:
+        """The person's channels and direct messages, with what's unread (rooms.py)."""
+        listed = rooms.rooms_for(conn, self._room_user(conn, caller), self.get_directory())
+        out = [{"room": ("#" + r["name"]) if r["kind"] == "channel" else r["name"], "room_id": r["id"],
+                "kind": r["kind"], "unread": r["unread"], "mentions_you": r["mentions"],
+                **({"topic": r["topic"]} if r["topic"] else {})} for r in listed]
+        return {"rooms": out, "link": f"{self.base}/rooms",
+                **({} if out else {"note": "No rooms yet; the person joins or starts them under Rooms."})}, []
+
+    def read_room(self, conn, caller: Caller, room: int | str, limit: int = 30, before: int | None = None,
+                  thread: int | None = None) -> tuple[dict, list[int]]:
+        user, directory = self._room_user(conn, caller), self.get_directory()
+        try:
+            r = rooms.find_room(conn, user, room, directory)
+            if thread is not None:
+                listed = rooms.thread(conn, user, thread, directory)
+                if listed[0]["room_id"] != r["id"]:
+                    raise rooms.NotFound("That thread isn't in this room.")
+            else:
+                listed = rooms.history(conn, user, r["id"], directory, before=before, limit=max(1, min(int(limit), 100)))
+        except rooms.RoomError as exc:
+            raise Refused(str(exc), "not_found" if exc.status == 404 else "not_allowed") from None
+        label = ("#" + r["name"]) if r["kind"] == "channel" else rooms.view_room(conn, r, user)["name"]
+        out = {"room": label, "room_id": r["id"], "messages": [self._room_message(m) for m in listed],
+               "link": f"{self.base}/rooms#room={r['id']}"}
+        if thread is None and listed and len(listed) >= limit:
+            out["note"] = f"Older messages: call again with before={listed[0]['id']}."
+        return out, []
+
+    def post_to_room(self, conn, caller: Caller, room: int | str, text: str,
+                     thread: int | None = None) -> tuple[dict, list[int]]:
+        """Write in a room as "Claude for <name>" (rooms.post)."""
+        user, directory = self._room_user(conn, caller), self.get_directory()
+        if not caller.can_edit:
+            raise ToolError("This connection can only search. To let Claude write in Rooms, open Claude in Mnemerynne "
+                            "and turn on “Let Claude edit files” for this token.")
+        try:
+            r = rooms.find_room(conn, user, room, directory)
+            message, _ = rooms.post(conn, user, r["id"], text, directory, via=self.mode if self.mode in
+                                    ("claude", "erynne") else "claude", thread_root_id=thread)
+        except rooms.RoomError as exc:
+            raise Refused(str(exc), "not_found" if exc.status == 404 else "invalid") from None
+        return {"message_id": message["id"], "room_id": r["id"], "link": f"{self.base}/rooms#room={r['id']}",
+                "note": "Posted. Everyone in the room sees it, marked as written by Claude for the person."}, []
+
+    def react_in_room(self, conn, caller: Caller, message_id: int, emoji: str) -> tuple[dict, list[int]]:
+        user = self._room_user(conn, caller)
+        if not caller.can_edit:
+            raise ToolError("This connection can only search.")
+        try:
+            m = rooms.react(conn, user, message_id, emoji, True, self.get_directory())
+        except rooms.RoomError as exc:
+            raise Refused(str(exc), "not_found" if exc.status == 404 else "invalid") from None
+        return {"message_id": m["id"], "reactions": {r["emoji"]: len(r["users"]) for r in m["reactions"]}}, []
+
     def diagnose(self, conn, caller: Caller, what: str, query: str | None = None, file_id: int | None = None,
                  chunk_id: int | None = None, tool: str | None = None, failed_only: bool = False,
                  since_minutes: int = 60, limit: int = 50, level: str = "INFO",
@@ -1468,6 +1548,33 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
         person if unsure), optionally with a `link` to a page here (a file, a wiki page, a proposal). They
         see it under Messages, with "Claude for <name>" as the sender. It isn't email."""
         return await call(ctx, "send_message", {"to": to, "text": text, "link": link}, tools.send_message)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def list_rooms(ctx: Context) -> dict:
+        """The person's Rooms (the team chat inside Mnemerynne): channels such as #front-office and direct
+        messages, with how many are unread and how many mention them."""
+        return await call(ctx, "list_rooms", {}, tools.list_rooms)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def read_room(ctx: Context, room: int | str, limit: int = 30, before: int | None = None,
+                        thread: int | None = None) -> dict:
+        """Read a room's latest messages, oldest first: `room` is a channel ("#front-office" or
+        "front-office"), "@username" for the direct messages with them, or a room_id from list_rooms.
+        `before` (a message_id) pages back; `thread` (a message_id) reads that thread's replies."""
+        return await call(ctx, "read_room", {"room": room, "limit": limit, "before": before, "thread": thread},
+                          tools.read_room)
+
+    @server.tool(annotations=_EDITS)
+    async def post_to_room(ctx: Context, room: int | str, text: str, thread: int | None = None) -> dict:
+        """Write a message in a room (as read_room names it; "@username" opens a direct message), shown as
+        "Claude for <name>". Markdown works; @name mentions someone. `thread` (a message_id) replies in that
+        thread. Everyone in the room sees it: post only what the person asked you to."""
+        return await call(ctx, "post_to_room", {"room": room, "text": text, "thread": thread}, tools.post_to_room)
+
+    @server.tool(annotations=_EDITS)
+    async def react_in_room(ctx: Context, message_id: int, emoji: str) -> dict:
+        """Add an emoji reaction (e.g. "👍") to a room message, as the person."""
+        return await call(ctx, "react_in_room", {"message_id": message_id, "emoji": emoji}, tools.react_in_room)
 
     @server.tool(annotations=_READ_ONLY)
     async def diagnose(ctx: Context, what: str, query: str | None = None, file_id: int | None = None,

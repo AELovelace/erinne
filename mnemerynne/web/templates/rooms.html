@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Rooms · {{ assistant_name }}{% endblock %}
+{% block body %}
+{% include "_nav.html" %}
+<main class="rooms" id="rooms" data-max="{{ max_chars }}">
+  <aside class="rooms-side" id="rooms-side" aria-label="Rooms">
+    <div class="rooms-side-head">
+      <strong>Rooms</strong>
+      <button type="button" class="link small" id="rooms-new" title="New channel or message">＋</button>
+    </div>
+    <h2 class="rooms-group">Channels</h2>
+    <ul class="rooms-list" id="rooms-channels"></ul>
+    <button type="button" class="link small" id="rooms-browse">Browse channels</button>
+    <h2 class="rooms-group">Direct messages</h2>
+    <ul class="rooms-list" id="rooms-dms"></ul>
+  </aside>
+
+  <section class="rooms-main" aria-live="polite">
+    <header class="rooms-head" id="rooms-head">
+      <button type="button" class="link rooms-menu" id="rooms-menu" aria-controls="rooms-side" title="Rooms">☰</button>
+      <div class="rooms-title"><strong id="room-name">Rooms</strong> <span class="muted small" id="room-topic"></span></div>
+      <div class="rooms-head-actions" id="room-actions" hidden>
+        <button type="button" class="link small" data-pane="members">Members</button>
+        <button type="button" class="link small" data-pane="pins">📌 Pins</button>
+        <button type="button" class="link small" id="room-settings">Settings</button>
+      </div>
+    </header>
+    <div class="rooms-log" id="rooms-log" tabindex="0">
+      <p class="muted rooms-empty">Pick a channel or a person on the left, or start one with ＋.</p>
+    </div>
+    <div class="rooms-typing small muted" id="rooms-typing" aria-live="polite"></div>
+    <form class="rooms-compose" id="rooms-compose" hidden autocomplete="off">
+      <div class="rooms-attached" id="rooms-attached"></div>
+      <div class="rooms-compose-row">
+        <label class="link rooms-attach" title="Attach files"><input type="file" id="rooms-file" multiple hidden>📎</label>
+        <textarea id="rooms-text" rows="1" maxlength="{{ max_chars }}" placeholder="Message"></textarea>
+        <button type="submit">Send</button>
+      </div>
+      <div class="rooms-suggest" id="rooms-suggest" role="listbox" hidden></div>
+    </form>
+  </section>
+
+  <aside class="rooms-pane" id="rooms-pane" hidden aria-label="Details">
+    <header class="rooms-pane-head"><strong id="pane-title"></strong>
+      <button type="button" class="link" id="pane-close" title="Close">✕</button></header>
+    <div class="rooms-pane-body" id="pane-body"></div>
+    <form class="rooms-compose rooms-thread-compose" id="thread-compose" hidden autocomplete="off">
+      <div class="rooms-compose-row">
+        <textarea id="thread-text" rows="1" maxlength="{{ max_chars }}" placeholder="Reply in thread"></textarea>
+        <button type="submit">Reply</button>
+      </div>
+    </form>
+  </aside>
+</main>
+<script src="{{ static('picker.js') }}"></script>
+<script src="{{ static('rooms.js') }}"></script>
+{% endblock %}

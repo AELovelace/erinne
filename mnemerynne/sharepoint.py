@@ -67,8 +67,12 @@ def resolve_site(conn: sqlite3.Connection, settings: Settings, tenant_row: int, 
         drives = graph.get(f"/sites/{site['id']}/drives", {"$select": "id,name,webUrl,driveType"})
     except m365.GraphError as exc:
         if exc.status in (401, 403, 404):
-            raise SharePointError("Mnemerynne can't open that site. A tenant admin grants it read access per site "
-                                  "(Sites.Selected; see the deploy guide, section 5i).") from None
+            row = m365.tenant(conn, tenant_row)
+            app_id = row["client_id"] or settings.m365_client_id
+            raise SharePointError(f"Mnemerynne can't open that site (Microsoft said {exc.status}: {exc}). A tenant admin "
+                                  f"grants the app {app_id} read access to it (Sites.Selected): deploy/m365/SharePointAccess.ps1 "
+                                  f"-AppId {app_id}, or the deploy guide, section 5i. A new grant can take a few minutes "
+                                  f"to apply.") from None
         raise
     taken = {r["drive_id"] for r in conn.execute("SELECT drive_id FROM sharepoint_drives WHERE tenant_row = ?",
                                                  (tenant_row,))}

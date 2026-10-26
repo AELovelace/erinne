@@ -131,6 +131,10 @@ class Settings(BaseSettings):
     # Messages between people and from Mnemerynne (mnemerynne/messages.py) are deleted after
     # message_days; announcements (mnemerynne/notices.py) announcement_days after they expired.
     message_days: int = 365
+    # Rooms (mnemerynne/rooms.py): messages and their files are kept room_message_days (0 = always);
+    # one attached file is at most room_file_bytes.
+    room_message_days: int = 365
+    room_file_bytes: int = 25 * 1024 * 1024
     announcement_days: int = 90
 
     # Backups and housekeeping (mnemerynne/backup.py, mnemerynne/retention.py).
