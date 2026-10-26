@@ -30,7 +30,7 @@ A small counter on the right shows how much text the models read and wrote for t
 
 ## Use External API
 
-If your admin has turned this on for you and you have added your own API key on Preferences, a **🌐 Use External API** switch appears. With it ticked, the question is answered by Claude (Anthropic's model) using your key and billed to you, with Erynne's tools, but reaching only the documents that are shared with Claude; your mail, calendar and memories never go there. Changes it drafts are still proposals you apply. Without a key the switch is replaced by a link to add one.
+If your admin has turned this on for you and you have added your own API key on Preferences, a **🌐 Use External API** switch appears. With it ticked, the question is answered by Claude (Anthropic's model) using your key and billed to you, with all of Erynne's tools and reach: your documents, internal systems, your mail and calendar if you have them, your memories and the conversation so far. Everything it reads goes to Anthropic under your key, which is why only people an admin put in the group see the switch. Changes it drafts are still proposals you apply. Without a key the switch is replaced by a link to add one.
 
 ## Good questions
 

@@ -26,7 +26,7 @@ Nothing until an admin shares it:
 - **Internal APIs**: each has its own *Claude can query this* switch, off by default.
 - **SharePoint libraries**: their Claude switch, off by default, with the per-file check against SharePoint.
 
-Erynne is unaffected by any of this: she runs on the box and sees what the person sees. Memories, mail and calendar never go to Claude.
+Erynne is unaffected by any of this: she runs on the box and sees what the person sees. Memories, mail and calendar never go to Claude through the connector; [Claude in chat](claude-in-chat.md) is the deliberate exception.
 
 ## What Claude can change
 

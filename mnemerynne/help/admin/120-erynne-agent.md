@@ -23,7 +23,7 @@ Every tool call is logged in `agent_calls` (kept `MNEMERYNNE_AGENT_CALLS_DAYS`, 
 
 ## Mail and calendar
 
-Only for the agent group, and only through a linked Microsoft account: search and read mail, see the calendar, search SharePoint live, draft emails and replies. **Save to Drafts** puts a draft in Outlook; nothing is ever sent, moved or deleted, and there is no code to do it. Mail text never goes to Claude. See [Microsoft 365](microsoft-365.md).
+Only for the agent group, and only through a linked Microsoft account: search and read mail, see the calendar, search SharePoint live, draft emails and replies. **Save to Drafts** puts a draft in Outlook; nothing is ever sent, moved or deleted, and there is no code to do it. Mail text never goes to Claude through the connector; it does for people who tick *Use External API* in chat, under their own key. See [Microsoft 365](microsoft-365.md).
 
 ## Evaluating the agent
 

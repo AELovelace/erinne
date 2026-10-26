@@ -87,9 +87,11 @@
   {% if claude_chat %}
   <h2 class="admin-section" id="claude-key">Claude in chat</h2>
   <p class="muted small">Tick <em>Use External API</em> under the question box and {{ assistant_name }} answers
-    with Claude, using your own Anthropic API key: the questions are billed to you. She keeps her tools, and hands
-    reading-heavy parts to MinErynnes, two at a time, who see only what's shared with Claude, as she does then.
-    Your mail, calendar and memories never go to Claude. Changes she drafts are proposals you apply, as always.</p>
+    with Claude, using your own Anthropic API key: the questions are billed to you. She keeps all her tools and
+    reach: your documents, internal systems, and if you have them your mail and calendar, memories and the
+    conversation so far. All of that is sent to Anthropic under your key, so only tick it when you're fine with
+    that. She hands reading-heavy parts to MinErynnes, two at a time. Changes she drafts are proposals you apply,
+    as always.</p>
   <div id="claude-chat" aria-live="polite"><p class="muted small">Loading…</p></div>
   {% endif %}
 

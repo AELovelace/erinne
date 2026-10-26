@@ -25,8 +25,11 @@ flow instead. Every tool call is logged in agent_calls.
 
 Members of the Claude group (claude_chat.py) may have Claude run the same loop
 instead, with their own API key ("Use External API" in chat). Claude answers
-as Erynne, gets the tools in "claude" mode (only what is shared with Claude;
-edits still become proposals) and can hand reading-heavy parts to MinErynnes:
+as Erynne with Erynne's own tools and reach: everything the person can read,
+their APIs, and for the agent group mail, calendar and SharePoint, plus their
+memories and the whole conversation (people in the group accept that this
+goes to the API provider under their key; edits still become proposals). It
+can hand reading-heavy parts to MinErynnes:
 local Erynne instances, up to MAX_SUBAGENTS at once, in parallel, their
 requests spread over the balancer nodes. A MinErynne has Claude's limits too (its
 report goes back to Claude) and can't change files. Nothing the person sees
@@ -177,9 +180,7 @@ files, ask internal systems (live, read-only), and draft changes to .txt, .md, .
 CLAUDE_EXTRA = """
 - You are {name} to {user}: stay in that role. Don't bring up which model or company is behind you; if asked,
   say you can't share details of the technology behind you.
-- {delegate}
-- Some of their documents can't be reached this way. If something isn't there, say it may be in documents you
-  can't reach right now, and that they can ask again with "Use External API" switched off."""
+- {delegate}"""
 
 SUBAGENT_PROMPT = """You are a MinErynne, a helper reading for {name} on part of a question from {user}.
 Today is {today}.
@@ -524,7 +525,10 @@ class AgentCaller(Caller):
 
 # ---------------------------------------------------------------- subagents
 class _Delegate:
-    """Claude's ask_minerynne: one MinErynne (local Erynne) per call, at most MAX_SUBAGENTS at once
+    """Claude's ask_minerynne: one MinErynne (local Erynne) per call, at most MAX_SUBAGENTS at once.
+    A MinErynne always runs on the local model path (agent._client_for: balancer nodes, then
+    MNEMERYNNE_LLM_URL), never on the person's Claude key: when no local model answers there is no
+    delegate and Claude does the reading itself
     (the semaphore), each request to the least busy balancer node. Claude's limits,
     read-only tools, and the parent's Sources, so its [n] markers are Claude's too.
     Each is numbered for the question, and her steps show under the answer as
@@ -576,8 +580,9 @@ class Agent:
         self.settings = settings
         self.get_directory = get_directory
         self.tools = Tools(settings, get_embedder, get_directory, mode="erynne")
-        # Claude in chat, and the Erynne subagents working for it: Claude's reach, edits as proposals.
-        self.claude_tools = Tools(settings, get_embedder, get_directory, mode="claude", propose=True)
+        # Claude in chat, and the Erynne subagents working for it: Erynne's reach (everything the person can
+        # read), edits as proposals. A separate instance, so "tools is claude_tools" tells the two apart.
+        self.claude_tools = Tools(settings, get_embedder, get_directory, mode="erynne", propose=True)
         self._claude_factory = claude_factory or (lambda key, model, timeout: ClaudeLLM(key, model, timeout=timeout))
         self._server = build_server(settings, get_embedder, get_directory)   # only for the tool list
         self._specs: list[dict] | None = None
@@ -624,7 +629,7 @@ class Agent:
                 return "nokey"
             local = model_config(conn)
             local["full"] = accounts.is_agent_user(conn, user, self.get_directory())
-            local["places"] = _places(conn, fs.Access.for_claude(conn, user_id))
+            local["places"] = _places(conn, fs.Access.of(conn, user_id))
             return {**local, **CLAUDE_LIMITS}, local, user["username"], *creds
         finally:
             conn.close()
@@ -820,7 +825,8 @@ class Agent:
     # ---------------------------------------------------------------- run
     def _messages(self, state: dict, username: str, places: str, claude: bool = False,
                   delegate: bool = False, agents_only: bool = False) -> list[dict]:
-        """For Claude: no memories, and only earlier answers Claude wrote (claude_chat.py)."""
+        """The system prompt, the person's memories and the conversation so far; the same for Claude
+        (the person chose to send them under their own key)."""
         system = SYSTEM_PROMPT.format(name=ASSISTANT_NAME, user=username, today=date.today().isoformat(),
                                       places=f"they can search {places}" if places else "they have no documents yet")
         if claude:
@@ -831,11 +837,11 @@ class Agent:
         if agents_only:
             system += (f"\n- You can only create or change files in {username}'s Agents folder "
                        f"(“{permissions.PRIVATE_LABEL} / Agents”), nowhere else.")
-        memories = [] if claude else state.get("memories") or []
+        memories = state.get("memories") or []
         if memories:
             system += "\n\nWhat " + username + " has told you about themselves:\n" + "\n".join(f"- {m}" for m in memories)
         messages = [{"role": "system", "content": system}]
-        turns = [t for t in state.get("turns") or [] if not claude or t.get("model") in claude_chat.MODELS]
+        turns = state.get("turns") or []
         for turn in turns[-HISTORY_TURNS:]:
             messages += [{"role": "user", "content": turn["question"]},
                          {"role": "assistant", "content": turn["answer"][:2000]}]
@@ -864,12 +870,11 @@ class Agent:
         base = [s for s in await self.specs()
                 if s["function"]["name"] not in GENERIC_API_TOOLS | CONNECTOR_ONLY_TOOLS
                 | (NO_IMAGES if claude else set())]
-        api_specs, api_map = await asyncio.to_thread(self._api_tools, state["user_id"], claude)
+        api_specs, api_map = await asyncio.to_thread(self._api_tools, state["user_id"])
         if not full:   # API actions: the agent group only
             api_specs = [s for s in api_specs if not api_map[s["function"]["name"]].action]
-        # Mail, calendar and SharePoint: the agent group, and never Claude.
-        mail_specs, mail = (([], None) if claude or not full
-                            else await asyncio.to_thread(self._mail_tools, state["user_id"]))
+        # Mail, calendar and SharePoint: the agent group (with the external API too).
+        mail_specs, mail = (([], None) if not full else await asyncio.to_thread(self._mail_tools, state["user_id"]))
         delegate = None
         if claude and DELEGATE_TOOL not in off and await self.reachable(local):
             delegate = _Delegate(self, local, username, asyncio.Semaphore(MAX_SUBAGENTS))

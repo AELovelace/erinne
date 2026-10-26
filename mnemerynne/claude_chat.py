@@ -4,11 +4,11 @@ Anthropic API, with their own API key.
 
 - Each person's key is encrypted like API credentials (apis.encrypt_secret),
   never sent back, and used only for their own questions, billed to them.
-- Claude sees what it sees through /mcp: libraries shared with Claude, APIs
-  with Claude's switch on, and no mail, calendar or SharePoint. Edits stay
-  proposals the person applies (agent.py).
-- Earlier answers in the conversation go along only if Claude wrote them, and
-  memories never do: either could carry what isn't shared with Claude.
+- Claude gets Erynne's own tools and reach (agent.py): everything the person
+  can read, their APIs, and for the agent group mail, calendar and SharePoint;
+  their memories and the whole conversation go along. The Claude group is the
+  admin's statement that these people accept what that sends to Anthropic.
+  Edits stay proposals the person applies.
 """
 
 from __future__ import annotations

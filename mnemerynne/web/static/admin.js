@@ -1165,9 +1165,10 @@
     if (data.groups && data.groups.length) fillDatalist("domain-groups", data.groups);
     box.appendChild(el("p", "muted", "Members of this " + (data.domain || "domain") + " group may tick Use External API " +
       "in chat: Claude answers with Erynne's tools, using each person's own Anthropic API key (saved on their " +
-      "Preferences page, billed to them). Claude reads only what's shared with Claude, can hand reading to up to two " +
-      "MinErynnes (small local Erynnes) with the same limits, and never sees mail, calendar or memories. Leave it empty to turn " +
-      "it off."));
+      "Preferences page, billed to them). It gets Erynne's full reach: everything they can read, their internal " +
+      "systems, mail and calendar if they're in the agent group, memories and the conversation, all sent to " +
+      "Anthropic under their key. Put only people in it who accept that. It can hand reading to up to two " +
+      "MinErynnes (small local Erynnes). Leave it empty to turn it off."));
     if (!data.enabled) box.appendChild(el("p", "error", "No AD domain is configured on the server (MNEMERYNNE_AD_DOMAIN), so nobody can be in the group."));
     if (!data.secret_key_set) box.appendChild(el("p", "error", "MNEMERYNNE_SECRET_KEY isn't set on the server, so nobody can save a key yet."));
 

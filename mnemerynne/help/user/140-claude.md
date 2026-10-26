@@ -2,7 +2,7 @@
 
 Erynne is also an **MCP server**: Claude (Anthropic's assistant) can search your documents, read passages and pages, browse your files, and, if you allow it, create and change files, all as you, and only within what has been shared with Claude. Everything here is on the right half of [Preferences](preferences.md).
 
-> What Claude reads is sent to Anthropic. That is why Claude only reaches the libraries and files an admin and you have shared with it, never your mail, calendar or memories.
+> What Claude reads is sent to Anthropic. That is why Claude through the connector only reaches the libraries and files an admin and you have shared with it, never your mail, calendar or memories. The exception is **Use External API** in chat (below), where you deliberately send Erynne's full reach under your own key.
 
 ## Three ways to connect
 
@@ -49,7 +49,7 @@ Claude can also comment on files and read comments ([Comments](comments.md)), an
 
 ## Claude in chat (your own API key)
 
-If an admin has put you in the Claude group, **Claude in chat** lets you paste your own Anthropic API key and pick a model. Then the **🌐 Use External API** switch on the Ask tab answers with Claude, billed to you, with Erynne's tools but Claude's reach. The key is checked with Anthropic when you save it and is never shown again; **Remove** forgets it.
+If an admin has put you in the Claude group, **Claude in chat** lets you paste your own Anthropic API key and pick a model (Opus, Sonnet or Haiku). Then the **🌐 Use External API** switch on the Ask tab answers with Claude, billed to you, with all of Erynne's tools and reach: every document you can read, your internal systems, your mail and calendar if you are in the agent group, your memories and the conversation. All of that is sent to Anthropic under your key; the group exists so that only people who accept that get the switch. The key is checked with Anthropic when you save it and is never shown again; **Remove** forgets it.
 
 ## Activity
 

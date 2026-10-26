@@ -26,7 +26,7 @@
       </label>
       {% endif %}
       {% if claude and claude_key %}
-      <label class="tools-toggle small" title="Answer with the external API, using your own API key. It reaches only the documents shared for it.">
+      <label class="tools-toggle small" title="Answer with the external API, using your own API key. It gets the same tools and documents as Erynne, including your mail and calendar if you have them; all of that goes to the API provider.">
         <input type="checkbox" id="use-claude"> 🌐 Use External API
       </label>
       {% elif claude %}

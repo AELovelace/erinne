@@ -41,7 +41,7 @@ Access → Settings → Microsoft 365 → SharePoint: pick the tenant, paste a s
 
 ## Mail and calendar
 
-People in the Erynne agent group with a linked account get tools to search and read their mail, see their calendar, search SharePoint live, and draft emails and replies. Drafts are cards under the answer; **Save to Drafts** puts the draft in that account's Outlook Drafts. Nothing is sent, moved or deleted. Mail text never goes to Claude; the tool log keeps message ids, not text.
+People in the Erynne agent group with a linked account get tools to search and read their mail, see their calendar, search SharePoint live, and draft emails and replies. Drafts are cards under the answer; **Save to Drafts** puts the draft in that account's Outlook Drafts. Nothing is sent, moved or deleted. Mail text never goes to Claude through the connector (people who use *Use External API* in chat send it under their own key); the tool log keeps message ids, not text.
 
 **Shared mailboxes** are listed per tenant with an optional group. Exchange still decides who may open one: the person needs Full Access there too.
 

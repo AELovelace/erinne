@@ -711,8 +711,9 @@ group with a linked account get tools to:
 Drafts are cards under the answer. **Save to Drafts** puts the draft in that
 account's Outlook Drafts folder. Nothing is ever sent, moved or deleted, and
 there's no code to do it. Emails and events are cited like documents and open
-in Outlook. Mail text never goes to Claude, and the tool-call log
-(`agent_calls`) keeps message ids, not mail text.
+in Outlook. Mail text never goes to Claude through the connector (people who
+tick *Use External API* in chat send it under their own key), and the tool-call
+log (`agent_calls`) keeps message ids, not mail text.
 
 *Shared mailboxes* (Settings → Microsoft 365) are listed per tenant with an
 optional group. Exchange still decides who may open them: a person needs Full

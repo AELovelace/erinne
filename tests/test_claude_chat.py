@@ -1,4 +1,5 @@
-"""Claude in chat: the Claude group, each person's own key, Claude's limits, and Erynne subagents."""
+"""Claude in chat: the Claude group, each person's own key, Erynne's full reach under that key, and Erynne
+subagents."""
 
 import asyncio
 import json
@@ -153,38 +154,47 @@ def test_keys_are_each_persons_own_and_never_shown(client, conn, settings, world
     assert claude_chat.credentials(conn, settings, world["alice"]) is None
 
 
-# ----------------------------------------------------------- Claude's limits
-def test_claude_reads_only_what_is_shared_with_claude(client, claude, conn, settings, world):
+# ------------------------------------------------------------ Erynne's reach
+def test_claude_gets_erynnes_full_reach(client, claude, conn, settings, world, directory, monkeypatch):
+    """The Claude switches don't apply to the external API: people in the group send Erynne's whole reach
+    under their own key, mail included once they're in the agent group."""
+    from mnemerynne import agent as agent_mod
+
     _with_key(conn, settings, world)
     _login(client, "alice")
-    _inbox_for_claude(conn, world, False)
-    claude.turns(call("search_documents", query="night audit"), ToolTurn("I can't see that."))
-    _final(_ask(client, "How do I run the night audit?"))
-    messages, offered, _ = claude.calls[0]
-    assert last_tool(claude.calls[1][0]).get("results", []) == []                      # inbox not shared
-    assert "create_file" in offered and "ask_minerynne" in offered
-    assert "view_page" not in offered and not {"search_mail", "calendar", "recent_mail"} & set(offered)
-    assert messages[0]["content"].startswith("You are Erynne") and "Claude" not in messages[0]["content"]
-
-    _inbox_for_claude(conn, world, True)
+    _inbox_for_claude(conn, world, False)                                        # not shared with the connector
     claude.turns(call("search_documents", query="night audit"),
                  lambda m: ToolTurn(f"After midnight {last_tool(m)['results'][0]['cite']}."))
     final = _final(_ask(client, "How do I run the night audit?"))
-    assert final["answer"] == "After midnight [1]." and final["citations"] == [1]
+    assert final["answer"] == "After midnight [1]." and final["citations"] == [1]   # found anyway
+    messages, offered, _ = claude.calls[0]
+    assert "create_file" in offered and "ask_minerynne" in offered and "view_page" not in offered
+    assert not {"search_mail", "calendar", "recent_mail"} & set(offered)           # not in the agent group
+    assert messages[0]["content"].startswith("You are Erynne") and "Claude" not in messages[0]["content"]
+    assert "can't be reached this way" not in messages[0]["content"]
+
+    # In the agent group, mail and calendar come along like they do for Erynne.
+    directory.members["alice"].add(GROUP.lower())
+    mail_spec = {"type": "function", "function": {"name": "search_mail", "description": "Search mail",
+                                                  "parameters": {"type": "object", "properties": {}}}}
+    monkeypatch.setattr(agent_mod.Agent, "_mail_tools", lambda self, uid: ([mail_spec], None))
+    claude.turns(ToolTurn("Nothing in your mail about that."))
+    _final(_ask(client, "Did anyone email me about the audit?"))
+    assert "search_mail" in claude.calls[-1][1]
 
 
 def test_tool_errors_dont_name_claude(client, claude, conn, settings, world):
     _with_key(conn, settings, world)
     _login(client, "alice")
     _inbox_for_claude(conn, world, False)
-    claude.turns(call("read_passage", chunk_id=1), ToolTurn("Not found."))
+    claude.turns(call("read_passage", chunk_id=999999), ToolTurn("Not found."))
     events = _ask(client, "Read it")
     failed = [e for e in events if e["type"] == "tool" and e["state"] == "failed"]
-    assert failed and "can't be reached this way" in failed[0]["summary"]
+    assert failed and "No such passage" in failed[0]["summary"]
     assert "Claude" not in json.dumps(events) and "Claude" not in claude.calls[1][0][-1]["content"]
 
 
-def test_earlier_answers_and_memories_go_to_claude_only_if_claude_wrote_them(client, claude, conn, settings, world):
+def test_the_whole_conversation_goes_along(client, claude, conn, settings, world):
     _with_key(conn, settings, world)
     _login(client, "alice")
     events = _ask(client, "How do I run the night audit?", claude=False)          # Erynne answers this one
@@ -192,11 +202,11 @@ def test_earlier_answers_and_memories_go_to_claude_only_if_claude_wrote_them(cli
     claude.turns(ToolTurn("Claude's answer."))
     _final(_ask(client, "And after that?", conversation_id=conversation))
     messages = claude.calls[-1][0]
-    assert [m["role"] for m in messages] == ["system", "user"]                     # Erynne's answer stayed here
-    assert messages[1]["content"] == "And after that?"
+    assert [m["role"] for m in messages] == ["system", "user", "assistant", "user"]   # Erynne's turn too
+    assert messages[1]["content"] == "How do I run the night audit?" and messages[-1]["content"] == "And after that?"
     claude.turns(ToolTurn("Second."))
     _final(_ask(client, "And then?", conversation_id=conversation))
-    assert [m["content"] for m in claude.calls[-1][0][1:]] == ["And after that?", "Claude's answer.", "And then?"]
+    assert [m["content"] for m in claude.calls[-1][0][-3:]] == ["And after that?", "Claude's answer.", "And then?"]
 
 
 def test_claude_hands_reading_to_two_erynne_subagents_at_a_time(client, claude, local, conn, settings, world):
@@ -211,7 +221,7 @@ def test_claude_hands_reading_to_two_erynne_subagents_at_a_time(client, claude, 
     assert len([c for c in local.calls if c[0][-1]["role"] == "user"]) == 3
     assert final["answer"] == "Done: After midnight [1]. / After midnight [1]. / After midnight [1]."
     assert final["citations"] == [1] and final["sources"][0]["file"] == "OPERA.pdf"
-    # Subagents: read-only tools, Claude's limits, their steps shown under the answer.
+    # Subagents: read-only tools, Erynne's reach, their steps shown under the answer.
     offered = local.calls[0][1]
     assert "search_documents" in offered and not {"create_file", "edit_text", "ask_minerynne", "view_page"} & set(offered)
     sub_steps = [e for e in events if e["type"] == "tool" and "/" in e["id"]]
@@ -223,10 +233,14 @@ def test_claude_hands_reading_to_two_erynne_subagents_at_a_time(client, claude, 
     assert [e["label"] for e in sent if e["state"] == "running"] == [f"Sending MinErynne {n} to read" for n in (1, 2, 3)]
     assert {e["summary"] for e in sent if e["state"] == "done"} == {f"MinErynne {n}: Reported back" for n in (1, 2, 3)}
     assert "Claude" not in json.dumps(events)                     # the person never sees Claude's name
+    # MinErynnes run on the local model, never on the person's Claude key: every MinErynne prompt went to
+    # the local fake, and none reached the Claude fake.
+    assert len(local.calls) >= 3 and all(m[0]["content"].startswith("You are a MinErynne") for m, _, _ in local.calls)
+    assert not any(m[0]["content"].startswith("You are a MinErynne") for m, _, _ in claude.calls)
 
-    _inbox_for_claude(conn, world, False)
+    _inbox_for_claude(conn, world, False)                       # the connector switch doesn't limit MinErynnes
     claude.turns(ToolTurn("", tasks[:1]), lambda m: ToolTurn(json.loads(m[-1]["content"])["report"]))
-    assert _final(_ask(client, "Summarise the night audit"))["answer"] == "Nothing about that."
+    assert _final(_ask(client, "Summarise the night audit"))["answer"] == "After midnight [1]."
 
 
 def test_no_subagents_when_erynnes_model_is_down(client, claude, local, conn, settings, world):
