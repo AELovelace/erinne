@@ -17,7 +17,7 @@ def test_library_admin(client, conn):
     page = client.get("/admin/libraries").text
     assert "Who can see what" in page
     # The Settings tab is one tab panel holding two cards: this box's settings, then connectors.
-    assert page.count('data-panel="settings"') == 1 and 'class="ax-split" data-panel="settings"' in page
+    assert page.count('data-panel="settings"') == 1 and 'class="ax-settings" data-panel="settings"' in page
     local, connectors = page.index('id="ax-local-title"'), page.index('id="ax-connectors-title"')
     assert local < page.index('id="admin-group"') < page.index('id="agent-settings"') \
         < page.index('id="balancer-settings"') < page.index('id="updates"') < connectors

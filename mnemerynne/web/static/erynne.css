@@ -715,9 +715,13 @@ button.danger-fill { background: var(--error); }
 .ax-split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; flex: 1; min-height: 0;
   align-items: start; }
 .ax-split[hidden] { display: none; }
-.ax-split { overflow: auto; }                      /* three sections: the panel scrolls as one */
+/* Settings: the two columns, then Experimental full width; the panel scrolls as one, and Experimental
+   sits at the bottom of the panel even when the columns are short. */
+.ax-settings { display: flex; flex-direction: column; gap: .9rem; flex: 1; min-height: 0; overflow: auto; }
+.ax-settings[hidden] { display: none; }
+.ax-settings > .ax-split { flex: none; min-height: 0; overflow: visible; }
+.ax-settings > .ax-wide { flex: none; width: 100%; max-width: none; margin: auto 0 0; }
 .ax-split > .inbox { max-width: none; max-height: none; }
-.ax-split > .ax-split-wide { grid-column: 1 / -1; }   /* Experimental: full width, at the bottom */
 .ax-split-title { margin: 0; font-size: 1.3rem; }
 .ax-split .ax-split-title + .ax-h { margin-top: 1rem; }
 .ax-tree { overflow: auto; padding: .6rem .3rem; }
@@ -756,6 +760,7 @@ button.danger-fill { background: var(--error); }
 @media (max-width: 800px) {
   .ax-page { height: auto; }
   .ax, .ax-split { grid-template-columns: 1fr; }
+  .ax-settings { overflow: visible; }
   .ax-tree { max-height: 40vh; }
 }
 .ax-commits { list-style: none; padding: 0; margin: .4rem 0 .8rem; font-size: .9rem; }
@@ -847,8 +852,9 @@ button.danger-fill { background: var(--error); }
               linear-gradient(transparent, rgba(255, 46, 151, .45)); }
 
 /* ---------------------------------------------------------------- Rooms (rooms.html, rooms.js) */
-.rooms { display: grid; grid-template-columns: 15rem minmax(0, 1fr) auto; gap: .75rem; max-width: 92rem;
-         margin: .75rem auto; padding: 0 .75rem; height: calc(100vh - 5.5rem); }
+/* Full width: the same .75rem gap on every side as at the bottom, however wide the screen. */
+.rooms { display: grid; grid-template-columns: 15rem minmax(0, 1fr) auto; gap: .75rem;
+         margin: .75rem; height: calc(100vh - 5.5rem); }
 .rooms-side, .rooms-main, .rooms-pane { background: var(--glass); border: 1px solid var(--line);
                                         border-radius: var(--radius); box-shadow: var(--shadow); min-height: 0; }
 .rooms-side { padding: .75rem; overflow-y: auto; }
