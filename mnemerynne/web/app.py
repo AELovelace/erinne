@@ -22,7 +22,7 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
 from mnemerynne import (balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, mcp_server, memory,
-                        permissions, share, sharepoint, users)
+                        messages as messages_mod, permissions, remote, share, sharepoint, users)
 from mnemerynne.agent import Agent
 from mnemerynne.answer import ASSISTANT_NAME
 from mnemerynne.auth import LoginThrottle
@@ -32,10 +32,10 @@ from mnemerynne.clients.rerank import Reranker
 from mnemerynne.config import Settings, get_settings
 from mnemerynne.graph import Deps, build_graph
 from mnemerynne.router import load_router
-from mnemerynne.web import (admin, admin_apis, agent as agent_pages, apis as api_pages, balancer as balancer_pages,
+from mnemerynne.web import (admin, admin_apis, admin_notices, admin_remote, agent as agent_pages, apis as api_pages, balancer as balancer_pages,
                             bfgguf as bfgguf_pages, chat,
                             claude_links as claude_link_pages, editor as editor_pages, files, help as help_pages,
-                            m365 as m365_pages, memories, oauth as oauth_pages, security,
+                            m365 as m365_pages, memories, messages as message_pages, oauth as oauth_pages, remote as remote_pages, security,
                             settings as settings_pages, tokens, wiki as wiki_pages)
 from mnemerynne.web.deps import LoginRequired, api_user, get_db, is_admin, page_user
 
@@ -45,6 +45,16 @@ _HERE = Path(__file__).parent
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 # Called by Claude's servers with OAuth credentials, never with the session cookie.
 _OAUTH_API = {"/oauth/token", "/oauth/register", "/oauth/revoke"}
+
+
+def _safe_return(after: str) -> bool:
+    """A place sign-in may send someone back to: Claude's consent page, or a remote app they opened;
+    never another site (open redirect) or anything with a scheme, a backslash or control characters."""
+    if not (after.startswith("/oauth/authorize?") or after.startswith(f"{remote.PREFIX}/")):
+        return False
+    parts = urlsplit(after)
+    return not (after.startswith("//") or "\\" in after or parts.scheme or parts.netloc
+                or any(ord(c) < 32 or c == "\x7f" for c in after))
 
 
 def _cross_site(request: Request) -> bool:
@@ -148,6 +158,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             await saver_conn.close()
             await store_conn.close()
             await app.state.agent.aclose()
+            await app.state.remote_proxy.aclose()
             await balancer.aclose()
             if services is None:
                 svc.embedder.close()
@@ -185,7 +196,25 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.add_middleware(security.SecurityHeaders, settings=settings)
 
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
-    templates = Jinja2Templates(directory=_HERE / "templates")
+    def _nav_context(request: Request) -> dict:
+        """What every page's top bar needs beyond its own context: the unread badge."""
+        user_id = request.scope.get("session", {}).get("user_id") if "session" in request.scope else None
+        if not user_id:
+            return {}
+        conn = db.connect(settings.db_path)
+        try:
+            user = users.get_user_by_id(conn, user_id)
+            if user is None:
+                return {}
+            admin = is_admin(request, conn, user)
+            return {"nav_unread": messages_mod.unread_count(conn, user_id),
+                    "has_remote": bool(remote.apps_for(conn, user, app.state.directory, admin))}
+        except sqlite3.Error:
+            return {}
+        finally:
+            conn.close()
+
+    templates = Jinja2Templates(directory=_HERE / "templates", context_processors=[_nav_context])
     templates.env.globals["assistant_name"] = ASSISTANT_NAME
 
     def static(name: str) -> str:
@@ -214,6 +243,13 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(help_pages.router)
     app.include_router(editor_pages.router)
     app.include_router(wiki_pages.router)
+    app.include_router(message_pages.router)
+    app.include_router(admin_notices.router)
+    app.include_router(remote_pages.router)
+    app.include_router(admin_remote.router)
+    # LAN apps served at /remote/<slug>/... (mnemerynne/remote.py); after the routers, so /remote itself is the page.
+    app.state.remote_proxy = remote.RemoteProxy(settings, lambda: app.state.directory)
+    app.mount(remote.PREFIX, app.state.remote_proxy, name="remote")
 
     # MCP for Claude Desktop: bearer-token auth, read-only tools (mnemerynne/mcp_server.py).
     mcp = mcp_server.build_server(settings, lambda: app.state.embedder, lambda: app.state.directory)
@@ -256,7 +292,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         request.session.clear()
         request.session["user_id"] = user["id"]
         request.session["epoch"] = user["session_epoch"]
-        target = after if after.startswith("/oauth/authorize?") else "/"
+        target = after if _safe_return(after) else "/"
         return RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
 
     @app.post("/logout")

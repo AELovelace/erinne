@@ -10,7 +10,9 @@
       <button type="button" role="tab" data-tab="groups">Groups</button>
       <button type="button" role="tab" data-tab="accounts">Accounts</button>
       <button type="button" role="tab" data-tab="apis">APIs</button>
+      <button type="button" role="tab" data-tab="remote">Remote</button>
       <button type="button" role="tab" data-tab="approvals">Approvals</button>
+      <button type="button" role="tab" data-tab="announcements">Announcements</button>
       <button type="button" role="tab" data-tab="people">Who can see what</button>
       <button type="button" role="tab" data-tab="claude">Claude activity</button>
       <button type="button" role="tab" data-tab="changes">Recent changes</button>
@@ -111,11 +113,51 @@
     <datalist id="api-groups"></datalist>
   </section>
 
+  <section class="ax" data-panel="remote" role="tabpanel" aria-label="Remote apps" hidden>
+    <aside class="ax-tree glass" aria-label="Remote apps">
+      <form class="ax-new ax-new-stack" id="new-remote" autocomplete="off">
+        <input type="text" id="new-remote-slug" placeholder="slug, e.g. balancer" maxlength="40" pattern="[a-z0-9][a-z0-9-]{0,39}" required aria-label="Slug">
+        <input type="text" id="new-remote-name" placeholder="Name" maxlength="80" required aria-label="Name">
+        <input type="text" id="new-remote-url" placeholder="http://10.0.5.20:9180" maxlength="500" required aria-label="Address">
+        <button type="submit" class="small">Add</button>
+      </form>
+      <ul class="tree" id="remote-list-admin"></ul>
+    </aside>
+    <section class="ax-pane glass" id="remote-pane" aria-live="polite">
+      <p class="muted">LAN-only web apps people open through {{ assistant_name }}, on the Remote tab, behind its sign-in.</p>
+    </section>
+    <datalist id="remote-groups"></datalist>
+  </section>
+
   <section class="inbox admin" data-panel="approvals" role="tabpanel" aria-label="Approvals" hidden>
     <p class="muted">Requests from Claude or Erynne that only an admin can decide: letting the AI edit a whole
       library, and API actions marked “needs an admin's approval”. Approving runs it on the requester's behalf
       (an API action checks again that they may still use it); your note is shown to them and their Claude.</p>
     <div id="approvals" aria-live="polite"><p class="muted">Loading…</p></div>
+  </section>
+
+  <section class="inbox admin" data-panel="announcements" role="tabpanel" aria-label="Announcements" hidden>
+    <p class="muted">A notice everyone, or one group, sees as a card on every page until they press <em>Got it</em>,
+      or <em>I acknowledge</em> when you ask for that. Markdown works in the text; the link is optional and points at a
+      page here (a wiki page, a file, the help).</p>
+    <form class="settings-form" id="new-announcement" autocomplete="off">
+      <label for="an-title" class="small">Title</label>
+      <input type="text" id="an-title" maxlength="120" required>
+      <label for="an-body" class="small">Text</label>
+      <textarea id="an-body" rows="4" maxlength="4000" placeholder="Markdown"></textarea>
+      <label for="an-link" class="small">Link</label>
+      <input type="text" id="an-link" maxlength="500" placeholder="/wiki/40 or /help/user/files (optional)">
+      <label for="an-group" class="small">For</label>
+      <input type="text" id="an-group" list="announcement-groups" placeholder="Everyone, or a group">
+      <label for="an-expires" class="small">Until</label>
+      <input type="date" id="an-expires">
+      <span></span>
+      <label class="check small"><input type="checkbox" id="an-ack"> People must acknowledge it</label>
+      <span></span>
+      <div><button type="submit">Post</button></div>
+    </form>
+    <datalist id="announcement-groups"></datalist>
+    <div id="announcements-admin" aria-live="polite"><p class="muted">Loading…</p></div>
   </section>
 
   <section class="inbox admin" data-panel="people" role="tabpanel" hidden>
@@ -168,4 +210,6 @@
 <script src="{{ static('admin_m365.js') }}"></script>
 <script src="{{ static('agent.js') }}"></script>
 <script src="{{ static('admin_approvals.js') }}"></script>
+<script src="{{ static('admin_notices.js') }}"></script>
+<script src="{{ static('admin_remote.js') }}"></script>
 {% endblock %}

@@ -58,8 +58,20 @@ def add(conn: sqlite3.Connection, access: fs.Access, file_id: int, body: str, *,
     if reply_to is not None and conn.execute("SELECT 1 FROM file_comments WHERE id = ? AND file_id = ?",
                                              (reply_to, file_id)).fetchone() is None:
         raise CommentError("There's no such comment on this file to reply to.")
-    return conn.execute("INSERT INTO file_comments(file_id, parent_id, user_id, via, body) VALUES (?, ?, ?, ?, ?)",
-                        (file_id, reply_to, access.user_id, via, body)).lastrowid
+    row = conn.execute("SELECT uploaded_by, display_name FROM files WHERE id = ?", (file_id,)).fetchone()
+    others = {r[0] for r in conn.execute("SELECT DISTINCT user_id FROM file_comments WHERE file_id = ? "
+                                         "AND user_id IS NOT NULL", (file_id,))}
+    comment_id = conn.execute("INSERT INTO file_comments(file_id, parent_id, user_id, via, body) VALUES (?, ?, ?, ?, ?)",
+                              (file_id, reply_to, access.user_id, via, body)).lastrowid
+    # Tell whoever has a stake in the file: its uploader and the earlier commenters, not the author.
+    from mnemerynne import messages   # messages imports comments: lazy, to keep the modules apart
+
+    author = conn.execute("SELECT username FROM users WHERE id = ?", (access.user_id,)).fetchone()
+    by = who(author["username"] if author else None, "claude" if via == "claude" else None)
+    for uid in (others | {row["uploaded_by"]}) - {access.user_id, None}:
+        messages.system(conn, uid, f"{by} commented on “{row['display_name']}”: {body[:140]}",
+                        link=f"/files/{file_id}/view")
+    return comment_id
 
 
 def counts(conn: sqlite3.Connection, file_ids: list[int]) -> dict[int, int]:

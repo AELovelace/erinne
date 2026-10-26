@@ -125,7 +125,7 @@ def test_everyone_gets_tools_and_the_agent_group_may_change_more(client, agent_l
     assert steps[1]["summary"] == "Searched “night audit”: 1 passage(s)"
     # The model saw the same tools Claude gets, and no links to paste.
     messages, offered, _ = agent_llm.calls[0]
-    assert "create_file" in offered and "query_api" not in offered and len(offered) == 12   # no APIs for alice
+    assert "create_file" in offered and "query_api" not in offered and len(offered) == 14   # no APIs for alice
     assert "link" not in agent_llm.calls[1][0][-1]["content"]
     assert len(client.llm.answer_prompts) == answered               # the answer model wasn't used
     row = conn.execute("SELECT tool, ok, u.username FROM agent_calls JOIN users u ON u.id = user_id").fetchone()
@@ -274,7 +274,7 @@ def test_steps_are_capped(client, agent_llm, conn, settings):
     agent_llm.turns(call("find_files", name="a"), call("find_files", name="b"), ToolTurn("Here's what I found."))
     final = _final(_ask(client, "look around"))
     assert final["answer"] == "Here's what I found."
-    assert [len(offered) for _, offered, _ in agent_llm.calls] == [12, 12, 0]      # the last turn gets no tools
+    assert [len(offered) for _, offered, _ in agent_llm.calls] == [14, 14, 0]      # the last turn gets no tools
 
 
 # -------------------------------------------------------------------- admin

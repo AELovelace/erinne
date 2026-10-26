@@ -17,5 +17,6 @@
   <div class="petals" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div>
   {% block body %}{% endblock %}
   <script src="{{ static('parallax.js') }}" defer></script>
+  {% if user is defined and user %}<script src="{{ static('notify.js') }}" defer></script>{% endif %}
 </body>
 </html>

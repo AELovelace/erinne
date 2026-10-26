@@ -4,6 +4,8 @@
     <a href="/" {% if active == 'chat' %}aria-current="page"{% endif %}>Ask</a>
     <a href="/files" {% if active == 'files' %}aria-current="page"{% endif %}>Files</a>
     <a href="/wiki" {% if active == 'wiki' %}aria-current="page"{% endif %}>Wiki</a>
+    {% if has_remote %}<a href="/remote" {% if active == 'remote' %}aria-current="page"{% endif %}>Remote</a>{% endif %}
+    <a href="/messages" {% if active == 'messages' %}aria-current="page"{% endif %}>Messages<span class="badge unread" id="nav-unread" {% if not nav_unread %}hidden{% endif %}>{{ nav_unread or '' }}</span></a>
     <a href="/preferences" {% if active == 'preferences' %}aria-current="page"{% endif %}>Preferences</a>
     {% if is_admin %}<a href="/admin/libraries" {% if active == 'admin' %}aria-current="page"{% endif %}>Access</a>{% endif %}
   </nav>
@@ -11,3 +13,4 @@
   <a class="help-link" href="/help" target="_blank" rel="noopener">Help</a>
   <form method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
 </header>
+<div class="notices" id="notices" aria-live="polite" hidden></div>

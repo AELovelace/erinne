@@ -16,6 +16,7 @@ Documents, questions, answers, memories, mail and the call logs live on this ser
 - **The AI never writes a request**: internal APIs are fixed operations with typed, checked parameters; actions are proposals; Claude can't delete or widen its own access; every file change keeps a version.
 - **Files**: uploads are sniffed by content; names are cleaned; the share is written through temp files and renames; Office lock files are respected.
 - **Logs**: Claude's calls, API calls (with responses), the agent's calls and the access log record who did what; they are pruned by the retention settings.
+- **Remote apps** ([Remote apps](remote-apps.md)) run on Mnemerynne's own address for whoever opens them, so their scripts could call Mnemerynne's API as that person. The proxy never forwards the session cookie upstream and checks the group on every request, but the app itself is trusted: list only the organisation's own tools, for the groups that should have them.
 
 ## Opening the box to the internet
 

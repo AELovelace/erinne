@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Remote · {{ assistant_name }}{% endblock %}
+{% block body %}
+{% include "_nav.html" %}
+<main class="remote-term" id="remote">
+  <section class="remote-window" id="remote-window" aria-label="Remote window">
+    <header class="remote-title">
+      <span class="remote-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="remote-where"><strong id="remote-name">Home</strong><span class="muted" id="remote-path"> · resources</span></span>
+      <span class="remote-buttons">
+        <button type="button" class="tool" id="remote-home" title="Home">⌂</button>
+        <button type="button" class="tool" id="remote-reload" title="Reload" hidden>↻</button>
+        <a class="tool" id="remote-open" target="_blank" rel="noopener" title="Open in a new tab" hidden>⧉</a>
+        <button type="button" class="tool" id="remote-full" title="Fullscreen" aria-pressed="false">⛶</button>
+      </span>
+    </header>
+    <div class="remote-content">
+      <div class="remote-home" id="remote-home-page">
+        {% if apps %}
+        <p class="muted">Resources you can open here. They run on the organisation's own network and are served
+          through {{ assistant_name }}; what you do in them is up to that system.</p>
+        <ul class="remote-cards" id="remote-cards">
+          {% for a in apps %}
+          <li class="remote-card glass" data-slug="{{ a.slug }}">
+            <strong>{{ a.name }}</strong>
+            {% if a.description %}<p class="small muted">{{ a.description }}</p>{% endif %}
+            {% if a.embed %}
+            <button type="button" class="small" data-open="{{ a.slug }}">Open</button>
+            {% else %}
+            <a class="button-like small" href="{{ a.url }}" target="_blank" rel="noopener">Open in a new tab</a>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">Nothing here yet. An admin lists the resources you may open on Access → Remote.</p>
+        {% endif %}
+      </div>
+      <iframe id="remote-frame" title="Remote resource" hidden></iframe>
+    </div>
+  </section>
+  <aside class="remote-bar" id="remote-bar" aria-label="Resources">
+    <button type="button" class="remote-handle" id="remote-handle" aria-expanded="false" aria-controls="remote-list">Resources ▾</button>
+    <div class="remote-drop" id="remote-list" hidden>
+      <button type="button" class="remote-item" data-open="">⌂ Home</button>
+      {% for a in apps %}
+      {% if a.embed %}
+      <button type="button" class="remote-item" data-open="{{ a.slug }}">{{ a.name }}</button>
+      {% else %}
+      <a class="remote-item" href="{{ a.url }}" target="_blank" rel="noopener">{{ a.name }} ⧉</a>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </aside>
+</main>
+<script id="remote-apps" type="application/json">{{ apps | tojson }}</script>
+<script src="{{ static('remote.js') }}"></script>
+{% endblock %}

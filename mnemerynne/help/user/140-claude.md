@@ -47,6 +47,8 @@ Claude can also comment on files and read comments ([Comments](comments.md)), an
 
 **Following a proposal.** Claude can check what became of a proposal (`get_proposal`), list its pending and recently decided ones, and withdraw one it no longer needs, so it can propose something partway through a task, carry on, and report the outcome without asking you whether you approved. It can never approve, apply or reject anything itself: that stays with you on *Changes waiting for you*.
 
+**Messages.** With a connection that may edit, Claude can leave a colleague a note inside Erynne (`send_message`, shown as "Claude for you") and read your unread notes and announcements (`list_messages`). See [Messages and announcements](messages-and-announcements.md).
+
 ## Claude in chat (your own API key)
 
 If an admin has put you in the Claude group, **Claude in chat** lets you paste your own Anthropic API key and pick a model (Opus, Sonnet or Haiku). Then the **🌐 Use External API** switch on the Ask tab answers with Claude, billed to you, with all of Erynne's tools and reach: every document you can read, your internal systems, your mail and calendar if you are in the agent group, your memories and the conversation. All of that is sent to Anthropic under your key; the group exists so that only people who accept that get the switch. The key is checked with Anthropic when you save it and is never shown again; **Remove** forgets it.

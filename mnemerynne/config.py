@@ -128,6 +128,10 @@ class Settings(BaseSettings):
     # (propose_batch) holds at most proposal_batch_max API actions under one approval.
     proposal_days: int = 7
     proposal_batch_max: int = 25
+    # Messages between people and from Mnemerynne (mnemerynne/messages.py) are deleted after
+    # message_days; announcements (mnemerynne/notices.py) announcement_days after they expired.
+    message_days: int = 365
+    announcement_days: int = 90
 
     # Backups and housekeeping (mnemerynne/backup.py, mnemerynne/retention.py).
     # Where `mnemerynne backup` writes and `restore` reads: put it on a disk

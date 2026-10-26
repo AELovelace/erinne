@@ -10,11 +10,14 @@ import sqlite3
 
 from mnemerynne.config import Settings
 
-# (table, setting): each table has an `at` or `started_at` column.
+# (table, column, setting): rows whose column is older than the setting's days go. Messages and
+# expired announcements are kept this way too (an announcement with no expiry never matches).
 LOGS = (("mcp_calls", "at", "mcp_calls_days"),
         ("api_calls", "at", "api_calls_days"),
         ("agent_calls", "at", "agent_calls_days"),
-        ("graph_runs", "started_at", "graph_runs_days"))
+        ("graph_runs", "started_at", "graph_runs_days"),
+        ("user_messages", "created_at", "message_days"),
+        ("announcements", "expires_at", "announcement_days"))
 
 
 def _older(days: int) -> str:

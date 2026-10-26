@@ -1435,7 +1435,9 @@
     }
     if (tab === "accounts") loadAccounts();
     if (tab === "apis" && window.ErynneApis) window.ErynneApis.load();   // admin_apis.js
+    if (tab === "remote" && window.ErynneRemote) window.ErynneRemote.load();   // admin_remote.js
     if (tab === "approvals" && window.ErynneApprovals) window.ErynneApprovals.load();   // admin_approvals.js
+    if (tab === "announcements" && window.ErynneNotices) window.ErynneNotices.load();   // admin_notices.js
   }
 
   function writeHash() {

@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import accounts, api_tokens, fs, group_refs, permissions, share, updates, users
+from mnemerynne import accounts, api_tokens, fs, group_refs, messages, permissions, share, updates, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
@@ -657,9 +657,13 @@ def update_account(user_id: int, body: AccountPatch, request: Request, user=Depe
         if body.role is not None and body.role != target["role"]:
             users.set_role(conn, target["username"], body.role)
             _log(conn, user, "account.role", target["username"], f"{target['role']} → {body.role}")
+            messages.system(conn, target["id"], f"{user['username']} made you a "
+                            f"{'local admin' if body.role == 'admin' else 'regular user'}.", link="/preferences")
         if body.active is not None and body.active != bool(target["active"]):
             users.set_active(conn, target["username"], body.active)
             _log(conn, user, "account.activate" if body.active else "account.deactivate", target["username"])
+            if body.active:
+                messages.system(conn, target["id"], f"{user['username']} let you sign in again.", link="/preferences")
     return _account_json(request, conn, _target(conn, user_id))
 
 
@@ -683,6 +687,8 @@ def set_user_groups(user_id: int, body: UserGroupsBody, user=Depends(admin_api_u
             "SELECT g.name FROM group_members m JOIN groups g ON g.id = m.group_id WHERE m.user_id = ? "
             "ORDER BY g.name COLLATE NOCASE", (user_id,))]
         _log(conn, user, "account.groups", target["username"], ", ".join(names) or "none")
+        messages.system(conn, target["id"], f"{user['username']} set your groups to: {', '.join(names) or 'none'}.",
+                        link="/preferences")
     return {"groups": names}
 
 
@@ -694,6 +700,8 @@ def link_account(user_id: int, body: LinkBody, request: Request, user=Depends(ad
     except accounts.LinkError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
     _log(conn, user, "account.link", users.get_user_by_id(conn, user_id)["username"], f"to {linked}")
+    messages.system(conn, user_id, f"{user['username']} linked your account to the domain account {linked}.",
+                    link="/preferences")
     return {"status": "linked", "ad_account": linked}
 
 
@@ -708,4 +716,6 @@ def unlink_account(user_id: int, request: Request, user=Depends(admin_api_user),
                             "Your admin rights come from your domain account; unlinking it would lock you out.")
     if accounts.unlink(conn, user_id):
         _log(conn, user, "account.unlink", target["username"], f"was {target['ad_account']}")
+        messages.system(conn, user_id, f"{user['username']} unlinked your account from the domain account "
+                        f"{target['ad_account']}.", link="/preferences")
     return {"status": "unlinked"}

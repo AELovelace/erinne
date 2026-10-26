@@ -35,7 +35,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from mnemerynne import editing, fs, permissions
+from mnemerynne import editing, fs, messages, permissions
 from mnemerynne.api_tokens import Caller
 from mnemerynne.config import Settings, get_settings
 from mnemerynne.db import transaction
@@ -588,7 +588,10 @@ def approve(conn: sqlite3.Connection, settings: Settings, admin: sqlite3.Row, pr
     else:
         raise ProposalError(f"Admins don't decide '{row['kind']}' changes; the person applies those.")
     _record_decision(conn, proposal_id, admin, note)
-    return view(conn, get(conn, proposal_id, row["user_id"]))
+    card = view(conn, get(conn, proposal_id, row["user_id"]))
+    messages.system(conn, row["user_id"], f"{admin['username']} approved your request: {card['summary']}"
+                    + (f" — “{note.strip()}”" if note and note.strip() else ""), link=f"/proposals#p{proposal_id}")
+    return card
 
 
 def reject(conn: sqlite3.Connection, admin: sqlite3.Row, proposal_id: int, note: str = "") -> dict:
@@ -596,7 +599,10 @@ def reject(conn: sqlite3.Connection, admin: sqlite3.Row, proposal_id: int, note:
     row = _admin_row(conn, proposal_id)
     _decide(conn, proposal_id, "rejected", by=admin["id"])
     _record_decision(conn, proposal_id, admin, note)
-    return view(conn, get(conn, proposal_id, row["user_id"]))
+    card = view(conn, get(conn, proposal_id, row["user_id"]))
+    messages.system(conn, row["user_id"], f"{admin['username']} turned down your request: {card['summary']}"
+                    + (f" — “{note.strip()}”" if note and note.strip() else ""), link=f"/proposals#p{proposal_id}")
+    return card
 
 
 def for_person(conn: sqlite3.Connection, user_id: int, status: str = "all", since_days: int = 7,

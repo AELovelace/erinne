@@ -230,6 +230,11 @@ html[data-theme="neon"] .proposal .diff,
 html[data-theme="neon"] :is(.doc, .help-body, .wiki-body) pre { background: rgba(255, 46, 151, 0.07); }
 html[data-theme="neon"] :is(.doc, .help-body, .wiki-body) :target { background: rgba(255, 46, 151, 0.2); box-shadow: inset 2px 0 0 var(--cyan); }
 html[data-theme="neon"] .help-toc li a[aria-current="page"] { box-shadow: inset 2px 0 0 var(--rose); }
+html[data-theme="neon"] .remote-term { background: #07020d; }
+html[data-theme="neon"] .remote-window { box-shadow: var(--bloom), 0 20px 60px rgba(0, 0, 0, .6); border: 1px solid var(--line); }
+html[data-theme="neon"] .remote-title, html[data-theme="neon"] .remote-handle, html[data-theme="neon"] .remote-drop { background: #12051c; color: var(--ink); }
+html[data-theme="neon"] .remote-home { background: var(--blush); }
+html[data-theme="neon"] .remote-item[aria-current="page"] { color: var(--cyan); box-shadow: inset 3px 0 0 var(--cyan); }
 /* CodeMirror's stock theme is light: the editor follows the neon colours. */
 html[data-theme="neon"] .editor-pane .CodeMirror { background: transparent; color: var(--ink); }
 html[data-theme="neon"] .editor-pane .CodeMirror-gutters { background: transparent; border-color: var(--line); }

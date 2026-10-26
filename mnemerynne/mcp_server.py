@@ -33,7 +33,7 @@ from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
-from mnemerynne import (accounts, activity, api_tokens, apis, claude_links, comments, db, editing, editing_formats,
+from mnemerynne import (messages, notices, accounts, activity, api_tokens, apis, claude_links, comments, db, editing, editing_formats,
                         fs, permissions, proposals, retrieval, sharepoint)
 from mnemerynne.api_tokens import Caller
 from mnemerynne.config import Settings
@@ -100,6 +100,10 @@ Working with others (people, and other people's Claude):
   list_comments, rather than editing someone else's document to leave a message.
 - You can't save images (screenshots, photos) or other files you didn't write: give the person the
   `upload` link from list_libraries, which opens their Agents folder for them to add the file.
+- send_message leaves a short note for a colleague inside Mnemerynne (`to` is their Mnemerynne username;
+  they see it under Messages); it isn't email. list_messages shows the person's own unread notes,
+  what Mnemerynne told them (a proposal decided, a comment on their file) and announcements waiting
+  for them; mention those when they're relevant.
 
 Internal APIs (live):
 - list_apis shows the internal systems you may query for this person (night-audit health, hotel stats,
@@ -985,6 +989,40 @@ class Tools:
                 "note": "Saved. People see it in Files (the file's details), and other agents with list_comments."}, \
             [file_id]
 
+    def list_messages(self, conn, caller: Caller, unread_only: bool = True, limit: int = 20,
+                      mark_read: bool = False) -> tuple[dict, list[int]]:
+        """The person's notes and system messages (messages.py), and the announcements waiting for them."""
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (caller.user_id,)).fetchone()
+        listed = messages.inbox(conn, caller.user_id, unread_only=unread_only, limit=max(1, min(int(limit), 50)))
+        if mark_read:
+            for m in listed:
+                messages.mark_read(conn, caller.user_id, m["message_id"])
+        out = [{"message_id": m["message_id"], "from": m["from"], "kind": m["kind"], "at": m["at"], "text": m["text"],
+                **({"link": self.base + m["link"]} if m["link"] else {}), "read": m["read"] or mark_read}
+               for m in listed]
+        pending = [{"title": a["title"], **({"link": self.base + a["link"]} if a["link"] else {}),
+                    "must_ack": a["must_ack"]} for a in notices.pending_for(conn, user, self.get_directory())]
+        unread = messages.unread_count(conn, caller.user_id)
+        return {"unread": unread, "messages": out, "announcements": pending,
+                "note": ("Nothing unread." if not out and not pending else
+                         "Tell the person briefly what's there. ") +
+                        ("" if mark_read else "They mark messages read on their Messages page (or pass mark_read)."),
+                }, []
+
+    def send_message(self, conn, caller: Caller, to: str, text: str, link: str | None = None) -> tuple[dict, list[int]]:
+        """A short note to a colleague, inside Mnemerynne (messages.py): it isn't email."""
+        if not caller.can_edit:
+            raise ToolError("This connection can only search. To let Claude send notes, open Claude in Mnemerynne and "
+                            "turn on “Let Claude edit files” for this token.")
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (caller.user_id,)).fetchone()
+        try:
+            message_id = messages.send(conn, user, to, text, via=self.mode, link=link, public_url=self.base)
+        except messages.MessageError as exc:
+            raise Refused(str(exc), "invalid") from None
+        return {"message_id": message_id, "to": (to or "").strip().lower(),
+                "note": "Sent. They see it under Messages in Mnemerynne (and their Claude with list_messages); "
+                        "it isn't an email."}, []
+
     def list_versions(self, conn, caller: Caller, file_id: int) -> tuple[dict, list[int]]:
         loaded = editing.load(conn, self.settings, caller.user_id, file_id, via=self.mode)
         return {"file_id": file_id, "file": loaded.row["display_name"], "current_version": loaded.version,
@@ -1372,6 +1410,22 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
         talk to people or other agents about a document instead of editing it."""
         return await call(ctx, "add_comment", {"file_id": file_id, "text": text, "reply_to": reply_to},
                           tools.add_comment)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def list_messages(ctx: Context, unread_only: bool = True, limit: int = 20, mark_read: bool = False) -> dict:
+        """The person's messages inside Mnemerynne: notes from colleagues (or their Claude), what Mnemerynne
+        told them (a proposal an admin decided, a comment on their file, a change to their account) and
+        the announcements waiting for them. `unread_only` false lists read ones too; `mark_read` marks the
+        listed ones read."""
+        return await call(ctx, "list_messages", {"unread_only": unread_only, "limit": limit, "mark_read": mark_read},
+                          tools.list_messages)
+
+    @server.tool(annotations=_EDITS)
+    async def send_message(ctx: Context, to: str, text: str, link: str | None = None) -> dict:
+        """Leave a short note for a colleague inside Mnemerynne (`to`: their Mnemerynne username; ask the
+        person if unsure), optionally with a `link` to a page here (a file, a wiki page, a proposal). They
+        see it under Messages, with "Claude for <name>" as the sender. It isn't email."""
+        return await call(ctx, "send_message", {"to": to, "text": text, "link": link}, tools.send_message)
 
     @server.tool(annotations=_READ_ONLY)
     async def list_versions(ctx: Context, file_id: int) -> dict:

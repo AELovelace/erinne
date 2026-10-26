@@ -18,9 +18,17 @@ Every account: create one, reset a password, change the role or "Can sign in", s
 
 Internal systems Erynne and Claude may query: presets (Wazuh, Atera), uploaded templates, each API's operations, credentials, certificate pinning, AD group, Claude switch, admin-approval actions, tests and recent calls. See [Internal APIs](internal-apis.md).
 
+## Remote
+
+LAN-only web apps served through Mnemerynne at `/remote/<slug>/` for the groups you pick: address, certificate pinning, link rewriting, in the window or a new tab. See [Remote apps](remote-apps.md).
+
 ## Approvals
 
 Requests only an admin can decide: letting the AI edit a whole library, and API actions marked as needing admin approval. Approve runs it on the requester's behalf; Reject turns it down with a note. See [Approvals](approvals.md).
+
+## Announcements
+
+Post a notice for everyone or a group, shown as a card on every page until dismissed or acknowledged; see who saw and acknowledged each. See [Announcements and messages](announcements-and-messages.md).
 
 ## Who can see what
 
