@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from mcp.server.mcpserver.exceptions import ToolError
 
-from mnemerynne import api_tokens, permissions, users, worker
+from mnemerynne import api_tokens, mcp_server, permissions, users, worker
 from mnemerynne.ingest import store
 from mnemerynne.mcp_server import Tools
 from mnemerynne.web.app import Services, create_app
@@ -168,6 +168,7 @@ def test_mcp_endpoint_end_to_end(mcp_client, conn, world):
     init = _initialize(mcp_client, token)
     assert init.status_code == 200, init.text
     assert init.json()["result"]["serverInfo"]["name"] == "mnemerynne"
+    assert init.json()["result"]["serverInfo"]["version"] == mcp_server.MCP_VERSION == "1.0.0"
 
     listed = _rpc(mcp_client, token, "tools/list").json()["result"]["tools"]
     edits = {"edit_text", "edit_document", "edit_spreadsheet", "create_file", "create_folder", "rename_item",

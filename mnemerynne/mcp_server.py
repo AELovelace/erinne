@@ -41,6 +41,12 @@ from mnemerynne.ingest import store
 
 log = logging.getLogger("mnemerynne.mcp")
 
+# The MCP server's own version, separate from the app's (pyproject): clients
+# see it in initialize's serverInfo. Bump it when tools or their contracts change.
+# 1.0.0: the "Road to 1.0" blockers (editable flags, request_edit_access,
+# forgiving names, ids or paths, error codes), verified live 2026-10-25.
+MCP_VERSION = "1.0.0"
+
 PAGE_WIDTH_PX = 1200     # rendered page width: small print stays legible, JPEG stays ~100-300 KB
 PAGE_MAX_PX = 2000       # cap on either side, for unusually long or wide pages
 
@@ -914,7 +920,7 @@ class Tools:
 def build_server(settings: Settings, get_embedder: Callable[[], Any],
                  get_directory: Callable[[], Any] = lambda: None) -> MCPServer:
     tools = Tools(settings, get_embedder, get_directory)
-    server = MCPServer(name="mnemerynne", title="Mnemerynne", instructions=INSTRUCTIONS)
+    server = MCPServer(name="mnemerynne", title="Mnemerynne", instructions=INSTRUCTIONS, version=MCP_VERSION)
 
     async def call(ctx: Context, name: str, args: dict, fn) -> dict:
         caller = _caller_of(ctx)
