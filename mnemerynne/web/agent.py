@@ -25,8 +25,12 @@ def _refused(exc: Exception) -> HTTPException:
 
 
 # ---------------------------------------------------------------- proposals
+class ApplyBody(BaseModel):
+    items: list[int] | None = Field(None, max_length=100)   # a batch: the items to run (all when left out)
+
+
 @router.post("/api/agent/proposals/{proposal_id}/apply")
-def apply_proposal(proposal_id: int, request: Request, user=Depends(api_user),
+def apply_proposal(proposal_id: int, request: Request, body: ApplyBody | None = None, user=Depends(api_user),
                    conn: sqlite3.Connection = Depends(get_db)):
     """Mail drafts: still in the agent group. File changes: the agent group anywhere they may edit,
     everyone else only in their own Agents folder. API actions check instead that the person may still
@@ -36,15 +40,18 @@ def apply_proposal(proposal_id: int, request: Request, user=Depends(api_user),
 
     try:
         row = proposals.get(conn, proposal_id, user["id"])
-        if row["kind"] not in ("api", "delete", "access") and not accounts.is_agent_user(
+        if row["kind"] not in ("api", "batch", "delete", "access") and not accounts.is_agent_user(
                 conn, user, request.app.state.directory):
             if row["kind"] == "mail" or not proposals.in_agents_folder(conn, user["id"], row):
                 raise HTTPException(status.HTTP_403_FORBIDDEN, "Outside the agent group, Erynne only changes files "
                                                                "in your Agents folder.")
-        return proposals.apply(conn, request.app.state.settings, user, proposal_id, request.app.state.directory,
-                               admin=row["kind"] == "access" and is_admin(request, conn, user))
+        out = proposals.apply(conn, request.app.state.settings, user, proposal_id, request.app.state.directory,
+                              admin=row["kind"] == "access" and is_admin(request, conn, user),
+                              items=body.items if body else None)
     except (editing.EditError, proposals.ProposalError, m365.M365Error) as exc:
         raise _refused(exc) from None
+    _log(conn, user, "proposal.apply", out["summary"][:200], f"#{proposal_id} ({out['requested_via']})")
+    return out
 
 
 @router.get("/api/me/tools")
@@ -69,14 +76,23 @@ def list_proposals(user=Depends(api_user), conn: sqlite3.Connection = Depends(ge
     return {"proposals": [proposals.view(conn, r) for r in rows]}
 
 
+class DismissBody(BaseModel):
+    note: str = Field("", max_length=1000)   # why, shown to the person's Claude (get_proposal)
+
+
 @router.post("/api/agent/proposals/{proposal_id}/dismiss")
-def dismiss_proposal(proposal_id: int, request: Request, user=Depends(api_user),
+def dismiss_proposal(proposal_id: int, request: Request, body: DismissBody | None = None, user=Depends(api_user),
                      conn: sqlite3.Connection = Depends(get_db)):
     # Anyone may dismiss their own proposals, even after leaving the group.
     try:
-        return proposals.dismiss(conn, request.app.state.settings, user["id"], proposal_id)
+        out = proposals.dismiss(conn, request.app.state.settings, user["id"], proposal_id,
+                                note=body.note if body else "")
     except editing.EditError as exc:
         raise _refused(exc) from None
+    if out["status"] == "dismissed" and out.get("decided_at"):
+        _log(conn, user, "proposal.dismiss", out["summary"][:200],
+             f"#{proposal_id} ({out['requested_via']})" + (f": {body.note}" if body and body.note else ""))
+    return out
 
 
 # ------------------------------------------------------------ admin approvals

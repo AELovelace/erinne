@@ -43,6 +43,8 @@
     {"name": "add_comment", "description": "Comment on a file, or reply to a comment"},
     {"name": "list_proposals", "description": "Your pending and recently decided proposals and requests"},
     {"name": "get_proposal", "description": "Whether a proposal was applied, withdrawn or rejected, and by whom"},
+    {"name": "withdraw_proposal", "description": "Take back a pending proposal of yours"},
+    {"name": "propose_batch", "description": "Propose several API changes under one approval"},
     {"name": "list_apis", "description": "List the internal systems Claude may query for you"},
     {"name": "query_api", "description": "Read live data from an internal system"},
     {"name": "propose_api_action", "description": "Propose a change in an internal system (you apply it)"}

@@ -157,7 +157,7 @@ def test_a_library_needs_an_admin(conn, settings, world, tools):
     with _web(settings, "alice") as web:
         assert web.post(f"/api/agent/proposals/{out['proposal']}/apply").status_code == 200
     assert conn.execute("SELECT claude_edit FROM collections WHERE id = ?", (world["brand"],)).fetchone()[0] == 1
-    assert conn.execute("SELECT action FROM access_log ORDER BY id DESC").fetchone()[0] == "claude.edit.on"
+    assert [r[0] for r in conn.execute("SELECT action FROM access_log ORDER BY id DESC LIMIT 2")] == ["proposal.apply", "claude.edit.on"]
 
 
 def test_what_the_person_cant_give(conn, settings, world, tools):

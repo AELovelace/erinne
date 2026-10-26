@@ -350,7 +350,11 @@ def test_admin_sets_up_an_api_from_a_preset(admin_client, conn):
     detail = admin_client.get(f"/api/admin/apis/{made['id']}").json()
     assert [o["name"] for o in detail["operations"]] == [
         "Tickets", "Ticket", "Ticket comments", "Ticket statuses", "Tickets by status", "Customer's tickets",
-        "Customers", "Tickets modified since", "Alerts", "Alert"]
+        "Customers", "Tickets modified since", "Alerts", "Alert", "Contact by email", "Create ticket",
+        "Change ticket status", "Change ticket priority", "Add internal note", "Resolve alert"]
+    # One Atera entry covers reading and changes (1.0.1); the changes are actions the person runs.
+    assert [o["name"] for o in detail["operations"] if o["action"]] == [
+        "Create ticket", "Change ticket status", "Change ticket priority", "Add internal note", "Resolve alert"]
     assert detail["credential"] == "missing"
     assert conn.execute("SELECT count(*) FROM api_examples").fetchone()[0] > 0   # indexed for routing
 

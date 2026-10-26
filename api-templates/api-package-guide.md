@@ -8,6 +8,9 @@ then enters the credential and chooses who may use it.
 
 A working example is [atera-read-write.json](atera-read-write.json) (actions);
 the built-in presets in `mnemerynne/apis.py` (`PRESETS`) show reading operations.
+(The built-in Atera preset includes the same actions since 1.0.1, so one *Atera*
+entry covers reading and changes; the template remains the way to give the
+changes their own credential and group.)
 
 ## How Mnemerynne uses your API
 

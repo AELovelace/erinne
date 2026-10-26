@@ -19,7 +19,7 @@ People in one group get Erynne with the same tools Claude has: she searches, rea
 
 ## Records
 
-Every tool call is logged in `agent_calls` (kept `MNEMERYNNE_AGENT_CALLS_DAYS`, 90), and answers record the agent model's name. Proposals nobody decides expire after `MNEMERYNNE_VERSION_DAYS` (30); their content sits under `<data_dir>/proposals` until then and isn't backed up.
+Every tool call is logged in `agent_calls` (kept `MNEMERYNNE_AGENT_CALLS_DAYS`, 90), and answers record the agent model's name. Proposals nobody decides expire after `MNEMERYNNE_PROPOSAL_DAYS` (7); their content sits under `<data_dir>/proposals` until then and isn't backed up.
 
 ## Mail and calendar
 

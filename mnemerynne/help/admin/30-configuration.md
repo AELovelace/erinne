@@ -81,7 +81,9 @@ Also in the database (Access → Settings): the **admin group** (default `Domain
 | `EDIT_MAX_BYTES` | 20 MB | Largest file Claude, Erynne or the browser editor may change. |
 | `EDIT_MAX_CELLS` | 200000 | Spreadsheet cells, all sheets together. |
 | `EDIT_MAX_OPERATIONS` | 50 | Edits per call. |
-| `VERSION_DAYS`, `VERSION_KEEP` | 30, 20 | How long earlier versions are kept, and how many per file. Pending proposals also expire after `VERSION_DAYS`. |
+| `VERSION_DAYS`, `VERSION_KEEP` | 30, 20 | How long earlier versions are kept, and how many per file. |
+| `PROPOSAL_DAYS` | 7 | A proposal nobody applies, dismisses or withdraws within this many days expires. |
+| `PROPOSAL_BATCH_MAX` | 25 | API actions one `propose_batch` call may hold. |
 
 ## Backups and retention
 

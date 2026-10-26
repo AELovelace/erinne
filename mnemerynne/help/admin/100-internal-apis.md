@@ -35,9 +35,11 @@ An operation marked **changes data** (close a ticket, resolve an alert, add a no
 
 Keep actions in their own API or template with their own credential and group, separate from the reading operations, so the reading credential stays read-only.
 
-## Atera today
+## Atera
 
-The built-in Atera preset holds the reading operations; the actions (create ticket, change status or priority, add an internal note, resolve an alert) come from the `atera-read-write.json` template. Until they are folded into one preset, an install that added both shows two Atera entries to Claude, with some reading operations under each; that clean-up is on the 1.0.1 roadmap.
+The built-in Atera preset holds the reading operations and, since 1.0.1, the changes too: Contact by email (reads personal data), Create ticket, Change ticket status, Change ticket priority, Add internal note and Resolve alert, all actions the person runs. One Atera entry with one credential covers both; delete the change operations from it to keep an entry read-only, and edit Add internal note's body to the technician the notes should come from. An existing Atera API gets the new operations with **Add preset operations**. The `atera-read-write.json` template remains the way to give the changes a separate credential and group; an install that added both "Atera" and "Atera (read-write)" should delete the second once the first has the actions, so Claude sees one entry.
+
+**Batches.** Claude can propose several actions as one proposal (`propose_batch`, at most `MNEMERYNNE_PROPOSAL_BATCH_MAX` = 25): one card, one link, a tick box per change. If any item needs an admin's approval the whole batch goes to Approvals.
 
 ## Writing a template
 

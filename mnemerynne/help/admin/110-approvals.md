@@ -14,11 +14,11 @@ Waiting requests are listed first, oldest first, each with who asked, what exact
 - **Approve** runs it on the requester's behalf. For an API action the requester's access is checked again at that moment (operation still enabled, still in its group), so an admin can't run something for someone who has lost access. For a library edit request it flips the library's switch and logs it.
 - **Reject** turns it down. The note is shown to the requester and to their Claude (`get_proposal` reports *rejected* with the note).
 
-The person can **withdraw** a request while it waits. Decided requests stay listed for a week; every decision goes in Recent changes.
+The person can **withdraw** a request while it waits (their Claude can too, with `withdraw_proposal`). Decided requests stay listed for a week; every decision goes in Recent changes, as does every proposal a person applies or dismisses (`proposal.apply`, `proposal.dismiss`, with the note). A batch (several API actions under one approval) is approved or rejected as a whole here.
 
 ## What Claude is told
 
-When Claude proposes something that needs an admin, it gets status `awaiting_admin` and no approve link, and its instructions say to tell the person it's with the admins and to check `get_proposal` for the outcome rather than assume. Pending proposals of every kind expire after `MNEMERYNNE_VERSION_DAYS` (30) if nobody decides them.
+When Claude proposes something that needs an admin, it gets status `awaiting_admin` and no approve link, and its instructions say to tell the person it's with the admins and to check `get_proposal` for the outcome rather than assume. Pending proposals of every kind expire after `MNEMERYNNE_PROPOSAL_DAYS` (7) if nobody decides them; they then show as *expired*, and Claude is told so.
 
 ## Related
 

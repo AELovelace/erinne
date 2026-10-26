@@ -372,10 +372,15 @@ def replace_content(conn: sqlite3.Connection, settings: Settings, file_id: int, 
     tmp_dir.mkdir(parents=True, exist_ok=True)
     tmp = tmp_dir / f".mnemerynne-{secrets.token_hex(6)}.tmp"
     try:
-        with open(tmp, "xb") as fh:
-            fh.write(data)
-            fh.flush()
-            os.fsync(fh.fileno())
+        try:
+            with open(tmp, "xb") as fh:
+                fh.write(data)
+                fh.flush()
+                os.fsync(fh.fileno())
+        except OSError as exc:
+            if not on_share:
+                raise
+            raise EditError(str(share._fail("save the file", exc))) from exc
         kind, mime, size, note = store.inspect(tmp, row["display_name"], settings)
         with transaction(conn):
             conn.execute("INSERT INTO file_versions(file_id, sha256, size, rel_path, created_by, via, token_id, summary) "
@@ -397,7 +402,10 @@ def replace_content(conn: sqlite3.Connection, settings: Settings, file_id: int, 
             if on_share:
                 # Last: if the rename fails, the transaction rolls back and the
                 # file on the share is still the old one.
-                os.replace(tmp, path)
+                try:
+                    os.replace(tmp, path)
+                except OSError as exc:
+                    raise EditError(str(share._fail("save the file", exc))) from exc
                 share.record_stat(conn, file_id, path)
     except BaseException:
         tmp.unlink(missing_ok=True)

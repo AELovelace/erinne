@@ -13,9 +13,9 @@
     {% if places %}
     <ul class="grants">{% for p in places %}<li>{{ p }}</li>{% endfor %}</ul>
     {% else %}
-    <p class="muted small">Nothing yet: no library is shared with Claude for you. An admin can change that.</p>
+    <p class="muted small">Nothing yet: no library is shared with AI assistants for you. An admin can change that.</p>
     {% endif %}
-    <p class="muted small">Passages it reads go to Anthropic as part of your chat. You can disconnect it any time on the
+    <p class="muted small">Passages it reads go to {{ provider }} as part of your chat. You can disconnect it any time on the
       Connect page in {{ assistant_name }}.</p>
     <form method="post" action="/oauth/authorize">
       <input type="hidden" name="nonce" value="{{ nonce }}">

@@ -1195,6 +1195,38 @@
     }
   }
 
+  function renderChatGPT(data) {
+    const box = $("chatgpt-settings");
+    box.replaceChildren();
+    box.appendChild(el("p", "muted", "Lets people connect ChatGPT to " + data.mcp_url + " (in ChatGPT: add a " +
+      "custom MCP server with that address and OAuth). It sees exactly what is shared with Claude: the same " +
+      "libraries and APIs, so turning this on also sends those to OpenAI. Turning it off ends every ChatGPT " +
+      "connection; people connect again if it's turned back on."));
+    const form = el("form", "ax-new");
+    const on = agentInput("checkbox", data.enabled);
+    on.setAttribute("aria-label", "Allow ChatGPT");
+    const onLabel = el("label", "check small");
+    onLabel.append(on, document.createTextNode(" Allow ChatGPT connections"));
+    const save = el("button", "small", "Save");
+    save.type = "submit";
+    form.append(onLabel, save, el("span", "small muted", data.connections + " connected"));
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      if (data.enabled && !on.checked && data.connections &&
+          !confirm("End all " + data.connections + " ChatGPT connection(s)?")) return;
+      try {
+        renderChatGPT(await api("PUT", "/api/admin/settings/chatgpt", { enabled: on.checked }));
+      } catch (err) { showError(err.message); }
+    });
+    box.appendChild(form);
+  }
+
+  async function loadChatGPT() {
+    try { renderChatGPT(await api("GET", "/api/admin/settings/chatgpt")); }
+    catch (e) { $("chatgpt-settings").replaceChildren(el("p", "error", e.message)); }
+  }
+
   function renderClaudeLinks(data) {
     const box = $("claude-links-settings");
     box.replaceChildren();
@@ -1261,7 +1293,7 @@
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
     if (tab === "settings" && !updatesLoaded) {
-      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeLinks();
+      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeLinks(); loadChatGPT();
       if (window.ErynneM365) window.ErynneM365.load();   // admin_m365.js
     }
     if (tab === "accounts") loadAccounts();

@@ -289,6 +289,27 @@ again in the background:
 - who can use it: anyone in their own files; admins in any library they can
   open. For all files at once: `sudo mnemerynne-admin reindex`.
 
+**ChatGPT.** The same `/mcp` address also works as a custom MCP server in
+ChatGPT, with OAuth.
+- **Off until an admin allows it:** Access → Settings → ChatGPT. Until then
+  ChatGPT can't even register.
+- **What it sees:** exactly what is shared with Claude (the same libraries,
+  "Claude can see" switches and APIs), so allowing it also sends those to
+  OpenAI.
+- **Turning it off** ends every ChatGPT connection at once. Claude's
+  connections are unaffected.
+- **Connecting:** in ChatGPT, add a custom MCP server with
+  `https://<your address>/mcp` and OAuth. ChatGPT registers itself, then sends
+  the person to Mnemerynne's sign-in and consent page, which names ChatGPT
+  and OpenAI. Connections show under Settings → Claude like Claude's.
+- **Reachability:** ChatGPT connects from OpenAI's servers, so the address
+  must be public with a publicly trusted certificate (the same as claude.ai
+  connectors), or reached through OpenAI's Secure MCP Tunnel.
+- **Only ChatGPT's own callbacks are accepted:**
+  `https://chatgpt.com/connector_platform_oauth_redirect` and
+  `https://chatgpt.com/connector/oauth/<id>`. Mnemerynne returns `iss` on
+  every sign-in redirect (RFC 9207), which ChatGPT needs for the first one.
+
 ## 5c. Domain accounts
 
 People sign in with their Mnemerynne username and password. An admin links
@@ -533,7 +554,7 @@ How it behaves:
   normal answer instead.
 - **Records.** Every tool call is logged in `agent_calls`, and answers
   record the agent model's name. Proposals nobody decides on expire after
-  `MNEMERYNNE_VERSION_DAYS` (30). Their content sits in
+  `MNEMERYNNE_PROPOSAL_DAYS` (7). Their content sits in
   `<data_dir>/proposals` until then. It isn't backed up, since it's
   short-lived.
 

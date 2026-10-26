@@ -51,7 +51,7 @@ sudo grep '^MNEMERYNNE_SECRET_KEY=' /etc/mnemerynne/mnemerynne.env
 |---|---|---|
 | Recycle-bin items | 30 days | `MNEMERYNNE_TRASH_DAYS` (`purge-trash` does it now) |
 | Earlier file versions | 30 days, 20 per file | `MNEMERYNNE_VERSION_DAYS`, `VERSION_KEEP` |
-| Pending proposals | 30 days, then expired | `MNEMERYNNE_VERSION_DAYS` |
+| Pending proposals | 7 days, then expired | `MNEMERYNNE_PROPOSAL_DAYS` |
 | Claude's tool calls | 90 days | `MNEMERYNNE_MCP_CALLS_DAYS` |
 | Internal API calls (with responses) | 90 days | `MNEMERYNNE_API_CALLS_DAYS` |
 | Erynne agent tool calls | 90 days | `MNEMERYNNE_AGENT_CALLS_DAYS` |

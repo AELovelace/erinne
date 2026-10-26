@@ -46,7 +46,7 @@ log = logging.getLogger("mnemerynne.mcp")
 # 1.0.0: the "Road to 1.0" blockers (editable flags, request_edit_access,
 # forgiving names, ids or paths, error codes), verified live 2026-10-25.
 # 1.1.0: admin approvals (status awaiting_admin), list_proposals and get_proposal.
-MCP_VERSION = "1.1.0"
+MCP_VERSION = "1.2.0"
 
 PAGE_WIDTH_PX = 1200     # rendered page width: small print stays legible, JPEG stays ~100-300 KB
 PAGE_MAX_PX = 2000       # cap on either side, for unusually long or wide pages
@@ -114,18 +114,29 @@ Internal APIs (live):
   the current state with query_api first, and never say the change is made.
 
 Proposals and approvals:
-- propose_api_action, delete_item and request_edit_access return a `proposal` id. Most the person
-  applies (the `approve` link); some wait for a Mnemerynne admin instead (status awaiting_admin): then
-  say it's with the admins, and there is no link to give.
-- get_proposal tells you what became of one (applied, dismissed, stale, or rejected with the admin's
-  note); list_proposals shows the person's pending and recently decided ones. Check there before saying
-  anything was done, and report rejections with their note."""
+- Proposals do nothing until the person approves them. propose_api_action, propose_batch, delete_item
+  and request_edit_access return the same shape: `proposal_id`, `summary` (one sentence saying exactly
+  what will change; the approve page shows the same words), `approve` (the link), `expires_at` and
+  `status`. Give the person the link and the summary, carry on with the rest of the task, and check
+  get_proposal before relying on the change. Never say a proposed change is done.
+- Some wait for a Mnemerynne admin instead (status awaiting_admin): say it's with the admins; there is
+  no link to give.
+- get_proposal tells you what became of one (applied with its result, dismissed with the person's note,
+  rejected with the admin's note, stale, or expired); list_proposals shows the person's pending and
+  recently decided ones. withdraw_proposal takes back one of yours that's no longer needed. Nothing you
+  can call approves, applies or rejects a proposal: only the person, in Mnemerynne."""
 
 _READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True,
                              open_world_hint=False)
 # Changes files, but never destructively: every change keeps the previous version.
 _EDITS = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False,
                          open_world_hint=False)
+# Proposes a change: nothing happens until the person approves it in Mnemerynne.
+_PROPOSES = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False,
+                            open_world_hint=False)
+# Asking again for the same thing returns the same pending request; withdrawing twice is harmless.
+_PROPOSES_ONCE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True,
+                                 open_world_hint=False)
 # Names for the person's File box a model might use (older ones too: "inbox" was its name before).
 _INBOX_WORDS = {"file box", "my file box", "filebox", "inbox", "my inbox", "my files", "my documents"}
 _PROPOSED = ("Nothing has changed yet: the person sees this change under your answer and decides whether to "
@@ -498,20 +509,62 @@ class Tools:
                                     for_claude=self.claude)
             if not op["action"]:
                 raise ToolError(f"“{operation}” only reads; use query_api.")
-            proposal = proposals.propose_api(conn, caller, op, params)
+            proposal = proposals.propose_api(conn, caller, op, params, self.settings)
         except apis.ApiError as exc:
             raise Refused(f"{exc} Use list_apis to see the operations and their parameters.", _api_code(exc)) from None
-        out = {"proposal": proposal, "api": op["api_name"], "operation": op["name"], "status": "proposed"}
-        if op["admin_approval"]:
-            return {**out, "status": "awaiting_admin",
-                    "note": "Nothing has changed yet: this operation needs a Mnemerynne admin's approval, so it now "
-                            "waits for one (Access → Approvals). Tell the person it's with the admins; get_proposal "
-                            "shows the outcome. Don't say it's done."}, []
+        return self._proposed(conn, caller, proposal, {"api": op["api_name"], "operation": op["name"]},
+                              "Nothing has changed yet: this operation needs a Mnemerynne admin's approval, so it now "
+                              "waits for one (Access → Approvals). Tell the person it's with the admins; get_proposal "
+                              "shows the outcome. Don't say it's done.",
+                              "Nothing has changed yet. Give the person the approve link and the summary: they check "
+                              "it and apply it in Mnemerynne themselves. Carry on with the rest; get_proposal shows "
+                              "the outcome. Don't say it's done."), []
+
+    def propose_batch(self, conn, caller: Caller, items: list[dict]) -> tuple[dict, list[int]]:
+        """Several API actions as one proposal with one approve link (proposals.propose_batch); any item that
+        can't run refuses the whole batch, so a card never offers what can't run."""
+        if not isinstance(items, list) or not items:
+            raise Refused("items is a list of {api, operation, params}, at least one.", "invalid")
+        if len(items) > self.settings.proposal_batch_max:
+            raise Refused(f"A batch holds at most {self.settings.proposal_batch_max} changes; split it.", "invalid")
+        checked = []
+        for n, item in enumerate(items, 1):
+            if not isinstance(item, dict) or not item.get("api") or not item.get("operation"):
+                raise Refused(f"Item {n} needs api and operation (and params).", "invalid")
+            try:
+                op = apis.operation_for(conn, self._user(conn, caller), self.get_directory(), item["api"],
+                                        item["operation"], for_claude=self.claude)
+                if not op["action"]:
+                    raise ToolError(f"Item {n}: “{item['operation']}” only reads; use query_api.")
+                apis.validate_params(apis.param_specs(op), item.get("params"))
+            except apis.ApiError as exc:
+                raise Refused(f"Item {n}: {exc} Use list_apis to see the operations and their parameters.",
+                              _api_code(exc)) from None
+            checked.append((op, item.get("params")))
+        try:
+            proposal = proposals.propose_batch(conn, caller, checked, self.settings)
+        except (proposals.ProposalError, apis.ApiError) as exc:
+            raise Refused(str(exc), "invalid") from None
+        return self._proposed(conn, caller, proposal, {},
+                              "Nothing has changed yet: a change in this batch needs a Mnemerynne admin's approval, "
+                              "so the whole batch waits for one (Access → Approvals). Tell the person it's with the "
+                              "admins; get_proposal shows each item's outcome. Don't say it's done.",
+                              "Nothing has changed yet. Give the person the approve link and the summary: they tick "
+                              "the changes to run and apply them in Mnemerynne themselves; get_proposal then shows "
+                              "each item's outcome. Carry on with the rest. Don't say it's done."), []
+
+    def _proposed(self, conn, caller: Caller, proposal: int, extra: dict, admin_note: str, note: str) -> dict:
+        """The shape every proposing tool returns: proposal_id, summary, expires_at, status and, when the person
+        decides it, the approve link (not in chat: the card is under the answer)."""
+        card = proposals.view(conn, proposals.get(conn, proposal, caller.user_id))
+        out = {**self._proposal_out(card), **extra, "status": "proposed"}
+        if card["approver"] == "admin":
+            out.pop("approve", None)
+            return {**out, "status": "awaiting_admin", "note": admin_note}
         if self.propose:
-            return {**out, "note": _PROPOSED}, []
-        return {**out, "approve": f"{self.base}/proposals#p{proposal}",
-                "note": "Nothing has changed yet. Give the person the approve link: they check it and apply it "
-                        "in Mnemerynne themselves. Don't say it's done."}, []
+            out.pop("approve", None)
+            return {**out, "note": _PROPOSED}
+        return {**out, "note": note}
 
     def list_libraries(self, conn, caller: Caller) -> tuple[dict, list[int]]:
         access = self._access(conn, caller)
@@ -787,10 +840,10 @@ class Tools:
                     folder_id: int | None = None) -> tuple[dict, list[int]]:
         self._no_proposals()
         item = self._item(file_id, folder_id)
-        proposal = proposals.propose_delete(conn, caller, item, via=self.mode)
-        return {"proposal": proposal, "status": "proposed", "approve": f"{self.base}/proposals#p{proposal}",
-                "note": "Nothing is deleted yet. Give the person the approve link: they check it and move it to the "
-                        "recycle bin in Mnemerynne themselves. Don't say it's done."}, []
+        proposal = proposals.propose_delete(conn, caller, item, via=self.mode, settings=self.settings)
+        return self._proposed(conn, caller, proposal, {}, "",
+                              "Nothing is deleted yet. Give the person the approve link and the summary: they check "
+                              "it and move it to the recycle bin in Mnemerynne themselves. Don't say it's done."), []
 
     def list_changes(self, conn, caller: Caller, library: int | str, folder: int | str | None = None,
                      since: str | None = None) -> tuple[dict, list[int]]:
@@ -899,19 +952,15 @@ class Tools:
             return {"editable": False, "status": "not_possible", "where": where,
                     "note": "AI edit is switched on per folder or file in the File box, not for all of it. Ask for "
                             "a folder or file in it, or work in the Agents folder."}, []
-        proposal = proposals.propose_access(conn, caller, target, name, cid, fid, changes, approver=approver)
-        out = {"proposal": proposal, "status": "proposed", "editable": False, "where": where, "changes": changes}
-        if approver == "admin":
-            return {**out, "status": "awaiting_admin",
-                    "note": f"Nothing has changed yet: only a Mnemerynne admin can let {who} edit in all of "
-                            f"{_label(coll)}, so the request now waits for one (Access → Approvals). Tell the person "
-                            f"it's with the admins; get_proposal shows the outcome. Meanwhile work in their Agents "
-                            f"folder. Don't say it's done."}, []
-        if self.propose:
-            return {**out, "note": _PROPOSED}, []
-        return {**out, "approve": f"{self.base}/proposals#p{proposal}",
-                "note": f"Nothing has changed yet. Give the person the approve link: once they allow it there, "
-                        f"{who} can edit here. Don't say it's done."}, []
+        proposal = proposals.propose_access(conn, caller, target, name, cid, fid, changes, approver=approver,
+                                            settings=self.settings)
+        return self._proposed(conn, caller, proposal, {"editable": False, "where": where, "changes": changes},
+                              f"Nothing has changed yet: only a Mnemerynne admin can let {who} edit in all of "
+                              f"{_label(coll)}, so the request now waits for one (Access → Approvals). Tell the person "
+                              f"it's with the admins; get_proposal shows the outcome. Meanwhile work in their Agents "
+                              f"folder. Don't say it's done.",
+                              f"Nothing has changed yet. Give the person the approve link and the summary: once they "
+                              f"allow it there, {who} can edit here. Don't say it's done."), []
 
     def list_comments(self, conn, caller: Caller, file_id: int) -> tuple[dict, list[int]]:
         try:
@@ -944,10 +993,13 @@ class Tools:
 
     def _proposal_out(self, card: dict) -> dict:
         """A proposal as Claude sees it: absolute links, and `approve` only while it's the person's to apply."""
-        out = {"proposal": card["id"], "kind": card["kind"], "what": card["file"], "where": card["where"],
-               "changes": card["changes"], "status": card["status"], "approver": card["approver"],
+        out = {"proposal": card["id"], "proposal_id": card["id"], "kind": card["kind"], "what": card["file"],
+               "where": card["where"], "summary": card["summary"], "changes": card["changes"],
+               "status": card["status"], "approver": card["approver"], "requested_via": card["requested_via"],
                "created_at": card["created_at"] + " UTC"}
-        for key in ("decided_by", "decision_note"):
+        if card.get("expires_at"):
+            out["expires_at"] = card["expires_at"] + " UTC"
+        for key in ("decided_by", "decision_note", "items", "counts"):
             if key in card:
                 out[key] = card[key]
         if card["decided_at"]:
@@ -956,16 +1008,20 @@ class Tools:
             out["approve"] = f"{self.base}/proposals#p{card['id']}"
         elif card["status"] == "applied" and card.get("url"):
             out["link"] = self.base + card["url"] if card["url"].startswith("/") else card["url"]
+            if card["kind"] == "api" and card.get("result"):
+                out["result"] = card["result"]
         return out
 
     def list_proposals(self, conn, caller: Caller, status: str = "all", since_days: int = 7,
-                       limit: int = 20) -> tuple[dict, list[int]]:
+                       limit: int = 20, since: str | None = None) -> tuple[dict, list[int]]:
         """The person's own proposals (proposals.for_person), so Claude can tell what was applied, withdrawn,
         rejected by an admin or is still waiting."""
         if status not in ("pending", "decided", "all"):
             raise Refused("status is pending, decided or all.", "invalid")
+        if since is not None and not re.fullmatch(r"\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?", since.strip()):
+            raise Refused("since is a UTC time like 2026-10-24 or 2026-10-24 14:30.", "invalid")
         cards = proposals.for_person(conn, caller.user_id, status, max(1, min(int(since_days), 90)),
-                                     max(1, min(int(limit), 50)))
+                                     max(1, min(int(limit), 50)), since=since.strip() if since else None)
         found = [self._proposal_out(c) for c in cards]
         return {"proposals": found, **({} if found else {"note": "No proposals in that period."})}, []
 
@@ -979,17 +1035,108 @@ class Tools:
         out = self._proposal_out(proposals.view(conn, row))
         notes = {"pending": "Still waiting for the person to apply it (approve link)." if row["approver"] == "self"
                  else "Still waiting for a Mnemerynne admin.",
-                 "applied": "Done: it was applied.", "dismissed": "Withdrawn (or it expired): nothing changed.",
+                 "applied": "Done: it was applied.",
+                 "dismissed": "The person dismissed it (or it was withdrawn): nothing changed."
+                              + (" Their note says why." if row["decision_note"] else ""),
                  "stale": "The file changed before it was applied, so nothing changed: redo it on the new version.",
-                 "rejected": "An admin turned it down: nothing changed."}
+                 "rejected": "An admin turned it down: nothing changed.",
+                 "expired": "Nobody decided it before it expired: nothing changed. Propose it again if it's still "
+                            "wanted."}
+        if row["kind"] == "batch" and row["status"] == "applied":
+            counts = out.get("counts") or {}
+            return {**out, "note": f"Decided: {counts.get('applied', 0)} applied, {counts.get('declined', 0)} declined, "
+                                   f"{counts.get('failed', 0)} failed; `items` says which."}, []
         return {**out, "note": notes[row["status"]]}, []
+
+    def withdraw_proposal(self, conn, caller: Caller, proposal: int) -> tuple[dict, list[int]]:
+        """Take back one of the person's own pending proposals (the only change to a proposal's status a tool
+        can make: never approve, apply or reject)."""
+        try:
+            row = proposals.get(conn, proposal, caller.user_id)
+        except editing.EditNotFound:
+            raise Refused(f"No proposal {proposal} of this person's. list_proposals shows theirs.", "not_found") \
+                from None
+        if row["status"] != "pending":
+            raise Refused(f"Proposal {proposal} was already {row['status']}; it can't be withdrawn now.", "conflict")
+        card = proposals.dismiss(conn, self.settings, caller.user_id, proposal, note="withdrawn by Claude")
+        return {**self._proposal_out(card), "note": "Withdrawn: nothing changed, and the approve link no longer works."}, []
 
 
 # --------------------------------------------------------------- the server
+ELICIT_SECONDS = 120          # how long a proposal tool waits for the person to answer in the chat
+_clients_seen: set[tuple[str, str, str]] = set()
+
+
+def _elicitation_modes(session) -> str:
+    caps = getattr(session, "client_capabilities", None)
+    el = getattr(caps, "elicitation", None) if caps else None
+    if el is None:
+        return "none"
+    modes = [m for m in ("form", "url") if getattr(el, m, None) is not None]
+    return ", ".join(modes) or "declared, no mode"
+
+
+def note_client(session) -> None:
+    """Log once per client (name, version) whether it supports elicitation: the 1.0.1 roadmap's first
+    question, answered from real connections."""
+    params = getattr(session, "client_params", None)
+    info = getattr(params, "clientInfo", None) if params else None
+    key = (getattr(info, "name", "?") or "?", getattr(info, "version", "?") or "?", _elicitation_modes(session))
+    if key not in _clients_seen:
+        _clients_seen.add(key)
+        log.info("MCP client %s %s: elicitation %s; back-channel %s.", key[0], key[1], key[2],
+                 "yes" if getattr(session, "can_send_request", False) else "no (stateless)")
+
+
+async def offer_approval(ctx: Context, tools: "Tools", caller: Caller, out: dict) -> dict:
+    """Phase C: when the client can show a page in the chat (URL elicitation) and the transport has a
+    back-channel, ask it to open the approve page, wait for the person, then report the proposal's real
+    state. Otherwise (this endpoint is stateless today) the answer carries the link as before. The
+    decision itself always happens on the approve page, never through Claude."""
+    session = getattr(ctx, "session", None)
+    if session is None or not out.get("approve") or out.get("status") != "proposed":
+        return out
+    note_client(session)
+    modes = _elicitation_modes(session)
+    if "url" not in modes or not getattr(session, "can_send_request", False):
+        return out
+    try:
+        with anyio.fail_after(ELICIT_SECONDS):
+            answer = await session.elicit_url(message=out["summary"], url=out["approve"],
+                                              elicitation_id=f"proposal-{out['proposal_id']}")
+    except Exception as exc:   # no back-channel after all, a timeout, a client error: the link still works
+        log.debug("Elicitation for proposal %s not answered: %s", out.get("proposal_id"), exc)
+        return out
+
+    def peek():
+        conn = db.connect(tools.settings.db_path)
+        try:
+            return tools.get_proposal(conn, caller, out["proposal_id"])[0]
+        finally:
+            conn.close()
+
+    current = await anyio.to_thread.run_sync(peek)
+    merged = {**out, "elicited": answer.action}
+    if current["status"] != "pending":
+        merged.update({k: v for k, v in current.items() if k in ("status", "decided_by", "decision_note", "link",
+                                                                  "result", "items", "counts", "decided_at")})
+        merged.pop("approve", None)
+        merged["note"] = current["note"]
+    elif answer.action != "accept":
+        merged["note"] = ("The person closed the approval without deciding; the approve link still works. "
+                          "Don't say it's done.")
+    return merged
+
+
 def build_server(settings: Settings, get_embedder: Callable[[], Any],
                  get_directory: Callable[[], Any] = lambda: None) -> MCPServer:
     tools = Tools(settings, get_embedder, get_directory)
     server = MCPServer(name="mnemerynne", title="Mnemerynne", instructions=INSTRUCTIONS, version=MCP_VERSION)
+
+    async def propose(ctx: Context, name: str, args: dict, fn) -> dict:
+        """A proposing tool: the call, then the in-chat approval where that's possible."""
+        out = await call(ctx, name, args, fn)
+        return await offer_approval(ctx, tools, _caller_of(ctx), out)
 
     async def call(ctx: Context, name: str, args: dict, fn) -> dict:
         caller = _caller_of(ctx)
@@ -1059,13 +1206,22 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
         return await call(ctx, "query_api", {"api": api, "operation": operation, "params": params or {},
                                              "offset": offset, "find": find}, tools.query_api)
 
-    @server.tool(annotations=_EDITS)
+    @server.tool(annotations=_PROPOSES)
     async def propose_api_action(ctx: Context, api: str, operation: str, params: dict | None = None) -> dict:
         """Propose an operation from list_apis marked changes_data (e.g. close a ticket, resolve an alert),
-        with its params. Nothing happens yet: you get an `approve` link to give the person, who checks
-        it and applies it in Mnemerynne. Never say the change is made."""
-        return await call(ctx, "propose_api_action", {"api": api, "operation": operation, "params": params or {}},
-                          tools.propose_api_action)
+        with its params. Nothing happens yet: you get a `summary`, an `approve` link to give the person,
+        who checks it and applies it in Mnemerynne, and a `proposal_id` for get_proposal. Carry on with
+        the task meanwhile. Never say the change is made."""
+        return await propose(ctx, "propose_api_action", {"api": api, "operation": operation, "params": params or {}},
+                             tools.propose_api_action)
+
+    @server.tool(annotations=_PROPOSES)
+    async def propose_batch(ctx: Context, items: list[dict]) -> dict:
+        """Propose several changes_data operations (from list_apis) as ONE proposal with one approve link,
+        e.g. ten ticket status changes: `items` is a list of {api, operation, params}. The person ticks
+        which to run; get_proposal then reports each item's outcome. Every item is checked first, so a
+        bad one refuses the whole batch. Never say the changes are made."""
+        return await propose(ctx, "propose_batch", {"items": items}, tools.propose_batch)
 
     @server.tool(annotations=_READ_ONLY)
     async def list_libraries(ctx: Context) -> dict:
@@ -1177,12 +1333,12 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
                                              "folder": folder, "to_library": to_library, "to_folder": to_folder},
                           tools.move_item)
 
-    @server.tool(annotations=_EDITS)
+    @server.tool(annotations=_PROPOSES_ONCE)
     async def delete_item(ctx: Context, file_id: int | None = None, folder_id: int | None = None) -> dict:
         """Propose moving a file (file_id) or folder (folder_id) to the recycle bin. Nothing happens yet: you
-        get an `approve` link to give the person, who checks it and applies it in Mnemerynne. Never say it's
-        deleted."""
-        return await call(ctx, "delete_item", {"file_id": file_id, "folder_id": folder_id}, tools.delete_item)
+        get a `summary` and an `approve` link to give the person, who checks it and applies it in Mnemerynne,
+        and a `proposal_id` for get_proposal. Never say it's deleted."""
+        return await propose(ctx, "delete_item", {"file_id": file_id, "folder_id": folder_id}, tools.delete_item)
 
     @server.tool(annotations=_READ_ONLY)
     async def list_changes(ctx: Context, library: int | str, folder: int | str | None = None,
@@ -1194,16 +1350,16 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
         return await call(ctx, "list_changes", {"library": library, "folder": folder, "since": since},
                           tools.list_changes)
 
-    @server.tool(annotations=_EDITS)
+    @server.tool(annotations=_PROPOSES_ONCE)
     async def request_edit_access(ctx: Context, file_id: int | None = None, folder_id: int | None = None,
                                   library: int | str | None = None, folder: int | str | None = None) -> dict:
         """Ask for permission to edit where you aren't allowed (`editable` is false, or an edit was refused
         with [not_allowed]): a file, a folder, or a place (`library` and `folder`). When it's the person's to
-        give, you get an `approve` link for them; nothing changes until they apply it. Otherwise `note` says
-        who can allow it."""
-        return await call(ctx, "request_edit_access", {"file_id": file_id, "folder_id": folder_id,
-                                                       "library": library, "folder": folder},
-                          tools.request_edit_access)
+        give, you get a `summary` and an `approve` link for them; nothing changes until they apply it
+        (get_proposal says when). Otherwise `note` says who can allow it."""
+        return await propose(ctx, "request_edit_access", {"file_id": file_id, "folder_id": folder_id,
+                                                          "library": library, "folder": folder},
+                             tools.request_edit_access)
 
     @server.tool(annotations=_READ_ONLY)
     async def list_comments(ctx: Context, file_id: int) -> dict:
@@ -1224,20 +1380,29 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
         return await call(ctx, "list_versions", {"file_id": file_id}, tools.list_versions)
 
     @server.tool(annotations=_READ_ONLY)
-    async def list_proposals(ctx: Context, status: str = "all", since_days: int = 7, limit: int = 20) -> dict:
-        """The person's proposals (from propose_api_action, delete_item, request_edit_access), newest first:
-        `status` "pending" (still waiting), "decided" (applied, withdrawn, rejected or stale within
-        `since_days`, 1-90) or "all". Each says who decides it (`approver`: the person or an admin) and,
-        once decided, `decided_by` and any `decision_note`. Use it to report outcomes instead of guessing."""
-        return await call(ctx, "list_proposals", {"status": status, "since_days": since_days, "limit": limit},
-                          tools.list_proposals)
+    async def list_proposals(ctx: Context, status: str = "all", since_days: int = 7, limit: int = 20,
+                             since: str | None = None) -> dict:
+        """The person's proposals (from propose_api_action, propose_batch, delete_item, request_edit_access),
+        newest first: `status` "pending" (still waiting), "decided" (applied, dismissed, rejected, stale or
+        expired within `since_days`, 1-90, or since a UTC time `since`) or "all". Each carries its `summary`,
+        `expires_at`, who decides it (`approver`: the person or an admin) and, once decided, `decided_by`
+        and any `decision_note`. Use it to report outcomes instead of guessing."""
+        return await call(ctx, "list_proposals", {"status": status, "since_days": since_days, "limit": limit,
+                                                  "since": since}, tools.list_proposals)
 
     @server.tool(annotations=_READ_ONLY)
     async def get_proposal(ctx: Context, proposal: int) -> dict:
-        """One proposal by the `proposal` id a propose or request tool returned: its status (pending,
-        applied, dismissed, stale or rejected), who decided it and why. Only say a change is made once
-        this says applied."""
+        """One proposal by the `proposal_id` a propose or request tool returned: its status (pending,
+        applied, dismissed, stale, rejected or expired), who decided it, why (`decision_note`), and for an
+        applied API action its `result` and `link`. Only say a change is made once this says applied."""
         return await call(ctx, "get_proposal", {"proposal": proposal}, tools.get_proposal)
+
+    @server.tool(annotations=_PROPOSES_ONCE)
+    async def withdraw_proposal(ctx: Context, proposal: int) -> dict:
+        """Take back a pending proposal of yours (its `proposal_id`) that turned out wrong or unneeded, so a
+        stale approve link doesn't linger. Only pending ones you made for this person; nothing else about a
+        proposal can be changed from here."""
+        return await call(ctx, "withdraw_proposal", {"proposal": proposal}, tools.withdraw_proposal)
 
     return server
 
@@ -1313,4 +1478,53 @@ class McpEndpoint:
                                     status_code=429, headers={"Retry-After": "60"})
             return await response(scope, receive, send)
         scope["mnemerynne.caller"] = caller
-        await self.manager.handle_request(scope, receive, send)
+        await self.manager.handle_request(scope, receive, _with_security_schemes(send))
+
+
+# Every tool needs the person signed in. ChatGPT reads that per tool, from a `securitySchemes` key beside
+# `name` and `inputSchema` (developers.openai.com/plugins/build/auth); the SDK's Tool model has no such
+# field and drops unknown ones, so it is added to the tools/list reply here. Other clients ignore it.
+SECURITY_SCHEMES = [{"type": "oauth2", "scopes": ["mcp"]}]
+
+
+def _with_security_schemes(send: Send) -> Send:
+    """Wrap `send` so a JSON tools/list reply gets securitySchemes on each tool. The endpoint is stateless and
+    answers in plain JSON (one body), so the reply is held until it is complete; anything else passes as is."""
+    held: dict = {}
+
+    async def wrapped(message) -> None:
+        if message["type"] == "http.response.start":
+            headers = {k.decode().lower(): v.decode() for k, v in message.get("headers", [])}
+            if headers.get("content-type", "").startswith("application/json"):
+                held["start"], held["body"] = message, b""
+                return
+            await send(message)
+            return
+        if message["type"] == "http.response.body" and "start" in held:
+            held["body"] += message.get("body", b"")
+            if message.get("more_body"):
+                return
+            body = _add_security_schemes(held["body"])
+            start = dict(held.pop("start"))
+            start["headers"] = [(k, v) for k, v in start.get("headers", []) if k.lower() != b"content-length"] + \
+                [(b"content-length", str(len(body)).encode())]
+            await send(start)
+            await send({"type": "http.response.body", "body": body})
+            return
+        await send(message)
+
+    return wrapped
+
+
+def _add_security_schemes(body: bytes) -> bytes:
+    try:
+        reply = json.loads(body)
+    except ValueError:
+        return body
+    tools = reply.get("result", {}).get("tools") if isinstance(reply, dict) else None
+    if not isinstance(tools, list):
+        return body
+    for tool in tools:
+        if isinstance(tool, dict):
+            tool.setdefault("securitySchemes", SECURITY_SCHEMES)
+    return json.dumps(reply, ensure_ascii=False, separators=(",", ":")).encode()

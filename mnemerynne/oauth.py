@@ -2,15 +2,18 @@
 connectors, added by a Team/Enterprise owner or by a person for themselves)
 and Claude Code connect by signing the person in to Mnemerynne and asking
 their consent, instead of a pasted personal token. Claude Desktop's
-extension and personal tokens keep working as before.
+extension and personal tokens keep working as before. ChatGPT connects the
+same way when an admin allows it (Settings → ChatGPT, off by default): it
+sees what is shared with Claude, and switching it off ends its connections.
 
 How a connection is made (MCP's authorization spec):
   1. /mcp answers 401 with WWW-Authenticate pointing at
      /.well-known/oauth-protected-resource, which names this server as the
      authorization server (/.well-known/oauth-authorization-server).
   2. The app registers itself (/oauth/register). Only Claude's own redirect
-     addresses, and this computer's (Claude Code), are accepted: nothing
-     else can register and then ask staff for their documents.
+     addresses, this computer's (Claude Code), and ChatGPT's two exact
+     callbacks (while allowed) are accepted: nothing else can register and
+     then ask staff for their documents.
   3. The person signs in and allows it (/oauth/authorize), choosing whether
      it may edit files. PKCE (S256) is required.
   4. The app swaps the code for an access token (an hour) and a refresh token
@@ -26,6 +29,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 import secrets
 import sqlite3
 from urllib.parse import urlsplit
@@ -37,6 +41,12 @@ REFRESH_DAYS = 90
 CODE_SECONDS = 300
 CLAUDE_HOSTS = ("claude.ai", "claude.com")
 LOOPBACK = ("localhost", "127.0.0.1", "::1")
+# ChatGPT's OAuth callbacks (developers.openai.com/plugins/build/auth): the stable one, used when the
+# authorization server supports RFC 9207 (it does: metadata and `iss` on every redirect), and the
+# per-connector one it falls back to. Exact matches only, nothing else on chatgpt.com.
+CHATGPT_REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect"
+CHATGPT_CALLBACK = re.compile(r"https://chatgpt\.com/connector/oauth/[A-Za-z0-9_-]{1,128}")
+CHATGPT_KEY = "chatgpt_enabled"
 ACCESS_PREFIX = "mnemerynne_at_"
 REFRESH_PREFIX = "mnemerynne_rt_"
 
@@ -56,9 +66,56 @@ def _hash(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+# ------------------------------------------------------------------ ChatGPT
+def chatgpt_enabled(conn: sqlite3.Connection) -> bool:
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (CHATGPT_KEY,)).fetchone()
+    return bool(row and row["value"] == "1")
+
+
+def set_chatgpt(conn: sqlite3.Connection, enabled: bool) -> int:
+    """Allow or stop ChatGPT connections. Stopping ends the ones there are (returns how many), so turning it
+    back on means people connect again rather than old connections quietly coming back."""
+    conn.execute("INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                 (CHATGPT_KEY, "1" if enabled else "0"))
+    if enabled:
+        return 0
+    ended = 0
+    for row in conn.execute("SELECT g.id, c.redirect_uris FROM oauth_grants g JOIN oauth_clients c "
+                            "ON c.id = g.client_row WHERE g.revoked_at IS NULL").fetchall():
+        if kind(json.loads(row["redirect_uris"])) == "chatgpt":
+            ended += revoke_grant(conn, row["id"])
+    return ended
+
+
+def _is_chatgpt(uri: str) -> bool:
+    return uri == CHATGPT_REDIRECT or CHATGPT_CALLBACK.fullmatch(uri) is not None
+
+
+def kind(redirect_uris: list[str]) -> str:
+    """Which app a client is, from where it is sent back: "chatgpt", "claude" or "local" (Claude Code)."""
+    if any(_is_chatgpt(u) for u in redirect_uris):
+        return "chatgpt"
+    hosts = {(urlsplit(u).hostname or "").lower() for u in redirect_uris}
+    if any(any(h == c or h.endswith("." + c) for c in CLAUDE_HOSTS) for h in hosts):
+        return "claude"
+    return "local"
+
+
+# What the consent page calls each app, and who the passages it reads go to.
+APPS = {"claude": ("Claude", "Anthropic"), "chatgpt": ("ChatGPT", "OpenAI"),
+        "local": ("An app on your computer (such as Claude Code)", "the app's AI provider")}
+
+
+def _refuse_if_off(conn: sqlite3.Connection, row: sqlite3.Row, error: str = "access_denied") -> None:
+    if kind(json.loads(row["redirect_uris"])) == "chatgpt" and not chatgpt_enabled(conn):
+        raise OAuthError(error, "ChatGPT connections aren't allowed here; ask a Mnemerynne admin.")
+
+
 # ------------------------------------------------------------------ clients
 def redirect_allowed(uri: str) -> bool:
-    """Claude's own addresses over HTTPS, or this computer (Claude Code's local callback)."""
+    """Claude's own addresses over HTTPS, this computer (Claude Code's local callback), or ChatGPT's callbacks."""
+    if _is_chatgpt(uri):
+        return True
     try:
         parts = urlsplit(uri)
     except ValueError:
@@ -73,19 +130,21 @@ def redirect_allowed(uri: str) -> bool:
 
 def who(redirect_uris: list[str]) -> str:
     """Who is asking, as the consent page says it."""
-    hosts = {(urlsplit(u).hostname or "").lower() for u in redirect_uris}
-    if any(any(h == c or h.endswith("." + c) for c in CLAUDE_HOSTS) for h in hosts):
-        return "Claude"
-    return "An app on your computer (such as Claude Code)"
+    return APPS[kind(redirect_uris)][0]
 
 
 def register(conn: sqlite3.Connection, body: dict) -> dict:
-    """Dynamic client registration (RFC 7591), for Claude only."""
+    """Dynamic client registration (RFC 7591), for Claude, and ChatGPT while an admin allows it."""
     uris = body.get("redirect_uris")
     if not isinstance(uris, list) or not uris or not all(isinstance(u, str) for u in uris):
         raise OAuthError("invalid_redirect_uri", "Give the redirect_uris.")
     if len(uris) > 10 or not all(redirect_allowed(u) for u in uris):
-        raise OAuthError("invalid_redirect_uri", "Mnemerynne only works with Claude (claude.ai, Claude Code).")
+        raise OAuthError("invalid_redirect_uri",
+                         "Mnemerynne only works with Claude (claude.ai, Claude Code) and, where allowed, ChatGPT.")
+    if kind(uris) == "chatgpt" and not all(_is_chatgpt(u) for u in uris):
+        raise OAuthError("invalid_redirect_uri", "Register ChatGPT's callbacks on their own.")
+    if kind(uris) == "chatgpt" and not chatgpt_enabled(conn):
+        raise OAuthError("invalid_redirect_uri", "ChatGPT connections aren't allowed here; ask a Mnemerynne admin.")
     method = body.get("token_endpoint_auth_method") or "none"
     if method not in ("none", "client_secret_post", "client_secret_basic"):
         raise OAuthError("invalid_client_metadata", "Unsupported token_endpoint_auth_method.")
@@ -130,6 +189,7 @@ def check_request(conn: sqlite3.Connection, params: dict, resource: str) -> tupl
         raise OAuthError("invalid_request", "PKCE (S256) is required.")
     if params.get("resource") and params["resource"].rstrip("/") not in (resource, resource.rsplit("/mcp", 1)[0]):
         raise OAuthError("invalid_target", "That isn't this Mnemerynne's MCP address.")
+    _refuse_if_off(conn, row)
     return row, redirect_uri
 
 
@@ -170,6 +230,7 @@ def _client_auth(conn: sqlite3.Connection, form: dict, basic: str | None) -> tup
 def token(conn: sqlite3.Connection, form: dict, basic: str | None = None) -> dict:
     """The token endpoint: authorization_code (with PKCE) and refresh_token grants."""
     row, _ = _client_auth(conn, form, basic)
+    _refuse_if_off(conn, row, "invalid_grant")
     grant_type = form.get("grant_type")
     if grant_type == "authorization_code":
         code = conn.execute("SELECT * FROM oauth_codes WHERE code_hash = ?", (_hash(form.get("code") or ""),)).fetchone()
@@ -217,11 +278,14 @@ def verify(conn: sqlite3.Connection, value: str | None) -> Caller | None:
     if not value or not value.startswith(ACCESS_PREFIX):
         return None
     row = conn.execute(
-        "SELECT g.id AS grant_id, g.user_id, g.can_edit, u.username FROM oauth_tokens t "
+        "SELECT g.id AS grant_id, g.user_id, g.can_edit, u.username, c.redirect_uris FROM oauth_tokens t "
         "JOIN oauth_grants g ON g.id = t.grant_id JOIN users u ON u.id = g.user_id "
+        "JOIN oauth_clients c ON c.id = g.client_row "
         "WHERE t.token_hash = ? AND t.kind = 'access' AND t.expires_at > datetime('now') "
         "AND g.revoked_at IS NULL AND u.active = 1", (_hash(value),)).fetchone()
     if row is None:
+        return None
+    if kind(json.loads(row["redirect_uris"])) == "chatgpt" and not chatgpt_enabled(conn):
         return None
     conn.execute("UPDATE oauth_grants SET last_used_at = datetime('now') WHERE id = ?", (row["grant_id"],))
     return Caller(row["user_id"], row["username"], None, bool(row["can_edit"]), grant_id=row["grant_id"])

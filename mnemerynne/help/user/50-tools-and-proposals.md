@@ -22,7 +22,9 @@ Erynne never changes anything herself. A change she drafts shows as a **card** u
 
 Each card has **Apply** (or **Run it**, **Save to Drafts**, **Move to recycle bin**, **Allow**, depending on the kind) and **Dismiss**. Applying checks everything again at that moment: that you may still edit there, still use that system, and that the file hasn't changed since the draft. If the file did change, the card turns **stale**; ask her to redo it on the current version. Applied file changes keep the previous version ([Versions](versions.md)).
 
-Proposals you don't decide on expire after a while. Expired or dismissed proposals change nothing.
+Each card says who asked ("Claude for you", or Erynne), carries the same one-sentence summary you were given in the chat, and shows when it expires: proposals nobody decides on expire after 7 days (admins can change this). Expired or dismissed proposals change nothing. When you dismiss one you can add a short reason, which Claude or Erynne can see afterwards instead of asking you.
+
+**Several changes, one approval.** Claude can propose a batch, for example ten ticket status changes, as one card with one link. Each change has a tick box: untick the ones you don't want and press **Run the ticked ones**. The card then shows what ran, what you declined and what the system refused.
 
 ## Changes waiting for you
 

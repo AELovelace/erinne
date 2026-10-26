@@ -123,6 +123,11 @@ class Settings(BaseSettings):
     edit_max_operations: int = 50
     version_days: int = 30
     version_keep: int = 20             # per file, newest first
+    # Proposals (mnemerynne/proposals.py): a change Claude or Erynne proposed that nobody applies,
+    # dismisses or withdraws within this many days expires (nothing changes). A batch
+    # (propose_batch) holds at most proposal_batch_max API actions under one approval.
+    proposal_days: int = 7
+    proposal_batch_max: int = 25
 
     # Backups and housekeeping (mnemerynne/backup.py, mnemerynne/retention.py).
     # Where `mnemerynne backup` writes and `restore` reads: put it on a disk

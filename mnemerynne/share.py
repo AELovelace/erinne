@@ -165,7 +165,9 @@ def record_stat(conn: sqlite3.Connection, file_id: int, path: Path) -> None:
 def _fail(action: str, exc: OSError) -> ShareError:
     log.warning("Share: couldn't %s: %s", action, exc)
     if exc.errno in (errno.EACCES, errno.EPERM):
-        return ShareError(f"The server isn't allowed to {action} on the share.")
+        return ShareError(f"The server isn't allowed to {action} on the share: the mnemerynne service user needs "
+                          f"Modify rights on that folder (its entry shows as “Unix User\\mnemerynne” in the folder's "
+                          f"Security tab in Windows).")
     if exc.errno == errno.EEXIST or isinstance(exc, FileExistsError):
         return ShareError(f"Couldn't {action}: something with that name already exists on the share.")
     return ShareError(f"Couldn't {action} on the share: {exc.strerror or exc}")

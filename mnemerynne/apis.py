@@ -705,8 +705,14 @@ PRESETS: list[dict] = [
     },
     {
         "key": "atera", "name": "Atera", "base_url": "https://api.atera.com/api/v3", "auth_type": "bearer",
-        "description": "Atera IT tickets (the same calls the IT dashboard makes). Full ticket text, including "
-                       "emails and comments: give it to the IT group only. Use a read-only Tickets token.",
+        "description": "Atera IT tickets and alerts (the same calls the IT dashboard makes). Full ticket text, "
+                       "including emails and comments: give it to the IT group only. The reading operations need a "
+                       "read-only token; the changes (create a ticket, change its status or priority, add an "
+                       "internal note, resolve an alert) are proposals the person runs, and need a token that may "
+                       "write. Delete the change operations here if this entry should stay read-only, and edit "
+                       "Add internal note's body to the technician the notes should come from. Contact by email "
+                       "returns names, emails and phone numbers: leave Claude's switch off if that mustn't go to "
+                       "Anthropic.",
         "operations": [
             {"name": "Tickets", "path": "/tickets/noComments", "cache_seconds": 60,
              "params": [_p("page", "int", min=1, max=50, default=1),
@@ -773,6 +779,55 @@ PRESETS: list[dict] = [
              "params": [_p("alertId", "int", where="path", required=True, min=1, help="Alert ID")],
              "description": "One Atera alert in full: title, message, severity, device, customer, status and dates.",
              "example_questions": "What is alert 5531 about?\nShow me alert 5531.\nIs alert 5531 still open?"},
+            {"name": "Contact by email", "path": "/contacts", "cache_seconds": 300,
+             "params": [_p("Email", "string", required=True, help="The person's email address, exactly as in Atera")],
+             "description": "The Atera contact (end user) with a given email: EndUserID, name, customer. Look it up "
+                            "before proposing Create ticket, which needs the EndUserID. Returns personal data.",
+             "example_questions": "What's the Atera contact for jane@example.com?\n"
+                                  "Who is the end user with the email jane@example.com in Atera?"},
+            # Changes: proposed by Erynne or Claude, run only when the person presses Run it.
+            {"name": "Create ticket", "action": True, "method": "POST", "path": "/tickets", "cache_seconds": 0,
+             "body": '{"TicketTitle": "{{title}}", "Description": "{{description}}", "EndUserID": {{endUserId}}, '
+                     '"TicketPriority": "{{priority}}", "TicketType": "{{type}}", "TicketImpact": "{{impact}}"}',
+             "params": [_p("title", "text", where="body", required=True, help="A short, one-line title"),
+                        _p("description", "text", where="body", required=True,
+                           help="What's wrong, where it was seen and what should happen; include the evidence"),
+                        _p("endUserId", "int", where="body", required=True, min=1,
+                           help="The contact's EndUserID from Contact by email (who the ticket is for)"),
+                        _p("priority", "enum", where="body", default="Medium", options=["Low", "Medium", "High", "Critical"],
+                           help="The priority"),
+                        _p("type", "enum", where="body", default="Incident",
+                           options=["Incident", "Problem", "Request", "Change"],
+                           help="Incident for something broken or a security finding, Request for something wanted"),
+                        _p("impact", "enum", where="body", default="Minor",
+                           options=["NoImpact", "Minor", "Major", "ServerIssue", "SiteDown", "Crisis"],
+                           help="How much it affects work")],
+             "description": "Open a new ticket for an existing Atera contact: title, description, priority, type and "
+                            "impact. Proposed: the person runs it. Needs the contact's EndUserID (Contact by email). "
+                            "Never makes a contact."},
+            {"name": "Change ticket status", "action": True, "method": "PUT", "path": "/tickets/{ticketId}",
+             "cache_seconds": 0, "body": '{"TicketStatus": "{{status}}"}',
+             "params": [_p("ticketId", "int", where="path", required=True, min=1, help="Ticket number"),
+                        _p("status", "string", where="body", required=True,
+                           help="A status name from Ticket statuses, exactly as listed, e.g. Resolved")],
+             "description": "Set one ticket's status, e.g. to Resolved or Closed. Proposed: the person runs it."},
+            {"name": "Change ticket priority", "action": True, "method": "PUT", "path": "/tickets/{ticketId}",
+             "cache_seconds": 0, "body": '{"TicketPriority": "{{priority}}"}',
+             "params": [_p("ticketId", "int", where="path", required=True, min=1, help="Ticket number"),
+                        _p("priority", "enum", where="body", required=True, options=["Low", "Medium", "High", "Critical"],
+                           help="The new priority")],
+             "description": "Set one ticket's priority. Proposed: the person runs it."},
+            {"name": "Add internal note", "action": True, "method": "POST", "path": "/tickets/{ticketId}/comments",
+             "cache_seconds": 0,
+             "body": '{"CommentText": "{{text}}", "TechnicianCommentDetails": {"TechnicianEmail": '
+                     '"technician@example.com", "IsInternal": true}}',
+             "params": [_p("ticketId", "int", where="path", required=True, min=1, help="Ticket number"),
+                        _p("text", "text", where="body", required=True, help="The note")],
+             "description": "Add a technician-only note to a ticket (the customer doesn't see it). Proposed: the "
+                            "person runs it. Edit the body's TechnicianEmail to the technician the notes come from."},
+            {"name": "Resolve alert", "action": True, "method": "PUT", "path": "/alerts/{alertId}", "cache_seconds": 0,
+             "params": [_p("alertId", "int", where="path", required=True, min=1, help="Alert ID")],
+             "description": "Mark one Atera alert as resolved. Proposed: the person runs it."},
         ],
     },
 ]

@@ -47,7 +47,14 @@
     dismissed: "Dismissed; nothing was changed.",
     stale: "Not applied: the file changed since Erynne drafted this. Ask her to redo it.",
     rejected: "✗ Turned down by an admin; nothing was changed.",
+    expired: "Expired before anyone decided; nothing was changed.",
   };
+
+  function dateLabel(iso) {
+    if (!iso) return "";
+    const d = new Date(iso.replace(" ", "T") + "Z");
+    return isNaN(d) ? iso : d.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  }
 
   // A proposed edit or new file, with Apply / Dismiss while it is pending. One that waits for an admin
   // (approver "admin") can only be withdrawn here; adminProposal is the admins' view, with Approve / Reject.
@@ -64,9 +71,12 @@
   }
 
   function decisionText(p) {
-    if (!p.decided_by) return "";
-    return (p.status === "rejected" ? " Turned down by " : " Approved by ") + p.decided_by +
-           (p.decision_note ? ": “" + p.decision_note + "”" : ".");
+    if (p.approver === "admin" && p.decided_by && (p.status === "rejected" || p.status === "applied")) {
+      return (p.status === "rejected" ? " Turned down by " : " Approved by ") + p.decided_by +
+             (p.decision_note ? ": “" + p.decision_note + "”" : ".");
+    }
+    if (p.status === "dismissed" && p.decision_note) return " Note: “" + p.decision_note + "”";
+    return "";
   }
 
   function fill(card, p, opts) {
@@ -74,11 +84,36 @@
     card.dataset.status = p.status;
     const head = el("div", "proposal-head");
     const what = { create: "📄 New file ", edit: "📝 Change to ", mail: "✉️ Email draft: ",
-                   api: "⚙️ Change in ", delete: "🗑️ Delete ", access: "🔓 Let the AI edit " }[p.kind] || "";
+                   api: "⚙️ Change in ", delete: "🗑️ Delete ", access: "🔓 Let the AI edit ", batch: "⚙️ " }[p.kind] || "";
     head.append(document.createTextNode(what), el("strong", null, p.file), el("span", "muted small", " · " + p.where));
     if (opts.admin && p.requester) head.appendChild(el("span", "muted small", " · asked by " + p.requester));
+    else if (p.requested_via && p.requested_via !== "Erynne") head.appendChild(el("span", "muted small", " · asked by " + p.requested_via));
     card.appendChild(head);
-    if (p.changes && p.changes.length && !(p.kind === "create" && p.diff)) {
+    // The same sentence Claude or Erynne gave the person, so what they were told matches what they see.
+    if (p.summary) card.appendChild(el("p", "proposal-summary", p.summary));
+    const ticks = [];
+    if (p.kind === "batch" && p.items) {
+      // One line per change; while pending (and theirs to decide) each has a tick box.
+      const ul = el("ul", "small proposal-changes proposal-items");
+      p.items.forEach(function (item, i) {
+        const li = el("li");
+        if (p.status === "pending" && !opts.admin && p.approver !== "admin") {
+          const label = el("label", "check");
+          const box = el("input");
+          box.type = "checkbox"; box.checked = true; box.dataset.index = String(i);
+          ticks.push(box);
+          label.append(box, document.createTextNode(" " + item.summary));
+          li.appendChild(label);
+        } else {
+          const mark = { applied: "✓ ", declined: "– ", failed: "✗ ", pending: "" }[item.status] || "";
+          li.appendChild(el("span", item.status === "failed" ? "error" : null, mark + item.summary));
+          if (item.status === "failed" && item.error) li.appendChild(el("span", "muted", " (" + item.error + ")"));
+          if (item.result && item.status === "applied") li.appendChild(el("span", "muted", " · " + item.result));
+        }
+        ul.appendChild(li);
+      });
+      card.appendChild(ul);
+    } else if (p.changes && p.changes.length && !(p.kind === "create" && p.diff)) {
       const ul = el("ul", "small proposal-changes");
       p.changes.slice(0, 30).forEach(function (c) { ul.appendChild(el("li", null, c)); });
       if (p.changes.length > 30) ul.appendChild(el("li", "muted", "… and " + (p.changes.length - 30) + " more"));
@@ -108,16 +143,28 @@
       foot.append(el("span", "small muted", "⏳ Waiting for a Mnemerynne admin to approve it."), withdraw, msg);
     } else if (p.status === "pending") {
       const apply = el("button", "small", { mail: "Save to Drafts", api: "Run it", delete: "Move to recycle bin",
-                                            access: "Allow" }[p.kind] || "Apply");
+                                            access: "Allow", batch: "Run the ticked ones" }[p.kind] || "Apply");
       apply.type = "button";
       const dismiss = el("button", "link small", "Dismiss");
       dismiss.type = "button";
       const msg = el("span", "small");
-      apply.addEventListener("click", function () { decide(card, p, "apply", [apply, dismiss], msg, opts); });
-      dismiss.addEventListener("click", function () { decide(card, p, "dismiss", [apply, dismiss], msg, opts); });
+      apply.addEventListener("click", function () {
+        const chosen = ticks.length ? ticks.filter(function (b) { return b.checked; }).map(function (b) { return Number(b.dataset.index); }) : null;
+        if (chosen && !chosen.length) { msg.textContent = "Tick at least one change, or dismiss."; msg.className = "small error"; return; }
+        decide(card, p, "apply", [apply, dismiss], msg, opts, null, chosen);
+      });
+      dismiss.addEventListener("click", function () {
+        const why = prompt("Dismiss this? Add a reason if you like (shown to whoever proposed it):", "");
+        if (why === null) return;
+        decide(card, p, "dismiss", [apply, dismiss], msg, opts, why);
+      });
       foot.append(apply, dismiss, msg);
+      if (p.expires_at) foot.appendChild(el("span", "small muted", "Expires " + dateLabel(p.expires_at)));
     } else {
+      const counts = p.counts || {};
       const said = p.status === "applied" && p.kind === "mail" ? STATUS.saved
+                 : p.status === "applied" && p.kind === "batch"
+                   ? "✓ " + (counts.applied || 0) + " applied, " + (counts.declined || 0) + " declined, " + (counts.failed || 0) + " failed."
                  : p.status === "applied" && p.kind === "api" ? "✓ Done."
                  : p.status === "applied" && p.kind === "delete" ? "✓ In the recycle bin."
                  : p.status === "applied" && p.kind === "access" ? "✓ The AI can edit here now." : STATUS[p.status] || p.status;
@@ -132,15 +179,17 @@
     card.appendChild(foot);
   }
 
-  async function decide(card, p, action, buttons, msg, opts, note) {
+  async function decide(card, p, action, buttons, msg, opts, note, items) {
     buttons.forEach(function (b) { b.disabled = true; });
     msg.textContent = action === "apply" || action === "approve"
-      ? ({ mail: "Saving…", api: "Running…", delete: "Deleting…" }[p.kind] || "Applying…") : "";
+      ? ({ mail: "Saving…", api: "Running…", delete: "Deleting…", batch: "Running…" }[p.kind] || "Applying…") : "";
     msg.className = "small muted";
     try {
-      const r = opts.admin
-        ? await fetch("/api/admin/proposals/" + p.id + "/" + action, {
-            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note: note || "" }) })
+      const payload = opts.admin ? { note: note || "" } : action === "dismiss" && note ? { note: note }
+                    : action === "apply" && items ? { items: items } : null;
+      const r = payload
+        ? await fetch((opts.admin ? "/api/admin/proposals/" : "/api/agent/proposals/") + p.id + "/" + action, {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
         : await fetch("/api/agent/proposals/" + p.id + "/" + action, { method: "POST" });
       const data = await r.json().catch(function () { return {}; });
       if (r.ok) { fill(card, Object.assign({ requester: p.requester }, data), opts); return; }

@@ -1,4 +1,5 @@
-"""OAuth for /mcp: claude.ai connectors and Claude Code sign people in and ask consent."""
+"""OAuth for /mcp: claude.ai connectors, Claude Code and (when an admin allows it) ChatGPT sign people in and
+ask consent."""
 
 import base64
 import hashlib
@@ -14,6 +15,8 @@ from mnemerynne.web.app import Services, create_app
 from test_mcp import _initialize, _rpc
 
 CLAUDE = "https://claude.ai/api/mcp/auth_callback"
+CHATGPT = "https://chatgpt.com/connector_platform_oauth_redirect"
+CHATGPT_CALLBACK = "https://chatgpt.com/connector/oauth/cb_8f3a2Kx"
 
 
 @pytest.fixture
@@ -36,7 +39,7 @@ def _register(client, uri=CLAUDE, **extra):
     return client.post("/oauth/register", json={"redirect_uris": [uri], "client_name": "Claude", **extra})
 
 
-def _connect(client, name="alice", can_edit=True, uri=CLAUDE):
+def _connect(client, name="alice", can_edit=True, uri=CLAUDE, app="Claude"):
     """The whole dance: register, sign in, approve, swap the code. Returns (tokens, client_id)."""
     client_id = _register(client, uri).json()["client_id"]
     verifier, challenge = _pkce()
@@ -48,7 +51,7 @@ def _connect(client, name="alice", can_edit=True, uri=CLAUDE):
         back = client.post("/login", data={"username": name, "password": "password123"}, follow_redirects=False)
         assert back.headers["location"].startswith("/oauth/authorize?")
         first = client.get(back.headers["location"])
-    assert first.status_code == 200 and "Claude</strong> wants to use" in first.text
+    assert first.status_code == 200 and f"{app}</strong> wants to use" in first.text
     nonce = first.text.split('name="nonce" value="')[1].split('"')[0]
     form = {"nonce": nonce, "decision": "allow", **({"can_edit": "1"} if can_edit else {})}
     done = client.post("/oauth/authorize", data=form, follow_redirects=False)
@@ -146,7 +149,8 @@ def test_bad_requests_and_denial(client):
     page = client.get("/oauth/authorize?" + urlencode({**base, "state": "x"}))
     nonce = page.text.split('name="nonce" value="')[1].split('"')[0]
     denied = client.post("/oauth/authorize", data={"nonce": nonce, "decision": "deny"}, follow_redirects=False)
-    assert parse_qs(urlsplit(denied.headers["location"]).query) == {"error": ["access_denied"], "state": ["x"]}
+    assert parse_qs(urlsplit(denied.headers["location"]).query) == {"error": ["access_denied"], "state": ["x"],
+                                                                    "iss": ["https://mnemerynne.test"]}   # RFC 9207
     # A forged approval (no matching nonce in this session) does nothing.
     assert client.post("/oauth/authorize", data={"nonce": "forged", "decision": "allow"}).status_code == 400
 
@@ -173,3 +177,62 @@ def test_calls_are_logged_with_the_connection(client, conn):
     _rpc(client, tokens["access_token"], "tools/call", {"name": "list_libraries", "arguments": {}}, id_=2)
     row = conn.execute("SELECT token_id, grant_id FROM mcp_calls ORDER BY id DESC").fetchone()
     assert row["token_id"] is None and row["grant_id"]
+
+
+# ------------------------------------------------------------------ ChatGPT
+def _admin(client, conn):
+    conn.execute("UPDATE users SET role = 'admin' WHERE username = 'bob'")
+    client.post("/login", data={"username": "bob", "password": "password123"})
+
+
+def test_chatgpt_is_refused_until_an_admin_allows_it(client, conn):
+    for uri in (CHATGPT, CHATGPT_CALLBACK):
+        refused = _register(client, uri)
+        assert refused.status_code == 400 and "ask a Mnemerynne admin" in refused.json()["error_description"]
+    _admin(client, conn)
+    assert client.put("/api/admin/settings/chatgpt", json={"enabled": True}).json()["enabled"] is True
+    client.post("/logout")
+    for uri in (CHATGPT, CHATGPT_CALLBACK):
+        assert _register(client, uri).status_code == 201, uri
+    # Only ChatGPT's exact callbacks: nothing else on chatgpt.com, and not mixed with other addresses.
+    for bad in ("https://chatgpt.com/evil", "https://chatgpt.com/connector/oauth/a/b",
+                "https://chatgpt.com/connector_platform_oauth_redirect/x", "http://chatgpt.com/connector/oauth/a",
+                "https://chatgpt.com.evil.example/connector/oauth/a"):
+        assert _register(client, bad).status_code == 400, bad
+    mixed = client.post("/oauth/register", json={"redirect_uris": [CHATGPT, "http://127.0.0.1:9/cb"]})
+    assert mixed.status_code == 400
+
+
+def test_chatgpt_connects_says_who_it_is_and_switching_it_off_ends_it(client, conn):
+    oauth.set_chatgpt(conn, True)
+    meta = client.get("/.well-known/oauth-authorization-server").json()
+    assert meta["authorization_response_iss_parameter_supported"] is True
+    assert meta["issuer"] == "https://mnemerynne.test"
+    tokens, _ = _connect(client, uri=CHATGPT, app="ChatGPT")
+    page = client.get("/oauth/authorize?" + urlencode({
+        "response_type": "code", "client_id": _register(client, CHATGPT).json()["client_id"], "redirect_uri": CHATGPT,
+        "code_challenge": _pkce()[1], "code_challenge_method": "S256"}))
+    assert "go to OpenAI" in page.text and "Anthropic" not in page.text
+    assert _initialize(client, tokens["access_token"]).status_code == 200
+    listed = _rpc(client, tokens["access_token"], "tools/list").json()["result"]["tools"]
+    assert listed and all(t["securitySchemes"] == [{"type": "oauth2", "scopes": ["mcp"]}] for t in listed)
+    assert [c["app"] for c in client.get("/api/oauth/connections").json()["connections"]] == ["ChatGPT"]
+    claude, _ = _connect(client)                                         # Claude is untouched by the switch
+
+    client.post("/logout")
+    _admin(client, conn)
+    assert client.get("/api/admin/settings/chatgpt").json()["connections"] == 1
+    off = client.put("/api/admin/settings/chatgpt", json={"enabled": False}).json()
+    assert off == {"enabled": False, "connections": 0, "mcp_url": "https://mnemerynne.test/mcp"}
+    assert _initialize(client, tokens["access_token"]).status_code == 401
+    assert _initialize(client, claude["access_token"]).status_code == 200
+    assert client.post("/oauth/token", data={"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"],
+                                             "client_id": "x"}).status_code in (400, 401)
+    assert conn.execute("SELECT action, target FROM access_log ORDER BY id DESC").fetchone()[:] == \
+        ("settings.chatgpt", "off")
+
+
+def test_chatgpt_switch_is_for_admins(client):
+    client.post("/login", data={"username": "alice", "password": "password123"})
+    assert client.get("/api/admin/settings/chatgpt").status_code == 403
+    assert client.put("/api/admin/settings/chatgpt", json={"enabled": True}).status_code == 403

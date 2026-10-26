@@ -1,6 +1,6 @@
 """OAuth endpoints for /mcp (mnemerynne/oauth.py): discovery documents, app
-registration, the sign-in and consent page, tokens, and the connections people
-and admins can see and disconnect."""
+registration, the sign-in and consent page, tokens, the connections people
+and admins can see and disconnect, and the admin switch for ChatGPT."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from mnemerynne import oauth, permissions
+from mnemerynne.db import transaction
 from mnemerynne.mcp_server import public_base
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import _session_user, admin_user, api_user, get_db
@@ -44,9 +45,11 @@ def protected_resource(request: Request):
 @router.get("/.well-known/oauth-authorization-server")
 @router.get("/.well-known/oauth-authorization-server/mcp")
 def authorization_server(request: Request):
-    """RFC 8414."""
+    """RFC 8414. RFC 9207: every redirect back carries `iss` (this issuer), which lets ChatGPT use its
+    stable callback."""
     base = _base(request)
-    return {"issuer": base, "authorization_endpoint": base + "/oauth/authorize",
+    return {"issuer": base, "authorization_response_iss_parameter_supported": True,
+            "authorization_endpoint": base + "/oauth/authorize",
             "token_endpoint": base + "/oauth/token", "registration_endpoint": base + "/oauth/register",
             "revocation_endpoint": base + "/oauth/revoke", "response_types_supported": ["code"],
             "grant_types_supported": ["authorization_code", "refresh_token"],
@@ -92,8 +95,9 @@ def authorize(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     shared = permissions.claude_collection_ids(conn, user["id"])
     places = [("📥 " + permissions.PRIVATE_LABEL if c["kind"] == "private" else "📚 " + c["name"])
               for c in permissions.readable_collections(conn, user["id"]) if c["id"] in shared]
+    app, provider = oauth.APPS[oauth.kind(json.loads(row["redirect_uris"]))]
     return _page(request, "oauth_consent.html", user=user, nonce=nonce, places=places,
-                 app=oauth.who(json.loads(row["redirect_uris"])), name=row["name"],
+                 app=app, provider=provider, name=row["name"],
                  host=urlsplit(redirect_uri).hostname, error=None)
 
 
@@ -105,7 +109,7 @@ async def decide(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     if (not pending or user is None or pending["user_id"] != user["id"]
             or not secrets.compare_digest(str(pending["nonce"]), str(form.get("nonce", "")))):
         return _page(request, "oauth_consent.html", 400, user=None,
-                     error="That approval didn't match; go back to Claude and connect again.")
+                     error="That approval didn't match; go back to the app and connect again.")
     query: dict = {"state": pending["state"]} if pending.get("state") else {}
     if form.get("decision") == "allow":
         row = oauth.client(conn, pending["client_id"])
@@ -113,9 +117,10 @@ async def decide(request: Request, conn: sqlite3.Connection = Depends(get_db)):
             return _page(request, "oauth_consent.html", 400, user=None, error="That app was removed; connect again.")
         query["code"] = oauth.issue_code(conn, row, user["id"], pending["redirect_uri"], pending["challenge"],
                                          form.get("can_edit") == "1")
-        query["iss"] = _base(request)
     else:
         query["error"] = "access_denied"
+    # RFC 9207 on success and error alike, exactly the metadata's issuer: ChatGPT rejects a reply without it.
+    query["iss"] = _base(request)
     sep = "&" if "?" in pending["redirect_uri"] else "?"
     return RedirectResponse(pending["redirect_uri"] + sep + urlencode(query), status_code=status.HTTP_303_SEE_OTHER)
 
@@ -169,6 +174,29 @@ def disconnect(grant_id: int, user=Depends(api_user), conn: sqlite3.Connection =
 @router.get("/api/admin/users/{user_id}/connections")
 def user_connections(user_id: int, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
     return {"connections": oauth.connections(conn, user_id)}
+
+
+class ChatGPTBody(BaseModel):
+    enabled: bool
+
+
+@router.get("/api/admin/settings/chatgpt")
+def get_chatgpt(request: Request, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Whether people may connect ChatGPT (it then sees what is shared with Claude), and how many have."""
+    count = sum(1 for r in conn.execute("SELECT c.redirect_uris FROM oauth_grants g JOIN oauth_clients c "
+                                        "ON c.id = g.client_row WHERE g.revoked_at IS NULL")
+                if oauth.kind(json.loads(r["redirect_uris"])) == "chatgpt")
+    return {"enabled": oauth.chatgpt_enabled(conn), "connections": count, "mcp_url": _base(request) + "/mcp"}
+
+
+@router.put("/api/admin/settings/chatgpt")
+def put_chatgpt(body: ChatGPTBody, request: Request, user=Depends(admin_user),
+                conn: sqlite3.Connection = Depends(get_db)):
+    with transaction(conn):
+        ended = oauth.set_chatgpt(conn, body.enabled)
+        _log(conn, user, "settings.chatgpt", "on" if body.enabled else "off",
+             f"ended {ended} connection(s)" if ended else "")
+    return get_chatgpt(request, user, conn)
 
 
 @router.delete("/api/admin/oauth/connections/{grant_id}")

@@ -520,6 +520,8 @@ button.danger-fill { background: var(--error); }
 .help-body code, .wiki-body code { font-size: .9em; }
 .help-body blockquote, .wiki-body blockquote { margin: 1rem 0; padding: .2rem 1rem; border-left: 3px solid var(--rose); color: var(--muted); }
 
+.proposal-summary { margin: .3rem 0 .4rem; font-weight: 500; }
+
 /* ------------------------------------------------------------- editor */
 .editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .9rem;
   height: calc(100vh - 3.6rem); padding: .9rem; }

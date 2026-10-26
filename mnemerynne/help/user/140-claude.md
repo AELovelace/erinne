@@ -45,6 +45,8 @@ With a token or connection that may edit, Claude can create and change **text, M
 
 Claude can also comment on files and read comments ([Comments](comments.md)), and reads a short-lived copy of a file's text through a private link when it needs more than a passage.
 
+**Following a proposal.** Claude can check what became of a proposal (`get_proposal`), list its pending and recently decided ones, and withdraw one it no longer needs, so it can propose something partway through a task, carry on, and report the outcome without asking you whether you approved. It can never approve, apply or reject anything itself: that stays with you on *Changes waiting for you*.
+
 ## Claude in chat (your own API key)
 
 If an admin has put you in the Claude group, **Claude in chat** lets you paste your own Anthropic API key and pick a model. Then the **🌐 Use External API** switch on the Ask tab answers with Claude, billed to you, with Erynne's tools but Claude's reach. The key is checked with Anthropic when you save it and is never shown again; **Remove** forgets it.
