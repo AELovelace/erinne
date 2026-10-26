@@ -88,9 +88,10 @@ DELEGATE_TOOL = "ask_minerynne"
 # Tools that change files; outside the agent group only in the person's Agents folder.
 FILE_WRITE_TOOLS = {"edit_text", "edit_document", "edit_spreadsheet", "create_file"}
 # Connector tools chat's assistants don't get: changes with no proposal form (they only propose changes),
-# and the tools for working with other people's agents, which would only crowd a small model's choices.
+# the tools for working with other people's agents, which would only crowd a small model's choices, and
+# the proposal status tools (chat shows its proposals as cards under the answer instead).
 CONNECTOR_ONLY_TOOLS = {"create_folder", "rename_item", "move_item", "delete_item", "add_comment",
-                        "list_changes", "list_comments", "request_edit_access"}
+                        "list_changes", "list_comments", "request_edit_access", "list_proposals", "get_proposal"}
 # What the chat's tool panel calls each tool, by group.
 TOOL_GROUPS = {
     "Documents": {"search_documents": "Search documents", "read_passage": "Read passages",

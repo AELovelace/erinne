@@ -15,6 +15,11 @@ resolving an alert is only called when the person applies it, after checking
 again that they may use that operation, and the call is linked from the card.
 So do Claude's deletes (kind 'delete') and its requests to edit where it is
 refused (kind 'access'): the person applies them with their own rights.
+
+A few wait for a Mnemerynne admin instead (approver 'admin'): a whole library's AI edit asked for by
+someone who isn't an admin, and API actions marked "needs admin approval". The person can only withdraw
+those; an admin approves them (run on the person's behalf) or rejects them with a note, from Access →
+Approvals. Either way decided_by and decision_note say who and why, for the person and their Claude.
 """
 
 from __future__ import annotations
@@ -119,11 +124,14 @@ def propose_api(conn: sqlite3.Connection, caller, op: sqlite3.Row, params: dict 
 
     checked = apis.validate_params(apis.param_specs(op), params)
     changes = [f"{name}: {value}" for name, value in checked.items()]
+    # An admin decides operations marked "needs admin approval"; the person decides the rest.
+    approver = "admin" if op["admin_approval"] else "self"
     return conn.execute(
-        "INSERT INTO agent_proposals(user_id, conversation_id, kind, name, changes, diff, payload) "
-        "VALUES (?, ?, 'api', ?, ?, ?, ?)",
+        "INSERT INTO agent_proposals(user_id, conversation_id, kind, name, changes, diff, payload, approver) "
+        "VALUES (?, ?, 'api', ?, ?, ?, ?, ?)",
         (caller.user_id, getattr(caller, "conversation_id", None), f"{op['api_name']} · {op['name']}",
-         json.dumps(changes), op["description"] or "", json.dumps({"operation_id": op["id"], "params": checked}))
+         json.dumps(changes), op["description"] or "", json.dumps({"operation_id": op["id"], "params": checked}),
+         approver)
     ).lastrowid
 
 
@@ -154,20 +162,21 @@ def propose_delete(conn: sqlite3.Connection, caller, item: fs.Item, *, via: str 
 
 
 def propose_access(conn: sqlite3.Connection, caller, target: fs.Item, name: str, collection_id: int,
-                   folder_id: int | None, changes: list[str]) -> int:
+                   folder_id: int | None, changes: list[str], *, approver: str = "self") -> int:
     """Letting the AI edit somewhere it is refused, which the person applies: target is the file or folder
     whose "AI can edit" switch goes on (their own File box, or clearing a read-only switch), or a library
-    ({type: "library"}), which only an admin can apply. The tool has worked out which (request_edit_access)."""
+    ({type: "library"}), which only an admin can apply. The tool has worked out which (request_edit_access).
+    approver "admin": a library asked for by someone who isn't an admin waits in the admins' queue."""
     payload = json.dumps({"type": target.type, "id": target.id})
     pending = conn.execute("SELECT id FROM agent_proposals WHERE user_id = ? AND kind = 'access' AND status = 'pending' "
-                           "AND payload = ?", (caller.user_id, payload)).fetchone()
+                           "AND payload = ? AND approver = ?", (caller.user_id, payload, approver)).fetchone()
     if pending:
         return pending["id"]
     return conn.execute(
         "INSERT INTO agent_proposals(user_id, conversation_id, kind, file_id, collection_id, folder_id, name, changes, "
-        "payload) VALUES (?, ?, 'access', ?, ?, ?, ?, ?, ?)",
+        "payload, approver) VALUES (?, ?, 'access', ?, ?, ?, ?, ?, ?, ?)",
         (caller.user_id, getattr(caller, "conversation_id", None), target.id if target.type == "file" else None,
-         collection_id, folder_id, name, json.dumps(changes), payload)).lastrowid
+         collection_id, folder_id, name, json.dumps(changes), payload, approver)).lastrowid
 
 
 def _apply_access(conn: sqlite3.Connection, user: sqlite3.Row, row: sqlite3.Row, admin: bool) -> None:
@@ -213,7 +222,19 @@ def where(conn: sqlite3.Connection, collection_id: int, folder_id: int | None) -
 
 
 def view(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
-    """What the chat card shows."""
+    """What the chat card shows, and who decides it (and, once an admin has, who and why)."""
+    out = _card(conn, row)
+    out["approver"] = row["approver"]
+    out["created_at"], out["decided_at"] = row["created_at"], row["decided_at"]
+    if row["decided_by"] is not None:
+        by = conn.execute("SELECT username FROM users WHERE id = ?", (row["decided_by"],)).fetchone()
+        out["decided_by"] = by["username"] if by else "a removed account"
+    if row["decision_note"]:
+        out["decision_note"] = row["decision_note"]
+    return out
+
+
+def _card(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
     if row["kind"] == "api":
         api = row["name"].split(" · ")[0]
         return {"id": row["id"], "kind": "api", "file": row["name"], "file_id": None, "where": api,
@@ -273,6 +294,8 @@ def apply(conn: sqlite3.Connection, settings: Settings, user: sqlite3.Row, propo
     row = get(conn, proposal_id, user["id"])
     if row["status"] != "pending":
         raise ProposalError(f"This change was already {row['status']}.")
+    if row["approver"] == "admin":
+        raise ProposalError("This one waits for a Mnemerynne admin to approve it. You can withdraw it meanwhile.")
     if row["kind"] == "api":
         return _apply_api(conn, settings, user, row, directory)
     if row["kind"] == "access":
@@ -361,6 +384,72 @@ def dismiss(conn: sqlite3.Connection, settings: Settings, user_id: int, proposal
         if row["rel_path"]:
             (_dir(settings) / row["rel_path"]).unlink(missing_ok=True)
     return view(conn, get(conn, proposal_id, user_id))
+
+
+# ------------------------------------------------------------ admin approvals
+def for_admins(conn: sqlite3.Connection, *, decided_days: int = 7, limit: int = 100) -> list[dict]:
+    """The admins' queue: proposals waiting for an admin, oldest first, then the ones decided lately."""
+    rows = conn.execute(
+        "SELECT p.*, u.username AS requester FROM agent_proposals p JOIN users u ON u.id = p.user_id "
+        "WHERE p.approver = 'admin' AND (p.status = 'pending' OR p.decided_at >= datetime('now', ?)) "
+        "ORDER BY p.status <> 'pending', CASE WHEN p.status = 'pending' THEN p.id ELSE -p.id END LIMIT ?",
+        (f"-{int(decided_days)} days", limit)).fetchall()
+    return [{**view(conn, r), "requester": r["requester"]} for r in rows]
+
+
+def _admin_row(conn: sqlite3.Connection, proposal_id: int) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM agent_proposals WHERE id = ? AND approver = 'admin'",
+                       (proposal_id,)).fetchone()
+    if row is None:
+        raise editing.EditNotFound("No such request for admins.")
+    if row["status"] != "pending":
+        raise ProposalError(f"This request was already {row['status']}.")
+    return row
+
+
+def _record_decision(conn: sqlite3.Connection, proposal_id: int, admin: sqlite3.Row, note: str) -> None:
+    conn.execute("UPDATE agent_proposals SET decided_by = ?, decision_note = ? WHERE id = ?",
+                 (admin["id"], (note or "").strip()[:1000] or None, proposal_id))
+
+
+def approve(conn: sqlite3.Connection, settings: Settings, admin: sqlite3.Row, proposal_id: int, note: str = "",
+            directory=None) -> dict:
+    """An admin approves a request waiting for them; it runs on the requester's behalf. An API action
+    checks again that the requester may still use its operation (directory: their groups), so an admin
+    can't run something for someone who has lost access to it."""
+    row = _admin_row(conn, proposal_id)
+    requester = conn.execute("SELECT * FROM users WHERE id = ?", (row["user_id"],)).fetchone()
+    if row["kind"] == "api":
+        _apply_api(conn, settings, requester, row, directory)
+    elif row["kind"] == "access":
+        _apply_access(conn, admin, row, admin=True)
+        _decide(conn, proposal_id, "applied")
+    else:
+        raise ProposalError(f"Admins don't decide '{row['kind']}' changes; the person applies those.")
+    _record_decision(conn, proposal_id, admin, note)
+    return view(conn, get(conn, proposal_id, row["user_id"]))
+
+
+def reject(conn: sqlite3.Connection, admin: sqlite3.Row, proposal_id: int, note: str = "") -> dict:
+    """An admin turns a request down; the note tells the requester (and their Claude) why."""
+    row = _admin_row(conn, proposal_id)
+    _decide(conn, proposal_id, "rejected")
+    _record_decision(conn, proposal_id, admin, note)
+    return view(conn, get(conn, proposal_id, row["user_id"]))
+
+
+def for_person(conn: sqlite3.Connection, user_id: int, status: str = "all", since_days: int = 7,
+               limit: int = 20) -> list[dict]:
+    """A person's own proposals for their Claude (list_proposals): 'pending', those 'decided' within
+    since_days, or 'all' of both, newest first."""
+    since = f"-{int(since_days)} days"
+    where = {"pending": "status = 'pending'",
+             "decided": "status <> 'pending' AND decided_at >= datetime('now', ?)",
+             "all": "(status = 'pending' OR decided_at >= datetime('now', ?))"}[status]
+    args = (user_id,) + ((since,) if status != "pending" else ()) + (limit,)
+    rows = conn.execute(f"SELECT * FROM agent_proposals WHERE user_id = ? AND {where} ORDER BY id DESC LIMIT ?",
+                        args).fetchall()
+    return [view(conn, r) for r in rows]
 
 
 def purge(conn: sqlite3.Connection, settings: Settings) -> int:

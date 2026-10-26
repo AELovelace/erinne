@@ -141,7 +141,11 @@ def test_request_edit_access_clears_a_read_only_switch(conn, settings, world, to
 def test_a_library_needs_an_admin(conn, settings, world, tools):
     alice = _caller(conn, world["alice"])
     out = tools.request_edit_access(conn, alice, library="Brand")[0]
-    assert out["status"] == "needs_admin" and "proposal" not in out and "Access" in out["note"]
+    assert out["status"] == "awaiting_admin" and "approve" not in out and "Approvals" in out["note"]
+    assert tools.request_edit_access(conn, alice, library="Brand")[0]["proposal"] == out["proposal"]   # not twice
+    with _web(settings, "alice") as web:                            # hers to withdraw, not to apply
+        assert web.post(f"/api/agent/proposals/{out['proposal']}/apply").status_code == 400
+    assert conn.execute("SELECT claude_edit FROM collections WHERE id = ?", (world["brand"],)).fetchone()[0] == 0
 
     conn.execute("UPDATE users SET role = 'admin' WHERE id = ?", (world["alice"],))
     out = tools.request_edit_access(conn, alice, library="Brand")[0]

@@ -1,0 +1,103 @@
+{
+  "format": "mnemerynne-api-template",
+  "name": "UniFi Site Manager",
+  "base_url": "https://api.ui.com",
+  "auth_type": "header",
+  "auth_header": "X-API-Key",
+  "description": "UniFi Site Manager (api.ui.com): every UniFi console on the account, its sites with device and client counts, each device's status and firmware, and internet (ISP) health per site. Read-only: Mnemerynne only sends the fixed GET requests below.\n\n**Setup**\n\n1. Sign in at **unifi.ui.com** with the account that owns the consoles, open **API** (Site Manager), and **Create API Key**. Copy it once; UniFi won't show it again. The key carries that account's access, so if you can, create it from an account that only has view access to the sites.\n2. Paste the key as this API's credential. It's sent as the `X-API-Key` header.\n3. Don't trust (pin) a certificate on this page: api.ui.com has a public certificate that UniFi renews, and the normal check is the right one.\n4. Set the AD group to IT.\n5. Test **Sites** and **Devices** first. If either answers with fewer sites or devices than you have, lower `pageSize` on that operation: Mnemerynne can't follow UniFi's next-page token, so each operation reads one page.\n\n**Claude:** **Hosts** returns console details including owner account information, and **Devices** returns device names, IP and MAC addresses. That's internal network detail, not guest data. Turn Claude's switch on only if that may go to Anthropic.\n\n**Hosts is large:** UniFi sends each console's full reported state (installed apps, file lists and more), and Mnemerynne can't pick fields out of a response. If Sites and Devices answer your questions, delete Hosts from this API.\n\nNot included: **Get host by ID** (UniFi host IDs contain `:`, which Mnemerynne doesn't allow in a path), and the **Connector**, which can change console settings and belongs in a separate read-write template.",
+  "operations": [
+    {
+      "name": "Sites",
+      "description": "Every UniFi site: its name, its hostId and siteId (for Internet health), and counts of devices, offline devices and wired, Wi-Fi and guest clients, plus the site's internet provider. A site can name a hostId that Hosts doesn't list (a console this account can see the site of but doesn't own).",
+      "path": "/v1/sites",
+      "params": [
+        {"name": "pageSize", "type": "int", "min": 1, "max": 500, "default": 100, "help": "How many sites (one page)"}
+      ],
+      "cache_seconds": 120,
+      "example_questions": [
+        "Which UniFi sites do we have?",
+        "How many clients are on the network at the Comfort Inn?",
+        "Are any sites showing offline devices?",
+        "How many guests are on Wi-Fi right now?",
+        "Which internet provider does each hotel use?"
+      ]
+    },
+    {
+      "name": "Devices",
+      "description": "Every UniFi device (access points, switches, gateways, consoles), grouped by console: name, model, IP, MAC, online status and firmware version. firmwareStatus says whether an update is waiting (updateAvailable is often empty; go by firmwareStatus). Only consoles that report to Site Manager appear, and each group's updatedAt says how fresh its list is: a disconnected console's devices are missing or stale.",
+      "path": "/v1/devices",
+      "params": [
+        {"name": "pageSize", "type": "int", "min": 1, "max": 500, "default": 200, "help": "How many devices (one page)"}
+      ],
+      "cache_seconds": 60,
+      "example_questions": [
+        "Which access points are offline?",
+        "Is the switch at Red Lion Pasco online?",
+        "Which UniFi devices need a firmware update?",
+        "What model is the gateway at the Kennewick site?",
+        "List the UniFi devices at each hotel."
+      ]
+    },
+    {
+      "name": "Internet health for a site (one day)",
+      "description": "Hour-by-hour internet (WAN) health of one site for one day (UTC): ISP name, download and upload speed, average and worst latency, packet loss, uptime and downtime. Take the site's hostId and siteId from Sites first. Hourly data goes back 30 days. A site whose console is disconnected has no data.",
+      "method": "POST",
+      "path": "/v1/isp-metrics/1h/query",
+      "body": {"sites": [{"hostId": "{{hostId}}", "siteId": "{{siteId}}", "beginTimestamp": "{{day}}T00:00:00Z", "endTimestamp": "{{day}}T23:59:59Z"}]},
+      "params": [
+        {"name": "hostId", "type": "string", "in": "body", "required": true, "help": "The site's hostId, from Sites"},
+        {"name": "siteId", "type": "string", "in": "body", "required": true, "help": "The site's siteId, from Sites"},
+        {"name": "day", "type": "date", "in": "body", "required": true, "help": "Which day (UTC), within the last 30 days"}
+      ],
+      "cache_seconds": 300,
+      "example_questions": [
+        "Was the internet down at Red Lion Pasco today?",
+        "How has the Comfort Inn's internet been since yesterday?",
+        "Did Red Lion have packet loss overnight?",
+        "Is the ISP at Red Lion slow today?",
+        "What were the latency spikes at the Comfort Inn on Monday?"
+      ]
+    },
+    {
+      "name": "Hosts",
+      "description": "The UniFi consoles (hosts) on the account: hardware type, IP address, when each last connected or changed state, and its latest backup time.",
+      "path": "/v1/hosts",
+      "params": [
+        {"name": "pageSize", "type": "int", "min": 1, "max": 500, "default": 100, "help": "How many consoles (one page)"}
+      ],
+      "cache_seconds": 300,
+      "example_questions": [
+        "Which UniFi consoles do we have?",
+        "When was each UniFi console last backed up?",
+        "Is the Dream Machine at the Comfort Inn connected?",
+        "What's the IP address of each UniFi controller?"
+      ]
+    },
+    {
+      "name": "SD-WAN configs",
+      "description": "The SD-WAN configurations on the account (site-to-site links between hubs and spokes): ID, name and type.",
+      "path": "/v1/sd-wan-configs",
+      "cache_seconds": 300,
+      "example_questions": [
+        "Do we have any SD-WAN set up?",
+        "What site-to-site VPN configs are in UniFi?",
+        "List the SD-WAN configurations."
+      ]
+    },
+    {
+      "name": "SD-WAN status",
+      "description": "One SD-WAN configuration's live status: each hub's and spoke's state, when it was last generated, and any errors or warnings. Find the config ID with SD-WAN configs first.",
+      "path": "/v1/sd-wan-configs/{configId}/status",
+      "params": [
+        {"name": "configId", "type": "string", "in": "path", "required": true, "help": "The SD-WAN config's ID (see SD-WAN configs)"}
+      ],
+      "cache_seconds": 60,
+      "example_questions": [
+        "Is the site-to-site VPN healthy?",
+        "Are there SD-WAN errors?",
+        "Are all the SD-WAN spokes connected?",
+        "When was the SD-WAN config last pushed out?"
+      ]
+    }
+  ]
+}

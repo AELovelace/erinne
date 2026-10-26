@@ -1225,6 +1225,7 @@
     }
     if (tab === "accounts") loadAccounts();
     if (tab === "apis" && window.ErynneApis) window.ErynneApis.load();   // admin_apis.js
+    if (tab === "approvals" && window.ErynneApprovals) window.ErynneApprovals.load();   // admin_approvals.js
   }
 
   function writeHash() {

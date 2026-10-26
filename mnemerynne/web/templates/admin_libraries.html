@@ -10,6 +10,7 @@
       <button type="button" role="tab" data-tab="groups">Groups</button>
       <button type="button" role="tab" data-tab="accounts">Accounts</button>
       <button type="button" role="tab" data-tab="apis">APIs</button>
+      <button type="button" role="tab" data-tab="approvals">Approvals</button>
       <button type="button" role="tab" data-tab="people">Who can see what</button>
       <button type="button" role="tab" data-tab="claude">Claude activity</button>
       <button type="button" role="tab" data-tab="changes">Recent changes</button>
@@ -110,6 +111,13 @@
     <datalist id="api-groups"></datalist>
   </section>
 
+  <section class="inbox admin" data-panel="approvals" role="tabpanel" aria-label="Approvals" hidden>
+    <p class="muted">Requests from Claude or Erynne that only an admin can decide: letting the AI edit a whole
+      library, and API actions marked “needs an admin's approval”. Approving runs it on the requester's behalf
+      (an API action checks again that they may still use it); your note is shown to them and their Claude.</p>
+    <div id="approvals" aria-live="polite"><p class="muted">Loading…</p></div>
+  </section>
+
   <section class="inbox admin" data-panel="people" role="tabpanel" hidden>
     <p class="muted">Each person's File box and libraries: what they can read, edit and search from Claude, and the grants that give it.</p>
     <div id="access" class="table-wrap"></div>
@@ -146,4 +154,6 @@
 <script src="{{ static('admin.js') }}"></script>
 <script src="{{ static('admin_apis.js') }}"></script>
 <script src="{{ static('admin_m365.js') }}"></script>
+<script src="{{ static('agent.js') }}"></script>
+<script src="{{ static('admin_approvals.js') }}"></script>
 {% endblock %}

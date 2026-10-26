@@ -224,3 +224,73 @@ def test_the_atera_template_and_testing_an_action(settings, conn, world, directo
         assert c.post(url, json={"params": {"alertId": 1}, "really_change": True}).json()["ok"] and len(seen) == 1
         bad = {"name": "Sneaky", "method": "PUT", "path": "/tickets/1", "body": '{"a": 1}'}
         assert c.post(f"/api/admin/apis/{made['id']}/operations", json=bad).status_code == 422   # not an action
+
+
+def test_an_action_marked_for_admins_waits_for_one_and_runs_as_the_requester(conn, settings, world, directory):
+    seen = []
+    _upstream(seen)
+    _, ids = _atera(conn, settings)
+    conn.execute("UPDATE apis SET claude_enabled = 1")
+    conn.execute("UPDATE api_operations SET admin_approval = 1 WHERE id = ?", (ids["Resolve alert"],))
+    settings.public_url = "https://mnemerynne.test"
+    tools = Tools(settings, lambda: None, lambda: directory)
+    caller = api_tokens.verify(conn, api_tokens.create(conn, world["alice"], "laptop")[1])
+    listed = {o["operation"]: o for o in tools.list_apis(conn, caller)[0]["apis"][0]["operations"]}
+    assert listed["Resolve alert"]["needs_admin_approval"] and "needs_admin_approval" not in listed["Add internal note"]
+
+    out, _ = tools.propose_api_action(conn, caller, "Atera (read-write)", "Resolve alert", {"alertId": 5531})
+    assert out["status"] == "awaiting_admin" and "approve" not in out and "Don't say" in out["note"]
+    waiting = tools.get_proposal(conn, caller, out["proposal"])[0]
+    assert waiting["status"] == "pending" and waiting["approver"] == "admin" and "admin" in waiting["note"]
+
+    with TestClient(create_app(settings, Services(llm=None, embedder=world["embedder"], directory=directory)),
+                    base_url="https://mnemerynne.test") as c:
+        _login(c, "alice")
+        refused = c.post(f"/api/agent/proposals/{out['proposal']}/apply")
+        assert refused.status_code == 400 and "admin" in refused.json()["detail"]
+        assert c.get("/api/admin/proposals").status_code == 403               # not an admin
+        c.post("/logout")
+        conn.execute("UPDATE users SET role = 'admin' WHERE username = 'boss'")
+        _login(c, "boss")                                                      # not in Staff himself
+        queue = c.get("/api/admin/proposals").json()["requests"]
+        assert [(r["id"], r["requester"], r["status"]) for r in queue] == [(out["proposal"], "alice", "pending")]
+        done = c.post(f"/api/admin/proposals/{out['proposal']}/approve", json={"note": "Checked with the NOC."}).json()
+        assert done["status"] == "applied" and done["decided_by"] == "boss"
+        assert c.post(f"/api/admin/proposals/{out['proposal']}/approve", json={}).status_code == 400   # once only
+    assert len(seen) == 1 and seen[0].url.path == "/api/v3/alerts/5531"
+    call = conn.execute("SELECT user_id, via FROM api_calls ORDER BY id DESC").fetchone()
+    assert (call["user_id"], call["via"]) == (world["alice"], "apply")                     # on her behalf
+    decided = tools.get_proposal(conn, caller, out["proposal"])[0]
+    assert decided["status"] == "applied" and decided["decided_by"] == "boss"
+    assert decided["decision_note"] == "Checked with the NOC." and decided["link"].startswith("https://mnemerynne.test/apis/calls/")
+
+
+def test_an_admin_cant_run_an_action_for_someone_who_lost_access(conn, settings, world, directory):
+    seen = []
+    _upstream(seen)
+    _, ids = _atera(conn, settings)
+    conn.execute("UPDATE apis SET claude_enabled = 1")
+    conn.execute("UPDATE api_operations SET admin_approval = 1 WHERE id = ?", (ids["Resolve alert"],))
+    tools = Tools(settings, lambda: None, lambda: directory)
+    caller = api_tokens.verify(conn, api_tokens.create(conn, world["alice"], "laptop")[1])
+    out, _ = tools.propose_api_action(conn, caller, "Atera (read-write)", "Resolve alert", {"alertId": 5531})
+    conn.execute("UPDATE apis SET ad_group = 'Domain Admins'")                    # alice left the API's group
+    conn.execute("UPDATE users SET role = 'admin' WHERE username = 'boss'")
+    with TestClient(create_app(settings, Services(llm=None, embedder=world["embedder"], directory=directory))) as c:
+        _login(c, "boss")
+        refused = c.post(f"/api/admin/proposals/{out['proposal']}/approve", json={})
+        assert refused.status_code == 400 and "can't use that operation" in refused.json()["detail"]
+    assert seen == [] and tools.get_proposal(conn, caller, out["proposal"])[0]["status"] == "pending"
+
+
+def test_only_actions_can_need_an_admin(settings, conn, world, directory):
+    with TestClient(create_app(settings, Services(llm=None, embedder=world["embedder"], directory=directory))) as c:
+        conn.execute("UPDATE users SET role = 'admin' WHERE username = 'boss'")
+        _login(c, "boss")
+        api_id = c.post("/api/admin/apis", json={"name": "Stats", "base_url": "https://stats.example.com"}).json()["id"]
+        op = {"name": "Read", "path": "/x", "admin_approval": True}
+        assert c.post(f"/api/admin/apis/{api_id}/operations", json=op).status_code == 422
+        made = c.post(f"/api/admin/apis/{api_id}/operations",
+                      json={**op, "method": "PUT", "action": True}).json()
+        ops = c.get(f"/api/admin/apis/{api_id}").json()["operations"]
+        assert [(o["id"], o["admin_approval"]) for o in ops] == [(made["id"], True)]

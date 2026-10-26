@@ -43,7 +43,8 @@ def _op_json(r: sqlite3.Row) -> dict:
     return {"id": r["id"], "name": r["name"], "description": r["description"], "method": r["method"],
             "path": r["path"], "params": apis.param_specs(r), "body": r["body"],
             "example_questions": r["example_questions"], "cache_seconds": r["cache_seconds"],
-            "enabled": bool(r["enabled"]), "action": bool(r["action"])}
+            "enabled": bool(r["enabled"]), "action": bool(r["action"]),
+            "admin_approval": bool(r["admin_approval"])}
 
 
 def _check_url(url: str) -> str:
@@ -346,6 +347,7 @@ class Operation(BaseModel):
     cache_seconds: int = Field(60, ge=0, le=86400)
     enabled: bool = True
     action: bool = False    # changes data: proposed by Erynne or Claude, run only when the person applies it
+    admin_approval: bool = False   # an action an admin approves (Access → Approvals) instead of the person
 
 
 def _save_op(conn, api_id: int, op_id: int | None, body: Operation) -> int:
@@ -353,17 +355,22 @@ def _save_op(conn, api_id: int, op_id: int | None, body: Operation) -> int:
         apis.check_specs(body.path, body.params, body.method, body.body, body.action)
     except apis.ApiError as exc:
         raise _refuse(exc) from None
+    if body.admin_approval and not body.action:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            "Only an action (an operation that changes data) can need an admin's approval.")
     values = (body.name.strip(), body.description, body.example_questions, body.method, body.path,
               json.dumps(body.params), body.body if body.method in apis.BODY_METHODS else "",
-              0 if body.action else body.cache_seconds, int(body.enabled), int(body.action))
+              0 if body.action else body.cache_seconds, int(body.enabled), int(body.action),
+              int(body.admin_approval))
     try:
         if op_id is None:
             return conn.execute(
                 "INSERT INTO api_operations(name, description, example_questions, method, path, params, body, "
-                "cache_seconds, enabled, action, api_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "cache_seconds, enabled, action, admin_approval, api_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (*values, api_id)).lastrowid
         conn.execute("UPDATE api_operations SET name = ?, description = ?, example_questions = ?, method = ?, "
-                     "path = ?, params = ?, body = ?, cache_seconds = ?, enabled = ?, action = ? WHERE id = ?",
+                     "path = ?, params = ?, body = ?, cache_seconds = ?, enabled = ?, action = ?, admin_approval = ? "
+                     "WHERE id = ?",
                      (*values, op_id))
         return op_id
     except sqlite3.IntegrityError:

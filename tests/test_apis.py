@@ -120,6 +120,17 @@ def test_failures_explain_themselves_and_redirects_are_not_followed(conn, settin
     assert "refused the credential" in apis.call(conn, settings, op_id, {}, user_id=None, via="test").error
     _upstream(lambda r: httpx.Response(302, headers={"location": "https://evil.example/"}))
     assert "redirect" in apis.call(conn, settings, op_id, {}, user_id=None, via="test").error
+    _upstream(lambda r: httpx.Response(404, json={"Message": "Technician with email technician@example.com not found"}))
+    failed = apis.call(conn, settings, op_id, {}, user_id=None, via="test")
+    assert failed.error == "the API answered HTTP 404: Technician with email technician@example.com not found"
+    assert "technician@example.com" in conn.execute("SELECT response_excerpt FROM api_calls WHERE id = ?",
+                                                    (failed.call_id,)).fetchone()[0]
+    _upstream(lambda r: httpx.Response(400, json={"error": {"code": 12, "message": "TicketId is invalid"}}))
+    assert apis.call(conn, settings, op_id, {}, user_id=None, via="test").error.endswith(": TicketId is invalid")
+    _upstream(lambda r: httpx.Response(500, text="Object reference not set to an instance of an object."))
+    assert "Object reference" in apis.call(conn, settings, op_id, {}, user_id=None, via="test").error
+    _upstream(lambda r: httpx.Response(502, text="<html><body>Bad gateway</body></html>"))
+    assert apis.call(conn, settings, op_id, {}, user_id=None, via="test").error == "the API answered HTTP 502"
     _upstream(lambda r: httpx.Response(200, content=b"x" * (apis.MAX_RESPONSE_BYTES + 10)))
     big = apis.call(conn, settings, op_id, {}, user_id=None, via="test")
     assert big.ok and big.truncated and len(big.data) <= apis.MAX_RESPONSE_BYTES

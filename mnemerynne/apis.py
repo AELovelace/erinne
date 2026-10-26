@@ -368,12 +368,31 @@ def _explain(status: int, text: str) -> str:
         return f"the API refused the credential (HTTP {status}); an admin should check it on the APIs page"
     if 300 <= status < 400:
         return f"the API tried to redirect (HTTP {status}); redirects aren't followed"
-    detail = ""
+    return f"the API answered HTTP {status}" + (f": {_detail(text)}" if _detail(text) else "")
+
+
+_DETAIL_KEYS = ("error", "message", "Message", "detail", "title", "error_description", "errors")
+
+
+def _detail(text: str) -> str:
+    """What the API said went wrong: the usual message field of a JSON error (one level down too),
+    or a short plain-text body; "" if there's nothing readable."""
+    text = (text or "").strip()
     try:
-        detail = str(json.loads(text).get("error") or "")[:200]
-    except (ValueError, AttributeError):
-        pass
-    return f"the API answered HTTP {status}" + (f": {detail}" if detail else "")
+        data = json.loads(text)
+    except ValueError:
+        return "" if not text or text.startswith("<") or len(text) > 300 else text[:200]
+    for _ in range(2):
+        if not isinstance(data, dict):
+            break
+        found = next((data[k] for k in _DETAIL_KEYS if data.get(k)), None)
+        if found is None:
+            return ""
+        if isinstance(found, (dict, list)):
+            data = found[0] if isinstance(found, list) and found else found
+            continue
+        return str(found)[:200]
+    return str(data)[:200] if isinstance(data, str) else ""
 
 
 def call(conn: sqlite3.Connection, settings: Settings, op_id: int, params: dict | None, *,
@@ -399,6 +418,7 @@ def call(conn: sqlite3.Connection, settings: Settings, op_id: int, params: dict 
         result = CallResult(0, False, api["name"], op["name"], "")
         raw_len = None
         turn = None
+        failed_text = None
         try:
             method, url, query, body = build_request(api, op, params)
             headers = _headers(settings, api)
@@ -418,6 +438,7 @@ def call(conn: sqlite3.Connection, settings: Settings, op_id: int, params: dict 
                     result.data = text
             else:
                 result.error = _explain(status, text)
+                failed_text = text
         except ApiError as exc:
             result.error = str(exc)
         except httpx.TimeoutException:
@@ -436,6 +457,8 @@ def call(conn: sqlite3.Connection, settings: Settings, op_id: int, params: dict 
     if result.ok:
         excerpt = (json.dumps(result.data, indent=1, ensure_ascii=False) if not isinstance(result.data, str)
                    else result.data)[:EXCERPT_CHARS]
+    elif not result.cached and failed_text:
+        excerpt = failed_text[:EXCERPT_CHARS]          # what the API said, for the call's page
     cur = conn.execute(
         "INSERT INTO api_calls(user_id, via, api_id, operation_id, api_name, operation_name, params, status_code, "
         "ok, cached, ms, error, response_bytes, response_excerpt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "

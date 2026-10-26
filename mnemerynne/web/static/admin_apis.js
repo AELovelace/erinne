@@ -320,7 +320,8 @@
     const head = el("div", "lib-head");
     head.appendChild(el("strong", null, (op.enabled ? "" : "⏸ ") + (op.action ? "✏️ " : "") + op.name));
     head.appendChild(el("code", "small", op.method + " " + op.path));
-    if (op.action) head.appendChild(el("span", "tag", "changes data: the person applies it"));
+    if (op.action) head.appendChild(el("span", "tag", op.admin_approval ? "changes data: an admin approves it"
+                                                                      : "changes data: the person applies it"));
     head.append(button("Edit", "link small", function () { card.replaceWith(operationEditor(d, op)); }),
                 button("Test", "link small", function () { toggleTest(card, op); }));
     card.appendChild(head);
@@ -341,6 +342,8 @@
                            ["PATCH", "PATCH (action)"], ["DELETE", "DELETE (action)"]], op ? op.method : "GET");
     const action = checkbox("Changes data (an action): Erynne and Claude only propose it; the person applies it",
                             op ? op.action : false);
+    const adminApproval = checkbox("Needs an admin's approval: proposals wait in Access → Approvals instead of " +
+                                   "the person applying them", op ? op.admin_approval : false);
     const path = input(op ? op.path : "/", { placeholder: "/tickets/{ticketId}" });
     const body = input(op ? op.body : "", { multiline: true, rows: 4, placeholder: "{\"size\": 0}" });
     const params = input(JSON.stringify(op ? op.params : [], null, 1), { multiline: true, rows: 5 });
@@ -352,11 +355,14 @@
     function toggle() {
       bodyField.hidden = ["POST", "PUT", "PATCH"].indexOf(method.value) < 0;
       if (["PUT", "PATCH", "DELETE"].indexOf(method.value) >= 0) action.box.checked = true;
+      adminApproval.hidden = !action.box.checked;
+      if (!action.box.checked) adminApproval.box.checked = false;
     }
     method.addEventListener("change", toggle);
+    action.box.addEventListener("change", toggle);
     toggle();
     box.append(field("Name", name), field("Description (helps the model fill parameters)", description),
-               field("Method", method), action,
+               field("Method", method), action, adminApproval,
                field("Path", path, "Relative to the API address; {name} for path parameters."),
                bodyField,
                field("Parameters (JSON)", params,
@@ -371,7 +377,8 @@
       const payload = { name: name.value.trim(), description: description.value, method: method.value,
                         path: path.value.trim(), body: bodyField.hidden ? "" : body.value,
                         params: parsed, example_questions: examples.value, cache_seconds: Number(cache.value) || 0,
-                        enabled: enabled.box.checked, action: action.box.checked };
+                        enabled: enabled.box.checked, action: action.box.checked,
+                        admin_approval: action.box.checked && adminApproval.box.checked };
       run(async function () {
         if (op) await api("PUT", "/api/admin/apis/operations/" + op.id, payload);
         else await api("POST", "/api/admin/apis/" + d.id + "/operations", payload);

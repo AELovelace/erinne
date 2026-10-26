@@ -46,22 +46,37 @@
     saved: "✓ Saved to your Drafts. Nothing was sent.",
     dismissed: "Dismissed; nothing was changed.",
     stale: "Not applied: the file changed since Erynne drafted this. Ask her to redo it.",
+    rejected: "✗ Turned down by an admin; nothing was changed.",
   };
 
-  // A proposed edit or new file, with Apply / Dismiss while it is pending.
+  // A proposed edit or new file, with Apply / Dismiss while it is pending. One that waits for an admin
+  // (approver "admin") can only be withdrawn here; adminProposal is the admins' view, with Approve / Reject.
   function proposal(p) {
     const card = el("div", "proposal");
-    fill(card, p);
+    fill(card, p, {});
     return card;
   }
 
-  function fill(card, p) {
+  function adminProposal(p) {
+    const card = el("div", "proposal");
+    fill(card, p, { admin: true });
+    return card;
+  }
+
+  function decisionText(p) {
+    if (!p.decided_by) return "";
+    return (p.status === "rejected" ? " Turned down by " : " Approved by ") + p.decided_by +
+           (p.decision_note ? ": “" + p.decision_note + "”" : ".");
+  }
+
+  function fill(card, p, opts) {
     card.replaceChildren();
     card.dataset.status = p.status;
     const head = el("div", "proposal-head");
     const what = { create: "📄 New file ", edit: "📝 Change to ", mail: "✉️ Email draft: ",
                    api: "⚙️ Change in ", delete: "🗑️ Delete ", access: "🔓 Let the AI edit " }[p.kind] || "";
     head.append(document.createTextNode(what), el("strong", null, p.file), el("span", "muted small", " · " + p.where));
+    if (opts.admin && p.requester) head.appendChild(el("span", "muted small", " · asked by " + p.requester));
     card.appendChild(head);
     if (p.changes && p.changes.length && !(p.kind === "create" && p.diff)) {
       const ul = el("ul", "small proposal-changes");
@@ -73,22 +88,41 @@
     if (p.kind === "mail") card.appendChild(el("pre", "diff mail-body", p.body || ""));
     if (p.kind === "api" && p.body) card.appendChild(el("p", "muted small", p.body));
     const foot = el("div", "proposal-actions");
-    if (p.status === "pending") {
+    if (p.status === "pending" && opts.admin) {
+      const note = el("input", "small");
+      note.type = "text"; note.maxLength = 1000; note.placeholder = "Note for them (optional)";
+      note.setAttribute("aria-label", "Note for " + (p.requester || "the requester"));
+      const approve = el("button", "small", "Approve");
+      approve.type = "button";
+      const reject = el("button", "link small", "Reject");
+      reject.type = "button";
+      const msg = el("span", "small");
+      approve.addEventListener("click", function () { decide(card, p, "approve", [approve, reject], msg, opts, note.value); });
+      reject.addEventListener("click", function () { decide(card, p, "reject", [approve, reject], msg, opts, note.value); });
+      foot.append(note, approve, reject, msg);
+    } else if (p.status === "pending" && p.approver === "admin") {
+      const withdraw = el("button", "link small", "Withdraw");
+      withdraw.type = "button";
+      const msg = el("span", "small");
+      withdraw.addEventListener("click", function () { decide(card, p, "dismiss", [withdraw], msg, opts); });
+      foot.append(el("span", "small muted", "⏳ Waiting for a Mnemerynne admin to approve it."), withdraw, msg);
+    } else if (p.status === "pending") {
       const apply = el("button", "small", { mail: "Save to Drafts", api: "Run it", delete: "Move to recycle bin",
                                             access: "Allow" }[p.kind] || "Apply");
       apply.type = "button";
       const dismiss = el("button", "link small", "Dismiss");
       dismiss.type = "button";
       const msg = el("span", "small");
-      apply.addEventListener("click", function () { decide(card, p, "apply", [apply, dismiss], msg); });
-      dismiss.addEventListener("click", function () { decide(card, p, "dismiss", [apply, dismiss], msg); });
+      apply.addEventListener("click", function () { decide(card, p, "apply", [apply, dismiss], msg, opts); });
+      dismiss.addEventListener("click", function () { decide(card, p, "dismiss", [apply, dismiss], msg, opts); });
       foot.append(apply, dismiss, msg);
     } else {
       const said = p.status === "applied" && p.kind === "mail" ? STATUS.saved
                  : p.status === "applied" && p.kind === "api" ? "✓ Done."
                  : p.status === "applied" && p.kind === "delete" ? "✓ In the recycle bin."
                  : p.status === "applied" && p.kind === "access" ? "✓ The AI can edit here now." : STATUS[p.status] || p.status;
-      foot.appendChild(el("span", "small " + (p.status === "stale" ? "error" : "muted"), said));
+      foot.appendChild(el("span", "small " + (p.status === "stale" || p.status === "rejected" ? "error" : "muted"),
+                          said + decisionText(p)));
     }
     if (p.url && p.status !== "dismissed") {
       const a = el("a", "small", { mail: "Open in Outlook", api: "See what it answered" }[p.kind] || "Open folder");
@@ -98,17 +132,20 @@
     card.appendChild(foot);
   }
 
-  async function decide(card, p, action, buttons, msg) {
+  async function decide(card, p, action, buttons, msg, opts, note) {
     buttons.forEach(function (b) { b.disabled = true; });
-    msg.textContent = action === "apply" ? ({ mail: "Saving…", api: "Running…", delete: "Deleting…" }[p.kind]
-                                             || "Applying…") : "";
+    msg.textContent = action === "apply" || action === "approve"
+      ? ({ mail: "Saving…", api: "Running…", delete: "Deleting…" }[p.kind] || "Applying…") : "";
     msg.className = "small muted";
     try {
-      const r = await fetch("/api/agent/proposals/" + p.id + "/" + action, { method: "POST" });
+      const r = opts.admin
+        ? await fetch("/api/admin/proposals/" + p.id + "/" + action, {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note: note || "" }) })
+        : await fetch("/api/agent/proposals/" + p.id + "/" + action, { method: "POST" });
       const data = await r.json().catch(function () { return {}; });
-      if (r.ok) { fill(card, data); return; }
+      if (r.ok) { fill(card, Object.assign({ requester: p.requester }, data), opts); return; }
       if (r.status === 409 && /changed since/.test(data.detail || "")) {
-        fill(card, Object.assign({}, p, { status: "stale" }));
+        fill(card, Object.assign({}, p, { status: "stale" }), opts);
         return;
       }
       msg.textContent = data.detail || r.statusText;
@@ -120,5 +157,5 @@
     buttons.forEach(function (b) { b.disabled = false; });
   }
 
-  window.ErynneAgent = { tool: tool, proposal: proposal };
+  window.ErynneAgent = { tool: tool, proposal: proposal, adminProposal: adminProposal };
 })();

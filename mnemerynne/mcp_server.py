@@ -45,7 +45,8 @@ log = logging.getLogger("mnemerynne.mcp")
 # see it in initialize's serverInfo. Bump it when tools or their contracts change.
 # 1.0.0: the "Road to 1.0" blockers (editable flags, request_edit_access,
 # forgiving names, ids or paths, error codes), verified live 2026-10-25.
-MCP_VERSION = "1.0.0"
+# 1.1.0: admin approvals (status awaiting_admin), list_proposals and get_proposal.
+MCP_VERSION = "1.1.0"
 
 PAGE_WIDTH_PX = 1200     # rendered page width: small print stays legible, JPEG stays ~100-300 KB
 PAGE_MAX_PX = 2000       # cap on either side, for unusually long or wide pages
@@ -110,7 +111,15 @@ Internal APIs (live):
 - When search_documents finds nothing but returns `try_api`, the answer is probably live data: query it.
 - Operations marked changes_data (closing a ticket, resolving an alert) only go through
   propose_api_action: it returns an `approve` link for the person, who applies it in Mnemerynne. Check
-  the current state with query_api first, and never say the change is made."""
+  the current state with query_api first, and never say the change is made.
+
+Proposals and approvals:
+- propose_api_action, delete_item and request_edit_access return a `proposal` id. Most the person
+  applies (the `approve` link); some wait for a Mnemerynne admin instead (status awaiting_admin): then
+  say it's with the admins, and there is no link to give.
+- get_proposal tells you what became of one (applied, dismissed, stale, or rejected with the admin's
+  note); list_proposals shows the person's pending and recently decided ones. Check there before saying
+  anything was done, and report rejections with their note."""
 
 _READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True,
                              open_world_hint=False)
@@ -439,6 +448,7 @@ class Tools:
             entry["operations"].append({
                 "operation": op["name"], "description": op["description"],
                 **({"changes_data": True} if op["action"] else {}),
+                **({"needs_admin_approval": True} if op["action"] and op["admin_approval"] else {}),
                 "parameters": [{k: v for k, v in s.items() if k in ("name", "type", "required", "options",
                                                                     "min", "max", "default", "help")}
                                for s in apis.param_specs(op)]})
@@ -492,6 +502,11 @@ class Tools:
         except apis.ApiError as exc:
             raise Refused(f"{exc} Use list_apis to see the operations and their parameters.", _api_code(exc)) from None
         out = {"proposal": proposal, "api": op["api_name"], "operation": op["name"], "status": "proposed"}
+        if op["admin_approval"]:
+            return {**out, "status": "awaiting_admin",
+                    "note": "Nothing has changed yet: this operation needs a Mnemerynne admin's approval, so it now "
+                            "waits for one (Access → Approvals). Tell the person it's with the admins; get_proposal "
+                            "shows the outcome. Don't say it's done."}, []
         if self.propose:
             return {**out, "note": _PROPOSED}, []
         return {**out, "approve": f"{self.base}/proposals#p{proposal}",
@@ -858,16 +873,19 @@ class Tools:
             return {"editable": False, "status": "needs_admin", "where": where,
                     "note": "This is someone else's File box: only a Mnemerynne admin can let the AI edit in it. "
                             "Meanwhile work in the person's own Agents folder."}, []
+        approver = "self"
         if not own_inbox and not coll["claude_edit"]:
             user = conn.execute("SELECT * FROM users WHERE id = ?", (caller.user_id,)).fetchone()
-            if not accounts.is_admin(conn, user, self.get_directory(), self.settings.admin_usernames):
-                return {"editable": False, "status": "needs_admin", "where": where,
-                        "note": f"Only a Mnemerynne admin can let the AI edit in {_label(coll)} (Access → Files & "
-                                f"folders → {_label(coll)} → Claude can edit). Tell the person; meanwhile work in "
-                                f"their Agents folder."}, []
-            target, changes = fs.Item("library", cid), [
-                f"Let the AI edit in the whole {_label(coll)} library, for everyone who can change files there "
-                f"(you're an admin; you can switch it off again in Access → Files & folders)."]
+            target = fs.Item("library", cid)
+            if accounts.is_admin(conn, user, self.get_directory(), self.settings.admin_usernames):
+                changes = [f"Let the AI edit in the whole {_label(coll)} library, for everyone who can change files "
+                           f"there (you're an admin; you can switch it off again in Access → Files & folders)."]
+            else:
+                # Not theirs to give: it waits in the admins' queue (Access → Approvals).
+                approver = "admin"
+                changes = [f"Let the AI edit in the whole {_label(coll)} library, for everyone who can change files "
+                           f"there. Asked for by {user['username']}; an admin can switch it off again in Access → "
+                           f"Files & folders."]
         elif blocked is not None:
             target = blocked
             label = name if blocked.type == "file" and blocked.id == file_id else \
@@ -881,8 +899,14 @@ class Tools:
             return {"editable": False, "status": "not_possible", "where": where,
                     "note": "AI edit is switched on per folder or file in the File box, not for all of it. Ask for "
                             "a folder or file in it, or work in the Agents folder."}, []
-        proposal = proposals.propose_access(conn, caller, target, name, cid, fid, changes)
+        proposal = proposals.propose_access(conn, caller, target, name, cid, fid, changes, approver=approver)
         out = {"proposal": proposal, "status": "proposed", "editable": False, "where": where, "changes": changes}
+        if approver == "admin":
+            return {**out, "status": "awaiting_admin",
+                    "note": f"Nothing has changed yet: only a Mnemerynne admin can let {who} edit in all of "
+                            f"{_label(coll)}, so the request now waits for one (Access → Approvals). Tell the person "
+                            f"it's with the admins; get_proposal shows the outcome. Meanwhile work in their Agents "
+                            f"folder. Don't say it's done."}, []
         if self.propose:
             return {**out, "note": _PROPOSED}, []
         return {**out, "approve": f"{self.base}/proposals#p{proposal}",
@@ -917,6 +941,48 @@ class Tools:
         return {"file_id": file_id, "file": loaded.row["display_name"], "current_version": loaded.version,
                 "earlier_versions": editing.versions(conn, file_id),
                 "note": "The person restores a version from Files → the file's info → Versions."}, [file_id]
+
+    def _proposal_out(self, card: dict) -> dict:
+        """A proposal as Claude sees it: absolute links, and `approve` only while it's the person's to apply."""
+        out = {"proposal": card["id"], "kind": card["kind"], "what": card["file"], "where": card["where"],
+               "changes": card["changes"], "status": card["status"], "approver": card["approver"],
+               "created_at": card["created_at"] + " UTC"}
+        for key in ("decided_by", "decision_note"):
+            if key in card:
+                out[key] = card[key]
+        if card["decided_at"]:
+            out["decided_at"] = card["decided_at"] + " UTC"
+        if card["status"] == "pending" and card["approver"] == "self":
+            out["approve"] = f"{self.base}/proposals#p{card['id']}"
+        elif card["status"] == "applied" and card.get("url"):
+            out["link"] = self.base + card["url"] if card["url"].startswith("/") else card["url"]
+        return out
+
+    def list_proposals(self, conn, caller: Caller, status: str = "all", since_days: int = 7,
+                       limit: int = 20) -> tuple[dict, list[int]]:
+        """The person's own proposals (proposals.for_person), so Claude can tell what was applied, withdrawn,
+        rejected by an admin or is still waiting."""
+        if status not in ("pending", "decided", "all"):
+            raise Refused("status is pending, decided or all.", "invalid")
+        cards = proposals.for_person(conn, caller.user_id, status, max(1, min(int(since_days), 90)),
+                                     max(1, min(int(limit), 50)))
+        found = [self._proposal_out(c) for c in cards]
+        return {"proposals": found, **({} if found else {"note": "No proposals in that period."})}, []
+
+    def get_proposal(self, conn, caller: Caller, proposal: int) -> tuple[dict, list[int]]:
+        """One of the person's proposals by the id a propose/request tool returned."""
+        try:
+            row = proposals.get(conn, proposal, caller.user_id)
+        except editing.EditNotFound:
+            raise Refused(f"No proposal {proposal} of this person's. list_proposals shows theirs.", "not_found") \
+                from None
+        out = self._proposal_out(proposals.view(conn, row))
+        notes = {"pending": "Still waiting for the person to apply it (approve link)." if row["approver"] == "self"
+                 else "Still waiting for a Mnemerynne admin.",
+                 "applied": "Done: it was applied.", "dismissed": "Withdrawn (or it expired): nothing changed.",
+                 "stale": "The file changed before it was applied, so nothing changed: redo it on the new version.",
+                 "rejected": "An admin turned it down: nothing changed."}
+        return {**out, "note": notes[row["status"]]}, []
 
 
 # --------------------------------------------------------------- the server
@@ -1156,6 +1222,22 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
         """Earlier versions of a file kept when it was changed through Claude, newest first, with what
         each change was. The person can restore any of them from Files."""
         return await call(ctx, "list_versions", {"file_id": file_id}, tools.list_versions)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def list_proposals(ctx: Context, status: str = "all", since_days: int = 7, limit: int = 20) -> dict:
+        """The person's proposals (from propose_api_action, delete_item, request_edit_access), newest first:
+        `status` "pending" (still waiting), "decided" (applied, withdrawn, rejected or stale within
+        `since_days`, 1-90) or "all". Each says who decides it (`approver`: the person or an admin) and,
+        once decided, `decided_by` and any `decision_note`. Use it to report outcomes instead of guessing."""
+        return await call(ctx, "list_proposals", {"status": status, "since_days": since_days, "limit": limit},
+                          tools.list_proposals)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def get_proposal(ctx: Context, proposal: int) -> dict:
+        """One proposal by the `proposal` id a propose or request tool returned: its status (pending,
+        applied, dismissed, stale or rejected), who decided it and why. Only say a change is made once
+        this says applied."""
+        return await call(ctx, "get_proposal", {"proposal": proposal}, tools.get_proposal)
 
     return server
 

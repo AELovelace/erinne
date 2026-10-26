@@ -1,6 +1,7 @@
 """Erynne's agent: applying or dismissing her proposed file changes (or
-Claude's, in chat), and the admin settings (who gets the agent, which model it
-uses, and who may ask Claude in chat)."""
+Claude's, in chat), admins approving or rejecting the requests that wait for
+them, and the admin settings (who gets the agent, which model it uses, and who
+may ask Claude in chat)."""
 
 from __future__ import annotations
 
@@ -76,6 +77,40 @@ def dismiss_proposal(proposal_id: int, request: Request, user=Depends(api_user),
         return proposals.dismiss(conn, request.app.state.settings, user["id"], proposal_id)
     except editing.EditError as exc:
         raise _refused(exc) from None
+
+
+# ------------------------------------------------------------ admin approvals
+class DecisionBody(BaseModel):
+    note: str = Field("", max_length=1000)   # shown to the requester and their Claude
+
+
+@router.get("/api/admin/proposals")
+def admin_proposals(user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Access → Approvals: requests waiting for an admin, then the ones decided in the last week."""
+    return {"requests": proposals.for_admins(conn)}
+
+
+@router.post("/api/admin/proposals/{proposal_id}/approve")
+def approve_proposal(proposal_id: int, body: DecisionBody, request: Request, user=Depends(admin_user),
+                     conn: sqlite3.Connection = Depends(get_db)):
+    try:
+        out = proposals.approve(conn, request.app.state.settings, user, proposal_id, body.note,
+                                request.app.state.directory)
+    except (editing.EditError, proposals.ProposalError) as exc:
+        raise _refused(exc) from None
+    _log(conn, user, "proposal.approve", out["file"], f"#{proposal_id}" + (f": {body.note}" if body.note else ""))
+    return out
+
+
+@router.post("/api/admin/proposals/{proposal_id}/reject")
+def reject_proposal(proposal_id: int, body: DecisionBody, user=Depends(admin_user),
+                    conn: sqlite3.Connection = Depends(get_db)):
+    try:
+        out = proposals.reject(conn, user, proposal_id, body.note)
+    except (editing.EditError, proposals.ProposalError) as exc:
+        raise _refused(exc) from None
+    _log(conn, user, "proposal.reject", out["file"], f"#{proposal_id}" + (f": {body.note}" if body.note else ""))
+    return out
 
 
 # ------------------------------------------------------------------- admin

@@ -657,6 +657,8 @@ button.danger-fill { background: var(--error); }
             background: var(--glass-strong); }
 .proposal[data-status="applied"] { border-color: var(--ok-fg); }
 .proposal[data-status="dismissed"] { opacity: .7; }
+.proposal[data-status="rejected"] { opacity: .8; }
+.proposal-actions input { flex: 1 1 14rem; min-width: 0; }
 .proposal-head { margin-bottom: .3rem; overflow-wrap: anywhere; }
 .proposal-changes { margin: .2rem 0 .4rem; padding-left: 1.2rem; }
 .proposal .diff { max-height: 18rem; overflow: auto; margin: .3rem 0 .5rem; padding: .5rem; border-radius: 8px;

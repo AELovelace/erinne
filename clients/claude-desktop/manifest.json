@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "mnemerynne",
   "display_name": "Mnemerynne",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Search your Mnemerynne documents (File box and shared libraries) from Claude, with citations, and edit text, Word and Excel files.",
   "long_description": "Lets Claude search the documents you can see in Mnemerynne and answer with the file, page and section for every claim, linking back to Mnemerynne. With a token that's allowed to edit, Claude can also create and change .txt, .md, .docx and .xlsx files in your Agents folder (and wherever an admin allows); every change keeps the previous version. Uses a personal token you create under Claude in Mnemerynne; what Claude may search and edit is set by Mnemerynne's admins.",
   "author": {
@@ -41,6 +41,8 @@
     {"name": "list_changes", "description": "What changed in a library or folder, and who changed it"},
     {"name": "list_comments", "description": "Read the comments on a file"},
     {"name": "add_comment", "description": "Comment on a file, or reply to a comment"},
+    {"name": "list_proposals", "description": "Your pending and recently decided proposals and requests"},
+    {"name": "get_proposal", "description": "Whether a proposal was applied, withdrawn or rejected, and by whom"},
     {"name": "list_apis", "description": "List the internal systems Claude may query for you"},
     {"name": "query_api", "description": "Read live data from an internal system"},
     {"name": "propose_api_action", "description": "Propose a change in an internal system (you apply it)"}
