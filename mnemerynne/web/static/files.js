@@ -599,6 +599,7 @@
       if (needs.includes("some") && items.length === 0) ok = false;
       if (needs.includes("files") && (!items.length || items.some(function (i) { return i.type !== "file"; }))) ok = false;
       if (needs.includes("reembed") && !state.canReembed) ok = false;
+      if (needs.includes("editable") && !(items.length === 1 && items[0].edit_url)) ok = false;
       node.disabled = !ok;
     });
     const empty = document.querySelector('[data-act="empty-bin"]');
@@ -630,6 +631,7 @@
         case "upload-folder": $("pick-folder").click(); break;
         case "new-folder": await newFolder(); break;
         case "open": if (items[0]) openItem(items[0]); break;
+        case "edit": if (items[0] && items[0].edit_url) window.open(items[0].edit_url, "_blank"); break;
         case "download": items.forEach(function (i, n) {
           setTimeout(function () {
             const a = el("a"); a.href = i.download_url; a.download = ""; document.body.appendChild(a); a.click(); a.remove();
@@ -916,6 +918,7 @@
       add("Delete forever", "purge", items.length > 0, true);
     } else if (items.length) {
       add("Open", "open", items.length === 1);
+      if (items.length === 1 && items[0].edit_url) add("Edit", "edit");
       add("Download", "download", items.every(function (i) { return i.type === "file"; }));
       if (items.length === 1 && items[0].type === "file" && items[0].status === "failed" && write) add("Retry indexing", "retry");
       if (state.mode === "browse" && state.canReembed) add("Re-embed", "reembed");
@@ -1018,6 +1021,11 @@
       const open = el("a", "button-like", "Open");
       open.href = full.view_url; open.target = "_blank"; open.rel = "noopener";
       actions.appendChild(open);
+    }
+    if (full.edit_url) {
+      const edit = el("a", "button-like", "Edit");
+      edit.href = full.edit_url; edit.target = "_blank";
+      actions.appendChild(edit);
     }
     const dl0 = el("a", "button-like soft", "Download");
     dl0.href = full.download_url;
@@ -1447,6 +1455,10 @@
   });
   document.addEventListener("click", function (e) {
     if (!e.target.closest(".menu")) hideMenus();
+  });
+  // The editor tab (mdeditor.js) says when it saved a file: show the new size and version.
+  window.addEventListener("message", function (e) {
+    if (e.origin === location.origin && e.data && e.data.type === "mnemerynne-saved") refresh(true);
   });
   document.addEventListener("scroll", hideMenus, true);
   document.querySelectorAll("dialog [data-close]").forEach(function (b) {

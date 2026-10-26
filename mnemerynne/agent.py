@@ -340,7 +340,7 @@ def _claude_trouble(exc: anthropic.APIError, cfg: dict) -> str:
     """What to tell the person when the external API (Claude) fails partway or can't be used.
     It never names Claude or Anthropic: to them it's Erynne with the external API."""
     if isinstance(exc, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
-        return "Sorry, the external API didn't accept your API key. You can check it on your Settings page."
+        return "Sorry, the external API didn't accept your API key. You can check it on your Preferences page."
     if isinstance(exc, anthropic.RateLimitError):
         return "Sorry, the external API is limiting requests on your key right now. Try again in a minute."
     if isinstance(exc, anthropic.APITimeoutError):

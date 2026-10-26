@@ -860,9 +860,9 @@ class Tools:
             pass
         who = editing.ASSISTANTS[self.mode]
         if not caller.can_edit:
-            return {"editable": False, "status": "needs_person", "link": f"{self.base}/settings#claude",
+            return {"editable": False, "status": "needs_person", "link": f"{self.base}/preferences#claude",
                     "note": "This connection can only search. The person turns on “Let Claude edit files” for it on "
-                            "their Claude settings (link); then try again."}, []
+                            "their Preferences page (link); then try again."}, []
         if not fs.Access.of(conn, caller.user_id).can_write(cid, fid):
             return {"editable": False, "status": "not_possible", "where": where,
                     "note": "The person can't change files here themselves, so they can't let you either. Only a "

@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from typing import Callable
 
 from markdown_it import MarkdownIt
 
@@ -110,10 +111,23 @@ def segments(text: str) -> list[Segment]:
     return out
 
 
-def render_html(text: str) -> str:
-    """HTML for the file view. Raw HTML in the source is escaped, not rendered."""
+def _rewrite_links(tokens, rewrite: Callable[[str], str]) -> None:
+    """Pass every link's href and image's src through `rewrite` (wiki pages linking each other)."""
+    for tok in tokens:
+        for child in tok.children or []:
+            if child.type == "link_open" and child.attrGet("href") is not None:
+                child.attrSet("href", rewrite(child.attrGet("href")))
+            elif child.type == "image" and child.attrGet("src") is not None:
+                child.attrSet("src", rewrite(child.attrGet("src")))
+
+
+def render_html(text: str, link_rewriter: Callable[[str], str] | None = None) -> str:
+    """HTML for the file view. Raw HTML in the source is escaped, not rendered.
+    `link_rewriter` maps each link target (after the allowlist) to the one to show."""
     md = _parser()
     body = strip_front_matter(text)
     tokens = md.parse(body)
     _headings(tokens)  # sets id attributes, identical to the anchors in segments()
+    if link_rewriter is not None:
+        _rewrite_links(tokens, link_rewriter)
     return md.renderer.render(tokens, md.options, {})

@@ -25,8 +25,8 @@ def extension_path(settings: Settings):
 
 @router.get("/connect")
 def connect_page(user=Depends(page_user)):
-    """Old links and bookmarks: the Claude half of Settings."""
-    return RedirectResponse("/settings#claude", status_code=status.HTTP_308_PERMANENT_REDIRECT)
+    """Old links and bookmarks: the Claude half of Preferences."""
+    return RedirectResponse("/preferences#claude", status_code=status.HTTP_308_PERMANENT_REDIRECT)
 
 
 @router.get("/connect/mnemerynne.mcpb")

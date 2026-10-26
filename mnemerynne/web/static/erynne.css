@@ -506,13 +506,69 @@ button.danger-fill { background: var(--error); }
 
 /* ---------------------------------------------------- rendered Markdown */
 .doc { max-width: 50rem; margin: 1.5rem auto; padding: 1.5rem 2.25rem; background: var(--glass-strong); }
-.doc pre { overflow-x: auto; background: var(--petal-soft); padding: .8rem 1rem; border-radius: 10px; }
-@media (prefers-color-scheme: dark) { .doc pre { background: rgba(240, 138, 162, .1); } }
-.doc table { border-collapse: collapse; }
-.doc th, .doc td { border: 1px solid var(--line); padding: .35rem .7rem; }
-.doc :target { background: var(--petal-soft); border-radius: 6px; scroll-margin-top: 5rem;
+.doc pre, .help-body pre, .wiki-body pre { overflow-x: auto; background: var(--petal-soft); padding: .8rem 1rem; border-radius: 10px; }
+@media (prefers-color-scheme: dark) { .doc pre, .help-body pre, .wiki-body pre { background: rgba(240, 138, 162, .1); } }
+.doc table, .help-body table, .wiki-body table { border-collapse: collapse; }
+.doc th, .doc td, .help-body th, .help-body td, .wiki-body th, .wiki-body td { border: 1px solid var(--line); padding: .35rem .7rem; }
+.doc :target, .help-body :target, .wiki-body :target { background: var(--petal-soft); border-radius: 6px; scroll-margin-top: 5rem;
                box-shadow: 0 0 0 .4rem var(--petal-soft); }
-@media (prefers-color-scheme: dark) { .doc :target { background: rgba(240, 138, 162, .18); box-shadow: none; } }
+@media (prefers-color-scheme: dark) { .doc :target, .help-body :target, .wiki-body :target { background: rgba(240, 138, 162, .18); box-shadow: none; } }
+.help-body img, .wiki-body img { max-width: 100%; }
+.help-body > :first-child, .wiki-body > :first-child { margin-top: 0; }
+.help-body h1, .wiki-body h1 { font-size: 1.6rem; }
+.help-body h2, .wiki-body h2 { font-size: 1.25rem; margin-top: 1.6rem; }
+.help-body code, .wiki-body code { font-size: .9em; }
+.help-body blockquote, .wiki-body blockquote { margin: 1rem 0; padding: .2rem 1rem; border-left: 3px solid var(--rose); color: var(--muted); }
+
+/* ------------------------------------------------------------- editor */
+.editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .9rem;
+  height: calc(100vh - 3.6rem); padding: .9rem; }
+.editor-pane { min-height: 0; overflow: hidden; display: flex; }
+.editor-pane .CodeMirror { flex: 1; height: auto; min-height: 0; font: 14px/1.55 ui-monospace, SFMono-Regular, Menlo,
+  Consolas, monospace; background: transparent; color: var(--ink); border-radius: var(--radius); }
+.editor-pane .CodeMirror-gutters { background: transparent; border-right: 1px solid var(--line); }
+.editor-pane .CodeMirror-linenumber { color: var(--muted); }
+.editor-pane .CodeMirror-cursor { border-left: 2px solid var(--ink); }
+.editor-pane .CodeMirror-selected, .editor-pane .CodeMirror-focused .CodeMirror-selected { background: var(--petal-soft); }
+.editor-pane .cm-s-default .cm-header { color: var(--rose-deep); }
+.editor-pane .cm-s-default .cm-link, .editor-pane .cm-s-default .cm-url { color: var(--rose); }
+.editor-pane .cm-s-default .cm-quote, .editor-pane .cm-s-default .cm-comment, .editor-pane .cm-s-default .cm-hr { color: var(--muted); }
+.editor-pane .cm-s-default .cm-strong { font-weight: 600; }
+.editor-pane textarea { flex: 1; font: 14px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; border: 0;
+  background: transparent; color: var(--ink); padding: 1rem; resize: none; outline: none; }
+.editor-preview { min-height: 0; overflow: auto; padding: 1.1rem 1.4rem; }
+.ed-name { font: inherit; padding: .3rem .6rem; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--glass-strong); color: var(--ink); min-width: 16rem; }
+.ed-conflict { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin: .9rem .9rem 0;
+  padding: .6rem 1rem; border: 1px solid var(--error); border-radius: 12px; background: var(--glass-strong); }
+.ed-conflict[hidden] { display: none; }
+@media (prefers-color-scheme: dark) { .editor-pane .CodeMirror-selected { background: rgba(240, 138, 162, .2); } }
+@media (max-width: 800px) {
+  .editor { grid-template-columns: 1fr; height: auto; }
+  .editor-pane .CodeMirror { min-height: 50vh; }
+  .editor-preview { max-height: 60vh; }
+}
+
+/* --------------------------------------------------------- help and wiki */
+.wiki-new { align-items: center; justify-content: space-between; }
+.wiki-lib { padding-left: .3rem; }
+.wiki-pane { display: flex; flex-direction: column; }
+.wiki-head { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; justify-content: space-between;
+  padding-bottom: .6rem; margin-bottom: .8rem; border-bottom: 1px solid var(--line); }
+.wiki-head[hidden] { display: none; }
+.wiki-title { color: var(--ink); font-weight: 600; }
+.wiki-actions { display: flex; gap: .8rem; align-items: center; }
+.wiki-body { flex: 1; }
+
+.help-link { text-decoration: none; color: var(--muted); padding: .3rem .8rem; border-radius: 999px; }
+.help-link:hover { color: var(--ink); background: var(--petal-soft); }
+.help-toc li a { display: block; padding: .32rem .5rem; border-radius: 8px; color: var(--ink); text-decoration: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.help-toc li a:hover { background: var(--petal-soft); }
+.help-toc li a[aria-current="page"] { background: var(--petal-soft); color: var(--rose-deep); font-weight: 600; }
+@media (prefers-color-scheme: dark) {
+  .help-link:hover, .help-toc li a:hover, .help-toc li a[aria-current="page"] { background: rgba(240, 138, 162, .16); }
+}
 
 /* ------------------------------------------------------- falling petals */
 .parallax { display: none; }   /* the neon theme's city backdrop (theme-neon.css, parallax.js) */

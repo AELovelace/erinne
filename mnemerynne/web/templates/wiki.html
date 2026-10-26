@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Wiki · {{ assistant_name }}{% endblock %}
+{% block body %}
+{% include "_nav.html" %}
+{% if library %}
+<main class="ax-page wiki-page" id="wiki" data-library-id="{{ library.id }}" data-library-name="{{ library.name }}"
+      data-file-id="{{ file_id or '' }}" data-can-write="{{ 'yes' if can_write else '' }}">
+  <div class="ax">
+    <aside class="ax-tree glass" aria-label="Pages">
+      <div class="ax-new wiki-new">
+        <strong class="wiki-lib">{{ library.name }}</strong>
+        <button type="button" class="small" id="wiki-new-page" hidden>New page</button>
+      </div>
+      <ul class="tree" id="wiki-tree" role="tree" aria-label="Wiki pages"></ul>
+      <p class="muted small" id="wiki-empty" hidden>No pages yet.</p>
+    </aside>
+    <section class="ax-pane glass wiki-pane" aria-live="polite">
+      <div class="wiki-head" id="wiki-head" hidden>
+        <nav class="wiki-crumbs small muted" id="wiki-crumbs" aria-label="Path"></nav>
+        <div class="wiki-actions">
+          <a id="wiki-edit" class="button-like" target="_blank" hidden>Edit</a>
+          <a id="wiki-open" class="small" target="_blank" rel="noopener" hidden>Open in Files</a>
+        </div>
+      </div>
+      <article class="wiki-body" id="wiki-page">
+        <p class="muted">Pick a page on the left.</p>
+      </article>
+    </section>
+  </div>
+</main>
+{% else %}
+<main class="inbox">
+  <h1>Wiki</h1>
+  {% if is_admin %}
+  <p class="muted">There's no wiki library yet. Make a folder called <strong>{{ default_name }}</strong> at the root of the
+    share: it becomes a library on the next scan, and the Windows permissions on it decide who reads and who edits.
+    Without a share, create a library called <strong>{{ default_name }}</strong> on Access → Files &amp; folders and grant
+    it to people. To use a library with another name, pick it on Access → Settings → This box → Organisation wiki.</p>
+  {% else %}
+  <p class="muted">Your organisation hasn't set up a wiki yet, or you haven't been given access to it. Ask a
+    Mnemerynne admin.</p>
+  {% endif %}
+</main>
+{% endif %}
+<script src="{{ static('picker.js') }}"></script>
+<script src="{{ static('wiki.js') }}"></script>
+{% endblock %}

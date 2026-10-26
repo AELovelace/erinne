@@ -1,7 +1,8 @@
-"""Personal settings: everyone's own account page, in two halves.
+"""Preferences: everyone's own account page, in two halves.
 
 Erynne (left): pick a theme, change your password, sign out other browsers,
-and link Microsoft 365 accounts (m365.js, web/m365.py).
+link Microsoft 365 accounts (m365.js, web/m365.py), and see and forget what Erynne
+remembers about you (web/memories.py). /settings and /memories redirect here.
 Claude (right): ask Claude in chat with your own Anthropic API key (Claude
 group only, claude_chat.py), and use Erynne from Claude: connectors, tokens
 and what Claude can reach (connect.js, claude_connect.js, web/tokens.py)."""
@@ -12,10 +13,10 @@ import sqlite3
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import accounts, api_tokens, apis, auth, claude_chat, users
+from mnemerynne import accounts, api_tokens, apis, auth, claude_chat, memory, users
 from mnemerynne.clients import claude as claude_client
 from mnemerynne.db import transaction
 from mnemerynne.web.admin import _log
@@ -26,8 +27,15 @@ router = APIRouter()
 ADMIN_VIA = {"role": "local admin", "bootstrap": "admin (server setting)", "domain": "admin (domain group)"}
 
 
-@router.get("/settings", response_class=HTMLResponse)
-def settings_page(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db)):
+@router.get("/settings")
+def old_settings_url(request: Request):
+    """Old links and bookmarks. The query string comes along; the browser keeps the #fragment itself."""
+    query = f"?{request.url.query}" if request.url.query else ""
+    return RedirectResponse(f"/preferences{query}", status_code=status.HTTP_308_PERMANENT_REDIRECT)
+
+
+@router.get("/preferences", response_class=HTMLResponse)
+async def preferences_page(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db)):
     state = request.app.state
     via = accounts.admin_via(conn, user, state.directory, state.settings.admin_usernames)
     groups = [r[0] for r in conn.execute(
@@ -35,8 +43,9 @@ def settings_page(request: Request, user=Depends(page_user), conn: sqlite3.Conne
         "ORDER BY g.name COLLATE NOCASE", (user["id"],))]
     from mnemerynne.web.tokens import extension_path
 
-    return state.templates.TemplateResponse(request, "settings.html", {
-        "user": user, "is_admin": is_admin(request, conn, user), "active": "settings",
+    return state.templates.TemplateResponse(request, "preferences.html", {
+        "user": user, "is_admin": is_admin(request, conn, user), "active": "preferences",
+        "memories": await memory.list_memories(state.store, user["id"]), "memory_mode": state.settings.memory_mode,
         "admin_via": ADMIN_VIA.get(via or ""), "groups": groups, "domain": state.settings.ad_domain,
         "tokens": api_tokens.has_active(conn, user["id"]), "min_password": auth.MIN_PASSWORD_LENGTH,
         "has_extension": extension_path(state.settings) is not None,

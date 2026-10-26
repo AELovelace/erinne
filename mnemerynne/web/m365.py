@@ -29,7 +29,7 @@ def _refused(exc: m365.M365Error) -> HTTPException:
 
 
 def _back(note: str, ok: bool) -> RedirectResponse:
-    return RedirectResponse(f"/settings?m365={'linked' if ok else 'error'}&note={quote(note[:300])}#m365",
+    return RedirectResponse(f"/preferences?m365={'linked' if ok else 'error'}&note={quote(note[:300])}#m365",
                             status_code=status.HTTP_303_SEE_OTHER)
 
 

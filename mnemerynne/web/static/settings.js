@@ -1,4 +1,4 @@
-/* Personal settings: change your password, sign out other browsers.
+/* Preferences: theme, password, sign out other browsers, and the memories Erynne keeps.
    (Microsoft 365 linking on this page is m365.js.) */
 (function () {
   "use strict";
@@ -55,6 +55,23 @@
     } finally {
       button.disabled = false;
     }
+  });
+
+  // Memories: forget one or all; the list is rendered by the server, so reload after a change.
+  async function forget(url) {
+    const r = await fetch(url, { method: "DELETE" });
+    if (!r.ok) {
+      note("memories-note", "Couldn't forget that: " + r.statusText);
+      return;
+    }
+    location.reload();
+  }
+  document.querySelectorAll("#memories-list .forget").forEach(function (b) {
+    b.addEventListener("click", function () { forget("/api/memories/" + encodeURIComponent(b.closest("li").dataset.id)); });
+  });
+  const forgetAll = $("forget-all");
+  if (forgetAll) forgetAll.addEventListener("click", function () {
+    if (confirm("Forget everything Erynne remembers about you?")) forget("/api/memories");
   });
 
   $("sign-out-others").addEventListener("click", async function () {

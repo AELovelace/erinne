@@ -96,7 +96,7 @@ def _inbox_for_claude(conn, world, on):
 # --------------------------------------------------------------------- gate
 def test_only_the_claude_group_with_a_key_gets_claude(client, claude, conn, settings, world):
     _login(client, "bob")
-    assert 'id="use-claude"' not in client.get("/").text and "claude_chat.js" not in client.get("/settings").text
+    assert 'id="use-claude"' not in client.get("/").text and "claude_chat.js" not in client.get("/preferences").text
     assert client.put("/api/me/claude", json={"key": KEY}).status_code == 403
     events = _ask(client, "How do I run the night audit?")
     route = next(e for e in events if e["type"] == "route")
@@ -106,7 +106,7 @@ def test_only_the_claude_group_with_a_key_gets_claude(client, claude, conn, sett
     client.post("/logout")
     _login(client, "alice")
     page = client.get("/").text
-    assert 'id="use-claude"' not in page and 'href="/settings#claude-key"' in page   # no key yet
+    assert 'id="use-claude"' not in page and 'href="/preferences#claude-key"' in page   # no key yet
     events = _ask(client, "How do I run the night audit?")
     assert next(e for e in events if e["type"] == "route")["fallback"].startswith("add your API key")
     assert claude.calls == []
@@ -142,7 +142,7 @@ def test_keys_are_each_persons_own_and_never_shown(client, conn, settings, world
     assert checked[-1] == (KEY, "claude-sonnet-5-5")
     blob = conn.execute("SELECT key_enc FROM user_claude WHERE user_id = ?", (world["alice"],)).fetchone()[0]
     assert KEY.encode() not in bytes(blob)                                                   # encrypted
-    assert KEY not in client.get("/api/me/claude").text + client.get("/settings").text      # write-only
+    assert KEY not in client.get("/api/me/claude").text + client.get("/preferences").text      # write-only
     assert claude_chat.credentials(conn, settings, world["alice"]) == (KEY, "claude-sonnet-5-5")
     assert claude_chat.credentials(conn, settings, world["bob"]) is None                    # not shared
     assert client.put("/api/me/claude", json={"model": "claude-haiku-5-5"}).json()["model"] == "claude-haiku-5-5"

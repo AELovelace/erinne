@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}{{ name or "New page" }} · Edit · {{ assistant_name }}{% endblock %}
+{% block body %}
+<header class="topbar">
+  <a class="brand" href="/"><span class="blossom" aria-hidden="true">🌸</span>{{ assistant_name }}</a>
+  {% if mode == 'new' %}
+  <input type="text" id="ed-name" class="ed-name" value="{{ name }}" placeholder="Page name" maxlength="200"
+         aria-label="Page name" autocomplete="off">
+  {% else %}
+  <strong id="ed-title">{{ name }}</strong>
+  {% endif %}
+  <span class="muted small">{{ where }}</span>
+  <span id="ed-status" class="small muted push-right" aria-live="polite">Loading…</span>
+  <button type="button" id="ed-save" title="Ctrl+S">Save</button>
+  <a id="ed-view" href="{{ view_url or '' }}" target="_blank" rel="noopener" {% if not view_url %}hidden{% endif %}>View</a>
+  <button type="button" class="link" id="ed-close">Close</button>
+</header>
+<div class="ed-conflict" id="ed-conflict" role="alert" hidden>
+  <span id="ed-conflict-text"></span>
+  <button type="button" class="small" id="ed-conflict-theirs">Load their version (mine goes to the clipboard)</button>
+  <button type="button" class="small" id="ed-conflict-mine">Save mine over it (theirs stays under Versions)</button>
+</div>
+<main class="editor" id="editor" data-mode="{{ mode }}" data-file-id="{{ file_id or '' }}"
+      data-collection-id="{{ collection_id or '' }}" data-folder-id="{{ folder_id or '' }}" data-back="{{ back }}">
+  <section class="editor-pane glass" aria-label="Markdown source">
+    <textarea id="ed-source" spellcheck="true" aria-label="Markdown source"></textarea>
+  </section>
+  <section class="editor-preview glass wiki-body" id="ed-preview" aria-label="Preview"></section>
+</main>
+<link rel="stylesheet" href="{{ static('vendor/codemirror/codemirror.min.css') }}">
+<script src="{{ static('vendor/codemirror/codemirror.min.js') }}"></script>
+<script src="{{ static('vendor/codemirror/codemirror-markdown.min.js') }}"></script>
+<script src="{{ static('picker.js') }}"></script>
+<script src="{{ static('mdeditor.js') }}"></script>
+{% endblock %}

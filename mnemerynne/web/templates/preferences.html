@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Settings · {{ assistant_name }}{% endblock %}
+{% block title %}Preferences · {{ assistant_name }}{% endblock %}
 {% block body %}
 {% include "_nav.html" %}
 <main class="settings-page">
@@ -60,10 +60,23 @@
     <div id="m365" aria-live="polite"><p class="muted small">Loading…</p></div>
   </section>
 
-  <h2 class="admin-section">More</h2>
-  <ul class="grants">
-    <li><a href="/memories">What {{ assistant_name }} remembers about you</a></li>
+  <h2 class="admin-section" id="memories">What {{ assistant_name }} remembers about you</h2>
+  {% if memory_mode == 'off' %}
+  <p class="muted small">Memory is turned off on this server.</p>
+  {% elif memory_mode == 'explicit' %}
+  <p class="muted small">{{ assistant_name }} only remembers things you ask it to, e.g. "Remember that I work at the Portland property."</p>
+  {% else %}
+  <p class="muted small">When you mention facts about yourself (your property, role or shift), {{ assistant_name }} keeps them to tailor future answers. Only you can see these. Passwords, codes and guest details are never saved.</p>
+  {% endif %}
+  <ul class="memories" id="memories-list">
+    {% for m in memories %}
+    <li data-id="{{ m.id }}"><span>{{ m.text }}</span> <button type="button" class="link danger forget">Forget</button></li>
+    {% else %}
+    <li class="muted">Nothing yet.</li>
+    {% endfor %}
   </ul>
+  {% if memories %}<button type="button" class="link danger" id="forget-all">Forget everything</button>{% endif %}
+  <p id="memories-note" aria-live="polite" hidden></p>
 </section>
 
 <section class="inbox admin connect" id="claude" aria-labelledby="claude-title">

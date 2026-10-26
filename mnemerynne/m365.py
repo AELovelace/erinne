@@ -264,7 +264,7 @@ def finish_link(conn: sqlite3.Connection, settings: Settings, session: dict, use
     """Finish linking: check everything, store the account and its token. Returns the identity."""
     pending = session.pop("m365_link", None)
     if not pending or not secrets.compare_digest(str(pending.get("state", "")), state or ""):
-        raise M365Error("That Microsoft sign-in didn't match one started here; start again from the Settings page.")
+        raise M365Error("That Microsoft sign-in didn't match one started here; start again from the Preferences page.")
     if pending["user_id"] != user["id"] or time.time() - pending["at"] > LINK_SECONDS:
         raise M365Error("That Microsoft sign-in took too long or belongs to another session; start again.")
     chosen = tenant(conn, pending["tenant_row"]) if pending.get("tenant_row") else None

@@ -19,14 +19,25 @@ def _login(client, name="alice", password="password123"):
     return client.post("/login", data={"username": name, "password": password}, follow_redirects=False)
 
 
-def test_everyone_gets_a_settings_page(settings, conn, alice):
+def test_everyone_gets_a_preferences_page(settings, conn, alice):
     with TestClient(_app(settings)) as c:
         _login(c)
-        page = c.get("/settings")
+        page = c.get("/preferences")
         assert page.status_code == 200 and 'id="password-form"' in page.text and 'id="m365-section"' in page.text
         assert 'id="claude-title"' in page.text                         # the Claude page is its right half
         nav = c.get("/").text
-        assert 'href="/settings"' in nav and 'href="/connect"' not in nav   # one tab for both
+        assert 'href="/preferences"' in nav and 'href="/connect"' not in nav   # one tab for both
+        assert 'href="/memories"' not in nav and 'id="memories"' in page.text   # memories live here now
+
+
+def test_old_settings_and_memories_urls_redirect(settings, conn, alice):
+    with TestClient(_app(settings)) as c:
+        _login(c)
+        moved = c.get("/settings?m365=linked", follow_redirects=False)
+        assert moved.status_code == 308 and moved.headers["location"] == "/preferences?m365=linked"
+        assert c.get("/settings", follow_redirects=False).headers["location"] == "/preferences"
+        moved = c.get("/memories", follow_redirects=False)
+        assert moved.status_code == 308 and moved.headers["location"] == "/preferences#memories"
 
 
 def test_change_your_own_password(settings, conn, alice):
@@ -62,7 +73,7 @@ def test_sign_out_other_browsers(settings, conn, alice):
 def test_pick_a_theme(settings, conn, alice):
     with TestClient(_app(settings)) as c:
         _login(c)
-        page = c.get("/settings").text
+        page = c.get("/preferences").text
         assert 'data-theme="neon"' in page and 'content="dark"' in page          # the default
         assert "theme-neon.css" in page and "parallax.js" in page
         assert c.put("/api/me/theme", json={"theme": "vaporwave"}).status_code == 422

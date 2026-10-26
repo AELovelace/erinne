@@ -246,8 +246,8 @@ def test_mcp_rate_limit(settings, conn, world, embedder):
 def test_connect_page_and_token_api(mcp_client, conn, world):
     mcp_client.post("/login", data={"username": "alice", "password": "password123"})
     moved = mcp_client.get("/connect", follow_redirects=False)   # the Claude half of Settings now
-    assert moved.status_code == 308 and moved.headers["location"] == "/settings#claude"
-    page = mcp_client.get("/settings").text
+    assert moved.status_code == 308 and moved.headers["location"] == "/preferences#claude"
+    page = mcp_client.get("/preferences").text
     assert 'id="claude-title"' in page and 'id="new-token"' in page
     assert "claude_chat.js" not in page   # alice isn't in the Claude group
     made = mcp_client.post("/api/tokens", json={"name": "Laptop", "days": 30})

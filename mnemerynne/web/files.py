@@ -74,6 +74,10 @@ def _file_json(row: sqlite3.Row, access: fs.Access) -> dict:
         "view_url": view,
         "download_url": f"/files/{row['id']}/raw",
         "can_delete": access.can_write(row["collection_id"], row["folder_id"]),
+        # Text and Markdown files the person may change open in the browser editor (web/editor.py).
+        "edit_url": (f"/edit/{row['id']}" if editing.format_of(row["display_name"]) == "text"
+                     and row["deleted_at"] is None and access.can_write(row["collection_id"], row["folder_id"])
+                     else None),
         # "claude:alice" / "erynne:alice": last changed by Claude, or by Erynne's
         # proposal that alice applied (Versions can undo it)
         "edited_via": row["edited_via"] if "edited_via" in row.keys() else None,

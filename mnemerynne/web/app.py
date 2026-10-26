@@ -33,8 +33,9 @@ from mnemerynne.config import Settings, get_settings
 from mnemerynne.graph import Deps, build_graph
 from mnemerynne.router import load_router
 from mnemerynne.web import (admin, admin_apis, agent as agent_pages, apis as api_pages, balancer as balancer_pages, chat,
-                            claude_links as claude_link_pages, files, m365 as m365_pages, memories,
-                            oauth as oauth_pages, security, settings as settings_pages, tokens)
+                            claude_links as claude_link_pages, editor as editor_pages, files, help as help_pages,
+                            m365 as m365_pages, memories, oauth as oauth_pages, security,
+                            settings as settings_pages, tokens, wiki as wiki_pages)
 from mnemerynne.web.deps import LoginRequired, api_user, get_db, is_admin, page_user
 
 log = logging.getLogger("mnemerynne.web")
@@ -206,6 +207,9 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(balancer_pages.router)
     app.include_router(settings_pages.router)
     app.include_router(claude_link_pages.router)
+    app.include_router(help_pages.router)
+    app.include_router(editor_pages.router)
+    app.include_router(wiki_pages.router)
 
     # MCP for Claude Desktop: bearer-token auth, read-only tools (mnemerynne/mcp_server.py).
     mcp = mcp_server.build_server(settings, lambda: app.state.embedder, lambda: app.state.directory)
@@ -278,10 +282,11 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         return _page(request, "files.html", user, conn, active="files", trash_days=settings.trash_days)
 
     @app.get("/api/me")
-    def me(user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+    def me(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
         return {
             "username": user["username"],
             "role": user["role"],
+            "is_admin": is_admin(request, conn, user),   # local admin, bootstrap name or the admin group
             "collections": [dict(c) for c in permissions.readable_collections(conn, user["id"])],
             # Erynne's tools (everyone), and whether they may change files anywhere (the agent group);
             # the server checks again on every question.

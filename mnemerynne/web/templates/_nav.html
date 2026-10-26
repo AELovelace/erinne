@@ -3,10 +3,11 @@
   <nav class="tabs">
     <a href="/" {% if active == 'chat' %}aria-current="page"{% endif %}>Ask</a>
     <a href="/files" {% if active == 'files' %}aria-current="page"{% endif %}>Files</a>
-    <a href="/memories" {% if active == 'memories' %}aria-current="page"{% endif %}>Memories</a>
-    <a href="/settings" {% if active == 'settings' %}aria-current="page"{% endif %}>Settings</a>
+    <a href="/wiki" {% if active == 'wiki' %}aria-current="page"{% endif %}>Wiki</a>
+    <a href="/preferences" {% if active == 'preferences' %}aria-current="page"{% endif %}>Preferences</a>
     {% if is_admin %}<a href="/admin/libraries" {% if active == 'admin' %}aria-current="page"{% endif %}>Access</a>{% endif %}
   </nav>
   <span class="muted push-right">{{ user.username }}{% if is_admin %} · admin{% endif %}</span>
+  <a class="help-link" href="/help" target="_blank" rel="noopener">Help</a>
   <form method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
 </header>

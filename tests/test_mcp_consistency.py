@@ -163,7 +163,7 @@ def test_a_library_needs_an_admin(conn, settings, world, tools):
 def test_what_the_person_cant_give(conn, settings, world, tools):
     reader = _caller(conn, world["alice"], can_edit=False)
     out = tools.request_edit_access(conn, reader, library="IT-OPS")[0]
-    assert out["status"] == "needs_person" and out["link"].endswith("/settings#claude")
+    assert out["status"] == "needs_person" and out["link"].endswith("/preferences#claude")
     rob = _caller(conn, world["rob"])
     assert tools.request_edit_access(conn, rob, library="Docs")[0]["status"] == "not_possible"
     with pytest.raises(Refused) as refused:

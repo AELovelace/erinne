@@ -228,7 +228,7 @@ def test_memories_are_extracted_filtered_used_and_private(chat_client, llm):
     system = llm.answer_prompts[-1][0]["content"]
     assert "Works at the Portland property." in system and "hunter2" not in system
 
-    page = chat_client.get("/memories")
+    page = chat_client.get("/memories", follow_redirects=True)   # redirects to Preferences
     assert page.status_code == 200 and "Works at the Portland property." in page.text
 
     chat_client.post("/logout")

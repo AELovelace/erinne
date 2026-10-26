@@ -12,6 +12,12 @@ the file and where in it for every claim (page, heading, slide, sheet rows or
 code lines), or says the answer isn't in their documents. It remembers follow-up
 context within a conversation and facts users tell it about themselves.
 
+**Help** (top right) opens the built-in wiki: a user section for everyone and an
+admin section for admins, written as Markdown in `mnemerynne/help/`. The **Wiki**
+tab shows the organisation's own wiki, a library called *Wiki* (a folder at the
+root of the share), with a browser editor for its pages; the same editor opens
+from **Edit** in Files for any text or Markdown file a person may change.
+
 Everything runs locally: a FastAPI app, one SQLite database (FTS5,
 sqlite-vec, LangGraph checkpoints and memory), and llama.cpp `llama-server`
 for the Erynne model and embeddings. No document, question or trace leaves
@@ -26,9 +32,10 @@ the machine (LangSmith is forced off).
 | P1b | File manager (folders, move/copy, recycle bin, upload queue, previews), library admin page, "search in" a folder | done |
 | P2 | Permission-filtered hybrid search, synonyms, evaluation harness, embedder bake-off | done; gold set needs staff review |
 | P3 | LangGraph answering flow, streaming, citations, conversation memory, feedback | done |
-| P3b | Long-term user memory with safety filter and "Your memories" page | done |
+| P3b | Long-term user memory with safety filter, shown on Preferences | done |
 | P4 | Fedora pilot next to MicroJames | ready: `deploy/linux/README.md` |
 | P5 | Fine-tuning the Erynne model (LFM2.5-2.6B) | pipeline ready: `training/README.md` |
+| P6 | Help wiki (user and admin, `mnemerynne/help`), the organisation **Wiki** tab (a library of Markdown pages) and the browser Markdown editor | done |
 
 ### Planned
 
@@ -72,7 +79,7 @@ question ─► memories ─► condense follow-up ─► hybrid search ─► n
   llama-server's JSON schema; uncited or malformed answers become "not found".
 * **Memory:** conversation state per thread (LangGraph checkpointer); facts
   users state about themselves extracted after each answer, filtered for
-  secrets and guest details, visible and deletable on **Memories**.
+  secrets and guest details, visible and deletable on **Preferences**.
 
 ## Development (Windows or Linux)
 

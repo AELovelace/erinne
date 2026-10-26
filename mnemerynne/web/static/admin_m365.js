@@ -91,7 +91,7 @@
     const box = $("m365-settings");
     box.replaceChildren();
     box.appendChild(el("p", "muted", "People sign in to Mnemerynne as always, then link their Microsoft 365 accounts on " +
-      "the Settings page, one per tenant. Linked accounts let Erynne reach SharePoint, and for the agent group mail and " +
+      "the Preferences page, one per tenant. Linked accounts let Erynne reach SharePoint, and for the agent group mail and " +
       "calendar, with Microsoft's own permissions. Nothing is ever sent, deleted or moved."));
     if (!data.configured) {
       box.appendChild(el("p", "error", "The shared app registration isn't set on the server (MNEMERYNNE_M365_CLIENT_ID and " +

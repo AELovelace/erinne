@@ -109,6 +109,16 @@ def test_sync_turns_the_share_into_libraries_and_files(conn, settings, root):
     assert not share.sync(conn, settings)                     # nothing changed: nothing to do
 
 
+def test_a_wiki_folder_on_the_share_is_the_organisation_wiki(conn, settings, root):
+    from mnemerynne import wiki
+
+    assert wiki.library_row(conn) is None
+    _write(root / "Wiki" / "index.md", "# Home\n\nWelcome.")
+    share.sync(conn, settings)
+    found = wiki.library_row(conn)
+    assert found is not None and found["name"] == "Wiki" and found["share_path"] == "Wiki"
+
+
 def test_renames_and_moves_on_the_share_keep_the_index(conn, settings, root):
     _write(root / "Oracle" / "audit.txt", "Run the night audit at 2am.")
     (root / "Archive").mkdir()

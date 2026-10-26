@@ -1,7 +1,7 @@
 /* Erynne — neon theme: hot pink on black, chromatic bloom (a cyan and a red
    fringe either side of a pink glow), hard edges. Everything is scoped to
    html[data-theme="neon"], so the sakura theme (erynne.css) is untouched;
-   this file only overrides it. Chosen per person on the Settings page; the
+   this file only overrides it. Chosen per person on the Preferences page; the
    default for new accounts and signed-out pages. */
 
 html[data-theme="neon"] {
@@ -227,8 +227,18 @@ html[data-theme="neon"] .history li.active { background: rgba(255, 46, 151, 0.14
 html[data-theme="neon"] .history li.active { box-shadow: inset 2px 0 0 var(--rose); }
 html[data-theme="neon"] .drop-overlay { background: rgba(7, 2, 13, 0.82); border-color: var(--rose); }
 html[data-theme="neon"] .proposal .diff,
-html[data-theme="neon"] .doc pre { background: rgba(255, 46, 151, 0.07); }
-html[data-theme="neon"] .doc :target { background: rgba(255, 46, 151, 0.2); box-shadow: inset 2px 0 0 var(--cyan); }
+html[data-theme="neon"] :is(.doc, .help-body, .wiki-body) pre { background: rgba(255, 46, 151, 0.07); }
+html[data-theme="neon"] :is(.doc, .help-body, .wiki-body) :target { background: rgba(255, 46, 151, 0.2); box-shadow: inset 2px 0 0 var(--cyan); }
+html[data-theme="neon"] .help-toc li a[aria-current="page"] { box-shadow: inset 2px 0 0 var(--rose); }
+/* CodeMirror's stock theme is light: the editor follows the neon colours. */
+html[data-theme="neon"] .editor-pane .CodeMirror { background: transparent; color: var(--ink); }
+html[data-theme="neon"] .editor-pane .CodeMirror-gutters { background: transparent; border-color: var(--line); }
+html[data-theme="neon"] .editor-pane .CodeMirror-cursor { border-left-color: var(--rose); }
+html[data-theme="neon"] .editor-pane .CodeMirror-selected,
+html[data-theme="neon"] .editor-pane .CodeMirror-focused .CodeMirror-selected { background: rgba(255, 46, 151, 0.2); }
+html[data-theme="neon"] .editor-pane .cm-s-default .cm-header { color: var(--rose); }
+html[data-theme="neon"] .editor-pane .cm-s-default .cm-link,
+html[data-theme="neon"] .editor-pane .cm-s-default .cm-url { color: var(--cyan); }
 html[data-theme="neon"] .toast { box-shadow: var(--bloom); }
 html[data-theme="neon"] .admin-table th { color: var(--rose); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.78rem; }
 html[data-theme="neon"] .props-h { color: var(--cyan); text-shadow: 0 0 6px rgba(0, 240, 255, 0.6); }

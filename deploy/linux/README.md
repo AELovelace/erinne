@@ -326,7 +326,7 @@ You can't deactivate yourself, or remove your own admin role unless the domain
 admin group keeps you an admin. Every change goes in **Recent changes**.
 Deleting a user is still done with `mnemerynne-admin delete-user`.
 
-**Everyone's own Settings page** (the Settings tab) shows their account, role,
+**Everyone's own Preferences page** (the Preferences tab) shows their account, role,
 domain account and groups. It lets them change their password, which needs
 the current one; wrong guesses count towards the sign-in lockout. They can
 also sign out every other browser and link their Microsoft 365 accounts
@@ -413,6 +413,12 @@ moves are recognised (a file keeps its search index). Names must also suit
 Windows: no `\ / : * ? " < > |`, no trailing dot or space. Office lock files
 (`~$…`), `Thumbs.db`, `desktop.ini` and hidden files are ignored. Deleting a
 library on the Access page moves its folder to the trash directory.
+
+**The organisation wiki.** A folder named `Wiki` at the root of the share becomes
+the library behind the **Wiki** tab (its Windows permissions decide who reads and
+who edits; sub-folders can carry their own). Admins can pick another library on
+Access → Settings → Organisation wiki. Pages are edited in the browser; every save
+keeps a version. The Help button (top right) opens the built-in user and admin wiki.
 
 ## 5e. Office documents and code
 
@@ -583,7 +589,7 @@ How it behaves:
 ## 5i. Microsoft 365
 
 People keep signing in to Mnemerynne with their Mnemerynne account. On their
-**Settings** page they then link their Microsoft 365 account(s), one per
+**Preferences** page they then link their Microsoft 365 account(s), one per
 tenant (a person working for two brands links both). Linking is a normal
 Microsoft sign-in, so MFA and Conditional Access apply. It gives Mnemerynne
 delegated access *as that person*, so Microsoft's own permissions decide what
@@ -622,9 +628,9 @@ permission to do so.
    accepts. **Check** then confirms the app can sign in there.
 3. A tenant whose admins won't consent to an outside app can register its own
    single-tenant app: enter its client ID and secret on the tenant's row. It
-   then gets its own "Link your … account" button on the Settings page.
+   then gets its own "Link your … account" button on the Preferences page.
 
-Linked accounts show on the Settings page and in each user's dialog on Access →
+Linked accounts show on the Preferences page and in each user's dialog on Access →
 Accounts, where admins can unlink them. Removing a tenant unlinks everyone's
 accounts in it and removes its SharePoint libraries. Refresh tokens are stored
 encrypted with a key derived from `MNEMERYNNE_SECRET_KEY`. If Microsoft stops

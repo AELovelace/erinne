@@ -840,7 +840,7 @@
   function microsoftSection(u, linked) {
     const s = dlgSection("Microsoft 365");
     if (!linked.length) {
-      s.appendChild(el("p", "small muted", "No Microsoft 365 account linked. They link their own on the Settings page."));
+      s.appendChild(el("p", "small muted", "No Microsoft 365 account linked. They link their own on the Preferences page."));
       return s;
     }
     linked.forEach(function (a) {
@@ -952,6 +952,47 @@
   async function loadAdminGroup() {
     try { renderAdminGroup(await api("GET", "/api/admin/settings/admin-group")); }
     catch (e) { $("admin-group").replaceChildren(el("p", "error", e.message)); }
+  }
+
+  // ------------------------------------------------------ organisation wiki
+  function renderWikiLibrary(data) {
+    const box = $("wiki-settings");
+    box.replaceChildren();
+    box.appendChild(el("p", "muted", "The Wiki tab shows one library of Markdown pages. By default it's the library " +
+      "called " + data.default_name + " (on the share: a folder named " + data.default_name + " at its root, with the " +
+      "Windows permissions deciding who reads and who edits). Pick another library here instead."));
+    const form = el("form", "ax-new");
+    const select = el("select");
+    select.setAttribute("aria-label", "Wiki library");
+    const byName = el("option", null, "The library called " + data.default_name);
+    byName.value = "";
+    select.appendChild(byName);
+    data.libraries.forEach(function (lib) {
+      const o = el("option", null, lib.name);
+      o.value = String(lib.id);
+      select.appendChild(o);
+    });
+    select.value = data.source === "setting" ? String(data.library_id) : "";
+    const save = el("button", "small", "Save");
+    save.type = "submit";
+    form.append(select, save);
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      try {
+        renderWikiLibrary(await api("PUT", "/api/admin/settings/wiki-library",
+          { library_id: select.value ? Number(select.value) : null }));
+      } catch (err) { showError(err.message); }
+    });
+    box.appendChild(form);
+    box.appendChild(el("p", "muted small", data.name
+      ? "Showing: " + data.name + (data.source === "name" ? " (by its name)" : "") + "."
+      : "No library called " + data.default_name + " yet: the Wiki tab tells people it isn't set up."));
+  }
+
+  async function loadWikiLibrary() {
+    try { renderWikiLibrary(await api("GET", "/api/admin/settings/wiki-library")); }
+    catch (e) { $("wiki-settings").replaceChildren(el("p", "error", e.message)); }
   }
 
   // -------------------------------------------------------- balancer nodes
@@ -1124,7 +1165,7 @@
     if (data.groups && data.groups.length) fillDatalist("domain-groups", data.groups);
     box.appendChild(el("p", "muted", "Members of this " + (data.domain || "domain") + " group may tick Use External API " +
       "in chat: Claude answers with Erynne's tools, using each person's own Anthropic API key (saved on their " +
-      "Settings page, billed to them). Claude reads only what's shared with Claude, can hand reading to up to two " +
+      "Preferences page, billed to them). Claude reads only what's shared with Claude, can hand reading to up to two " +
       "MinErynnes (small local Erynnes) with the same limits, and never sees mail, calendar or memories. Leave it empty to turn " +
       "it off."));
     if (!data.enabled) box.appendChild(el("p", "error", "No AD domain is configured on the server (MNEMERYNNE_AD_DOMAIN), so nobody can be in the group."));
@@ -1220,7 +1261,7 @@
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
     if (tab === "settings" && !updatesLoaded) {
-      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadAgent(); loadClaude(); loadClaudeLinks();
+      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeLinks();
       if (window.ErynneM365) window.ErynneM365.load();   // admin_m365.js
     }
     if (tab === "accounts") loadAccounts();
