@@ -1,0 +1,22 @@
+[Unit]
+Description=Give Mnemerynne read and write on new folders on the SMB share
+After=local-fs.target
+
+[Service]
+Type=simple
+# Root: only a file's owner may change its ACL. It only adds the mnemerynne
+# entry, under MNEMERYNNE_SHARE_ROOT.
+EnvironmentFile=/etc/mnemerynne/mnemerynne.env
+ExecStart=/bin/bash /opt/mnemerynne/deploy/linux/share-acl-watch.sh
+# Exits 0 when no share is configured; 1 when the share is missing, so try again.
+Restart=on-failure
+RestartSec=60
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# The share (/srv/storage/share, or /srv/share on the dev NAS); "-" = fine if absent.
+ReadWritePaths=-/srv
+
+[Install]
+WantedBy=multi-user.target

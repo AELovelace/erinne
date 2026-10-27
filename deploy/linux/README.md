@@ -408,6 +408,18 @@ into their `Users\<name>` folder.
    ```
    In Windows' Security tab this entry shows as *Unix User\mnemerynne*; keep it
    (Modify) on every folder, or Mnemerynne can't see or change that folder.
+   To put it back by itself on every folder that appears (made, copied or moved
+   in, including ones whose permissions Windows replaced), with everything
+   inside, run the watcher:
+   ```sh
+   sudo dnf install inotify-tools
+   sudo install -m 644 /opt/mnemerynne/deploy/linux/mnemerynne-share-acl.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now mnemerynne-share-acl
+   journalctl -u mnemerynne-share-acl -f      # "rw for mnemerynne: …" per new folder
+   ```
+   It watches every folder on the share; if it stops with "too many folders",
+   raise the limit: `echo fs.inotify.max_user_watches=1048576 | sudo tee /etc/sysctl.d/90-inotify.conf && sudo sysctl --system`.
 2. Turn it on and prepare the share:
    ```sh
    echo 'MNEMERYNNE_SHARE_ROOT=/srv/storage/share' | sudo tee -a /etc/mnemerynne/mnemerynne.env
