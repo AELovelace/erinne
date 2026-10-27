@@ -54,7 +54,9 @@
       <span class="mc-time" id="mc-pos">0:00</span>
       <input type="range" class="mc-seek" id="mc-seek" min="0" max="0" step="1" value="0" aria-label="Position">
       <span class="mc-time" id="mc-len">0:00</span>
+      <button type="button" id="mc-vol-down" title="Quieter (↓, −)">🔉</button>
       <button type="button" id="mc-mute" title="Mute (M)">🔊</button>
+      <button type="button" id="mc-vol-up" title="Louder (↑, +)">🔊</button>
       <label class="mc-night" title="Night filter: warmer and dimmer (N)">🌙
         <input type="range" id="mc-night" min="0" max="100" step="5" value="0" aria-label="Night filter">
       </label>
@@ -91,6 +93,8 @@
     <button type="button" id="mc-np-toggle" title="Play / pause">⏯</button>
     <button type="button" id="mc-np-next" title="Next">⏭</button>
     <button type="button" id="mc-np-stop" title="Stop">⏹</button>
+    <button type="button" id="mc-np-vol-down" title="Quieter (−)">🔉</button>
+    <button type="button" id="mc-np-vol-up" title="Louder (+)">🔊</button>
   </div>
   <audio id="mc-audio" preload="none"></audio>
 </footer>

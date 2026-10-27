@@ -695,6 +695,7 @@ def test_casting_to_a_screen(client, conn, directory, root, settings):
     assert sent({"action": "play_station", "key": "relay-sgc"})["station"]["name"] == "SadGirlsClub"
     assert sent({"action": "skip", "by": -10}) == {"action": "skip", "by": -10}
     assert sent({"action": "volume", "level": 0.4}) == {"action": "volume", "level": 0.4}
+    assert sent({"action": "mute"}) == {"action": "mute"}
     assert sent({"action": "night"}) == {"action": "night"}                      # the next step
     assert sent({"action": "night", "level": 0.55}) == {"action": "night", "level": 0.55}
     assert client.post(f"/api/media/screens/{screen_id}/command",
@@ -706,9 +707,11 @@ def test_casting_to_a_screen(client, conn, directory, root, settings):
     tv = TestClient(client.app)
     tv.cookies.set("mnemerynne_screen", key)
     assert tv.put("/api/media/screen/state", json={"kind": "video", "title": "Heat", "position": 61.5,
-                                                   "duration": 6000, "paused": False, "volume": 0.4}).status_code == 200
+                                                   "duration": 6000, "paused": False, "volume": 0.4,
+                                                   "muted": True}).status_code == 200
     mine = client.get("/api/media/screens").json()["screens"][0]
     assert mine["online"] is True and mine["state"]["title"] == "Heat" and mine["state"]["position"] == 61.5
+    assert mine["state"]["muted"] is True
 
     # Someone else can't see or drive it.
     _login(client, conn, directory, "jane", "jsmith")

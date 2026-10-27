@@ -496,7 +496,7 @@ async def remove_screen(screen_id: int, request: Request, user=Depends(api_user)
 
 class Command(BaseModel):
     action: Literal["play_item", "play_album", "play_youtube", "play_source", "play_station", "toggle", "seek",
-                    "skip", "volume", "night", "next", "prev", "stop"]
+                    "skip", "volume", "mute", "night", "next", "prev", "stop"]
     file_id: int | None = None
     key: str | None = Field(None, max_length=2000)       # album key or station key
     index: int = Field(0, ge=0)
@@ -597,6 +597,7 @@ class ScreenState(BaseModel):
     duration: float | None = None
     paused: bool = False
     volume: float | None = Field(None, ge=0, le=1)
+    muted: bool = False
     has_queue: bool = False
     night: float | None = Field(None, ge=0, le=1)        # the night filter's level
 

@@ -475,7 +475,11 @@
       // enablejsapi: pause, seek and volume from a remote, and position reports (ytCommand, the message listener).
       frame.src = source.embed + (source.embed.indexOf("?") < 0 ? "?" : "&") + "autoplay=1&rel=0&playsinline=1"
         + "&enablejsapi=1&origin=" + encodeURIComponent(location.origin);
-      frame.onload = function () { player.ytCommand(null); };
+      frame.onload = function () {
+        player.ytCommand(null);
+        volume.applyYouTube();
+        setTimeout(function () { volume.applyYouTube(); }, 1500);
+      };
       $("mc-player-close").focus();
     },
 
@@ -615,10 +619,10 @@
       else if (k === " " || k === "k" || k === "MediaPlayPause") { this.toggle(); }
       else if (k === "ArrowLeft") { this.seekTo(this.position() - 10); }
       else if (k === "ArrowRight") { this.seekTo(this.position() + 30); }
-      else if (k === "ArrowUp") { video.volume = Math.min(1, video.volume + 0.1); }
-      else if (k === "ArrowDown") { video.volume = Math.max(0, video.volume - 0.1); }
+      else if (k === "ArrowUp") { volume.step(0.1); }
+      else if (k === "ArrowDown") { volume.step(-0.1); }
       else if (k === "f") { this.fullscreen(); }
-      else if (k === "m") { video.muted = !video.muted; }
+      else if (k === "m") { volume.toggleMute(); }
       else if (k === "n") { night.step(); }
       else return false;
       return true;
@@ -655,7 +659,9 @@
   $("mc-toggle").addEventListener("click", function () { player.toggle(); });
   $("mc-back10").addEventListener("click", function () { player.seekTo(player.position() - 10); });
   $("mc-fwd30").addEventListener("click", function () { player.seekTo(player.position() + 30); });
-  $("mc-mute").addEventListener("click", function () { video.muted = !video.muted; $("mc-mute").textContent = video.muted ? "🔇" : "🔊"; });
+  $("mc-mute").addEventListener("click", function () { volume.toggleMute(); });
+  $("mc-vol-down").addEventListener("click", function () { volume.step(-0.1); });
+  $("mc-vol-up").addEventListener("click", function () { volume.step(0.1); });
 
   /* The night filter, 0 (off) to 100: kept per device, so the TV keeps its own; a screen's owner can set it
      from the phone's remote (the "night" command). */
@@ -813,6 +819,101 @@
   $("mc-np-next").addEventListener("click", function () { nowPlaying.next(); });
   $("mc-np-prev").addEventListener("click", function () { nowPlaying.prev(); });
   $("mc-np-stop").addEventListener("click", function () { nowPlaying.stop(); });
+  $("mc-np-vol-down").addEventListener("click", function () { volume.step(-0.1); });
+  $("mc-np-vol-up").addEventListener("click", function () { volume.step(0.1); });
+
+  // ----------------------------------------------------------------- volume
+  /* One volume for everything the page plays: films, live TV, music, radio, YouTube and signage clips.
+     A TV has no other volume control (the kiosk keeps its sound card at full), so this is it: the
+     remote's volume keys, + and -, the 🔉 🔊 buttons and M, or the phone's remote. Kept per device. */
+  const volume = {
+    level: 1, muted: false, osdTimer: null, ready: false,
+
+    init: function () {
+      try {
+        const saved = JSON.parse(localStorage.getItem("mc-volume") || "null");
+        if (saved && typeof saved.level === "number") {
+          this.level = Math.max(0, Math.min(1, saved.level));
+          this.muted = !!saved.muted;
+        }
+      } catch (e) { /* private window */ }
+      this.apply(false);
+      this.ready = true;      // from now on changes are reported (screenMode is defined further down)
+      // Before anything else sees the key: changing the volume isn't "someone's using the TV".
+      window.addEventListener("keydown", function (e) {
+        if (volume.key(e)) { e.preventDefault(); e.stopImmediatePropagation(); }
+      }, true);
+    },
+
+    key: function (e) {
+      if (e.ctrlKey || e.altKey || e.metaKey) return false;
+      const tag = (document.activeElement && document.activeElement.tagName) || "";
+      const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+      if (e.key === "AudioVolumeUp" || (!typing && (e.key === "+" || e.key === "="))) { this.step(0.05); return true; }
+      if (e.key === "AudioVolumeDown" || (!typing && e.key === "-")) { this.step(-0.05); return true; }
+      if (e.key === "AudioVolumeMute") { this.toggleMute(); return true; }
+      return false;
+    },
+
+    set: function (level, show) {
+      this.level = Math.round(Math.max(0, Math.min(1, level)) * 20) / 20;
+      this.muted = false;
+      this.apply(show !== false);
+    },
+
+    step: function (by) { this.set(this.level + by); },
+
+    toggleMute: function () {
+      this.muted = !this.muted;
+      this.apply(true);
+    },
+
+    /* A signage clip set to play silently stays silent (data-silent). */
+    media: function (m) {
+      m.volume = this.level;
+      m.muted = this.muted || m.dataset.silent === "1";
+    },
+
+    applyYouTube: function () {
+      player.ytCommand("setVolume", [Math.round(this.level * 100)]);
+      player.ytCommand(this.muted ? "mute" : "unMute", []);
+      player.yt.volume = this.level * 100;
+    },
+
+    apply: function (show) {
+      [video, audio].concat(Array.from(document.querySelectorAll(".mc-signage video"))).forEach(function (m) {
+        volume.media(m);
+      });
+      this.applyYouTube();
+      const icon = this.muted || this.level === 0 ? "🔇" : "🔊";
+      $("mc-mute").textContent = icon;
+      try { localStorage.setItem("mc-volume", JSON.stringify({ level: this.level, muted: this.muted })); }
+      catch (e) { /* private window */ }
+      if (show) this.osd();
+      if (screenId && this.ready) screenMode.report(true);
+    },
+
+    /* The level for a moment, top right, over whatever is showing. */
+    osd: function () {
+      let box = $("mc-volume");
+      if (!box) {
+        box = el("div", "mc-volume");
+        box.id = "mc-volume";
+        box.setAttribute("role", "status");
+        box.append(el("span", "mc-volume-icon"), el("span", "mc-volume-bar"), el("span", "mc-volume-pct"));
+        box.children[1].appendChild(el("span"));
+        document.body.appendChild(box);
+      }
+      const pct = Math.round(this.level * 100);
+      box.children[0].textContent = this.muted || pct === 0 ? "🔇" : pct < 50 ? "🔉" : "🔊";
+      box.children[1].firstChild.style.width = (this.muted ? 0 : pct) + "%";
+      box.children[2].textContent = this.muted ? "Muted" : pct + "%";
+      box.classList.add("on");
+      clearTimeout(this.osdTimer);
+      this.osdTimer = setTimeout(function () { box.classList.remove("on"); }, 1600);
+    },
+  };
+  volume.init();
   if ("mediaSession" in navigator) {
     navigator.mediaSession.setActionHandler("nexttrack", function () { nowPlaying.next(); });
     navigator.mediaSession.setActionHandler("previoustrack", function () { nowPlaying.prev(); });
@@ -1006,6 +1107,7 @@
       [["⏮", "Previous", { action: "prev" }], ["⟲", "Back 10 s", { action: "skip", by: -10 }],
        ["⏯", "Play / pause", { action: "toggle" }], ["⟳", "Forward 30 s", { action: "skip", by: 30 }],
        ["⏭", "Next", { action: "next" }], ["🔉", "Quieter", "down"], ["🔊", "Louder", "up"],
+       ["🔇", "Mute / unmute", { action: "mute" }],
        ["🌙", "Night filter: off, low, medium, high", "night"],
        ["⏹", "Stop", { action: "stop" }], ["✕", "Play on this device again", "leave"]].forEach(function (b) {
         bar.appendChild(button(b[0], "", function () {
@@ -1293,11 +1395,9 @@
         if (playerOpen) player.seekAny(to); else if (!$("mc-viewer").hidden) viewer.step(cmd.by > 0 ? 1 : -1);
         else nowPlaying.seekTo(to);
       } else if (a === "volume") {
-        video.volume = audio.volume = cmd.level;
-        video.muted = audio.muted = false;
-        player.ytCommand("setVolume", [Math.round(cmd.level * 100)]);
-        player.ytCommand("unMute", []);
-        player.yt.volume = cmd.level * 100;
+        volume.set(cmd.level);
+      } else if (a === "mute") {
+        volume.toggleMute();
       } else if (a === "next" || a === "prev") {
         if (!$("mc-viewer").hidden) viewer.step(a === "next" ? 1 : -1);
         else if (a === "next") nowPlaying.next(); else nowPlaying.prev();
@@ -1338,6 +1438,8 @@
     report: function (force) {
       const state = this.state();
       state.night = night.level / 100;
+      state.volume = volume.level;
+      state.muted = volume.muted;
       const key = JSON.stringify(state);
       if (!force && key === this.lastReport && state.kind === "idle") return;
       this.lastReport = key;
@@ -1484,7 +1586,8 @@
       }
       if (item.type === "video") {
         const v = el("video");
-        v.muted = !item.sound;
+        if (!item.sound) v.dataset.silent = "1";
+        volume.media(v);
         v.autoplay = true;
         v.playsInline = true;
         v.addEventListener("playing", reveal, { once: true });
