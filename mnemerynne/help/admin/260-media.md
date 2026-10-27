@@ -42,3 +42,25 @@ Media is a Kodi-style media centre for films, music and pictures from the share,
 - **Playing now** lists the server's running sessions: what each one is doing, which encoder it uses, and how long it has been idle. A session stops a minute after its last viewer leaves.
 
 Adding, changing and removing sources is logged (`media.*`).
+
+## Signage
+
+**Access → Signage** sets what screens show while nobody is using them, like digital signage.
+
+**Slideshows** are lists of slides:
+
+- **Pictures and clips from a folder** of the Media library, optionally with its subfolders. Pictures added to the folder appear by themselves within a few minutes. Clips play only if the browser can play them as they are, such as MP4 with H.264; others are skipped.
+- **A video** from the library, with or without sound.
+- **Text:** a title and a few lines, on a colour or a picture.
+- **A web page**, shown for a set time. Many sites refuse to be shown inside another page, so try it on a screen first.
+- **Announcements for everyone:** each current announcement without a group becomes a slide. Announcements for a group never appear, because anyone walking past can see the TV.
+
+Each slide shows for the slideshow's number of seconds unless it sets its own. Videos play to the end.
+
+**Screens** lists every paired screen, whoever owns it. Each screen has rules, and the first rule that matches the screen's own clock decides what it shows:
+
+- **Days, From and To.** From and To the same means all day. To earlier than From runs past midnight.
+- **When idle:** the slideshow starts once nothing has played and nobody has pressed a key for the screen's idle time. Any key, or anything cast from a phone, stops it.
+- **Always (signage):** the slideshow runs whenever nothing is cast to the screen, and keys don't stop it. Casting still interrupts, and the slideshow resumes when playback ends.
+
+Screens show the slideshow's pictures and videos even if their owner couldn't open those folders. Changes reach screens that are on within seconds. Re-pairing a screen under the same name keeps its rules.

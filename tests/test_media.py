@@ -664,7 +664,7 @@ def test_a_paired_screen_keeps_media_only(client, conn, directory, root, setting
     assert tv.get("/admin/libraries", follow_redirects=False).status_code == 303
 
     stranger = TestClient(client.app)
-    assert stranger.get("/media/screen", follow_redirects=False).headers["location"] == "/media#screens"
+    assert "Pair this screen" in stranger.get("/media/screen", follow_redirects=False).text   # a code, not sign-in
     stranger.cookies.set("mnemerynne_screen", "not-a-key")
     assert stranger.get("/api/media/home").status_code == 401
 
@@ -740,7 +740,7 @@ def test_the_screen_stream_and_unpairing(client, conn, directory, monkeypatch):
     assert client.delete(f"/api/media/screens/{screen_id}").status_code == 200
     assert tv.get("/media/screen/stream").status_code == 401
     assert tv.get("/api/media/home").status_code == 401
-    assert tv.get("/media/screen", follow_redirects=False).status_code == 303
+    assert "Pair this screen" in tv.get("/media/screen", follow_redirects=False).text
 
 
 def test_screen_names_are_checked_and_pairing_again_replaces(client, conn, directory):
@@ -752,6 +752,82 @@ def test_screen_names_are_checked_and_pairing_again_replaces(client, conn, direc
     second, key2 = _pair(client, "living  room")
     assert key1 != key2                                # re-pairing issues a new key
     assert [s["name"] for s in client.get("/api/media/screens").json()["screens"]] == ["living room"]
+
+
+def _tv_code(tv):
+    r = tv.post("/media/screen/pair")
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_a_tv_pairs_with_a_code_from_the_phone(client, conn, directory):
+    _login(client, conn, directory)
+    _turn_on(client)
+    _screens_for(client)
+    tv = TestClient(client.app)                       # no sign-in, no keyboard
+    page = tv.get("/media/screen")
+    assert page.status_code == 200 and "Pair this screen" in page.text and "screen-pair.js" in page.text
+    pairing = _tv_code(tv)
+    code = pairing["code"]
+    assert len(code) == 9 and code[4] == "-" and pairing["qr"].startswith("<svg")
+    assert pairing["url"].endswith("/media/pair?code=" + code.replace("-", ""))
+    assert "HttpOnly" in tv.post("/media/screen/pair").headers["set-cookie"]
+    assert _tv_code(tv)["code"] == code               # reloading the page keeps the same code
+    assert tv.get("/media/screen/pair").json()["state"] == "waiting"
+    assert tv.get("/api/media/home").status_code == 401
+
+    # The QR code opens Media → Screens on the phone with the code filled in.
+    link = client.get("/media/pair", params={"code": code}, follow_redirects=False)
+    assert link.headers["location"] == "/media#pair/" + code.replace("-", "")
+    r = client.post("/api/media/screens/claim", json={"code": " " + code.lower().replace("-", " "), "name": "Den"})
+    assert r.status_code == 201, r.text
+    screen_id = r.json()["id"]
+
+    status = tv.get("/media/screen/pair")
+    assert status.json() == {"state": "paired", "url": "/media/screen"}
+    assert "mnemerynne_screen=" in status.headers["set-cookie"]
+    page = tv.get("/media/screen")
+    assert f'data-screen-id="{screen_id}"' in page.text and 'data-screen-name="Den"' in page.text
+    assert tv.get("/api/media/home").status_code == 200
+    assert tv.get("/media/screen/pair").json()["state"] == "expired"      # the key is handed over once
+    assert client.post("/api/media/screens/claim", json={"code": code, "name": "Again"}).status_code == 422
+    assert [s["name"] for s in client.get("/api/media/screens").json()["screens"]] == ["Den"]
+
+
+def test_pairing_codes_run_out_and_wrong_ones_are_limited(client, conn, directory, monkeypatch):
+    from mnemerynne.media import screens
+    _login(client, conn, directory)
+    _turn_on(client)
+    _screens_for(client)
+    tv = TestClient(client.app)
+    code = _tv_code(tv)["code"]
+    for _ in range(screens.CLAIM_TRIES):
+        r = client.post("/api/media/screens/claim", json={"code": "BBBB-BBBB", "name": "TV"})
+        assert r.status_code == 422 and "isn't on any screen" in r.json()["detail"]
+    r = client.post("/api/media/screens/claim", json={"code": code, "name": "TV"})
+    assert r.status_code == 429                       # even the right code, until the window passes
+    assert tv.get("/media/screen/pair").json()["state"] == "waiting"
+
+    later = time.monotonic() + screens.PAIR_SECONDS + 1
+    monkeypatch.setattr(screens.time, "monotonic", lambda: later)
+    assert tv.get("/media/screen/pair").json()["state"] == "expired"
+    assert _tv_code(tv)["code"] != code               # a new one
+    assert client.post("/api/media/screens/claim", json={"code": code, "name": "TV"}).status_code == 422
+    assert client.get("/api/media/screens").json()["screens"] == []
+
+
+def test_pairing_codes_need_the_screens_group_and_sign_in(client, conn, directory):
+    _login(client, conn, directory)
+    _turn_on(client)
+    tv = TestClient(client.app)
+    code = _tv_code(tv)["code"]
+    assert client.post("/api/media/screens/claim", json={"code": code, "name": "TV"}).status_code == 403
+    signed_out = TestClient(client.app)
+    assert signed_out.post("/api/media/screens/claim", json={"code": code, "name": "TV"}).status_code == 401
+    r = signed_out.get("/media/pair", params={"code": code}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login"
+    client.put("/api/admin/settings/media", json={"enabled": False})
+    assert tv.post("/media/screen/pair").status_code == 404 and tv.get("/media/screen").status_code == 404
 
 
 # ------------------------------------------------------------- app, share
@@ -836,7 +912,7 @@ def test_media_and_screens_are_for_their_groups_only(client, conn, directory, ro
     assert tv.get("/api/media/home").status_code == 200
     _screens_for(client, "")                    # nobody
     assert tv.get("/media/screen/stream").status_code == 401
-    assert tv.get("/media/screen", follow_redirects=False).status_code == 303
+    assert "Pair this screen" in tv.get("/media/screen", follow_redirects=False).text
     assert tv.get("/api/media/screen/state").status_code in (401, 405)
     _screens_for(client, "Domain Admins")
     client.put("/api/admin/settings/media", json={"media_group": "Domain Users"})

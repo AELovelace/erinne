@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Pair this screen · {{ assistant_name }}{% endblock %}
+{% block body %}
+{#- An unpaired TV (/media/screen): a code to pair it with from a phone, so the TV needs no sign-in and
+    no keyboard (media.screens.Pairings). screen-pair.js gets the code and waits for it to be claimed. -#}
+<link rel="stylesheet" href="{{ static('media.css') }}">
+<div class="mc-splash mc-pair" role="status">
+  <div class="mc-splash-name">📺 Pair this screen</div>
+  <div class="mc-pair-row">
+    <div class="mc-pair-qr" id="mc-pair-qr" aria-hidden="true"></div>
+    <div class="mc-pair-steps">
+      <p>On your phone, open {{ assistant_name }} → <b>Media → Screens</b>, choose <b>Pair a TV</b> and type:</p>
+      <div class="mc-pair-code" id="mc-pair-code" aria-live="polite">…</div>
+      <p class="muted">Or scan the code with the phone’s camera.</p>
+    </div>
+  </div>
+  <div class="mc-splash-state" id="mc-pair-state">Getting a code…</div>
+</div>
+<script src="{{ static('screen-pair.js') }}"></script>
+{% endblock %}

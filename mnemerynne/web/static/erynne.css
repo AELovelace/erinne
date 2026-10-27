@@ -963,3 +963,18 @@ button.danger-fill { background: var(--error); }
 .rooms-preview { display: block; margin-top: .3rem; padding: .35rem .6rem; border: 1px solid var(--line);
                  border-left: 3px solid var(--rose); border-radius: 8px; background: var(--glass-strong);
                  text-decoration: none; color: var(--ink); max-width: 32rem; }
+
+/* Access → Signage (admin_signage.js) */
+.sg-section { margin-bottom: 1.6rem; }
+.sg-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .6rem 1rem; margin: .5rem 0; }
+.sg-field { display: flex; flex-direction: column; gap: .2rem; }
+.sg-field input[type="checkbox"] { align-self: flex-start; margin: .35rem 0; }
+.sg-field textarea { min-width: 18rem; }
+.sg-tools { display: flex; gap: .4rem; flex: none; }
+.grants .sg-show, .grants .sg-slide { display: block; }
+.sg-editor { margin: .6rem 0 1rem; }
+.sg-slides, .sg-rules { list-style: none; padding: 0; margin: .5rem 0; display: flex; flex-direction: column; gap: .6rem; }
+.sg-slide, .sg-screen { padding: .7rem .9rem; border-radius: .7rem; }
+.sg-screen { margin: .8rem 0; }
+.sg-rule { padding-bottom: .5rem; border-bottom: 1px solid var(--line, rgba(127, 127, 127, .25)); }
+.sg-days { display: flex; flex-wrap: wrap; gap: .1rem .6rem; }

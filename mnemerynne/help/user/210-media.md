@@ -42,12 +42,17 @@ You only see what you may open in that folder on the share. Who may open it is s
 
 A **screen** is a browser left showing Media, such as the TV's, that you send things to from your phone.
 
-**Pair the TV once:**
+**Pair the TV once with a code** (no sign-in or keyboard on the TV):
 
-1. On the TV, sign in and open **Media → Screens**.
-2. Under **Use this browser as a screen**, name it (for example *Living room*) and press **Pair**.
-3. The TV switches to screen mode and waits. It stays paired after its sign-in runs out, until you remove it.
-4. Press **Start** on the TV once, so it may play sound. Your admin can set the TV up so this isn't needed.
+1. On the TV, open `/media/screen` on Erynne's address. The Erynne screen box does this by itself. The TV shows a code and a QR code.
+2. On your phone, scan the QR code, or open **Media → Screens** and type the code under **Pair a TV**.
+3. Name the screen (for example *Living room*) and press **Pair**. The TV switches to screen mode within a few seconds.
+
+A code lasts ten minutes; the TV shows a new one by itself when it runs out.
+
+**Or pair from the TV itself:** sign in on the TV, open **Media → Screens**, name it under **Use this browser as a screen** and press **Pair**.
+
+Either way, the TV stays paired until you remove it, even after any sign-in runs out. Press **Start** on the TV once, so it may play sound; the Erynne screen box doesn't need this.
 
 **Send things from your phone:**
 

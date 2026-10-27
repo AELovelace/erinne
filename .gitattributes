@@ -1,3 +1,4 @@
 deploy/linux/** text eol=lf
 *.sh text eol=lf
 *.sql text eol=lf
+deploy/screen/** text eol=lf

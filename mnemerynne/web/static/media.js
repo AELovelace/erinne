@@ -183,7 +183,7 @@
     return slash < 0 ? { view: raw || "home", arg: "" } : { view: raw.slice(0, slash), arg: raw.slice(slash + 1) };
   }
 
-  const SECTION_OF = { screens: "screens", cast: "screens", home: "home", movies: "movies", movie: "movies", music: "music", album: "music",
+  const SECTION_OF = { screens: "screens", cast: "screens", pair: "screens", home: "home", movies: "movies", movie: "movies", music: "music", album: "music",
                        artist: "music", pictures: "pictures", live: "live", radio: "radio" };
 
   async function render() {
@@ -197,7 +197,7 @@
     backdrop(null);
     const views = { home: viewHome, movies: viewMovies, movie: viewMovie, music: viewMusic, album: viewAlbum,
                     artist: viewArtist, pictures: viewPictures, live: viewLive, radio: viewRadio,
-                    screens: viewScreens, cast: viewScreens };
+                    screens: viewScreens, cast: viewScreens, pair: function (code) { return viewScreens("", code); } };
     try {
       const nodes = await (views[r.view] || viewHome)(r.arg);
       if (token !== renderToken) return;
@@ -973,7 +973,7 @@
       this.allowed = data.allowed;
       if (this.target !== null && !this.screen()) this.choose(null);
       this.paint();
-      if (route().view === "screens" && !document.activeElement.closest("#mc-content input, #mc-content select")) {
+      if ((route().view === "screens" || route().view === "pair") && !document.activeElement.closest("#mc-content input, #mc-content select")) {
         paintScreens();
       }
     },
@@ -1043,7 +1043,7 @@
     if (!list) return;
     list.replaceChildren();
     if (!cast.screens.length) {
-      list.appendChild(empty("No screens yet. On the TV, sign in, open Media → Screens and press “Use this browser as a screen”."));
+      list.appendChild(empty("No screens yet. Open /media/screen on the TV and pair it with the code it shows (below)."));
       return;
     }
     cast.screens.forEach(function (s) {
@@ -1078,7 +1078,9 @@
     });
   }
 
-  async function viewScreens(arg) {
+  /* arg: a YouTube link to fill in (#cast/<link>, from the Share menu); code: a TV's pairing code
+     (#pair/<code>, from its QR code). */
+  async function viewScreens(arg, code) {
     setHead("Screens");
     await cast.refresh();
     const out = [];
@@ -1126,6 +1128,39 @@
       }
     });
     if (cast.screens.some(function (s) { return !s.this; })) out.push(paste);
+
+    /* A TV showing a code (/media/screen while unpaired): name it here and it pairs itself. */
+    const claim = el("form", "mc-paste");
+    claim.appendChild(el("h2", null, "Pair a TV"));
+    claim.appendChild(el("p", "mc-note", "Open /media/screen on the TV (the Erynne screen app does it by " +
+      "itself). Type the code it shows, or scan its QR code, and name it."));
+    const codeIn = el("input");
+    codeIn.placeholder = "Code, e.g. BCDF-GHJK";
+    codeIn.setAttribute("aria-label", "Code on the TV");
+    codeIn.autocapitalize = "characters";
+    codeIn.autocomplete = "off";
+    codeIn.spellcheck = false;
+    codeIn.value = code ? decodeURIComponent(code) : "";
+    const tvName = el("input");
+    tvName.placeholder = "Living room";
+    tvName.setAttribute("aria-label", "Screen name");
+    const claimBtn = el("button", null, "Pair");
+    claimBtn.type = "submit";
+    const crow = el("div", "mc-paste-row");
+    crow.append(codeIn, tvName, claimBtn);
+    claim.appendChild(crow);
+    claim.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      try {
+        const r = await api("POST", "/api/media/screens/claim", { code: codeIn.value, name: tvName.value });
+        codeIn.value = tvName.value = "";
+        await cast.refresh();
+        cast.choose(r.id);
+        if (route().view === "pair") go("screens"); else paintScreens();
+      } catch (err) { showError(err.message); }
+    });
+    out.push(claim);
+    if (code) setTimeout(function () { tvName.focus(); }, 0);
 
     const listBox = el("section", "mc-shelf");
     listBox.appendChild(el("h2", null, "Your screens"));
@@ -1176,6 +1211,15 @@
         if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(function () {});
       });
       splash.addEventListener("click", function (e) { if (e.target !== startBtn && startBtn.hidden) splash.hidden = true; });
+      window.addEventListener("keydown", function (e) {
+        if (splash.hidden || e.ctrlKey || e.altKey || e.metaKey || signage.running) return;   // a slideshow first
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        startBtn.hidden = true;
+        splash.hidden = true;
+        focusFirst();
+      }, true);
+      signage.init();
       this.connect();
       setInterval(function () { screenMode.report(false); }, 3000);
       ["play", "pause", "ended", "loadedmetadata"].forEach(function (ev) {
@@ -1195,17 +1239,29 @@
       });
       this.es.onerror = function () {
         if (screenMode.es.readyState === EventSource.CLOSED) {
-          state.textContent = "This screen was removed. Sign in and pair it again under Media → Screens.";
+          state.textContent = "This screen was removed. Showing a code to pair it again…";
           $("mc-splash").hidden = false;
+          screenMode.reloadWhenUp(5000);                     // unpaired, it shows the pairing code
         } else {
           state.textContent = "Reconnecting…";
         }
       };
     },
 
+    /* Reload once the server answers: a kiosk left on the browser's error page would never come back. */
+    reloadWhenUp: function (wait) {
+      setTimeout(function () {
+        fetch("/healthz", { cache: "no-store" }).then(function (r) {
+          if (r.ok) location.replace("/media/screen"); else screenMode.reloadWhenUp(10000);
+        }, function () { screenMode.reloadWhenUp(10000); });
+      }, wait);
+    },
+
     handle: function (cmd) {
       const a = cmd.action;
       if (a === "unpaired") { this.es.close(); this.es.onerror(); return; }
+      if (a === "signage") { signage.load(); return; }
+      if (a.indexOf("play_") === 0 || a === "stop") signage.activity(false);
       if (a.indexOf("play_") === 0) {
         $("mc-splash").hidden = true;
         viewer.close();
@@ -1256,6 +1312,10 @@
     },
 
     state: function () {
+      if (signage.running) {
+        const item = signage.items[signage.index % signage.items.length] || {};
+        return { kind: "signage", title: "Slideshow: " + signage.running.name, sub: item.title || "" };
+      }
       if (!$("mc-player").hidden) {
         if ($("mc-player").classList.contains("youtube")) {
           return { kind: "youtube", title: $("mc-player-title").textContent, position: player.yt.time,
@@ -1282,6 +1342,180 @@
       if (!force && key === this.lastReport && state.kind === "idle") return;
       this.lastReport = key;
       api("PUT", "/api/media/screen/state", state).catch(function () {});
+    },
+  };
+
+  // ------------------------------------------------------ signage (the TV, idle)
+  /* What the screen shows while nobody uses it (Access → Signage). Its rules go by weekday and time on
+     this screen's own clock; the first that matches wins. An "idle" one starts once nothing has played
+     and no key was pressed for idle_minutes, and any key or cast stops it; an "always" one runs whenever
+     nothing cast is playing, and keys don't stop it. Two layers crossfade from slide to slide. */
+  const signage = {
+    config: null, running: null, items: [], index: 0, layer: 0, timer: null, seq: 0, lastActivity: Date.now(),
+
+    init: function () {
+      const self = this;
+      ["keydown", "pointerdown", "wheel"].forEach(function (ev) {
+        window.addEventListener(ev, function (e) {
+          const swallow = self.running && self.running.rule.mode === "idle";
+          self.activity(true);
+          if (swallow) { e.preventDefault(); e.stopImmediatePropagation(); }   // the key that woke it does nothing else
+        }, true);
+      });
+      this.load();
+      setInterval(function () { self.check(); }, 15000);
+      setInterval(function () { self.load(); }, 300000);   // new pictures in the folders, new announcements
+    },
+
+    load: async function () {
+      try { this.config = await api("GET", "/media/screen/signage"); } catch (e) { return; }
+      this.stop();          // with the new slides, if its rule still says so (check)
+      this.check();
+    },
+
+    rule: function () {
+      const c = this.config;
+      if (!c) return null;
+      const now = new Date();
+      const day = (now.getDay() + 6) % 7, yesterday = (day + 6) % 7;   // 0 is Monday
+      const mins = now.getHours() * 60 + now.getMinutes();
+      const minutes = function (hhmm) { return Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5)); };
+      return c.rules.find(function (r) {
+        if (!c.shows[r.show_id]) return false;
+        const from = minutes(r.start), to = minutes(r.end);
+        if (from === to) return r.days.indexOf(day) >= 0;
+        if (from < to) return r.days.indexOf(day) >= 0 && mins >= from && mins < to;
+        return (r.days.indexOf(day) >= 0 && mins >= from) || (r.days.indexOf(yesterday) >= 0 && mins < to);
+      }) || null;
+    },
+
+    busy: function () {
+      return !$("mc-player").hidden || !$("mc-viewer").hidden || !audio.paused;
+    },
+
+    activity: function (fromKey) {
+      this.lastActivity = Date.now();
+      if (this.running && (!fromKey || this.running.rule.mode === "idle")) this.stop();
+    },
+
+    check: function () {
+      const r = this.rule();
+      if (!r) { this.stop(); return; }
+      if (this.running) {
+        if (this.running.rule.show_id !== r.show_id || this.running.rule.mode !== r.mode) { this.stop(); this.start(r); }
+        return;
+      }
+      if (this.busy()) return;
+      if (r.mode === "always" || Date.now() - this.lastActivity >= this.config.idle_minutes * 60000) this.start(r);
+    },
+
+    box: function () {
+      let box = $("mc-signage");
+      if (!box) {
+        box = el("div", "mc-signage");
+        box.id = "mc-signage";
+        box.hidden = true;
+        box.setAttribute("aria-hidden", "true");
+        box.append(el("div", "mc-sg-layer"), el("div", "mc-sg-layer"));
+        document.body.appendChild(box);
+      }
+      return box;
+    },
+
+    start: function (r) {
+      const show = this.config.shows[r.show_id];
+      if (!show || !show.items.length) return;
+      this.items = show.shuffle ? shuffled(show.items) : show.items.slice();
+      this.index = 0;
+      this.running = { rule: r, name: show.name };
+      this.box().hidden = false;
+      document.documentElement.classList.add("mc-sg-running");
+      this.show();
+      screenMode.report(true);
+    },
+
+    stop: function () {
+      if (!this.running) return;
+      this.running = null;
+      this.seq += 1;
+      clearTimeout(this.timer);
+      const box = this.box();
+      box.hidden = true;
+      document.documentElement.classList.remove("mc-sg-running");
+      box.querySelectorAll(".mc-sg-layer").forEach(function (l) { l.classList.remove("on"); l.replaceChildren(); });
+      screenMode.report(true);
+    },
+
+    /* The current slide on the hidden layer; once it can be seen (loaded, playing), fade it in. */
+    show: function () {
+      clearTimeout(this.timer);
+      if (!this.running) return;
+      const self = this, seq = ++this.seq;
+      const item = this.items[this.index % this.items.length];
+      const layers = this.box().querySelectorAll(".mc-sg-layer");
+      const cur = layers[this.layer], next = layers[this.layer ^ 1];
+      const advance = function () {
+        if (seq !== self.seq) return;
+        self.index = (self.index + 1) % self.items.length;
+        self.show();
+      };
+      const reveal = function () {
+        if (seq !== self.seq) return;
+        next.classList.add("on");
+        cur.classList.remove("on");
+        self.layer ^= 1;
+        setTimeout(function () { if (!cur.classList.contains("on")) cur.replaceChildren(); }, 1200);
+        if (item.type !== "video") self.timer = setTimeout(advance, (item.seconds || 10) * 1000);
+        screenMode.report(true);
+      };
+      const skip = function () { self.timer = setTimeout(advance, 1000); };   // a slide that won't load
+      next.replaceChildren(this.render(item, reveal, advance, skip));
+      if (item.type === "text" || item.type === "notice" || item.type === "web") reveal();
+    },
+
+    render: function (item, reveal, advance, skip) {
+      if (item.type === "image") {
+        const img = el("img");
+        img.alt = "";
+        img.onload = reveal;
+        img.onerror = skip;
+        img.src = item.src;
+        return img;
+      }
+      if (item.type === "video") {
+        const v = el("video");
+        v.muted = !item.sound;
+        v.autoplay = true;
+        v.playsInline = true;
+        v.addEventListener("playing", reveal, { once: true });
+        v.addEventListener("ended", advance);
+        v.addEventListener("error", skip);
+        v.src = item.src;
+        return v;
+      }
+      if (item.type === "web") {
+        const frame = el("iframe");
+        frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms");
+        frame.setAttribute("referrerpolicy", "no-referrer");
+        frame.setAttribute("allow", "autoplay");
+        frame.src = item.url;
+        return frame;
+      }
+      const card = el("div", "mc-sg-text");
+      if (item.type === "text") {
+        card.style.background = item.background;
+        card.style.color = item.color;
+        if (item.image) card.style.backgroundImage = "url(\"" + item.image + "\")";
+        if (item.title) card.appendChild(el("h1", null, item.title));
+        if (item.body) card.appendChild(el("p", null, item.body));
+      } else {                                   // an announcement: Markdown made safe by the server
+        card.appendChild(el("div", "mc-sg-kicker", "Announcement"));
+        card.appendChild(el("h1", null, item.title));
+        const body = el("div", "mc-sg-html");
+        body.innerHTML = item.html;
+        card.appendChild(body);
+      }
+      return card;
     },
   };
 

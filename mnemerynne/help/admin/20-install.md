@@ -2,6 +2,19 @@
 
 The reference install is Fedora with systemd; `deploy/linux/README.md` in the repository is the step-by-step version with the exact commands. This page is the map.
 
+## The wizard
+
+`deploy/linux/setup.sh` does sections 1 to 5 below, and the SMB share, in one go:
+
+```sh
+sudo dnf install git
+sudo git clone https://github.com/AELovelace/erinne.git /opt/mnemerynne
+sudo bash /opt/mnemerynne/deploy/linux/setup.sh             # ask, show the plan, run
+sudo bash /opt/mnemerynne/deploy/linux/setup.sh --dry-run   # the plan only
+```
+
+It asks each question with its default and confirms the whole plan once. It grows a cramped root volume, runs `preinstall.sh`, prepares the storage (blank disks mirrored with mdadm, LVM and XFS mounted at `/srv/storage`; or an array already mounted there), lays out the share, its recycle bin, the backups and the data folder on it with the right owners, ACLs and SELinux labels, writes the settings file with a generated secret key, installs the Python environment and the services, defines the Samba share where Samba runs on the box, sets up Caddy and creates the first admin. Every step skips what is already done, so run it again after adding a disk or to pick up new unit files; every answer is also a flag (`--help`), so it runs unattended with `--yes`. The README's section 0 lists the flags and what stays by hand (joining the domain, Caddy's root certificate on PCs, Claude Desktop).
+
 ## 1. Code and prerequisites
 
 ```sh

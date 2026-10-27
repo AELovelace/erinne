@@ -143,6 +143,7 @@ PUBLIC_LIMITS: list[tuple[str, frozenset[str] | None, int, int]] = [
     ("/.well-known/", None, 120, 60),
     ("/c/", None, 120, 60),
     ("/login", frozenset({"POST"}), 30, 60),
+    ("/media/screen/pair", None, 60, 60),     # an unpaired TV asks every 3 s
 ]
 
 

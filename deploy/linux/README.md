@@ -106,6 +106,77 @@ when MicroJames is switched off.
 (~2.7 GB). Check both cards with `nvtop` after step 3. The generator unit
 joins the `render` and `video` groups to reach the RX 580.
 
+## 0. One-shot setup (the wizard)
+
+`deploy/linux/setup.sh` does sections 1 to 5d below in one go, asking each
+question with its default, showing the whole plan and confirming once. Every
+step skips what is already done, so it is safe to run again (after adding a
+disk, say, or to pick up a new unit file).
+
+```sh
+sudo dnf install git
+sudo git clone https://github.com/AELovelace/erinne.git /opt/mnemerynne
+sudo bash /opt/mnemerynne/deploy/linux/setup.sh             # ask, show the plan, run
+sudo bash /opt/mnemerynne/deploy/linux/setup.sh --dry-run   # the plan only, nothing written
+```
+
+What it sets up, in order:
+
+1. **The root volume**, when `/` has under 10 GB free and its volume group has
+   room (a default Fedora Server root is 15 GB): `lvextend -r`.
+2. **`preinstall.sh`** (section 1): packages, the `mnemerynne` user, llama.cpp,
+   the models, the GPU check.
+3. **The storage.** Either the array already mounted at `/srv/storage`, or blank
+   disks it finds (no partitions, no filesystem, not mounted; the root disk is
+   never offered): with two or more it mirrors them with mdadm, then LVM
+   (`storage/data`), XFS, mounted by UUID from `/etc/fstab` with `nofail`, so a
+   boot without the array still comes up (the share marker keeps the worker
+   from treating it as emptied). Wiping disks needs their names typed back.
+4. **The folders** on it: `share/` with the ACL and SELinux label (5d),
+   `.mnemerynne-trash/`, `backups/mnemerynne/` (Backups) and, by default, the
+   data folder `mnemerynne/` (database, uploads, versions) so it outlives the
+   boot drive; an existing `/var/lib/mnemerynne` is copied over with the
+   services stopped and kept, renamed. A mount outside `/srv/storage` gets
+   unit drop-ins so the services may write there.
+5. **Settings** (2): `/etc/mnemerynne/mnemerynne.env` from the example, a
+   generated secret key (printed once: keep a copy off the box), the data,
+   share and backup folders, `MNEMERYNNE_PUBLIC_URL`, and `MNEMERYNNE_AD_DOMAIN`
+   when the box is already joined; `mnemerynne-admin` in `/usr/local/bin`.
+6. **The code** (`uv sync --frozen --no-dev`) and **the services** (3), plus
+   the share-acl watcher and, once joined, the AD sync timer; waits for
+   `/healthz`.
+7. **The Samba share**, where Samba is on this box: `[share]` (or the name you
+   give) in `/etc/samba/mnemerynne-share.conf`, included from `smb.conf`;
+   `testparm` must accept it or the include is removed again. Elsewhere it
+   prints what to share from the file server.
+8. **Caddy** (5): installed, Fedora's test page replaced (backed up), the site
+   with your hostname, the SELinux boolean, the firewall; `--public` uses the
+   Let's Encrypt Caddyfile (5j).
+9. **The first admin** (`create-user --role admin`, password prompted), then
+   `share-init` and `share-scan` (5d).
+
+Every answer is a flag, or a `SETUP_*` variable, for unattended runs; with
+`--yes` the defaults are taken and nothing destructive happens without its flag:
+
+| Flag | |
+|---|---|
+| `--mount DIR` | use the storage at DIR (default `/srv/storage`), or mount the new volume there |
+| `--disks /dev/sdb,/dev/sdc` | wipe these blank disks and make the volume on them (`--force-wipe` for disks that aren't blank) |
+| `--raid1` / `--no-raid` | mirror or not (default: mirror with two or more disks) |
+| `--no-storage` | touch no disks and no storage folders |
+| `--grow-root GB` / `--no-grow-root` | grow `/` first, or never |
+| `--data-on-storage` / `--data-local` | the data folder on the storage, or `/var/lib/mnemerynne` |
+| `--share-name NAME` / `--no-samba` | the Samba share's name, or skip Samba |
+| `--hostname H` / `--public` / `--no-caddy` | the address people use; Let's Encrypt; or skip Caddy |
+| `--admin NAME` / `--no-admin` | the first local admin (`SETUP_ADMIN_PASSWORD` for unattended runs), or nobody |
+| `--skip-preinstall` | don't run `preinstall.sh` |
+| `--yes` / `--dry-run` | no questions / the plan only |
+
+Still by hand afterwards: joining the domain (5c), Caddy's root certificate on
+staff PCs (5), the Claude Desktop extension (5b), `share-export` for libraries
+that live inside Mnemerynne (5d), Microsoft 365 (5i), Media (5k). Sections 1 to
+5d remain the manual path and say exactly what the wizard does.
+
 ## 1. Code and prerequisites
 
 ```sh
@@ -378,6 +449,9 @@ flush winbind reports only each person's primary group, which briefly locks
 people out of everything their other groups give them.
 
 ## 5d. Libraries on the SMB share
+
+(`setup.sh`, section 0, does the folders, ACLs, labels, settings and `share-init`
+below, and the Samba share definition.)
 
 With `MNEMERYNNE_SHARE_ROOT` set, every top-level folder of the share is a
 library and `Users\<name>` is that person's inbox. The share is the source of
@@ -968,7 +1042,7 @@ sudo systemctl restart mnemerynne-web mnemerynne-worker
 in it is readable only by `mnemerynne` (folders 0700, files 0600).
 
 **Where.** Put it on a disk that outlives the boot drive, such as the NAS's
-storage array, but never inside the SMB share (`MNEMERYNNE_SHARE_ROOT`): the
+storage array (`setup.sh` puts it at `<storage>/backups/mnemerynne`), but never inside the SMB share (`MNEMERYNNE_SHARE_ROOT`): the
 backup refuses, because people could read the copied secret key there. For
 example, with the array mounted at `/srv/storage` and the share at
 `/srv/storage/share`:

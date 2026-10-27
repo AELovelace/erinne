@@ -111,5 +111,6 @@ fi
 step "Done"
 cat <<EOF
 llama.cpp $LLAMA_TAG (Vulkan) is in $LLAMA_DIR and the generator will use the $GPU_MATCH (Vulkan0).
-Next, from deploy/linux/README.md: uv sync (section 1), then settings (2) and services (3).
+Next, from deploy/linux/README.md: uv sync (section 1), then settings (2) and services (3);
+or let deploy/linux/setup.sh do those, the storage, the share and Caddy in one go (section 0).
 EOF

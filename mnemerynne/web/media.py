@@ -18,6 +18,7 @@ from urllib.parse import quote
 
 import anyio
 import httpx
+import segno
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -26,7 +27,7 @@ from mnemerynne import group_refs, media, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
-from mnemerynne.media import artwork, browse, catalog, live, probe, screens, transcode
+from mnemerynne.media import artwork, browse, catalog, live, probe, screens, signage, transcode
 from mnemerynne.web import security
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import _session_user, admin_user, api_user, get_db, get_settings, is_admin, page_user
@@ -352,6 +353,12 @@ def hub(request: Request) -> screens.Hub:
     return request.app.state.media_screens
 
 
+def pairings(request: Request) -> screens.Pairings:
+    if getattr(request.app.state, "media_pairings", None) is None:
+        request.app.state.media_pairings = screens.Pairings()
+    return request.app.state.media_pairings
+
+
 def _key_cookie(response, request: Request, token: str) -> None:
     response.set_cookie(screens.COOKIE, token, max_age=screens.COOKIE_DAYS * 86400, httponly=True, samesite="lax",
                         secure=security.https_only(request.app.state.settings), path="/")
@@ -359,11 +366,12 @@ def _key_cookie(response, request: Request, token: str) -> None:
 
 @router.get("/media/screen", response_class=HTMLResponse)
 def screen_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
-    """The TV: Media full-screen, waiting for what its owner casts. Unpaired browsers go to pairing."""
+    """The TV: Media full-screen, waiting for what its owner casts. Unpaired, it shows a code to pair with
+    from a phone (no sign-in needed on the TV)."""
     screen = _screen(request, conn)
     owner = users.get_user_by_id(conn, screen["user_id"]) if screen is not None else None
     if owner is None or not screens.may_use(conn, owner, request.app.state.directory):
-        return RedirectResponse("/media#screens", status_code=status.HTTP_303_SEE_OTHER)
+        return request.app.state.templates.TemplateResponse(request, "media_pair.html", {})
     return request.app.state.templates.TemplateResponse(request, "media.html", {
         "user": owner, "is_admin": False, "active": "media", "has_library": media.library(conn) is not None,
         "folder": _folder_name(conn), "screen": {"id": screen["id"], "name": screen["name"]}})
@@ -374,18 +382,95 @@ class ScreenBody(BaseModel):
 
 
 @router.post("/api/media/screens", status_code=status.HTTP_201_CREATED)
-def pair_screen(body: ScreenBody, request: Request, user=Depends(screens_user),
-                conn: sqlite3.Connection = Depends(get_db)):
+async def pair_screen(body: ScreenBody, request: Request, user=Depends(screens_user),
+                      conn: sqlite3.Connection = Depends(get_db)):
     """Make this browser one of the person's screens: it gets the screen key as a cookie."""
     try:
         with transaction(conn):
             screen_id, token = screens.create(conn, user["id"], body.name)
     except screens.ScreenError as exc:
         raise HTTPException(exc.status, str(exc)) from None
+    hub(request).close(screen_id)       # re-paired: a TV still on the old key goes back to its code
     response = JSONResponse({"id": screen_id, "name": screens.clean_name(body.name), "url": "/media/screen"},
                             status_code=status.HTTP_201_CREATED)
     _key_cookie(response, request, token)
     return response
+
+
+def _pairing_url(request: Request, code: str) -> str:
+    base = request.app.state.settings.public_url.rstrip("/") or str(request.base_url).rstrip("/")
+    return f"{base}/media/pair?code={code}"
+
+
+@router.post("/media/screen/pair")
+async def start_pairing(request: Request):
+    """An unpaired TV's code (the one it already has while that lasts), with a QR code of where to claim it."""
+    p = pairings(request)
+    secret = request.cookies.get(screens.PAIR_COOKIE)
+    found = p.waiting(secret)
+    if found is None:
+        try:
+            code, secret = p.start()
+        except screens.ScreenError as exc:
+            raise HTTPException(exc.status, str(exc)) from None
+        found = code, float(screens.PAIR_SECONDS)
+    code, left = found
+    url = _pairing_url(request, code)
+    response = JSONResponse({"code": screens.show_code(code), "expires_in": int(left), "url": url,
+                             "qr": segno.make(url, error="m").svg_inline(scale=1, border=4, omitsize=True)})
+    response.set_cookie(screens.PAIR_COOKIE, secret, max_age=screens.PAIR_SECONDS, httponly=True, samesite="lax",
+                        secure=security.https_only(request.app.state.settings), path="/media/screen")
+    return response
+
+
+@router.get("/media/screen/pair")
+async def pairing_status(request: Request):
+    """What the TV asks every few seconds: still waiting, paired (it gets its key), or the code ran out."""
+    secret = request.cookies.get(screens.PAIR_COOKIE)
+    p = pairings(request)
+    collected = p.collect(secret)
+    if collected is not None:
+        response = JSONResponse({"state": "paired", "url": "/media/screen"})
+        _key_cookie(response, request, collected[1])
+        response.delete_cookie(screens.PAIR_COOKIE, path="/media/screen")
+        return response
+    found = p.waiting(secret)
+    if found is None:
+        return {"state": "expired"}
+    return {"state": "waiting", "expires_in": int(found[1])}
+
+
+@router.get("/media/pair")
+def pair_link(request: Request, code: str = "", conn: sqlite3.Connection = Depends(get_db)):
+    """The TV's QR code: Media → Screens on the phone, with the code filled in. Signed out, it waits for
+    sign-in and comes back here."""
+    if _session_user(request, conn) is None:
+        request.session["after_login"] = str(request.url.path) + "?" + str(request.url.query)
+        return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse("/media#pair/" + quote(screens.clean_code(code), safe=""),
+                            status_code=status.HTTP_303_SEE_OTHER)
+
+
+class ClaimBody(BaseModel):
+    code: str = Field(..., max_length=40)
+    name: str = Field(..., max_length=200)
+
+
+@router.post("/api/media/screens/claim", status_code=status.HTTP_201_CREATED)
+async def claim_screen(body: ClaimBody, request: Request, user=Depends(screens_user),
+                       conn: sqlite3.Connection = Depends(get_db)):
+    """Pair the TV showing this code as one of the person's screens; it collects its key itself."""
+    p = pairings(request)
+    try:
+        name = screens.clean_name(body.name)
+        code = p.check(user["id"], body.code)
+        with transaction(conn):
+            screen_id, token = screens.create(conn, user["id"], name)
+    except screens.ScreenError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    p.claim(code, screen_id, token)
+    hub(request).close(screen_id)
+    return {"id": screen_id, "name": name}
 
 
 @router.get("/api/media/screens")
@@ -504,7 +589,7 @@ async def screen_stream(request: Request, screen=Depends(screen_device), conn: s
 
 
 class ScreenState(BaseModel):
-    kind: Literal["idle", "video", "live", "youtube", "audio", "radio", "pictures"]
+    kind: Literal["idle", "video", "live", "youtube", "audio", "radio", "pictures", "signage"]
     title: str = Field("", max_length=300)
     sub: str = Field("", max_length=300)
     art: str | None = Field(None, max_length=300)
@@ -521,6 +606,27 @@ async def screen_state(body: ScreenState, request: Request, screen=Depends(scree
     """What the screen is playing, every few seconds and on every change; read by its owner's remote."""
     hub(request).set_state(screen["id"], body.model_dump())
     return {"status": "ok"}
+
+@router.get("/media/screen/signage")
+def screen_signage(screen=Depends(screen_device), conn: sqlite3.Connection = Depends(get_db)):
+    """The screen's signage rules and the slideshows they name, ready to play (media/signage.py)."""
+    return signage.for_screen(conn, screen["id"])[0]
+
+
+@router.get("/media/screen/signage/file/{file_id}")
+def screen_signage_file(file_id: int, screen=Depends(screen_device), conn: sqlite3.Connection = Depends(get_db),
+                        settings: Settings = Depends(get_settings)):
+    """A picture (screen-sized) or video of the screen's slideshows: only those, whatever its owner may read."""
+    if file_id not in signage.for_screen(conn, screen["id"])[1]:
+        raise _not_found()
+    found = signage.picture_path(conn, settings, file_id)
+    if found is None:
+        raise _not_found()
+    path, mime = found
+    return FileResponse(path, media_type=mime, headers={
+        "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox",
+        "Cache-Control": "private, max-age=604800, immutable"})   # the address changes with the content
+
 
 # -------------------------------------------------------------------- admin
 def _admin_status(request: Request, conn: sqlite3.Connection) -> dict:
@@ -696,3 +802,101 @@ def share_link(request: Request, title: str = "", text: str = "", url: str = "",
     target = "/media#cast/" + quote(link, safe="") if link else "/media#screens"
     return RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
 
+
+
+# ------------------------------------------------------------ admin: signage
+def _signage_status(request: Request, conn: sqlite3.Connection) -> dict:
+    h = hub(request)
+    return {"enabled": media.enabled(conn), "library": media.library(conn) is not None,
+            "shows": signage.shows(conn), "folders": signage.folders(conn),
+            "screens": [s | {"online": h.online(s["id"]), "state": h.state(s["id"])} for s in signage.screens(conn)]}
+
+
+def _signage_changed(request: Request, conn: sqlite3.Connection) -> None:
+    """Every screen fetches its signage again (cheap, and admins change it seldom)."""
+    h = hub(request)
+    for row in conn.execute("SELECT id FROM media_screens"):
+        h.push(row["id"], {"action": "signage"})
+
+
+def _signage_error(exc: signage.SignageError) -> HTTPException:
+    return HTTPException(exc.status, str(exc))
+
+
+@admin_router.get("/api/admin/signage")
+async def admin_signage(request: Request, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+    return _signage_status(request, conn)
+
+
+@admin_router.get("/api/admin/signage/files")
+def admin_signage_files(folder: int, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+    return {"files": signage.files_in(conn, folder)}
+
+
+class NewShowBody(BaseModel):
+    name: str = Field(..., max_length=200)
+
+
+class ShowBody(BaseModel):
+    name: str = Field(..., max_length=200)
+    seconds: int = Field(10, ge=3, le=3600)
+    shuffle: bool = False
+    slides: list[dict] = Field(default_factory=list, max_length=signage.MAX_SLIDES)
+
+
+class ScreenSignageBody(BaseModel):
+    idle_minutes: int = Field(5, ge=1, le=1440)
+    rules: list[signage.Rule] = Field(default_factory=list, max_length=signage.MAX_RULES)
+
+
+@admin_router.post("/api/admin/signage/shows", status_code=status.HTTP_201_CREATED)
+async def admin_new_show(body: NewShowBody, request: Request, user=Depends(admin_user),
+                         conn: sqlite3.Connection = Depends(get_db)):
+    try:
+        with transaction(conn):
+            show_id = signage.create_show(conn, user["id"], body.name)
+            _log(conn, user, "signage.show_create", signage.clean_name(body.name))
+    except signage.SignageError as exc:
+        raise _signage_error(exc) from None
+    return _signage_status(request, conn) | {"created": show_id}
+
+
+@admin_router.put("/api/admin/signage/shows/{show_id}")
+async def admin_save_show(show_id: int, body: ShowBody, request: Request, user=Depends(admin_user),
+                          conn: sqlite3.Connection = Depends(get_db)):
+    try:
+        slides = signage.parse_slides(body.slides)
+        with transaction(conn):
+            signage.update_show(conn, show_id, body.name, body.seconds, body.shuffle, slides)
+            _log(conn, user, "signage.show_update", signage.clean_name(body.name), f"{len(slides)} slide(s)")
+    except signage.SignageError as exc:
+        raise _signage_error(exc) from None
+    _signage_changed(request, conn)
+    return _signage_status(request, conn)
+
+
+@admin_router.delete("/api/admin/signage/shows/{show_id}")
+async def admin_delete_show(show_id: int, request: Request, user=Depends(admin_user),
+                            conn: sqlite3.Connection = Depends(get_db)):
+    row = conn.execute("SELECT name FROM signage_shows WHERE id = ?", (show_id,)).fetchone()
+    if row is None:
+        raise _not_found()
+    with transaction(conn):
+        signage.delete_show(conn, show_id)
+        _log(conn, user, "signage.show_delete", row["name"])
+    _signage_changed(request, conn)
+    return _signage_status(request, conn)
+
+
+@admin_router.put("/api/admin/signage/screens/{screen_id}")
+async def admin_screen_signage(screen_id: int, body: ScreenSignageBody, request: Request, user=Depends(admin_user),
+                               conn: sqlite3.Connection = Depends(get_db)):
+    try:
+        with transaction(conn):
+            signage.set_screen(conn, screen_id, body.idle_minutes, body.rules)
+            name = conn.execute("SELECT name FROM media_screens WHERE id = ?", (screen_id,)).fetchone()["name"]
+            _log(conn, user, "signage.screen", name, f"{len(body.rules)} rule(s), idle {body.idle_minutes} min")
+    except signage.SignageError as exc:
+        raise _signage_error(exc) from None
+    hub(request).push(screen_id, {"action": "signage"})
+    return _signage_status(request, conn)

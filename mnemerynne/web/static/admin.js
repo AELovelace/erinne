@@ -1762,6 +1762,7 @@
     if (tab === "remote" && window.ErynneRemote) window.ErynneRemote.load();   // admin_remote.js
     if (tab === "approvals" && window.ErynneApprovals) window.ErynneApprovals.load();   // admin_approvals.js
     if (tab === "announcements" && window.ErynneNotices) window.ErynneNotices.load();   // admin_notices.js
+    if (tab === "signage" && window.ErynneSignage) window.ErynneSignage.load();   // admin_signage.js
   }
 
   function writeHash() {

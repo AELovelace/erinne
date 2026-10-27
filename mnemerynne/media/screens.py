@@ -4,6 +4,11 @@ Pairing: the owner, signed in on the TV, names it; the TV gets a screen key in a
 (only its hash is stored). The key opens Media, and nothing else, as its owner, so the TV keeps
 working after sign-in sessions expire; removing the screen revokes it.
 
+Pairing with a code, for a TV with no keyboard (the kiosk in screen/): an unpaired browser on
+/media/screen asks for a code (Pairings, in memory) and shows it with a QR code; the owner types or
+scans it on their phone and names the screen; the TV, asking every few seconds, then gets its key.
+Codes last ten minutes, and each person may only try a few wrong ones.
+
 Casting: the phone posts a command (play this film, album, station, live source or YouTube link;
 pause, seek, volume, next, stop) for one of its owner's screens. The web app hands it to the screen's
 open event stream (Hub, in memory: this is one uvicorn process), the screen's page acts on it and
@@ -29,10 +34,23 @@ COOKIE_DAYS = 400               # browsers cap cookies here; it's renewed whenev
 MAX_PER_USER = 10
 STATE_SECONDS = 15              # a screen silent this long counts as gone from the remote's point of view
 
+PAIR_COOKIE = "mnemerynne_screen_pairing"
+PAIR_SECONDS = 600              # how long a pairing code lasts
+COLLECT_SECONDS = 120           # at least this long, once claimed, for the TV to collect its key
+PAIR_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ23456789"   # no vowels (no words), nothing that looks like 0/O or 1/I
+PAIR_LENGTH = 8                 # 28**8: about 3.8e11 codes
+MAX_PAIRINGS = 200              # codes waiting at once, server-wide: unpaired browsers needn't sign in
+CLAIM_TRIES = 10                # wrong codes a person may type per CLAIM_WINDOW
+CLAIM_WINDOW = 600
+
 
 class ScreenError(ValueError):
     """A refusal; the message is safe to show."""
     status = 422
+
+
+class ScreenBusy(ScreenError):
+    status = 429
 
 
 def may_use(conn: sqlite3.Connection, user, directory) -> bool:
@@ -53,12 +71,18 @@ def clean_name(name: str) -> str:
 
 
 def create(conn: sqlite3.Connection, user_id: int, name: str) -> tuple[int, str]:
-    """(screen id, key) in the caller's transaction; a screen of the same name is replaced (re-paired)."""
+    """(screen id, key) in the caller's transaction. A screen of the same name is re-paired: it gets a new
+    key (the old one stops working) and keeps its id, so its signage and the phones' choice of it stay."""
     name = clean_name(name)
-    conn.execute("DELETE FROM media_screens WHERE user_id = ? AND lower(name) = lower(?)", (user_id, name))
+    token = secrets.token_urlsafe(32)
+    same = conn.execute("SELECT id FROM media_screens WHERE user_id = ? AND lower(name) = lower(?)",
+                        (user_id, name)).fetchone()
+    if same is not None:
+        conn.execute("UPDATE media_screens SET name = ?, token_hash = ?, created_at = datetime('now'), "
+                     "last_seen_at = NULL WHERE id = ?", (name, _hash(token), same["id"]))
+        return same["id"], token
     if conn.execute("SELECT count(*) FROM media_screens WHERE user_id = ?", (user_id,)).fetchone()[0] >= MAX_PER_USER:
         raise ScreenError(f"At most {MAX_PER_USER} screens; remove one first.")
-    token = secrets.token_urlsafe(32)
     screen_id = conn.execute("INSERT INTO media_screens(user_id, name, token_hash) VALUES (?, ?, ?)",
                              (user_id, name, _hash(token))).lastrowid
     return screen_id, token
@@ -130,3 +154,79 @@ class Hub:
         if hit is None or time.monotonic() - hit[0] > STATE_SECONDS:
             return None
         return hit[1]
+
+
+def clean_code(code: str) -> str:
+    """What was typed, as the code: case, spaces and dashes don't matter."""
+    return "".join(ch for ch in (code or "").upper() if ch.isalnum())[:40]
+
+
+def show_code(code: str) -> str:
+    return code[:4] + "-" + code[4:]
+
+
+class Pairings:
+    """Codes unpaired TVs are showing, until someone claims them and the TV collects its key. Used from
+    the event loop only; lost on restart (the TV just asks for a new code)."""
+
+    def __init__(self) -> None:
+        self._codes: dict[str, dict] = {}        # code -> {secret, until, token, screen}
+        self._secrets: dict[str, str] = {}       # the TV's secret (its cookie) -> code
+        self._wrong: dict[int, list[float]] = {}
+
+    def _sweep(self, now: float) -> None:
+        for code in [c for c, p in self._codes.items() if p["until"] <= now]:
+            self._secrets.pop(self._codes.pop(code)["secret"], None)
+
+    def start(self) -> tuple[str, str]:
+        """(code, secret): the TV shows the code and keeps the secret, to collect its key with."""
+        now = time.monotonic()
+        self._sweep(now)
+        if len(self._codes) >= MAX_PAIRINGS:
+            raise ScreenBusy("Too many screens are waiting to be paired. Try again in a few minutes.")
+        code = "".join(secrets.choice(PAIR_ALPHABET) for _ in range(PAIR_LENGTH))
+        while code in self._codes:
+            code = "".join(secrets.choice(PAIR_ALPHABET) for _ in range(PAIR_LENGTH))
+        secret = secrets.token_urlsafe(32)
+        self._codes[code] = {"secret": secret, "until": now + PAIR_SECONDS, "token": None, "screen": None}
+        self._secrets[secret] = code
+        return code, secret
+
+    def waiting(self, secret: str | None) -> tuple[str, float] | None:
+        """(code, seconds left) of the TV's pairing while it is still unclaimed; None once gone or claimed."""
+        now = time.monotonic()
+        self._sweep(now)
+        code = self._secrets.get(secret or "")
+        if code is None or self._codes[code]["token"] is not None:
+            return None
+        return code, self._codes[code]["until"] - now
+
+    def check(self, user_id: int, code: str) -> str:
+        """The code, if it is one waiting to be claimed; counts the person's wrong tries."""
+        now = time.monotonic()
+        self._sweep(now)
+        tries = [t for t in self._wrong.get(user_id, []) if t > now - CLAIM_WINDOW]
+        self._wrong[user_id] = tries
+        if len(tries) >= CLAIM_TRIES:
+            raise ScreenBusy("Too many wrong codes. Wait ten minutes and try again.")
+        code = clean_code(code)
+        hit = self._codes.get(code)
+        if hit is None or hit["token"] is not None:
+            tries.append(now)
+            raise ScreenError("That code isn't on any screen waiting to pair. Check it, or get a new one "
+                              "by reloading the screen.")
+        return code
+
+    def claim(self, code: str, screen_id: int, token: str) -> None:
+        """The screen was made (check first): the TV collects its key on its next ask."""
+        hit = self._codes[code]
+        hit.update(token=token, screen=screen_id, until=max(hit["until"], time.monotonic() + COLLECT_SECONDS))
+
+    def collect(self, secret: str | None) -> tuple[int, str] | None:
+        """(screen id, key) once the TV's code was claimed, and only once."""
+        code = self._secrets.get(secret or "")
+        hit = self._codes.get(code) if code else None
+        if hit is None or hit["token"] is None:
+            return None
+        del self._codes[code], self._secrets[secret]
+        return hit["screen"], hit["token"]

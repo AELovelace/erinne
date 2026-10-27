@@ -13,6 +13,7 @@
       <button type="button" role="tab" data-tab="remote">Remote</button>
       <button type="button" role="tab" data-tab="approvals">Approvals</button>
       <button type="button" role="tab" data-tab="announcements">Announcements</button>
+      <button type="button" role="tab" data-tab="signage">Signage</button>
       <button type="button" role="tab" data-tab="people">Who can see what</button>
       <button type="button" role="tab" data-tab="claude">Claude activity</button>
       <button type="button" role="tab" data-tab="changes">Recent changes</button>
@@ -160,6 +161,13 @@
     <div id="announcements-admin" aria-live="polite"><p class="muted">Loading…</p></div>
   </section>
 
+  <section class="inbox admin" data-panel="signage" role="tabpanel" aria-label="Signage" hidden>
+    <p class="muted">What screens (TVs paired under Media → Screens) show while nobody is using them: slideshows of a
+      Media folder's pictures and clips, videos, text, web pages and the announcements for everyone, by weekday and
+      time of day. Screens show these whatever their owner may open.</p>
+    <div id="signage-admin" aria-live="polite"><p class="muted">Loading…</p></div>
+  </section>
+
   <section class="inbox admin" data-panel="people" role="tabpanel" hidden>
     <p class="muted">Each person's File box and libraries: what they can read, edit and search from Claude, and the grants that give it.</p>
     <div id="access" class="table-wrap"></div>
@@ -222,5 +230,6 @@
 <script src="{{ static('agent.js') }}"></script>
 <script src="{{ static('admin_approvals.js') }}"></script>
 <script src="{{ static('admin_notices.js') }}"></script>
+<script src="{{ static('admin_signage.js') }}"></script>
 <script src="{{ static('admin_remote.js') }}"></script>
 {% endblock %}
