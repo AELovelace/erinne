@@ -15,7 +15,8 @@
     <button type="button" class="mc-menu-item" data-view="pictures"><span class="mc-icon">🖼</span>Pictures</button>
     <button type="button" class="mc-menu-item" data-view="live"><span class="mc-icon">📡</span>Live TV</button>
     <button type="button" class="mc-menu-item" data-view="radio"><span class="mc-icon">📻</span>Radio</button>
-    {% if screen %}<button type="button" class="mc-menu-item" id="mc-calibrate"><span class="mc-icon">⛶</span>Screen size</button>{% endif %}
+    {% if screen %}<button type="button" class="mc-menu-item" id="mc-calibrate"><span class="mc-icon">⛶</span>Screen size</button>
+    <button type="button" class="mc-menu-item" id="mc-wifi" hidden><span class="mc-icon">📶</span>Wi-Fi</button>{% endif %}
     {% if not screen and screens_allowed %}<button type="button" class="mc-menu-item" data-view="screens"><span class="mc-icon">📺</span>Screens</button>
     <label class="mc-cast" id="mc-cast-wrap" hidden>Play on
       <select id="mc-cast"><option value="">This device</option></select>

@@ -15,6 +15,7 @@ Read from the AD snapshot through each person's linked domain account ([Accounts
 - **Administrators** (Access → Settings)
 - **Erynne agent** (who gets tools)
 - **Claude in chat** (who may use their own API key)
+- **Mail and calendar for Claude** (whose Claude may reach their mail through the connector)
 - each **internal API** (who may query it)
 - each **shared mailbox** (who may ask about it)
 

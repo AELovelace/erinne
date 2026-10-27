@@ -14,6 +14,18 @@
   const isAdmin = main.dataset.admin === "1";
   const folder = main.dataset.folder || "Media";   // the Media folder on the share (Settings → Media)
   const screenId = main.dataset.screenId ? Number(main.dataset.screenId) : null;   // this browser is a screen (the TV)
+  /* The Mnemerynne screen box (deploy/screen) opens this page as ?kiosk=1 from its own start page
+     (http://127.0.0.1:9187/, which also sets up Wi-Fi); remembered, since later loads come without it. */
+  const KIOSK_HOME = "http://127.0.0.1:9187/";
+  const kiosk = (function () {
+    try {
+      if (/[?&]kiosk=1\b/.test(location.search)) {
+        localStorage.setItem("mc-kiosk", "1");
+        history.replaceState(null, "", location.pathname + location.hash);
+      }
+      return localStorage.getItem("mc-kiosk") === "1";
+    } catch (e) { return false; }
+  })();
   let renderToken = 0;
 
   // ------------------------------------------------------------- helpers
@@ -1326,7 +1338,7 @@
      playing every few seconds. Browsers only play sound after someone has clicked on the page, unless
      the site is allowed to autoplay (see the help): the splash's Start button is that click. */
   const screenMode = {
-    es: null, lastReport: "",
+    es: null, lastReport: "", lostTimer: null,
 
     start: function () {
       document.body.classList.add("mc-screen-mode");
@@ -1373,8 +1385,12 @@
           screenMode.reloadWhenUp(5000);                     // unpaired, it shows the pairing code
         } else {
           state.textContent = "Reconnecting…";
+          if (kiosk && !screenMode.lostTimer) {
+            screenMode.lostTimer = setTimeout(function () { location.replace(KIOSK_HOME); }, 120000);
+          }
         }
       };
+      this.es.addEventListener("open", function () { clearTimeout(screenMode.lostTimer); screenMode.lostTimer = null; });
     },
 
     /* Reload once the server answers: a kiosk left on the browser's error page would never come back. */
@@ -1382,7 +1398,7 @@
       setTimeout(function () {
         fetch("/healthz", { cache: "no-store" }).then(function (r) {
           if (r.ok) location.replace("/media/screen"); else screenMode.reloadWhenUp(10000);
-        }, function () { screenMode.reloadWhenUp(10000); });
+        }, function () { if (kiosk) location.replace(KIOSK_HOME); else screenMode.reloadWhenUp(10000); });
       }, wait);
     },
 
@@ -1493,6 +1509,8 @@
         if (safeArea.isOpen() && safeArea.key(e)) { e.preventDefault(); e.stopImmediatePropagation(); }
       }, true);
       $("mc-calibrate").addEventListener("click", function () { safeArea.open(); });
+      $("mc-wifi").hidden = !kiosk;
+      $("mc-wifi").addEventListener("click", function () { location.href = KIOSK_HOME + "wifi"; });
     },
 
     isOpen: function () { return !!this.box && !this.box.hidden; },

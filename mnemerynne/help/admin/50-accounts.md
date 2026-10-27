@@ -37,7 +37,7 @@ The link is what gives a person:
 
 - access to libraries on the [SMB share](share.md) (their Windows permissions);
 - admin rights through the admin group;
-- Erynne's tools (the agent group), Claude in chat (the Claude group), each internal API (its group), shared mailboxes;
+- Erynne's tools (the agent group), Claude in chat (the Claude group), mail and calendar for Claude (its group), each internal API (its group), shared mailboxes;
 - the right to link only the matching Microsoft 365 account, where a tenant is set to "synced from our AD".
 
 Unlinked people see their File box and the libraries granted to them in Mnemerynne, nothing from the share.

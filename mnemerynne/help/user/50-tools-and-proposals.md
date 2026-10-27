@@ -36,7 +36,7 @@ Two kinds can't be applied by you: letting the AI edit a whole library, and API 
 
 ## Mail and calendar
 
-People in the agent group with a linked Microsoft account can ask about their mail and calendar ("what did the Portland GM send me about the audit?", "what's on my calendar Thursday?") and have replies drafted. **Save to Drafts** puts the draft in Outlook's Drafts folder. Erynne never sends, moves or deletes mail, and your mail never goes to Claude through the connector (it does when you tick *Use External API*, under your own key).
+People in the agent group with a linked Microsoft account can ask about their mail and calendar ("what did the Portland GM send me about the audit?", "what's on my calendar Thursday?") and have replies drafted. **Save to Drafts** puts the draft in Outlook's Drafts folder. Erynne never sends, moves or deletes mail. Your mail goes to Claude through the connector only if an admin put you in the mail group for Claude ([Using Erynne from Claude](claude.md#mail-and-calendar)), and when you tick *Use External API*, under your own key.
 
 ## Internal systems
 

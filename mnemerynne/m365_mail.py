@@ -9,12 +9,20 @@ Tools are built per question (`context`, `specs`): an `account` choice when
 the person linked accounts in several tenants, and a `mailbox` choice for
 the shared mailboxes admins listed that they may use (Exchange still decides
 whether they can open it). Message ids are long; the model gets short ones
-(m1, m2, ...) for this question instead. Mail and calendar never reach
-Claude: these tools exist only in the agent.
+(m1, m2, ...) for this question instead.
+
+Claude through the connector gets the same mail and calendar tools (not the
+live SharePoint search) only for people in the group an admin names on
+Access → Connectors → Mail and calendar for Claude (meta 'claude_mail_group',
+a group_refs reference; empty = off). The connector is stateless, so there a
+Context is `opaque`: message ids are self-describing tokens (`encode_ref`)
+instead of m1, m2, and every token is checked against the person's own linked
+accounts and allowed mailboxes before it reaches Graph.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import sqlite3
@@ -28,13 +36,19 @@ from mnemerynne import group_refs, m365
 from mnemerynne.config import Settings
 
 TOOL_NAMES = {"search_mail", "read_mail", "recent_mail", "calendar", "search_sharepoint", "draft_reply", "draft_mail"}
+CLAUDE_TOOL_NAMES = TOOL_NAMES - {"search_sharepoint"}   # the connector's share: SharePoint comes through libraries
+CLAUDE_KEY = "claude_mail_group"
 BODY_CHARS = 6000
 FOLDERS = ("inbox", "sentitems", "drafts", "archive")
 _LIST_SELECT = "id,subject,from,receivedDateTime,bodyPreview,webLink"
 
 
 class MailError(m365.M365Error):
-    pass
+    """`code`: the connector's refusal code (invalid, not_found, not_allowed or unavailable)."""
+
+    def __init__(self, message: str, code: str = "invalid"):
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass
@@ -54,12 +68,18 @@ class Mailbox:
 
 @dataclass
 class Context:
-    """What one person may use in this question, and the short ids handed out."""
+    """What one person may use in this question, and the short ids handed out.
+
+    `opaque` (the connector): nothing is remembered between calls, so ids are
+    tokens that carry the account, mailbox and message id (`encode_ref`)."""
     accounts: list[Account]
     mailboxes: list[Mailbox]
     refs: dict[str, tuple[int, str | None, str, dict]] = field(default_factory=dict)  # m1 -> (identity, mailbox, id, info)
+    opaque: bool = False
 
     def ref(self, identity_id: int, mailbox: str | None, message_id: str, info: dict) -> str:
+        if self.opaque:
+            return encode_ref(identity_id, mailbox, message_id)
         for short, (i, mb, mid, _) in self.refs.items():
             if (i, mb, mid) == (identity_id, mailbox, message_id):
                 return short
@@ -67,8 +87,72 @@ class Context:
         self.refs[short] = (identity_id, mailbox, message_id, info)
         return short
 
+    def lookup(self, ref: str) -> tuple[int, str | None, str, dict] | None:
+        """What a message id stands for, or None. An opaque token only counts when it names one of
+        this person's own accounts and, for a shared mailbox, one they may use: a token made for
+        someone else, or made up, never reaches Graph."""
+        if ref in self.refs:
+            return self.refs[ref]
+        if not self.opaque:
+            return None
+        decoded = decode_ref(ref)
+        if decoded is None:
+            return None
+        identity_id, mailbox, message_id = decoded
+        if identity_id not in {a.identity_id for a in self.accounts}:
+            return None
+        if mailbox and mailbox not in {m.address for m in self.mailboxes}:
+            return None
+        return identity_id, mailbox, message_id, {}
 
-def context(conn: sqlite3.Connection, user, directory) -> Context | None:
+
+def encode_ref(identity_id: int, mailbox: str | None, message_id: str) -> str:
+    raw = json.dumps([identity_id, mailbox or "", message_id], separators=(",", ":")).encode()
+    return "mail_" + base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def decode_ref(ref: str) -> tuple[int, str | None, str] | None:
+    text = str(ref or "").strip()
+    if not text.startswith("mail_"):
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(text[5:] + "=" * (-len(text[5:]) % 4))
+        identity_id, mailbox, message_id = json.loads(raw)
+        if not isinstance(identity_id, int) or not isinstance(message_id, str) or not message_id:
+            return None
+        return identity_id, (str(mailbox) or None), message_id
+    except (ValueError, TypeError):
+        return None
+
+
+# ------------------------------------------------- the connector's group
+def claude_group(conn: sqlite3.Connection) -> str:
+    """The group whose members' Claude gets the mail and calendar tools (group_refs text); '' = off."""
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (CLAUDE_KEY,)).fetchone()
+    return (row["value"] if row else "") or ""
+
+
+def set_claude_group(conn: sqlite3.Connection, value: str) -> str:
+    """Store a resolved group reference (group_refs.resolve), or '' to keep mail away from Claude."""
+    value = (value or "").strip()
+    if value:
+        conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (CLAUDE_KEY, value))
+    else:
+        conn.execute("DELETE FROM meta WHERE key = ?", (CLAUDE_KEY,))
+    return value
+
+
+def claude_enabled(conn: sqlite3.Connection) -> bool:
+    return bool(claude_group(conn))
+
+
+def claude_allowed(conn: sqlite3.Connection, user, directory) -> bool:
+    """A group is set and this person is in it (through their linked domain or Microsoft account)."""
+    value = claude_group(conn)
+    return bool(value) and group_refs.in_any(conn, user, directory, value)
+
+
+def context(conn: sqlite3.Connection, user, directory, *, opaque: bool = False) -> Context | None:
     """The person's usable linked accounts and allowed shared mailboxes (None: no accounts)."""
     rows = conn.execute("SELECT i.id, i.upn, i.tenant_row, t.label FROM m365_identities i JOIN m365_tenants t "
                         "ON t.id = i.tenant_row WHERE i.user_id = ? AND i.status = 'ok' AND t.enabled = 1 "
@@ -82,7 +166,7 @@ def context(conn: sqlite3.Connection, user, directory) -> Context | None:
         "SELECT * FROM m365_shared_mailboxes ORDER BY label COLLATE NOCASE").fetchall()
         if r["tenant_row"] in tenants and (not r["group_ref"] or group_refs.in_any(conn, user, directory,
                                                                                      r["group_ref"], groups))]
-    return Context(accounts, mailboxes)
+    return Context(accounts, mailboxes, opaque=opaque)
 
 
 # ------------------------------------------------------------------- specs
@@ -206,28 +290,35 @@ def run(conn: sqlite3.Connection, settings: Settings, ctx: Context, name: str, a
     try:
         return _run(conn, settings, ctx, name, dict(args), cite)
     except m365.NeedsRelink as exc:
-        raise MailError(str(exc)) from None
+        raise MailError(str(exc), "not_allowed") from None
     except m365.GraphError as exc:
         if exc.status in (401, 403):
-            raise MailError("Microsoft didn't allow that (no access to that mailbox or item).") from None
+            raise MailError("Microsoft didn't allow that (no access to that mailbox or item).", "not_allowed") from None
         if exc.status == 404:
-            raise MailError("Microsoft couldn't find that (it may have been moved or deleted).") from None
-        raise MailError(f"Microsoft answered: {exc}") from None
+            raise MailError("Microsoft couldn't find that (it may have been moved or deleted).", "not_found") from None
+        raise MailError(f"Microsoft answered: {exc}", "unavailable") from None
     except httpx.HTTPError as exc:
-        raise MailError(f"Couldn't reach Microsoft: {exc}") from None
+        raise MailError(f"Couldn't reach Microsoft: {exc}", "unavailable") from None
 
 
 def _run(conn, settings, ctx: Context, name: str, args: dict, cite) -> dict:
     if name in ("read_mail", "draft_reply"):
         short = str(args.get("id", "")).strip()
-        if short not in ctx.refs:
-            raise MailError(f"There's no message {short or '(none given)'} in this conversation turn; use "
-                            "search_mail or recent_mail first and pass its short id.")
-        identity_id, mailbox, message_id, info = ctx.refs[short]
+        found = ctx.lookup(short)
+        if found is None:
+            raise MailError(f"There's no message {short or '(none given)'} " +
+                            ("here; use the `id` search_mail or recent_mail returned." if ctx.opaque else
+                             "in this conversation turn; use search_mail or recent_mail first and pass its short id."))
+        identity_id, mailbox, message_id, info = found
         if name == "draft_reply":
             body = str(args.get("body", "")).strip()
             if not body:
                 raise MailError("Give the text of the reply.")
+            if "from_address" not in info:   # an opaque id carries no subject or sender: ask Graph
+                msg = m365.graph_for(conn, settings, identity_id).get(f"{_base(mailbox)}/messages/{message_id}",
+                                                                      {"$select": "subject,from"})
+                info = {"subject": msg.get("subject"),
+                        "from_address": ((msg.get("from") or {}).get("emailAddress") or {}).get("address", "")}
             return {"draft": {"identity_id": identity_id, "reply_to": message_id, "mailbox": mailbox,
                               "reply_all": bool(args.get("reply_all")), "to": [info.get("from_address", "")],
                               "subject": "RE: " + (info.get("subject") or ""), "body": body}}

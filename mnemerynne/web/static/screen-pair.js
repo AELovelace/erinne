@@ -7,6 +7,13 @@
   const qrBox = document.getElementById("mc-pair-qr");
   const state = document.getElementById("mc-pair-state");
   let timer = null;
+  let failing = 0;
+  // The screen box (deploy/screen) comes here as ?kiosk=1; Media's page remembers it (media.js).
+  let kiosk = false;
+  try {
+    if (/[?&]kiosk=1\b/.test(location.search)) localStorage.setItem("mc-kiosk", "1");
+    kiosk = localStorage.getItem("mc-kiosk") === "1";
+  } catch (e) { /* private window */ }
 
   async function call(method) {
     const r = await fetch("/media/screen/pair", { method: method, credentials: "same-origin",
@@ -33,6 +40,8 @@
       later(ask, 3000);
     } catch (err) {
       state.textContent = "Can't get a code: " + err.message + " Trying again…";
+      failing += 1;
+      if (kiosk && failing >= 12) { location.replace("http://127.0.0.1:9187/"); return; }
       later(newCode, 10000);
     }
   }
@@ -41,10 +50,13 @@
     try {
       const s = await call("GET");
       if (s.state === "paired") { state.textContent = "Paired. Starting…"; location.replace(s.url); return; }
+      failing = 0;
       if (s.state === "expired") { newCode(); return; }
       later(ask, 3000);
     } catch (err) {
       state.textContent = "Can't reach the server. Trying again…";
+      failing += 1;
+      if (kiosk && failing >= 12) { location.replace("http://127.0.0.1:9187/"); return; }   // the box's own page
       later(ask, 10000);
     }
   }

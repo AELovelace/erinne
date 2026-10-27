@@ -58,6 +58,7 @@ Two columns.
 
 - **Microsoft 365**: tenants, consent, SharePoint libraries, shared mailboxes. See [Microsoft 365](microsoft-365.md).
 - **Claude in chat**: the group that may use its own Anthropic API key in chat. See [Claude in chat](claude-in-chat.md).
+- **Mail and calendar for Claude**: the group whose members' Claude gets mail and calendar tools through the connector (empty = off). See [Microsoft 365](microsoft-365.md#mail-and-calendar).
 - **Links Claude can open**: whether Claude gets short-lived text links and for how long. See [Claude](claude.md#links-claude-can-open).
 
 **Experimental** (full width, at the bottom)

@@ -22,9 +22,9 @@ def test_library_admin(client, conn):
     assert local < page.index('id="admin-group"') < page.index('id="agent-settings"') \
         < page.index('id="balancer-settings"') < page.index('id="updates"') < connectors
     assert connectors < page.index('id="m365-settings"') < page.index('id="claude-settings"') \
-        < page.index('id="claude-links-settings"')
+        < page.index('id="claude-mail-settings"') < page.index('id="claude-links-settings"')
     for block in ("admin-group", "agent-settings", "balancer-settings", "updates", "m365-settings",
-                  "claude-settings", "claude-links-settings", "domain-groups"):
+                  "claude-settings", "claude-mail-settings", "claude-links-settings", "domain-groups"):
         assert page.count(f'id="{block}"') == 1, block
     lib = client.post("/api/admin/libraries", json={"name": "Brand Standards"}).json()["id"]
     assert client.post("/api/admin/libraries", json={"name": "brand standards"}).status_code == 409

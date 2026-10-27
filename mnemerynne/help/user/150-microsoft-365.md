@@ -16,4 +16,4 @@ If Microsoft stops accepting the link (you changed your password, the account wa
 
 ## Privacy
 
-Mail and calendar text never goes to Claude through the connector, and tool logs keep message ids, not mail text. The one exception is **Use External API** in chat, where you send Erynne's full reach, mail included, to Anthropic under your own key. SharePoint files only reach Claude when an admin switched the library on for Claude, with the same per-file check.
+Mail and calendar text goes to Claude through the connector only if an admin put you in the mail group for Claude ([Using Erynne from Claude](claude.md#mail-and-calendar)); otherwise never. Tool logs keep message ids, not mail text. The other exception is **Use External API** in chat, where you send Erynne's full reach, mail included, to Anthropic under your own key. SharePoint files only reach Claude when an admin switched the library on for Claude, with the same per-file check.

@@ -34,7 +34,7 @@ from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
 from mnemerynne import (diagnostics, messages, notices, rooms, accounts, activity, api_tokens, apis, claude_links, comments, db, editing, editing_formats,
-                        fs, permissions, proposals, retrieval, sharepoint)
+                        fs, m365_mail, permissions, proposals, retrieval, sharepoint)
 from mnemerynne.api_tokens import Caller
 from mnemerynne.config import Settings
 from mnemerynne.ingest import store
@@ -47,14 +47,16 @@ log = logging.getLogger("mnemerynne.mcp")
 # forgiving names, ids or paths, error codes), verified live 2026-10-25.
 # 1.1.0: admin approvals (status awaiting_admin), list_proposals and get_proposal.
 # 1.3.0: Rooms (channels and direct messages): list_rooms, read_room, post_to_room, react_in_room.
-MCP_VERSION = "1.3.0"
+# 1.4.0: mail and calendar for the group an admin names: search_mail, recent_mail, read_mail, calendar,
+#        draft_reply, draft_mail (drafts are proposals; nothing sends).
+MCP_VERSION = "1.4.0"
 
 PAGE_WIDTH_PX = 1200     # rendered page width: small print stays legible, JPEG stays ~100-300 KB
 PAGE_MAX_PX = 2000       # cap on either side, for unusually long or wide pages
 
 INSTRUCTIONS = """\
-Mnemerynne holds this organisation's documents: each person's private File box (their own files, not
-their email) and the shared libraries they have been given (brand standards, system manuals and so on).
+Mnemerynne holds this organisation's documents: each person's private File box (their own files) and
+the shared libraries they have been given (brand standards, system manuals and so on).
 Use these tools whenever a question could be answered from those documents.
 
 - Answer only from the passages the tools return, and cite every claim with the passage's `citation`
@@ -110,6 +112,14 @@ Working with others (people, and other people's Claude):
   id; `thread` for one thread); post_to_room writes there as "Claude for <name>" (reply in a thread
   with `thread`); react_in_room adds an emoji. Everyone in the room reads what you post: write only what
   the person asked you to say, and never paste documents they didn't ask you to share.
+
+Mail and calendar (only for people an admin put in the mail group, with a linked Microsoft 365 account;
+for everyone else these tools refuse with [not_allowed], so don't retry them):
+- search_mail and recent_mail list messages with an `id`, `citation` and `link`; read_mail reads one in
+  full; calendar lists the person's events between two days. Cite mail like documents. Quote only what
+  the question needs: a mailbox holds other people's words.
+- draft_reply and draft_mail never send anything: each is a proposal the person saves to their Outlook
+  Drafts from the approve link, like any proposal. Nothing here can send, move or delete mail.
 
 Internal APIs (live):
 - list_apis shows the internal systems you may query for this person (night-audit health, hotel stats,
@@ -307,6 +317,19 @@ def _api_code(exc: Exception) -> str:
     if "still busy" in text:
         return "rate_limited"
     return "not_found" if text.startswith("There's no API operation") else "invalid"
+
+
+def _mail_cite(kind: str, key: str, title: str, location: str, url: str | None) -> dict:
+    """m365_mail's `cite` for the connector: a citation and a link on the item, like passages."""
+    return {"citation": f"{title} · {location}" if location else title, "link": url or ""}
+
+
+def logged_args(name: str, args: dict) -> dict:
+    """A call's arguments as the log keeps them: a mail draft's text is replaced by its length, so the
+    log holds message ids, never mail."""
+    if name in m365_mail.CLAUDE_TOOL_NAMES:
+        return {k: (f"({len(v)} characters)" if k == "body" and isinstance(v, str) else v) for k, v in args.items()}
+    return args
 
 
 def _passage(hit: retrieval.Hit, base: str, library: str, n: int | None = None,
@@ -1140,6 +1163,70 @@ class Tools:
             return {"what": what, "records": diagnostics.recent_log(limit, level, tool)}, []
         return {"what": what, **diagnostics.config(conn, self.settings)}, []
 
+    # ------------------------------------------------------------- mail
+    def _mail(self, conn, caller: Caller) -> m365_mail.Context:
+        """The person's mail for the connector (m365_mail): an admin's mail group must be set and hold
+        them, and they need a usable linked Microsoft 365 account. Ids are opaque tokens (stateless)."""
+        if not m365_mail.claude_enabled(conn):
+            raise Refused("Mail and calendar are off for Claude: an admin names the group that gets them under "
+                          "Access → Connectors → Mail and calendar for Claude.", "not_allowed")
+        user = self._user(conn, caller)
+        if not m365_mail.claude_allowed(conn, user, self.get_directory()):
+            raise Refused("Only people in the mail group may reach their mail and calendar from Claude (Access → "
+                          "Connectors → Mail and calendar for Claude).", "not_allowed")
+        ctx = m365_mail.context(conn, user, self.get_directory(), opaque=True)
+        if ctx is None:
+            raise Refused("No Microsoft 365 account is linked: the person links one on Preferences first.",
+                          "not_allowed")
+        return ctx
+
+    def _mail_run(self, conn, caller: Caller, name: str, args: dict) -> tuple[dict, list[int]]:
+        """One mail tool as the person; a draft becomes a proposal (never a sent mail)."""
+        ctx = self._mail(conn, caller)
+        try:
+            out = m365_mail.run(conn, self.settings, ctx, name, {k: v for k, v in args.items() if v is not None},
+                                _mail_cite)
+        except m365_mail.MailError as exc:
+            raise Refused(str(exc), exc.code) from None
+        except m365_mail.m365.M365Error as exc:
+            raise Refused(str(exc), "unavailable") from None
+        if "draft" in out:
+            proposal = proposals.propose_mail(conn, caller, out["draft"], self.settings)
+            return self._proposed(conn, caller, proposal, {},
+                                  "Nothing is sent: the draft waits for a Mnemerynne admin (Access → Approvals). "
+                                  "Don't say it's sent or saved.",
+                                  "Nothing is sent. Give the person the approve link: they review the draft and save "
+                                  "it to their Outlook Drafts themselves. Don't say it's sent or saved."), []
+        for item in [out, *out.get("messages", []), *out.get("events", [])]:
+            cite = item.pop("cite", None)
+            if isinstance(cite, dict):
+                item.update(cite)
+        return out, []
+
+    def search_mail(self, conn, caller: Caller, query: str, sender: str | None = None, since: str | None = None,
+                    count: int = 10, account: str | None = None, mailbox: str | None = None) -> tuple[dict, list[int]]:
+        return self._mail_run(conn, caller, "search_mail", {"query": query, "from": sender, "since": since,
+                                                           "count": count, "account": account, "mailbox": mailbox})
+
+    def recent_mail(self, conn, caller: Caller, folder: str = "inbox", count: int = 10, account: str | None = None,
+                    mailbox: str | None = None) -> tuple[dict, list[int]]:
+        return self._mail_run(conn, caller, "recent_mail", {"folder": folder, "count": count, "account": account,
+                                                           "mailbox": mailbox})
+
+    def read_mail(self, conn, caller: Caller, id: str) -> tuple[dict, list[int]]:
+        return self._mail_run(conn, caller, "read_mail", {"id": id})
+
+    def calendar(self, conn, caller: Caller, start: str, end: str, account: str | None = None) -> tuple[dict, list[int]]:
+        return self._mail_run(conn, caller, "calendar", {"start": start, "end": end, "account": account})
+
+    def draft_reply(self, conn, caller: Caller, id: str, body: str, reply_all: bool = False) -> tuple[dict, list[int]]:
+        return self._mail_run(conn, caller, "draft_reply", {"id": id, "body": body, "reply_all": reply_all})
+
+    def draft_mail(self, conn, caller: Caller, to: list[str], subject: str, body: str, cc: list[str] | None = None,
+                   account: str | None = None) -> tuple[dict, list[int]]:
+        return self._mail_run(conn, caller, "draft_mail", {"to": to, "cc": cc or [], "subject": subject, "body": body,
+                                                          "account": account})
+
     def list_versions(self, conn, caller: Caller, file_id: int) -> tuple[dict, list[int]]:
         loaded = editing.load(conn, self.settings, caller.user_id, file_id, via=self.mode)
         return {"file_id": file_id, "file": loaded.row["display_name"], "current_version": loaded.version,
@@ -1318,7 +1405,7 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
             finally:
                 conn.execute("INSERT INTO mcp_calls(user_id, token_id, grant_id, tool, args, file_ids, ok, ms, error) "
                              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                             (caller.user_id, caller.token_id, caller.grant_id, name, json.dumps(args),
+                             (caller.user_id, caller.token_id, caller.grant_id, name, json.dumps(logged_args(name, args)),
                               json.dumps(file_ids), int(ok), int((time.monotonic() - started) * 1000),
                               None if error is None else error[:2000]))
                 conn.close()
@@ -1592,6 +1679,53 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
         return await call(ctx, "diagnose", {"what": what, "query": query, "file_id": file_id, "chunk_id": chunk_id,
                                             "tool": tool, "failed_only": failed_only, "since_minutes": since_minutes,
                                             "limit": limit, "level": level, "status": status}, tools.diagnose)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def search_mail(ctx: Context, query: str, sender: str | None = None, since: str | None = None,
+                          count: int = 10, account: str | None = None, mailbox: str | None = None) -> dict:
+        """Search the person's email for messages about something (only for people in the mail group an admin
+        names under Access → Connectors → Mail and calendar for Claude, with a linked Microsoft 365 account;
+        [not_allowed] otherwise). Each message comes with its `id` (for read_mail and draft_reply), sender,
+        date, a preview, `citation` and `link`. `sender`: a name or address; `since`: YYYY-MM-DD; `count`:
+        up to 20; `account`: which linked organisation when the person has several (a refusal names them);
+        `mailbox`: the name of a shared mailbox the person may use, instead of their own."""
+        return await call(ctx, "search_mail", {"query": query, "sender": sender, "since": since, "count": count,
+                                               "account": account, "mailbox": mailbox}, tools.search_mail)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def recent_mail(ctx: Context, folder: str = "inbox", count: int = 10, account: str | None = None,
+                          mailbox: str | None = None) -> dict:
+        """The newest messages in a folder of the person's email ("inbox", "sentitems", "drafts" or "archive"),
+        same rules and shape as search_mail."""
+        return await call(ctx, "recent_mail", {"folder": folder, "count": count, "account": account,
+                                               "mailbox": mailbox}, tools.recent_mail)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def read_mail(ctx: Context, id: str) -> dict:
+        """Read one message in full by the `id` search_mail or recent_mail returned: subject, from, to, cc, date,
+        its own text (quoted earlier mail and the signature cut), `citation` and `link`."""
+        return await call(ctx, "read_mail", {"id": id}, tools.read_mail)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def calendar(ctx: Context, start: str, end: str, account: str | None = None) -> dict:
+        """The person's calendar events from `start` to `end` (YYYY-MM-DD, inclusive, at most two months): subject,
+        times, location, organiser, attendees and a `link`. Same mail-group rule as search_mail."""
+        return await call(ctx, "calendar", {"start": start, "end": end, "account": account}, tools.calendar)
+
+    @server.tool(annotations=_PROPOSES)
+    async def draft_reply(ctx: Context, id: str, body: str, reply_all: bool = False) -> dict:
+        """Draft a reply to a message (its `id`) with `body` as the text. Nothing is sent: it is a proposal with
+        an `approve` link, where the person reviews the draft and saves it to their Outlook Drafts. Never say it
+        was sent or saved."""
+        return await propose(ctx, "draft_reply", {"id": id, "body": body, "reply_all": reply_all}, tools.draft_reply)
+
+    @server.tool(annotations=_PROPOSES)
+    async def draft_mail(ctx: Context, to: list[str], subject: str, body: str, cc: list[str] | None = None,
+                         account: str | None = None) -> dict:
+        """Draft a new email (`to` and `cc` are addresses). Nothing is sent: it is a proposal with an `approve`
+        link, where the person reviews it and saves it to their Outlook Drafts. Never say it was sent or saved."""
+        return await propose(ctx, "draft_mail", {"to": to, "subject": subject, "body": body, "cc": cc,
+                                                 "account": account}, tools.draft_mail)
 
     @server.tool(annotations=_READ_ONLY)
     async def list_versions(ctx: Context, file_id: int) -> dict:

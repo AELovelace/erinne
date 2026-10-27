@@ -3,6 +3,19 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import shutil
+
+
+def find_bash() -> str | None:
+    """The bash that runs the deploy scripts in tests: Git Bash on Windows. `shutil.which` finds
+    WSL's launcher in system32 first when PowerShell started pytest, and that has no distro here."""
+    if os.name == "nt":
+        for candidate in (r"C:\Program Files\Git\bin\bash.exe", r"C:\Program Files\Git\usr\bin\bash.exe"):
+            if os.path.exists(candidate):
+                return candidate
+    found = shutil.which("bash")
+    return None if found and "system32" in found.lower() else found
 
 
 class FakeEmbedder:

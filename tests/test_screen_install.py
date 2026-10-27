@@ -5,15 +5,16 @@ skipped where there is none."""
 
 import json
 import os
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from fakes import find_bash
+
 REPO = Path(__file__).resolve().parents[1]
 INSTALL = REPO / "deploy" / "screen" / "install.sh"
-BASH = shutil.which("bash")
+BASH = find_bash()
 
 pytestmark = pytest.mark.skipif(not BASH, reason="needs bash")
 
@@ -127,6 +128,8 @@ def test_a_dry_run_writes_nothing(tmp_path):
     assert "Mnemerynne screen for https://erynne.example.com" in out
     assert "rpmfusion-free-release" in out and "dnf install" in out and "useradd" in out
     assert "write /etc/firefox/policies/policies.json" in out and "systemctl enable mnemerynne-screen.service" in out
+    assert "write /usr/local/libexec/mnemerynne-screen-wifi" in out and "python3-qrcode" in out
+    assert "firewall-cmd --permanent --zone=nm-shared --add-service=http" in out
     assert sorted(p.name for p in root.rglob("*") if p.is_file()) == ["os-release"]
 
 
@@ -137,19 +140,26 @@ def test_install_under_a_root_and_run_again(tmp_path):
     assert "MNEMERYNNE_URL=https://erynne.example.com\n" in conf and "AUDIO_OUTPUT=hdmi\n" in conf
     for path in ("usr/local/bin/mnemerynne-screen-session", "usr/local/bin/mnemerynne-screen-audio",
                  "usr/local/share/mnemerynne-screen/start.html", "etc/systemd/system/mnemerynne-screen.service",
-                 "etc/pam.d/mnemerynne-screen", "etc/dnf/dnf5-plugins/automatic.conf"):
+                 "etc/pam.d/mnemerynne-screen", "etc/dnf/dnf5-plugins/automatic.conf",
+                 "etc/systemd/system/mnemerynne-screen-wifi.service",
+                 "etc/NetworkManager/dnsmasq-shared.d/mnemerynne-screen.conf"):
         assert (root / path).is_file(), path
+    helper = root / "usr/local/libexec/mnemerynne-screen-wifi"
+    assert helper.read_bytes() == (INSTALL.parent / "wifi-setup.py").read_bytes()
+    assert "WIFI_SETUP=yes\n" in conf
+    assert "address=/#/10.42.0.1" in (root / "etc/NetworkManager/dnsmasq-shared.d/mnemerynne-screen.conf").read_text()
     assert "vp9" not in (root / "usr/local/share/mnemerynne-screen/user.js").read_text()
     session = (root / "usr/local/bin/mnemerynne-screen-session").read_text()
-    assert "firefox --kiosk" in session and "start.html" in session
+    assert "firefox --kiosk" in session and "start.html" in session and "http://127.0.0.1:9187/" in session
     subprocess.run([BASH, "-n", posix(root / "usr/local/bin/mnemerynne-screen-session")], check=True)
     subprocess.run([BASH, "-n", posix(root / "usr/local/bin/mnemerynne-screen-audio")], check=True)
 
     # Again without the address: it keeps the one it has; the options are as given this time.
-    run("--no-packages", "--audio", "auto", "--no-auto-updates", root=root)
+    out = run("--no-packages", "--audio", "auto", "--no-auto-updates", "--no-wifi-setup", root=root).stdout
     conf = (root / "etc" / "mnemerynne-screen.conf").read_text()
     assert "MNEMERYNNE_URL=https://erynne.example.com\n" in conf and "AUDIO_OUTPUT=auto\n" in conf
     assert "vp9" in (root / "usr/local/share/mnemerynne-screen/user.js").read_text()
+    assert "WIFI_SETUP=no\n" in conf and "systemctl disable --now mnemerynne-screen-wifi.service" in out
 
 
 def test_it_is_for_fedora_and_needs_an_address(tmp_path):

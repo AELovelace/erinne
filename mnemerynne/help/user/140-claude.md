@@ -2,7 +2,7 @@
 
 Erynne is also an **MCP server**: Claude (Anthropic's assistant) can search your documents, read passages and pages, browse your files, and, if you allow it, create and change files, all as you, and only within what has been shared with Claude. Everything here is on the right half of [Preferences](preferences.md).
 
-> What Claude reads is sent to Anthropic. That is why Claude through the connector only reaches the libraries and files an admin and you have shared with it, never your mail, calendar or memories. The exception is **Use External API** in chat (below), where you deliberately send Erynne's full reach under your own key.
+> What Claude reads is sent to Anthropic. That is why Claude through the connector only reaches the libraries and files an admin and you have shared with it, never your memories, and your mail and calendar only if an admin put you in the group for it (below). The exception is **Use External API** in chat (below), where you deliberately send Erynne's full reach under your own key.
 
 ## Three ways to connect
 
@@ -48,6 +48,10 @@ Claude can also comment on files and read comments ([Comments](comments.md)), an
 **Following a proposal.** Claude can check what became of a proposal (`get_proposal`), list its pending and recently decided ones, and withdraw one it no longer needs, so it can propose something partway through a task, carry on, and report the outcome without asking you whether you approved. It can never approve, apply or reject anything itself: that stays with you on *Changes waiting for you*.
 
 **Messages.** With a connection that may edit, Claude can leave a colleague a note inside Erynne (`send_message`, shown as "Claude for you") and read your unread notes and announcements (`list_messages`). See [Messages and announcements](messages-and-announcements.md).
+
+## Mail and calendar
+
+If an admin has put you in the mail group for Claude and you have linked your Microsoft 365 account on Preferences, Claude can search and read your mail (and the shared mailboxes you may use), see your calendar, and draft replies and new emails. A draft is a proposal: Claude hands you an approve link, you review the text and **Save to Drafts** puts it in Outlook's Drafts folder. Nothing is ever sent, moved or deleted. Everything Claude reads this way goes to Anthropic, which is why it takes the group; without it these tools simply refuse. See [Microsoft 365](microsoft-365.md).
 
 ## Claude in chat (your own API key)
 

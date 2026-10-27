@@ -2,8 +2,9 @@
 # Make a Fedora box (Server or Everything, minimal install) into a Mnemerynne screen: at boot it opens
 # Media's screen page full-screen on the TV (Firefox in kiosk mode under cage, on tty1), with sound over
 # HDMI, and nothing else. Unpaired, the page shows a code to pair it with from a phone (Media →
-# Screens → Pair a TV); no keyboard or sign-in is needed on the box. Self-contained: copy this one file
-# to the box and run it. Safe to run again (to change the address, or after an upgrade).
+# Screens → Pair a TV); no keyboard or sign-in is needed on the box. With no network, it offers a Wi-Fi
+# hotspot to set it up from a phone (wifi-setup.py, beside this file: clone the repository onto the box,
+# or copy both). Safe to run again (to change the address, or after an upgrade).
 #
 #   sudo bash install.sh https://erynne.example.com             # set up, start
 #   sudo bash install.sh https://erynne.example.com --dry-run   # what it would do, nothing written
@@ -14,6 +15,7 @@
 #                          the choice to PipeWire
 #   --youtube-any-codec    let YouTube send VP9/AV1 (decoded on the CPU) instead of H.264 (the GPU)
 #   --no-auto-updates      don't install security updates nightly (dnf automatic, rebooting if needed)
+#   --no-wifi-setup        no setup hotspot (and the start page is a plain local file)
 #   --no-packages          write the files only; install nothing with dnf
 #   --dry-run              print the plan and stop
 #
@@ -31,12 +33,17 @@ UNIT=$ROOT/etc/systemd/system/mnemerynne-screen.service
 PAM_FILE=$ROOT/etc/pam.d/mnemerynne-screen
 POLICIES=$ROOT/etc/firefox/policies/policies.json
 DNF_AUTOMATIC=$ROOT/etc/dnf/dnf5-plugins/automatic.conf
+WIFI_HELPER=$ROOT/usr/local/libexec/mnemerynne-screen-wifi
+WIFI_UNIT=$ROOT/etc/systemd/system/mnemerynne-screen-wifi.service
+WIFI_DNS=$ROOT/etc/NetworkManager/dnsmasq-shared.d/mnemerynne-screen.conf
+WIFI_SOURCE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/wifi-setup.py
 SCREEN_USER=mnemerynne-screen
 
 URL=""
 AUDIO=hdmi
 YOUTUBE_H264=1
 AUTO_UPDATES=1
+WIFI_SETUP=1
 PACKAGES=1
 DRY_RUN=0
 MODE=install
@@ -90,6 +97,7 @@ render_conf() {
 # this file and restarts the screen.
 MNEMERYNNE_URL=$URL
 AUDIO_OUTPUT=$AUDIO
+WIFI_SETUP=$([[ $WIFI_SETUP == 1 ]] && echo yes || echo no)
 EOF
 }
 
@@ -109,7 +117,15 @@ if [ "${AUDIO_OUTPUT:-hdmi}" = hdmi ]; then
     /usr/local/bin/mnemerynne-screen-audio >/dev/null 2>&1 &
 fi
 export MOZ_ENABLE_WAYLAND=1
-exec firefox --kiosk --no-remote --profile "$PROFILE" file:///usr/local/share/mnemerynne-screen/start.html
+START=file:///usr/local/share/mnemerynne-screen/start.html
+if [ "${WIFI_SETUP:-no}" = yes ]; then
+    # The Wi-Fi helper's page: it waits for the server, and offers the setup hotspot when there's no network.
+    for _ in $(seq 20); do
+        if curl -fsS -o /dev/null --max-time 2 http://127.0.0.1:9187/api/status; then START=http://127.0.0.1:9187/; break; fi
+        sleep 1
+    done
+fi
+exec firefox --kiosk --no-remote --profile "$PROFILE" "$START"
 EOF
 }
 
@@ -203,6 +219,8 @@ user_pref("full-screen-api.warning.timeout", 0);
 user_pref("full-screen-api.transition-duration.enter", "0 0");
 user_pref("full-screen-api.transition-duration.leave", "0 0");
 user_pref("media.videocontrols.picture-in-picture.video-toggle.enabled", false);
+user_pref("network.captive-portal-service.enabled", false);   // the box's own hotspot isn't a portal to it
+user_pref("network.connectivity-service.enabled", false);
 EOF
     if [[ $YOUTUBE_H264 == 1 ]]; then
         cat <<'EOF'
@@ -288,6 +306,35 @@ session  required pam_systemd.so
 EOF
 }
 
+# The Wi-Fi helper (wifi-setup.py), as root: it manages NetworkManager's hotspot and joins networks.
+render_wifi_unit() {
+    cat <<'EOF'
+# The Mnemerynne screen's start page and Wi-Fi setup (deploy/screen/wifi-setup.py).
+[Unit]
+Description=Mnemerynne screen: start page and Wi-Fi setup
+After=NetworkManager.service
+Wants=NetworkManager.service
+Before=mnemerynne-screen.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -I /usr/local/libexec/mnemerynne-screen-wifi
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+# On the setup hotspot, every name is the box: a phone's "sign in to the network" sheet opens the setup page.
+render_wifi_dns() {
+    cat <<'EOF'
+# The Mnemerynne screen's setup hotspot (deploy/screen/install.sh): every name answers with the box.
+address=/#/10.42.0.1
+EOF
+}
+
 render_dnf_automatic() {
     cat <<'EOF'
 # The Mnemerynne screen (deploy/screen/install.sh): install updates nightly, rebooting when one needs it.
@@ -314,6 +361,9 @@ install_packages() {
         cage firefox ffmpeg ffmpeg-libs libva-intel-driver libva-utils mesa-dri-drivers \
         pipewire pipewire-alsa pipewire-pulseaudio wireplumber pulseaudio-utils curl \
         google-noto-sans-fonts google-noto-color-emoji-fonts
+    if [[ $WIFI_SETUP == 1 ]]; then
+        sys dnf install -y --setopt=install_weak_deps=False python3 python3-qrcode iw dnsmasq NetworkManager-wifi
+    fi
     sys dnf install -y --skip-unavailable intel-media-driver
     if [[ $AUTO_UPDATES == 1 ]]; then
         sys dnf install -y dnf5-plugin-automatic
@@ -334,6 +384,12 @@ write_files() {
     if [[ $AUTO_UPDATES == 1 ]]; then
         render_dnf_automatic | put 0644 "$DNF_AUTOMATIC"
     fi
+    if [[ $WIFI_SETUP == 1 ]]; then
+        [[ -f $WIFI_SOURCE ]] || die "wifi-setup.py isn't beside install.sh: clone the repository onto the box (README), or use --no-wifi-setup"
+        put 0755 "$WIFI_HELPER" <"$WIFI_SOURCE"
+        render_wifi_unit | put 0644 "$WIFI_UNIT"
+        render_wifi_dns | put 0644 "$WIFI_DNS"
+    fi
 }
 
 make_user() {
@@ -351,6 +407,18 @@ enable_service() {
     sys restorecon -R /etc/mnemerynne-screen.conf /usr/local/bin /usr/local/share/mnemerynne-screen \
         /etc/firefox/policies /etc/systemd/system/mnemerynne-screen.service /etc/pam.d/mnemerynne-screen
     sys systemctl daemon-reload
+    if [[ $WIFI_SETUP == 1 ]]; then
+        sys restorecon -R /usr/local/libexec /etc/systemd/system/mnemerynne-screen-wifi.service /etc/NetworkManager/dnsmasq-shared.d
+        # The setup page on the hotspot (firewalld's zone for shared connections; nothing on the real network).
+        if [[ -n $ROOT || $DRY_RUN == 1 ]] || firewall-cmd --state >/dev/null 2>&1; then
+            sys firewall-cmd --permanent --zone=nm-shared --add-service=http
+            sys firewall-cmd --reload
+        fi
+        sys systemctl enable mnemerynne-screen-wifi.service
+        sys systemctl restart mnemerynne-screen-wifi.service
+    else
+        sys systemctl disable --now mnemerynne-screen-wifi.service
+    fi
     sys systemctl enable mnemerynne-screen.service
     if [[ $AUTO_UPDATES == 1 ]]; then
         sys systemctl enable --now dnf5-automatic.timer
@@ -401,6 +469,10 @@ check() {
 
     step "The screen"
     if systemctl is-active --quiet mnemerynne-screen.service; then ok "running on tty1"; else bad "not running: journalctl -u mnemerynne-screen -b"; fi
+    if [[ $(conf_value WIFI_SETUP) == yes ]]; then
+        if curl -fsS -o /dev/null --max-time 3 http://127.0.0.1:9187/api/status; then ok "Wi-Fi setup and start page running"; else bad "the Wi-Fi helper isn't answering: journalctl -u mnemerynne-screen-wifi -b"; fi
+        if iw list 2>/dev/null | grep -A10 "Supported interface modes" | grep -qw AP; then ok "the Wi-Fi card can be a hotspot"; else note "no Wi-Fi card that can be a hotspot: setting up Wi-Fi needs a cable or SSH"; fi
+    fi
     if [[ -n $(pactl --server "unix:/run/user/$(id -u "$SCREEN_USER" 2>/dev/null || echo 0)/pulse/native" get-default-sink 2>/dev/null | grep -i hdmi) ]]; then
         ok "sound goes to HDMI"
     else
@@ -412,7 +484,10 @@ check() {
 uninstall() {
     step "Removing the Mnemerynne screen"
     sys systemctl disable --now mnemerynne-screen.service
-    for f in "$UNIT" "$PAM_FILE" "$CONF" "$POLICIES" "$BIN/mnemerynne-screen-session" "$BIN/mnemerynne-screen-audio" "$DNF_AUTOMATIC"; do
+    sys systemctl disable --now mnemerynne-screen-wifi.service
+    sys nmcli connection delete id mnemerynne-setup
+    for f in "$UNIT" "$PAM_FILE" "$CONF" "$POLICIES" "$BIN/mnemerynne-screen-session" "$BIN/mnemerynne-screen-audio" "$DNF_AUTOMATIC" \
+             "$WIFI_HELPER" "$WIFI_UNIT" "$WIFI_DNS"; do
         sys rm -f "${f#"$ROOT"}"
     done
     sys rm -rf /usr/local/share/mnemerynne-screen
@@ -432,6 +507,7 @@ parse_args() {
                      [[ $AUDIO == hdmi || $AUDIO == auto ]] || die "--audio is hdmi or auto" ;;
             --youtube-any-codec) YOUTUBE_H264=0 ;;
             --no-auto-updates) AUTO_UPDATES=0 ;;
+            --no-wifi-setup) WIFI_SETUP=0 ;;
             --no-packages) PACKAGES=0 ;;
             --dry-run) DRY_RUN=1 ;;
             --check) MODE=check ;;
@@ -459,8 +535,9 @@ main() {
     URL=$(clean_url "$URL") || exit 1
     [[ $URL == https://* ]] || note "warning: $URL isn't HTTPS; the screen key would cross the network in the clear"
 
-    printf 'Mnemerynne screen for %s (sound: %s, YouTube: %s, nightly updates: %s)\n' "$URL" "$AUDIO" \
-        "$([[ $YOUTUBE_H264 == 1 ]] && echo H.264 || echo any codec)" "$([[ $AUTO_UPDATES == 1 ]] && echo yes || echo no)"
+    printf 'Mnemerynne screen for %s (sound: %s, YouTube: %s, nightly updates: %s, Wi-Fi setup: %s)\n' "$URL" "$AUDIO" \
+        "$([[ $YOUTUBE_H264 == 1 ]] && echo H.264 || echo any codec)" "$([[ $AUTO_UPDATES == 1 ]] && echo yes || echo no)" \
+        "$([[ $WIFI_SETUP == 1 ]] && echo hotspot || echo no)"
     if [[ $PACKAGES == 1 ]]; then install_packages; fi
     make_user
     write_files

@@ -746,9 +746,10 @@ class Agent:
         return self.balancer is not None and bool(self.balancer.ready_nodes())
 
     async def specs(self) -> list[dict]:
-        """The same tools, descriptions and argument schemas Claude gets."""
+        """The same tools, descriptions and argument schemas Claude gets, except the connector's mail and
+        calendar tools: Erynne gets hers per question (_mail_tools), with the person's accounts and mailboxes."""
         if self._specs is None:
-            listed = await self._server.list_tools()
+            listed = [t for t in await self._server.list_tools() if t.name not in m365_mail.CLAUDE_TOOL_NAMES]
             self._specs = [{"type": "function", "function": {
                 "name": t.name, "description": (t.description or "") + _HINTS.get(t.name, ""),
                 "parameters": _clean_schema(t.input_schema)}}

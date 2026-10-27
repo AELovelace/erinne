@@ -1,18 +1,22 @@
-"""Mail, calendar and drafts for the agent group, through linked Microsoft accounts. Nothing ever sends."""
+"""Mail, calendar and drafts for the agent group, through linked Microsoft accounts, and the same for
+Claude through the connector, only for the group an admin names. Nothing ever sends."""
 
 import asyncio
 import json
 import time
+from contextlib import contextmanager
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from mcp.server.mcpserver.exceptions import ToolError
 
-from fakes import FakeDirectory, KeywordEmbedder
-from mnemerynne import accounts, m365, m365_mail, mcp_server, users
+from fakes import FakeDirectory, FakeEmbedder, KeywordEmbedder
+from mnemerynne import accounts, api_tokens, m365, m365_mail, mcp_server, users
 from mnemerynne.clients.llm import ToolCall, ToolTurn
 from mnemerynne.config import Settings
+from mnemerynne.mcp_server import Tools
 from mnemerynne.web.app import Services, create_app
 from test_agent import AgentLLM, last_tool
 from test_chat import FakeLLM, _ask, _final
@@ -38,6 +42,8 @@ class FakeGraph:
         q = parse_qs(urlsplit(url).query)
         if path.endswith("/users/frontdesk@gasco.test/messages") and who != "user-alice-g":
             return httpx.Response(403, json={"error": {"message": "Access is denied."}})
+        if "/mailFolders/inbox/messages" in path:
+            return httpx.Response(200, json={"value": []})
         if path.endswith("/messages") and method == "GET":
             assert q["$search"][0].startswith('"boiler') or q["$search"][0] == '"boiler from:Sam"'
             return httpx.Response(200, json={"value": [
@@ -46,10 +52,9 @@ class FakeGraph:
                  "bodyPreview": "The boiler is fixed", "webLink": "https://outlook.test/m/1"},
                 {"id": "old", "subject": "Old boiler", "receivedDateTime": "2025-01-01T10:00:00Z",
                  "from": {"emailAddress": {"name": "Ann"}}, "webLink": "https://outlook.test/m/2"}]})
-        if "/mailFolders/inbox/messages" in path:
-            return httpx.Response(200, json={"value": []})
         if path.endswith(f"/messages/{LONG_ID}") and method == "GET":
-            assert request.headers["prefer"] == 'outlook.body-content-type="text"'
+            if "body" in q.get("$select", [""])[0]:
+                assert request.headers["prefer"] == 'outlook.body-content-type="text"'
             return httpx.Response(200, json={
                 "subject": "Boiler repair", "receivedDateTime": "2026-10-20T15:04:00Z", "webLink": "https://outlook.test/m/1",
                 "from": {"emailAddress": {"name": "Sam GM", "address": "sam@eternal.test"}},
@@ -122,9 +127,9 @@ def test_tools_offer_this_persons_accounts_and_mailboxes(conn, world):
     assert "account" not in {s["function"]["name"]: s for s in m365_mail.specs(bob)}["search_mail"]["function"][
         "parameters"]["properties"]                                        # one account: no choice to make
     assert [m.label for m in bob.mailboxes] == ["IT"]
-    # Claude never gets any of these.
+    # Claude's connector lists the mail and calendar tools (gated at call time), never the live SharePoint search.
     names = {t.name for t in asyncio.run(mcp_server.build_server(Settings(_env_file=None), lambda: None).list_tools())}
-    assert not names & m365_mail.TOOL_NAMES
+    assert names & m365_mail.TOOL_NAMES == m365_mail.CLAUDE_TOOL_NAMES and "search_sharepoint" not in names
 
 
 def test_search_read_calendar_and_sharepoint(conn, settings, world):
@@ -236,3 +241,99 @@ def test_mail_tools_are_only_for_the_agent_group(client, conn, world):
     assert not offered & {"search_mail", "recent_mail", "read_mail", "calendar", "draft_reply", "draft_mail",
                           "search_sharepoint"}                              # ...but no mail: not in the agent group
     assert not [t for t in client.get("/api/me/tools").json()["tools"] if t["group"] == "Microsoft 365"]
+
+
+# ------------------------------------------------------------ the connector
+def _caller(conn, user_id):
+    return api_tokens.verify(conn, api_tokens.create(conn, user_id, "t", can_edit=True)[1])
+
+
+@contextmanager
+def _web(settings, world, name):
+    with TestClient(create_app(settings, Services(llm=None, embedder=FakeEmbedder(), directory=world["directory"]))) as c:
+        c.post("/login", data={"username": name, "password": "password123"})
+        yield c
+
+
+def test_claude_gets_mail_only_in_the_mail_group(conn, settings, world, graph):
+    """The connector's mail tools refuse until an admin names a group, and then only for its members."""
+    tools = Tools(settings, lambda: FakeEmbedder(), lambda: world["directory"])
+    alice, bob = _caller(conn, world["alice"]), _caller(conn, world["bob"])
+    users.create_user(conn, "root", "password123", role="admin")
+    with pytest.raises(ToolError, match="off for Claude"):
+        tools.search_mail(conn, alice, "boiler")
+    assert not graph.calls
+
+    with _web(settings, world, "root") as web:
+        assert web.get("/api/admin/settings/claude-mail").json()["enabled"] is False
+        assert web.put("/api/admin/settings/claude-mail", json={"group": "Nobody"}).status_code == 422
+        got = web.put("/api/admin/settings/claude-mail", json={"group": "staff"}).json()
+        assert got["enabled"] and got["group"] == "staff" and got["members"] == ["bob"]
+        assert 'id="claude-mail-settings"' in web.get("/admin/libraries").text
+    assert m365_mail.claude_group(conn) == "staff"
+    log = conn.execute("SELECT action, target, detail FROM access_log ORDER BY id DESC LIMIT 1").fetchone()
+    assert tuple(log) == ("settings.claude_mail", "staff", "was (off)")
+
+    with pytest.raises(ToolError, match="mail group"):
+        tools.search_mail(conn, alice, "boiler")                            # alice isn't in staff
+    assert tools.recent_mail(conn, bob)[0]["messages"] == []                 # bob is
+    with _web(settings, world, "alice") as web:
+        assert web.get("/api/admin/settings/claude-mail").status_code == 403
+    with _web(settings, world, "root") as web:
+        assert web.put("/api/admin/settings/claude-mail", json={"group": ""}).json()["enabled"] is False
+    with pytest.raises(ToolError, match="off for Claude"):
+        tools.recent_mail(conn, bob)
+    # In the group but without a linked account: told to link one.
+    m365_mail.set_claude_group(conn, "staff")
+    conn.execute("UPDATE m365_identities SET status = 'relink' WHERE user_id = ?", (world["bob"],))
+    with pytest.raises(ToolError, match="links one on Preferences"):
+        tools.recent_mail(conn, bob)
+
+
+def test_claude_reads_mail_with_opaque_ids_and_drafts_as_proposals(conn, settings, world, graph):
+    m365_mail.set_claude_group(conn, "erynne agents")
+    tools = Tools(settings, lambda: FakeEmbedder(), lambda: world["directory"])
+    alice = _caller(conn, world["alice"])
+
+    found = tools.search_mail(conn, alice, "boiler", account="Eternal", since="2026-01-01")[0]
+    (msg,) = found["messages"]
+    assert msg["id"].startswith("mail_") and msg["citation"].startswith("Boiler repair · Sam GM · 2026-10-20")
+    assert msg["link"] == "https://outlook.test/m/1" and "cite" not in msg and msg["preview"] == "The boiler is fixed"
+    assert m365_mail.decode_ref(msg["id"]) == (world["id_alice"], None, LONG_ID)
+    read = tools.read_mail(conn, alice, msg["id"])[0]
+    assert read["body"] == "Hi Alice,\nThe boiler is fixed; the bill is $420." and read["link"] == "https://outlook.test/m/1"
+    assert read["citation"].startswith("Boiler repair · Sam GM")
+    # An id made up, or made for someone else's account or a mailbox they may not use, never reaches Graph.
+    before = len(graph.calls)
+    for bad in ("m1", "mail_nope", m365_mail.encode_ref(world["id_bob"], None, LONG_ID),
+                m365_mail.encode_ref(world["id_alice"], "it@eternal.test", LONG_ID)):
+        with pytest.raises(ToolError, match="There's no message"):
+            tools.read_mail(conn, alice, bad)
+    assert len(graph.calls) == before
+    with pytest.raises(ToolError, match="Say which account"):
+        tools.search_mail(conn, alice, "boiler")
+    events = tools.calendar(conn, alice, "2026-10-23", "2026-10-23", account="Eternal")[0]["events"]
+    assert events[0]["subject"] == "Owners meeting" and events[0]["link"] == "https://outlook.test/e/1"
+    shared = tools.search_mail(conn, alice, "boiler", account="Gasco", mailbox="Front desk")[0]
+    assert shared["mailbox"] == "Front desk" and m365_mail.decode_ref(shared["messages"][0]["id"])[1] == "frontdesk@gasco.test"
+
+    # A reply is a proposal with an approve link; nothing is written until the person applies it.
+    out = tools.draft_reply(conn, alice, msg["id"], "Thanks Sam, I'll pay it Thursday.")[0]
+    assert out["status"] == "proposed" and out["kind"] == "mail" and out["approve"].endswith(f"#p{out['proposal_id']}")
+    assert out["changes"][0] == "Reply to sam@eternal.test" and "Nothing is sent" in out["note"]
+    assert graph.drafts == []
+    with _web(settings, world, "alice") as web:
+        saved = web.post(f"/api/agent/proposals/{out['proposal_id']}/apply").json()
+    assert saved["status"] == "applied" and saved["url"] == "https://outlook.test/drafts/1"
+    path, body = graph.drafts[0]
+    assert path.endswith(f"/me/messages/{LONG_ID}/createReply") and body == {"comment": "Thanks Sam, I'll pay it Thursday."}
+    assert tools.get_proposal(conn, alice, out["proposal_id"])[0]["status"] == "applied"
+
+    new = tools.draft_mail(conn, alice, ["ops@eternal.test"], "Boiler", "It's fixed.", account="Eternal")[0]
+    assert new["status"] == "proposed" and new["summary"] and len(graph.drafts) == 1
+    with pytest.raises(ToolError, match="email addresses"):
+        tools.draft_mail(conn, alice, ["not-an-address"], "x", "y", account="Eternal")
+    # The call log keeps ids and lengths, never the text of a draft.
+    logged = mcp_server.logged_args("draft_reply", {"id": msg["id"], "body": "Thanks Sam, I'll pay it Thursday."})
+    assert logged == {"id": msg["id"], "body": "(33 characters)"}
+    assert mcp_server.logged_args("search_documents", {"query": "x"}) == {"query": "x"}

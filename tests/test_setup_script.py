@@ -3,15 +3,16 @@ definition), the plan it prints on a dry run without touching anything, and the 
 under a test root. Runs under bash (Git Bash on Windows); skipped where there is none."""
 
 import os
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from fakes import find_bash
+
 REPO = Path(__file__).resolve().parents[1]
 SETUP = REPO / "deploy" / "linux" / "setup.sh"
-BASH = shutil.which("bash")
+BASH = find_bash()
 
 pytestmark = pytest.mark.skipif(not BASH, reason="needs bash")
 

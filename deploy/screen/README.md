@@ -12,6 +12,8 @@ How it works:
   **Media → Screens → Pair a TV**.
 - **Self-healing:** if Firefox crashes, it starts again within seconds. After a power cut it waits for
   the network and the server, then carries on.
+- **Wi-Fi from a phone:** with no network, the box offers its own Wi-Fi hotspot, and the TV shows how
+  to join it and pick the box's network from your phone (step 5).
 
 ## 1. The box
 
@@ -19,25 +21,28 @@ How it works:
   Update the BIOS while you're there.
 - **Fedora:** Fedora Server, or the Everything netinstall with a *Minimal Install*, is all it needs; it
   doesn't need a desktop. Create an admin account (for SSH) during installation. Leave root locked.
-- **Network:** wired is best. Wi-Fi works, set up with `nmtui`.
+- **Network:** wired is best for the install itself. Afterwards the box can be moved onto Wi-Fi from
+  a phone (step 5).
 - **Ports:** nothing to open. The screen only connects out to the server, on 443.
 
 ## 2. Install
 
-Copy the installer to the box, then run it with the address people open Mnemerynne at:
+Get the repository onto the box and run the installer with the address people open Mnemerynne at:
 
 ```sh
-scp deploy/screen/install.sh admin@nuc:          # from the PC with this repository
-ssh admin@nuc
-sudo bash install.sh https://erynne.example.com
+sudo dnf install -y git && git clone https://github.com/AELovelace/erinne.git
+sudo bash erinne/deploy/screen/install.sh https://erynne.example.com
 ```
+
+Later updates: `cd ~/erinne && git pull && sudo bash deploy/screen/install.sh` (it keeps the address).
+The installer needs `wifi-setup.py` beside it; to copy files instead of cloning, copy both.
 
 It takes a few minutes. It:
 
 - enables RPM Fusion (free);
 - swaps Fedora's FFmpeg for RPM Fusion's, because Fedora's own can't decode H.264, which Mnemerynne's
   transcoder sends;
-- installs the VA-API drivers, cage, Firefox and PipeWire;
+- installs the VA-API drivers, cage, Firefox and PipeWire, and what the Wi-Fi setup needs;
 - writes its files and starts the screen;
 - checks the box and prints what it found (step 4).
 
@@ -50,6 +55,7 @@ Options:
 | `--audio auto` | Let PipeWire choose the output, instead of HDMI. |
 | `--youtube-any-codec` | Let YouTube send VP9 or AV1. By default it's asked for H.264, which this GPU decodes. VP9 or AV1 are decoded on the CPU, which manages 1080p at 30 fps but struggles at 60 fps. |
 | `--no-auto-updates` | Don't install updates nightly. By default `dnf5-automatic` installs them and reboots when an update needs it. |
+| `--no-wifi-setup` | No setup hotspot. Firefox starts on a plain local page that waits for the server. |
 | `--dry-run` | Show the plan; change nothing. |
 
 Run it again at any time, for example with a new address. It rewrites its files and restarts the screen.
@@ -75,13 +81,37 @@ sudo bash install.sh --check
 | **the GPU decodes H.264** | VA-API works with the i965 driver; video is cheap. If this says FAIL, video still plays, on the CPU. |
 | **… answers** / **the screen page answers** | The box reaches the server, its certificate is trusted, and Media is turned on. |
 | **running on tty1** / **sound goes to HDMI** | The kiosk is up and sound goes to the TV. If the TV was off, give it 30 seconds after turning it on. |
+| **Wi-Fi setup and start page running** / **can be a hotspot** | The Wi-Fi helper answers, and the Wi-Fi card can offer the setup hotspot. |
+
+## 5. Wi-Fi
+
+**When the box has no network at all** (no cable, no Wi-Fi it knows) for about 90 seconds, it starts
+a hotspot called `Mnemerynne-Setup-XXXX`. The TV shows its password and two QR codes:
+
+1. **Join the hotspot:** scan the first code with your phone's camera.
+2. **Open the setup page:** most phones show "Sign in to network" and open it by themselves. If not, scan
+   the second code or open `http://10.42.0.1`.
+3. **Pick the network:** choose the box's network and type its password. The hotspot goes away while the
+   box tries.
+   - If it joined, the TV carries on to Mnemerynne.
+   - If the hotspot comes back, the password was wrong. Join it again; the page says what happened.
+
+After a power cut the router may take longer to start than the box. While nobody is on the hotspot, the
+box steps aside every 3 minutes so it can rejoin the networks it already knows.
+
+**To change networks while the box is online:** open **Wi-Fi** in the TV's menu (with a keyboard or air
+mouse). The same page lists the networks.
+
+Only the box itself and phones on its hotspot can reach the setup page; nothing is opened on your
+network. The hotspot's password is new every time it starts.
 
 ## When something's wrong
 
 | What you see | What to do |
 | --- | --- |
 | A black screen | `journalctl -u mnemerynne-screen -b` shows why cage or Firefox stopped. `sudo systemctl restart mnemerynne-screen` starts it again. |
-| **Connecting to … / Not reachable yet** | The box can't reach the server: check the cable and DNS, and `curl -I https://erynne.example.com/healthz`. |
+| **Connecting to … / Waiting for the network** | The box can't reach the server: check the cable and DNS, and `curl -I https://erynne.example.com/healthz`. Without any network it offers the setup hotspot within about 90 seconds. |
+| No setup hotspot | `journalctl -u mnemerynne-screen-wifi -b`. `sudo bash install.sh --check` says whether the Wi-Fi card can be a hotspot. |
 | A 404 page | Media is off, or the screens group isn't set (Settings → Media). |
 | No sound | Is the TV's input on this box, and is its volume up? `sudo bash install.sh --check` says whether sound goes to HDMI. `--audio auto` leaves the choice to PipeWire. |
 | Stutters on films | The GPU isn't decoding (see `--check`), or the server is transcoding something heavy. Admin → Settings → Media shows running transcodes. |
@@ -96,7 +126,10 @@ To use the box for something else: `sudo bash install.sh --uninstall`, and remov
 | `/etc/systemd/system/mnemerynne-screen.service`, `/etc/pam.d/mnemerynne-screen` | cage on tty1 with a login session. That session gives it the GPU, input and PipeWire. |
 | `/usr/local/bin/mnemerynne-screen-session` | Starts Firefox. |
 | `/usr/local/bin/mnemerynne-screen-audio` | Keeps sound on HDMI. |
-| `/usr/local/share/mnemerynne-screen/` | `start.html`, which waits for the server; `user.js`, the Firefox preferences, copied in at every start. |
+| `/usr/local/share/mnemerynne-screen/` | `start.html`, the start page without the Wi-Fi setup; `user.js`, the Firefox preferences, copied in at every start. |
+| `/usr/local/libexec/mnemerynne-screen-wifi`, `/etc/systemd/system/mnemerynne-screen-wifi.service` | The start page (`http://127.0.0.1:9187/`) and the Wi-Fi setup, as root: it starts NetworkManager's hotspot and joins networks. |
+| `/etc/NetworkManager/dnsmasq-shared.d/mnemerynne-screen.conf` | On the hotspot, every name resolves to the box, so phones open the setup page. |
+| firewalld zone `nm-shared` | HTTP allowed, for the setup page on the hotspot only. |
 | `/etc/firefox/policies/policies.json` | Autoplay allowed for the server only; no extensions, updates, telemetry or first-run pages. It applies to every Firefox on the box, which on a dedicated box is only this one. |
 | `/etc/dnf/dnf5-plugins/automatic.conf` | Nightly updates. |
 

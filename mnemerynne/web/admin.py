@@ -15,7 +15,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import accounts, api_tokens, diagnostics, fs, group_refs, messages, permissions, share, updates, users
+from mnemerynne import (accounts, api_tokens, diagnostics, fs, group_refs, m365_mail, messages, permissions, share,
+                        updates, users)
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
@@ -496,14 +497,14 @@ class AdminGroupBody(BaseModel):
     group: str = Field(min_length=1, max_length=2000)   # one or more, ';'-separated (AD or "Tenant / Group")
 
 
-class DiagnosticsBody(BaseModel):
-    group: str = Field("", max_length=2000)   # group_refs text; empty switches diagnostics off
+class OptionalGroupBody(BaseModel):
+    group: str = Field("", max_length=2000)   # group_refs text; empty switches the feature off
 
 
-async def _diagnostics_status(request: Request, conn: sqlite3.Connection) -> dict:
+async def _group_status(request: Request, conn: sqlite3.Connection, value: str) -> dict:
+    """A feature gated to one group (none = off): the group, who is in it, and the groups to pick from."""
     directory = request.app.state.directory
     ad = await anyio.to_thread.run_sync(directory.groups) if directory.enabled else []
-    value = diagnostics.group(conn)
     members = []
     if value:
         rows = conn.execute("SELECT * FROM users WHERE active = 1").fetchall()
@@ -513,26 +514,47 @@ async def _diagnostics_status(request: Request, conn: sqlite3.Connection) -> dic
             "groups": group_refs.choices(conn, ad)}
 
 
-@router.get("/api/admin/settings/diagnostics")
-async def get_diagnostics(request: Request, user=Depends(admin_api_user), conn: sqlite3.Connection = Depends(get_db)):
-    """Development diagnostics: the group whose members' Claude may pull raw internals (diagnose)."""
-    return await _diagnostics_status(request, conn)
-
-
-@router.put("/api/admin/settings/diagnostics")
-async def set_diagnostics(body: DiagnosticsBody, request: Request, user=Depends(admin_api_user),
-                          conn: sqlite3.Connection = Depends(get_db)):
+async def _resolve_group(request: Request, conn: sqlite3.Connection, text: str) -> str:
     directory = request.app.state.directory
     known = await anyio.to_thread.run_sync(directory.groups) if directory.enabled else []
     try:
-        value = group_refs.resolve(conn, body.group, known) if body.group.strip() else ""
+        return group_refs.resolve(conn, text, known) if text.strip() else ""
     except group_refs.GroupRefError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+
+
+@router.get("/api/admin/settings/diagnostics")
+async def get_diagnostics(request: Request, user=Depends(admin_api_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Development diagnostics: the group whose members' Claude may pull raw internals (diagnose)."""
+    return await _group_status(request, conn, diagnostics.group(conn))
+
+
+@router.put("/api/admin/settings/diagnostics")
+async def set_diagnostics(body: OptionalGroupBody, request: Request, user=Depends(admin_api_user),
+                          conn: sqlite3.Connection = Depends(get_db)):
+    value = await _resolve_group(request, conn, body.group)
     with transaction(conn):
         old = group_refs.label(conn, diagnostics.group(conn))
         diagnostics.set_group(conn, value)
         _log(conn, user, "settings.diagnostics", group_refs.label(conn, value) or "(off)", f"was {old or '(off)'}")
-    return await _diagnostics_status(request, conn)
+    return await _group_status(request, conn, diagnostics.group(conn))
+
+
+@router.get("/api/admin/settings/claude-mail")
+async def get_claude_mail(request: Request, user=Depends(admin_api_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Mail and calendar for Claude: the group whose members' Claude gets the mail tools (m365_mail)."""
+    return await _group_status(request, conn, m365_mail.claude_group(conn))
+
+
+@router.put("/api/admin/settings/claude-mail")
+async def set_claude_mail(body: OptionalGroupBody, request: Request, user=Depends(admin_api_user),
+                          conn: sqlite3.Connection = Depends(get_db)):
+    value = await _resolve_group(request, conn, body.group)
+    with transaction(conn):
+        old = group_refs.label(conn, m365_mail.claude_group(conn))
+        m365_mail.set_claude_group(conn, value)
+        _log(conn, user, "settings.claude_mail", group_refs.label(conn, value) or "(off)", f"was {old or '(off)'}")
+    return await _group_status(request, conn, m365_mail.claude_group(conn))
 
 
 @router.get("/api/admin/settings/admin-group")

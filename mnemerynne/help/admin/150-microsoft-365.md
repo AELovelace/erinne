@@ -41,7 +41,9 @@ Access → Settings → Microsoft 365 → SharePoint: pick the tenant, paste a s
 
 ## Mail and calendar
 
-People in the Erynne agent group with a linked account get tools to search and read their mail, see their calendar, search SharePoint live, and draft emails and replies. Drafts are cards under the answer; **Save to Drafts** puts the draft in that account's Outlook Drafts. Nothing is sent, moved or deleted. Mail text never goes to Claude through the connector (people who use *Use External API* in chat send it under their own key); the tool log keeps message ids, not text.
+People in the Erynne agent group with a linked account get tools to search and read their mail, see their calendar, search SharePoint live, and draft emails and replies. Drafts are cards under the answer; **Save to Drafts** puts the draft in that account's Outlook Drafts. Nothing is sent, moved or deleted. The tool log keeps message ids, not text.
+
+**Mail and calendar for Claude.** By default mail text never goes to Claude through the connector (people who use *Use External API* in chat send it under their own key). Access → Connectors → **Mail and calendar for Claude** names one group whose members' Claude gets the same tools through the connector: search and read their own mail and the shared mailboxes they may use, see their calendar, and draft replies and new emails as proposals they save to Drafts from the approve link. The live SharePoint search stays with Erynne (Claude gets SharePoint through libraries switched on for it). What Claude reads goes to Anthropic, so put only people in the group who accept that; each still needs a linked account. Leave the box empty to keep mail away from Claude. The connector's call log holds message ids and a draft's length, never its text.
 
 **Shared mailboxes** are listed per tenant with an optional group. Exchange still decides who may open one: the person needs Full Access there too.
 
