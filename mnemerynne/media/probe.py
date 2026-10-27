@@ -52,6 +52,7 @@ class Info:
     genre: str = ""
     taken_at: str | None = None
     camera: str = ""
+    pages: int | None = None                                 # documents (PDF)
     cover: bytes | None = field(default=None, repr=False)   # embedded art
 
 
@@ -219,6 +220,12 @@ def read(settings: Settings, path: Path, section: str, kind: str) -> Info:
         _picture(info, path)
         info.title = path.stem
         return info
+    if kind == "document":
+        from mnemerynne.ingest import pdf
+        info.title = path.stem
+        info.container = "pdf"
+        info.pages = pdf.page_count(path)     # PdfError (a ValueError) marks the file as failed
+        return info
     if kind == "audio":
         _music_tags(info, path)
     data = ffprobe(settings, path)
@@ -244,7 +251,7 @@ def decide(kind: str, container: str | None, video: str | None, audio: str | Non
     audio_ok = set(BROWSER_AUDIO) | {c for c in ("ac3", "eac3", "alac") if caps.get(c)}
     container = (container or "").lower()
     audio_fine = audio is None or audio in audio_ok or bool(PCM.match(audio or ""))
-    if kind == "image":
+    if kind in ("image", "document"):
         return "direct"
     if kind == "audio" or video is None:
         if container in DIRECT_CONTAINERS and audio_fine:

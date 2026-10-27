@@ -5,13 +5,17 @@
 <main class="remote-term" id="remote">
   <section class="remote-window" id="remote-window" aria-label="Remote window">
     <header class="remote-title">
-      <span class="remote-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      {#- The three dots work like a window's: red closes (back to the list; on the list, it refreshes), yellow
+          collapses the window to its frame, green expands it to the whole page (remote.js). -#}
+      <span class="remote-dots">
+        <button type="button" class="remote-dot" id="remote-close" title="Close: back to the list (again: refresh)" aria-label="Close"></button>
+        <button type="button" class="remote-dot" id="remote-collapse" title="Collapse" aria-label="Collapse"></button>
+        <button type="button" class="remote-dot" id="remote-full" title="Expand" aria-label="Expand" aria-pressed="false"></button>
+      </span>
       <span class="remote-where"><strong id="remote-name">Home</strong><span class="muted" id="remote-path"> · resources</span></span>
       <span class="remote-buttons">
-        <button type="button" class="tool" id="remote-home" title="Home">⌂</button>
         <button type="button" class="tool" id="remote-reload" title="Reload" hidden>↻</button>
         <a class="tool" id="remote-open" target="_blank" rel="noopener" title="Open in a new tab" hidden>⧉</a>
-        <button type="button" class="tool" id="remote-full" title="Fullscreen" aria-pressed="false">⛶</button>
         <button type="button" class="tool remote-list-button" id="remote-list-button" title="Resources" aria-expanded="false" aria-controls="remote-list">▤</button>
       </span>
     </header>

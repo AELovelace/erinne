@@ -160,28 +160,7 @@
     return !!state.selected && state.selected.kind === kind && state.selected.id === id;
   }
 
-  function treeNode(label, opts) {
-    const li = el("li");
-    li.setAttribute("role", "treeitem");
-    const row = el("div", "tree-row" + (opts.current ? " current" : ""));
-    const toggle = el("button", "tree-toggle", opts.expandable ? (opts.expanded ? "▾" : "▸") : "");
-    toggle.type = "button";
-    toggle.tabIndex = -1;
-    toggle.disabled = !opts.expandable;
-    toggle.setAttribute("aria-label", opts.expanded ? "Collapse" : "Expand");
-    if (opts.expandable) toggle.addEventListener("click", opts.onToggle);
-    const btn = el("button", "tree-label", label);
-    btn.type = "button";
-    btn.style.paddingLeft = (0.3 + opts.depth * 0.85) + "rem";
-    btn.addEventListener("click", opts.onOpen);
-    if (opts.current) btn.setAttribute("aria-current", "true");
-    if (opts.title) btn.title = opts.title;
-    row.append(toggle, btn);
-    if (opts.badge) row.appendChild(el("span", "ax-badge", opts.badge));
-    li.appendChild(row);
-    if (opts.expandable) li.setAttribute("aria-expanded", String(!!opts.expanded));
-    return li;
-  }
+  const treeNode = window.Erynne.treeNode;   // shared with the Signage browser (picker.js)
 
   async function toggle(key, libId) {
     if (state.expanded.has(key)) state.expanded.delete(key);

@@ -45,22 +45,15 @@ Adding, changing and removing sources is logged (`media.*`).
 
 ## Signage
 
-**Access → Signage** sets what screens show while nobody is using them, like digital signage.
+Screens double as digital signage: playlists of pictures, clips, PDFs, text, web pages and announcements, scheduled per screen or group, with each screen's state in view. See [Signage](signage.md).
 
-**Slideshows** are lists of slides:
+## Screen boxes: Kiosk settings
 
-- **Pictures and clips from a folder** of the Media library, optionally with its subfolders. Pictures added to the folder appear by themselves within a few minutes. Clips play only if the browser can play them as they are, such as MP4 with H.264; others are skipped.
-- **A video** from the library, with or without sound.
-- **Text:** a title and a few lines, on a colour or a picture.
-- **A web page**, shown for a set time. Many sites refuse to be shown inside another page, so try it on a screen first.
-- **Announcements for everyone:** each current announcement without a group becomes a slide. Announcements for a group never appear, because anyone walking past can see the TV.
+A TV run by a screen box (`deploy/screen/` in the repository) has **⚙ Kiosk settings** in its menu: the box's Mnemerynne address, system volume, top bar, kiosk PIN and updates. Only admins can open them:
 
-Each slide shows for the slideshow's number of seconds unless it sets its own. Videos play to the end.
+- **From a phone:** the TV shows a code and a QR code. Scan it, or open `/media/kiosk` and type the code, and approve. Only admins can approve.
+- **With the kiosk PIN,** if one was set in the settings. It's the only way in while the box can't reach the server.
 
-**Screens** lists every paired screen, whoever owns it. Each screen has rules, and the first rule that matches the screen's own clock decides what it shows:
+**Show the top bar** gives that TV's page a short top bar (Ask, Files, the Wiki, **Sign in**), for a box used as a thin client. Anyone who signs in on the TV is signed out when they go back to the TV, and after ten minutes untouched. It's stored on the server for that screen, so changing it needs a phone approval.
 
-- **Days, From and To.** From and To the same means all day. To earlier than From runs past midnight.
-- **When idle:** the slideshow starts once nothing has played and nobody has pressed a key for the screen's idle time. Any key, or anything cast from a phone, stops it.
-- **Always (signage):** the slideshow runs whenever nothing is cast to the screen, and keys don't stop it. Casting still interrupts, and the slideshow resumes when playback ends.
-
-Screens show the slideshow's pictures and videos even if their owner couldn't open those folders. Changes reach screens that are on within seconds. Re-pairing a screen under the same name keeps its rules.
+Opening the settings (`kiosk.unlock`) and changing the top bar (`kiosk.top_bar`) are logged, with the admin who approved. The box's README (`deploy/screen/README.md`, step 6) covers the rest.

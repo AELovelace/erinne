@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Kiosk settings · {{ assistant_name }}{% endblock %}
+{% block body %}
+{% include "_nav.html" %}
+{#- A screen box's TV asked to open its Kiosk settings (web/kiosk.py): an admin approves here, from the
+    QR code on the TV or by typing its code. -#}
+<main class="doc kiosk-approve">
+  <h1>⚙ Kiosk settings</h1>
+  {% if not is_admin %}
+  <p>Only admins can open a screen's Kiosk settings. Ask an admin to scan the code on the TV.</p>
+  {% else %}
+  <p>A TV is asking to open its Kiosk settings: its address, updates, volume and top bar. Approve only if
+     you are at that TV, or someone you trust there asked you to.</p>
+  <form id="kiosk-approve" class="settings-form">
+    <label>Code on the TV <input id="kiosk-code" value="{{ code }}" autocomplete="off" spellcheck="false" required></label>
+    <div><button type="submit">Open the settings</button></div>
+  </form>
+  <p id="kiosk-result" role="status"></p>
+  <script>
+  "use strict";
+  (function () {
+    const form = document.getElementById("kiosk-approve"), out = document.getElementById("kiosk-result");
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      out.className = ""; out.textContent = "";
+      const r = await fetch("/api/media/kiosk/approve", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: document.getElementById("kiosk-code").value }) }).catch(function () { return null; });
+      const body = r ? await r.json().catch(function () { return {}; }) : {};
+      if (!r || !r.ok) { out.className = "error"; out.textContent = body.detail || "That didn't work. Try again."; return; }
+      form.hidden = true;
+      out.textContent = "The settings are opening on " + body.screen + ". They lock again after ten minutes unused.";
+    });
+  })();
+  </script>
+  {% endif %}
+</main>
+{% endblock %}

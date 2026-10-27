@@ -134,6 +134,36 @@ def frame(settings: Settings, path: Path, at_s: float) -> bytes | None:
     return out.stdout if out.returncode == 0 and out.stdout else None
 
 
+def pdf_page(path: Path, index: int, max_side: int = 1920) -> bytes | None:
+    """One page of a PDF as JPEG bytes (pypdfium2), the longest side `max_side`; None when it can't be."""
+    import io
+
+    from mnemerynne.ingest import pdf as pdfmod
+
+    try:
+        doc = pdfmod.open_pdf(path)
+    except pdfmod.PdfError as exc:
+        log.info("No page from %s: %s", path, exc)
+        return None
+    try:
+        if index < 0 or index >= len(doc):
+            return None
+        page = doc[index]
+        try:
+            width, height = page.get_size()
+            image = page.render(scale=max_side / max(width, height, 1.0)).to_pil()
+        finally:
+            page.close()
+        out = io.BytesIO()
+        image.convert("RGB").save(out, "JPEG", quality=86, optimize=True)
+        return out.getvalue()
+    except Exception as exc:  # pdfium raises its own errors; a bad page must not stop the catalog
+        log.info("No page %d from %s: %s", index + 1, path, exc)
+        return None
+    finally:
+        doc.close()
+
+
 def read_file(path: Path, limit: int = 40 * 1024 * 1024) -> bytes | None:
     try:
         if path.stat().st_size > limit:

@@ -1,0 +1,59 @@
+/* CRT effects for signage (signage_render.js applyEffects): an old monitor playing the playlist. Everything
+   is compositor-friendly (opacity, transforms, gradients) so a small box keeps its frame rate; the one
+   filter, the colour fringe, is only put on still pictures and text. --crt (0 to 1) scales it all. */
+
+.mc-crt { --crt: .6; position: relative; overflow: hidden; background: #000; isolation: isolate; }
+/* Curvature: rounded corners, a dark bevel, the picture a touch bigger so no black edge shows. */
+.mc-crt-curvature { border-radius: 2% / 3%; }
+.mc-crt-curvature > .mc-sg-layer > * { transform: scale(1.02); }
+.mc-crt-curvature > .mc-crt-overlay > .mc-crt-vignette {
+  position: absolute; inset: 0; border-radius: inherit;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, calc(.55 * var(--crt))) 100%);
+  box-shadow: inset 0 0 calc(6vw * var(--crt)) rgba(0, 0, 0, calc(.8 * var(--crt))),
+              inset 0 0 1.5vw rgba(0, 0, 0, calc(.9 * var(--crt)));
+}
+.mc-crt-overlay { position: absolute; inset: 0; z-index: 5; pointer-events: none; overflow: hidden; border-radius: inherit; }
+.mc-crt-overlay > * { display: none; }
+/* Scanlines and a faint phosphor mask. */
+.mc-crt-scanlines > .mc-crt-overlay > .mc-crt-scan {
+  display: block; position: absolute; inset: 0;
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, calc(.38 * var(--crt))) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(255, 0, 0, calc(.05 * var(--crt))) 0 1px, rgba(0, 255, 0, calc(.05 * var(--crt))) 1px 2px,
+                              rgba(0, 0, 255, calc(.05 * var(--crt))) 2px 3px);
+}
+/* Flicker: the scanlines breathe (the picture's own fade stays smooth), and a bar rolls down every few seconds. */
+.mc-crt-flicker > .mc-crt-overlay > .mc-crt-scan { animation: mc-crt-flicker 90ms steps(2) infinite; }
+.mc-crt-flicker > .mc-crt-overlay > .mc-crt-bar {
+  display: block; position: absolute; left: 0; right: 0; height: 12%;
+  background: linear-gradient(transparent, rgba(255, 255, 255, calc(.06 * var(--crt))), transparent);
+  animation: mc-crt-roll 8s linear infinite;
+}
+@keyframes mc-crt-flicker { 0% { opacity: 1; } 50% { opacity: calc(1 - .35 * var(--crt)); } 100% { opacity: 1; } }
+@keyframes mc-crt-roll { from { top: -12%; } to { top: 100%; } }
+/* Glow: a bit more colour and contrast, bloom on text. */
+.mc-crt-glow > .mc-sg-layer { filter: saturate(calc(1 + .25 * var(--crt))) contrast(calc(1 + .1 * var(--crt))); }
+.mc-crt-glow .mc-sg-text h1, .mc-crt-glow .mc-sg-text p, .mc-crt-glow .mc-sg-html {
+  text-shadow: 0 0 calc(.4em * var(--crt)) currentColor, 0 0 calc(1.2em * var(--crt)) rgba(255, 46, 151, calc(.6 * var(--crt)));
+}
+/* Fringe: the three colours slightly apart, on pictures (an SVG filter) and on text (shadows). */
+.mc-crt-fringe .mc-sg-fit img:not(.mc-sg-blur) { filter: url(#mc-crt-fringe); }
+.mc-crt-fringe .mc-sg-text h1, .mc-crt-fringe .mc-sg-text p, .mc-crt-fringe .mc-sg-html, .mc-crt-fringe .mc-sg-kicker {
+  text-shadow: calc(-1.5px * var(--crt)) 0 rgba(0, 240, 255, .75), calc(1.5px * var(--crt)) 0 rgba(255, 20, 80, .8);
+}
+/* Power: the tube warming up from a line of light, and going dark the same way. */
+.mc-crt-power-on { animation: mc-crt-on .65s cubic-bezier(.2, .8, .3, 1) both; }
+.mc-crt-power-off { animation: mc-crt-off .45s ease-in both; }
+@keyframes mc-crt-on {
+  0% { transform: scaleY(.005) scaleX(.6); filter: brightness(6); }
+  40% { transform: scaleY(.01) scaleX(1); filter: brightness(4); }
+  100% { transform: none; filter: brightness(1); }
+}
+@keyframes mc-crt-off {
+  0% { transform: none; filter: brightness(1); }
+  60% { transform: scaleY(.01) scaleX(1); filter: brightness(4); }
+  100% { transform: scaleY(.002) scaleX(.2); filter: brightness(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mc-crt-flicker > .mc-crt-overlay > .mc-crt-scan, .mc-crt-flicker > .mc-crt-overlay > .mc-crt-bar { animation: none; }
+}

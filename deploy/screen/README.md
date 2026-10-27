@@ -14,6 +14,8 @@ How it works:
   the network and the server, then carries on.
 - **Wi-Fi from a phone:** with no network, the box offers its own Wi-Fi hotspot, and the TV shows how
   to join it and pick the box's network from your phone (step 5).
+- **Kiosk settings:** admins change the box's address, volume and top bar, and install updates, from the
+  TV's menu with a phone approval or a PIN (step 6).
 
 ## 1. The box
 
@@ -34,15 +36,18 @@ sudo dnf install -y git && git clone https://github.com/AELovelace/erinne.git
 sudo bash erinne/deploy/screen/install.sh https://erynne.example.com
 ```
 
-Later updates: `cd ~/erinne && git pull && sudo bash deploy/screen/install.sh` (it keeps the address).
-The installer needs `wifi-setup.py` beside it; to copy files instead of cloning, copy both.
+The installer copies the clone's commit to `/opt/mnemerynne-screen`, the box's own copy, which **Kiosk
+settings → Updates** moves between releases (step 6). Updating by hand still works:
+`cd ~/erinne && git pull && sudo bash deploy/screen/install.sh --keep-options` (it keeps the address and
+the options). The installer needs `wifi-setup.py` beside it; to copy files instead of cloning, copy both,
+but then Kiosk settings can't update the box.
 
 It takes a few minutes. It:
 
 - enables RPM Fusion (free);
 - swaps Fedora's FFmpeg for RPM Fusion's, because Fedora's own can't decode H.264, which Mnemerynne's
   transcoder sends;
-- installs the VA-API drivers, cage, Firefox and PipeWire, and what the Wi-Fi setup needs;
+- installs the VA-API drivers, cage, Firefox and PipeWire, git, and what the Wi-Fi setup needs;
 - writes its files and starts the screen;
 - checks the box and prints what it found (step 4).
 
@@ -55,7 +60,11 @@ Options:
 | `--audio auto` | Let PipeWire choose the output, instead of HDMI. |
 | `--youtube-any-codec` | Let YouTube send VP9 or AV1. By default it's asked for H.264, which this GPU decodes. VP9 or AV1 are decoded on the CPU, which manages 1080p at 30 fps but struggles at 60 fps. |
 | `--no-auto-updates` | Don't install updates nightly. By default `dnf5-automatic` installs them and reboots when an update needs it. |
-| `--no-wifi-setup` | No setup hotspot. Firefox starts on a plain local page that waits for the server. |
+| `--no-wifi-setup` | No setup hotspot. The start page and Kiosk settings are still there. |
+| `--volume 0-100` | The system volume (default 100). Kiosk settings changes it too. |
+| `--keep-options` | Start from the options the box already has, then apply the ones given. Without it, options not given go back to their defaults. |
+| `--reconfigure` | `--keep-options`, and install no packages: a new address, say. |
+| `--update screen-vX.Y.Z`, `--rollback` | Move the box to a release, or back to the one before the last update. Kiosk settings runs these. |
 | `--dry-run` | Show the plan; change nothing. |
 
 Run it again at any time, for example with a new address. It rewrites its files and restarts the screen.
@@ -81,7 +90,8 @@ sudo bash install.sh --check
 | **the GPU decodes H.264** | VA-API works with the i965 driver; video is cheap. If this says FAIL, video still plays, on the CPU. |
 | **… answers** / **the screen page answers** | The box reaches the server, its certificate is trusted, and Media is turned on. |
 | **running on tty1** / **sound goes to HDMI** | The kiosk is up and sound goes to the TV. If the TV was off, give it 30 seconds after turning it on. |
-| **Wi-Fi setup and start page running** / **can be a hotspot** | The Wi-Fi helper answers, and the Wi-Fi card can offer the setup hotspot. |
+| **start page and Kiosk settings running** / **can be a hotspot** | The helper answers, and the Wi-Fi card can offer the setup hotspot. |
+| **release …** | Which screen release the box runs, from `/opt/mnemerynne-screen`. |
 
 ## 5. Wi-Fi
 
@@ -105,6 +115,38 @@ mouse). The same page lists the networks.
 Only the box itself and phones on its hotspot can reach the setup page; nothing is opened on your
 network. The hotspot's password is new every time it starts.
 
+## 6. Kiosk settings
+
+**⚙ Kiosk settings** in the TV's menu (with a keyboard or air mouse) opens the box's settings. They are
+for Mnemerynne admins:
+
+- **With a phone:** the TV shows a code and a QR code. An admin scans it (or opens `/media/kiosk` and types
+  the code), signs in if asked, and approves. The TV opens the settings.
+- **With the kiosk PIN:** **Use the kiosk PIN** on the same screen. A new box has no PIN; set one in the
+  settings. Without the server, the PIN is the only way in.
+
+They lock again after ten minutes untouched, or with **Lock**.
+
+| Setting | What it does |
+| --- | --- |
+| **Mnemerynne address** | The server the TV shows. The box checks the new one answers like Mnemerynne, then runs `install.sh --reconfigure` with it and restarts. The TV shows the new server's pairing code. |
+| **Show the top bar** | The TV page gets a short top bar: Ask, Files and the Wiki, and **Sign in**. Whoever signs in on the TV is signed out when they go back to the TV (**📺 Back to TV**), or after ten minutes untouched. Kept on the server for this screen, so it needs a phone approval to change. |
+| **System volume** | The sound card's level, kept across restarts. Media's own volume (− and +) is on top of it. |
+| **Updates** | The installed `screen-v*` release, newer ones with their notes, **Install**, and **Roll back** to the one before the last update. Only newer releases install, and never over changes made by hand in `/opt/mnemerynne-screen`. **Install system updates now** runs `dnf5 upgrade`; **Reboot to finish** shows when a new kernel is waiting. |
+| **Kiosk PIN** | 4 to 12 digits. Five wrong tries lock it for five minutes. |
+| **This box** | Its name, addresses, system and server; **Wi-Fi…**, **Restart the screen**, **Reboot the box**. |
+
+**When the TV can't connect** (a new box, or a server that moved), the start page offers **Change the
+Mnemerynne address** after 20 seconds. With a kiosk PIN set it asks for the PIN first. With none, anyone at
+the TV can change it, so set a PIN once the box is in place.
+
+Updates, address changes and system updates run in their own systemd unit (`mnemerynne-screen-update`,
+`-config`, `-osupdate`). The TV shows "Updating the screen…" until they finish, and the settings page shows
+their last lines. In full: `journalctl -u mnemerynne-screen-update`.
+
+**Releases:** the box follows git tags named `screen-vX.Y.Z`. Tag a release only on a commit that's ready
+for every box, and push the tag (`git push origin screen-v0.3.0`).
+
 ## When something's wrong
 
 | What you see | What to do |
@@ -112,6 +154,9 @@ network. The hotspot's password is new every time it starts.
 | A black screen | `journalctl -u mnemerynne-screen -b` shows why cage or Firefox stopped. `sudo systemctl restart mnemerynne-screen` starts it again. |
 | **Connecting to … / Waiting for the network** | The box can't reach the server: check the cable and DNS, and `curl -I https://erynne.example.com/healthz`. Without any network it offers the setup hotspot within about 90 seconds. |
 | No setup hotspot | `journalctl -u mnemerynne-screen-wifi -b`. `sudo bash install.sh --check` says whether the Wi-Fi card can be a hotspot. |
+| Kiosk settings: "no copy of the repository" | The box was installed from copied files. Clone the repository onto it and run the installer from the clone once. |
+| An update didn't finish | **Kiosk settings → Updates** shows its last lines; `journalctl -u mnemerynne-screen-update` the rest. **Roll back** returns to the release before. |
+| Forgot the kiosk PIN | Approve from an admin's phone instead, then set a new one. Or over SSH: `sudo rm /etc/mnemerynne-screen.pin`. |
 | A 404 page | Media is off, or the screens group isn't set (Settings → Media). |
 | No sound | Is the TV's input on this box, and is its volume up? `sudo bash install.sh --check` says whether sound goes to HDMI. `--audio auto` leaves the choice to PipeWire. |
 | Stutters on films | The GPU isn't decoding (see `--check`), or the server is transcoding something heavy. Admin → Settings → Media shows running transcodes. |
@@ -122,12 +167,15 @@ To use the box for something else: `sudo bash install.sh --uninstall`, and remov
 
 | File | What it's for |
 | --- | --- |
-| `/etc/mnemerynne-screen.conf` | The address and the sound setting. |
+| `/etc/mnemerynne-screen.conf` | The address and the options, so `--keep-options` and Kiosk settings keep them. |
+| `/etc/mnemerynne-screen.pin` | Kiosk settings' PIN, as a scrypt hash (root only). Not there until one is set. |
+| `/opt/mnemerynne-screen` | The box's own copy of the repository, at the installed release. |
+| `/var/lib/mnemerynne-screen/previous` | The release before the last update, for **Roll back**. |
 | `/etc/systemd/system/mnemerynne-screen.service`, `/etc/pam.d/mnemerynne-screen` | cage on tty1 with a login session. That session gives it the GPU, input and PipeWire. |
 | `/usr/local/bin/mnemerynne-screen-session` | Starts Firefox. |
 | `/usr/local/bin/mnemerynne-screen-audio` | Keeps sound on HDMI. |
 | `/usr/local/share/mnemerynne-screen/` | `start.html`, the start page without the Wi-Fi setup; `user.js`, the Firefox preferences, copied in at every start. |
-| `/usr/local/libexec/mnemerynne-screen-wifi`, `/etc/systemd/system/mnemerynne-screen-wifi.service` | The start page (`http://127.0.0.1:9187/`) and the Wi-Fi setup, as root: it starts NetworkManager's hotspot and joins networks. |
+| `/usr/local/libexec/mnemerynne-screen-wifi`, `/etc/systemd/system/mnemerynne-screen-wifi.service` | The helper, as root: the start page (`http://127.0.0.1:9187/`), Kiosk settings (`/settings`), and the Wi-Fi setup (it starts NetworkManager's hotspot and joins networks). |
 | `/etc/NetworkManager/dnsmasq-shared.d/mnemerynne-screen.conf` | On the hotspot, every name resolves to the box, so phones open the setup page. |
 | firewalld zone `nm-shared` | HTTP allowed, for the setup page on the hotspot only. |
 | `/etc/firefox/policies/policies.json` | Autoplay allowed for the server only; no extensions, updates, telemetry or first-run pages. It applies to every Firefox on the box, which on a dedicated box is only this one. |

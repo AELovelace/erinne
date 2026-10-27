@@ -11,6 +11,8 @@
       <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
       <button type="submit">Sign in</button>
     </form>
+    {#- On a screen box's TV (its top bar is on): there is no Back button in the kiosk. -#}
+    {% if kiosk_back %}<p><a href="/media/screen" data-kiosk-back>📺 Back to TV</a></p>{% endif %}
   </div>
 </main>
 {% endblock %}

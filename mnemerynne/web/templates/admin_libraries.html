@@ -164,11 +164,30 @@
     <div id="announcements-admin" aria-live="polite"><p class="muted">Loading…</p></div>
   </section>
 
-  <section class="inbox admin" data-panel="signage" role="tabpanel" aria-label="Signage" hidden>
-    <p class="muted">What screens (TVs paired under Media → Screens) show while nobody is using them: slideshows of a
-      Media folder's pictures and clips, videos, text, web pages and the announcements for everyone, by weekday and
-      time of day. Screens show these whatever their owner may open.</p>
-    <div id="signage-admin" aria-live="polite"><p class="muted">Loading…</p></div>
+  {#- Signage (admin_signage.js): the content browser on the left (the Signage folder and the Media library, with
+      upload), playlists, the schedule, the screens and settings on the right. -#}
+  <section class="ax sg" data-panel="signage" role="tabpanel" aria-label="Signage" hidden>
+    <details class="ax-side ax-tree glass sg-side" id="signage-side" open>
+      <summary>Content ▾</summary>
+      <div class="sg-browser-tools" id="signage-browser-tools">
+        <button type="button" class="small" id="signage-upload-button" hidden>Upload…</button>
+        <button type="button" class="link small" id="signage-new-folder" hidden>New folder</button>
+        <button type="button" class="link small" id="signage-add-selected" hidden>Add to playlist ▸</button>
+        <input type="file" id="signage-upload" multiple hidden>
+      </div>
+      <ul class="tree" id="signage-tree" role="tree" aria-label="Signage content"></ul>
+      <div class="sg-files fm-list grid" id="signage-files" aria-label="Files"></div>
+      <ul class="sg-queue" id="signage-queue" hidden></ul>
+    </details>
+    <section class="ax-pane glass sg-pane" aria-live="polite">
+      <nav class="ax-tabs sg-tabs" id="signage-tabs" role="tablist" aria-label="Signage sections">
+        <button type="button" role="tab" data-sg-tab="playlists">Playlists</button>
+        <button type="button" role="tab" data-sg-tab="schedule">Schedule</button>
+        <button type="button" role="tab" data-sg-tab="screens">Screens</button>
+        <button type="button" role="tab" data-sg-tab="settings">Settings</button>
+      </nav>
+      <div id="signage-admin"><p class="muted">Loading…</p></div>
+    </section>
   </section>
 
   <section class="inbox admin" data-panel="people" role="tabpanel" hidden>
@@ -235,6 +254,10 @@
 <script src="{{ static('agent.js') }}"></script>
 <script src="{{ static('admin_approvals.js') }}"></script>
 <script src="{{ static('admin_notices.js') }}"></script>
+<link rel="stylesheet" href="{{ static('media.css') }}">
+<link rel="stylesheet" href="{{ static('signage_crt.css') }}">
+<script src="{{ static('signage_render.js') }}"></script>
 <script src="{{ static('admin_signage.js') }}"></script>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 <script src="{{ static('admin_remote.js') }}"></script>
 {% endblock %}

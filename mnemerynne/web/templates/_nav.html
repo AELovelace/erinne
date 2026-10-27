@@ -1,17 +1,22 @@
-<header class="topbar main-bar">
+{%- if screen is defined and screen %}
+{#- The TV's own page with its top bar on (Kiosk settings): nobody is signed in here, so the pages
+    ask someone to sign in; going back to the TV signs them out (web/media.py screen_page). -#}
+<header class="topbar main-bar kiosk-bar">
   <a class="brand" href="/"><span class="blossom" aria-hidden="true">🌸</span>{{ assistant_name }}</a>
   <nav class="tabs" aria-label="Pages">
-    <a href="/" {% if active == 'chat' %}aria-current="page"{% endif %}>Ask</a>
-    <a href="/files" {% if active == 'files' %}aria-current="page"{% endif %}>Files</a>
-    <a href="/wiki" {% if active == 'wiki' %}aria-current="page"{% endif %}>Wiki</a>
-    {% if has_media %}<a href="/media" {% if active == 'media' %}aria-current="page"{% endif %}>Media</a>{% endif %}
-    {% if has_remote %}<a href="/remote" {% if active == 'remote' %}aria-current="page"{% endif %}>Remote</a>{% endif %}
-    {% if has_rooms %}<a href="/rooms" {% if active == 'rooms' %}aria-current="page"{% endif %}>Rooms</a>{% endif %}
-    <a href="/preferences" {% if active == 'preferences' %}aria-current="page"{% endif %}>Preferences</a>
-    {% if is_admin %}<a href="/admin/libraries" {% if active == 'admin' %}aria-current="page"{% endif %}>Access</a>{% endif %}
+    <a href="/">Ask</a>
+    <a href="/files">Files</a>
+    <a href="/wiki">Wiki</a>
+    <a href="/media/screen" aria-current="page">TV</a>
   </nav>
-  {#- On a phone the bar is one row (brand, ✉, ☰) with the tabs as a strip under it; what follows the tabs
-      here sits inline on a desktop and in the ☰ menu on a phone (nav.js, .nav-more). -#}
+  <a class="kiosk-signin" href="/login">Sign in</a>
+</header>
+<div class="notices" id="notices" aria-live="polite" hidden></div>
+{%- else %}
+<header class="topbar main-bar">
+  <a class="brand" href="/"><span class="blossom" aria-hidden="true">🌸</span>{{ assistant_name }}</a>
+  {#- On a phone the bar is one row (brand, ✉, ☰) and everything in .nav-more, the tabs too, is the ☰ menu
+      (nav.js); on a desktop .nav-more is display: contents, so it all sits inline (the tabs after the brand). -#}
   {%- if has_rooms %}
   <a class="notify-button" id="notify-button" href="/rooms#inbox" title="Messages">✉<span class="badge unread" id="nav-unread" {% if not nav_unread %}hidden{% endif %}>{{ nav_unread or '' }}</span></a>
   {%- else %}
@@ -20,6 +25,17 @@
   <button type="button" class="nav-menu" id="nav-menu" aria-haspopup="menu" aria-controls="nav-more" aria-expanded="false" title="Menu">☰</button>
   <div class="nav-more" id="nav-more">
     <span class="muted nav-who">{{ user.username }}{% if is_admin %} · admin{% endif %}</span>
+    <nav class="tabs" aria-label="Pages">
+      <a href="/" {% if active == 'chat' %}aria-current="page"{% endif %}>Ask</a>
+      <a href="/files" {% if active == 'files' %}aria-current="page"{% endif %}>Files</a>
+      <a href="/wiki" {% if active == 'wiki' %}aria-current="page"{% endif %}>Wiki</a>
+      {% if has_media %}<a href="/media" {% if active == 'media' %}aria-current="page"{% endif %}>Media</a>{% endif %}
+      {% if has_remote %}<a href="/remote" {% if active == 'remote' %}aria-current="page"{% endif %}>Remote</a>{% endif %}
+      {% if has_rooms %}<a href="/rooms" {% if active == 'rooms' %}aria-current="page"{% endif %}>Rooms</a>{% endif %}
+      <a href="/preferences" {% if active == 'preferences' %}aria-current="page"{% endif %}>Preferences</a>
+      {% if is_admin %}<a href="/admin/libraries" {% if active == 'admin' %}aria-current="page"{% endif %}>Access</a>{% endif %}
+    </nav>
+    {% if kiosk_back %}<a class="help-link kiosk-back" href="/media/screen" data-kiosk-back>📺 Back to TV</a>{% endif %}
     <a class="help-link" href="/help" target="_blank" rel="noopener">Help</a>
     <form method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
   </div>
@@ -34,4 +50,5 @@
   </div>
   <div class="msg-host"></div>
 </dialog>
+{%- endif %}
 {%- endif %}

@@ -195,6 +195,17 @@
     return slash < 0 ? { view: raw || "home", arg: "" } : { view: raw.slice(0, slash), arg: raw.slice(slash + 1) };
   }
 
+  /* The narrow browser's dropdown of the menu's views (none on a screen). */
+  const viewSelect = $("mc-view-select");
+  if (viewSelect) {
+    document.querySelectorAll(".mc-menu-item[data-view]").forEach(function (b) {
+      const option = el("option", null, b.querySelector(".mc-icon").textContent + "  " + b.lastChild.textContent.trim());
+      option.value = b.dataset.view;
+      viewSelect.appendChild(option);
+    });
+    viewSelect.addEventListener("change", function () { go(viewSelect.value); });
+  }
+
   const SECTION_OF = { screens: "screens", cast: "screens", pair: "screens", home: "home", movies: "movies", movie: "movies", music: "music", album: "music",
                        artist: "music", pictures: "pictures", live: "live", radio: "radio" };
 
@@ -205,6 +216,7 @@
     document.querySelectorAll(".mc-menu-item").forEach(function (b) {
       b.setAttribute("aria-current", String(b.dataset.view === section));
     });
+    if (viewSelect) viewSelect.value = section;
     showError("");
     backdrop(null);
     const views = { home: viewHome, movies: viewMovies, movie: viewMovie, music: viewMusic, album: viewAlbum,
@@ -1425,6 +1437,10 @@
       const a = cmd.action;
       if (a === "unpaired") { this.es.close(); this.es.onerror(); return; }
       if (a === "signage") { signage.load(); return; }
+      if (a === "identify") { signage.identify(); return; }
+      if (a === "reload") { location.reload(); return; }
+      if (a === "signage_stop") { signage.pause(true); return; }
+      if (a === "signage_start") { signage.pause(false); return; }
       if (a === "calibrate") { safeArea.step(cmd.step); return; }
       if (a.indexOf("play_") === 0 || a === "stop") signage.activity(false);
       if (a.indexOf("play_") === 0) {
@@ -1478,10 +1494,7 @@
       if (safeArea.isOpen()) {
         return { kind: "calibrating", title: "Adjusting the screen size", sub: safeArea.label() };
       }
-      if (signage.running) {
-        const item = signage.items[signage.index % signage.items.length] || {};
-        return { kind: "signage", title: "Slideshow: " + signage.running.name, sub: item.title || "" };
-      }
+      if (signage.running) return signage.state();
       if (!$("mc-player").hidden) {
         if ($("mc-player").classList.contains("youtube")) {
           return { kind: "youtube", title: $("mc-player-title").textContent, position: player.yt.time,
@@ -1506,9 +1519,14 @@
       state.night = night.level / 100;
       state.volume = volume.level;
       state.muted = volume.muted;
+      state.version = window.SignageRender ? window.SignageRender.VERSION : null;
+      state.errors = signage.errors.slice();
       const key = JSON.stringify(state);
-      if (!force && key === this.lastReport && state.kind === "idle") return;
+      // Unchanged and idle: a heartbeat every 30 s keeps the screen "online" on Access → Signage.
+      const stale = Date.now() - (this.lastSent || 0) > 30000;
+      if (!force && key === this.lastReport && state.kind === "idle" && !stale) return;
       this.lastReport = key;
+      this.lastSent = Date.now();
       api("PUT", "/api/media/screen/state", state).catch(function () {});
     },
   };
@@ -1628,18 +1646,21 @@
   };
 
   // ------------------------------------------------------ signage (the TV, idle)
-  /* What the screen shows while nobody uses it (Access → Signage). Its rules go by weekday and time on
-     this screen's own clock; the first that matches wins. An "idle" one starts once nothing has played
+  /* What the screen shows while nobody uses it (Access → Signage). Its programme is the ranked list of
+     schedule entries for this screen (its own, its group's, everyone's); the first that holds by this
+     screen's own clock plays (signage_render.js matches). An "idle" entry starts once nothing has played
      and no key was pressed for idle_minutes, and any key or cast stops it; an "always" one runs whenever
-     nothing cast is playing, and keys don't stop it. Two layers crossfade from slide to slide. */
+     nothing cast is playing, and keys don't stop it. Slides with their own days or hours are skipped
+     while they don't hold. The drawing (two crossfading layers, transitions, fit, CRT effects) is
+     SignageRender's, shared with the admin page's preview. */
   const signage = {
-    config: null, running: null, items: [], index: 0, layer: 0, timer: null, seq: 0, lastActivity: Date.now(),
+    config: null, running: null, items: [], index: 0, zone: null, paused: false, lastActivity: Date.now(), errors: [],
 
     init: function () {
       const self = this;
       ["keydown", "pointerdown", "wheel"].forEach(function (ev) {
         window.addEventListener(ev, function (e) {
-          const swallow = self.running && self.running.rule.mode === "idle";
+          const swallow = self.running && self.running.entry.mode === "idle";
           self.activity(true);
           if (swallow) { e.preventDefault(); e.stopImmediatePropagation(); }   // the key that woke it does nothing else
         }, true);
@@ -1651,24 +1672,16 @@
 
     load: async function () {
       try { this.config = await api("GET", "/media/screen/signage"); } catch (e) { return; }
-      this.stop();          // with the new slides, if its rule still says so (check)
+      this.stop();          // with the new slides, if its entry still says so (check)
       this.check();
     },
 
-    rule: function () {
+    /* The programme entry that holds now: the list came ranked, so the first match wins. */
+    entry: function () {
       const c = this.config;
       if (!c) return null;
       const now = new Date();
-      const day = (now.getDay() + 6) % 7, yesterday = (day + 6) % 7;   // 0 is Monday
-      const mins = now.getHours() * 60 + now.getMinutes();
-      const minutes = function (hhmm) { return Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5)); };
-      return c.rules.find(function (r) {
-        if (!c.shows[r.show_id]) return false;
-        const from = minutes(r.start), to = minutes(r.end);
-        if (from === to) return r.days.indexOf(day) >= 0;
-        if (from < to) return r.days.indexOf(day) >= 0 && mins >= from && mins < to;
-        return (r.days.indexOf(day) >= 0 && mins >= from) || (r.days.indexOf(yesterday) >= 0 && mins < to);
-      }) || null;
+      return c.programme.find(function (e) { return c.shows[e.show_id] && window.SignageRender.matches(e, now); }) || null;
     },
 
     busy: function () {
@@ -1677,18 +1690,24 @@
 
     activity: function (fromKey) {
       this.lastActivity = Date.now();
-      if (this.running && (!fromKey || this.running.rule.mode === "idle")) this.stop();
+      if (this.running && (!fromKey || this.running.entry.mode === "idle")) this.stop();
     },
 
     check: function () {
-      const r = this.rule();
-      if (!r) { this.stop(); return; }
+      const e = this.entry();
+      if (!e || this.paused) { this.stop(); return; }
       if (this.running) {
-        if (this.running.rule.show_id !== r.show_id || this.running.rule.mode !== r.mode) { this.stop(); this.start(r); }
+        if (this.running.entry.show_id !== e.show_id || this.running.entry.mode !== e.mode) { this.stop(); this.start(e); }
         return;
       }
       if (this.busy()) return;
-      if (r.mode === "always" || Date.now() - this.lastActivity >= this.config.idle_minutes * 60000) this.start(r);
+      if (e.mode === "always" || Date.now() - this.lastActivity >= this.config.idle_minutes * 60000) this.start(e);
+    },
+
+    /* An admin's Stop/Start from Access → Signage: stopped, nothing plays until started again (or reloaded). */
+    pause: function (on) {
+      this.paused = on;
+      if (on) this.stop(); else { this.lastActivity = 0; this.check(); }
     },
 
     box: function () {
@@ -1698,20 +1717,30 @@
         box.id = "mc-signage";
         box.hidden = true;
         box.setAttribute("aria-hidden", "true");
-        box.append(el("div", "mc-sg-layer"), el("div", "mc-sg-layer"));
         document.body.appendChild(box);
+        this.zone = new window.SignageRender.Zone(box, { volume: function (v) { volume.media(v); } });
       }
       return box;
     },
 
-    start: function (r) {
-      const show = this.config.shows[r.show_id];
-      if (!show || !show.items.length) return;
-      this.items = show.shuffle ? shuffled(show.items) : show.items.slice();
+    /* The playlist's slides that hold now (a slide's own days, hours and dates). */
+    playable: function (show) {
+      const now = new Date();
+      return show.items.filter(function (i) { return !i.when || window.SignageRender.matches(i.when, now); });
+    },
+
+    start: function (e) {
+      const show = this.config.shows[e.show_id];
+      const items = show ? this.playable(show) : [];
+      if (!items.length) return;
+      this.items = show.shuffle ? shuffled(items) : items;
       this.index = 0;
-      this.running = { rule: r, name: show.name };
-      this.box().hidden = false;
+      this.running = { entry: e, show: show, item: null };
+      const box = this.box();
+      window.SignageRender.applyEffects(box, e.effects);
+      box.hidden = false;
       document.documentElement.classList.add("mc-sg-running");
+      window.SignageRender.power(box, true, e.effects);
       this.show();
       screenMode.report(true);
     },
@@ -1719,86 +1748,48 @@
     stop: function () {
       if (!this.running) return;
       this.running = null;
-      this.seq += 1;
-      clearTimeout(this.timer);
       const box = this.box();
+      this.zone.stop();
       box.hidden = true;
       document.documentElement.classList.remove("mc-sg-running");
-      box.querySelectorAll(".mc-sg-layer").forEach(function (l) { l.classList.remove("on"); l.replaceChildren(); });
       screenMode.report(true);
     },
 
-    /* The current slide on the hidden layer; once it can be seen (loaded, playing), fade it in. */
+    /* The next slide that holds now, on the hidden layer; SignageRender brings it over when it can be seen. */
     show: function () {
-      clearTimeout(this.timer);
       if (!this.running) return;
-      const self = this, seq = ++this.seq;
-      const item = this.items[this.index % this.items.length];
-      const layers = this.box().querySelectorAll(".mc-sg-layer");
-      const cur = layers[this.layer], next = layers[this.layer ^ 1];
-      const advance = function () {
-        if (seq !== self.seq) return;
+      const self = this;
+      let item = null;
+      for (let tries = 0; tries < this.items.length && !item; tries++) {
+        const cand = this.items[this.index % this.items.length];
+        if (!cand.when || window.SignageRender.matches(cand.when)) item = cand; else self.index += 1;
+      }
+      if (!item) { this.stop(); return; }   // nothing holds right now: check() starts it again when something does
+      this.running.item = item;
+      this.zone.play(item, this.running.show, function (skipped) {
+        if (skipped) self.noteError(item);
         self.index = (self.index + 1) % self.items.length;
         self.show();
-      };
-      const reveal = function () {
-        if (seq !== self.seq) return;
-        next.classList.add("on");
-        cur.classList.remove("on");
-        self.layer ^= 1;
-        setTimeout(function () { if (!cur.classList.contains("on")) cur.replaceChildren(); }, 1200);
-        if (item.type !== "video") self.timer = setTimeout(advance, (item.seconds || 10) * 1000);
-        screenMode.report(true);
-      };
-      const skip = function () { self.timer = setTimeout(advance, 1000); };   // a slide that won't load
-      next.replaceChildren(this.render(item, reveal, advance, skip));
-      if (item.type === "text" || item.type === "notice" || item.type === "web") reveal();
+      });
+      screenMode.report(true);
     },
 
-    render: function (item, reveal, advance, skip) {
-      if (item.type === "image") {
-        const img = el("img");
-        img.alt = "";
-        img.onload = reveal;
-        img.onerror = skip;
-        img.src = item.src;
-        return img;
-      }
-      if (item.type === "video") {
-        const v = el("video");
-        if (!item.sound) v.dataset.silent = "1";
-        volume.media(v);
-        v.autoplay = true;
-        v.playsInline = true;
-        v.addEventListener("playing", reveal, { once: true });
-        v.addEventListener("ended", advance);
-        v.addEventListener("error", skip);
-        v.src = item.src;
-        return v;
-      }
-      if (item.type === "web") {
-        const frame = el("iframe");
-        frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms");
-        frame.setAttribute("referrerpolicy", "no-referrer");
-        frame.setAttribute("allow", "autoplay");
-        frame.src = item.url;
-        return frame;
-      }
-      const card = el("div", "mc-sg-text");
-      if (item.type === "text") {
-        card.style.background = item.background;
-        card.style.color = item.color;
-        if (item.image) card.style.backgroundImage = "url(\"" + item.image + "\")";
-        if (item.title) card.appendChild(el("h1", null, item.title));
-        if (item.body) card.appendChild(el("p", null, item.body));
-      } else {                                   // an announcement: Markdown made safe by the server
-        card.appendChild(el("div", "mc-sg-kicker", "Announcement"));
-        card.appendChild(el("h1", null, item.title));
-        const body = el("div", "mc-sg-html");
-        body.innerHTML = item.html;
-        card.appendChild(body);
-      }
-      return card;
+    noteError: function (item) {
+      const what = (item.title || item.type) + (item.src ? " (" + item.src.split("?")[0] + ")" : "");
+      if (this.errors[this.errors.length - 1] !== what) this.errors.push(what);
+      this.errors = this.errors.slice(-10);
+    },
+
+    state: function () {
+      const item = this.running.item || {};
+      return { kind: "signage", title: "Playlist: " + this.running.show.name, sub: item.title || "" };
+    },
+
+    /* The admin's Identify: this screen's name over everything for a few seconds. */
+    identify: function () {
+      const s = this.config && this.config.screen;
+      window.SignageRender.identify(s ? s.name : (main.dataset.screenName || "This screen"),
+                                    s && s.orientation === "portrait" ? "portrait" : "");
     },
   };
 

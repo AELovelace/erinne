@@ -78,12 +78,20 @@
   });
   handle.addEventListener("click", toggle);
   listButton.addEventListener("click", toggle);
-  $("remote-home").addEventListener("click", function () { showHome(true); });
-  reload.addEventListener("click", function () { if (current) frame.src = bySlug[current].url; });
-  full.addEventListener("click", function () {
-    const on = windowEl.classList.toggle("full");
-    full.setAttribute("aria-pressed", String(on));
+  // The dots: red closes the resource (back to the list; on the list already, it refreshes the page),
+  // yellow collapses the window back to its frame, green expands it over the whole page.
+  $("remote-close").addEventListener("click", function () {
+    if (current) showHome(true); else location.reload();
   });
+  $("remote-collapse").addEventListener("click", function () {
+    windowEl.classList.remove("full");
+    full.setAttribute("aria-pressed", "false");
+  });
+  full.addEventListener("click", function () {
+    windowEl.classList.add("full");
+    full.setAttribute("aria-pressed", "true");
+  });
+  reload.addEventListener("click", function () { if (current) frame.src = bySlug[current].url; });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape") collapse();
     else if (e.key === "r" && !e.ctrlKey && !e.metaKey && !e.altKey && document.activeElement === document.body) toggle();

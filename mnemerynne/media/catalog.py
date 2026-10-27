@@ -80,6 +80,8 @@ def _read(conn: sqlite3.Connection, settings: Settings, path: Path, section: str
                 or artwork.prepare(info.cover, "cover", "embedded")
     elif kind == "image":
         out.art = artwork.prepare(artwork.read_file(path), "thumb", "local")
+    elif kind == "document":
+        out.art = artwork.prepare(artwork.pdf_page(path, 0, 960), "thumb", "local")
     elif info.duration_s is not None:
         out.art = artwork.prepare(artwork.frame(settings, path, min(1.0, info.duration_s / 2)), "thumb", "frame")
     return out
@@ -100,8 +102,8 @@ def _write(conn: sqlite3.Connection, settings: Settings, file_id: int, mtime_ns:
     conn.execute(
         "INSERT INTO media_items(file_id, section, media_type, title, sort_title, year, duration_s, width, height, "
         "container, video_codec, audio_codec, bitrate, artist, album_artist, album, album_key, track_no, disc_no, "
-        "genre, taken_at, camera, playback, artwork_id, fanart_id, disk_mtime_ns, probed_at, error) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), NULL) "
+        "genre, taken_at, camera, playback, artwork_id, fanart_id, pages, disk_mtime_ns, probed_at, error) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), NULL) "
         "ON CONFLICT(file_id) DO UPDATE SET section = excluded.section, media_type = excluded.media_type, "
         "title = excluded.title, sort_title = excluded.sort_title, year = COALESCE(excluded.year, media_items.year), "
         "duration_s = excluded.duration_s, width = excluded.width, height = excluded.height, "
@@ -110,12 +112,12 @@ def _write(conn: sqlite3.Connection, settings: Settings, file_id: int, mtime_ns:
         "album = excluded.album, album_key = excluded.album_key, track_no = excluded.track_no, disc_no = excluded.disc_no, genre = excluded.genre, "
         "taken_at = excluded.taken_at, camera = excluded.camera, playback = excluded.playback, "
         "artwork_id = COALESCE(excluded.artwork_id, media_items.artwork_id), "
-        "fanart_id = COALESCE(excluded.fanart_id, media_items.fanart_id), "
+        "fanart_id = COALESCE(excluded.fanart_id, media_items.fanart_id), pages = excluded.pages, "
         "disk_mtime_ns = excluded.disk_mtime_ns, probed_at = excluded.probed_at, error = NULL",
         (file_id, r.section, r.kind, info.title, probe.sort_title(info.title), info.year, info.duration_s,
          info.width, info.height, info.container, info.video_codec, info.audio_codec, info.bitrate, info.artist,
          info.album_artist, info.album, key, info.track_no, info.disc_no, info.genre, info.taken_at, info.camera,
-         r.playback, art_id, fanart_id, mtime_ns))
+         r.playback, art_id, fanart_id, info.pages, mtime_ns))
 
 
 def _failed(conn: sqlite3.Connection, file_id: int, mtime_ns: int | None, section: str, kind: str, name: str,
@@ -132,13 +134,34 @@ def run_pass(conn: sqlite3.Connection, settings: Settings, budget_s: float = 20.
     stats = Stats()
     if not media.enabled(conn):
         return stats
-    lib = media.library(conn)
-    if lib is None:
+    roots = media.catalog_roots(conn)
+    if not roots:
         return stats
     deadline = time.monotonic() + budget_s
-    sections = media.folder_sections(conn, lib["id"])
+    for lib, sections, root_section in roots:
+        _catalog_library(conn, settings, lib, sections, root_section, deadline, stats)
+    cfg = media.load_settings(conn)
+    if cfg.get("online_metadata") and time.monotonic() < deadline:
+        from mnemerynne.media import scrape
+        try:
+            stats.scraped = scrape.run(conn, settings, cfg, deadline)
+        except Exception:  # never let the internet stop the pass
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            log.exception("Media: online lookups failed")
+    _prune_art(conn, settings)
+    _record(conn, stats)
+    if stats.read or stats.failed or stats.scraped:
+        log.info("Media catalog: %d read, %d failed, %d looked up online, %d waiting.",
+                 stats.read, stats.failed, stats.scraped, stats.pending)
+    return stats
+
+
+def _catalog_library(conn: sqlite3.Connection, settings: Settings, lib: sqlite3.Row, sections: dict[int, str],
+                     root_section: str | None, deadline: float, stats: Stats) -> None:
+    """One library's new or changed files, within the deadline (the Signage library's root files count too)."""
     for row in _pending(conn, lib["id"]):
-        section = sections.get(row["folder_id"]) if row["folder_id"] is not None else None
+        section = sections.get(row["folder_id"]) if row["folder_id"] is not None else root_section
         kind = media.media_type(row["display_name"])
         if section is None or kind is None or kind not in media.SECTION_TYPES[section]:
             continue
@@ -166,21 +189,6 @@ def run_pass(conn: sqlite3.Connection, settings: Settings, budget_s: float = 20.
                 continue
             _write(conn, settings, row["id"], row["disk_mtime_ns"], read)
         stats.read += 1
-    cfg = media.load_settings(conn)
-    if cfg.get("online_metadata") and time.monotonic() < deadline:
-        from mnemerynne.media import scrape
-        try:
-            stats.scraped = scrape.run(conn, settings, cfg, deadline)
-        except Exception:  # never let the internet stop the pass
-            if conn.in_transaction:
-                conn.execute("ROLLBACK")
-            log.exception("Media: online lookups failed")
-    _prune_art(conn, settings)
-    _record(conn, stats)
-    if stats.read or stats.failed or stats.scraped:
-        log.info("Media catalog: %d read, %d failed, %d looked up online, %d waiting.",
-                 stats.read, stats.failed, stats.scraped, stats.pending)
-    return stats
 
 
 def _prune_art(conn: sqlite3.Connection, settings: Settings) -> int:

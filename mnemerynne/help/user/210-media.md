@@ -65,6 +65,10 @@ Either way, the TV stays paired until you remove it, even after any sign-in runs
 
 Only you can see and control your screens. Screens are only for members of the group your admin chose; without it, there is no **Screens** item in the menu.
 
+## Signage on the screens
+
+An admin can give screens playlists to show while nobody is using them (Access → Signage): pictures and clips from the **Signage** folder on the share, PDFs, text, web pages and the announcements for everyone. Casting from your phone always interrupts; what you cast plays, and the signage comes back afterwards.
+
 ## Erynne as an app on your phone
 
 Install it from Chrome's **⋮ → Install app** (Android) or Safari's **Share → Add to Home Screen** (iPhone): it then opens like an app and, on Android, appears in the **Share** menu of other apps such as YouTube. See [Erynne on a phone](phone.md).

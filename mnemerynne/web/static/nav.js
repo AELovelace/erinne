@@ -1,6 +1,6 @@
 /* The top bar on every page: measures how much of the screen the bar and the announcement cards
-   take (--chrome, which the full-height pages subtract from the viewport, phone or not), scrolls
-   the current tab into view when the tabs are a strip, runs the ☰ menu on phones, and closes the
+   take (--chrome, which the full-height pages subtract from the viewport, phone or not), runs the
+   ☰ menu on phones (the tabs, the username, Help and Sign out), and closes the
    collapsible side lists (details.ax-side) on narrow screens. Nothing here uses innerHTML. */
 (function () {
   "use strict";
@@ -26,13 +26,7 @@
   window.addEventListener("load", measure);
   if (notices) new MutationObserver(measure).observe(notices, { attributes: true, attributeFilter: ["hidden"], childList: true });
 
-  // The current tab in view when the tabs scroll sideways.
-  const current = document.querySelector(".tabs a[aria-current='page']");
-  if (current && narrow.matches && typeof current.scrollIntoView === "function") {
-    current.scrollIntoView({ block: "nearest", inline: "center" });
-  }
-
-  // ☰: the username, Help and Sign out, in a menu on phones (inline on a desktop).
+  // ☰: the tabs, the username, Help and Sign out, in a menu on phones (inline on a desktop).
   const menuButton = document.getElementById("nav-menu");
   const more = document.getElementById("nav-more");
   if (menuButton && more) {
@@ -49,6 +43,22 @@
     });
     document.addEventListener("keydown", function (e) { if (e.key === "Escape") setOpen(false); });
     narrow.addEventListener("change", function () { setOpen(false); });
+  }
+
+  // Signed in on a screen box's TV (its top bar): untouched for KIOSK_IDLE_MS, back to the TV page, which
+  // signs out (web/media.py screen_page), so nobody is left signed in on a TV people walk past.
+  const KIOSK_IDLE_MS = 10 * 60 * 1000;
+  const kioskBack = document.querySelector("[data-kiosk-back]");
+  if (kioskBack) {
+    let idle = null;
+    const awake = function () {
+      clearTimeout(idle);
+      idle = setTimeout(function () { location.href = kioskBack.href; }, KIOSK_IDLE_MS);
+    };
+    ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"].forEach(function (name) {
+      window.addEventListener(name, awake, { capture: true, passive: true });
+    });
+    awake();
   }
 
   // Side lists (wiki pages, help contents, Access trees) start closed on a phone; a desktop shows them open.

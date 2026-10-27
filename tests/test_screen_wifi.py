@@ -266,3 +266,252 @@ def test_on_the_hotspot_everything_leads_to_the_setup_page(box):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+# ------------------------------------------------------------ kiosk settings
+class FakeRun:
+    """systemctl, systemd-run, journalctl, runuser…: recorded, with canned answers; git really runs."""
+
+    def __init__(self):
+        self.calls = []
+        self.active = set()
+        self.journal = {}
+
+    def __call__(self, args, timeout=60):
+        if args[0] == "git":
+            return ws.run_cmd(args, timeout)
+        self.calls.append(args)
+        if args[:3] == ["systemctl", "is-active", "--quiet"]:
+            return (0 if args[3] in self.active else 3), "", ""
+        if args[0] == "journalctl":
+            return 0, self.journal.get(args[2], ""), ""
+        if args[0] == "hostname":
+            return 0, "192.168.1.50 fd00::50\n", ""
+        if args[0] == "uname":
+            return 0, "6.11.4-301.fc41.x86_64\n", ""
+        if args[0] == "rpm":
+            return 0, "kernel-core-6.11.5-300.fc41.x86_64   Mon 27 Oct 2026\nkernel-core-6.11.4-301.fc41.x86_64   Fri\n", ""
+        return 0, "", ""
+
+
+class FakeServer:
+    """The Mnemerynne server's kiosk routes (web/kiosk.py) as the helper sees them."""
+
+    def __init__(self):
+        self.calls = []
+        self.top_bar = False
+        self.healthy = True
+
+    def __call__(self, method, url, body=None, headers=None, timeout=10):
+        self.calls.append((method, url.split("://", 1)[1].split("/", 1)[1], body, headers))
+        if url.endswith("/healthz"):
+            return (200, {"status": "ok", "schema": 46}) if self.healthy else (0, {"detail": "refused"})
+        if url.endswith("/api/media/kiosk/redeem"):
+            if body["grant"] != "good-grant":
+                return 403, {"detail": "That approval has run out or was used already."}
+            return 200, {"session": "srv-session", "admin": "boss", "expires_in": 600,
+                         "screen": {"id": 3, "name": "Lobby", "top_bar": self.top_bar}}
+        if url.endswith("/api/media/kiosk/screen"):
+            assert headers == {"X-Kiosk-Session": "srv-session"}
+            if method == "PUT":
+                self.top_bar = body["top_bar"]
+            return 200, {"screen": {"id": 3, "name": "Lobby", "top_bar": self.top_bar}}
+        return 204, {}
+
+
+@pytest.fixture
+def kiosk(tmp_path, box):
+    nm, clock, setup, events = box
+    conf = tmp_path / "screen.conf"
+    conf.write_text("MNEMERYNNE_URL=https://erynne.example.com\nSYSTEM_VOLUME=80\n"
+                    f"SOURCE_DIR={(tmp_path / 'opt').as_posix()}\n")
+    run, server = FakeRun(), FakeServer()
+    k = ws.Kiosk(setup, conf=str(conf), pins=ws.Pins(str(tmp_path / "pin"), clock=clock), run=run, http=server,
+                 clock=clock, state_dir=str(tmp_path / "state"), uid=lambda: 990)
+    return k, run, server, clock, setup, conf
+
+
+def _started(run):
+    return [c for c in run.calls if c[0] == "systemd-run"][-1]
+
+
+def test_the_pin_is_optional_hashed_and_locks_after_wrong_tries(kiosk, tmp_path):
+    k, run, server, clock, setup, conf = kiosk
+    with pytest.raises(ws.KioskError) as exc:
+        k.unlock_pin("1234")                                   # a new box has none: only a phone approval
+    assert exc.value.status == 403
+    with pytest.raises(ws.KioskError):
+        k.pins.set("12a4")
+    k.pins.set("482913")
+    assert "482913" not in (tmp_path / "pin").read_text()
+    for _ in range(ws.PIN_TRIES):
+        with pytest.raises(ws.KioskError):
+            k.unlock_pin("000000")
+    with pytest.raises(ws.KioskError) as exc:
+        k.unlock_pin("482913")                                 # locked, even the right one
+    assert exc.value.status == 429
+    clock.now += ws.PIN_LOCK_SECONDS
+    token = k.unlock_pin("482913")
+    assert k.state(token)["unlocked"] and k.state(token)["via"] == "pin" and k.state(None)["unlocked"] is False
+    clock.now += ws.UNLOCK_SECONDS
+    assert k.session(token) is None                            # left alone: locked again
+
+
+def test_the_address_changes_through_the_installer_after_a_check(kiosk):
+    k, run, server, clock, setup, conf = kiosk
+    setup.server_ok = False
+    # No PIN and the server out of reach: the "can't connect" page may change it without unlocking.
+    assert k.address_open(None)
+    for bad in ("erynne.example.com", "https://x/files", "javascript:alert(1)"):
+        with pytest.raises(ws.KioskError):
+            k.set_address(None, bad)
+    server.healthy = False
+    with pytest.raises(ws.KioskError) as exc:
+        k.set_address(None, "https://new.example.com")
+    assert "isn't answering like a Mnemerynne server" in str(exc.value)
+    server.healthy = True
+    assert k.set_address(None, "https://new.example.com/media/screen") == "https://new.example.com"
+    started = _started(run)
+    assert "--unit=mnemerynne-screen-config" in started
+    assert started[-1].startswith("bash " + k.source() + "/deploy/screen/install.sh https://new.example.com --reconfigure;")
+
+    k.pins.set("4321")                                         # with a PIN it must be unlocked first
+    assert not k.address_open(None)
+    with pytest.raises(ws.KioskError) as exc:
+        k.set_address(None, "https://new.example.com")
+    assert exc.value.status == 401
+    setup.server_ok = True
+    k.pins.clear()
+    assert not k.address_open(None)                            # connected: only once unlocked
+
+    run.active.add("mnemerynne-screen-update")                 # one job at a time
+    token = k.unlock_grant("good-grant")
+    with pytest.raises(ws.KioskError) as exc:
+        k.set_address(token, "https://new.example.com")
+    assert "busy" in str(exc.value)
+
+
+def test_a_phone_approval_opens_the_top_bar_and_the_volume(kiosk):
+    k, run, server, clock, setup, conf = kiosk
+    with pytest.raises(ws.KioskError):
+        k.unlock_grant("used-grant")
+    token = k.unlock_grant("good-grant")
+    st = k.state(token)
+    assert st["via"] == "phone" and st["admin"] == "boss" and st["screen"]["name"] == "Lobby" and st["volume"] == 80
+    assert st["details"]["addresses"] == ["192.168.1.50", "fd00::50"] and st["reboot_needed"] is True
+    assert k.set_top_bar(token, True)["top_bar"] is True and server.top_bar is True
+
+    assert k.set_volume(token, 35) == 35
+    assert "SYSTEM_VOLUME=35\n" in conf.read_text() and "MNEMERYNNE_URL=https://erynne.example.com\n" in conf.read_text()
+    assert run.calls[-1] == ["runuser", "-u", "mnemerynne-screen", "--", "env", "XDG_RUNTIME_DIR=/run/user/990",
+                             "pactl", "set-sink-volume", "@DEFAULT_SINK@", "35%"]
+    for bad in (101, -1, "50", True):
+        with pytest.raises(ws.KioskError):
+            k.set_volume(token, bad)
+
+    k.pins.set("4321")
+    pin_token = k.unlock_pin("4321")
+    with pytest.raises(ws.KioskError) as exc:
+        k.set_top_bar(pin_token, False)                        # kept on the server: a phone approval only
+    assert exc.value.status == 403
+    k.lock_up(token)
+    assert ("POST", "api/media/kiosk/lock", None, {"X-Kiosk-Session": "srv-session"}) in server.calls
+    with pytest.raises(ws.KioskError):
+        k.set_volume(token, 50)
+
+
+def _git(path, *args):
+    import subprocess
+    return subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True, check=True)
+
+
+def test_releases_newer_than_the_installed_one_update_and_roll_back(kiosk, tmp_path):
+    k, run, server, clock, setup, conf = kiosk
+    assert k.releases()["available"] is False                  # no copy of the repository yet
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    _git(upstream, "init", "--quiet")
+    _git(upstream, "config", "user.email", "t@example.com")
+    _git(upstream, "config", "user.name", "t")
+    for n, names in enumerate([["screen-v0.1.0"], ["screen-v0.2.0", "files-v1.0.0"], ["screen-v0.3.0"]]):
+        (upstream / "f.txt").write_text(str(n))
+        _git(upstream, "add", "-A")
+        _git(upstream, "commit", "--quiet", "-m", f"c{n}")
+        for name in names:
+            _git(upstream, "tag", "-a", name, "-m", f"{name}: release {n}")
+    _git(tmp_path, "clone", "--quiet", str(upstream), str(tmp_path / "opt"))
+    _git(tmp_path / "opt", "-c", "advice.detachedHead=false", "checkout", "--quiet", "screen-v0.2.0")
+
+    r = k.releases()
+    assert r["current"] == "screen-v0.2.0" and r["fetched"] and r["previous"] is None
+    assert [(n["tag"], n["notes"]) for n in r["newer"]] == [("screen-v0.3.0", "screen-v0.3.0: release 2")]
+
+    token = k.unlock_grant("good-grant")
+    for tag in ("screen-v0.1.0", "files-v1.0.0", "screen-v9.0.0"):
+        with pytest.raises(ws.KioskError):
+            k.update(token, tag)
+    k.update(token, "screen-v0.3.0")
+    started = _started(run)
+    assert "--unit=mnemerynne-screen-update" in started and "install.sh --update screen-v0.3.0;" in started[-1]
+
+    with pytest.raises(ws.KioskError):
+        k.rollback(token)                                      # nothing recorded yet
+    (tmp_path / "state").mkdir()
+    (tmp_path / "state" / "previous").write_text("screen-v0.1.0\n")
+    k.rollback(token)
+    assert "install.sh --rollback;" in _started(run)[-1]
+
+    run.journal["mnemerynne-screen-osupdate"] = "Upgrading 3 packages\nError: no space\n== finished: 1\n"
+    jobs = k.jobs()
+    assert jobs["system"]["ok"] is False and jobs["system"]["log"][-1] == "== finished: 1" and jobs["update"]["ok"] is None
+
+
+def test_kiosk_settings_answer_on_the_box_only(kiosk):
+    k, run, server, clock, setup, conf = kiosk
+    srv = ws.Server(("127.0.0.1", 0), setup, local=True, kiosk=k)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    hot = _serve(setup, local=False)
+    own = f"127.0.0.1:{srv.server_address[1]}"
+    good = {"Origin": f"http://{own}", "Content-Type": "application/json"}
+    try:
+        status, _, page = _request(srv, "GET", "/settings", own)
+        assert status == 200 and "Kiosk settings" in page
+        assert json.loads(_request(srv, "GET", "/api/kiosk/state", own)[2])["unlocked"] is False
+        assert _request(srv, "GET", "/api/kiosk/releases", own)[0] == 401
+        assert _request(srv, "POST", "/api/kiosk/unlock", own, {"grant": "good-grant"},
+                        {"Content-Type": "application/json"})[0] == 403          # not from the page
+        status, headers, body = _request(srv, "POST", "/api/kiosk/unlock", own, {"grant": "good-grant"}, good)
+        assert status == 200 and json.loads(body)["via"] == "phone"
+        cookie = headers["Set-Cookie"]
+        assert "HttpOnly" in cookie and "SameSite=Strict" in cookie
+        session = {"Cookie": cookie.split(";", 1)[0]}
+        assert json.loads(_request(srv, "GET", "/api/kiosk/state", own, headers=session)[2])["unlocked"] is True
+        status, _, body = _request(srv, "POST", "/api/kiosk/volume", own, {"level": 40}, {**good, **session})
+        assert status == 200 and json.loads(body) == {"volume": 40}
+        assert _request(srv, "POST", "/api/kiosk/volume", own, {"level": 40}, good)[0] == 401   # without the cookie
+
+        # The hotspot's listener (phones) has none of it.
+        assert _request(hot, "GET", "/settings", "10.42.0.1")[0] == 302
+        assert _request(hot, "POST", "/api/kiosk/unlock", "10.42.0.1", {"grant": "good-grant"},
+                        {"Origin": "http://10.42.0.1", "Content-Type": "application/json"})[0] == 404
+    finally:
+        for s in (srv, hot):
+            s.shutdown()
+            s.server_close()
+
+
+def test_settings_file_lines_change_one_at_a_time(tmp_path):
+    path = tmp_path / "c.conf"
+    path.write_text("# note\nA=1\nB=2\n")
+    ws.set_conf_value(str(path), "B", "3")
+    ws.set_conf_value(str(path), "C", "4")
+    assert path.read_text() == "# note\nA=1\nB=3\nC=4\n"
+
+
+def test_no_wifi_setup_means_no_hotspot(box):
+    nm, clock, setup, events = box
+    setup.hotspot_enabled = False
+    setup.tick()
+    clock.now += ws.OFFLINE_SECONDS * 3
+    setup.tick()
+    assert setup.hotspot is None and events == []

@@ -27,7 +27,7 @@ from mnemerynne import (balancer as balancer_mod, bfgguf, claude_chat, db, direc
                         sharepoint,
                         users)
 from mnemerynne.agent import Agent
-from mnemerynne.media import transcode as media_transcode
+from mnemerynne.media import screens as media_screens, transcode as media_transcode
 from mnemerynne.rooms_erynne import RoomErynne
 from mnemerynne.answer import ASSISTANT_NAME
 from mnemerynne.auth import LoginThrottle
@@ -40,6 +40,7 @@ from mnemerynne.router import load_router
 from mnemerynne.web import (admin, admin_apis, admin_notices, admin_remote, agent as agent_pages, apis as api_pages, balancer as balancer_pages,
                             bfgguf as bfgguf_pages, chat,
                             claude_links as claude_link_pages, editor as editor_pages, files, help as help_pages,
+                            kiosk as kiosk_pages,
                             m365 as m365_pages, media as media_pages, memories, messages as message_pages, oauth as oauth_pages, remote as remote_pages,
                             rooms as room_pages, security,
                             settings as settings_pages, tokens, wiki as wiki_pages)
@@ -221,7 +222,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     def _nav_context(request: Request) -> dict:
         """What every page's top bar needs beyond its own context: the badge on the Messages button
         (unread notes, and with Rooms on, mentions and unread DMs), whether Rooms and Remote are there."""
-        user_id = request.scope.get("session", {}).get("user_id") if "session" in request.scope else None
+        session = request.scope.get("session", {}) if "session" in request.scope else {}
+        user_id = session.get("user_id")
         if not user_id:
             return {}
         conn = db.connect(settings.db_path)
@@ -234,7 +236,9 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             return {"nav_unread": messages_mod.unread_count(conn, user_id) + unread_rooms["mentions"] + unread_rooms["dms"],
                     "has_rooms": rooms_mod.enabled(conn), "has_media": media_mod.enabled(conn) and media_mod.may_use(conn, user, app.state.directory),
                     "message_max_chars": messages_mod.MAX_CHARS,
-                    "has_remote": bool(remote.apps_for(conn, user, app.state.directory, admin))}
+                    "has_remote": bool(remote.apps_for(conn, user, app.state.directory, admin)),
+                    # Signed in on a screen box's TV (its top bar): back to the TV page, which signs out.
+                    "kiosk_back": bool(session.get("kiosk_screen"))}
         except sqlite3.Error:
             return {}
         finally:
@@ -275,6 +279,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(media_pages.router)
     app.include_router(media_pages.admin_router)
     app.include_router(media_pages.share_router)
+    app.include_router(kiosk_pages.router)
     app.include_router(admin_notices.router)
     app.include_router(remote_pages.router)
     app.include_router(admin_remote.router)
@@ -314,8 +319,21 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     def healthz(conn: sqlite3.Connection = Depends(get_db)):
         return JSONResponse({"status": "ok", "schema": db.schema_version(conn)})
 
+    def _kiosk_screen(request: Request, conn: sqlite3.Connection) -> sqlite3.Row | None:
+        """The screen this browser is, if its top bar is on (kiosk settings): sign-ins here are the TV's."""
+        screen = media_screens.by_token(conn, request.cookies.get(media_screens.COOKIE))
+        return screen if screen is not None and screen["top_bar"] else None
+
     def _login(request: Request, error: str | None = None, code: int = status.HTTP_200_OK):
-        return templates.TemplateResponse(request, "login.html", {"error": error}, status_code=code)
+        conn = db.connect(settings.db_path)
+        try:
+            back = _kiosk_screen(request, conn) is not None
+        except sqlite3.Error:
+            back = False
+        finally:
+            conn.close()
+        return templates.TemplateResponse(request, "login.html", {"error": error, "kiosk_back": back},
+                                          status_code=code)
 
     @app.get("/login", response_class=HTMLResponse)
     def login_page(request: Request):
@@ -343,6 +361,9 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         request.session.clear()
         request.session["user_id"] = user["id"]
         request.session["epoch"] = user["session_epoch"]
+        screen = _kiosk_screen(request, conn)
+        if screen is not None:     # on a TV: going back to its page signs out (web/media.py screen_page)
+            request.session["kiosk_screen"] = screen["id"]
         target = after if _safe_return(after) else "/"
         return RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
 

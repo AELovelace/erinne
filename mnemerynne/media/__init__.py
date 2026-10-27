@@ -36,16 +36,25 @@ AUDIO_EXT = {".mp3", ".flac", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".wav", "
 VIDEO_EXT = {".mp4", ".m4v", ".mkv", ".webm", ".avi", ".mov", ".wmv", ".mpg", ".mpeg", ".ts", ".m2ts", ".flv",
              ".ogv", ".3gp"}
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".heic", ".heif", ".avif"}
-# What each section catalogs: artwork beside a film or an album isn't a picture of its own.
-SECTION_TYPES = {"music": {"audio"}, "movies": {"video"}, "pictures": {"image", "video"}}
+DOCUMENT_EXT = {".pdf"}
+# What each section catalogs: artwork beside a film or an album isn't a picture of its own. The Signage
+# folder (signage.py) is its own share library: every folder in it is the 'signage' section, which takes
+# anything a screen can show, PDFs included (one slide a page).
+SECTION_TYPES = {"music": {"audio"}, "movies": {"video"}, "pictures": {"image", "video"},
+                 "signage": {"image", "video", "document"}}
+SIGNAGE_SECTION = "signage"
+SIGNAGE_LIBRARY_KEY = "signage_library_id"
 
 HWACCELS = ("auto", "vaapi", "nvenc", "software")
 DEFAULT_RADIO_DIRECTORY = "https://sadgirlsclub.wtf/rr/healthz"
 # folder: the top-level folder on the share that is the Media library (Settings → Media → Media folder).
 # media_group: who may use Media at all; screens_group: who may pair screens and cast to them (group_refs
 # values, AD or Entra groups). Empty: nobody (may_use, screens.may_use).
+# signage_folder: the top-level share folder whose pictures, clips and PDFs signage playlists draw on;
+# signage_effects: the CRT effects a newly paired screen gets (signage.Effects; {} is off).
 DEFAULTS = {"folder": LIBRARY_NAME, "hwaccel": "auto", "max_transcodes": 2, "online_metadata": False,
-            "radio_directory_url": DEFAULT_RADIO_DIRECTORY, "media_group": "", "screens_group": ""}
+            "radio_directory_url": DEFAULT_RADIO_DIRECTORY, "media_group": "", "screens_group": "",
+            "signage_folder": "Signage", "signage_effects": {}}
 GROUP_SETTINGS = ("media_group", "screens_group")
 
 
@@ -62,6 +71,8 @@ def media_type(name: str) -> str | None:
         return "video"
     if ext in IMAGE_EXT:
         return "image"
+    if ext in DOCUMENT_EXT:
+        return "document"
     return None
 
 
@@ -113,7 +124,7 @@ def save_settings(conn: sqlite3.Connection, settings: Settings, changes: dict, k
             raise MediaError("At most 8 transcodes at once (0: never transcode).")
         if name == "radio_directory_url" and value and not str(value).startswith(("http://", "https://")):
             raise MediaError("The station list is an http:// or https:// address.")
-        if name == "folder":
+        if name in ("folder", "signage_folder"):
             value = check_folder(value)
         cfg[name] = value
     if key is not None:
@@ -148,48 +159,68 @@ def _share_library(conn: sqlite3.Connection, name: str) -> sqlite3.Row | None:
                         "AND lower(share_path) = lower(?)", (name,)).fetchone()
 
 
-def library(conn: sqlite3.Connection) -> sqlite3.Row | None:
-    """The Media library: the one Settings set up (it keeps being it when renamed in Windows), else the
-    share library named like the Media folder setting."""
-    row = conn.execute("SELECT value FROM meta WHERE key = ?", (LIBRARY_KEY,)).fetchone()
+def _meta_library(conn: sqlite3.Connection, key: str, setting: str) -> sqlite3.Row | None:
+    """The share library Settings set up under `key` (it keeps being it when renamed in Windows), else the
+    share library named like the folder setting."""
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
     if row:
         lib = conn.execute("SELECT * FROM collections WHERE id = ? AND kind = 'library' AND share_path IS NOT NULL",
                            (int(row["value"]),)).fetchone()
         if lib is not None:
             return lib
-    return _share_library(conn, load_settings(conn)["folder"])
+    return _share_library(conn, load_settings(conn)[setting])
+
+
+def library(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    """The Media library (Settings → Media → Media folder)."""
+    return _meta_library(conn, LIBRARY_KEY, "folder")
+
+
+def signage_library(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    """The Signage folder's library (Access → Signage → Settings), where signage assets live."""
+    return _meta_library(conn, SIGNAGE_LIBRARY_KEY, "signage_folder")
+
+
+def _set_folder(conn: sqlite3.Connection, settings: Settings, name: str, key: str, setting: str) -> bool:
+    name = check_folder(name)
+    current = _meta_library(conn, key, setting)
+    if current is not None and current["share_path"].lower() == name.lower():
+        return False
+    save_settings(conn, settings, {setting: name})
+    found = _share_library(conn, name)
+    if found is not None:
+        conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (key, str(found["id"])))
+    else:
+        conn.execute("DELETE FROM meta WHERE key = ?", (key,))   # made by the ensure_* call
+    return True
 
 
 def set_folder(conn: sqlite3.Connection, settings: Settings, name: str) -> bool:
     """Use another top-level folder of the share as the Media library (in the caller's transaction).
     The catalog of the old one is kept, for switching back. True if it changed."""
-    name = check_folder(name)
-    current = library(conn)
-    if current is not None and current["share_path"].lower() == name.lower():
-        return False
-    save_settings(conn, settings, {"folder": name})
-    found = _share_library(conn, name)
-    if found is not None:
-        conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (LIBRARY_KEY, str(found["id"])))
-    else:
-        conn.execute("DELETE FROM meta WHERE key = ?", (LIBRARY_KEY,))   # made by ensure_library
-    return True
+    return _set_folder(conn, settings, name, LIBRARY_KEY, "folder")
 
 
-def ensure_library(conn: sqlite3.Connection) -> sqlite3.Row:
-    """The Media folder and its three folders on the share, made where missing; runs in the caller's
-    transaction. The folders' rows come with the next share scan, like anything else made through SMB."""
+def set_signage_folder(conn: sqlite3.Connection, settings: Settings, name: str) -> bool:
+    """Use another top-level folder of the share for signage assets. True if it changed."""
+    if str(name).strip().lower() == str(load_settings(conn)["folder"]).lower():
+        raise MediaError("The Signage folder can't be the Media folder: pick another folder at the top of the share.")
+    return _set_folder(conn, settings, name, SIGNAGE_LIBRARY_KEY, "signage_folder")
+
+
+def _ensure_share_library(conn: sqlite3.Connection, key: str, setting: str, subfolders: tuple[str, ...],
+                          what: str) -> sqlite3.Row:
     rt = share.current()
     if rt is None:
-        raise MediaError("Media lives on the file share, and this server has none (MNEMERYNNE_SHARE_ROOT).")
+        raise MediaError(f"{what} lives on the file share, and this server has none (MNEMERYNNE_SHARE_ROOT).")
     if not share.mounted(rt):
         raise MediaError(f"The share ({rt.root}) isn't available right now; try again later.")
-    lib = library(conn)
+    lib = _meta_library(conn, key, setting)
     if lib is None:
-        name = check_folder(load_settings(conn)["folder"])
+        name = check_folder(load_settings(conn)[setting])
         if permissions.get_library(conn, name):
             raise MediaError(f"There is already a library called “{name}” that isn't on the share; "
-                             "rename it or choose another Media folder.")
+                             f"rename it or choose another {what} folder.")
         base = rt.root / name
         share.make_dir(base)
         library_id = permissions.create_library(conn, name)
@@ -197,13 +228,39 @@ def ensure_library(conn: sqlite3.Connection) -> sqlite3.Row:
                      (name, base.stat().st_ino, library_id))
         lib = conn.execute("SELECT * FROM collections WHERE id = ?", (library_id,)).fetchone()
     base = rt.root / Path(lib["share_path"])
-    for folder in SECTIONS.values():
+    for folder in subfolders:
         existing = next((p for p in base.iterdir() if p.is_dir() and p.name.lower() == folder.lower()), None) \
             if base.is_dir() else None
         if existing is None:
             share.make_dir(base / folder)
-    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (LIBRARY_KEY, str(lib["id"])))
+    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (key, str(lib["id"])))
     return lib
+
+
+def ensure_library(conn: sqlite3.Connection) -> sqlite3.Row:
+    """The Media folder and its three folders on the share, made where missing; runs in the caller's
+    transaction. The folders' rows come with the next share scan, like anything else made through SMB."""
+    return _ensure_share_library(conn, LIBRARY_KEY, "folder", tuple(SECTIONS.values()), "Media")
+
+
+def ensure_signage_library(conn: sqlite3.Connection) -> sqlite3.Row:
+    """The Signage folder on the share, made where missing (in the caller's transaction)."""
+    return _ensure_share_library(conn, SIGNAGE_LIBRARY_KEY, "signage_folder", (), "Signage")
+
+
+def catalog_roots(conn: sqlite3.Connection) -> list[tuple[sqlite3.Row, dict[int, str], str | None]]:
+    """What the catalog reads: (library, folder id -> section, the section of files at the library's
+    root) for the Media library (Music, Movies, Pictures) and the Signage library (all of it)."""
+    out = []
+    lib = library(conn)
+    if lib is not None:
+        out.append((lib, folder_sections(conn, lib["id"]), None))
+    sg = signage_library(conn)
+    if sg is not None and (lib is None or sg["id"] != lib["id"]):
+        folders = {r["id"]: SIGNAGE_SECTION for r in conn.execute(
+            "SELECT id FROM folders WHERE collection_id = ? AND deleted_at IS NULL", (sg["id"],))}
+        out.append((sg, folders, SIGNAGE_SECTION))
+    return out
 
 
 def section_folders(conn: sqlite3.Connection, library_id: int) -> dict[int, str]:

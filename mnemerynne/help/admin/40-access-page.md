@@ -30,6 +30,10 @@ Requests only an admin can decide: letting the AI edit a whole library, and API 
 
 Post a notice for everyone or a group, shown as a card on every page until dismissed or acknowledged; see who saw and acknowledged each. See [Announcements and messages](announcements-and-messages.md).
 
+## Signage
+
+What the screens paired under Media show while nobody uses them: the content browser (the Signage folder and the Media library), playlists, the schedule per screen or group, each screen's state and the CRT effects. See [Signage](signage.md).
+
 ## Who can see what
 
 One row per person and library: whether they read, edit and can search it from Claude, and through which grant, group or share permission. The place to answer "why can Rob see the Brand library?"

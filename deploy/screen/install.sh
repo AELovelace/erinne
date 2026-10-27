@@ -10,14 +10,24 @@
 #   sudo bash install.sh https://erynne.example.com --dry-run   # what it would do, nothing written
 #   sudo bash install.sh --check                                # codecs, video decoding, the server
 #   sudo bash install.sh --uninstall
+#   sudo bash install.sh --update screen-v0.3.0                 # move to a release (Kiosk settings does this)
+#   sudo bash install.sh --rollback                             # back to the release before the last update
 #
 #   --audio hdmi|auto      sound over HDMI, also when the TV is turned on later (default), or leave
 #                          the choice to PipeWire
 #   --youtube-any-codec    let YouTube send VP9/AV1 (decoded on the CPU) instead of H.264 (the GPU)
 #   --no-auto-updates      don't install security updates nightly (dnf automatic, rebooting if needed)
 #   --no-wifi-setup        no setup hotspot (and the start page is a plain local file)
+#   --volume 0-100         the system volume (default 100; Media sets its own on top)
 #   --no-packages          write the files only; install nothing with dnf
+#   --keep-options         start from the options this box already has (the settings file), then apply
+#                          the ones given; without it, options not given go back to their defaults
+#   --reconfigure          --keep-options --no-packages (Kiosk settings: a new address, say)
 #   --dry-run              print the plan and stop
+#
+# The box keeps a copy of the repository in /opt/mnemerynne-screen (root's): Kiosk settings' updater moves
+# it between screen-v* release tags and runs that release's installer. Installed from another clone (your
+# home folder), that clone's commit is copied there.
 #
 # What it needs from the hardware: an Intel GPU (VA-API decoding; 3rd generation Core and newer use the
 # i965 driver, 5th and newer also intel-media-driver), HDMI to the TV, and the network. RPM Fusion
@@ -36,17 +46,25 @@ DNF_AUTOMATIC=$ROOT/etc/dnf/dnf5-plugins/automatic.conf
 WIFI_HELPER=$ROOT/usr/local/libexec/mnemerynne-screen-wifi
 WIFI_UNIT=$ROOT/etc/systemd/system/mnemerynne-screen-wifi.service
 WIFI_DNS=$ROOT/etc/NetworkManager/dnsmasq-shared.d/mnemerynne-screen.conf
-WIFI_SOURCE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/wifi-setup.py
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+WIFI_SOURCE=$HERE/wifi-setup.py
+SOURCE_DIR=$ROOT/opt/mnemerynne-screen          # the box's own copy of the repository (the updater's)
+STATE_DIR=$ROOT/var/lib/mnemerynne-screen        # the release before the last update (--rollback)
+PIN_FILE=$ROOT/etc/mnemerynne-screen.pin         # Kiosk settings' PIN (wifi-setup.py writes it)
 SCREEN_USER=mnemerynne-screen
+RELEASE_TAG='^screen-v[0-9]+\.[0-9]+\.[0-9]+$'
 
 URL=""
 AUDIO=hdmi
 YOUTUBE_H264=1
 AUTO_UPDATES=1
 WIFI_SETUP=1
+VOLUME=100
 PACKAGES=1
+KEEP_OPTIONS=0
 DRY_RUN=0
 MODE=install
+TARGET=""
 
 step() { printf '\n== %s\n' "$*"; }
 note() { printf '   %s\n' "$*"; }
@@ -97,8 +115,25 @@ render_conf() {
 # this file and restarts the screen.
 MNEMERYNNE_URL=$URL
 AUDIO_OUTPUT=$AUDIO
-WIFI_SETUP=$([[ $WIFI_SETUP == 1 ]] && echo yes || echo no)
+WIFI_SETUP=$(yes_no "$WIFI_SETUP")
+YOUTUBE_H264=$(yes_no "$YOUTUBE_H264")
+AUTO_UPDATES=$(yes_no "$AUTO_UPDATES")
+SYSTEM_VOLUME=$VOLUME
+SOURCE_DIR=${SOURCE_DIR#"$ROOT"}
 EOF
+}
+
+yes_no() { [[ $1 == 1 ]] && echo yes || echo no; }
+
+# --keep-options: what this box has now, before the command line's options apply.
+load_options() {
+    local v
+    v=$(conf_value AUDIO_OUTPUT); [[ $v == hdmi || $v == auto ]] && AUDIO=$v
+    v=$(conf_value WIFI_SETUP); [[ $v == no ]] && WIFI_SETUP=0
+    v=$(conf_value YOUTUBE_H264); [[ $v == no ]] && YOUTUBE_H264=0
+    v=$(conf_value AUTO_UPDATES); [[ $v == no ]] && AUTO_UPDATES=0
+    v=$(conf_value SYSTEM_VOLUME); [[ $v =~ ^[0-9]{1,3}$ && $v -le 100 ]] && VOLUME=$v
+    return 0
 }
 
 # Runs inside cage as $SCREEN_USER: Firefox in kiosk mode, starting on the local page that waits for
@@ -118,13 +153,12 @@ if [ "${AUDIO_OUTPUT:-hdmi}" = hdmi ]; then
 fi
 export MOZ_ENABLE_WAYLAND=1
 START=file:///usr/local/share/mnemerynne-screen/start.html
-if [ "${WIFI_SETUP:-no}" = yes ]; then
-    # The Wi-Fi helper's page: it waits for the server, and offers the setup hotspot when there's no network.
-    for _ in $(seq 20); do
-        if curl -fsS -o /dev/null --max-time 2 http://127.0.0.1:9187/api/status; then START=http://127.0.0.1:9187/; break; fi
-        sleep 1
-    done
-fi
+# The helper's page (wifi-setup.py): it waits for the server, offers the setup hotspot when there's no
+# network, and has Kiosk settings. The plain file only if the helper isn't answering.
+for _ in $(seq 20); do
+    if curl -fsS -o /dev/null --max-time 2 http://127.0.0.1:9187/api/status; then START=http://127.0.0.1:9187/; break; fi
+    sleep 1
+done
 exec firefox --kiosk --no-remote --profile "$PROFILE" "$START"
 EOF
 }
@@ -137,6 +171,8 @@ render_audio() {
 #!/bin/bash
 # HDMI sound for the Mnemerynne screen (deploy/screen/install.sh).
 set -u
+SYSTEM_VOLUME=100
+. /etc/mnemerynne-screen.conf 2>/dev/null || true
 pick() {
     awk '
         /^Card #/ { card = "" }
@@ -160,7 +196,7 @@ while :; do
         if [ -n "$sink" ] && [ "$(pactl get-default-sink)" != "$sink" ]; then
             pactl set-default-sink "$sink"
             pactl set-sink-mute "$sink" 0
-            pactl set-sink-volume "$sink" 100%      # Media sets its own volume on top
+            pactl set-sink-volume "$sink" "${SYSTEM_VOLUME:-100}%"   # Kiosk settings' volume; Media's is on top
         fi
     fi
     sleep 30
@@ -359,10 +395,11 @@ install_packages() {
     fi
     sys dnf install -y --allowerasing --setopt=install_weak_deps=False \
         cage firefox ffmpeg ffmpeg-libs libva-intel-driver libva-utils mesa-dri-drivers \
-        pipewire pipewire-alsa pipewire-pulseaudio wireplumber pulseaudio-utils curl \
+        pipewire pipewire-alsa pipewire-pulseaudio wireplumber pulseaudio-utils curl git \
         google-noto-sans-fonts google-noto-color-emoji-fonts
+    sys dnf install -y --setopt=install_weak_deps=False python3 python3-qrcode
     if [[ $WIFI_SETUP == 1 ]]; then
-        sys dnf install -y --setopt=install_weak_deps=False python3 python3-qrcode iw dnsmasq NetworkManager-wifi
+        sys dnf install -y --setopt=install_weak_deps=False iw dnsmasq NetworkManager-wifi
     fi
     sys dnf install -y --skip-unavailable intel-media-driver
     if [[ $AUTO_UPDATES == 1 ]]; then
@@ -384,12 +421,65 @@ write_files() {
     if [[ $AUTO_UPDATES == 1 ]]; then
         render_dnf_automatic | put 0644 "$DNF_AUTOMATIC"
     fi
+    # The helper: the start page and Kiosk settings always; the setup hotspot unless --no-wifi-setup.
+    [[ -f $WIFI_SOURCE ]] || die "wifi-setup.py isn't beside install.sh: clone the repository onto the box (README)"
+    put 0755 "$WIFI_HELPER" <"$WIFI_SOURCE"
+    render_wifi_unit | put 0644 "$WIFI_UNIT"
     if [[ $WIFI_SETUP == 1 ]]; then
-        [[ -f $WIFI_SOURCE ]] || die "wifi-setup.py isn't beside install.sh: clone the repository onto the box (README), or use --no-wifi-setup"
-        put 0755 "$WIFI_HELPER" <"$WIFI_SOURCE"
-        render_wifi_unit | put 0644 "$WIFI_UNIT"
         render_wifi_dns | put 0644 "$WIFI_DNS"
     fi
+}
+
+# The box's own copy of the repository, for Kiosk settings' updater. Installed from another clone, that
+# clone's commit goes there (its origin stays the place updates come from); from the copy itself, nothing.
+sync_source() {
+    step "The box's copy of the repository ($SOURCE_DIR)"
+    local repo head origin
+    repo=$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null || true)
+    if [[ -z $repo ]]; then
+        note "not installed from a git clone: the updater needs one (README, step 2)"
+        return 0
+    fi
+    if [[ $(cd -- "$repo" && pwd -P) == $(cd -- "$SOURCE_DIR" 2>/dev/null && pwd -P) ]]; then
+        note "installing from it"
+        return 0
+    fi
+    head=$(git -C "$repo" rev-parse HEAD)
+    origin=$(git -C "$repo" remote get-url origin 2>/dev/null || true)
+    if [[ ! -d $SOURCE_DIR/.git ]]; then
+        sys git clone --quiet --no-checkout "$repo" "${SOURCE_DIR#"$ROOT"}"
+    else
+        sys git -C "${SOURCE_DIR#"$ROOT"}" fetch --quiet --tags --force "$repo" "$head"
+    fi
+    [[ -z $origin ]] || sys git -C "${SOURCE_DIR#"$ROOT"}" remote set-url origin "$origin"
+    sys git -C "${SOURCE_DIR#"$ROOT"}" -c advice.detachedHead=false checkout --quiet --force --detach "$head"
+    note "at $(git -C "$repo" describe --tags --always "$head" 2>/dev/null || echo "$head")"
+}
+
+# --update TAG / --rollback: move the box's copy to a screen-v* release, then run that release's installer
+# with the options the box has. Newer releases only, unless rolling back to the one before the last update.
+update_to() {
+    local tag=$1 rollback=$2 src=${SOURCE_DIR#"$ROOT"} current
+    [[ -d $SOURCE_DIR/.git ]] || die "no copy of the repository in $src: run the installer from a clone first"
+    [[ -z $(git -C "$SOURCE_DIR" status --porcelain --untracked-files=no) ]] || die "$src has local changes; not updating over them"
+    local ref
+    if [[ $rollback == 1 ]]; then
+        ref=$tag          # what --rollback recorded: a release tag, or the commit installed from a clone
+    else
+        git -C "$SOURCE_DIR" fetch --quiet --tags --force origin || die "couldn't fetch releases from $(git -C "$SOURCE_DIR" remote get-url origin)"
+        [[ $tag =~ $RELEASE_TAG ]] || die "$tag isn't a screen release (screen-vX.Y.Z)"
+        ref=refs/tags/$tag
+    fi
+    git -C "$SOURCE_DIR" rev-parse --quiet --verify "$ref^{commit}" >/dev/null || die "there's no release $tag"
+    if [[ $rollback == 0 ]] && ! git -C "$SOURCE_DIR" merge-base --is-ancestor HEAD "$ref"; then
+        die "$tag doesn't follow on from what's installed; only newer releases install (or --rollback)"
+    fi
+    current=$(git -C "$SOURCE_DIR" describe --tags --exact-match --match 'screen-v*' HEAD 2>/dev/null || git -C "$SOURCE_DIR" rev-parse HEAD)
+    step "Updating the screen: $current → $tag"
+    mkdir -p "$STATE_DIR"
+    if [[ $rollback == 1 ]]; then rm -f "$STATE_DIR/previous"; else printf '%s\n' "$current" >"$STATE_DIR/previous"; fi
+    git -C "$SOURCE_DIR" -c advice.detachedHead=false checkout --quiet --detach "$ref"
+    exec bash "$SOURCE_DIR/deploy/screen/install.sh" --keep-options
 }
 
 make_user() {
@@ -407,18 +497,19 @@ enable_service() {
     sys restorecon -R /etc/mnemerynne-screen.conf /usr/local/bin /usr/local/share/mnemerynne-screen \
         /etc/firefox/policies /etc/systemd/system/mnemerynne-screen.service /etc/pam.d/mnemerynne-screen
     sys systemctl daemon-reload
+    sys restorecon -R /usr/local/libexec /etc/systemd/system/mnemerynne-screen-wifi.service
     if [[ $WIFI_SETUP == 1 ]]; then
-        sys restorecon -R /usr/local/libexec /etc/systemd/system/mnemerynne-screen-wifi.service /etc/NetworkManager/dnsmasq-shared.d
+        sys restorecon -R /etc/NetworkManager/dnsmasq-shared.d
         # The setup page on the hotspot (firewalld's zone for shared connections; nothing on the real network).
         if [[ -n $ROOT || $DRY_RUN == 1 ]] || firewall-cmd --state >/dev/null 2>&1; then
             sys firewall-cmd --permanent --zone=nm-shared --add-service=http
             sys firewall-cmd --reload
         fi
-        sys systemctl enable mnemerynne-screen-wifi.service
-        sys systemctl restart mnemerynne-screen-wifi.service
-    else
-        sys systemctl disable --now mnemerynne-screen-wifi.service
     fi
+    # The helper runs either way (the start page, Kiosk settings); WIFI_SETUP in the settings file says
+    # whether it may start the hotspot.
+    sys systemctl enable mnemerynne-screen-wifi.service
+    sys systemctl restart mnemerynne-screen-wifi.service
     sys systemctl enable mnemerynne-screen.service
     if [[ $AUTO_UPDATES == 1 ]]; then
         sys systemctl enable --now dnf5-automatic.timer
@@ -469,9 +560,14 @@ check() {
 
     step "The screen"
     if systemctl is-active --quiet mnemerynne-screen.service; then ok "running on tty1"; else bad "not running: journalctl -u mnemerynne-screen -b"; fi
+    if curl -fsS -o /dev/null --max-time 3 http://127.0.0.1:9187/api/status; then ok "start page and Kiosk settings running"; else bad "the helper isn't answering: journalctl -u mnemerynne-screen-wifi -b"; fi
     if [[ $(conf_value WIFI_SETUP) == yes ]]; then
-        if curl -fsS -o /dev/null --max-time 3 http://127.0.0.1:9187/api/status; then ok "Wi-Fi setup and start page running"; else bad "the Wi-Fi helper isn't answering: journalctl -u mnemerynne-screen-wifi -b"; fi
         if iw list 2>/dev/null | grep -A10 "Supported interface modes" | grep -qw AP; then ok "the Wi-Fi card can be a hotspot"; else note "no Wi-Fi card that can be a hotspot: setting up Wi-Fi needs a cable or SSH"; fi
+    fi
+    if [[ -d $SOURCE_DIR/.git ]]; then
+        ok "release $(git -C "$SOURCE_DIR" describe --tags --always --match 'screen-v*' HEAD 2>/dev/null) ($SOURCE_DIR)"
+    else
+        note "no copy of the repository in $SOURCE_DIR: Kiosk settings can't update (run the installer from a clone)"
     fi
     if [[ -n $(pactl --server "unix:/run/user/$(id -u "$SCREEN_USER" 2>/dev/null || echo 0)/pulse/native" get-default-sink 2>/dev/null | grep -i hdmi) ]]; then
         ok "sound goes to HDMI"
@@ -487,10 +583,10 @@ uninstall() {
     sys systemctl disable --now mnemerynne-screen-wifi.service
     sys nmcli connection delete id mnemerynne-setup
     for f in "$UNIT" "$PAM_FILE" "$CONF" "$POLICIES" "$BIN/mnemerynne-screen-session" "$BIN/mnemerynne-screen-audio" "$DNF_AUTOMATIC" \
-             "$WIFI_HELPER" "$WIFI_UNIT" "$WIFI_DNS"; do
+             "$WIFI_HELPER" "$WIFI_UNIT" "$WIFI_DNS" "$PIN_FILE"; do
         sys rm -f "${f#"$ROOT"}"
     done
-    sys rm -rf /usr/local/share/mnemerynne-screen
+    sys rm -rf /usr/local/share/mnemerynne-screen "${STATE_DIR#"$ROOT"}" "${SOURCE_DIR#"$ROOT"}"
     sys systemctl daemon-reload
     if id "$SCREEN_USER" >/dev/null 2>&1; then
         sys userdel --remove "$SCREEN_USER"
@@ -508,7 +604,17 @@ parse_args() {
             --youtube-any-codec) YOUTUBE_H264=0 ;;
             --no-auto-updates) AUTO_UPDATES=0 ;;
             --no-wifi-setup) WIFI_SETUP=0 ;;
+            --wifi-setup) WIFI_SETUP=1 ;;
+            --youtube-h264) YOUTUBE_H264=1 ;;
+            --auto-updates) AUTO_UPDATES=1 ;;
+            --volume) VOLUME=${2:-}; shift
+                      [[ $VOLUME =~ ^[0-9]{1,3}$ && $VOLUME -le 100 ]] || die "--volume is 0 to 100" ;;
             --no-packages) PACKAGES=0 ;;
+            --keep-options) ;;
+            --reconfigure) PACKAGES=0 ;;
+            --update) MODE=update; TARGET=${2:-}; shift
+                      [[ -n $TARGET ]] || die "--update needs a release, like screen-v0.3.0" ;;
+            --rollback) MODE=rollback ;;
             --dry-run) DRY_RUN=1 ;;
             --check) MODE=check ;;
             --uninstall) MODE=uninstall ;;
@@ -521,6 +627,12 @@ parse_args() {
 }
 
 main() {
+    # --keep-options (and --reconfigure): the box's options first, so the command line's apply on top.
+    local arg
+    for arg in "$@"; do
+        [[ $arg == --keep-options || $arg == --reconfigure ]] && KEEP_OPTIONS=1
+    done
+    [[ $KEEP_OPTIONS == 0 ]] || load_options
     parse_args "$@"
     if [[ -z $ROOT && $DRY_RUN == 0 && $EUID -ne 0 ]]; then
         die "run it as root: sudo bash $0 $*"
@@ -529,17 +641,22 @@ main() {
     case $MODE in
         check) check; exit ;;
         uninstall) uninstall; exit 0 ;;
+        update) update_to "$TARGET" 0 ;;
+        rollback)
+            [[ -s $STATE_DIR/previous ]] || die "nothing to roll back to: no update was installed since"
+            update_to "$(head -n 1 "$STATE_DIR/previous")" 1 ;;
     esac
     [[ -n $URL ]] || URL=$(conf_value MNEMERYNNE_URL)
     [[ -n $URL ]] || die "give the Mnemerynne address: sudo bash $0 https://erynne.example.com"
     URL=$(clean_url "$URL") || exit 1
     [[ $URL == https://* ]] || note "warning: $URL isn't HTTPS; the screen key would cross the network in the clear"
 
-    printf 'Mnemerynne screen for %s (sound: %s, YouTube: %s, nightly updates: %s, Wi-Fi setup: %s)\n' "$URL" "$AUDIO" \
-        "$([[ $YOUTUBE_H264 == 1 ]] && echo H.264 || echo any codec)" "$([[ $AUTO_UPDATES == 1 ]] && echo yes || echo no)" \
+    printf 'Mnemerynne screen for %s (sound: %s at %s%%, YouTube: %s, nightly updates: %s, Wi-Fi setup: %s)\n' "$URL" "$AUDIO" \
+        "$VOLUME" "$([[ $YOUTUBE_H264 == 1 ]] && echo H.264 || echo any codec)" "$([[ $AUTO_UPDATES == 1 ]] && echo yes || echo no)" \
         "$([[ $WIFI_SETUP == 1 ]] && echo hotspot || echo no)"
     if [[ $PACKAGES == 1 ]]; then install_packages; fi
     make_user
+    sync_source
     write_files
     enable_service
     if [[ $DRY_RUN == 1 || -n $ROOT ]]; then

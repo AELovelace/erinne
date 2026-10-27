@@ -37,6 +37,7 @@ html .mc-menu-item { display: flex; align-items: center; gap: .8rem; width: 100%
 .mc-menu-item .mc-icon { width: 1.6rem; text-align: center; font-size: 1.3rem; }
 .mc-menu-item[aria-current="true"] { background: var(--petal-soft); color: var(--rose); }
 .mc-menu-item:hover { background: var(--petal-soft); }
+.mc-view-select { display: none; }
 
 /* ------------------------------------------------------------------ main */
 .mc-main { position: relative; z-index: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden;
@@ -192,7 +193,11 @@ html .mc-np-buttons button { background: none; border: 0; color: var(--ink); fon
   .mc-clock, .mc-date { display: none; }
   html .mc-menu-item { font-size: 1rem; padding: .45rem .6rem; white-space: nowrap; width: auto; gap: .4rem; }
   .mc-menu-item .mc-icon { width: auto; font-size: 1.1rem; }
-  .mc-cast { flex: 1 1 100%; flex-direction: row; align-items: center; gap: .5rem; margin: 0; padding: .3rem .4rem;
+  /* The views as a dropdown, not rows of buttons; a screen keeps its list for the remote. */
+  .mc-view-select { display: block; flex: 1 1 10rem; min-width: 0; margin: .2rem; }
+  .mc:not([data-screen-id]) .mc-menu-item[data-view] { display: none; }
+  .mc-grid.square { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mc-cast { flex: 1 1 12rem; flex-direction: row; align-items: center; gap: .5rem; margin: 0; padding: .3rem .4rem;
              border-top: 0; }
   .mc-cast select { width: auto; flex: 1; min-width: 0; }
   .mc-head { padding: .6rem .8rem .4rem; gap: .5rem; }
@@ -278,6 +283,17 @@ body.mc-screen-mode { display: flow-root; }
 .mc-splash button { justify-self: center; font-size: 1.3rem; padding: .8rem 2rem; }
 html[data-theme="neon"] .mc-splash-name { color: var(--rose);
   text-shadow: -2px 0 var(--fringe-l), 2px 0 var(--fringe-r), 0 0 24px rgba(255, 46, 151, .6); }
+/* Neon: the idle splash shows the parallax city (base.html, parallax.js) through it, with Media hidden behind. */
+html[data-theme="neon"] .mc-splash { background: radial-gradient(ellipse 34% 26% at 50% 50%, rgba(7, 2, 13, .72), transparent 100%); }
+html[data-theme="neon"] .mc-splash-state { color: var(--ink); }
+html[data-theme="neon"] body:has(> .mc-splash:not([hidden])) :is(.mc, .mc-backdrop, .mc-dock, .topbar) { visibility: hidden; }
+/* The TV's top bar (Kiosk settings, _nav.html): inside the safe area, with Media under it. */
+body.mc-screen-mode > .topbar { margin: var(--safe-yv, 0px) var(--safe-xv, 0px) 0; }
+body.mc-screen-mode:has(> .topbar) .mc { margin-top: .9rem;
+  height: calc(100vh - var(--chrome, 3.6rem) - 1.8rem - 2 * var(--safe-yv, 0px)); }
+/* Kiosk settings' code for an admin's phone (kiosk_screen.js), on the pairing page's layout. */
+.mc-kiosk-buttons { display: flex; gap: 1rem; justify-content: center; }
+.mc-kiosk-buttons button { font-size: 1.2rem; padding: .7rem 1.6rem; }
 
 /* -------------------------------------------- pairing a TV (media_pair.html) */
 .mc-pair-row { display: flex; gap: 3rem; align-items: center; justify-content: center; text-align: left;
@@ -301,10 +317,28 @@ html.mc-sg-running, html.mc-sg-running body { overflow: hidden; }
 .mc-volume-bar { width: 12rem; height: .45rem; border-radius: .3rem; background: rgba(255, 255, 255, .25); overflow: hidden; }
 .mc-volume-bar > span { display: block; height: 100%; background: var(--rose, #ff2e97); }
 .mc-volume-pct { min-width: 3.6rem; text-align: right; font-variant-numeric: tabular-nums; }
-.mc-sg-layer { position: absolute; inset: 0; opacity: 0; transition: opacity 1s ease; display: grid; place-items: center; }
+/* Two layers; the next slide comes over the current one with the playlist's transition (signage_render.js). */
+.mc-sg-layer { position: absolute; inset: 0; opacity: 0; display: grid; place-items: center;
+               transition: opacity 1s ease, transform 1s ease; }
 .mc-sg-layer.on { opacity: 1; }
-.mc-sg-layer > img, .mc-sg-layer > video { width: 100%; height: 100%; object-fit: contain; }
+.mc-sg-t-cut { transition: none; }
+.mc-sg-t-slide { transform: translateX(8%); transition: opacity .7s ease, transform .7s cubic-bezier(.2, .8, .3, 1); }
+.mc-sg-t-slide.on { transform: none; }
+.mc-sg-t-zoom { transform: scale(1.08); transition: opacity .9s ease, transform .9s ease; }
+.mc-sg-t-zoom.on { transform: none; }
+/* Fit: contain (whole picture), cover (fills, edges cut), blur (whole picture over a blurred copy). */
+.mc-sg-fit { position: relative; width: 100%; height: 100%; overflow: hidden; }
+.mc-sg-fit > img, .mc-sg-fit > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.mc-sg-fit-cover > img, .mc-sg-fit-cover > video { object-fit: cover; }
+.mc-sg-fit > .mc-sg-blur { object-fit: cover; filter: blur(28px) brightness(.7); transform: scale(1.1); }
 .mc-sg-layer > iframe { width: 100%; height: 100%; border: 0; background: #fff; }
+/* The screen's name, for a few seconds, when an admin presses Identify. */
+.mc-sg-identify { position: fixed; left: 50%; top: 10%; transform: translate(-50%, -20px); z-index: 95; display: flex;
+                  flex-direction: column; align-items: center; gap: .3rem; padding: 1.2rem 2.4rem; border-radius: 1rem;
+                  background: rgba(0, 0, 0, .82); color: #fff; font-size: 2.4rem; text-align: center; opacity: 0;
+                  transition: opacity .3s ease, transform .3s ease; pointer-events: none; }
+.mc-sg-identify.on { opacity: 1; transform: translate(-50%, 0); }
+.mc-sg-identify span { font-size: 1.3rem; opacity: .8; }
 .mc-sg-text { box-sizing: border-box; width: 100%; height: 100%; display: grid; place-content: center; gap: 3vh;
               padding: 6vh 8vw; text-align: center; background: #12031f; color: #fff;
               background-size: cover; background-position: center; }

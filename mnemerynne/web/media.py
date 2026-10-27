@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import mimetypes
 import re
 import sqlite3
@@ -31,6 +32,8 @@ from mnemerynne.media import artwork, browse, catalog, live, probe, screens, sig
 from mnemerynne.web import security
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import _session_user, admin_user, api_user, get_db, get_settings, is_admin, page_user
+
+log = logging.getLogger("mnemerynne.media")
 
 
 def _media_on(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> None:
@@ -372,10 +375,13 @@ def screen_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     owner = users.get_user_by_id(conn, screen["user_id"]) if screen is not None else None
     if owner is None or not screens.may_use(conn, owner, request.app.state.directory):
         return request.app.state.templates.TemplateResponse(request, "media_pair.html", {})
+    if request.session.get("kiosk_screen"):
+        request.session.clear()      # someone signed in on the TV (its top bar): back on the TV, signed out
     return request.app.state.templates.TemplateResponse(request, "media.html", {
         "user": owner, "is_admin": False, "active": "media", "has_library": media.library(conn) is not None,
         "folder": _folder_name(conn), "screen": {"id": screen["id"], "name": screen["name"],
-                                                 "safe_x": screen["safe_x"], "safe_y": screen["safe_y"]}})
+                                                 "safe_x": screen["safe_x"], "safe_y": screen["safe_y"],
+                                                 "top_bar": bool(screen["top_bar"])}})
 
 
 class ScreenBody(BaseModel):
@@ -605,6 +611,8 @@ class ScreenState(BaseModel):
     muted: bool = False
     has_queue: bool = False
     night: float | None = Field(None, ge=0, le=1)        # the night filter's level
+    version: str | None = Field(None, max_length=40)     # the player's version (signage shows it per screen)
+    errors: list[str] = Field(default_factory=list, max_length=10)   # slides that wouldn't load, lately
 
 
 class SafeArea(BaseModel):
@@ -621,30 +629,41 @@ def screen_safe_area(body: SafeArea, screen=Depends(screen_device), conn: sqlite
 
 
 @router.put("/api/media/screen/state")
-async def screen_state(body: ScreenState, request: Request, screen=Depends(screen_device)):
-    """What the screen is playing, every few seconds and on every change; read by its owner's remote."""
-    hub(request).set_state(screen["id"], body.model_dump())
+async def screen_state(body: ScreenState, request: Request, screen=Depends(screen_device),
+                       conn: sqlite3.Connection = Depends(get_db)):
+    """What the screen is playing, every few seconds and on every change; read by its owner's remote, and
+    kept (signage.record_state) so Access → Signage shows it and "online" outlives a restart."""
+    state = body.model_dump(exclude={"version"})
+    hub(request).set_state(screen["id"], state)
+    with transaction(conn):
+        signage.record_state(conn, screen["id"], state, body.version)
     return {"status": "ok"}
+
 
 @router.get("/media/screen/signage")
 def screen_signage(screen=Depends(screen_device), conn: sqlite3.Connection = Depends(get_db)):
-    """The screen's signage rules and the slideshows they name, ready to play (media/signage.py)."""
-    return signage.for_screen(conn, screen["id"])[0]
+    """The screen's programme and the playlists it names, ready to play (media/signage.py)."""
+    return signage.for_screen(conn, screen)[0]
 
 
-@router.get("/media/screen/signage/file/{file_id}")
-def screen_signage_file(file_id: int, screen=Depends(screen_device), conn: sqlite3.Connection = Depends(get_db),
-                        settings: Settings = Depends(get_settings)):
-    """A picture (screen-sized) or video of the screen's slideshows: only those, whatever its owner may read."""
-    if file_id not in signage.for_screen(conn, screen["id"])[1]:
+def _signage_file(conn: sqlite3.Connection, settings: Settings, allowed: set[int], file_id: int, page: int | None):
+    if file_id not in allowed:
         raise _not_found()
-    found = signage.picture_path(conn, settings, file_id)
+    found = signage.picture_path(conn, settings, file_id, page)
     if found is None:
         raise _not_found()
     path, mime = found
     return FileResponse(path, media_type=mime, headers={
         "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox",
         "Cache-Control": "private, max-age=604800, immutable"})   # the address changes with the content
+
+
+@router.get("/media/screen/signage/file/{file_id}")
+def screen_signage_file(file_id: int, page: int | None = None, screen=Depends(screen_device),
+                        conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
+    """A picture (screen-sized), a PDF page or a video of the screen's playlists: only those, whatever its
+    owner may read."""
+    return _signage_file(conn, settings, signage.for_screen(conn, screen)[1], file_id, page)
 
 
 # -------------------------------------------------------------------- admin
@@ -679,6 +698,8 @@ class MediaSettingsBody(BaseModel):
     online_metadata: bool | None = None
     radio_directory_url: str | None = Field(None, max_length=1000)
     tmdb_key: str | None = Field(None, max_length=1000)   # None: keep; "": remove
+    signage_folder: str | None = Field(None, max_length=120)   # the Signage folder at the top of the share
+    signage_effects: dict | None = None                        # CRT effects for newly paired screens
 
 
 @admin_router.put("/api/admin/settings/media")
@@ -700,7 +721,16 @@ def admin_settings(body: MediaSettingsBody, request: Request, user=Depends(admin
             elif body.enabled is False and media.enabled(conn):
                 media.set_enabled(conn, False)
                 _log(conn, user, "settings.media", "off")
-            changes = body.model_dump(exclude={"enabled", "folder", "tmdb_key"}, exclude_none=True)
+            if body.signage_folder is not None and media.set_signage_folder(conn, settings, body.signage_folder):
+                _log(conn, user, "settings.signage_folder", media.check_folder(body.signage_folder))
+                if media.enabled(conn) and body.enabled is not False:
+                    media.ensure_signage_library(conn)
+            changes = body.model_dump(exclude={"enabled", "folder", "tmdb_key", "signage_folder"}, exclude_none=True)
+            if changes.get("signage_effects") is not None:
+                try:
+                    changes["signage_effects"] = signage.clean_effects(changes["signage_effects"])
+                except signage.SignageError as exc:
+                    raise media.MediaError(str(exc)) from None
             directory = request.app.state.directory
             for name in media.GROUP_SETTINGS:
                 if changes.get(name) is not None:
@@ -826,30 +856,105 @@ def share_link(request: Request, title: str = "", text: str = "", url: str = "",
 # ------------------------------------------------------------ admin: signage
 def _signage_status(request: Request, conn: sqlite3.Connection) -> dict:
     h = hub(request)
+    cfg = media.load_settings(conn)
+    sg = media.signage_library(conn)
     return {"enabled": media.enabled(conn), "library": media.library(conn) is not None,
-            "shows": signage.shows(conn), "folders": signage.folders(conn),
-            "screens": [s | {"online": h.online(s["id"]), "state": h.state(s["id"])} for s in signage.screens(conn)]}
+            "signage_library": {"id": sg["id"], "name": sg["name"]} if sg is not None else None,
+            "settings": {"signage_folder": cfg["signage_folder"], "signage_effects": cfg["signage_effects"] or {}},
+            "shows": signage.shows(conn), "groups": signage.groups(conn), "schedule": signage.schedule(conn),
+            "tree": signage.tree(conn),
+            "screens": [s | {"online": h.online(s["id"]) or s["recent"], "state": h.state(s["id"]) or s["last_state"]}
+                        for s in signage.screens(conn)]}
 
 
-def _signage_changed(request: Request, conn: sqlite3.Connection) -> None:
-    """Every screen fetches its signage again (cheap, and admins change it seldom)."""
+def _signage_changed(request: Request, conn: sqlite3.Connection, screen_ids=None) -> None:
+    """The screens fetch their signage again (cheap, and admins change it seldom): all, or the given ones."""
     h = hub(request)
-    for row in conn.execute("SELECT id FROM media_screens"):
-        h.push(row["id"], {"action": "signage"})
+    ids = screen_ids if screen_ids is not None else [r["id"] for r in conn.execute("SELECT id FROM media_screens")]
+    for screen_id in ids:
+        h.push(screen_id, {"action": "signage"})
 
 
 def _signage_error(exc: signage.SignageError) -> HTTPException:
     return HTTPException(exc.status, str(exc))
 
 
+def _ensure_signage(conn: sqlite3.Connection) -> None:
+    """The Signage folder on the share, made when Media is on and the share is there (quietly otherwise)."""
+    if not media.enabled(conn) or media.signage_library(conn) is not None:
+        return
+    try:
+        with transaction(conn):
+            media.ensure_signage_library(conn)
+    except (media.MediaError, OSError) as exc:
+        log.info("Signage folder not made yet: %s", exc)
+
+
 @admin_router.get("/api/admin/signage")
 async def admin_signage(request: Request, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+    _ensure_signage(conn)
     return _signage_status(request, conn)
 
 
 @admin_router.get("/api/admin/signage/files")
-def admin_signage_files(folder: int, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
-    return {"files": signage.files_in(conn, folder)}
+def admin_signage_files(library: int, folder: int | None = None, user=Depends(admin_user),
+                        conn: sqlite3.Connection = Depends(get_db)):
+    try:
+        return {"files": signage.files_in(conn, library, folder)}
+    except signage.SignageError as exc:
+        raise _signage_error(exc) from None
+
+
+@admin_router.get("/api/admin/signage/art/{artwork_id}")
+def admin_signage_art(artwork_id: int, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db),
+                      settings: Settings = Depends(get_settings)):
+    """A thumbnail from the catalog, for the Signage page (admins needn't be in the Media group)."""
+    row = conn.execute("SELECT rel_path FROM media_artwork WHERE id = ?", (artwork_id,)).fetchone()
+    path = artwork.path_of(settings, row["rel_path"]) if row else None
+    if path is None or not path.is_file():
+        raise _not_found()
+    return FileResponse(path, media_type="image/jpeg", headers={
+        "Cache-Control": "private, max-age=604800, immutable", "X-Content-Type-Options": "nosniff"})
+
+
+@admin_router.get("/api/admin/signage/file/{file_id}")
+def admin_signage_file(file_id: int, page: int | None = None, user=Depends(admin_user),
+                       conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
+    """A playlist's picture, PDF page or video as a screen gets it, for the admin page's preview."""
+    return _signage_file(conn, settings, signage.admin_files(conn), file_id, page)
+
+
+@admin_router.get("/api/admin/signage/preview/{show_id}")
+def admin_signage_preview(show_id: int, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+    try:
+        return signage.preview(conn, show_id)[0]
+    except signage.SignageError as exc:
+        raise _signage_error(exc) from None
+
+
+class NewFolderBody(BaseModel):
+    library_id: int
+    parent_id: int | None = None
+    name: str = Field(..., max_length=200)
+
+
+@admin_router.post("/api/admin/signage/folders", status_code=status.HTTP_201_CREATED)
+def admin_signage_folder(body: NewFolderBody, request: Request, user=Depends(admin_user),
+                         conn: sqlite3.Connection = Depends(get_db)):
+    """A folder in the Signage folder (as the admin, with their share rights)."""
+    from mnemerynne import fs, share
+    sg = media.signage_library(conn)
+    if sg is None or body.library_id != sg["id"]:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "New folders go in the Signage folder.")
+    try:
+        folder_id = fs.create_folder(conn, fs.Access.of(conn, user["id"]), sg["id"], body.parent_id, body.name)
+    except fs.FsError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    except share.ShareError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from None
+    _log(conn, user, "signage.folder_create", body.name.strip())
+    conn.commit()
+    return _signage_status(request, conn) | {"created": folder_id}
 
 
 class NewShowBody(BaseModel):
@@ -858,14 +963,29 @@ class NewShowBody(BaseModel):
 
 class ShowBody(BaseModel):
     name: str = Field(..., max_length=200)
+    description: str = Field("", max_length=300)
     seconds: int = Field(10, ge=3, le=3600)
     shuffle: bool = False
+    transition: Literal["fade", "cut", "slide", "zoom"] = "fade"
+    fit: Literal["contain", "cover", "blur"] = "contain"
+    effects: dict | None = None
     slides: list[dict] = Field(default_factory=list, max_length=signage.MAX_SLIDES)
 
 
 class ScreenSignageBody(BaseModel):
     idle_minutes: int = Field(5, ge=1, le=1440)
-    rules: list[signage.Rule] = Field(default_factory=list, max_length=signage.MAX_RULES)
+    group_id: int | None = None
+    location: str = Field("", max_length=80)
+    orientation: Literal["landscape", "portrait"] = "landscape"
+    effects: dict | None = None
+
+
+class GroupBody(BaseModel):
+    name: str = Field(..., max_length=200)
+
+
+class ScreenCommandBody(BaseModel):
+    action: Literal["reload", "identify", "signage_stop", "signage_start"]
 
 
 @admin_router.post("/api/admin/signage/shows", status_code=status.HTTP_201_CREATED)
@@ -886,12 +1006,27 @@ async def admin_save_show(show_id: int, body: ShowBody, request: Request, user=D
     try:
         slides = signage.parse_slides(body.slides)
         with transaction(conn):
-            signage.update_show(conn, show_id, body.name, body.seconds, body.shuffle, slides)
+            signage.update_show(conn, user["id"], show_id, name=body.name, description=body.description,
+                                seconds=body.seconds, shuffle=body.shuffle, transition=body.transition, fit=body.fit,
+                                effects=body.effects, slides=slides)
             _log(conn, user, "signage.show_update", signage.clean_name(body.name), f"{len(slides)} slide(s)")
     except signage.SignageError as exc:
         raise _signage_error(exc) from None
     _signage_changed(request, conn)
     return _signage_status(request, conn)
+
+
+@admin_router.post("/api/admin/signage/shows/{show_id}/duplicate", status_code=status.HTTP_201_CREATED)
+async def admin_duplicate_show(show_id: int, request: Request, user=Depends(admin_user),
+                               conn: sqlite3.Connection = Depends(get_db)):
+    try:
+        with transaction(conn):
+            made = signage.duplicate_show(conn, user["id"], show_id)
+            name = conn.execute("SELECT name FROM signage_shows WHERE id = ?", (made,)).fetchone()["name"]
+            _log(conn, user, "signage.show_create", name, "a copy")
+    except signage.SignageError as exc:
+        raise _signage_error(exc) from None
+    return _signage_status(request, conn) | {"created": made}
 
 
 @admin_router.delete("/api/admin/signage/shows/{show_id}")
@@ -907,15 +1042,113 @@ async def admin_delete_show(show_id: int, request: Request, user=Depends(admin_u
     return _signage_status(request, conn)
 
 
+@admin_router.post("/api/admin/signage/groups", status_code=status.HTTP_201_CREATED)
+async def admin_new_group(body: GroupBody, request: Request, user=Depends(admin_user),
+                          conn: sqlite3.Connection = Depends(get_db)):
+    try:
+        with transaction(conn):
+            group_id = signage.save_group(conn, None, body.name)
+            _log(conn, user, "signage.group_create", signage.clean_name(body.name, "group", 40))
+    except signage.SignageError as exc:
+        raise _signage_error(exc) from None
+    return _signage_status(request, conn) | {"created": group_id}
+
+
+@admin_router.put("/api/admin/signage/groups/{group_id}")
+async def admin_rename_group(group_id: int, body: GroupBody, request: Request, user=Depends(admin_user),
+                             conn: sqlite3.Connection = Depends(get_db)):
+    try:
+        with transaction(conn):
+            signage.save_group(conn, group_id, body.name)
+            _log(conn, user, "signage.group_update", signage.clean_name(body.name, "group", 40))
+    except signage.SignageError as exc:
+        raise _signage_error(exc) from None
+    return _signage_status(request, conn)
+
+
+@admin_router.delete("/api/admin/signage/groups/{group_id}")
+async def admin_delete_group(group_id: int, request: Request, user=Depends(admin_user),
+                             conn: sqlite3.Connection = Depends(get_db)):
+    row = conn.execute("SELECT name FROM signage_groups WHERE id = ?", (group_id,)).fetchone()
+    if row is None:
+        raise _not_found()
+    with transaction(conn):
+        members = signage.delete_group(conn, group_id)
+        _log(conn, user, "signage.group_delete", row["name"])
+    _signage_changed(request, conn, members)
+    return _signage_status(request, conn)
+
+
+@admin_router.post("/api/admin/signage/schedule", status_code=status.HTTP_201_CREATED)
+async def admin_new_entry(body: signage.Entry, request: Request, user=Depends(admin_user),
+                          conn: sqlite3.Connection = Depends(get_db)):
+    try:
+        with transaction(conn):
+            entry_id = signage.save_entry(conn, None, body)
+            _log(conn, user, "signage.schedule_create", signage.entry_target_label(conn, body), _entry_detail(conn, body))
+    except signage.SignageError as exc:
+        raise _signage_error(exc) from None
+    _signage_changed(request, conn)
+    return _signage_status(request, conn) | {"created": entry_id}
+
+
+@admin_router.put("/api/admin/signage/schedule/{entry_id}")
+async def admin_save_entry(entry_id: int, body: signage.Entry, request: Request, user=Depends(admin_user),
+                           conn: sqlite3.Connection = Depends(get_db)):
+    try:
+        with transaction(conn):
+            signage.save_entry(conn, entry_id, body)
+            _log(conn, user, "signage.schedule_update", signage.entry_target_label(conn, body), _entry_detail(conn, body))
+    except signage.SignageError as exc:
+        raise _signage_error(exc) from None
+    _signage_changed(request, conn)
+    return _signage_status(request, conn)
+
+
+@admin_router.delete("/api/admin/signage/schedule/{entry_id}")
+async def admin_delete_entry(entry_id: int, request: Request, user=Depends(admin_user),
+                             conn: sqlite3.Connection = Depends(get_db)):
+    try:
+        with transaction(conn):
+            signage.delete_entry(conn, entry_id)
+            _log(conn, user, "signage.schedule_delete", str(entry_id))
+    except signage.SignageError as exc:
+        raise _signage_error(exc) from None
+    _signage_changed(request, conn)
+    return _signage_status(request, conn)
+
+
+def _entry_detail(conn: sqlite3.Connection, e: signage.Entry) -> str:
+    show = conn.execute("SELECT name FROM signage_shows WHERE id = ?", (e.show_id,)).fetchone()
+    return f"{show['name'] if show else '?'} {e.start}-{e.end} {e.mode}" + ("" if e.enabled else " (off)")
+
+
 @admin_router.put("/api/admin/signage/screens/{screen_id}")
 async def admin_screen_signage(screen_id: int, body: ScreenSignageBody, request: Request, user=Depends(admin_user),
                                conn: sqlite3.Connection = Depends(get_db)):
     try:
         with transaction(conn):
-            signage.set_screen(conn, screen_id, body.idle_minutes, body.rules)
+            signage.set_screen(conn, screen_id, idle_minutes=body.idle_minutes, group_id=body.group_id,
+                               location=body.location, orientation=body.orientation, effects=body.effects)
             name = conn.execute("SELECT name FROM media_screens WHERE id = ?", (screen_id,)).fetchone()["name"]
-            _log(conn, user, "signage.screen", name, f"{len(body.rules)} rule(s), idle {body.idle_minutes} min")
+            _log(conn, user, "signage.screen", name, f"idle {body.idle_minutes} min, group {body.group_id or '-'}, "
+                 f"{body.orientation}" + (", CRT" if body.effects and body.effects.get("crt") else ""))
     except signage.SignageError as exc:
         raise _signage_error(exc) from None
     hub(request).push(screen_id, {"action": "signage"})
     return _signage_status(request, conn)
+
+
+@admin_router.post("/api/admin/signage/screens/{screen_id}/command")
+async def admin_screen_command(screen_id: int, body: ScreenCommandBody, request: Request, user=Depends(admin_user),
+                               conn: sqlite3.Connection = Depends(get_db)):
+    """Reload the screen's page, show its name on it, or stop and start its signage (any screen, not only
+    the admin's own: the owner's command route can't)."""
+    row = conn.execute("SELECT name FROM media_screens WHERE id = ?", (screen_id,)).fetchone()
+    if row is None:
+        raise _not_found()
+    if not hub(request).push(screen_id, {"action": body.action}):
+        raise HTTPException(status.HTTP_409_CONFLICT, f"{row['name']} isn't connected right now.")
+    _log(conn, user, "signage.command", row["name"], body.action)
+    conn.commit()
+    return {"status": "sent"}
