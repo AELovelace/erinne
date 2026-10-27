@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Media · {{ assistant_name }}{% endblock %}
+{% block body %}
+{% include "_nav.html" %}
+<link rel="stylesheet" href="{{ static('media.css') }}">
+<div class="mc-backdrop" id="mc-backdrop" aria-hidden="true"></div>
+<main class="mc" id="mc" data-has-library="{{ 1 if has_library else 0 }}" data-admin="{{ 1 if is_admin else 0 }}" data-folder="{{ folder }}">
+  <nav class="mc-menu" id="mc-menu" aria-label="Media">
+    <div class="mc-clock" id="mc-clock" aria-hidden="true"></div>
+    <div class="mc-date" id="mc-date" aria-hidden="true"></div>
+    <button type="button" class="mc-menu-item" data-view="home"><span class="mc-icon">⌂</span>Home</button>
+    <button type="button" class="mc-menu-item" data-view="movies"><span class="mc-icon">🎬</span>Movies</button>
+    <button type="button" class="mc-menu-item" data-view="music"><span class="mc-icon">♫</span>Music</button>
+    <button type="button" class="mc-menu-item" data-view="pictures"><span class="mc-icon">🖼</span>Pictures</button>
+    <button type="button" class="mc-menu-item" data-view="live"><span class="mc-icon">📡</span>Live TV</button>
+    <button type="button" class="mc-menu-item" data-view="radio"><span class="mc-icon">📻</span>Radio</button>
+  </nav>
+  <section class="mc-main" aria-live="polite">
+    <header class="mc-head">
+      <h1 id="mc-title">Media</h1>
+      <div class="mc-crumbs" id="mc-crumbs"></div>
+      <div class="mc-tools" id="mc-tools"></div>
+    </header>
+    <p class="error" id="mc-error" role="alert" hidden></p>
+    <div class="mc-scroll" id="mc-content"></div>
+  </section>
+</main>
+
+<div class="mc-player" id="mc-player" role="dialog" aria-label="Player" hidden>
+  <video id="mc-video" playsinline></video>
+  <div class="mc-status" id="mc-status"></div>
+  <div class="mc-osd-top">
+    <strong id="mc-player-title"></strong>
+    <span class="mc-tag" id="mc-player-tag" hidden></span>
+    <button type="button" id="mc-player-close" title="Close (Esc)">✕</button>
+  </div>
+  <div class="mc-osd">
+    <div class="mc-bar">
+      <button type="button" id="mc-back10" title="Back 10 s (←)">⟲</button>
+      <button type="button" id="mc-toggle" title="Play / pause (Space)">⏯</button>
+      <button type="button" id="mc-fwd30" title="Forward 30 s (→)">⟳</button>
+      <span class="mc-time" id="mc-pos">0:00</span>
+      <input type="range" class="mc-seek" id="mc-seek" min="0" max="0" step="1" value="0" aria-label="Position">
+      <span class="mc-time" id="mc-len">0:00</span>
+      <button type="button" id="mc-mute" title="Mute (M)">🔊</button>
+      <button type="button" id="mc-full" title="Full screen (F)">⛶</button>
+    </div>
+  </div>
+</div>
+
+<div class="mc-viewer" id="mc-viewer" role="dialog" aria-label="Pictures" hidden>
+  <img id="mc-viewer-img" alt="">
+  <div class="mc-osd-top">
+    <strong id="mc-viewer-title"></strong>
+    <span class="mc-time" id="mc-viewer-count"></span>
+    <button type="button" id="mc-viewer-show" title="Slideshow (S)">▶</button>
+    <button type="button" id="mc-viewer-close" title="Close (Esc)">✕</button>
+  </div>
+  <button type="button" class="mc-viewer-nav prev" id="mc-viewer-prev" title="Previous (←)">‹</button>
+  <button type="button" class="mc-viewer-nav next" id="mc-viewer-next" title="Next (→)">›</button>
+</div>
+
+<footer class="mc-np" id="mc-np" aria-label="Now playing" hidden>
+  <div class="mc-np-art" id="mc-np-art" aria-hidden="true">♫</div>
+  <div class="mc-np-text">
+    <div class="mc-np-title" id="mc-np-title"></div>
+    <div class="mc-np-sub" id="mc-np-sub"></div>
+    <div class="mc-np-seek" id="mc-np-seekrow">
+      <span class="mc-time" id="mc-np-pos">0:00</span>
+      <input type="range" id="mc-np-seek" min="0" max="0" step="1" value="0" aria-label="Position">
+      <span class="mc-time" id="mc-np-len">0:00</span>
+    </div>
+  </div>
+  <div class="mc-np-buttons">
+    <button type="button" id="mc-np-prev" title="Previous">⏮</button>
+    <button type="button" id="mc-np-toggle" title="Play / pause">⏯</button>
+    <button type="button" id="mc-np-next" title="Next">⏭</button>
+    <button type="button" id="mc-np-stop" title="Stop">⏹</button>
+  </div>
+  <audio id="mc-audio" preload="none"></audio>
+</footer>
+<script src="{{ static('picker.js') }}"></script>
+<script src="{{ static('vendor/hls.js/hls.min.js') }}"></script>
+<script src="{{ static('media.js') }}"></script>
+{% endblock %}

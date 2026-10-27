@@ -37,6 +37,17 @@ dnf install -y \
     git cmake gcc-c++ glslc glslang vulkan-headers vulkan-loader-devel spirv-headers-devel \
     mesa-vulkan-drivers vulkan-tools nvtop policycoreutils-python-utils curl
 
+step "ffmpeg and video drivers (Media)"
+# Media (Settings → Media) probes and transcodes with ffmpeg. Fedora's own ffmpeg-free and
+# mesa-va-drivers can't decode or encode H.264/HEVC, so both come from RPM Fusion: full ffmpeg
+# (with h264_vaapi and h264_nvenc) and the VAAPI driver for the RX 580. vainfo checks the card.
+fedora=$(rpm -E %fedora)
+rpm -q rpmfusion-free-release >/dev/null 2>&1 \
+    || dnf install -y "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$fedora.noarch.rpm"
+rpm -q ffmpeg >/dev/null 2>&1 || dnf swap -y ffmpeg-free ffmpeg --allowerasing
+rpm -q mesa-va-drivers-freeworld >/dev/null 2>&1 || dnf swap -y mesa-va-drivers mesa-va-drivers-freeworld --allowerasing
+dnf install -y libva-utils
+
 step "mnemerynne user and folders"
 id mnemerynne >/dev/null 2>&1 || useradd --system --home-dir /var/lib/mnemerynne --shell /sbin/nologin mnemerynne
 install -d -m 755 /etc/mnemerynne

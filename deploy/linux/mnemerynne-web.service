@@ -10,6 +10,9 @@ Group=mnemerynne
 WorkingDirectory=/opt/mnemerynne
 EnvironmentFile=/etc/mnemerynne/mnemerynne.env
 Environment=PYTHONUNBUFFERED=1
+# Media transcodes on the GPUs: /dev/dri/renderD* (VAAPI on the RX 580) needs render; video covers
+# the older device nodes. NVENC uses /dev/nvidia*, which the driver leaves open to everyone.
+SupplementaryGroups=render video
 ExecStart=/opt/mnemerynne/.venv/bin/mnemerynne serve
 Restart=on-failure
 RestartSec=5

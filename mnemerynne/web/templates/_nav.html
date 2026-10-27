@@ -4,6 +4,7 @@
     <a href="/" {% if active == 'chat' %}aria-current="page"{% endif %}>Ask</a>
     <a href="/files" {% if active == 'files' %}aria-current="page"{% endif %}>Files</a>
     <a href="/wiki" {% if active == 'wiki' %}aria-current="page"{% endif %}>Wiki</a>
+    {% if has_media %}<a href="/media" {% if active == 'media' %}aria-current="page"{% endif %}>Media</a>{% endif %}
     {% if has_remote %}<a href="/remote" {% if active == 'remote' %}aria-current="page"{% endif %}>Remote</a>{% endif %}
     {% if has_rooms %}<a href="/rooms" {% if active == 'rooms' %}aria-current="page"{% endif %}>Rooms</a>{% endif %}
     <a href="/preferences" {% if active == 'preferences' %}aria-current="page"{% endif %}>Preferences</a>

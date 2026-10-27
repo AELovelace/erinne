@@ -137,6 +137,17 @@ class Settings(BaseSettings):
     room_file_bytes: int = 25 * 1024 * 1024
     announcement_days: int = 90
 
+    # Media centre (mnemerynne/media/), off until an admin turns it on (Settings → Media). ffmpeg and
+    # ffprobe from RPM Fusion (Fedora's ffmpeg-free can't decode or encode H.264/HEVC). Artwork, picture
+    # thumbnails and transcoding sessions go under media_cache_dir (default <data_dir>/media-cache).
+    # media_vaapi_device: the render node of the card that transcodes with VAAPI (the RX 580); empty
+    # = the first /dev/dri/renderD* that can encode H.264.
+    media_ffmpeg: str = "ffmpeg"
+    media_ffprobe: str = "ffprobe"
+    media_cache_dir: Path | None = None
+    media_vaapi_device: str = ""
+    media_probe_timeout: int = 60
+
     # Backups and housekeeping (mnemerynne/backup.py, mnemerynne/retention.py).
     # Where `mnemerynne backup` writes and `restore` reads: put it on a disk
     # that survives the boot drive (e.g. the NAS's storage array), never inside
@@ -219,6 +230,10 @@ class Settings(BaseSettings):
     def tmp_dir(self) -> Path:
         # Inside data_dir so finished uploads move into blobs/ with a rename.
         return self.data_dir / "tmp"
+
+    @property
+    def media_dir(self) -> Path:
+        return self.media_cache_dir or self.data_dir / "media-cache"
 
     @property
     def share_trash_dir(self) -> Path | None:

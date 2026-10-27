@@ -11,6 +11,7 @@ from mnemerynne import db, directory, editing, fs, jobs, m365, proposals, retent
 from mnemerynne.clients.embed import Embedder
 from mnemerynne.config import Settings
 from mnemerynne.ingest import pipeline
+from mnemerynne.media import catalog
 
 log = logging.getLogger("mnemerynne.worker")
 
@@ -67,6 +68,16 @@ def m365_sync(conn: sqlite3.Connection, settings: Settings) -> None:
             log.exception("%s failed", name)
 
 
+def media_catalog(conn: sqlite3.Connection, settings: Settings) -> None:
+    """After each share scan, with Media on: catalog what's new in Media (time-boxed, media/catalog.py)."""
+    try:
+        catalog.run_pass(conn, settings)
+    except Exception:  # never let a bad file or ffprobe stop ingestion
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        log.exception("Media catalog pass failed")
+
+
 def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) -> None:
     conn = db.connect(settings.db_path)
     db.migrate(conn, settings.embed_dim)
@@ -109,6 +120,7 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
                     if conn.in_transaction:
                         conn.execute("ROLLBACK")
                     log.exception("Share scan failed")
+                media_catalog(conn, settings)
             if time.monotonic() - last_m365 > settings.m365_sync_seconds:
                 last_m365 = time.monotonic()
                 m365_sync(conn, settings)

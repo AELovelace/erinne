@@ -22,11 +22,12 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
 from mnemerynne import (balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, feedback as feedback_mod,
-                        mcp_server, memory,
+                        mcp_server, media as media_mod, memory,
                         diagnostics, messages as messages_mod, permissions, remote, rooms as rooms_mod, rooms_bus, share,
                         sharepoint,
                         users)
 from mnemerynne.agent import Agent
+from mnemerynne.media import transcode as media_transcode
 from mnemerynne.rooms_erynne import RoomErynne
 from mnemerynne.answer import ASSISTANT_NAME
 from mnemerynne.auth import LoginThrottle
@@ -39,7 +40,7 @@ from mnemerynne.router import load_router
 from mnemerynne.web import (admin, admin_apis, admin_notices, admin_remote, agent as agent_pages, apis as api_pages, balancer as balancer_pages,
                             bfgguf as bfgguf_pages, chat,
                             claude_links as claude_link_pages, editor as editor_pages, files, help as help_pages,
-                            m365 as m365_pages, memories, messages as message_pages, oauth as oauth_pages, remote as remote_pages,
+                            m365 as m365_pages, media as media_pages, memories, messages as message_pages, oauth as oauth_pages, remote as remote_pages,
                             rooms as room_pages, security,
                             settings as settings_pages, tokens, wiki as wiki_pages)
 from mnemerynne.web.deps import LoginRequired, api_user, get_db, is_admin, page_user
@@ -161,6 +162,9 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             lambda: app.state.directory, balancer, app.state.bfgguf_transport,
             (lambda cfg: svc.agent_llm) if svc.agent_llm is not None else None)
         app.state.memory_writer = memory.make_writer(settings, svc.llm, store, app.state.background)
+        # Media's ffmpeg sessions (media/transcode.py): none survive a restart.
+        app.state.media_sessions = media_transcode.Manager(settings)
+        await asyncio.to_thread(app.state.media_sessions.startup)
         app.state.embedder = svc.embedder
         poller = asyncio.create_task(balancer.run())
         app.state.background.add(poller)
@@ -176,6 +180,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             await app.state.agent.aclose()
             await app.state.remote_proxy.aclose()
             await balancer.aclose()
+            await asyncio.to_thread(app.state.media_sessions.shutdown)
             if services is None:
                 svc.embedder.close()
                 await svc.llm.aclose()
@@ -226,7 +231,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             admin = is_admin(request, conn, user)
             unread_rooms = rooms_mod.unread_summary(conn, user, app.state.directory)
             return {"nav_unread": messages_mod.unread_count(conn, user_id) + unread_rooms["mentions"] + unread_rooms["dms"],
-                    "has_rooms": rooms_mod.enabled(conn), "message_max_chars": messages_mod.MAX_CHARS,
+                    "has_rooms": rooms_mod.enabled(conn), "has_media": media_mod.enabled(conn),
+                    "message_max_chars": messages_mod.MAX_CHARS,
                     "has_remote": bool(remote.apps_for(conn, user, app.state.directory, admin))}
         except sqlite3.Error:
             return {}
@@ -265,6 +271,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(message_pages.router)
     app.include_router(room_pages.router)
     app.include_router(room_pages.admin_router)
+    app.include_router(media_pages.router)
+    app.include_router(media_pages.admin_router)
     app.include_router(admin_notices.router)
     app.include_router(remote_pages.router)
     app.include_router(admin_remote.router)

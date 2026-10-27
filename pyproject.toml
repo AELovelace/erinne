@@ -33,6 +33,8 @@ dependencies = [
     "cryptography==50.0.2",
     # Erynne on Claude, with each person's own API key (mnemerynne/clients/claude.py)
     "anthropic==1.17.0",
+    # Music tags and embedded cover art for the media centre (mnemerynne/media/probe.py)
+    "mutagen==1.47.0",
 ]
 
 [dependency-groups]

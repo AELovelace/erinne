@@ -1456,6 +1456,219 @@
     catch (e) { $("rooms-settings").replaceChildren(el("p", "error", e.message)); }
   }
 
+  // ------------------------------------------------------------- Media
+  function renderMedia(data) {
+    const box = $("media-settings");
+    box.replaceChildren();
+    box.appendChild(el("p", "muted", "A Kodi-style media centre: films, music and pictures from the Media folder on " +
+      "the share (Music, Movies and Pictures inside it), plus live streams and internet radio. Who sees what follows " +
+      "the share's permissions on those folders."));
+    async function save(body) {
+      showError("");
+      try { renderMedia(await api("PUT", "/api/admin/settings/media", body)); }
+      catch (err) { showError(err.message); }
+    }
+
+    const onForm = el("form", "ax-new");
+    const on = agentInput("checkbox", data.enabled);
+    on.setAttribute("aria-label", "Media on");
+    const onLabel = el("label", "check small");
+    onLabel.append(on, document.createTextNode(" Media is on for this organisation"));
+    const saveOn = el("button", "small", "Save");
+    saveOn.type = "submit";
+    onForm.append(onLabel, saveOn, el("span", "small muted", data.enabled
+      ? "Turning it off hides Media from everyone and stops playback; the files and the catalog are kept."
+      : "Off: nobody sees Media. Turning it on makes Music, Movies and Pictures in the Media folder below."));
+    onForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      if (data.enabled && !on.checked && !confirm("Turn Media off for everyone? Files and the catalog are kept.")) return;
+      save({ enabled: on.checked });
+    });
+    box.appendChild(onForm);
+
+    // Which folder at the top of the share is Media: "Media" unless an admin picks another.
+    const current = data.library ? data.library.share_path : data.settings.folder;
+    const folderForm = el("form", "ax-new");
+    const folder = agentInput("text", current);
+    folder.setAttribute("aria-label", "Media folder");
+    folder.setAttribute("list", "media-folders");
+    folder.placeholder = "Media";
+    const known = el("datalist");
+    known.id = "media-folders";
+    data.folders.forEach(function (f) { known.appendChild(el("option", null, f)); });
+    const use = el("button", "small", "Use this folder");
+    use.type = "submit";
+    folderForm.append(el("span", "small", "Media folder on the share:"), folder, known, use);
+    folderForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      const name = folder.value.trim();
+      if (!name || name.toLowerCase() === String(current).toLowerCase()) return;
+      const exists = data.folders.some(function (f) { return f.toLowerCase() === name.toLowerCase(); });
+      if (!confirm((exists ? "Use the existing folder “" + name + "”" : "Make a new folder “" + name + "”") +
+                   " on the share as Media? Music, Movies and Pictures are made inside it if missing. " +
+                   "The catalog of “" + current + "” is kept for switching back.")) return;
+      save({ folder: name });
+    });
+    box.appendChild(folderForm);
+    if (!data.enabled && !data.library) return;
+
+    const c = data.catalog;
+    const facts = [];
+    if (data.library) facts.push("Folder: " + data.library.share_path);
+    facts.push(c.counts.movies + " films, " + c.counts.music + " tracks, " + c.counts.pictures + " pictures");
+    if (c.last_pass) {
+      facts.push("last catalog pass " + c.last_pass.at + " UTC" + (c.last_pass.pending ? ", " + c.last_pass.pending + " waiting" : ""));
+    }
+    box.appendChild(el("p", "small", facts.join(" · ")));
+    if (c.errors.length) {
+      const details = el("details", "small");
+      details.appendChild(el("summary", null, c.errors.length + " file(s) couldn't be read"));
+      const ul = el("ul");
+      c.errors.forEach(function (e) { ul.appendChild(el("li", null, e.name + ": " + e.error)); });
+      details.appendChild(ul);
+      box.appendChild(details);
+    }
+
+    const s = data.settings;
+    const form = el("form");
+    const grid = el("div", "agent-settings");
+    const hw = el("select");
+    [["auto", "Automatic (AMD VAAPI, then NVIDIA NVENC, then CPU)"], ["vaapi", "AMD GPU (VAAPI)"],
+     ["nvenc", "NVIDIA GPU (NVENC)"], ["software", "CPU only (libx264)"]].forEach(function (o) {
+      const opt = el("option", null, o[1]);
+      opt.value = o[0];
+      hw.appendChild(opt);
+    });
+    hw.value = s.hwaccel;
+    const slots = agentInput("number", s.max_transcodes);
+    slots.min = "0"; slots.max = "8";
+    const online = agentInput("checkbox", s.online_metadata);
+    const tmdb = agentInput("password", "");
+    tmdb.placeholder = data.tmdb_key_set ? "TMDB key saved — type to replace" : "TMDB API key or read token";
+    tmdb.autocomplete = "off";
+    const radio = agentInput("url", s.radio_directory_url);
+    radio.placeholder = "https://sadgirlsclub.wtf/rr/healthz";
+    agentField(grid, "Transcoding", hw).title = "For films the browser can't play as they are";
+    agentField(grid, "Transcodes at once", slots).title = "0 turns transcoding off; copying into HLS (remux) doesn't count";
+    agentField(grid, "Look up artwork online", online).title = "TMDB for films, MusicBrainz and the Cover Art Archive for albums";
+    agentField(grid, "TMDB key", tmdb).title = "themoviedb.org → Settings → API; only film titles and years are sent";
+    agentField(grid, "Radio station list", radio).title = "SGCRelay's /healthz; empty for none";
+    form.appendChild(grid);
+    const actions = el("div", "ax-new");
+    const saveOpts = el("button", "small", "Save");
+    saveOpts.type = "submit";
+    actions.appendChild(saveOpts);
+    if (data.tmdb_key_set) {
+      const drop = el("button", "link small", "Remove TMDB key");
+      drop.type = "button";
+      drop.addEventListener("click", function () { save({ tmdb_key: "" }); });
+      actions.appendChild(drop);
+    }
+    actions.appendChild(el("span", "small muted", "Online lookups send only film titles and years, and album and artist names."));
+    form.appendChild(actions);
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      const body = { hwaccel: hw.value, max_transcodes: Number(slots.value), online_metadata: online.checked,
+                     radio_directory_url: radio.value.trim() };
+      if (tmdb.value.trim()) body.tmdb_key = tmdb.value.trim();
+      save(body);
+    });
+    box.appendChild(form);
+
+    const tools = el("div", "ax-new");
+    const test = el("button", "small", "Test transcoding");
+    test.type = "button";
+    const result = el("span", "small muted");
+    test.addEventListener("click", async function () {
+      test.disabled = true;
+      result.textContent = "Testing each encoder (a few seconds)…";
+      try {
+        const r = (await api("POST", "/api/admin/media/hwtest")).backends;
+        result.textContent = Object.keys(r).map(function (k) {
+          return k + (r[k].ok ? " ✓" : " ✗ " + r[k].detail) + (r[k].device ? " (" + r[k].device + ")" : "");
+        }).join(" · ");
+      } catch (err) { result.textContent = err.message; }
+      test.disabled = false;
+    });
+    const reread = el("button", "link small", "Read every file again");
+    reread.type = "button";
+    reread.addEventListener("click", async function () {
+      try { const r = await api("POST", "/api/admin/media/rescan", { online: false }); result.textContent = r.queued + " item(s) will be read again on the next pass."; }
+      catch (err) { showError(err.message); }
+    });
+    const relook = el("button", "link small", "Look everything up online again");
+    relook.type = "button";
+    relook.addEventListener("click", async function () {
+      try { const r = await api("POST", "/api/admin/media/rescan", { online: true }); result.textContent = r.queued + " item(s) will be read and looked up again."; }
+      catch (err) { showError(err.message); }
+    });
+    tools.append(test, reread, relook, result);
+    box.appendChild(tools);
+
+    box.appendChild(el("h3", "ax-h small", "Live streams and stations"));
+    if (data.sources.length) {
+      box.appendChild(table(["Name", "Kind", "Address", "", ""], data.sources.map(function (src) {
+        const toggle = el("button", "link small", src.enabled ? "Turn off" : "Turn on");
+        toggle.type = "button";
+        toggle.addEventListener("click", async function () {
+          try { renderMedia(await api("PUT", "/api/admin/media/sources/" + src.id,
+                                      { kind: src.kind, name: src.name, url: src.url, enabled: !src.enabled })); }
+          catch (err) { showError(err.message); }
+        });
+        const drop = el("button", "link small danger", "Remove");
+        drop.type = "button";
+        drop.addEventListener("click", async function () {
+          if (!confirm("Remove " + src.name + "?")) return;
+          try { renderMedia(await api("DELETE", "/api/admin/media/sources/" + src.id)); }
+          catch (err) { showError(err.message); }
+        });
+        return [src.name + (src.enabled ? "" : " (off)"), src.kind.toUpperCase(), src.url, toggle, drop];
+      })));
+    } else {
+      box.appendChild(el("p", "small muted", "None yet. RTMP and HLS streams show under Live TV; stations under Radio, after SGCRelay's."));
+    }
+    const add = el("form", "ax-new");
+    const kind = el("select");
+    [["hls", "HLS stream"], ["rtmp", "RTMP stream"], ["radio", "Radio station"]].forEach(function (o) {
+      const opt = el("option", null, o[1]);
+      opt.value = o[0];
+      kind.appendChild(opt);
+    });
+    kind.setAttribute("aria-label", "Kind");
+    const name = agentInput("text", "");
+    name.placeholder = "Name";
+    name.setAttribute("aria-label", "Name");
+    const url = agentInput("text", "");
+    url.placeholder = "http://10.1.1.21/stream/hls/live.m3u8";
+    url.setAttribute("aria-label", "Address");
+    kind.addEventListener("change", function () {
+      url.placeholder = { hls: "http://10.1.1.21/stream/hls/live.m3u8", rtmp: "rtmp://10.1.1.21/live/stream",
+                          radio: "https://example.org/stream.mp3" }[kind.value];
+    });
+    const addBtn = el("button", "small", "Add");
+    addBtn.type = "submit";
+    add.append(kind, name, url, addBtn);
+    add.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      try { renderMedia(await api("POST", "/api/admin/media/sources", { kind: kind.value, name: name.value, url: url.value })); }
+      catch (err) { showError(err.message); }
+    });
+    box.appendChild(add);
+
+    if (data.sessions.length) {
+      box.appendChild(el("h3", "ax-h small", "Playing now"));
+      box.appendChild(table(["Session", "Mode", "Encoder", "Idle"], data.sessions.map(function (x) {
+        return [x.id, x.mode + (x.source_id ? " (live)" : ""), x.backend || "–", x.idle_s + " s"];
+      })));
+    }
+  }
+
+  async function loadMedia() {
+    try { renderMedia(await api("GET", "/api/admin/settings/media")); }
+    catch (e) { $("media-settings").replaceChildren(el("p", "error", e.message)); }
+  }
+
   async function loadChatGPT() {
     try { renderChatGPT(await api("GET", "/api/admin/settings/chatgpt")); }
     catch (e) { $("chatgpt-settings").replaceChildren(el("p", "error", e.message)); }
@@ -1527,7 +1740,7 @@
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
     if (tab === "settings" && !updatesLoaded) {
-      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeLinks(); loadChatGPT(); loadExperimental(); loadRooms(); loadDev();
+      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeLinks(); loadChatGPT(); loadExperimental(); loadRooms(); loadMedia(); loadDev();
       if (window.ErynneM365) window.ErynneM365.load();   // admin_m365.js
     }
     if (tab === "accounts") loadAccounts();
