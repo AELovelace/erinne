@@ -884,6 +884,9 @@ button.danger-fill { background: var(--error); }
 /* Full width: the same .75rem gap on every side as at the bottom, however wide the screen. */
 .rooms { display: grid; grid-template-columns: 15rem minmax(0, 1fr) auto; gap: .75rem;
          margin: .75rem; height: calc(100vh - 5.5rem); }
+/* The inbox (.msg-columns), the pane and the head actions set their own display; hidden must still win,
+   or the inbox stays under the room log, splitting its height. */
+.rooms [hidden] { display: none !important; }
 .rooms-side, .rooms-main, .rooms-pane { background: var(--glass); border: 1px solid var(--line);
                                         border-radius: var(--radius); box-shadow: var(--shadow); min-height: 0; }
 .rooms-side { padding: .75rem; overflow-y: auto; }
