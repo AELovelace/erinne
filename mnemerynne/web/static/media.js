@@ -13,6 +13,7 @@
   const content = $("mc-content");
   const isAdmin = main.dataset.admin === "1";
   const folder = main.dataset.folder || "Media";   // the Media folder on the share (Settings → Media)
+  const screenId = main.dataset.screenId ? Number(main.dataset.screenId) : null;   // this browser is a screen (the TV)
   let renderToken = 0;
 
   // ------------------------------------------------------------- helpers
@@ -120,7 +121,8 @@
     return card({ title: p.title, sub: p.taken_at ? p.taken_at.slice(0, 10) : "", art: p.art, shape: "wide",
                   glyph: p.type === "video" ? "🎞" : "🖼", badge: p.type === "video" ? clock(p.duration) : null,
                   onClick: function () {
-                    if (p.type === "video") player.open(p);
+                    if (cast.active()) cast.send({ action: "play_item", file_id: p.id });
+                    else if (p.type === "video") player.open(p);
                     else viewer.open(list.filter(function (x) { return x.type === "image"; }),
                                      list.filter(function (x) { return x.type === "image"; }).indexOf(p));
                   } });
@@ -153,6 +155,23 @@
     return null;
   }
 
+  function shuffled(list) {
+    const out = list.slice();
+    for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = out[i]; out[i] = out[j]; out[j] = t; }
+    return out;
+  }
+
+  /* Play here, or on the chosen screen (casting). */
+  function playItem(item, start) {
+    if (cast.active()) cast.send({ action: "play_item", file_id: item.id, start: start || 0 });
+    else player.open(item, start);
+  }
+
+  function playAlbum(a, index, shuffle) {
+    if (cast.active()) { cast.send({ action: "play_album", key: a.key, index: index, shuffle: shuffle }); return; }
+    nowPlaying.playQueue(shuffle ? shuffled(a.tracks) : a.tracks, shuffle ? 0 : index, a.art);
+  }
+
   // ------------------------------------------------------------- routing
   function go(hash) {
     if (location.hash === "#" + hash) render(); else location.hash = hash;
@@ -164,7 +183,7 @@
     return slash < 0 ? { view: raw || "home", arg: "" } : { view: raw.slice(0, slash), arg: raw.slice(slash + 1) };
   }
 
-  const SECTION_OF = { home: "home", movies: "movies", movie: "movies", music: "music", album: "music",
+  const SECTION_OF = { screens: "screens", cast: "screens", home: "home", movies: "movies", movie: "movies", music: "music", album: "music",
                        artist: "music", pictures: "pictures", live: "live", radio: "radio" };
 
   async function render() {
@@ -177,7 +196,8 @@
     showError("");
     backdrop(null);
     const views = { home: viewHome, movies: viewMovies, movie: viewMovie, music: viewMusic, album: viewAlbum,
-                    artist: viewArtist, pictures: viewPictures, live: viewLive, radio: viewRadio };
+                    artist: viewArtist, pictures: viewPictures, live: viewLive, radio: viewRadio,
+                    screens: viewScreens, cast: viewScreens };
     try {
       const nodes = await (views[r.view] || viewHome)(r.arg);
       if (token !== renderToken) return;
@@ -265,11 +285,11 @@
     const actions = el("div", "mc-actions");
     const resume = m.progress && m.progress.position > 30 && (!m.progress.duration || m.progress.position < m.progress.duration * 0.95);
     if (resume) {
-      const r = button("▶ Resume from " + clock(m.progress.position), "", function () { player.open(m, m.progress.position); });
+      const r = button("▶ Resume from " + clock(m.progress.position), "", function () { playItem(m, m.progress.position); });
       r.dataset.nav = "";
       actions.appendChild(r);
     }
-    const p = button(resume ? "Play from the start" : "▶ Play", resume ? "secondary" : "", function () { player.open(m, 0); });
+    const p = button(resume ? "Play from the start" : "▶ Play", resume ? "secondary" : "", function () { playItem(m, 0); });
     p.dataset.nav = "";
     actions.appendChild(p);
     text.appendChild(actions);
@@ -322,12 +342,8 @@
       .filter(Boolean).forEach(function (f) { facts.appendChild(el("span", null, String(f))); });
     text.appendChild(facts);
     const actions = el("div", "mc-actions");
-    const playAll = button("▶ Play", "", function () { nowPlaying.playQueue(a.tracks, 0, a.art); });
-    const shuffle = button("⤮ Shuffle", "secondary", function () {
-      const list = a.tracks.slice();
-      for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = list[i]; list[i] = list[j]; list[j] = t; }
-      nowPlaying.playQueue(list, 0, a.art);
-    });
+    const playAll = button("▶ Play", "", function () { playAlbum(a, 0, false); });
+    const shuffle = button("⤮ Shuffle", "secondary", function () { playAlbum(a, 0, true); });
     playAll.dataset.nav = ""; shuffle.dataset.nav = "";
     actions.append(playAll, shuffle);
     text.appendChild(actions);
@@ -341,7 +357,7 @@
       row.append(el("span", "n", t.track ? String(t.track) : String(i + 1)), el("span", null, t.title),
                  el("span", "t", clock(t.duration)));
       if (t.artist && t.artist !== a.artist) row.children[1].appendChild(el("span", "mc-sub", " — " + t.artist));
-      row.addEventListener("click", function () { nowPlaying.playQueue(a.tracks, i, a.art); });
+      row.addEventListener("click", function () { playAlbum(a, i, false); });
       li.appendChild(row);
       list.appendChild(li);
     });
@@ -381,12 +397,17 @@
     setHead("Live TV");
     const data = await api("GET", "/api/media/live");
     if (!data.streams.length) {
-      return [empty(isAdmin ? "No live streams yet. Add RTMP or HLS streams in Access → Settings → Media."
+      return [empty(isAdmin ? "No live streams yet. Add RTMP, HLS or YouTube sources in Access → Settings → Media."
                             : "No live streams have been set up.")];
     }
     return [shelf(null, data.streams.map(function (s) {
+      if (s.kind === "youtube") {
+        const sub = { live: "YouTube · live channel", playlist: "YouTube · playlist", video: "YouTube" }[s.what];
+        return card({ title: s.name, sub: sub, glyph: "▶", shape: "wide", badge: s.what === "live" ? "LIVE" : "YOUTUBE",
+                      live: s.what === "live", onClick: function () { if (cast.active()) cast.send({ action: "play_source", source_id: s.id }); else player.openYouTube(s); } });
+      }
       return card({ title: s.name, sub: s.kind.toUpperCase(), glyph: "📡", shape: "wide", badge: "LIVE", live: true,
-                    onClick: function () { player.openLive(s); } });
+                    onClick: function () { if (cast.active()) cast.send({ action: "play_source", source_id: s.id }); else player.openLive(s); } });
     }), "wide", "grid")];
   }
 
@@ -404,7 +425,7 @@
     out.push(shelf(null, data.stations.map(function (s) {
       const sub = s.running === null ? "Station"
         : (s.running ? "On air" : "Starts when you tune in") + " · " + s.listeners + (s.listeners === 1 ? " listener" : " listeners");
-      const c = card({ title: s.name, sub: sub, glyph: "📻", shape: "square", onClick: function () { nowPlaying.playStation(s); } });
+      const c = card({ title: s.name, sub: sub, glyph: "📻", shape: "square", onClick: function () { if (cast.active()) cast.send({ action: "play_station", key: s.key }); else nowPlaying.playStation(s); } });
       if (s.running) c.querySelector(".mc-art").appendChild(el("span", "mc-badge live", "ON AIR"));
       return c;
     }), "square", "grid"));
@@ -417,10 +438,12 @@
   const video = $("mc-video");
   const player = {
     item: null, hls: null, session: null, offset: 0, duration: 0, live: false, lastSave: 0, idleTimer: null,
+    yt: { time: 0, duration: 0, state: -1, volume: 100 },   // what YouTube's player last told us
 
     status: function (text) { $("mc-status").textContent = text || ""; },
 
     show: function (title) {
+      this.closeYouTube();
       nowPlaying.pause();
       $("mc-player").hidden = false;
       $("mc-player-title").textContent = title;
@@ -436,6 +459,41 @@
       $("mc-seek").disabled = false;
       await this.load(start || 0);
     },
+
+    /* YouTube plays in its own embed player, with its own controls: only ✕ and Escape are ours (and Escape
+       only while focus is outside YouTube's frame). */
+    openYouTube: function (source) {
+      this.item = null;
+      this.live = true;
+      this.show(source.name);
+      this.detach();
+      $("mc-player").classList.add("youtube");
+      video.hidden = true;
+      const frame = $("mc-yt");
+      frame.hidden = false;
+      this.yt = { time: 0, duration: 0, state: -1, volume: 100 };
+      // enablejsapi: pause, seek and volume from a remote, and position reports (ytCommand, the message listener).
+      frame.src = source.embed + (source.embed.indexOf("?") < 0 ? "?" : "&") + "autoplay=1&rel=0&playsinline=1"
+        + "&enablejsapi=1&origin=" + encodeURIComponent(location.origin);
+      frame.onload = function () { player.ytCommand(null); };
+      $("mc-player-close").focus();
+    },
+
+    /* A command to YouTube's player (its postMessage API); null: ask it to start reporting. */
+    ytCommand: function (func, args) {
+      const frame = $("mc-yt");
+      if (frame.hidden || !frame.contentWindow) return;
+      const msg = func ? { event: "command", func: func, args: args || [], id: 1, channel: "widget" }
+                       : { event: "listening", id: 1, channel: "widget" };
+      frame.contentWindow.postMessage(JSON.stringify(msg), new URL(frame.src).origin);
+    },
+
+    youtube: function () { return $("mc-player").classList.contains("youtube"); },
+    toggleAny: function () {
+      if (this.youtube()) this.ytCommand(this.yt.state === 1 ? "pauseVideo" : "playVideo"); else this.toggle();
+    },
+    positionAny: function () { return this.youtube() ? this.yt.time : this.position(); },
+    seekAny: function (t) { if (this.youtube()) this.ytCommand("seekTo", [Math.max(0, t), true]); else this.seekTo(t); },
 
     openLive: async function (source) {
       this.item = null;
@@ -523,9 +581,19 @@
       this.item = null;
       if (session) api("DELETE", "/api/media/sessions/" + session).catch(function () {});
       if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
+      this.closeYouTube();
       $("mc-player").hidden = true;
       this.status("");
       if (route().view === "movie" || route().view === "home") render();
+    },
+
+    closeYouTube: function () {
+      const frame = $("mc-yt");
+      if (frame.hidden) return;
+      frame.removeAttribute("src");   // stops it: nothing keeps playing behind the page
+      frame.hidden = true;
+      video.hidden = false;
+      $("mc-player").classList.remove("youtube");
     },
 
     toggle: function () { if (video.paused) video.play().catch(function () {}); else video.pause(); },
@@ -534,7 +602,10 @@
       const box = $("mc-player");
       box.classList.remove("idle");
       clearTimeout(this.idleTimer);
-      this.idleTimer = setTimeout(function () { if (!video.paused) box.classList.add("idle"); }, 3000);
+      // Never idle over YouTube: mouse moves inside its frame don't reach this page to wake the bar again.
+      this.idleTimer = setTimeout(function () {
+        if (!video.paused && !box.classList.contains("youtube")) box.classList.add("idle");
+      }, 3000);
     },
 
     key: function (e) {
@@ -837,7 +908,344 @@
     }
   });
 
+  // ------------------------------------------------------------- casting
+  /* This device (the phone) sends what to play to one of its owner's screens (the TV); the choice is
+     kept in this browser. With a screen chosen, every Play on the page goes there instead. */
+  const cast = {
+    target: null, screens: [], timer: null,
+
+    init: function () {
+      if (screenId) return;
+      try { this.target = Number(localStorage.getItem("mc-cast")) || null; } catch (e) { this.target = null; }
+      $("mc-cast").addEventListener("change", function () { cast.choose(Number($("mc-cast").value) || null); });
+      this.refresh();
+    },
+
+    active: function () { return !screenId && this.target !== null; },
+
+    choose: function (id) {
+      this.target = id;
+      try { if (id) localStorage.setItem("mc-cast", String(id)); else localStorage.removeItem("mc-cast"); } catch (e) { /* private window */ }
+      this.paint();
+      this.poll();
+    },
+
+    screen: function () {
+      const id = this.target;
+      return this.screens.find(function (s) { return s.id === id; }) || null;
+    },
+
+    refresh: async function () {
+      try { this.screens = (await api("GET", "/api/media/screens")).screens; } catch (e) { return; }
+      if (this.target !== null && !this.screen()) this.choose(null);
+      this.paint();
+      if (route().view === "screens" && !document.activeElement.closest("#mc-content input, #mc-content select")) {
+        paintScreens();
+      }
+    },
+
+    /* The "Play on" menu and the remote bar. */
+    paint: function () {
+      const select = $("mc-cast");
+      const others = this.screens.filter(function (s) { return !s.this; });
+      $("mc-cast-wrap").hidden = !others.length;
+      const keep = this.target;
+      select.replaceChildren(el("option", null, "This device"));
+      select.firstChild.value = "";
+      others.forEach(function (s) {
+        const o = el("option", null, s.name + (s.online ? "" : " (off)"));
+        o.value = String(s.id);
+        select.appendChild(o);
+      });
+      select.value = keep ? String(keep) : "";
+      const s = this.screen();
+      $("mc-remote").hidden = !s;
+      if (!s) return;
+      const st = s.state;
+      $("mc-remote-title").textContent = "📺 " + s.name + (s.online ? "" : " — not connected");
+      $("mc-remote-sub").textContent = !s.online ? "Open Media on it (Screens → that screen's address)."
+        : !st || st.kind === "idle" ? "Nothing playing"
+        : [st.title, st.sub, st.duration ? clock(st.position) + " / " + clock(st.duration) : ""].filter(Boolean).join(" · ")
+          + (st.paused ? " · paused" : "");
+      const bar = $("mc-remote-buttons");
+      if (bar.childElementCount) return;
+      [["⏮", "Previous", { action: "prev" }], ["⟲", "Back 10 s", { action: "skip", by: -10 }],
+       ["⏯", "Play / pause", { action: "toggle" }], ["⟳", "Forward 30 s", { action: "skip", by: 30 }],
+       ["⏭", "Next", { action: "next" }], ["🔉", "Quieter", "down"], ["🔊", "Louder", "up"],
+       ["⏹", "Stop", { action: "stop" }], ["✕", "Play on this device again", "leave"]].forEach(function (b) {
+        bar.appendChild(button(b[0], "", function () {
+          if (b[2] === "leave") { cast.choose(null); return; }
+          if (b[2] === "up" || b[2] === "down") {
+            const now = (cast.screen() && cast.screen().state && cast.screen().state.volume) || 0.5;
+            cast.send({ action: "volume", level: Math.max(0, Math.min(1, now + (b[2] === "up" ? 0.1 : -0.1))) });
+            return;
+          }
+          cast.send(b[2]);
+        }, b[1]));
+      });
+    },
+
+    /* While a screen is chosen, its state every 2 s (what the remote bar shows). */
+    poll: function () {
+      clearInterval(this.timer);
+      this.timer = this.target ? setInterval(function () { if (!document.hidden) cast.refresh(); }, 2000) : null;
+    },
+
+    send: async function (command, screen) {
+      const id = screen || this.target;
+      showError("");
+      try {
+        await api("POST", "/api/media/screens/" + id + "/command", command);
+        setTimeout(function () { cast.refresh(); }, 800);
+        return true;
+      } catch (err) { showError(err.message); return false; }
+    },
+  };
+
+  function paintScreens() {
+    const list = $("mc-screen-list");
+    if (!list) return;
+    list.replaceChildren();
+    if (!cast.screens.length) {
+      list.appendChild(empty("No screens yet. On the TV, sign in, open Media → Screens and press “Use this browser as a screen”."));
+      return;
+    }
+    cast.screens.forEach(function (s) {
+      const row = el("div", "mc-screen");
+      const name = el("div", "mc-screen-name");
+      const dot = el("span", "mc-dot" + (s.online ? " on" : ""));
+      name.append(dot, document.createTextNode(s.name + (s.this ? " (this browser)" : "")));
+      const st = s.state;
+      const what = el("div", "mc-sub", !s.online ? "Not connected" + (s.last_seen ? " · last seen " + s.last_seen + " UTC" : "")
+        : !st || st.kind === "idle" ? "Ready, nothing playing" : st.title + (st.paused ? " (paused)" : ""));
+      const actions = el("div", "mc-actions");
+      if (!s.this) {
+        const pick = button(cast.target === s.id ? "✓ Playing here" : "Play on this screen",
+                            cast.target === s.id ? "" : "secondary", function () { cast.choose(cast.target === s.id ? null : s.id); paintScreens(); });
+        pick.dataset.nav = "";
+        actions.appendChild(pick);
+      } else {
+        const open = button("Open screen mode", "secondary", function () { location.href = "/media/screen"; });
+        open.dataset.nav = "";
+        actions.appendChild(open);
+      }
+      const drop = button("Remove", "link small danger", async function () {
+        if (!confirm("Remove the screen " + s.name + "? It stops taking casts until it's paired again.")) return;
+        try { await api("DELETE", "/api/media/screens/" + s.id); } catch (err) { showError(err.message); }
+        cast.refresh();
+      });
+      actions.appendChild(drop);
+      row.append(name, what, actions);
+      list.appendChild(row);
+    });
+  }
+
+  async function viewScreens(arg) {
+    setHead("Screens");
+    await cast.refresh();
+    const out = [];
+
+    const paste = el("form", "mc-paste");
+    paste.appendChild(el("h2", null, "Play a YouTube link on a screen"));
+    const link = el("input");
+    link.type = "url";
+    link.placeholder = "Paste a YouTube link (video, playlist, or a channel's live stream)";
+    link.setAttribute("aria-label", "YouTube link");
+    link.value = arg ? decodeURIComponent(arg) : "";
+    const target = el("select");
+    target.setAttribute("aria-label", "Screen");
+    cast.screens.filter(function (s) { return !s.this; }).forEach(function (s) {
+      const o = el("option", null, s.name + (s.online ? "" : " (off)"));
+      o.value = String(s.id);
+      target.appendChild(o);
+    });
+    if (cast.target) target.value = String(cast.target);
+    const playBtn = el("button", null, "▶ Play");
+    playBtn.type = "submit";
+    const pasteBtn = button("Paste", "secondary", async function () {
+      try { link.value = (await navigator.clipboard.readText()).trim(); } catch (e) { link.focus(); }
+    }, "Paste from the clipboard");
+    const row = el("div", "mc-paste-row");
+    row.append(link, pasteBtn, target, playBtn);
+    paste.appendChild(row);
+    paste.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      if (!target.value) { showError("Pair a screen first (below)."); return; }
+      if (await cast.send({ action: "play_youtube", url: link.value.trim() }, Number(target.value))) {
+        link.value = "";
+        cast.choose(Number(target.value));
+      }
+    });
+    if (cast.screens.some(function (s) { return !s.this; })) out.push(paste);
+
+    const listBox = el("section", "mc-shelf");
+    listBox.appendChild(el("h2", null, "Your screens"));
+    const list = el("div", "mc-screen-list");
+    list.id = "mc-screen-list";
+    listBox.appendChild(list);
+    out.push(listBox);
+
+    const pair = el("form", "mc-paste");
+    pair.appendChild(el("h2", null, "Use this browser as a screen"));
+    pair.appendChild(el("p", "mc-note", "On the TV: sign in, come here, name it and press Pair. It then opens " +
+      "Media full-screen and waits for what you cast to it; it stays paired after sign-in runs out."));
+    const name = el("input");
+    name.placeholder = "Living room";
+    name.setAttribute("aria-label", "Screen name");
+    const pairBtn = el("button", null, "Pair");
+    pairBtn.type = "submit";
+    const prow = el("div", "mc-paste-row");
+    prow.append(name, pairBtn);
+    pair.appendChild(prow);
+    pair.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      try {
+        const r = await api("POST", "/api/media/screens", { name: name.value });
+        location.href = r.url;
+      } catch (err) { showError(err.message); }
+    });
+    out.push(pair);
+    setTimeout(paintScreens, 0);
+    return out;
+  }
+
+  // -------------------------------------------------------- screen (TV)
+  /* This browser is a screen: take commands from the server's stream, act on them, and say what is
+     playing every few seconds. Browsers only play sound after someone has clicked on the page, unless
+     the site is allowed to autoplay (see the help): the splash's Start button is that click. */
+  const screenMode = {
+    es: null, lastReport: "",
+
+    start: function () {
+      document.body.classList.add("mc-screen-mode");
+      const splash = $("mc-splash");
+      const policy = navigator.getAutoplayPolicy ? navigator.getAutoplayPolicy("mediaelement") : "unknown";
+      const startBtn = $("mc-splash-start");
+      if (policy === "allowed") startBtn.hidden = true;
+      startBtn.addEventListener("click", function () {
+        startBtn.hidden = true;
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(function () {});
+      });
+      splash.addEventListener("click", function (e) { if (e.target !== startBtn && startBtn.hidden) splash.hidden = true; });
+      this.connect();
+      setInterval(function () { screenMode.report(false); }, 3000);
+      ["play", "pause", "ended", "loadedmetadata"].forEach(function (ev) {
+        video.addEventListener(ev, function () { screenMode.report(true); });
+        audio.addEventListener(ev, function () { screenMode.report(true); });
+      });
+    },
+
+    connect: function () {
+      const state = $("mc-splash-state");
+      this.es = new EventSource("/media/screen/stream");
+      this.es.addEventListener("hello", function () { state.textContent = "Ready for casting"; screenMode.report(true); });
+      this.es.addEventListener("cmd", function (e) {
+        let cmd;
+        try { cmd = JSON.parse(e.data); } catch (err) { return; }
+        screenMode.handle(cmd);
+      });
+      this.es.onerror = function () {
+        if (screenMode.es.readyState === EventSource.CLOSED) {
+          state.textContent = "This screen was removed. Sign in and pair it again under Media → Screens.";
+          $("mc-splash").hidden = false;
+        } else {
+          state.textContent = "Reconnecting…";
+        }
+      };
+    },
+
+    handle: function (cmd) {
+      const a = cmd.action;
+      if (a === "unpaired") { this.es.close(); this.es.onerror(); return; }
+      if (a.indexOf("play_") === 0) {
+        $("mc-splash").hidden = true;
+        viewer.close();
+        if (!$("mc-player").hidden) player.close();
+      }
+      if (a === "play_item") {
+        const item = cmd.item;
+        if (item.type === "audio") nowPlaying.playQueue([item], 0, item.art);
+        else if (item.type === "image") viewer.open([item], 0);
+        else player.open(item, cmd.start || 0);
+      } else if (a === "play_album") {
+        let tracks = cmd.album.tracks, index = cmd.index;
+        if (cmd.shuffle) { tracks = shuffled(tracks); index = 0; }
+        nowPlaying.playQueue(tracks, index, cmd.album.art);
+      } else if (a === "play_youtube") {
+        player.openYouTube(cmd.source);
+      } else if (a === "play_source") {
+        if (cmd.source.kind === "youtube") player.openYouTube(cmd.source); else player.openLive(cmd.source);
+      } else if (a === "play_station") {
+        nowPlaying.playStation(cmd.station);
+      } else if (a === "toggle") {
+        if (!$("mc-player").hidden) player.toggleAny();
+        else if (!$("mc-viewer").hidden) viewer.slideshow();
+        else nowPlaying.toggle();
+      } else if (a === "skip" || a === "seek") {
+        const playerOpen = !$("mc-player").hidden;
+        const base = a === "skip" ? (playerOpen ? player.positionAny() : nowPlaying.position()) : 0;
+        const to = a === "skip" ? base + cmd.by : cmd.to;
+        if (playerOpen) player.seekAny(to); else if (!$("mc-viewer").hidden) viewer.step(cmd.by > 0 ? 1 : -1);
+        else nowPlaying.seekTo(to);
+      } else if (a === "volume") {
+        video.volume = audio.volume = cmd.level;
+        video.muted = audio.muted = false;
+        player.ytCommand("setVolume", [Math.round(cmd.level * 100)]);
+        player.ytCommand("unMute", []);
+        player.yt.volume = cmd.level * 100;
+      } else if (a === "next" || a === "prev") {
+        if (!$("mc-viewer").hidden) viewer.step(a === "next" ? 1 : -1);
+        else if (a === "next") nowPlaying.next(); else nowPlaying.prev();
+      } else if (a === "stop") {
+        player.close();
+        nowPlaying.stop();
+        viewer.close();
+      }
+      setTimeout(function () { screenMode.report(true); }, 300);
+    },
+
+    state: function () {
+      if (!$("mc-player").hidden) {
+        if ($("mc-player").classList.contains("youtube")) {
+          return { kind: "youtube", title: $("mc-player-title").textContent, position: player.yt.time,
+                   duration: player.yt.duration || null, paused: player.yt.state !== 1, volume: player.yt.volume / 100 };
+        }
+        return { kind: player.live ? "live" : "video", title: $("mc-player-title").textContent,
+                 position: player.live ? null : player.position(), duration: player.duration || null,
+                 paused: video.paused, volume: video.volume };
+      }
+      if (!$("mc-np").hidden) {
+        return { kind: nowPlaying.station ? "radio" : "audio", title: $("mc-np-title").textContent,
+                 sub: $("mc-np-sub").textContent, position: nowPlaying.station ? null : nowPlaying.position(),
+                 duration: nowPlaying.duration || null, paused: audio.paused, volume: audio.volume,
+                 has_queue: nowPlaying.queue.length > 1 };
+      }
+      if (!$("mc-viewer").hidden) return { kind: "pictures", title: $("mc-viewer-title").textContent };
+      return { kind: "idle" };
+    },
+
+    report: function (force) {
+      const state = this.state();
+      const key = JSON.stringify(state);
+      if (!force && key === this.lastReport && state.kind === "idle") return;
+      this.lastReport = key;
+      api("PUT", "/api/media/screen/state", state).catch(function () {});
+    },
+  };
+
   // ---------------------------------------------------------------- start
+  window.addEventListener("message", function (e) {
+    // YouTube's player reporting (after player.ytCommand(null)): position, length, playing or not, volume.
+    if (!/^https:\/\/www\.youtube(-nocookie)?\.com$/.test(e.origin) || typeof e.data !== "string") return;
+    let msg;
+    try { msg = JSON.parse(e.data); } catch (err) { return; }
+    const info = msg && msg.info;
+    if (!info || typeof info !== "object") return;
+    if (typeof info.currentTime === "number") player.yt.time = info.currentTime;
+    if (typeof info.duration === "number") player.yt.duration = info.duration;
+    if (typeof info.playerState === "number") player.yt.state = info.playerState;
+    if (typeof info.volume === "number") player.yt.volume = info.volume;
+  });
   document.querySelectorAll(".mc-menu-item").forEach(function (b) {
     b.addEventListener("click", function () { go(b.dataset.view); });
   });
@@ -851,5 +1259,7 @@
   setInterval(tick, 15000);
   window.addEventListener("hashchange", render);
   window.addEventListener("pagehide", function () { player.saveProgress(true); });
+  cast.init();
+  if (screenId) screenMode.start();
   render();
 })();

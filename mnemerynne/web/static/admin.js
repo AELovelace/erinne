@@ -1625,11 +1625,11 @@
         return [src.name + (src.enabled ? "" : " (off)"), src.kind.toUpperCase(), src.url, toggle, drop];
       })));
     } else {
-      box.appendChild(el("p", "small muted", "None yet. RTMP and HLS streams show under Live TV; stations under Radio, after SGCRelay's."));
+      box.appendChild(el("p", "small muted", "None yet. RTMP, HLS and YouTube sources show under Live TV; stations under Radio, after SGCRelay's."));
     }
     const add = el("form", "ax-new");
     const kind = el("select");
-    [["hls", "HLS stream"], ["rtmp", "RTMP stream"], ["radio", "Radio station"]].forEach(function (o) {
+    [["hls", "HLS stream"], ["rtmp", "RTMP stream"], ["youtube", "YouTube link"], ["radio", "Radio station"]].forEach(function (o) {
       const opt = el("option", null, o[1]);
       opt.value = o[0];
       kind.appendChild(opt);
@@ -1643,6 +1643,7 @@
     url.setAttribute("aria-label", "Address");
     kind.addEventListener("change", function () {
       url.placeholder = { hls: "http://10.1.1.21/stream/hls/live.m3u8", rtmp: "rtmp://10.1.1.21/live/stream",
+                          youtube: "A video, playlist or youtube.com/channel/UC… (its live stream) link",
                           radio: "https://example.org/stream.mp3" }[kind.value];
     });
     const addBtn = el("button", "small", "Add");

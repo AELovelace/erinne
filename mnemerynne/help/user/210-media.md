@@ -35,4 +35,25 @@ You only see what you may open in that folder on the share. Who may open it is s
 
 ## Live TV
 
-**Live TV** lists the streams your admin has added. Choose one to watch it live.
+**Live TV** lists the streams your admin has added. Choose one to watch it live. YouTube ones play in YouTube's own player, with its controls; press **✕** to close it.
+
+## Playing on the TV from your phone
+
+A **screen** is a browser left showing Media, such as the TV's, that you send things to from your phone.
+
+**Pair the TV once:**
+
+1. On the TV, sign in and open **Media → Screens**.
+2. Under **Use this browser as a screen**, name it (for example *Living room*) and press **Pair**.
+3. The TV switches to screen mode and waits. It stays paired after its sign-in runs out, until you remove it.
+4. Press **Start** on the TV once, so it may play sound. Your admin can set the TV up so this isn't needed.
+
+**Send things from your phone:**
+
+- **Play on** at the bottom of the menu chooses where things play. With a screen chosen, every **Play** sends there instead: films, albums, tracks, pictures, Live TV and radio.
+- To play a YouTube link, copy it in the YouTube app, then use **Media → Screens → Paste** and press **Play**.
+- The bar at the bottom shows what the screen is playing, with buttons to pause, skip, change the volume, go to the next track or stop. **✕** goes back to playing on your phone.
+- **Screens** lists your screens and whether they're on. **Remove** unpairs one.
+
+Only you can see and control your screens.
+

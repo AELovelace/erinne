@@ -1,10 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Media · {{ assistant_name }}{% endblock %}
 {% block body %}
-{% include "_nav.html" %}
+{#- A screen (the TV, /media/screen) shows Media alone: no top bar, nothing to sign out of. -#}
+{% if not screen %}{% include "_nav.html" %}{% endif %}
 <link rel="stylesheet" href="{{ static('media.css') }}">
 <div class="mc-backdrop" id="mc-backdrop" aria-hidden="true"></div>
-<main class="mc" id="mc" data-has-library="{{ 1 if has_library else 0 }}" data-admin="{{ 1 if is_admin else 0 }}" data-folder="{{ folder }}">
+<main class="mc" id="mc" data-has-library="{{ 1 if has_library else 0 }}" data-admin="{{ 1 if is_admin else 0 }}" data-folder="{{ folder }}"{% if screen %} data-screen-id="{{ screen.id }}" data-screen-name="{{ screen.name }}"{% endif %}>
   <nav class="mc-menu" id="mc-menu" aria-label="Media">
     <div class="mc-clock" id="mc-clock" aria-hidden="true"></div>
     <div class="mc-date" id="mc-date" aria-hidden="true"></div>
@@ -14,6 +15,10 @@
     <button type="button" class="mc-menu-item" data-view="pictures"><span class="mc-icon">🖼</span>Pictures</button>
     <button type="button" class="mc-menu-item" data-view="live"><span class="mc-icon">📡</span>Live TV</button>
     <button type="button" class="mc-menu-item" data-view="radio"><span class="mc-icon">📻</span>Radio</button>
+    {% if not screen %}<button type="button" class="mc-menu-item" data-view="screens"><span class="mc-icon">📺</span>Screens</button>
+    <label class="mc-cast" id="mc-cast-wrap" hidden>Play on
+      <select id="mc-cast"><option value="">This device</option></select>
+    </label>{% endif %}
   </nav>
   <section class="mc-main" aria-live="polite">
     <header class="mc-head">
@@ -28,6 +33,9 @@
 
 <div class="mc-player" id="mc-player" role="dialog" aria-label="Player" hidden>
   <video id="mc-video" playsinline></video>
+  {#- YouTube's player won't play without a referrer, and the page's policy (same-origin) sends none. -#}
+  <iframe id="mc-yt" title="YouTube" hidden allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+          allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
   <div class="mc-status" id="mc-status"></div>
   <div class="mc-osd-top">
     <strong id="mc-player-title"></strong>
@@ -79,6 +87,22 @@
   </div>
   <audio id="mc-audio" preload="none"></audio>
 </footer>
+{% if screen %}
+<div class="mc-splash" id="mc-splash" role="status">
+  <div class="mc-splash-name">📺 {{ screen.name }}</div>
+  <div class="mc-splash-state" id="mc-splash-state">Connecting…</div>
+  <button type="button" id="mc-splash-start">Start (allow sound)</button>
+  <p class="muted small">Cast to it from Media on your phone: Screens, or the “Play on” menu.</p>
+</div>
+{% else %}
+<footer class="mc-remote" id="mc-remote" aria-label="Remote" hidden>
+  <div class="mc-np-text">
+    <div class="mc-np-title" id="mc-remote-title"></div>
+    <div class="mc-np-sub" id="mc-remote-sub"></div>
+  </div>
+  <div class="mc-np-buttons" id="mc-remote-buttons"></div>
+</footer>
+{% endif %}
 <script src="{{ static('picker.js') }}"></script>
 <script src="{{ static('vendor/hls.js/hls.min.js') }}"></script>
 <script src="{{ static('media.js') }}"></script>

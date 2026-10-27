@@ -1,12 +1,15 @@
-"""Media: the page, its API, file and session streaming, the radio proxy, and Settings → Media
-(mnemerynne/media/).
+"""Media: the page, its API, file and session streaming, the radio proxy, casting to screens, and
+Settings → Media (mnemerynne/media/).
 
-Every library route takes the signed-in person and serves only files they can read on the share
-(media.browse.View). While Media is off, everything but the admin settings answers 404.
+Every library route takes the signed-in person, or for a paired screen (the TV) its owner
+(media_user), and serves only files they can read on the share (media.browse.View). While Media is
+off, everything but the admin settings answers 404.
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 import mimetypes
 import sqlite3
 from typing import Literal
@@ -14,22 +17,47 @@ from typing import Literal
 import anyio
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import media
+from mnemerynne import media, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
-from mnemerynne.media import artwork, browse, catalog, live, probe, transcode
+from mnemerynne.media import artwork, browse, catalog, live, probe, screens, transcode
+from mnemerynne.web import security
 from mnemerynne.web.admin import _log
-from mnemerynne.web.deps import admin_user, api_user, get_db, get_settings, is_admin, page_user
+from mnemerynne.web.deps import _session_user, admin_user, api_user, get_db, get_settings, is_admin, page_user
 
 
 def _media_on(conn: sqlite3.Connection = Depends(get_db)) -> None:
     """Every Media route but the admin settings: not there at all while Media is turned off."""
     if not media.enabled(conn):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+
+
+def _screen(request: Request, conn: sqlite3.Connection) -> sqlite3.Row | None:
+    return screens.by_token(conn, request.cookies.get(screens.COOKIE))
+
+
+def media_user(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> sqlite3.Row:
+    """The signed-in person, or on a paired screen (the TV) its owner: the screen key opens Media only."""
+    user = _session_user(request, conn)
+    if user is not None:
+        return user
+    screen = _screen(request, conn)
+    user = users.get_user_by_id(conn, screen["user_id"]) if screen is not None else None
+    if user is None or not user["active"]:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
+    return user
+
+
+def screen_device(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> sqlite3.Row:
+    """The screen this browser is (by its key), for the screen's own stream and reports."""
+    screen = _screen(request, conn)
+    if screen is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "This browser isn't a paired screen")
+    return screen
 
 
 router = APIRouter(dependencies=[Depends(_media_on)])
@@ -71,19 +99,19 @@ def _folder_name(conn: sqlite3.Connection) -> str:
 
 # ------------------------------------------------------------------ library
 @router.get("/api/media/home")
-def home(user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def home(user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
     view = _view(conn, user)
     return {"library": view.lib is not None and view.lib["id"] in view.access.readable, **browse.home(view)}
 
 
 @router.get("/api/media/movies")
-def movies(q: str = "", sort: Literal["title", "year", "added"] = "title", user=Depends(api_user),
+def movies(q: str = "", sort: Literal["title", "year", "added"] = "title", user=Depends(media_user),
            conn: sqlite3.Connection = Depends(get_db)):
     return {"movies": browse.movies(_view(conn, user), q, sort)}
 
 
 @router.get("/api/media/items/{file_id}")
-def media_item(file_id: int, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def media_item(file_id: int, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
     found = browse.item(_view(conn, user), file_id)
     if found is None:
         raise _not_found()
@@ -91,17 +119,17 @@ def media_item(file_id: int, user=Depends(api_user), conn: sqlite3.Connection = 
 
 
 @router.get("/api/media/music/artists")
-def artists(user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def artists(user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
     return {"artists": browse.artists(_view(conn, user))}
 
 
 @router.get("/api/media/music/albums")
-def albums(artist: str = "", user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def albums(artist: str = "", user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
     return {"albums": browse.albums(_view(conn, user), artist)}
 
 
 @router.get("/api/media/music/album")
-def album(key: str, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def album(key: str, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
     found = browse.album(_view(conn, user), key)
     if found is None:
         raise _not_found()
@@ -109,7 +137,7 @@ def album(key: str, user=Depends(api_user), conn: sqlite3.Connection = Depends(g
 
 
 @router.get("/api/media/pictures")
-def pictures(folder: int | None = None, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def pictures(folder: int | None = None, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
     found = browse.pictures(_view(conn, user), folder)
     if found is None:
         raise _not_found()
@@ -117,7 +145,7 @@ def pictures(folder: int | None = None, user=Depends(api_user), conn: sqlite3.Co
 
 
 @router.get("/media/art/{artwork_id}")
-def art(artwork_id: int, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db),
+def art(artwork_id: int, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db),
         settings: Settings = Depends(get_settings)):
     row = conn.execute("SELECT rel_path FROM media_artwork WHERE id = ?", (artwork_id,)).fetchone()
     if row is None or not browse.artwork_readable(_view(conn, user), artwork_id):
@@ -139,7 +167,7 @@ def _readable_item(conn: sqlite3.Connection, user, file_id: int) -> sqlite3.Row:
 
 
 @router.get("/media/files/{file_id}/stream")
-def stream_file(file_id: int, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db),
+def stream_file(file_id: int, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db),
                 settings: Settings = Depends(get_settings)):
     """The file itself, inline, with Range (seeking) support: for what the browser plays as it is."""
     row = _readable_item(conn, user, file_id)
@@ -169,7 +197,7 @@ class PlayBody(BaseModel):
 
 
 @router.post("/api/media/play/{file_id}")
-async def play(file_id: int, body: PlayBody, request: Request, user=Depends(api_user),
+async def play(file_id: int, body: PlayBody, request: Request, user=Depends(media_user),
                conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
     """How to play a file in this browser: the file itself ('direct'), or an HLS session from the start
     position (remux, audio, transcode) once its first segment is ready."""
@@ -202,7 +230,7 @@ async def play(file_id: int, body: PlayBody, request: Request, user=Depends(api_
 
 
 @router.get("/media/sessions/{sid}/{name}")
-def session_file(sid: str, name: str, request: Request, user=Depends(api_user)):
+def session_file(sid: str, name: str, request: Request, user=Depends(media_user)):
     session = sessions(request).get(sid)
     if session is None or (session.user_id is not None and session.user_id != user["id"]):
         raise _not_found()
@@ -215,7 +243,7 @@ def session_file(sid: str, name: str, request: Request, user=Depends(api_user)):
 
 
 @router.delete("/api/media/sessions/{sid}")
-def stop_session(sid: str, request: Request, user=Depends(api_user)):
+def stop_session(sid: str, request: Request, user=Depends(media_user)):
     """The player closed: stop its ffmpeg now rather than when it goes idle. Shared live sessions are
     left to idle out, since others may be watching."""
     sessions(request).stop(sid, user_id=user["id"])
@@ -228,7 +256,7 @@ class ProgressBody(BaseModel):
 
 
 @router.put("/api/media/progress/{file_id}")
-def progress(file_id: int, body: ProgressBody, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def progress(file_id: int, body: ProgressBody, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
     _readable_item(conn, user, file_id)
     with transaction(conn):
         browse.save_progress(conn, user["id"], file_id, body.position, body.duration)
@@ -237,15 +265,16 @@ def progress(file_id: int, body: ProgressBody, user=Depends(api_user), conn: sql
 
 # --------------------------------------------------------------------- live
 @router.get("/api/media/live")
-def live_list(user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def live_list(user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
     stations, problem = live.stations(conn)
-    streams = [{"id": s["id"], "kind": s["kind"], "name": s["name"]} for s in live.sources(conn)
-               if s["kind"] in ("rtmp", "hls")]
+    streams = [{"id": s["id"], "kind": s["kind"], "name": s["name"]}
+               | ({"embed": s["url"], "what": live.youtube_what(s["url"])} if s["kind"] == "youtube" else {})
+               for s in live.sources(conn) if s["kind"] in ("rtmp", "hls", "youtube")]
     return {"streams": streams, "stations": stations, "problem": problem}
 
 
 @router.post("/api/media/live/{source_id}/watch")
-async def watch(source_id: int, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+async def watch(source_id: int, request: Request, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
     src = live.source(conn, source_id)
     if src is None or not src["enabled"] or src["kind"] not in ("rtmp", "hls"):
         raise _not_found()
@@ -265,7 +294,7 @@ async def watch(source_id: int, request: Request, user=Depends(api_user), conn: 
 
 
 @router.get("/media/radio/{key}/stream")
-async def radio_stream(key: str, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+async def radio_stream(key: str, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
     """A plain-http station, relayed so a page served over https may play it."""
     found = await anyio.to_thread.run_sync(live.station, conn, key)
     if found is None:
@@ -294,6 +323,180 @@ async def radio_stream(key: str, user=Depends(api_user), conn: sqlite3.Connectio
     return StreamingResponse(body(), media_type=upstream.headers.get("content-type", "audio/mpeg"),
                              headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"})
 
+
+# ------------------------------------------------------------------- screens
+def hub(request: Request) -> screens.Hub:
+    if getattr(request.app.state, "media_screens", None) is None:
+        request.app.state.media_screens = screens.Hub()
+    return request.app.state.media_screens
+
+
+def _key_cookie(response, request: Request, token: str) -> None:
+    response.set_cookie(screens.COOKIE, token, max_age=screens.COOKIE_DAYS * 86400, httponly=True, samesite="lax",
+                        secure=security.https_only(request.app.state.settings), path="/")
+
+
+@router.get("/media/screen", response_class=HTMLResponse)
+def screen_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    """The TV: Media full-screen, waiting for what its owner casts. Unpaired browsers go to pairing."""
+    screen = _screen(request, conn)
+    if screen is None:
+        return RedirectResponse("/media#screens", status_code=status.HTTP_303_SEE_OTHER)
+    owner = users.get_user_by_id(conn, screen["user_id"])
+    return request.app.state.templates.TemplateResponse(request, "media.html", {
+        "user": owner, "is_admin": False, "active": "media", "has_library": media.library(conn) is not None,
+        "folder": _folder_name(conn), "screen": {"id": screen["id"], "name": screen["name"]}})
+
+
+class ScreenBody(BaseModel):
+    name: str = Field(..., max_length=200)
+
+
+@router.post("/api/media/screens", status_code=status.HTTP_201_CREATED)
+def pair_screen(body: ScreenBody, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Make this browser one of the person's screens: it gets the screen key as a cookie."""
+    try:
+        with transaction(conn):
+            screen_id, token = screens.create(conn, user["id"], body.name)
+    except screens.ScreenError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    response = JSONResponse({"id": screen_id, "name": screens.clean_name(body.name), "url": "/media/screen"},
+                            status_code=status.HTTP_201_CREATED)
+    _key_cookie(response, request, token)
+    return response
+
+
+@router.get("/api/media/screens")
+def list_screens(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+    h = hub(request)
+    mine = _screen(request, conn)
+    return {"screens": [{"id": s["id"], "name": s["name"], "online": h.online(s["id"]), "state": h.state(s["id"]),
+                         "last_seen": s["last_seen_at"], "this": mine is not None and mine["id"] == s["id"]}
+                        for s in screens.of_user(conn, user["id"])]}
+
+
+@router.delete("/api/media/screens/{screen_id}")
+async def remove_screen(screen_id: int, request: Request, user=Depends(api_user),
+                        conn: sqlite3.Connection = Depends(get_db)):
+    if screens.owned(conn, user["id"], screen_id) is None:
+        raise _not_found()
+    with transaction(conn):
+        conn.execute("DELETE FROM media_screens WHERE id = ?", (screen_id,))
+    hub(request).close(screen_id)
+    return {"status": "removed"}
+
+
+class Command(BaseModel):
+    action: Literal["play_item", "play_album", "play_youtube", "play_source", "play_station", "toggle", "seek",
+                    "skip", "volume", "next", "prev", "stop"]
+    file_id: int | None = None
+    key: str | None = Field(None, max_length=2000)       # album key or station key
+    index: int = Field(0, ge=0)
+    shuffle: bool = False
+    url: str | None = Field(None, max_length=1000)       # play_youtube
+    source_id: int | None = None
+    start: float = Field(0.0, ge=0)
+    to: float | None = Field(None, ge=0)                 # seek
+    by: float | None = Field(None, ge=-36000, le=36000)  # skip
+    level: float | None = Field(None, ge=0, le=1)        # volume
+
+
+def _command(conn: sqlite3.Connection, user, body: Command) -> dict:
+    """What the screen is sent: plays carry what to play, checked against what the person may read."""
+    view = _view(conn, user)
+    if body.action == "play_item":
+        found = browse.item(view, body.file_id or 0)
+        if found is None:
+            raise _not_found("File not found")
+        return {"action": "play_item", "item": found, "start": body.start}
+    if body.action == "play_album":
+        found = browse.album(view, body.key or "")
+        if found is None or body.index >= len(found["tracks"]):
+            raise _not_found("Album not found")
+        return {"action": "play_album", "album": found, "index": body.index, "shuffle": body.shuffle}
+    if body.action == "play_youtube":
+        try:
+            embed = live.youtube_embed(body.url or "")
+        except live.LiveError as exc:
+            raise HTTPException(exc.status, str(exc)) from None
+        return {"action": "play_youtube",
+                "source": {"name": "YouTube", "embed": embed, "what": live.youtube_what(embed)}}
+    if body.action == "play_source":
+        src = live.source(conn, body.source_id or 0)
+        if src is None or not src["enabled"] or src["kind"] == "radio":
+            raise _not_found()
+        source = {"id": src["id"], "name": src["name"], "kind": src["kind"]}
+        if src["kind"] == "youtube":
+            source.update(embed=src["url"], what=live.youtube_what(src["url"]))
+        return {"action": "play_source", "source": source}
+    if body.action == "play_station":
+        found = live.station(conn, body.key or "")
+        if found is None:
+            raise _not_found()
+        return {"action": "play_station", "station": found}
+    return {k: v for k, v in body.model_dump().items() if k in ("action", "to", "by", "level") and v is not None}
+
+
+@router.post("/api/media/screens/{screen_id}/command")
+async def cast(screen_id: int, body: Command, request: Request, user=Depends(api_user),
+               conn: sqlite3.Connection = Depends(get_db)):
+    """Play something on, or control, one of the person's screens."""
+    screen = screens.owned(conn, user["id"], screen_id)
+    if screen is None:
+        raise _not_found()
+    command = await anyio.to_thread.run_sync(_command, conn, user, body)
+    if not hub(request).push(screen_id, command):
+        raise HTTPException(status.HTTP_409_CONFLICT, f"{screen['name']} isn't connected: is Media open on it?")
+    return {"status": "sent"}
+
+
+@router.get("/media/screen/stream")
+async def screen_stream(request: Request, screen=Depends(screen_device), conn: sqlite3.Connection = Depends(get_db)):
+    """The screen's commands, as server-sent events, with a comment every 20 s so dead connections close."""
+    with transaction(conn):
+        screens.seen(conn, screen["id"])
+    h = hub(request)
+    queue = h.listen(screen["id"])
+
+    async def events():
+        try:
+            yield f"retry: 3000\nevent: hello\ndata: {json.dumps({'name': screen['name']})}\n\n"
+            while True:
+                try:
+                    command = await asyncio.wait_for(queue.get(), 20)
+                except TimeoutError:
+                    yield ": ping\n\n"
+                    continue
+                yield f"event: cmd\ndata: {json.dumps(command)}\n\n"
+                if command.get("action") == "unpaired":
+                    return
+        finally:
+            h.unlisten(screen["id"], queue)
+
+    response = StreamingResponse(events(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    # The key is renewed whenever the screen connects, so a TV in daily use never loses it.
+    _key_cookie(response, request, request.cookies[screens.COOKIE])
+    return response
+
+
+class ScreenState(BaseModel):
+    kind: Literal["idle", "video", "live", "youtube", "audio", "radio", "pictures"]
+    title: str = Field("", max_length=300)
+    sub: str = Field("", max_length=300)
+    art: str | None = Field(None, max_length=300)
+    position: float | None = None
+    duration: float | None = None
+    paused: bool = False
+    volume: float | None = Field(None, ge=0, le=1)
+    has_queue: bool = False
+
+
+@router.put("/api/media/screen/state")
+async def screen_state(body: ScreenState, request: Request, screen=Depends(screen_device)):
+    """What the screen is playing, every few seconds and on every change; read by its owner's remote."""
+    hub(request).set_state(screen["id"], body.model_dump())
+    return {"status": "ok"}
 
 # -------------------------------------------------------------------- admin
 def _admin_status(request: Request, conn: sqlite3.Connection) -> dict:
@@ -378,7 +581,7 @@ async def admin_hwtest(request: Request, user=Depends(admin_user)):
 
 
 class SourceBody(BaseModel):
-    kind: Literal["rtmp", "hls", "radio"]
+    kind: Literal["rtmp", "hls", "radio", "youtube"]
     name: str = Field(..., max_length=200)
     url: str = Field(..., max_length=1000)
     enabled: bool = True

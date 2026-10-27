@@ -117,7 +117,11 @@ html .mc-track { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr) aut
 
 /* ----------------------------------------------------------------- player */
 .mc-player { position: fixed; inset: 0; z-index: 60; background: #000; display: flex; flex-direction: column; }
-.mc-player video { flex: 1; width: 100%; min-height: 0; background: #000; }
+.mc-player video, .mc-player iframe { flex: 1; width: 100%; min-height: 0; background: #000; border: 0; }
+.mc-player iframe[hidden], .mc-player video[hidden] { display: none; }
+/* YouTube brings its own controls: only the title bar (with ✕) stays, below YouTube's top edge. */
+.mc-player.youtube .mc-osd, .mc-player.youtube .mc-status { display: none; }
+.mc-player.youtube .mc-osd-top { position: static; background: #000; padding: .5rem 1.6rem; opacity: 1; }
 .mc-osd { position: absolute; left: 0; right: 0; bottom: 0; padding: 2.4rem 1.6rem 1.2rem; color: #fff;
           background: linear-gradient(transparent, rgba(0, 0, 0, .85)); transition: opacity .3s ease; }
 .mc-osd-top { position: absolute; left: 0; right: 0; top: 0; padding: 1rem 1.6rem 2rem; color: #fff;
@@ -192,3 +196,40 @@ html[data-theme="neon"] .mc-head h1, html[data-theme="neon"] .mc-detail h2 {
 html[data-theme="neon"] .mc-progress span, html[data-theme="neon"] .mc-dot.on { box-shadow: 0 0 8px var(--rose); }
 /* The tile's glow is its focus mark; neon's cyan ring around the whole tile would double it. */
 html[data-theme="neon"] .mc-card:focus-visible { outline: none; }
+
+/* --------------------------------------------------------------- casting */
+.mc-cast { display: flex; flex-direction: column; gap: .25rem; margin-top: auto; padding: .8rem .6rem .2rem;
+           border-top: 1px solid var(--line); color: var(--muted); font-size: .8rem; }
+.mc-cast select { width: 100%; }
+.mc-remote { position: fixed; left: 50%; bottom: 1rem; transform: translateX(-50%); z-index: 50;
+             width: min(52rem, calc(100vw - 2rem)); display: grid; grid-template-columns: minmax(0, 1fr) auto;
+             gap: .9rem; align-items: center; padding: .6rem .9rem; background: var(--glass-strong);
+             border: 1px solid var(--rose); border-radius: var(--radius); box-shadow: var(--shadow);
+             -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+.mc-remote[hidden] { display: none; }
+.mc-np:not([hidden]) ~ .mc-remote { bottom: 6.6rem; }
+html .mc-remote .mc-np-buttons button { background: none; border: 0; color: var(--ink); font-size: 1.3rem;
+                                       cursor: pointer; padding: .3rem .45rem; border-radius: 6px; box-shadow: none; }
+.mc-remote .mc-np-buttons button:hover { color: var(--rose); background: var(--petal-soft); }
+.mc-paste { margin: .4rem 0 1.4rem; max-width: 52rem; }
+.mc-paste h2 { font-family: var(--serif); font-size: 1.15rem; font-weight: 600; margin: .2rem 0 .6rem; }
+.mc-paste-row { display: flex; gap: .5rem; flex-wrap: wrap; }
+.mc-paste-row input { flex: 1 1 16rem; min-width: 0; }
+.mc-screen-list { display: grid; gap: .6rem; max-width: 52rem; }
+.mc-screen { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .2rem 1rem; align-items: center;
+             padding: .7rem .9rem; border: 1px solid var(--line); border-radius: calc(var(--radius) * .6); }
+.mc-screen-name { font-weight: 600; }
+.mc-screen .mc-sub { grid-column: 1; }
+.mc-screen .mc-actions { grid-column: 2; grid-row: 1 / span 2; margin: 0; align-items: center; }
+.mc-screen .mc-actions button { font-size: .95rem; padding: .45rem 1rem; }
+
+/* ------------------------------------------------------------ screen (TV) */
+body.mc-screen-mode .mc { height: calc(100vh - 1.8rem); }
+.mc-splash { position: fixed; inset: 0; z-index: 55; display: grid; place-content: center; gap: 1.2rem;
+             text-align: center; background: var(--blush); }
+.mc-splash[hidden] { display: none; }
+.mc-splash-name { font-family: var(--serif); font-size: 3.4rem; font-weight: 600; }
+.mc-splash-state { font-size: 1.4rem; color: var(--muted); }
+.mc-splash button { justify-self: center; font-size: 1.3rem; padding: .8rem 2rem; }
+html[data-theme="neon"] .mc-splash-name { color: var(--rose);
+  text-shadow: -2px 0 var(--fringe-l), 2px 0 var(--fringe-r), 0 0 24px rgba(255, 46, 151, .6); }

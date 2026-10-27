@@ -868,6 +868,8 @@ run; set `MNEMERYNNE_MEDIA_VAAPI_DEVICE` if the wrong render node is picked.
 - **Live TV:** add RTMP or HLS addresses (e.g. `http://10.1.1.21/stream/hls/live.m3u8`).
   The server pulls them and repackages them for the browser, so LAN-only streams play
   from outside too; the picture is copied, so it should be H.264.
+- **YouTube:** video, playlist and `youtube.com/channel/UC…` (live) links play in YouTube's
+  embed player straight from YouTube; nothing goes through the server.
 - **Radio:** SGCRelay's station list (`https://sadgirlsclub.wtf/rr/healthz` by
   default) plus any stations added by hand. Plain-http stations are relayed through the
   server so an https page can play them.
@@ -875,6 +877,25 @@ run; set `MNEMERYNNE_MEDIA_VAAPI_DEVICE` if the wrong render node is picked.
   file on the share; expect it to take a while (about a minute per 30 GB).
 - nginx: the `location /media/` block in `nginx-mnemerynne.conf` turns buffering off;
   Caddy needs nothing.
+- **A TV as a screen** (cast from a phone, Media → Screens): a PC with Firefox works best.
+  Pair it once in a normal Firefox window (sign in, Media → Screens → Pair), then let
+  Firefox play sound on its own and start it full-screen on boot:
+
+  ```sh
+  HOST=https://erynne.example   # MNEMERYNNE_PUBLIC_URL
+  sudo mkdir -p /etc/firefox/policies
+  echo '{"policies":{"Permissions":{"Autoplay":{"Allow":["'"$HOST"'"]}}}}' | sudo tee /etc/firefox/policies/policies.json
+  mkdir -p ~/.config/autostart
+  printf '[Desktop Entry]
+Type=Application
+Name=Erynne screen
+Exec=firefox --kiosk %s/media/screen
+' "$HOST"       > ~/.config/autostart/erynne-screen.desktop
+  ```
+
+  `about:policies` in Firefox shows the policy took. Kiosk mode leaves with Alt+F4. The
+  screen keeps its key (a cookie) for 400 days from the last time it connected, so it
+  needs no sign-in once paired.
 
 ## 6. Check
 

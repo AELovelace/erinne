@@ -503,6 +503,56 @@ def test_live_sources_and_radio(client, conn, directory):
     assert "Telehack" not in {s["name"] for s in client.get("/api/media/live").json()["stations"]}
 
 
+EMBED = live.YOUTUBE_EMBED
+
+
+@pytest.mark.parametrize("link, embed", [
+    ("https://www.youtube.com/watch?v=dQw4w9WgXcQ", EMBED + "dQw4w9WgXcQ"),
+    ("https://youtu.be/dQw4w9WgXcQ?si=abc123", EMBED + "dQw4w9WgXcQ"),
+    ("https://m.youtube.com/watch?v=dQw4w9WgXcQ&t=42s", EMBED + "dQw4w9WgXcQ"),
+    ("https://www.youtube.com/shorts/dQw4w9WgXcQ", EMBED + "dQw4w9WgXcQ"),
+    ("https://www.youtube.com/live/jfKfPfyJRdk?feature=share", EMBED + "jfKfPfyJRdk"),
+    ("https://www.youtube.com/embed/dQw4w9WgXcQ", EMBED + "dQw4w9WgXcQ"),
+    ("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG",
+     EMBED + "dQw4w9WgXcQ?list=PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG"),
+    ("https://www.youtube.com/playlist?list=PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG",
+     EMBED + "videoseries?list=PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG"),
+    ("https://www.youtube.com/channel/UCSJ4gkVC6NrvII8umztf0Ow", EMBED + "live_stream?channel=UCSJ4gkVC6NrvII8umztf0Ow"),
+    ("https://www.youtube.com/channel/UCSJ4gkVC6NrvII8umztf0Ow/live", EMBED + "live_stream?channel=UCSJ4gkVC6NrvII8umztf0Ow"),
+    (EMBED + "live_stream?channel=UCSJ4gkVC6NrvII8umztf0Ow", EMBED + "live_stream?channel=UCSJ4gkVC6NrvII8umztf0Ow"),
+])
+def test_youtube_links_become_embed_addresses(link, embed):
+    assert live.youtube_embed(link) == embed
+
+
+@pytest.mark.parametrize("link, problem", [
+    ("https://www.youtube.com/@LofiGirl", "channel id"),
+    ("https://vimeo.com/123456", "isn't a YouTube link"),
+    ("https://www.youtube.com/watch?v=short", "doesn't look right"),
+    ("https://www.youtube.com/", "Use a YouTube"),
+])
+def test_youtube_links_that_cant_be_embedded_are_refused(link, problem):
+    with pytest.raises(live.LiveError, match=problem):
+        live.youtube_embed(link)
+
+
+def test_youtube_sources(client, conn, directory):
+    live.TRANSPORT = _relay_transport()
+    _login(client, conn, directory)
+    _turn_on(client)
+    r = client.post("/api/admin/media/sources", json={"kind": "youtube", "name": "Lofi",
+                                                      "url": "https://www.youtube.com/channel/UCSJ4gkVC6NrvII8umztf0Ow"})
+    assert r.status_code == 201
+    assert client.post("/api/admin/media/sources", json={"kind": "youtube", "name": "Handle",
+                                                         "url": "https://www.youtube.com/@LofiGirl"}).status_code == 422
+    stream = client.get("/api/media/live").json()["streams"][0]
+    assert stream == {"id": r.json()["id"], "kind": "youtube", "name": "Lofi", "what": "live",
+                      "embed": EMBED + "live_stream?channel=UCSJ4gkVC6NrvII8umztf0Ow"}
+    assert client.post(f"/api/media/live/{stream['id']}/watch").status_code == 404   # the browser plays it, not ffmpeg
+    page = client.get("/media").text
+    assert 'id="mc-yt"' in page and 'referrerpolicy="strict-origin-when-cross-origin"' in page
+
+
 def test_a_relay_that_doesnt_answer_is_reported(client, conn, directory):
     live.TRANSPORT = _relay_transport(status_code=502)
     _login(client, conn, directory)
@@ -573,3 +623,121 @@ def test_films_and_albums_are_looked_up_online(client, conn, directory, root, se
     assert client.get("/api/media/music/albums").json()["albums"][0]["art"]
     status = client.get("/api/admin/settings/media").json()
     assert status["tmdb_key_set"] is True and "tmdb_key_enc" not in json.dumps(status)
+
+
+# ---------------------------------------------------------------- screens
+def _pair(client, name="Living room"):
+    r = client.post("/api/media/screens", json={"name": name})
+    assert r.status_code == 201, r.text
+    return r.json()["id"], client.cookies.get("mnemerynne_screen")
+
+
+def _hub(client):
+    from mnemerynne.web.media import hub
+
+    class _Req:
+        app = client.app
+    return hub(_Req())
+
+
+def test_a_paired_screen_keeps_media_only(client, conn, directory, root, settings):
+    _login(client, conn, directory)
+    _turn_on(client)
+    screen_id, key = _pair(client)
+    assert key and client.get("/api/media/screens").json()["screens"][0]["this"] is True
+
+    tv = TestClient(client.app)                      # the TV after its sign-in ran out: only the screen key
+    tv.cookies.set("mnemerynne_screen", key)
+    page = tv.get("/media/screen")
+    assert page.status_code == 200 and f'data-screen-id="{screen_id}"' in page.text and "Sign out" not in page.text
+    assert tv.get("/api/media/home").status_code == 200
+    assert tv.get("/api/locations").status_code == 401          # nothing but Media
+    assert tv.get("/api/media/screens").status_code == 401      # and it can't cast or manage screens
+    assert tv.get("/admin/libraries", follow_redirects=False).status_code == 303
+
+    stranger = TestClient(client.app)
+    assert stranger.get("/media/screen", follow_redirects=False).headers["location"] == "/media#screens"
+    stranger.cookies.set("mnemerynne_screen", "not-a-key")
+    assert stranger.get("/api/media/home").status_code == 401
+
+
+def test_casting_to_a_screen(client, conn, directory, root, settings):
+    live.TRANSPORT = _relay_transport()
+    _login(client, conn, directory)
+    _turn_on(client)
+    (root / "Media" / "Movies" / "Heat (1995).mkv").write_bytes(b"\x1a\x45\xdf\xa3 not a real film")
+    _aged(root / "Media" / "Movies" / "Heat (1995).mkv")
+    _scan(conn, settings)
+    film = conn.execute("SELECT file_id FROM media_items").fetchone()[0]
+    screen_id, key = _pair(client)
+
+    off = client.post(f"/api/media/screens/{screen_id}/command", json={"action": "toggle"})
+    assert off.status_code == 409 and "isn't connected" in off.json()["detail"]
+
+    queue = _hub(client).listen(screen_id)               # the TV's open stream
+    def sent(body):
+        r = client.post(f"/api/media/screens/{screen_id}/command", json=body)
+        assert r.status_code == 200, r.text
+        return queue.get_nowait()
+
+    cmd = sent({"action": "play_item", "file_id": film, "start": 60})
+    assert cmd["item"]["title"] == "Heat" and cmd["start"] == 60
+    cmd = sent({"action": "play_youtube", "url": "https://youtu.be/dQw4w9WgXcQ"})
+    assert cmd["source"]["embed"] == live.YOUTUBE_EMBED + "dQw4w9WgXcQ"
+    assert sent({"action": "play_station", "key": "relay-sgc"})["station"]["name"] == "SadGirlsClub"
+    assert sent({"action": "skip", "by": -10}) == {"action": "skip", "by": -10}
+    assert sent({"action": "volume", "level": 0.4}) == {"action": "volume", "level": 0.4}
+    assert client.post(f"/api/media/screens/{screen_id}/command",
+                       json={"action": "play_youtube", "url": "https://vimeo.com/1"}).status_code == 422
+    assert client.post(f"/api/media/screens/{screen_id}/command",
+                       json={"action": "play_item", "file_id": 999}).status_code == 404
+
+    # What the TV reports is what the remote shows.
+    tv = TestClient(client.app)
+    tv.cookies.set("mnemerynne_screen", key)
+    assert tv.put("/api/media/screen/state", json={"kind": "video", "title": "Heat", "position": 61.5,
+                                                   "duration": 6000, "paused": False, "volume": 0.4}).status_code == 200
+    mine = client.get("/api/media/screens").json()["screens"][0]
+    assert mine["online"] is True and mine["state"]["title"] == "Heat" and mine["state"]["position"] == 61.5
+
+    # Someone else can't see or drive it.
+    _login(client, conn, directory, "jane", "jsmith")
+    assert client.get("/api/media/screens").json()["screens"] == []
+    assert client.post(f"/api/media/screens/{screen_id}/command", json={"action": "stop"}).status_code == 404
+    _hub(client).unlisten(screen_id, queue)
+
+
+def test_the_screen_stream_and_unpairing(client, conn, directory, monkeypatch):
+    _login(client, conn, directory)
+    _turn_on(client)
+    screen_id, key = _pair(client)
+    hub = _hub(client)
+    real_listen = hub.listen
+
+    def listen_then_unpair(sid):
+        queue = real_listen(sid)
+        queue.put_nowait({"action": "unpaired"})   # ends the stream, so the test can read all of it
+        return queue
+    monkeypatch.setattr(hub, "listen", listen_then_unpair)
+    tv = TestClient(client.app)
+    tv.cookies.set("mnemerynne_screen", key)
+    r = tv.get("/media/screen/stream")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
+    assert "event: hello" in r.text and '"name": "Living room"' in r.text and '"action": "unpaired"' in r.text
+    assert "mnemerynne_screen=" in r.headers["set-cookie"] and "HttpOnly" in r.headers["set-cookie"]
+    assert conn.execute("SELECT last_seen_at FROM media_screens").fetchone()[0]
+
+    assert client.delete(f"/api/media/screens/{screen_id}").status_code == 200
+    assert tv.get("/media/screen/stream").status_code == 401
+    assert tv.get("/api/media/home").status_code == 401
+    assert tv.get("/media/screen", follow_redirects=False).status_code == 303
+
+
+def test_screen_names_are_checked_and_pairing_again_replaces(client, conn, directory):
+    _login(client, conn, directory)
+    _turn_on(client)
+    assert client.post("/api/media/screens", json={"name": "  "}).status_code == 422
+    first, key1 = _pair(client, "Living room")
+    second, key2 = _pair(client, "living  room")
+    assert key1 != key2                                # re-pairing issues a new key
+    assert [s["name"] for s in client.get("/api/media/screens").json()["screens"]] == ["living room"]
