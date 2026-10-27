@@ -695,6 +695,8 @@ def test_casting_to_a_screen(client, conn, directory, root, settings):
     assert sent({"action": "play_station", "key": "relay-sgc"})["station"]["name"] == "SadGirlsClub"
     assert sent({"action": "skip", "by": -10}) == {"action": "skip", "by": -10}
     assert sent({"action": "volume", "level": 0.4}) == {"action": "volume", "level": 0.4}
+    assert sent({"action": "night"}) == {"action": "night"}                      # the next step
+    assert sent({"action": "night", "level": 0.55}) == {"action": "night", "level": 0.55}
     assert client.post(f"/api/media/screens/{screen_id}/command",
                        json={"action": "play_youtube", "url": "https://vimeo.com/1"}).status_code == 422
     assert client.post(f"/api/media/screens/{screen_id}/command",

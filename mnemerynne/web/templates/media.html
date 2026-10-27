@@ -36,6 +36,10 @@
   {#- YouTube's player won't play without a referrer, and the page's policy (same-origin) sends none. -#}
   <iframe id="mc-yt" title="YouTube" hidden allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
           allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
+  {#- The night filter (🌙): an amber layer that warms the picture and a dark one that dims it, over the
+      video or YouTube alike; clicks go through to what's underneath. -#}
+  <div class="mc-night-warm" id="mc-night-warm" aria-hidden="true"></div>
+  <div class="mc-night-dim" id="mc-night-dim" aria-hidden="true"></div>
   <div class="mc-status" id="mc-status"></div>
   <div class="mc-osd-top">
     <strong id="mc-player-title"></strong>
@@ -51,6 +55,9 @@
       <input type="range" class="mc-seek" id="mc-seek" min="0" max="0" step="1" value="0" aria-label="Position">
       <span class="mc-time" id="mc-len">0:00</span>
       <button type="button" id="mc-mute" title="Mute (M)">🔊</button>
+      <label class="mc-night" title="Night filter: warmer and dimmer (N)">🌙
+        <input type="range" id="mc-night" min="0" max="100" step="5" value="0" aria-label="Night filter">
+      </label>
       <button type="button" id="mc-full" title="Full screen (F)">⛶</button>
     </div>
   </div>

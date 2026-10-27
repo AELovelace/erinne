@@ -25,6 +25,7 @@ You only see what you may open in that folder on the share. Who may open it is s
   - **←** goes back 10 seconds and **→** forward 30;
   - **↑** and **↓** change the volume;
   - **F** switches full screen;
+  - **N** steps the night filter (off, low, medium, high); the 🌙 slider sets it exactly. It makes the picture warmer and dimmer for watching late, YouTube included, and each device remembers its own level;
   - **Escape** closes the player.
 - Most films play straight away. Some formats need the server to convert them first, and the player then says **Transcoding** or **Repackaged**. That takes a few seconds to start, and jumping far ahead takes a moment longer.
 
@@ -52,7 +53,7 @@ A **screen** is a browser left showing Media, such as the TV's, that you send th
 
 - **Play on** at the bottom of the menu chooses where things play. With a screen chosen, every **Play** sends there instead: films, albums, tracks, pictures, Live TV and radio.
 - To play a YouTube link, share it straight from the YouTube app on Android: **Share → Erynne**. Media opens with the link filled in; press **Play**. This needs Erynne installed on the phone (below). Otherwise, copy the link and use **Media → Screens → Paste**.
-- The bar at the bottom shows what the screen is playing, with buttons to pause, skip, change the volume, go to the next track or stop. **✕** goes back to playing on your phone.
+- The bar at the bottom shows what the screen is playing, with buttons to pause, skip, change the volume, step the TV's night filter (🌙), go to the next track or stop. **✕** goes back to playing on your phone.
 - **Screens** lists your screens and whether they're on. **Remove** unpairs one.
 
 Only you can see and control your screens. Screens are only for members of the group your admin chose; without it, there is no **Screens** item in the menu.

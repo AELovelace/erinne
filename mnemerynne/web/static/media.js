@@ -619,6 +619,7 @@
       else if (k === "ArrowDown") { video.volume = Math.max(0, video.volume - 0.1); }
       else if (k === "f") { this.fullscreen(); }
       else if (k === "m") { video.muted = !video.muted; }
+      else if (k === "n") { night.step(); }
       else return false;
       return true;
     },
@@ -655,6 +656,36 @@
   $("mc-back10").addEventListener("click", function () { player.seekTo(player.position() - 10); });
   $("mc-fwd30").addEventListener("click", function () { player.seekTo(player.position() + 30); });
   $("mc-mute").addEventListener("click", function () { video.muted = !video.muted; $("mc-mute").textContent = video.muted ? "🔇" : "🔊"; });
+
+  /* The night filter, 0 (off) to 100: kept per device, so the TV keeps its own; a screen's owner can set it
+     from the phone's remote (the "night" command). */
+  const night = {
+    STEPS: [0, 30, 55, 80],
+    level: 0,
+
+    init: function () {
+      let saved = 0;
+      try { saved = Number(localStorage.getItem("mc-night")) || 0; } catch (e) { /* private window */ }
+      this.set(saved, false);
+      $("mc-night").addEventListener("input", function () { night.set(Number($("mc-night").value), true); });
+    },
+
+    set: function (value, keep) {
+      const v = Math.max(0, Math.min(100, Math.round(value)));
+      this.level = v;
+      $("mc-night").value = String(v);
+      $("mc-night-warm").style.opacity = String((v / 100) * 0.85);
+      $("mc-night-dim").style.opacity = String((v / 100) * 0.45);
+      if (keep) { try { localStorage.setItem("mc-night", String(v)); } catch (e) { /* private window */ } }
+    },
+
+    /* N, and the remote's 🌙: off → low → medium → high → off. */
+    step: function () {
+      const next = this.STEPS.find(function (s) { return s > night.level; });
+      this.set(next === undefined ? 0 : next, true);
+    },
+  };
+  night.init();
   $("mc-full").addEventListener("click", function () { player.fullscreen(); });
   $("mc-player-close").addEventListener("click", function () { player.close(); });
   $("mc-player").addEventListener("mousemove", function () { player.wake(); });
@@ -975,9 +1006,11 @@
       [["⏮", "Previous", { action: "prev" }], ["⟲", "Back 10 s", { action: "skip", by: -10 }],
        ["⏯", "Play / pause", { action: "toggle" }], ["⟳", "Forward 30 s", { action: "skip", by: 30 }],
        ["⏭", "Next", { action: "next" }], ["🔉", "Quieter", "down"], ["🔊", "Louder", "up"],
+       ["🌙", "Night filter: off, low, medium, high", "night"],
        ["⏹", "Stop", { action: "stop" }], ["✕", "Play on this device again", "leave"]].forEach(function (b) {
         bar.appendChild(button(b[0], "", function () {
           if (b[2] === "leave") { cast.choose(null); return; }
+          if (b[2] === "night") { cast.send({ action: "night" }); return; }
           if (b[2] === "up" || b[2] === "down") {
             const now = (cast.screen() && cast.screen().state && cast.screen().state.volume) || 0.5;
             cast.send({ action: "volume", level: Math.max(0, Math.min(1, now + (b[2] === "up" ? 0.1 : -0.1))) });
@@ -1212,6 +1245,8 @@
       } else if (a === "next" || a === "prev") {
         if (!$("mc-viewer").hidden) viewer.step(a === "next" ? 1 : -1);
         else if (a === "next") nowPlaying.next(); else nowPlaying.prev();
+      } else if (a === "night") {
+        if (typeof cmd.level === "number") night.set(cmd.level * 100, true); else night.step();
       } else if (a === "stop") {
         player.close();
         nowPlaying.stop();
@@ -1242,6 +1277,7 @@
 
     report: function (force) {
       const state = this.state();
+      state.night = night.level / 100;
       const key = JSON.stringify(state);
       if (!force && key === this.lastReport && state.kind === "idle") return;
       this.lastReport = key;

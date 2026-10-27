@@ -411,7 +411,7 @@ async def remove_screen(screen_id: int, request: Request, user=Depends(api_user)
 
 class Command(BaseModel):
     action: Literal["play_item", "play_album", "play_youtube", "play_source", "play_station", "toggle", "seek",
-                    "skip", "volume", "next", "prev", "stop"]
+                    "skip", "volume", "night", "next", "prev", "stop"]
     file_id: int | None = None
     key: str | None = Field(None, max_length=2000)       # album key or station key
     index: int = Field(0, ge=0)
@@ -421,7 +421,7 @@ class Command(BaseModel):
     start: float = Field(0.0, ge=0)
     to: float | None = Field(None, ge=0)                 # seek
     by: float | None = Field(None, ge=-36000, le=36000)  # skip
-    level: float | None = Field(None, ge=0, le=1)        # volume
+    level: float | None = Field(None, ge=0, le=1)        # volume; night (none: the next step)
 
 
 def _command(conn: sqlite3.Connection, user, body: Command) -> dict:
@@ -513,6 +513,7 @@ class ScreenState(BaseModel):
     paused: bool = False
     volume: float | None = Field(None, ge=0, le=1)
     has_queue: bool = False
+    night: float | None = Field(None, ge=0, le=1)        # the night filter's level
 
 
 @router.put("/api/media/screen/state")
