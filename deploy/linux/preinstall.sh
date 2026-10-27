@@ -44,9 +44,13 @@ step "ffmpeg and video drivers (Media)"
 fedora=$(rpm -E %fedora)
 rpm -q rpmfusion-free-release >/dev/null 2>&1 \
     || dnf install -y "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$fedora.noarch.rpm"
-rpm -q ffmpeg >/dev/null 2>&1 || dnf swap -y ffmpeg-free ffmpeg --allowerasing
-rpm -q mesa-va-drivers-freeworld >/dev/null 2>&1 || dnf swap -y mesa-va-drivers mesa-va-drivers-freeworld --allowerasing
-dnf install -y libva-utils
+# install --allowerasing replaces ffmpeg-free and mesa-va-drivers where they are installed, and
+# simply installs where they aren't (a swap does nothing then).
+if ! { command -v ffmpeg >/dev/null && ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_vaapi; }; then
+    dnf install -y --allowerasing ffmpeg
+fi
+dnf install -y --allowerasing mesa-va-drivers-freeworld libva-utils
+command -v ffmpeg >/dev/null || die "ffmpeg didn't install; check that the RPM Fusion repository is enabled"
 
 step "mnemerynne user and folders"
 id mnemerynne >/dev/null 2>&1 || useradd --system --home-dir /var/lib/mnemerynne --shell /sbin/nologin mnemerynne
