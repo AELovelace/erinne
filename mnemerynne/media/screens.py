@@ -32,6 +32,7 @@ from mnemerynne import group_refs, media
 COOKIE = "mnemerynne_screen"
 COOKIE_DAYS = 400               # browsers cap cookies here; it's renewed whenever the screen connects
 MAX_PER_USER = 10
+MAX_SAFE = 10.0                 # underscan: at most this percentage in from each edge
 STATE_SECONDS = 15              # a screen silent this long counts as gone from the remote's point of view
 
 PAIR_COOKIE = "mnemerynne_screen_pairing"
@@ -103,6 +104,16 @@ def owned(conn: sqlite3.Connection, user_id: int, screen_id: int) -> sqlite3.Row
 def of_user(conn: sqlite3.Connection, user_id: int) -> list[sqlite3.Row]:
     return conn.execute("SELECT * FROM media_screens WHERE user_id = ? ORDER BY name COLLATE NOCASE",
                         (user_id,)).fetchall()
+
+
+def set_safe_area(conn: sqlite3.Connection, screen_id: int, x: float, y: float) -> tuple[float, float]:
+    """Underscan for a TV that crops its picture: percent in from the sides (x) and the top and bottom (y),
+    in half-percent steps. Returns what was stored."""
+    def step(v: float) -> float:
+        return round(max(0.0, min(MAX_SAFE, float(v))) * 2) / 2
+    x, y = step(x), step(y)
+    conn.execute("UPDATE media_screens SET safe_x = ?, safe_y = ? WHERE id = ?", (x, y, screen_id))
+    return x, y
 
 
 def seen(conn: sqlite3.Connection, screen_id: int) -> None:

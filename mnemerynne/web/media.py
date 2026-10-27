@@ -374,7 +374,8 @@ def screen_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
         return request.app.state.templates.TemplateResponse(request, "media_pair.html", {})
     return request.app.state.templates.TemplateResponse(request, "media.html", {
         "user": owner, "is_admin": False, "active": "media", "has_library": media.library(conn) is not None,
-        "folder": _folder_name(conn), "screen": {"id": screen["id"], "name": screen["name"]}})
+        "folder": _folder_name(conn), "screen": {"id": screen["id"], "name": screen["name"],
+                                                 "safe_x": screen["safe_x"], "safe_y": screen["safe_y"]}})
 
 
 class ScreenBody(BaseModel):
@@ -479,7 +480,8 @@ def list_screens(request: Request, user=Depends(api_user), conn: sqlite3.Connect
     mine = _screen(request, conn)
     # Out of the group: only their screens, to remove them (and casting refused).
     return {"allowed": screens.may_use(conn, user, request.app.state.directory), "screens": [{"id": s["id"], "name": s["name"], "online": h.online(s["id"]), "state": h.state(s["id"]),
-                         "last_seen": s["last_seen_at"], "this": mine is not None and mine["id"] == s["id"]}
+                         "last_seen": s["last_seen_at"], "this": mine is not None and mine["id"] == s["id"],
+                         "safe": {"x": s["safe_x"], "y": s["safe_y"]}}
                         for s in screens.of_user(conn, user["id"])]}
 
 
@@ -496,7 +498,7 @@ async def remove_screen(screen_id: int, request: Request, user=Depends(api_user)
 
 class Command(BaseModel):
     action: Literal["play_item", "play_album", "play_youtube", "play_source", "play_station", "toggle", "seek",
-                    "skip", "volume", "mute", "night", "next", "prev", "stop"]
+                    "skip", "volume", "mute", "night", "next", "prev", "stop", "calibrate"]
     file_id: int | None = None
     key: str | None = Field(None, max_length=2000)       # album key or station key
     index: int = Field(0, ge=0)
@@ -507,6 +509,7 @@ class Command(BaseModel):
     to: float | None = Field(None, ge=0)                 # seek
     by: float | None = Field(None, ge=-36000, le=36000)  # skip
     level: float | None = Field(None, ge=0, le=1)        # volume; night (none: the next step)
+    step: Literal["open", "wider", "narrower", "taller", "shorter", "reset", "save", "cancel"] | None = None  # calibrate
 
 
 def _command(conn: sqlite3.Connection, user, body: Command) -> dict:
@@ -542,6 +545,8 @@ def _command(conn: sqlite3.Connection, user, body: Command) -> dict:
         if found is None:
             raise _not_found()
         return {"action": "play_station", "station": found}
+    if body.action == "calibrate":
+        return {"action": "calibrate", "step": body.step or "open"}
     return {k: v for k, v in body.model_dump().items() if k in ("action", "to", "by", "level") and v is not None}
 
 
@@ -589,7 +594,7 @@ async def screen_stream(request: Request, screen=Depends(screen_device), conn: s
 
 
 class ScreenState(BaseModel):
-    kind: Literal["idle", "video", "live", "youtube", "audio", "radio", "pictures", "signage"]
+    kind: Literal["idle", "video", "live", "youtube", "audio", "radio", "pictures", "signage", "calibrating"]
     title: str = Field("", max_length=300)
     sub: str = Field("", max_length=300)
     art: str | None = Field(None, max_length=300)
@@ -600,6 +605,19 @@ class ScreenState(BaseModel):
     muted: bool = False
     has_queue: bool = False
     night: float | None = Field(None, ge=0, le=1)        # the night filter's level
+
+
+class SafeArea(BaseModel):
+    x: float = Field(..., ge=0, le=screens.MAX_SAFE)
+    y: float = Field(..., ge=0, le=screens.MAX_SAFE)
+
+
+@router.put("/media/screen/safe-area")
+def screen_safe_area(body: SafeArea, screen=Depends(screen_device), conn: sqlite3.Connection = Depends(get_db)):
+    """The TV's own calibration (underscan), saved from its calibration screen."""
+    with transaction(conn):
+        x, y = screens.set_safe_area(conn, screen["id"], body.x, body.y)
+    return {"x": x, "y": y}
 
 
 @router.put("/api/media/screen/state")

@@ -5,7 +5,7 @@
 {% if not screen %}{% include "_nav.html" %}{% endif %}
 <link rel="stylesheet" href="{{ static('media.css') }}">
 <div class="mc-backdrop" id="mc-backdrop" aria-hidden="true"></div>
-<main class="mc" id="mc" data-has-library="{{ 1 if has_library else 0 }}" data-admin="{{ 1 if is_admin else 0 }}" data-folder="{{ folder }}"{% if screen %} data-screen-id="{{ screen.id }}" data-screen-name="{{ screen.name }}"{% endif %}>
+<main class="mc" id="mc" data-has-library="{{ 1 if has_library else 0 }}" data-admin="{{ 1 if is_admin else 0 }}" data-folder="{{ folder }}"{% if screen %} data-screen-id="{{ screen.id }}" data-screen-name="{{ screen.name }}" data-safe-x="{{ screen.safe_x }}" data-safe-y="{{ screen.safe_y }}"{% endif %}>
   <nav class="mc-menu" id="mc-menu" aria-label="Media">
     <div class="mc-clock" id="mc-clock" aria-hidden="true"></div>
     <div class="mc-date" id="mc-date" aria-hidden="true"></div>
@@ -15,6 +15,7 @@
     <button type="button" class="mc-menu-item" data-view="pictures"><span class="mc-icon">🖼</span>Pictures</button>
     <button type="button" class="mc-menu-item" data-view="live"><span class="mc-icon">📡</span>Live TV</button>
     <button type="button" class="mc-menu-item" data-view="radio"><span class="mc-icon">📻</span>Radio</button>
+    {% if screen %}<button type="button" class="mc-menu-item" id="mc-calibrate"><span class="mc-icon">⛶</span>Screen size</button>{% endif %}
     {% if not screen and screens_allowed %}<button type="button" class="mc-menu-item" data-view="screens"><span class="mc-icon">📺</span>Screens</button>
     <label class="mc-cast" id="mc-cast-wrap" hidden>Play on
       <select id="mc-cast"><option value="">This device</option></select>

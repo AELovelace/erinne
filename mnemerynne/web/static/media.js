@@ -629,6 +629,7 @@
     },
 
     fullscreen: function () {
+      if (screenId) return;
       if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
       else $("mc-player").requestFullscreen().catch(function () {});
     },
@@ -1140,6 +1141,8 @@
     },
   };
 
+  let calibrating = null;   // the screen whose size is being adjusted from here (the phone)
+
   function paintScreens() {
     const list = $("mc-screen-list");
     if (!list) return;
@@ -1160,6 +1163,15 @@
       if (!cast.allowed) {
         // Out of the screens group: nothing but removing it.
       } else if (!s.this) {
+        if (s.online) {
+          const size = button("Screen size", "link small", function () {
+            calibrating = calibrating === s.id ? null : s.id;
+            if (calibrating) cast.send({ action: "calibrate", step: "open" }, s.id);
+            paintScreens();
+          }, "Fit the picture to a TV that cuts off its edges");
+          size.dataset.nav = "";
+          actions.appendChild(size);
+        }
         const pick = button(cast.target === s.id ? "✓ Playing here" : "Play on this screen",
                             cast.target === s.id ? "" : "secondary", function () { cast.choose(cast.target === s.id ? null : s.id); paintScreens(); });
         pick.dataset.nav = "";
@@ -1177,6 +1189,20 @@
       actions.appendChild(drop);
       row.append(name, what, actions);
       list.appendChild(row);
+      if (calibrating === s.id && s.online) {
+        const pad = el("div", "mc-cal-remote");
+        pad.appendChild(el("span", "mc-sub", "On the TV: " + (s.safe ? "sides " + s.safe.x + "% · top and bottom " + s.safe.y + "% saved" : "")));
+        [["Narrower", "narrower"], ["Wider", "wider"], ["Shorter", "shorter"], ["Taller", "taller"], ["Reset", "reset"],
+         ["Save", "save"], ["Cancel", "cancel"]].forEach(function (b) {
+          const btn = button(b[0], b[1] === "save" ? "" : "secondary small", function () {
+            cast.send({ action: "calibrate", step: b[1] }, s.id);
+            if (b[1] === "save" || b[1] === "cancel") { calibrating = null; paintScreens(); }
+          });
+          btn.dataset.nav = "";
+          pad.appendChild(btn);
+        });
+        list.appendChild(pad);
+      }
     });
   }
 
@@ -1321,6 +1347,7 @@
         splash.hidden = true;
         focusFirst();
       }, true);
+      safeArea.init();
       signage.init();
       this.connect();
       setInterval(function () { screenMode.report(false); }, 3000);
@@ -1363,6 +1390,7 @@
       const a = cmd.action;
       if (a === "unpaired") { this.es.close(); this.es.onerror(); return; }
       if (a === "signage") { signage.load(); return; }
+      if (a === "calibrate") { safeArea.step(cmd.step); return; }
       if (a.indexOf("play_") === 0 || a === "stop") signage.activity(false);
       if (a.indexOf("play_") === 0) {
         $("mc-splash").hidden = true;
@@ -1412,6 +1440,9 @@
     },
 
     state: function () {
+      if (safeArea.isOpen()) {
+        return { kind: "calibrating", title: "Adjusting the screen size", sub: safeArea.label() };
+      }
       if (signage.running) {
         const item = signage.items[signage.index % signage.items.length] || {};
         return { kind: "signage", title: "Slideshow: " + signage.running.name, sub: item.title || "" };
@@ -1444,6 +1475,118 @@
       if (!force && key === this.lastReport && state.kind === "idle") return;
       this.lastReport = key;
       api("PUT", "/api/media/screen/state", state).catch(function () {});
+    },
+  };
+
+  // ------------------------------------------------- underscan (the TV, its safe area)
+  /* For TVs that cut off the picture's edges (overscan): everything is drawn inside a frame this far in,
+     in percent of the width (x, both sides) and height (y, top and bottom), set on the calibration screen
+     (Screen size in the menu, or from the phone) and kept with the screen on the server. */
+  const safeArea = {
+    x: 0, y: 0, before: null, box: null,
+
+    init: function () {
+      this.x = Number(main.dataset.safeX) || 0;
+      this.y = Number(main.dataset.safeY) || 0;
+      this.apply();
+      window.addEventListener("keydown", function (e) {
+        if (safeArea.isOpen() && safeArea.key(e)) { e.preventDefault(); e.stopImmediatePropagation(); }
+      }, true);
+      $("mc-calibrate").addEventListener("click", function () { safeArea.open(); });
+    },
+
+    isOpen: function () { return !!this.box && !this.box.hidden; },
+    label: function () { return "sides " + this.x.toFixed(1) + "% · top and bottom " + this.y.toFixed(1) + "%"; },
+
+    apply: function () {
+      // % for the fixed layers (of the viewport itself); vw and vh for the page's margins.
+      const root = document.documentElement.style;
+      root.setProperty("--safe-x", this.x + "%");
+      root.setProperty("--safe-y", this.y + "%");
+      root.setProperty("--safe-xv", this.x + "vw");
+      root.setProperty("--safe-yv", this.y + "vh");
+      if (this.box) $("mc-cal-values").textContent = this.label();
+    },
+
+    adjust: function (dx, dy) {
+      const step = function (v) { return Math.round(Math.max(0, Math.min(10, v)) * 2) / 2; };
+      this.x = step(this.x + dx);
+      this.y = step(this.y + dy);
+      this.apply();
+      screenMode.report(true);
+    },
+
+    build: function () {
+      const box = el("div", "mc-cal");
+      box.id = "mc-cal";
+      box.setAttribute("role", "dialog");
+      box.setAttribute("aria-label", "Screen size");
+      const frame = el("div", "mc-cal-frame");
+      ["tl", "tr", "bl", "br"].forEach(function (c, i) { frame.appendChild(el("span", "mc-cal-corner " + c, "◤◥◣◢"[i])); });
+      const help = el("div", "mc-cal-help");
+      help.append(el("h2", null, "Screen size"),
+        el("p", null, "Adjust until you can see the whole pink frame and the arrows in all four corners."),
+        el("p", "mc-cal-keys", "← → narrower / wider · ↑ ↓ taller / shorter · 0 resets · Enter saves · Esc cancels"));
+      const values = el("p", "mc-cal-values");
+      values.id = "mc-cal-values";
+      const row = el("div", "mc-cal-buttons");
+      [["Narrower", "narrower"], ["Wider", "wider"], ["Shorter", "shorter"], ["Taller", "taller"], ["Reset", "reset"],
+       ["Save", "save"], ["Cancel", "cancel"]].forEach(function (b) {
+        row.appendChild(button(b[0], b[1] === "save" ? "" : "secondary", function () { safeArea.step(b[1]); }));
+      });
+      help.append(values, row);
+      frame.appendChild(help);
+      box.appendChild(frame);
+      document.body.appendChild(box);
+      return box;
+    },
+
+    open: function () {
+      if (this.isOpen()) return;
+      this.before = { x: this.x, y: this.y };
+      this.box = this.box || this.build();
+      this.box.hidden = false;
+      $("mc-splash").hidden = true;
+      signage.activity(false);
+      this.apply();
+      screenMode.report(true);
+    },
+
+    close: function () {
+      if (this.box) this.box.hidden = true;
+      screenMode.report(true);
+      focusFirst();
+    },
+
+    save: async function () {
+      try {
+        const r = await api("PUT", "/media/screen/safe-area", { x: this.x, y: this.y });
+        this.x = r.x;
+        this.y = r.y;
+        this.apply();
+        this.close();
+      } catch (err) { $("mc-cal-values").textContent = "Couldn't save: " + err.message; }
+    },
+
+    step: function (name) {
+      if (name === "open") { this.open(); return; }
+      if (!this.isOpen()) this.open();
+      if (name === "wider") this.adjust(-0.5, 0);
+      else if (name === "narrower") this.adjust(0.5, 0);
+      else if (name === "taller") this.adjust(0, -0.5);
+      else if (name === "shorter") this.adjust(0, 0.5);
+      else if (name === "reset") this.adjust(-this.x, -this.y);
+      else if (name === "save") this.save();
+      else if (name === "cancel") { this.x = this.before.x; this.y = this.before.y; this.apply(); this.close(); }
+    },
+
+    key: function (e) {
+      const steps = { ArrowLeft: "narrower", ArrowRight: "wider", ArrowUp: "taller", ArrowDown: "shorter", "0": "reset",
+                      Enter: "save", Escape: "cancel", Backspace: "cancel" };
+      if (e.key === "Enter" && document.activeElement && this.box.contains(document.activeElement)) return false;  // a focused button
+      if (!steps[e.key]) return false;
+      this.step(steps[e.key]);
+      return true;
     },
   };
 
@@ -1492,7 +1635,7 @@
     },
 
     busy: function () {
-      return !$("mc-player").hidden || !$("mc-viewer").hidden || !audio.paused;
+      return !$("mc-player").hidden || !$("mc-viewer").hidden || !audio.paused || safeArea.isOpen();
     },
 
     activity: function (fromKey) {
@@ -1635,7 +1778,7 @@
     if (typeof info.playerState === "number") player.yt.state = info.playerState;
     if (typeof info.volume === "number") player.yt.volume = info.volume;
   });
-  document.querySelectorAll(".mc-menu-item").forEach(function (b) {
+  document.querySelectorAll(".mc-menu-item[data-view]").forEach(function (b) {
     b.addEventListener("click", function () { go(b.dataset.view); });
   });
 

@@ -757,6 +757,38 @@ def test_screen_names_are_checked_and_pairing_again_replaces(client, conn, direc
     assert [s["name"] for s in client.get("/api/media/screens").json()["screens"]] == ["living room"]
 
 
+def test_a_screen_keeps_its_underscan(client, conn, directory):
+    _login(client, conn, directory)
+    _turn_on(client)
+    screen_id, key = _pair(client)
+    tv = TestClient(client.app)
+    tv.cookies.set("mnemerynne_screen", key)
+    assert 'data-safe-x="0.0" data-safe-y="0.0"' in tv.get("/media/screen").text
+    assert 'id="mc-calibrate"' in tv.get("/media/screen").text and 'id="mc-calibrate"' not in client.get("/media").text
+
+    r = tv.put("/media/screen/safe-area", json={"x": 3.2, "y": 2.5})
+    assert r.status_code == 200 and r.json() == {"x": 3.0, "y": 2.5}         # half-percent steps
+    assert 'data-safe-x="3.0" data-safe-y="2.5"' in tv.get("/media/screen").text
+    assert client.get("/api/media/screens").json()["screens"][0]["safe"] == {"x": 3.0, "y": 2.5}
+    assert tv.put("/media/screen/safe-area", json={"x": 11, "y": 0}).status_code == 422
+    assert TestClient(client.app).put("/media/screen/safe-area", json={"x": 1, "y": 1}).status_code == 401   # by the key
+
+    # The phone drives the TV's calibration screen.
+    queue = _hub(client).listen(screen_id)
+    for body, sent in [({"action": "calibrate"}, {"action": "calibrate", "step": "open"}),
+                       ({"action": "calibrate", "step": "wider"}, {"action": "calibrate", "step": "wider"})]:
+        assert client.post(f"/api/media/screens/{screen_id}/command", json=body).status_code == 200
+        assert queue.get_nowait() == sent
+    assert client.post(f"/api/media/screens/{screen_id}/command",
+                       json={"action": "calibrate", "step": "sideways"}).status_code == 422
+    assert tv.put("/api/media/screen/state", json={"kind": "calibrating", "title": "Adjusting"}).status_code == 200
+    _hub(client).unlisten(screen_id, queue)
+
+    # Pairing it again keeps it (it's the same TV).
+    _pair(client)
+    assert conn.execute("SELECT safe_x, safe_y FROM media_screens WHERE id = ?", (screen_id,)).fetchone()[:] == (3.0, 2.5)
+
+
 def _tv_code(tv):
     r = tv.post("/media/screen/pair")
     assert r.status_code == 200, r.text
