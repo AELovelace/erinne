@@ -11,8 +11,10 @@ from __future__ import annotations
 import asyncio
 import json
 import mimetypes
+import re
 import sqlite3
 from typing import Literal
+from urllib.parse import quote
 
 import anyio
 import httpx
@@ -20,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import media, users
+from mnemerynne import group_refs, media, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
@@ -30,9 +32,17 @@ from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import _session_user, admin_user, api_user, get_db, get_settings, is_admin, page_user
 
 
-def _media_on(conn: sqlite3.Connection = Depends(get_db)) -> None:
-    """Every Media route but the admin settings: not there at all while Media is turned off."""
+def _media_on(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> None:
+    """Every Media route but the admin settings: not there at all while Media is turned off, nor for
+    anyone outside the Media group (Settings → Media). Without a person or screen, the route's own
+    sign-in check answers."""
     if not media.enabled(conn):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+    user = _session_user(request, conn)
+    if user is None:
+        screen = _screen(request, conn)
+        user = users.get_user_by_id(conn, screen["user_id"]) if screen is not None else None
+    if user is not None and not media.may_use(conn, user, request.app.state.directory):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
 
 
@@ -47,7 +57,7 @@ def media_user(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> 
         return user
     screen = _screen(request, conn)
     user = users.get_user_by_id(conn, screen["user_id"]) if screen is not None else None
-    if user is None or not user["active"]:
+    if user is None or not user["active"] or not screens.may_use(conn, user, request.app.state.directory):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
     return user
 
@@ -55,13 +65,23 @@ def media_user(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> 
 def screen_device(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> sqlite3.Row:
     """The screen this browser is (by its key), for the screen's own stream and reports."""
     screen = _screen(request, conn)
-    if screen is None:
+    owner = users.get_user_by_id(conn, screen["user_id"]) if screen is not None else None
+    if owner is None or not screens.may_use(conn, owner, request.app.state.directory):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "This browser isn't a paired screen")
     return screen
 
 
+def screens_user(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)) -> sqlite3.Row:
+    """The signed-in person, if they are in the screens group (Settings → Media)."""
+    if not screens.may_use(conn, user, request.app.state.directory):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Screens are only for members of the group an admin "
+                                                       "chose (Settings → Media).")
+    return user
+
+
 router = APIRouter(dependencies=[Depends(_media_on)])
 admin_router = APIRouter()   # Settings → Media: reachable when it's off, to turn it on
+share_router = APIRouter()   # the Share menu target (manifest): answers even with Media off
 
 # Browsers want these names for <video>/<audio>; mimetypes doesn't know all of them everywhere.
 _MIME = {".mkv": "video/x-matroska", ".mka": "audio/x-matroska", ".webm": "video/webm", ".m4v": "video/mp4",
@@ -89,7 +109,8 @@ def _not_found(what: str = "Not found") -> HTTPException:
 def media_page(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db)):
     return request.app.state.templates.TemplateResponse(request, "media.html", {
         "user": user, "is_admin": is_admin(request, conn, user), "active": "media",
-        "has_library": media.library(conn) is not None, "folder": _folder_name(conn)})
+        "has_library": media.library(conn) is not None, "folder": _folder_name(conn),
+        "screens_allowed": screens.may_use(conn, user, request.app.state.directory)})
 
 
 def _folder_name(conn: sqlite3.Connection) -> str:
@@ -340,9 +361,9 @@ def _key_cookie(response, request: Request, token: str) -> None:
 def screen_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     """The TV: Media full-screen, waiting for what its owner casts. Unpaired browsers go to pairing."""
     screen = _screen(request, conn)
-    if screen is None:
+    owner = users.get_user_by_id(conn, screen["user_id"]) if screen is not None else None
+    if owner is None or not screens.may_use(conn, owner, request.app.state.directory):
         return RedirectResponse("/media#screens", status_code=status.HTTP_303_SEE_OTHER)
-    owner = users.get_user_by_id(conn, screen["user_id"])
     return request.app.state.templates.TemplateResponse(request, "media.html", {
         "user": owner, "is_admin": False, "active": "media", "has_library": media.library(conn) is not None,
         "folder": _folder_name(conn), "screen": {"id": screen["id"], "name": screen["name"]}})
@@ -353,7 +374,8 @@ class ScreenBody(BaseModel):
 
 
 @router.post("/api/media/screens", status_code=status.HTTP_201_CREATED)
-def pair_screen(body: ScreenBody, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def pair_screen(body: ScreenBody, request: Request, user=Depends(screens_user),
+                conn: sqlite3.Connection = Depends(get_db)):
     """Make this browser one of the person's screens: it gets the screen key as a cookie."""
     try:
         with transaction(conn):
@@ -370,7 +392,8 @@ def pair_screen(body: ScreenBody, request: Request, user=Depends(api_user), conn
 def list_screens(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
     h = hub(request)
     mine = _screen(request, conn)
-    return {"screens": [{"id": s["id"], "name": s["name"], "online": h.online(s["id"]), "state": h.state(s["id"]),
+    # Out of the group: only their screens, to remove them (and casting refused).
+    return {"allowed": screens.may_use(conn, user, request.app.state.directory), "screens": [{"id": s["id"], "name": s["name"], "online": h.online(s["id"]), "state": h.state(s["id"]),
                          "last_seen": s["last_seen_at"], "this": mine is not None and mine["id"] == s["id"]}
                         for s in screens.of_user(conn, user["id"])]}
 
@@ -438,7 +461,7 @@ def _command(conn: sqlite3.Connection, user, body: Command) -> dict:
 
 
 @router.post("/api/media/screens/{screen_id}/command")
-async def cast(screen_id: int, body: Command, request: Request, user=Depends(api_user),
+async def cast(screen_id: int, body: Command, request: Request, user=Depends(screens_user),
                conn: sqlite3.Connection = Depends(get_db)):
     """Play something on, or control, one of the person's screens."""
     screen = screens.owned(conn, user["id"], screen_id)
@@ -504,7 +527,9 @@ def _admin_status(request: Request, conn: sqlite3.Connection) -> dict:
     lib = media.library(conn)
     return {"enabled": media.enabled(conn),
             "library": {"id": lib["id"], "name": lib["name"], "share_path": lib["share_path"]} if lib else None,
-            "settings": {k: cfg[k] for k in media.DEFAULTS}, "tmdb_key_set": bool(cfg.get("tmdb_key_enc")),
+            "settings": {k: cfg[k] for k in media.DEFAULTS}
+                        | {g: group_refs.label(conn, cfg[g]) for g in media.GROUP_SETTINGS},
+            "tmdb_key_set": bool(cfg.get("tmdb_key_enc")),
             "sources": live.sources(conn, enabled_only=False), "catalog": catalog.status(conn, lib),
             "sessions": sessions(request).running(),
             # Top-level folders of the share, to pick the Media folder from (inboxes aren't libraries).
@@ -521,6 +546,8 @@ def admin_media(request: Request, user=Depends(admin_user), conn: sqlite3.Connec
 class MediaSettingsBody(BaseModel):
     enabled: bool | None = None
     folder: str | None = Field(None, max_length=120)      # the Media folder at the top of the share
+    media_group: str | None = Field(None, max_length=2000)     # who may use Media; "": nobody
+    screens_group: str | None = Field(None, max_length=2000)   # who may use screens; "": nobody
     hwaccel: Literal["auto", "vaapi", "nvenc", "software"] | None = None
     max_transcodes: int | None = Field(None, ge=0, le=8)
     online_metadata: bool | None = None
@@ -548,6 +575,14 @@ def admin_settings(body: MediaSettingsBody, request: Request, user=Depends(admin
                 media.set_enabled(conn, False)
                 _log(conn, user, "settings.media", "off")
             changes = body.model_dump(exclude={"enabled", "folder", "tmdb_key"}, exclude_none=True)
+            directory = request.app.state.directory
+            for name in media.GROUP_SETTINGS:
+                if changes.get(name) is not None:
+                    known = directory.groups() if directory.enabled else []
+                    try:
+                        changes[name] = group_refs.resolve(conn, changes[name], known)
+                    except group_refs.GroupRefError as exc:
+                        raise media.MediaError(str(exc)) from None
             if changes or body.tmdb_key is not None:
                 media.save_settings(conn, settings, changes, body.tmdb_key)
                 detail = ", ".join(f"{k}={v}" for k, v in changes.items())
@@ -631,3 +666,32 @@ def delete_source(source_id: int, request: Request, user=Depends(admin_user),
         _log(conn, user, "media.source_delete", src["name"], src["kind"])
     sessions(request).stop_live(source_id)
     return _admin_status(request, conn)
+
+
+# --------------------------------------------------------------- share menu
+_LINK = re.compile(r"https?://[^\s<>\"']+")
+
+
+def shared_link(*fields: str | None) -> str | None:
+    """The link in what an app shared: YouTube puts it in `text` (sometimes after the title), others in `url`."""
+    for value in fields:
+        match = _LINK.search(value or "")
+        if match:
+            return match.group(0).rstrip(".,;)")
+    return None
+
+
+@share_router.get("/media/share")
+def share_link(request: Request, title: str = "", text: str = "", url: str = "",
+               conn: sqlite3.Connection = Depends(get_db)):
+    """Android's Share → Erynne (the installed app): open Media → Screens with the link filled in, one tap
+    from playing on the TV. Signed out, it waits for sign-in and comes back here."""
+    if _session_user(request, conn) is None:
+        request.session["after_login"] = str(request.url.path) + "?" + str(request.url.query)
+        return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+    if not media.enabled(conn) or not media.may_use(conn, _session_user(request, conn), request.app.state.directory):
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+    link = shared_link(url, text, title)
+    target = "/media#cast/" + quote(link, safe="") if link else "/media#screens"
+    return RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
+

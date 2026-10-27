@@ -912,10 +912,10 @@
   /* This device (the phone) sends what to play to one of its owner's screens (the TV); the choice is
      kept in this browser. With a screen chosen, every Play on the page goes there instead. */
   const cast = {
-    target: null, screens: [], timer: null,
+    target: null, screens: [], allowed: true, timer: null,
 
     init: function () {
-      if (screenId) return;
+      if (screenId || !$("mc-cast")) return;   // a screen itself, or not in the screens group
       try { this.target = Number(localStorage.getItem("mc-cast")) || null; } catch (e) { this.target = null; }
       $("mc-cast").addEventListener("change", function () { cast.choose(Number($("mc-cast").value) || null); });
       this.refresh();
@@ -936,7 +936,10 @@
     },
 
     refresh: async function () {
-      try { this.screens = (await api("GET", "/api/media/screens")).screens; } catch (e) { return; }
+      let data;
+      try { data = await api("GET", "/api/media/screens"); } catch (e) { return; }
+      this.screens = data.screens;
+      this.allowed = data.allowed;
       if (this.target !== null && !this.screen()) this.choose(null);
       this.paint();
       if (route().view === "screens" && !document.activeElement.closest("#mc-content input, #mc-content select")) {
@@ -948,7 +951,7 @@
     paint: function () {
       const select = $("mc-cast");
       const others = this.screens.filter(function (s) { return !s.this; });
-      $("mc-cast-wrap").hidden = !others.length;
+      $("mc-cast-wrap").hidden = !others.length || !this.allowed;
       const keep = this.target;
       select.replaceChildren(el("option", null, "This device"));
       select.firstChild.value = "";
@@ -1019,7 +1022,9 @@
       const what = el("div", "mc-sub", !s.online ? "Not connected" + (s.last_seen ? " · last seen " + s.last_seen + " UTC" : "")
         : !st || st.kind === "idle" ? "Ready, nothing playing" : st.title + (st.paused ? " (paused)" : ""));
       const actions = el("div", "mc-actions");
-      if (!s.this) {
+      if (!cast.allowed) {
+        // Out of the screens group: nothing but removing it.
+      } else if (!s.this) {
         const pick = button(cast.target === s.id ? "✓ Playing here" : "Play on this screen",
                             cast.target === s.id ? "" : "secondary", function () { cast.choose(cast.target === s.id ? null : s.id); paintScreens(); });
         pick.dataset.nav = "";
@@ -1044,6 +1049,17 @@
     setHead("Screens");
     await cast.refresh();
     const out = [];
+    if (!cast.allowed) {
+      out.push(empty("Screens (playing on a TV from your phone) are only for members of the group an admin chose. "
+                     + "Ask an admin to add you.", "Not available."));
+      if (cast.screens.length) {
+        const own = el("div", "mc-screen-list");
+        own.id = "mc-screen-list";
+        out.push(own);
+        setTimeout(paintScreens, 0);
+      }
+      return out;
+    }
 
     const paste = el("form", "mc-paste");
     paste.appendChild(el("h2", null, "Play a YouTube link on a screen"));

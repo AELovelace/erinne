@@ -9,6 +9,10 @@
   <meta name="color-scheme" content="{{ 'dark' if theme == 'neon' else 'light dark' }}">
   <title>{% block title %}{{ assistant_name }}{% endblock %}</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌸</text></svg>">
+  {#- Installable (Add to Home screen), and on Android a Share target: /manifest.webmanifest (web/app.py). -#}
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="{{ static('icons/apple-touch-icon.png') }}">
+  <meta name="theme-color" content="{{ '#12031f' if theme == 'neon' else '#fbeef0' }}">
   <link rel="stylesheet" href="{{ static('erynne.css') }}">
   <link rel="stylesheet" href="{{ static('theme-neon.css') }}">
   {% if user is defined and user %}<script src="{{ static('messages.js') }}"></script>{% endif %}

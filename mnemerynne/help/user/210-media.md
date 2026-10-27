@@ -51,9 +51,16 @@ A **screen** is a browser left showing Media, such as the TV's, that you send th
 **Send things from your phone:**
 
 - **Play on** at the bottom of the menu chooses where things play. With a screen chosen, every **Play** sends there instead: films, albums, tracks, pictures, Live TV and radio.
-- To play a YouTube link, copy it in the YouTube app, then use **Media → Screens → Paste** and press **Play**.
+- To play a YouTube link, share it straight from the YouTube app on Android: **Share → Erynne**. Media opens with the link filled in; press **Play**. This needs Erynne installed on the phone (below). Otherwise, copy the link and use **Media → Screens → Paste**.
 - The bar at the bottom shows what the screen is playing, with buttons to pause, skip, change the volume, go to the next track or stop. **✕** goes back to playing on your phone.
 - **Screens** lists your screens and whether they're on. **Remove** unpairs one.
 
-Only you can see and control your screens.
+Only you can see and control your screens. Screens are only for members of the group your admin chose; without it, there is no **Screens** item in the menu.
+
+## Erynne as an app on your phone
+
+To install it, open Erynne in Chrome on Android and choose **⋮ → Install app** (or **Add to Home screen → Install**). It then opens like an app, without the browser's address bar, and appears in the **Share** menu of other apps such as YouTube.
+
+- Press and hold its icon for shortcuts to **Media**, **Screens** and **Files**.
+- On an iPhone, **Share → Add to Home Screen** in Safari installs it too. iPhones don't let web apps appear in the Share menu, so copy the link and paste it in **Screens** instead.
 

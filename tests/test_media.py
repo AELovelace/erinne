@@ -109,10 +109,16 @@ def _jpeg(color=(200, 40, 120), size=(64, 96), exif_date=None) -> bytes:
     return out.getvalue()
 
 
-def _turn_on(client):
-    r = client.put("/api/admin/settings/media", json={"enabled": True})
+def _turn_on(client, group="Domain Users"):
+    """Media on, for the Media group (everyone in these tests: both accounts are Domain Users)."""
+    r = client.put("/api/admin/settings/media", json={"enabled": True, "media_group": group})
     assert r.status_code == 200, r.text
     return r.json()
+
+
+def _screens_for(client, group="Domain Users"):
+    r = client.put("/api/admin/settings/media", json={"screens_group": group})
+    assert r.status_code == 200, r.text
 
 
 def _scan(conn, settings):
@@ -163,7 +169,8 @@ def test_the_media_folder_can_be_chosen(client, conn, directory, root, settings)
     assert status["settings"]["folder"] == "Media" and status["folders"] == ["Plex"]
 
     # Picked before turning it on: the existing folder is used, and nothing called Media is made.
-    status = client.put("/api/admin/settings/media", json={"folder": "plex", "enabled": True}).json()
+    status = client.put("/api/admin/settings/media", json={"folder": "plex", "enabled": True,
+                                                            "media_group": "Domain Users"}).json()
     assert status["library"]["share_path"] == "Plex" and status["enabled"] is True
     assert (root / "Plex" / "Music").is_dir() and (root / "Plex" / "Pictures").is_dir()
     assert not (root / "Media").exists()
@@ -627,6 +634,7 @@ def test_films_and_albums_are_looked_up_online(client, conn, directory, root, se
 
 # ---------------------------------------------------------------- screens
 def _pair(client, name="Living room"):
+    _screens_for(client)
     r = client.post("/api/media/screens", json={"name": name})
     assert r.status_code == 201, r.text
     return r.json()["id"], client.cookies.get("mnemerynne_screen")
@@ -736,8 +744,103 @@ def test_the_screen_stream_and_unpairing(client, conn, directory, monkeypatch):
 def test_screen_names_are_checked_and_pairing_again_replaces(client, conn, directory):
     _login(client, conn, directory)
     _turn_on(client)
+    _screens_for(client)
     assert client.post("/api/media/screens", json={"name": "  "}).status_code == 422
     first, key1 = _pair(client, "Living room")
     second, key2 = _pair(client, "living  room")
     assert key1 != key2                                # re-pairing issues a new key
     assert [s["name"] for s in client.get("/api/media/screens").json()["screens"]] == ["living room"]
+
+
+# ------------------------------------------------------------- app, share
+def test_erynne_is_installable_and_a_share_target(client, conn, directory):
+    m = client.get("/manifest.webmanifest")                     # public: fetched without the session
+    assert m.status_code == 200 and m.headers["content-type"].startswith("application/manifest+json")
+    data = m.json()
+    assert data["display"] == "standalone" and data["start_url"] == "/" and data["scope"] == "/"
+    assert {i["sizes"] for i in data["icons"]} >= {"192x192", "512x512"}
+    assert any(i["purpose"] == "maskable" for i in data["icons"])
+    for icon in data["icons"]:
+        assert client.get(icon["src"]).headers["content-type"] == "image/png"
+    assert data["share_target"] == {"action": "/media/share", "method": "GET",
+                                    "params": {"title": "title", "text": "text", "url": "url"}}
+    _login(client, conn, directory)
+    assert 'rel="manifest" href="/manifest.webmanifest"' in client.get("/files").text
+
+
+@pytest.mark.parametrize("params, link", [
+    ({"text": "https://youtu.be/dQw4w9WgXcQ?si=xyz"}, "https://youtu.be/dQw4w9WgXcQ?si=xyz"),           # YouTube app
+    ({"title": "Rick Astley", "text": "Never Gonna Give You Up https://youtu.be/dQw4w9WgXcQ"},
+     "https://youtu.be/dQw4w9WgXcQ"),
+    ({"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "title": "x"}, "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+])
+def test_shared_links_open_screens_ready_to_play(client, conn, directory, params, link):
+    from urllib.parse import quote
+    _login(client, conn, directory)
+    _turn_on(client)
+    r = client.get("/media/share", params=params, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/media#cast/" + quote(link, safe="")
+
+
+def test_sharing_while_signed_out_comes_back_after_sign_in(client, conn, directory):
+    _login(client, conn, directory)
+    _turn_on(client)
+    client.cookies.clear()
+    r = client.get("/media/share", params={"text": "https://youtu.be/dQw4w9WgXcQ"}, follow_redirects=False)
+    assert r.headers["location"] == "/login"
+    back = client.post("/login", data={"username": "boss", "password": "password123"}, follow_redirects=False)
+    assert back.headers["location"].startswith("/media/share?text=")
+    assert client.get(back.headers["location"], follow_redirects=False).headers["location"].startswith("/media#cast/")
+    assert client.get("/media/share", params={"text": "nothing to see"}, follow_redirects=False).headers[
+        "location"] == "/media#screens"
+
+
+# ------------------------------------------------------------------ groups
+def test_media_and_screens_are_for_their_groups_only(client, conn, directory, root, settings, checker):
+    _login(client, conn, directory)
+    # On, but no group yet: nobody has it, admins included; the settings stay reachable.
+    assert client.put("/api/admin/settings/media", json={"enabled": True}).json()["settings"]["media_group"] == ""
+    assert client.get("/media").status_code == 404 and client.get("/api/media/home").status_code == 404
+    assert 'href="/media"' not in client.get("/files").text
+    assert client.get("/media/share", params={"text": "https://youtu.be/dQw4w9WgXcQ"},
+                      follow_redirects=False).headers["location"] == "/"
+
+    status = client.put("/api/admin/settings/media", json={"media_group": "Domain Admins"}).json()
+    assert status["settings"]["media_group"].lower() == "domain admins"
+    assert client.get("/media").status_code == 200 and 'href="/media"' in client.get("/files").text
+    assert 'data-view="screens"' not in client.get("/media").text            # screens: no group yet
+    assert client.post("/api/media/screens", json={"name": "TV"}).status_code == 403
+    assert client.get("/api/media/screens").json()["allowed"] is False
+    assert client.put("/api/admin/settings/media", json={"media_group": "No Such Group"}).status_code == 422
+    assert conn.execute("SELECT 1 FROM access_log WHERE action = 'settings.media_options'").fetchone()
+
+    _screens_for(client, "Domain Admins")
+    assert 'data-view="screens"' in client.get("/media").text
+    screen_id = client.post("/api/media/screens", json={"name": "TV"}).json()["id"]
+    key = client.cookies.get("mnemerynne_screen")
+    tv = TestClient(client.app)
+    tv.cookies.set("mnemerynne_screen", key)
+    assert tv.get("/api/media/home").status_code == 200
+
+    # jane is a Domain User, not a Domain Admin: no Media at all.
+    _login(client, conn, directory, "jane", "jsmith")
+    assert client.get("/media").status_code == 404 and client.get("/api/media/movies").status_code == 404
+    assert 'href="/media"' not in client.get("/files").text
+
+    # The owner leaves a group (here: the setting changes): the TV stops at once, its key with it.
+    client.cookies.clear()
+    client.post("/login", data={"username": "boss", "password": "password123"})
+    _screens_for(client, "Domain Users; ")      # boss is still in it
+    assert tv.get("/api/media/home").status_code == 200
+    _screens_for(client, "")                    # nobody
+    assert tv.get("/media/screen/stream").status_code == 401
+    assert tv.get("/media/screen", follow_redirects=False).status_code == 303
+    assert tv.get("/api/media/screen/state").status_code in (401, 405)
+    _screens_for(client, "Domain Admins")
+    client.put("/api/admin/settings/media", json={"media_group": "Domain Users"})
+    assert tv.get("/api/media/home").status_code == 200
+    client.put("/api/admin/settings/media", json={"media_group": ""})
+    assert tv.get("/api/media/home").status_code == 404       # Media closed to its owner: the TV too
+    # Out of the groups, the owner can still remove it.
+    assert client.delete(f"/api/media/screens/{screen_id}").status_code in (200, 404)
+

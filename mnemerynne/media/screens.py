@@ -8,6 +8,10 @@ Casting: the phone posts a command (play this film, album, station, live source 
 pause, seek, volume, next, stop) for one of its owner's screens. The web app hands it to the screen's
 open event stream (Hub, in memory: this is one uvicorn process), the screen's page acts on it and
 reports what it is playing back every few seconds, which is what the phone's remote shows.
+
+Only members of the screens group (Settings → Media; AD or Entra groups) may pair screens and cast;
+with no group set, nobody may. It is checked live on every request, the screen key's included: a
+screen whose owner leaves the group stops working at once. Owners may always remove their screens.
 """
 
 from __future__ import annotations
@@ -18,6 +22,8 @@ import secrets
 import sqlite3
 import time
 
+from mnemerynne import group_refs, media
+
 COOKIE = "mnemerynne_screen"
 COOKIE_DAYS = 400               # browsers cap cookies here; it's renewed whenever the screen connects
 MAX_PER_USER = 10
@@ -27,6 +33,12 @@ STATE_SECONDS = 15              # a screen silent this long counts as gone from 
 class ScreenError(ValueError):
     """A refusal; the message is safe to show."""
     status = 422
+
+
+def may_use(conn: sqlite3.Connection, user, directory) -> bool:
+    """In the screens group, and the Media group (Settings → Media)? No group set: nobody."""
+    return (media.may_use(conn, user, directory)
+            and group_refs.in_any(conn, user, directory, media.load_settings(conn)["screens_group"]))
 
 
 def _hash(token: str) -> str:

@@ -6,8 +6,8 @@ already there); the worker then catalogs what people put in them (catalog.py), a
 plays it, straight from the share when the browser can, through ffmpeg when it can't
 (transcode.py). Live streams pulled by URL and internet radio (live.py) sit beside the library.
 
-Who sees what follows the share's own permissions on the Media folders, like any share library:
-there is no separate media permission. Off, the page and its API answer as if they didn't exist;
+Who may use Media at all is a group (Settings → Media; nobody until one is set). Within it, who sees
+what follows the share's own permissions on the Media folders, like any share library. Off, the page and its API answer as if they didn't exist;
 the folders, the files and the catalog are kept for when it's back.
 """
 
@@ -19,7 +19,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from mnemerynne import apis, permissions, share
+from mnemerynne import apis, group_refs, permissions, share
 from mnemerynne.config import Settings
 
 log = logging.getLogger("mnemerynne.media")
@@ -42,8 +42,11 @@ SECTION_TYPES = {"music": {"audio"}, "movies": {"video"}, "pictures": {"image", 
 HWACCELS = ("auto", "vaapi", "nvenc", "software")
 DEFAULT_RADIO_DIRECTORY = "https://sadgirlsclub.wtf/rr/healthz"
 # folder: the top-level folder on the share that is the Media library (Settings → Media → Media folder).
+# media_group: who may use Media at all; screens_group: who may pair screens and cast to them (group_refs
+# values, AD or Entra groups). Empty: nobody (may_use, screens.may_use).
 DEFAULTS = {"folder": LIBRARY_NAME, "hwaccel": "auto", "max_transcodes": 2, "online_metadata": False,
-            "radio_directory_url": DEFAULT_RADIO_DIRECTORY}
+            "radio_directory_url": DEFAULT_RADIO_DIRECTORY, "media_group": "", "screens_group": ""}
+GROUP_SETTINGS = ("media_group", "screens_group")
 
 
 class MediaError(ValueError):
@@ -71,6 +74,12 @@ def enabled(conn: sqlite3.Connection) -> bool:
 
 def set_enabled(conn: sqlite3.Connection, on: bool) -> None:
     conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (ENABLED_KEY, "1" if on else "0"))
+
+
+def may_use(conn: sqlite3.Connection, user, directory) -> bool:
+    """In the Media group (Settings → Media → Who may use Media)? No group set: nobody. Checked live, so
+    leaving the group closes Media (and that person's screens) at once."""
+    return user is not None and group_refs.in_any(conn, user, directory, load_settings(conn)["media_group"])
 
 
 # ---------------------------------------------------------------- settings

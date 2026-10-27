@@ -56,7 +56,8 @@ _OAUTH_API = {"/oauth/token", "/oauth/register", "/oauth/revoke"}
 def _safe_return(after: str) -> bool:
     """A place sign-in may send someone back to: Claude's consent page, or a remote app they opened;
     never another site (open redirect) or anything with a scheme, a backslash or control characters."""
-    if not (after.startswith("/oauth/authorize?") or after.startswith(f"{remote.PREFIX}/")):
+    if not (after.startswith("/oauth/authorize?") or after.startswith(f"{remote.PREFIX}/")
+            or after.startswith("/media/share?")):
         return False
     parts = urlsplit(after)
     return not (after.startswith("//") or "\\" in after or parts.scheme or parts.netloc
@@ -231,7 +232,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             admin = is_admin(request, conn, user)
             unread_rooms = rooms_mod.unread_summary(conn, user, app.state.directory)
             return {"nav_unread": messages_mod.unread_count(conn, user_id) + unread_rooms["mentions"] + unread_rooms["dms"],
-                    "has_rooms": rooms_mod.enabled(conn), "has_media": media_mod.enabled(conn),
+                    "has_rooms": rooms_mod.enabled(conn), "has_media": media_mod.enabled(conn) and media_mod.may_use(conn, user, app.state.directory),
                     "message_max_chars": messages_mod.MAX_CHARS,
                     "has_remote": bool(remote.apps_for(conn, user, app.state.directory, admin))}
         except sqlite3.Error:
@@ -273,6 +274,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(room_pages.admin_router)
     app.include_router(media_pages.router)
     app.include_router(media_pages.admin_router)
+    app.include_router(media_pages.share_router)
     app.include_router(admin_notices.router)
     app.include_router(remote_pages.router)
     app.include_router(admin_remote.router)
@@ -287,6 +289,23 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     @app.exception_handler(LoginRequired)
     async def _redirect_to_login(request: Request, exc: LoginRequired):
         return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    @app.get("/manifest.webmanifest", include_in_schema=False)
+    def manifest():
+        """Makes Erynne installable (Add to Home screen), and on Android a target in the Share menu:
+        a YouTube link shared to it opens Media → Screens to play on the TV (web/media.py share_link).
+        Public: browsers fetch it without the session cookie."""
+        icons = [{"src": static(f"icons/{name}"), "sizes": size, "type": "image/png", "purpose": purpose}
+                 for name, size, purpose in (("icon-192.png", "192x192", "any"), ("icon-512.png", "512x512", "any"),
+                                             ("maskable-512.png", "512x512", "maskable"))]
+        return JSONResponse({
+            "id": "/", "name": ASSISTANT_NAME, "short_name": ASSISTANT_NAME, "start_url": "/", "scope": "/",
+            "display": "standalone", "background_color": "#07020d", "theme_color": "#12031f", "icons": icons,
+            "shortcuts": [{"name": "Media", "url": "/media"}, {"name": "Screens", "url": "/media#screens"},
+                          {"name": "Files", "url": "/files"}],
+            "share_target": {"action": "/media/share", "method": "GET",
+                             "params": {"title": "title", "text": "text", "url": "url"}},
+        }, media_type="application/manifest+json", headers={"Cache-Control": "no-cache"})
 
     @app.get("/healthz")
     def healthz(conn: sqlite3.Connection = Depends(get_db)):

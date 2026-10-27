@@ -1548,11 +1548,23 @@
     tmdb.autocomplete = "off";
     const radio = agentInput("url", s.radio_directory_url);
     radio.placeholder = "https://sadgirlsclub.wtf/rr/healthz";
+    const mediaGroup = agentInput("text", s.media_group);
+    mediaGroup.setAttribute("list", "domain-groups");
+    mediaGroup.placeholder = "Nobody: Media is hidden";
+    const screensGroup = agentInput("text", s.screens_group);
+    screensGroup.setAttribute("list", "domain-groups");
+    screensGroup.placeholder = "Nobody: screens are off";
     agentField(grid, "Transcoding", hw).title = "For films the browser can't play as they are";
     agentField(grid, "Transcodes at once", slots).title = "0 turns transcoding off; copying into HLS (remux) doesn't count";
     agentField(grid, "Look up artwork online", online).title = "TMDB for films, MusicBrainz and the Cover Art Archive for albums";
     agentField(grid, "TMDB key", tmdb).title = "themoviedb.org → Settings → API; only film titles and years are sent";
     agentField(grid, "Radio station list", radio).title = "SGCRelay's /healthz; empty for none";
+    agentField(grid, "Who may use Media", mediaGroup).title =
+      "AD or Entra group(s), separated by ;. Only members see the Media tab; within it, the share's folder " +
+      "permissions still decide which files. Empty: nobody. Leaving the group closes it at once.";
+    agentField(grid, "Who may use screens", screensGroup).title =
+      "AD or Entra group(s), separated by ;. Members may pair a TV as a screen and cast to it from their phone. " +
+      "Empty: nobody. Leaving the group stops their screens at once.";
     form.appendChild(grid);
     const actions = el("div", "ax-new");
     const saveOpts = el("button", "small", "Save");
@@ -1569,7 +1581,8 @@
     form.addEventListener("submit", function (e) {
       e.preventDefault();
       const body = { hwaccel: hw.value, max_transcodes: Number(slots.value), online_metadata: online.checked,
-                     radio_directory_url: radio.value.trim() };
+                     radio_directory_url: radio.value.trim(), media_group: mediaGroup.value.trim(),
+                     screens_group: screensGroup.value.trim() };
       if (tmdb.value.trim()) body.tmdb_key = tmdb.value.trim();
       save(body);
     });

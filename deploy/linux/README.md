@@ -893,6 +893,8 @@ Exec=firefox --kiosk %s/media/screen
 ' "$HOST"       > ~/.config/autostart/erynne-screen.desktop
   ```
 
+  Phones install Erynne as an app (Chrome: ⋮ → Install app; it needs the HTTPS address)
+  and then get **Share → Erynne** in YouTube, which opens Screens with the link filled in.
   `about:policies` in Firefox shows the policy took. Kiosk mode leaves with Alt+F4. The
   screen keeps its key (a cookie) for 400 days from the last time it connected, so it
   needs no sign-in once paired.
