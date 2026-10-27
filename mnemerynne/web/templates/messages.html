@@ -2,46 +2,13 @@
 {% block title %}Messages · {{ assistant_name }}{% endblock %}
 {% block body %}
 {% include "_nav.html" %}
-<main class="inbox messages-page">
+<main class="messages-page">
   <h1>Messages</h1>
   <p class="muted">Short notes between people here, and what {{ assistant_name }} tells you: a proposal an admin
     decided, a comment on one of your files, a change to your account. Notes can also come from a colleague's
-    Claude, or be left for someone by asking {{ assistant_name }}.</p>
-
-  <section aria-labelledby="announcements-title">
-    <h2 class="admin-section" id="announcements-title">Announcements</h2>
-    <div id="announcements" aria-live="polite"><p class="muted small">Loading…</p></div>
-  </section>
-
-  <section aria-labelledby="compose-title">
-    <h2 class="admin-section" id="compose-title">Leave a note</h2>
-    <form class="settings-form" id="compose" autocomplete="off">
-      <label for="note-to" class="small">To</label>
-      <input type="text" id="note-to" list="people" placeholder="username" maxlength="64" required>
-      <datalist id="people"></datalist>
-      <label for="note-text" class="small">Note</label>
-      <textarea id="note-text" rows="3" maxlength="{{ max_chars }}" required></textarea>
-      <label for="note-link" class="small">Link (optional)</label>
-      <input type="text" id="note-link" placeholder="/files/12/view, /wiki/40, /proposals#p7" maxlength="500">
-      <span></span>
-      <div><button type="submit">Send</button></div>
-    </form>
-    <p id="compose-note" aria-live="polite" hidden></p>
-  </section>
-
-  <section aria-labelledby="inbox-title">
-    <div class="ax-bar">
-      <h2 class="admin-section" id="inbox-title">Inbox</h2>
-      <button type="button" class="link small" id="read-all">Mark all read</button>
-    </div>
-    <div id="inbox" aria-live="polite"><p class="muted small">Loading…</p></div>
-  </section>
-
-  <section aria-labelledby="sent-title">
-    <h2 class="admin-section" id="sent-title">Sent</h2>
-    <div id="sent"><p class="muted small">Loading…</p></div>
-  </section>
+    Claude, or be left for someone by asking {{ assistant_name }}.{% if has_rooms %} For a conversation, open a
+    direct message in <a href="/rooms">Rooms</a>.{% endif %}</p>
+  <div id="messages-host"></div>
 </main>
-<script src="{{ static('picker.js') }}"></script>
-<script src="{{ static('messages.js') }}"></script>
+<script>window.ErynneMessages.mount(document.getElementById("messages-host"), { maxChars: {{ max_chars }} });</script>
 {% endblock %}

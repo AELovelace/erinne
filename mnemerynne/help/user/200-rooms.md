@@ -40,4 +40,4 @@ Write **@Erynne** and a question, and she answers in a thread under it, citing h
 
 With Claude connected, Claude can read your rooms (`list_rooms`, `read_room`), write in them (`post_to_room`, shown as "Claude for you") and react, if its connection may edit. Everyone in the room sees what it posts.
 
-Rooms are separate from **Messages**, which keeps short notes and what Erynne tells you about your account and proposals. Room messages are kept for a year.
+The **Inbox** entry at the top of the sidebar is not a room: it holds short notes and what Erynne tells you about your account and proposals ([Messages and announcements](messages-and-announcements.md)); the envelope button at the top right opens it. Room messages are kept for a year.

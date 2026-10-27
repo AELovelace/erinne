@@ -84,7 +84,7 @@ Also in the database (Access → Settings): the **admin group** (default `Domain
 | `VERSION_DAYS`, `VERSION_KEEP` | 30, 20 | How long earlier versions are kept, and how many per file. |
 | `PROPOSAL_DAYS` | 7 | A proposal nobody applies, dismisses or withdraws within this many days expires. |
 | `PROPOSAL_BATCH_MAX` | 25 | API actions one `propose_batch` call may hold. |
-| `MESSAGE_DAYS` | 365 | Notes and system messages on the Messages tab are deleted after this. |
+| `MESSAGE_DAYS` | 365 | Notes and system messages in people's inboxes are deleted after this. |
 | `ANNOUNCEMENT_DAYS` | 90 | Expired announcements are deleted this long after their expiry. |
 
 ## Backups and retention

@@ -12,7 +12,7 @@ The product behind her is called **Mnemerynne**. You will see that name on the s
 | **Files** | Your own File box and the libraries shared with you: upload, organise, preview, restore earlier versions. See [The Files tab](files.md). |
 | **Wiki** | Your organisation's wiki: pages anyone with access can read, and people with write access can edit in the browser. See [The organisation wiki](wiki.md). |
 | **Remote** | Web pages on the organisation's own network, opened through Erynne in a small browser window. Only shown when an admin listed one for you. See [The Remote tab](remote.md). |
-| **Messages** | Notes from colleagues, what Erynne tells you (a proposal decided, a comment on your file) and announcements. See [Messages and announcements](messages-and-announcements.md). |
+| **✉ (top right)** | Notes from colleagues, what Erynne tells you (a proposal decided, a comment on your file) and announcements; with Rooms on, the Inbox in Rooms. See [Messages and announcements](messages-and-announcements.md). |
 | **Preferences** | Your account, theme, password, signed-in browsers, memories, Microsoft 365 and Claude. See [Preferences](preferences.md). |
 | **Access** | Only admins see this: libraries, people, groups and server settings. |
 

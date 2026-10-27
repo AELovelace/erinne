@@ -1,10 +1,14 @@
 # Messages and announcements
 
-The **Messages** tab is where Erynne tells you things and where colleagues leave you notes. A badge on the tab shows how many are unread; it updates by itself while you use Erynne.
+The envelope button at the top right is where Erynne tells you things and where colleagues leave you notes. The badge on it shows how many are waiting (unread notes, and where [Rooms](rooms.md) is on, mentions and unread direct messages too); it updates by itself while you use Erynne.
+
+Press the button and it grows into a full-screen panel: on the left you leave a note and see what you sent, on the right your inbox (announcements first, then notes). Escape, the ✕ or a click outside closes it. Where Rooms is on, the button opens the **Inbox** entry at the top of the Rooms sidebar instead, with the same two columns in the main pane; for a conversation, open a direct message there.
+
+The same two columns are at `/messages`, which is where a link to a particular note lands.
 
 ## Notes between people
 
-Leave a short note for a colleague by their username: pick the name, write the note (plain text, up to 2,000 characters), optionally add a link to a page in Erynne (a file, a wiki page, a proposal) and press **Send**. They see it on their Messages tab with your name; a note that Claude or Erynne sent on your behalf says so ("Claude for alice").
+Leave a short note for a colleague by their username: pick the name, write the note (plain text, up to 2,000 characters), optionally add a link to a page in Erynne (a file, a wiki page, a proposal) and press **Send**. They see it in their inbox with your name; a note that Claude or Erynne sent on your behalf says so ("Claude for alice").
 
 Notes aren't email: they stay inside Erynne, carry no attachments, and only go to people who can sign in here. Clicking a note marks it read; **Mark all read** clears the badge. Notes are kept for a year.
 
@@ -20,7 +24,7 @@ Each has a link to the place it is about.
 
 ## Announcements
 
-An announcement is something an admin wants everyone, or a group, to see. It appears as a card at the top of every page until you press **Got it**. Some must be acknowledged: the card stays until you press **I acknowledge**, and admins can see who has. The Messages tab lists every announcement meant for you, including ones you already dismissed, with a link where there is one.
+An announcement is something an admin wants everyone, or a group, to see. It appears as a card at the top of every page until you press **Got it**. Some must be acknowledged: the card stays until you press **I acknowledge**, and admins can see who has. The inbox lists every announcement meant for you, including ones you already dismissed, with a link where there is one.
 
 ## Through Claude and Erynne
 

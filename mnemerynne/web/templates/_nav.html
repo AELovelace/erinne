@@ -5,13 +5,27 @@
     <a href="/files" {% if active == 'files' %}aria-current="page"{% endif %}>Files</a>
     <a href="/wiki" {% if active == 'wiki' %}aria-current="page"{% endif %}>Wiki</a>
     {% if has_remote %}<a href="/remote" {% if active == 'remote' %}aria-current="page"{% endif %}>Remote</a>{% endif %}
-    {% if has_rooms %}<a href="/rooms" {% if active == 'rooms' %}aria-current="page"{% endif %}>Rooms<span class="badge unread" id="nav-rooms" {% if not nav_rooms %}hidden{% endif %}>{{ nav_rooms or '' }}</span></a>{% endif %}
-    <a href="/messages" {% if active == 'messages' %}aria-current="page"{% endif %}>Messages<span class="badge unread" id="nav-unread" {% if not nav_unread %}hidden{% endif %}>{{ nav_unread or '' }}</span></a>
+    {% if has_rooms %}<a href="/rooms" {% if active == 'rooms' %}aria-current="page"{% endif %}>Rooms</a>{% endif %}
     <a href="/preferences" {% if active == 'preferences' %}aria-current="page"{% endif %}>Preferences</a>
     {% if is_admin %}<a href="/admin/libraries" {% if active == 'admin' %}aria-current="page"{% endif %}>Access</a>{% endif %}
   </nav>
   <span class="muted push-right">{{ user.username }}{% if is_admin %} · admin{% endif %}</span>
+  {%- if has_rooms %}
+  <a class="notify-button" id="notify-button" href="/rooms#inbox" title="Messages">✉<span class="badge unread" id="nav-unread" {% if not nav_unread %}hidden{% endif %}>{{ nav_unread or '' }}</span></a>
+  {%- else %}
+  <button type="button" class="notify-button" id="notify-button" aria-haspopup="dialog" aria-controls="msg-modal" title="Messages">✉<span class="badge unread" id="nav-unread" {% if not nav_unread %}hidden{% endif %}>{{ nav_unread or '' }}</span></button>
+  {%- endif %}
   <a class="help-link" href="/help" target="_blank" rel="noopener">Help</a>
   <form method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
 </header>
 <div class="notices" id="notices" aria-live="polite" hidden></div>
+{%- if not has_rooms %}
+<dialog class="msg-modal" id="msg-modal" aria-label="Messages" data-max="{{ message_max_chars }}">
+  <div class="msg-modal-head">
+    <strong>Messages</strong>
+    <span class="muted small">Notes between people here, and what {{ assistant_name }} tells you.</span>
+    <button type="button" class="link push-right" id="msg-close" title="Close">✕</button>
+  </div>
+  <div class="msg-host"></div>
+</dialog>
+{%- endif %}

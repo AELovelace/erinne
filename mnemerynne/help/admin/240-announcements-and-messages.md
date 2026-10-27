@@ -9,11 +9,11 @@
 - **Until**: an expiry date; the card stops showing at once when it passes, and the announcement is deleted `MNEMERYNNE_ANNOUNCEMENT_DAYS` (90) later. Without a date it stays until removed.
 - **People must acknowledge it**: the card has no *Got it*, only *I acknowledge*, and stays until pressed. The list shows how many saw and acknowledged each announcement.
 
-The Messages tab lists every announcement meant for a person, dismissed or not. Posting, changing and removing are in Recent changes (`announcement.*`).
+A person's inbox (the envelope button at the top right; with Rooms on, the Inbox entry in Rooms) lists every announcement meant for them, dismissed or not. Posting, changing and removing are in Recent changes (`announcement.*`).
 
 ## Messages
 
-People leave each other short notes on the Messages tab (by username; every signed-in person can see the list of usernames), and Mnemerynne sends **system messages** on its own:
+People leave each other short notes from the envelope button at the top right (by username; every signed-in person can see the list of usernames). Without Rooms the button grows into a full-screen panel, send on the left and inbox on the right; with Rooms on it opens the Inbox entry in Rooms, with the same layout, and notes sit beside direct messages rather than replacing them. Mnemerynne sends **system messages** on its own:
 
 | When | To whom |
 |---|---|
@@ -29,4 +29,4 @@ Two tools, for the connector and for Erynne in chat: `list_messages` (the person
 
 ## The badge
 
-Every signed-in page loads `notify.js`, which asks `/api/notify` on load, once a minute and when the tab comes back, and shows the unread count on the Messages tab and the pending announcement cards. The help pages' strict Content-Security-Policy allows that one request (`connect-src 'self'`).
+Every signed-in page loads `notify.js`, which asks `/api/notify` on load, once a minute and when the tab comes back, and shows the count on the envelope button (unread notes, plus mentions and unread DMs where Rooms is on) and the pending announcement cards. The help pages' strict Content-Security-Policy allows that one request (`connect-src 'self'`).

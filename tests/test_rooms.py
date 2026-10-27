@@ -178,13 +178,18 @@ def test_the_web_api(settings, conn, people, directory):
         c.post(f"/api/rooms/{dm['id']}/messages", json={"text": "Lunch?"})
         listed = c.get("/api/rooms").json()
         assert [r["name"] for r in listed["rooms"]] == ["front-office", "bob"] and listed["me"] == "alice"
+        assert listed["notes"] == 0                                           # the Inbox entry's badge
         assert c.post("/api/rooms", json={"name": "bad name!"}).status_code == 400
         for _ in range(40):
             last = c.post(f"/api/rooms/{made['id']}/messages", json={"text": "spam"})
         assert last.status_code == 429
     with _web(settings, "bob", directory) as c:
         assert c.get("/api/notify").json()["rooms"]["dms"] == 1
-        assert ">1<" in c.get("/rooms").text.replace(" ", "")          # nav badge
+        page = c.get("/rooms").text
+        assert ">1<" in page.replace(" ", "")                                 # the badge on the Messages button
+        # With Rooms on, messages live in Rooms: the button links to the Inbox there, no fullscreen panel.
+        assert 'id="notify-button" href="/rooms#inbox"' in page and 'id="msg-modal"' not in page
+        assert 'id="rooms-inbox"' in page and 'id="rooms-inbox-link"' in page
         assert c.get(f"/api/rooms/{dm['id']}/messages").json()["messages"][0]["body"] == "Lunch?"
         assert c.get("/api/rooms/9999").status_code == 404
     with _web(settings, "carol", directory) as c:

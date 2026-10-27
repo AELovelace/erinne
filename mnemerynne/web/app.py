@@ -213,7 +213,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
 
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
     def _nav_context(request: Request) -> dict:
-        """What every page's top bar needs beyond its own context: the unread badge."""
+        """What every page's top bar needs beyond its own context: the badge on the Messages button
+        (unread notes, and with Rooms on, mentions and unread DMs), whether Rooms and Remote are there."""
         user_id = request.scope.get("session", {}).get("user_id") if "session" in request.scope else None
         if not user_id:
             return {}
@@ -224,9 +225,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                 return {}
             admin = is_admin(request, conn, user)
             unread_rooms = rooms_mod.unread_summary(conn, user, app.state.directory)
-            return {"nav_unread": messages_mod.unread_count(conn, user_id),
-                    "has_rooms": rooms_mod.enabled(conn),
-                    "nav_rooms": unread_rooms["mentions"] + unread_rooms["dms"],
+            return {"nav_unread": messages_mod.unread_count(conn, user_id) + unread_rooms["mentions"] + unread_rooms["dms"],
+                    "has_rooms": rooms_mod.enabled(conn), "message_max_chars": messages_mod.MAX_CHARS,
                     "has_remote": bool(remote.apps_for(conn, user, app.state.directory, admin))}
         except sqlite3.Error:
             return {}

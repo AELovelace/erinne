@@ -14,7 +14,7 @@
   const state = {
     me: "", rooms: new Map(), current: null, members: [], messages: new Map(), oldest: null, more: true,
     presence: {}, cursor: 0, es: null, retry: 1000, typing: new Map(), threadRoot: null, pane: null,
-    attached: [], lastTypingSent: 0,
+    attached: [], lastTypingSent: 0, inbox: false, inboxMounted: null,
   };
 
   // ------------------------------------------------------------- helpers
@@ -48,6 +48,7 @@
   function renderSidebar() {
     const channels = $("rooms-channels"), dms = $("rooms-dms");
     channels.replaceChildren(); dms.replaceChildren();
+    $("rooms-inbox-link").classList.toggle("current", state.inbox);
     state.rooms.forEach(function (r) {
       const li = el("li");
       const a = el("a", "rooms-item" + (r.id === state.current ? " current" : "") + (r.unread ? " unread" : ""));
@@ -74,9 +75,48 @@
     state.me = data.me;
     state.presence = data.presence || {};
     state.rooms = new Map(data.rooms.map(function (r) { return [r.id, r]; }));
+    setInboxBadge(data.notes || 0);
     renderSidebar();
     return data;
   }
+
+  // ------------------------------------------------------------- the inbox
+  // Notes between people and what Erynne tells you (messages.js), shown in the main pane as if
+  // it were a room; the badge is kept from notify.js's poll.
+  function setInboxBadge(n) {
+    const b = $("rooms-inbox-badge");
+    b.textContent = n ? String(n) : "";
+    b.hidden = !n;
+  }
+  document.addEventListener("erynne:notify", function (e) { setInboxBadge((e.detail && e.detail.unread) || 0); });
+
+  function openInbox() {
+    state.current = null;
+    state.inbox = true;
+    history.replaceState(null, "", "#inbox");
+    $("room-name").textContent = "Inbox";
+    $("room-topic").textContent = "Notes from colleagues, and what Erynne tells you";
+    $("room-actions").hidden = true;
+    $("rooms-compose").hidden = true;
+    $("rooms-log").hidden = true;
+    $("rooms-typing").hidden = true;
+    document.body.classList.remove("rooms-drawer");
+    const host = $("rooms-inbox");
+    host.hidden = false;
+    if (window.ErynneMessages) {
+      if (!state.inboxMounted) {
+        state.inboxMounted = window.ErynneMessages.mount(host, {
+          maxChars: Number($("rooms").dataset.notesMax) || 0,
+          hint: "For a conversation, open a direct message on the left; notes are for a quick word, and what Claude or Erynne leaves on your behalf.",
+        });
+      } else {
+        state.inboxMounted.refresh();
+      }
+    }
+    closePane();
+    renderSidebar();
+  }
+  $("rooms-inbox-link").addEventListener("click", function (e) { e.preventDefault(); openInbox(); });
 
   let reloadTimer = null;
   function reloadRoomsSoon() {
@@ -257,8 +297,12 @@
     const r = Object.assign(state.rooms.get(id) || {}, info.room);
     state.rooms.set(id, r);
     state.current = id;
+    state.inbox = false;
     state.members = info.members;
     history.replaceState(null, "", "#room=" + id);
+    $("rooms-inbox").hidden = true;
+    $("rooms-log").hidden = false;
+    $("rooms-typing").hidden = false;
     $("room-name").textContent = roomLabel(r) + (r.archived ? " (archived)" : "");
     $("room-topic").textContent = r.topic || (r.kind === "channel" && r.visibility === "group" ? "Group: " + r.group : "");
     $("room-actions").hidden = false;
@@ -681,7 +725,14 @@
     state.cursor = data.cursor;
     connect();
     const wanted = Number((/room=(\d+)/.exec(location.hash) || [])[1]);
-    if (wanted) openRoom(wanted);
+    if (location.hash === "#inbox") openInbox();
+    else if (wanted) openRoom(wanted);
     else if (data.rooms.length) openRoom(data.rooms[0].id);
   })();
+
+  window.addEventListener("hashchange", function () {   // the top-right button links here as /rooms#inbox
+    if (location.hash === "#inbox") { if (!state.inbox) openInbox(); return; }
+    const id = Number((/room=(\d+)/.exec(location.hash) || [])[1]);
+    if (id && id !== state.current) openRoom(id);
+  });
 })();

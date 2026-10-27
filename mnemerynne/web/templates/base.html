@@ -11,6 +11,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌸</text></svg>">
   <link rel="stylesheet" href="{{ static('erynne.css') }}">
   <link rel="stylesheet" href="{{ static('theme-neon.css') }}">
+  {% if user is defined and user %}<script src="{{ static('messages.js') }}"></script>{% endif %}
 </head>
 <body>
   <div class="parallax" aria-hidden="true"></div>

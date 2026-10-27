@@ -1,6 +1,8 @@
-/* On every signed-in page: the unread badge in the top bar and the announcement cards under it.
-   Polls /api/notify on load, every minute and when the tab comes back. An announcement's body is
-   the server's rendered Markdown (raw HTML escaped there); everything else is textContent. */
+/* On every signed-in page: the badge on the Messages button in the top bar (unread notes, plus
+   mentions and unread DMs where Rooms is on) and the announcement cards under it. Polls
+   /api/notify on load, every minute and when the tab comes back, and tells the page what it got
+   (the erynne:notify event; the Rooms page keeps its Inbox badge from it). An announcement's body
+   is the server's rendered Markdown (raw HTML escaped there); everything else is textContent. */
 (function () {
   "use strict";
 
@@ -68,13 +70,9 @@
       if (r.status === 401) { clearInterval(timer); return; }   // signed out meanwhile
       if (!r.ok) return;
       const data = await r.json();
-      setBadge(data.unread || 0);
-      const rooms = document.getElementById("nav-rooms");   // Rooms: unread mentions and DMs
-      if (rooms) {
-        const n = (data.rooms && (data.rooms.mentions + data.rooms.dms)) || 0;
-        rooms.textContent = n ? String(n) : "";
-        rooms.hidden = !n;
-      }
+      const inRooms = (data.rooms && (data.rooms.mentions + data.rooms.dms)) || 0;
+      setBadge((data.unread || 0) + inRooms);
+      document.dispatchEvent(new CustomEvent("erynne:notify", { detail: data }));
       if (!host) return;
       const pending = data.announcements || [];
       const ids = new Set(pending.map(function (a) { return a.id; }));

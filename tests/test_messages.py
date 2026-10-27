@@ -60,6 +60,11 @@ def test_a_note_between_people_and_the_badge(conn, settings, people):
         assert rob.get("/api/notify").json()["unread"] == 0
         page = rob.get("/messages")
         assert page.status_code == 200 and "messages.js" in page.text and "notify.js" in page.text
+        assert 'id="messages-host"' in page.text
+        # Without Rooms, the top-right button opens the fullscreen panel on every page.
+        home = rob.get("/").text
+        assert '<button type="button" class="notify-button" id="notify-button"' in home and 'id="msg-modal"' in home
+        assert 'href="/messages"' not in home
     with TestClient(create_app(settings, Services(llm=None, embedder=FakeEmbedder()))) as anon:
         assert anon.get("/api/people").status_code == 401
         assert anon.get("/api/notify").status_code == 401

@@ -2,12 +2,13 @@
 {% block title %}Rooms · {{ assistant_name }}{% endblock %}
 {% block body %}
 {% include "_nav.html" %}
-<main class="rooms" id="rooms" data-max="{{ max_chars }}">
+<main class="rooms" id="rooms" data-max="{{ max_chars }}" data-notes-max="{{ message_max_chars }}">
   <aside class="rooms-side" id="rooms-side" aria-label="Rooms">
     <div class="rooms-side-head">
       <strong>Rooms</strong>
       <button type="button" class="link small" id="rooms-new" title="New channel or message">＋</button>
     </div>
+    <a class="rooms-item rooms-inbox-link" id="rooms-inbox-link" href="#inbox"><span class="rooms-icon">✉</span><span class="rooms-name">Inbox</span><span class="badge unread" id="rooms-inbox-badge" hidden></span></a>
     <h2 class="rooms-group">Channels</h2>
     <ul class="rooms-list" id="rooms-channels"></ul>
     <button type="button" class="link small" id="rooms-browse">Browse channels</button>
@@ -28,6 +29,7 @@
     <div class="rooms-log" id="rooms-log" tabindex="0">
       <p class="muted rooms-empty">Pick a channel or a person on the left, or start one with ＋.</p>
     </div>
+    <div class="rooms-inbox" id="rooms-inbox" hidden></div>
     <div class="rooms-typing small muted" id="rooms-typing" aria-live="polite"></div>
     <form class="rooms-compose" id="rooms-compose" hidden autocomplete="off">
       <div class="rooms-attached" id="rooms-attached"></div>

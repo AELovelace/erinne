@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import rooms
+from mnemerynne import messages as user_messages, rooms
 from mnemerynne.db import transaction
 from mnemerynne.web import security
 from mnemerynne.web.admin import _log
@@ -70,9 +70,10 @@ def rooms_page(request: Request, user=Depends(page_user), conn: sqlite3.Connecti
 # -------------------------------------------------------------------- rooms
 @router.get("/api/rooms")
 def list_rooms(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
-    """The sidebar, who's online, and the event id to start the stream from."""
+    """The sidebar (with the Inbox's unread notes), who's online, and the event id to start the stream from."""
     bus = _bus(request)
     return {"rooms": rooms.rooms_for(conn, user, _dir(request)), "presence": bus.presence(),
+            "notes": user_messages.unread_count(conn, user["id"]),
             "cursor": conn.execute("SELECT coalesce(max(id), 0) FROM chat_events").fetchone()[0],
             "me": user["username"]}
 
