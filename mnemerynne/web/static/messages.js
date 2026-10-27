@@ -244,7 +244,7 @@
       const host = modal.querySelector(".msg-host");
       if (!mounted) mounted = mount(host, { maxChars: Number(modal.dataset.max) || 0 });
       else mounted.refresh();
-      mounted.focus();
+      if (!window.matchMedia("(pointer: coarse)").matches) mounted.focus();   // not the keyboard, on a phone
     }
     button.addEventListener("click", open);
     const close = modal.querySelector("#msg-close");

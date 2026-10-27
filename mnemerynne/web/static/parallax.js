@@ -17,6 +17,7 @@
   let seq = 0;                                // bumped by each show() and stop(); stale loads give up
   let timer = null;
   let running = false;
+  let current = 0;                            // the city on screen
 
   function urls(n) {
     const out = [];
@@ -50,6 +51,7 @@
     const mine = ++seq;
     await preload(urls(n));
     if (!running || mine !== seq) return;
+    current = n;
     const next = scene(n);
     root.appendChild(next);
     next.getBoundingClientRect();               // commit opacity 0 first, so the fade runs
@@ -77,6 +79,15 @@
   function sync() {
     if (document.documentElement.dataset.theme === "neon") start(); else stop();
   }
+
+  // While the tab is away (a phone's screen off, another app) the drift and the slideshow stop.
+  document.addEventListener("visibilitychange", function () {
+    root.classList.toggle("paused", document.hidden);
+    clearTimeout(timer);
+    if (!document.hidden && running && !still.matches) {
+      timer = setTimeout(function () { show((current + 1) % LAYERS.length); }, SHOW_MS);
+    }
+  });
 
   new MutationObserver(sync).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   still.addEventListener("change", function () { stop(); sync(); });

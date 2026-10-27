@@ -1,26 +1,31 @@
 {% extends "base.html" %}
 {% block title %}{{ page.title }} · Help · {{ assistant_name }}{% endblock %}
 {% block body %}
-<header class="topbar">
+<header class="topbar main-bar">
   <a class="brand" href="/"><span class="blossom" aria-hidden="true">🌸</span>{{ assistant_name }}</a>
-  <strong>Help</strong>
+  <strong class="nav-title">Help</strong>
   <nav class="tabs" aria-label="Help sections">
     {% for key, label, url in sections %}
     <a href="{{ url }}" {% if key == page.section %}aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
   </nav>
-  <span class="muted push-right">{{ user.username }}{% if is_admin %} · admin{% endif %}</span>
-  <a href="/">Back to {{ assistant_name }}</a>
+  <button type="button" class="nav-menu push-right" id="nav-menu" aria-haspopup="menu" aria-controls="nav-more" aria-expanded="false" title="Menu">☰</button>
+  <div class="nav-more" id="nav-more">
+    <span class="muted nav-who push-right">{{ user.username }}{% if is_admin %} · admin{% endif %}</span>
+    <a href="/">Back to {{ assistant_name }}</a>
+  </div>
 </header>
 <main class="ax-page help-page">
   <div class="ax">
-    <aside class="ax-tree glass" aria-label="{{ section_label }}">
-      <ul class="tree help-toc">
+    {#- The contents: a list beside the page on a desktop, a fold above it on a phone (nav.js). -#}
+    <details class="ax-side ax-tree glass" open>
+      <summary>Contents ▾</summary>
+      <ul class="tree help-toc" aria-label="{{ section_label }}">
         {% for p in pages %}
         <li><a href="{{ p.url }}" {% if p.slug == page.slug %}aria-current="page"{% endif %}>{{ p.title }}</a></li>
         {% endfor %}
       </ul>
-    </aside>
+    </details>
     <article class="ax-pane glass help-body">
       {{ content | safe }}
     </article>

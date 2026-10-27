@@ -3,7 +3,7 @@
 {% block body %}
 {% include "_nav.html" %}
 <main class="fm" id="fm" data-trash-days="{{ trash_days }}">
-  <aside class="fm-side glass" aria-label="Locations">
+  <aside class="fm-side glass" id="fm-side" aria-label="Locations">
     <ul class="tree" id="tree" role="tree"></ul>
   </aside>
 
@@ -16,22 +16,25 @@
           <button type="button" role="menuitem" data-act="upload-folder">Folder…</button>
         </div>
       </div>
-      <button type="button" class="tool" data-act="new-folder" data-mode="browse" data-needs="write">New folder</button>
-      <span class="sep" data-mode="browse search"></span>
-      <button type="button" class="tool" data-act="open" data-mode="browse search" data-needs="one">Open</button>
-      <button type="button" class="tool" data-act="edit" data-mode="browse search" data-needs="one editable"
+      <button type="button" class="tool fm-desk" data-act="new-folder" data-mode="browse" data-needs="write">New folder</button>
+      <span class="sep fm-desk" data-mode="browse search"></span>
+      <button type="button" class="tool fm-desk" data-act="open" data-mode="browse search" data-needs="one">Open</button>
+      <button type="button" class="tool fm-desk" data-act="edit" data-mode="browse search" data-needs="one editable"
               title="Edit a text or Markdown file in the browser">Edit</button>
-      <button type="button" class="tool" data-act="download" data-mode="browse search" data-needs="files">Download</button>
-      <button type="button" class="tool" data-act="rename" data-mode="browse search" data-needs="one write">Rename</button>
-      <button type="button" class="tool" data-act="move" data-mode="browse search" data-needs="some write">Move to…</button>
-      <button type="button" class="tool" data-act="copy" data-mode="browse search" data-needs="some">Copy to…</button>
-      <button type="button" class="tool danger" data-act="trash" data-mode="browse search" data-needs="some write">Delete</button>
-      <button type="button" class="tool" data-act="reembed" data-mode="browse" data-needs="reembed"
+      <button type="button" class="tool fm-desk" data-act="download" data-mode="browse search" data-needs="files">Download</button>
+      <button type="button" class="tool fm-desk" data-act="rename" data-mode="browse search" data-needs="one write">Rename</button>
+      <button type="button" class="tool fm-desk" data-act="move" data-mode="browse search" data-needs="some write">Move to…</button>
+      <button type="button" class="tool fm-desk" data-act="copy" data-mode="browse search" data-needs="some">Copy to…</button>
+      <button type="button" class="tool danger fm-desk" data-act="trash" data-mode="browse search" data-needs="some write">Delete</button>
+      <button type="button" class="tool fm-desk" data-act="reembed" data-mode="browse" data-needs="reembed"
               title="Read and embed the selected items again, or everything here when nothing is selected">Re-embed</button>
-      <button type="button" class="tool" data-act="properties" data-mode="browse search" data-needs="one">Properties</button>
-      <button type="button" class="tool" data-act="restore" data-mode="trash" data-needs="some">Restore</button>
-      <button type="button" class="tool danger" data-act="purge" data-mode="trash" data-needs="some">Delete forever</button>
-      <button type="button" class="tool danger" data-act="empty-bin" data-mode="trash">Empty bin</button>
+      <button type="button" class="tool fm-desk" data-act="properties" data-mode="browse search" data-needs="one">Properties</button>
+      <button type="button" class="tool fm-desk" data-act="restore" data-mode="trash" data-needs="some">Restore</button>
+      <button type="button" class="tool danger fm-desk" data-act="purge" data-mode="trash" data-needs="some">Delete forever</button>
+      <button type="button" class="tool danger fm-desk" data-act="empty-bin" data-mode="trash">Empty bin</button>
+      {#- Phones (erynne.css .fm-phone): Select turns taps into ticks; Actions opens the menu for what's ticked. -#}
+      <button type="button" class="tool fm-phone" id="btn-select" aria-pressed="false">Select</button>
+      <button type="button" class="tool fm-phone" id="btn-actions" aria-haspopup="menu">Actions ▾</button>
       <span class="grow"></span>
       <input type="search" id="fm-search" placeholder="Search file names" aria-label="Search file names" autocomplete="off">
       <select id="fm-sort" aria-label="Sort by">
@@ -47,7 +50,10 @@
       <button type="button" class="tool" id="btn-info" aria-pressed="false" title="Details">ⓘ</button>
     </div>
 
-    <nav class="crumbs" id="crumbs" aria-label="Path"></nav>
+    <div class="crumbs-row">
+      <button type="button" class="tool fm-tree-button" id="btn-tree" title="Locations" aria-controls="fm-side" aria-expanded="false">📁</button>
+      <nav class="crumbs" id="crumbs" aria-label="Path"></nav>
+    </div>
     <p class="fm-note muted" id="fm-note" hidden></p>
     <div class="fm-list list" id="list" tabindex="0" role="listbox" aria-multiselectable="true" aria-label="Items"></div>
     <p class="fm-empty muted" id="fm-empty" hidden></p>

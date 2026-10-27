@@ -54,10 +54,10 @@ _OAUTH_API = {"/oauth/token", "/oauth/register", "/oauth/revoke"}
 
 
 def _safe_return(after: str) -> bool:
-    """A place sign-in may send someone back to: Claude's consent page, or a remote app they opened;
-    never another site (open redirect) or anything with a scheme, a backslash or control characters."""
-    if not (after.startswith("/oauth/authorize?") or after.startswith(f"{remote.PREFIX}/")
-            or after.startswith("/media/share?")):
+    """A place sign-in may send someone back to: the page on this site they were opening (a link from
+    Claude, Claude's consent page, a remote app); never another site (open redirect), the sign-in pages
+    themselves, or anything with a scheme, a backslash or control characters."""
+    if not after.startswith("/") or urlsplit(after).path in ("/login", "/logout"):
         return False
     parts = urlsplit(after)
     return not (after.startswith("//") or "\\" in after or parts.scheme or parts.netloc
@@ -288,6 +288,9 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
 
     @app.exception_handler(LoginRequired)
     async def _redirect_to_login(request: Request, exc: LoginRequired):
+        # Back to this page after signing in: a link opened from Claude Desktop lands where it pointed.
+        if request.method == "GET":
+            request.session["after_login"] = request.url.path + (f"?{request.url.query}" if request.url.query else "")
         return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
 
     @app.get("/manifest.webmanifest", include_in_schema=False)

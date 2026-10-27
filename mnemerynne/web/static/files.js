@@ -5,7 +5,7 @@
 (function () {
   "use strict";
 
-  const { el, api } = window.Erynne;
+  const { el, api, coarse, drawer } = window.Erynne;
   const $ = function (id) { return document.getElementById(id); };
   const ITEMS_MIME = "application/x-erynne-items";
   const TRASH_DAYS = Number($("fm").dataset.trashDays || 30);
@@ -23,9 +23,10 @@
     items: [],                    // current view: [{type, id, name, ...}]
     selected: new Set(),          // "file:3", "folder:7"
     anchor: null,                 // index for shift-click ranges
+    selecting: false,             // touch screens: Select mode, where a tap ticks instead of opening
     view: load("fm.view", "list"),
     sort: load("fm.sort", "name"),
-    info: load("fm.info", "0") === "1",
+    info: !coarse && load("fm.info", "0") === "1",   // a phone's details sheet covers the list: never on its own
   };
 
   function load(key, fallback) {
@@ -478,7 +479,11 @@
     check.checked = sel;
     check.tabIndex = -1;
     check.setAttribute("aria-label", "Select " + item.name);
-    check.addEventListener("click", function (e) { e.stopPropagation(); toggleSelect(item, index); });
+    check.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (coarse && !state.selecting) { state.selecting = true; $("list").classList.add("selecting"); }   // a tick starts Select mode
+      toggleSelect(item, index);
+    });
 
     const name = el("span", "c-name");
     name.append(el("span", "ico", icon(item)), el("span", "nm", item.name));
@@ -510,15 +515,29 @@
         el("span", "c-date muted", dateLabel(item.updated_at || item.created_at)));
     }
 
-    row.addEventListener("click", function (e) { clickSelect(item, index, e); });
+    /* A mouse: click selects, double-click opens, right-click is the menu. A touch screen: a tap opens
+       (ticks, in Select mode), a long press is the menu; the context menu event is left alone, since
+       Android fires it for the same press and iPhones not at all. */
+    const selectForMenu = function () {
+      if (!state.selected.has(key(item))) { state.selected = new Set([key(item)]); state.anchor = index; paintSelection(); }
+    };
+    let pressed = false;   // a long press just opened the menu: swallow the tap that follows it
+    row.addEventListener("click", function (e) {
+      if (pressed) { pressed = false; e.stopPropagation(); return; }
+      if (state.selecting) { toggleSelect(item, index); return; }
+      if (coarse && state.mode !== "trash" && !e.ctrlKey && !e.metaKey && !e.shiftKey) { openItem(item); return; }
+      clickSelect(item, index, e);
+    });
     row.addEventListener("dblclick", function () { openItem(item); });
     row.addEventListener("contextmenu", function (e) {
       e.preventDefault();
-      if (!state.selected.has(key(item))) { state.selected = new Set([key(item)]); state.anchor = index; paintSelection(); }
+      if (coarse) return;
+      selectForMenu();
       showContextMenu(e.clientX, e.clientY);
     });
+    longPress(row, function (x, y) { pressed = true; selectForMenu(); showContextMenu(x, y); });
     if (state.mode !== "trash") {
-      row.draggable = true;
+      row.draggable = !coarse;   // a long press on a draggable row would start a drag on Android
       row.addEventListener("dragstart", function (e) {
         if (!state.selected.has(key(item))) { state.selected = new Set([key(item)]); paintSelection(); }
         const payload = selectedItems().map(function (i) {
@@ -532,6 +551,23 @@
       }
     }
     return row;
+  }
+
+  /* A long press on a touch screen (450 ms without moving): what a right-click does with a mouse. */
+  function longPress(node, fn) {
+    if (!coarse) return;
+    let timer = null, x0 = 0, y0 = 0;
+    const cancel = function () { clearTimeout(timer); timer = null; };
+    node.addEventListener("pointerdown", function (e) {
+      if (e.pointerType === "mouse") return;
+      x0 = e.clientX; y0 = e.clientY;
+      cancel();
+      timer = setTimeout(function () { timer = null; fn(x0, y0); }, 450);
+    });
+    node.addEventListener("pointermove", function (e) {
+      if (timer && (Math.abs(e.clientX - x0) > 10 || Math.abs(e.clientY - y0) > 10)) cancel();
+    });
+    ["pointerup", "pointercancel", "pointerleave"].forEach(function (ev) { node.addEventListener(ev, cancel); });
   }
 
   // -------------------------------------------------------------- selection
@@ -608,6 +644,9 @@
       b.setAttribute("aria-pressed", String(b.dataset.view === state.view));
     });
     $("btn-info").setAttribute("aria-pressed", String(state.info));
+    const sel = $("btn-select");
+    sel.setAttribute("aria-pressed", String(state.selecting));
+    sel.textContent = state.selecting ? (items.length ? items.length + " selected · Done" : "Done") : "Select";
   }
 
   // ---------------------------------------------------------------- actions
@@ -963,6 +1002,11 @@
     const items = selectedItems();
     const token = ++infoToken;
     pane.replaceChildren();
+    const close = el("button", "link info-close", "✕");   // the sheet's own way out, on a phone (erynne.css)
+    close.type = "button";
+    close.title = "Close";
+    close.addEventListener("click", function () { state.info = false; save("fm.info", "0"); updateToolbar(); renderInfo(); });
+    pane.appendChild(close);
     if (items.length !== 1) {
       pane.appendChild(el("p", "muted", items.length ? items.length + " items selected." : "Select a file to see its details and a preview."));
       return;
@@ -1432,6 +1476,27 @@
   $("btn-info").addEventListener("click", function () {
     state.info = !state.info; save("fm.info", state.info ? "1" : "0"); updateToolbar(); renderInfo();
   });
+  // Phones (erynne.css .fm-phone): Select mode, the Actions menu for what's ticked, and the locations drawer.
+  const treeDrawer = drawer($("fm-side"), { onClose: function () { $("btn-tree").setAttribute("aria-expanded", "false"); } });
+  $("btn-tree").addEventListener("click", function () {
+    treeDrawer.toggle();
+    this.setAttribute("aria-expanded", String(treeDrawer.isOpen()));
+  });
+  window.addEventListener("hashchange", function () { treeDrawer.close(); });
+  $("btn-select").addEventListener("click", function () {
+    state.selecting = !state.selecting;
+    if (!state.selecting) state.selected.clear();
+    $("list").classList.toggle("selecting", state.selecting);
+    paintSelection();
+  });
+  $("btn-actions").addEventListener("click", function (e) {
+    e.stopPropagation();   // the document's click handler would close the menu again
+    const r = this.getBoundingClientRect();
+    showContextMenu(r.left, r.bottom + 4);
+  });
+  if (!("webkitdirectory" in document.createElement("input"))) {   // iPhones can't pick a folder
+    document.querySelector('[data-act="upload-folder"]').hidden = true;
+  }
 
   let searchTimer = null;
   $("fm-search").addEventListener("input", function () {
@@ -1449,6 +1514,7 @@
   $("list").addEventListener("contextmenu", function (e) {
     if (e.target !== this) return;
     e.preventDefault();
+    if (coarse) return;   // the Actions button covers this on a phone
     state.selected.clear();
     paintSelection();
     showContextMenu(e.clientX, e.clientY);

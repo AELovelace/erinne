@@ -83,7 +83,9 @@
       body.appendChild(tr);
     });
     t.appendChild(body);
-    return t;
+    const wrap = el("div", "table-wrap");   // scrolls sideways on a narrow screen instead of widening the page
+    wrap.appendChild(t);
+    return wrap;
   }
 
   function principalOptions(select, skip) {
@@ -280,6 +282,10 @@
     }
     renderTree();
     renderPane();
+    if (!keepHash && window.Erynne.narrow.matches) {   // a phone: fold the tree and show the pane
+      $("ax-side").open = false;
+      $("ax-pane").scrollIntoView({ block: "start" });
+    }
   }
 
   function renderPane() {

@@ -167,6 +167,10 @@
     state.detail = d;
     renderList();
     renderDetail(d);
+    if (window.Erynne.narrow.matches) {   // a phone: fold the list and show the API
+      $("api-side").open = false;
+      $("api-pane").scrollIntoView({ block: "start" });
+    }
   }
 
   function patch(changes) {

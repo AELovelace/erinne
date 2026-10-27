@@ -5,7 +5,7 @@
 <html lang="en" data-theme="{{ theme }}">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="{{ 'dark' if theme == 'neon' else 'light dark' }}">
   <title>{% block title %}{{ assistant_name }}{% endblock %}</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌸</text></svg>">
@@ -21,6 +21,7 @@
   <div class="parallax" aria-hidden="true"></div>
   <div class="petals" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div>
   {% block body %}{% endblock %}
+  <script src="{{ static('nav.js') }}" defer></script>
   <script src="{{ static('parallax.js') }}" defer></script>
   {% if user is defined and user %}<script src="{{ static('notify.js') }}" defer></script>{% endif %}
 </body>

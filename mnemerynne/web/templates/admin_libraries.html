@@ -23,13 +23,14 @@
   <p class="error ax-error" id="admin-error" hidden></p>
 
   <section class="ax" data-panel="files" role="tabpanel" aria-label="Files and folders">
-    <aside class="ax-tree glass" aria-label="Libraries and folders">
+    <details class="ax-side ax-tree glass" id="ax-side" open>
+      <summary>Libraries and folders ▾</summary>
       <form class="ax-new" id="new-lib">
         <input type="text" id="new-lib-name" placeholder="New library" maxlength="120" required aria-label="New library name">
         <button type="submit" class="small">Create</button>
       </form>
       <ul class="tree" id="ax-tree" role="tree" aria-label="Libraries"></ul>
-    </aside>
+    </details>
     <section class="ax-pane glass" id="ax-pane" aria-live="polite">
       <p class="muted">Pick a library or folder on the left to see and change who can reach it.</p>
     </section>
@@ -95,7 +96,8 @@
   </dialog>
 
   <section class="ax" data-panel="apis" role="tabpanel" aria-label="Internal APIs" hidden>
-    <aside class="ax-tree glass" aria-label="APIs">
+    <details class="ax-side ax-tree glass" id="api-side" open>
+      <summary>APIs ▾</summary>
       <form class="ax-new" id="new-api">
         <select id="new-api-preset" aria-label="Start from"></select>
         <button type="submit" class="small">Add</button>
@@ -106,7 +108,7 @@
         <input type="file" id="api-template-file" accept=".json,application/json" hidden>
       </div>
       <ul class="tree" id="api-list"></ul>
-    </aside>
+    </details>
     <section class="ax-pane glass" id="api-pane" aria-live="polite">
       <p class="muted">Internal systems Erynne may query, read-only. Each API is open to one AD group; Claude only
         reaches the ones you switch on for it.</p>
@@ -115,7 +117,8 @@
   </section>
 
   <section class="ax" data-panel="remote" role="tabpanel" aria-label="Remote apps" hidden>
-    <aside class="ax-tree glass" aria-label="Remote apps">
+    <details class="ax-side ax-tree glass" id="remote-side" open>
+      <summary>Remote apps ▾</summary>
       <form class="ax-new ax-new-stack" id="new-remote" autocomplete="off">
         <input type="text" id="new-remote-slug" placeholder="slug, e.g. balancer" maxlength="40" pattern="[a-z0-9][a-z0-9-]{0,39}" required aria-label="Slug">
         <input type="text" id="new-remote-name" placeholder="Name" maxlength="80" required aria-label="Name">
@@ -123,7 +126,7 @@
         <button type="submit" class="small">Add</button>
       </form>
       <ul class="tree" id="remote-list-admin"></ul>
-    </aside>
+    </details>
     <section class="ax-pane glass" id="remote-pane" aria-live="polite">
       <p class="muted">LAN-only web apps people open through {{ assistant_name }}, on the Remote tab, behind its sign-in.</p>
     </section>

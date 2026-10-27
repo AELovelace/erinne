@@ -151,11 +151,16 @@
     $("wiki-head").hidden = false;
     const body = $("wiki-page");
     body.innerHTML = page.html;   // rendered by the server from the page's Markdown (HTML in it is escaped)
+    const pane = body.closest(".ax-pane");
+    if (push && window.Erynne.narrow.matches) {   // a phone: fold the page list and bring the page into view
+      $("wiki-side").open = false;
+      pane.scrollIntoView({ block: "start" });
+    }
     if (location.hash) {
       const target = body.querySelector(location.hash);
       if (target) target.scrollIntoView();
     } else {
-      body.closest(".ax-pane").scrollTop = 0;
+      pane.scrollTop = 0;
     }
     if (state.tree) renderTree();
   }

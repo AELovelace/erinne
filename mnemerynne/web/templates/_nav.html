@@ -1,6 +1,6 @@
-<header class="topbar">
+<header class="topbar main-bar">
   <a class="brand" href="/"><span class="blossom" aria-hidden="true">🌸</span>{{ assistant_name }}</a>
-  <nav class="tabs">
+  <nav class="tabs" aria-label="Pages">
     <a href="/" {% if active == 'chat' %}aria-current="page"{% endif %}>Ask</a>
     <a href="/files" {% if active == 'files' %}aria-current="page"{% endif %}>Files</a>
     <a href="/wiki" {% if active == 'wiki' %}aria-current="page"{% endif %}>Wiki</a>
@@ -10,14 +10,19 @@
     <a href="/preferences" {% if active == 'preferences' %}aria-current="page"{% endif %}>Preferences</a>
     {% if is_admin %}<a href="/admin/libraries" {% if active == 'admin' %}aria-current="page"{% endif %}>Access</a>{% endif %}
   </nav>
-  <span class="muted push-right">{{ user.username }}{% if is_admin %} · admin{% endif %}</span>
+  {#- On a phone the bar is one row (brand, ✉, ☰) with the tabs as a strip under it; what follows the tabs
+      here sits inline on a desktop and in the ☰ menu on a phone (nav.js, .nav-more). -#}
   {%- if has_rooms %}
   <a class="notify-button" id="notify-button" href="/rooms#inbox" title="Messages">✉<span class="badge unread" id="nav-unread" {% if not nav_unread %}hidden{% endif %}>{{ nav_unread or '' }}</span></a>
   {%- else %}
   <button type="button" class="notify-button" id="notify-button" aria-haspopup="dialog" aria-controls="msg-modal" title="Messages">✉<span class="badge unread" id="nav-unread" {% if not nav_unread %}hidden{% endif %}>{{ nav_unread or '' }}</span></button>
   {%- endif %}
-  <a class="help-link" href="/help" target="_blank" rel="noopener">Help</a>
-  <form method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
+  <button type="button" class="nav-menu" id="nav-menu" aria-haspopup="menu" aria-controls="nav-more" aria-expanded="false" title="Menu">☰</button>
+  <div class="nav-more" id="nav-more">
+    <span class="muted nav-who">{{ user.username }}{% if is_admin %} · admin{% endif %}</span>
+    <a class="help-link" href="/help" target="_blank" rel="noopener">Help</a>
+    <form method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
+  </div>
 </header>
 <div class="notices" id="notices" aria-live="polite" hidden></div>
 {%- if not has_rooms %}

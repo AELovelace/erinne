@@ -21,6 +21,15 @@
   --radius: 14px;
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Noto Serif", serif;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* What the top bar and the announcement cards take (nav.js measures it); the full-height pages
+     are the viewport minus this. dvh follows the phone's address bar; vh is the fallback. */
+  --chrome: 3.6rem;
+  --page-h: calc(100vh - var(--chrome));
+}
+@supports (height: 100dvh) {
+  :root { --page-h: calc(100dvh - var(--chrome)); }
+  body { min-height: 100dvh; }
+  .login { min-height: 100dvh; }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -105,6 +114,10 @@ label { display: block; margin: .9rem 0; font-size: .95rem; }
 .brand { font-family: var(--serif); font-size: 1.25rem; font-weight: 600; text-decoration: none; color: var(--ink); }
 .brand .blossom { display: inline-block; margin-right: .3rem; }
 .tabs { display: flex; gap: .35rem; }
+.topbar .notify-button { margin-left: auto; }
+.nav-menu { display: none; }
+.nav-more { display: contents; }   /* a desktop: inline in the bar; a phone: the ☰ menu (below) */
+.nav-more form { display: contents; }
 .tabs a {
   text-decoration: none; color: var(--muted); padding: .3rem .8rem; border-radius: 999px;
 }
@@ -123,7 +136,7 @@ label { display: block; margin: .9rem 0; font-size: .95rem; }
 
 /* ---------------------------------------------------------------- chat */
 .chat-layout { display: grid; grid-template-columns: 17rem 1fr; gap: 1rem; padding: 1rem;
-               height: calc(100vh - 3.6rem); }
+               height: var(--page-h); }
 .history { padding: 1rem; overflow-y: auto; }
 .history #new-chat { width: 100%; }
 /* Advanced settings: the tool panel on the right of the chat (chat.js). */
@@ -245,7 +258,7 @@ a.cite:hover { background: var(--petal); }
 /* ------------------------------------------------------- file manager */
 .fm {
   display: grid; grid-template-columns: 15.5rem minmax(0, 1fr) auto; gap: .9rem;
-  height: calc(100vh - 3.6rem); padding: .9rem;
+  height: var(--page-h); padding: .9rem;
 }
 .fm-side, .fm-main, .fm-info { min-height: 0; overflow: auto; }
 .fm-side { padding: .6rem .3rem; }
@@ -487,21 +500,31 @@ button.danger-fill { background: var(--error); }
 .msg .scope-chip { margin-bottom: .35rem; cursor: default; }
 @media (prefers-color-scheme: dark) { .scope-chip { background: rgba(240, 138, 162, .16); } }
 
+.crumbs-row { display: flex; align-items: center; }
+.crumbs-row .crumbs { flex: 1; min-width: 0; }
+.fm-tree-button, .fm-phone, .info-close { display: none; }
 @media (max-width: 1100px) {
   .fm { grid-template-columns: 13rem minmax(0, 1fr); }
-  .fm-info { position: fixed; right: .9rem; top: 4.4rem; bottom: .9rem; z-index: 15; box-shadow: var(--shadow); }
+  .fm-info { position: fixed; right: .9rem; top: calc(var(--chrome) + .8rem); bottom: .9rem; z-index: 15; box-shadow: var(--shadow); }
 }
 @media (max-width: 760px) {
-  .fm { grid-template-columns: 1fr; height: auto; padding: .5rem; }
-  .fm-side { max-height: 30vh; }
-  .fm-main { min-height: 70vh; }
+  .fm { grid-template-columns: minmax(0, 1fr); padding: .5rem; }
+  .fm-side.drawer { padding: .6rem .3rem; }
+  .fm-tree-button { display: inline-block; margin-left: .4rem; }
+  .fm-phone { display: inline-block; }
+  .fm-toolbar .fm-desk { display: none !important; }
+  .fm-toolbar { gap: .25rem; padding: .45rem .5rem; }
   .row { grid-template-columns: 1.6rem minmax(0, 1fr) 5rem; }
   .row .c-size, .row .c-date, .row .c-who { display: none; }
   .fm-list.trash .row, .fm-list.search .row { grid-template-columns: 1.6rem minmax(0, 1fr) 6rem; }
   .fm-list.with-claude .row, .fm-list.with-ai .row { grid-template-columns: 1.6rem minmax(0, 1fr) 5rem 3.5rem; }
   .fm-list.with-claude.with-ai .row { grid-template-columns: 1.6rem minmax(0, 1fr) 5rem 3.5rem 3.5rem; }
   #fm-search { width: 100%; order: 10; }
-  .fm-info { left: .5rem; right: .5rem; width: auto; }
+  /* The details: a sheet over the list, from under the bar to the bottom, with its own ✕. */
+  .fm-info { left: .5rem; right: .5rem; bottom: .5rem; top: calc(var(--chrome) + .5rem); width: auto; z-index: 25; }
+  .info-close { display: inline-block; float: right; margin: 0 0 .3rem .5rem; }
+  /* In select mode every checkbox shows; otherwise a tap opens, so the tile's box stays out of the way. */
+  .fm-list.selecting .tile input.c-check { opacity: 1; }
 }
 
 /* ---------------------------------------------------- rendered Markdown */
@@ -513,7 +536,9 @@ button.danger-fill { background: var(--error); }
 .doc :target, .help-body :target, .wiki-body :target { background: var(--petal-soft); border-radius: 6px; scroll-margin-top: 5rem;
                box-shadow: 0 0 0 .4rem var(--petal-soft); }
 @media (prefers-color-scheme: dark) { .doc :target, .help-body :target, .wiki-body :target { background: rgba(240, 138, 162, .18); box-shadow: none; } }
-.help-body img, .wiki-body img { max-width: 100%; }
+.doc img, .help-body img, .wiki-body img, .message-text img, .notice-body img { max-width: 100%; height: auto; }
+.doc table, .help-body table, .wiki-body table { display: block; max-width: 100%; overflow-x: auto; }
+.doc code, .help-body code, .wiki-body code { overflow-wrap: anywhere; }
 .help-body > :first-child, .wiki-body > :first-child { margin-top: 0; }
 .help-body h1, .wiki-body h1 { font-size: 1.6rem; }
 .help-body h2, .wiki-body h2 { font-size: 1.25rem; margin-top: 1.6rem; }
@@ -549,7 +574,7 @@ button.danger-fill { background: var(--error); }
   font: inherit; font-size: 1.1rem; line-height: 1; padding: .3rem .7rem; border-radius: 999px; cursor: pointer; text-decoration: none; }
 .notify-button:hover { color: var(--ink); background: var(--petal-soft); }
 .notify-button .badge.unread { position: absolute; top: -.25rem; right: -.15rem; margin: 0; }
-.msg-modal { position: fixed; inset: 0; width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 0;
+.msg-modal { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0;
   border: 0; background: var(--blush); color: var(--ink); z-index: 30; flex-direction: column; }
 .msg-modal[open] { display: flex; animation: msg-grow .22s ease-out; transform-origin: top right; }
 .msg-modal::backdrop { background: rgba(0, 0, 0, .35); }
@@ -576,7 +601,7 @@ button.danger-fill { background: var(--error); }
 @media (max-width: 900px) { .msg-columns { grid-template-columns: 1fr; } .msg-col { overflow: visible; } .msg-modal > .msg-host { overflow-y: auto; } }
 
 /* ------------------------------------------------------------- remote */
-.remote-term { position: relative; height: calc(100vh - 3.6rem); background: #1b1216; overflow: hidden; z-index: 1; }
+.remote-term { position: relative; height: var(--page-h); background: #1b1216; overflow: hidden; z-index: 1; }
 .remote-window { position: absolute; inset: 5%; display: flex; flex-direction: column; background: #fff;
   border-radius: var(--radius); box-shadow: 0 20px 60px rgba(0, 0, 0, .45); overflow: hidden; transition: inset .2s; }
 .remote-window.full { inset: 0; border-radius: 0; }
@@ -615,15 +640,18 @@ button.danger-fill { background: var(--error); }
 .remote-item:hover { background: rgba(255, 255, 255, .1); }
 .remote-item[aria-current="page"] { color: var(--petal); font-weight: 600; box-shadow: inset 3px 0 0 var(--petal); }
 .ax-new-stack { flex-direction: column; align-items: stretch; }
+.remote-list-button { display: none; }
 @media (max-width: 800px) {
-  .remote-term { height: calc(100vh - 6rem); }
   .remote-window { inset: 0; border-radius: 0; }
-  .remote-drop { width: 14rem; }
+  .remote-handle { display: none; }
+  .remote-list-button { display: inline-block; }
+  .remote-drop { width: min(16rem, 80vw); margin-top: 0; max-height: 100%; border-radius: 0; }
+  .remote-buttons .tool { padding: .3rem .6rem; font-size: 1.1rem; }
 }
 
 /* ------------------------------------------------------------- editor */
 .editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .9rem;
-  height: calc(100vh - 3.6rem); padding: .9rem; }
+  height: var(--page-h); padding: .9rem; }
 .editor-pane { min-height: 0; overflow: hidden; display: flex; }
 .editor-pane .CodeMirror { flex: 1; height: auto; min-height: 0; font: 14px/1.55 ui-monospace, SFMono-Regular, Menlo,
   Consolas, monospace; background: transparent; color: var(--ink); border-radius: var(--radius); }
@@ -644,10 +672,14 @@ button.danger-fill { background: var(--error); }
   padding: .6rem 1rem; border: 1px solid var(--error); border-radius: 12px; background: var(--glass-strong); }
 .ed-conflict[hidden] { display: none; }
 @media (prefers-color-scheme: dark) { .editor-pane .CodeMirror-selected { background: rgba(240, 138, 162, .2); } }
+.ed-switch { display: none; }
 @media (max-width: 800px) {
-  .editor { grid-template-columns: 1fr; height: auto; }
-  .editor-pane .CodeMirror { min-height: 50vh; }
-  .editor-preview { max-height: 60vh; }
+  .editor { grid-template-columns: minmax(0, 1fr); }
+  .ed-switch { display: flex; }
+  .ed-switch .tool[aria-pressed="true"] { background: var(--petal-soft); color: var(--rose-deep); }
+  body:not(.ed-preview) .editor-preview, body.ed-preview .editor-pane { display: none; }
+  .ed-name { min-width: 0; flex: 1 1 8rem; }
+  .editor-pane .CodeMirror, .editor-pane textarea { font-size: 16px; }
 }
 
 /* --------------------------------------------------------- help and wiki */
@@ -699,14 +731,71 @@ button.danger-fill { background: var(--error); }
 }
 
 /* --------------------------------------------------------------- small */
+.chat-phone-bar { display: none; }
+@media (max-width: 1000px) {
+  .topbar { flex-wrap: wrap; row-gap: .3rem; }
+}
 @media (max-width: 760px) {
-  .chat-layout { grid-template-columns: 1fr; padding: .5rem; }
-  .history { display: none; }
-  .tools-panel:not([hidden]) { display: block; }   /* below the chat on phones */
+  body { background-attachment: scroll; }
+  .chat-layout, .chat-layout.tools-open { grid-template-columns: minmax(0, 1fr); padding: .5rem; gap: .5rem; }
+  .chat-phone-bar { display: flex; gap: .4rem; align-items: center; }
+  .chat-phone-bar .tool { padding: .35rem .7rem; }
+  .history.drawer { padding: 1rem; }
   .msg.user { max-width: 92%; }
   .msg.assistant { margin-right: 0; }
   .inbox, .doc { margin: .75rem; padding: 1.1rem; }
-  .topbar { gap: .6rem; flex-wrap: wrap; }
+  .ask { padding-bottom: calc(.7rem + env(safe-area-inset-bottom, 0px)); }
+  .check { white-space: normal; }
+  .new-lib { flex-wrap: wrap; }
+  .grant-add code, .token-reveal code, #cc-command, .mcp-address { overflow-wrap: anywhere; }
+  .settings-form { grid-template-columns: minmax(0, 1fr); }
+  /* The main bar: brand, ✉ and ☰ on one row, the tabs as a strip under it; the rest in the ☰ menu. */
+  .topbar.main-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: .25rem .4rem;
+    padding: calc(.45rem + env(safe-area-inset-top, 0px)) .75rem .3rem; align-items: center; }
+  .topbar.main-bar .brand { grid-row: 1; grid-column: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar.main-bar .nav-title { grid-row: 1; grid-column: 2; font-family: var(--serif); font-size: 1.1rem; }
+  .topbar.main-bar .notify-button { grid-row: 1; grid-column: 2; }
+  .topbar.main-bar .nav-menu { grid-row: 1; grid-column: 3; }
+  .topbar.main-bar .tabs { grid-row: 2; grid-column: 1 / -1; flex-wrap: nowrap; gap: .15rem; overflow-x: auto; scrollbar-width: none;
+    margin: 0 -.75rem; padding: 0 .75rem; }
+  .topbar.main-bar .tabs::-webkit-scrollbar { display: none; }
+  .topbar.main-bar .tabs a { white-space: nowrap; flex: none; padding: .3rem .7rem; }
+  .topbar.main-bar .notify-button { margin: 0; font-size: 1.2rem; padding: .3rem .55rem; }
+  .nav-menu { display: inline-flex; align-items: center; justify-content: center; width: 2.4rem; height: 2.2rem; padding: 0;
+    background: none; box-shadow: none; color: var(--ink); font-size: 1.25rem; border-radius: 8px; }
+  .nav-menu:hover, .nav-menu[aria-expanded="true"] { background: var(--petal-soft); color: var(--ink); }
+  .nav-more { display: none; position: absolute; top: calc(100% + .2rem); right: .5rem; z-index: 30; min-width: 11rem;
+    flex-direction: column; gap: .2rem; padding: .5rem .7rem; background: var(--glass-strong);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: var(--shadow); }
+  .nav-more.open { display: flex; }
+  .nav-more form { display: block; }
+  .nav-more .nav-who { margin: 0; padding: .2rem 0 .35rem; border-bottom: 1px solid var(--line); }
+  .nav-more .help-link { padding: .35rem 0; }
+  .nav-more button.link { padding: .35rem 0; }
+  /* Document bars (the editor, a file view, an API call): the name wraps instead of pushing the bar out. */
+  .topbar.doc-bar { flex-wrap: wrap; gap: .4rem .7rem; padding: .5rem .75rem; }
+  .topbar.doc-bar > strong { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; font-size: .95rem; }
+  .topbar.doc-bar .brand { font-size: 1.1rem; }
+  /* Panels that become drawers (picker.js drawer): from under the bar to the bottom, over a backdrop. */
+  .drawer { position: fixed; top: var(--chrome); bottom: 0; left: 0; width: min(19rem, 85vw); z-index: 25; margin: 0;
+    overflow-y: auto; border-radius: 0 var(--radius) var(--radius) 0; box-shadow: var(--shadow); }
+  .drawer.right { left: auto; right: 0; border-radius: var(--radius) 0 0 var(--radius); }
+  .drawer.open { background: var(--glass-strong); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+  .drawer:not(.open) { display: none; }
+  .toast, .queue { bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); }
+  .msg-modal-head { padding-top: calc(.7rem + env(safe-area-inset-top, 0px)); }
+}
+.drawer-backdrop { position: fixed; inset: 0; z-index: 24; background: rgba(0, 0, 0, .35); }
+/* Touch screens: fields at 16px (iOS zooms into anything smaller), bigger tap targets. */
+select { font: inherit; color: var(--ink); }
+@media (pointer: coarse) {
+  input, select, textarea, #fm-sort, .grants select, .grant-add select, .claude-key-form select { font-size: 1rem; }
+  input.c-check, .c-claude input, .props-switch input { width: 1.3rem; height: 1.3rem; }
+  button.tool, .crumb, .tree-label { min-height: 2.4rem; }
+  .tile input.c-check { pointer-events: none; }
+  .fm-list.selecting .tile input.c-check { pointer-events: auto; opacity: 1; }
+  .rooms-actions .link { min-height: 2rem; }
 }
 
 /* connect claude */
@@ -728,7 +817,7 @@ button.danger-fill { background: var(--error); }
   border-radius: 8px; padding: .25rem .4rem; }
 
 /* ------------------------------------------------------- access explorer */
-.ax-page { display: flex; flex-direction: column; gap: .7rem; height: calc(100vh - 3.6rem); padding: .9rem; }
+.ax-page { display: flex; flex-direction: column; gap: .7rem; height: var(--page-h); padding: .9rem; }
 .ax-head { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1.2rem; padding: 0 .3rem; }
 .ax-head h1 { margin: 0; font-size: 1.4rem; }
 .ax-tabs { display: flex; flex-wrap: wrap; gap: .35rem; }
@@ -786,11 +875,20 @@ button.danger-fill { background: var(--error); }
 @media (prefers-color-scheme: dark) {
   .ax-tabs button:hover, .ax-tabs button[aria-selected="true"] { background: rgba(240, 138, 162, .16); }
 }
+.ax-side > summary { display: none; }
 @media (max-width: 800px) {
   .ax-page { height: auto; }
-  .ax, .ax-split { grid-template-columns: 1fr; }
+  .ax, .ax-split { grid-template-columns: minmax(0, 1fr); }
   .ax-settings { overflow: visible; }
   .ax-tree { max-height: 40vh; }
+  .ax-side > summary { display: block; cursor: pointer; padding: .35rem .5rem; font-weight: 600; color: var(--rose-deep); }
+  .ax-side:not([open]) { overflow: hidden; }
+  .ax-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: .2rem; }
+  .ax-tabs::-webkit-scrollbar { display: none; }
+  .ax-tabs button { white-space: nowrap; flex: none; }
+  .ax-link input, .sg-field textarea { min-width: 0; }
+  .sg-field { width: 100%; }
+  .sg-field textarea { width: 100%; }
 }
 .ax-commits { list-style: none; padding: 0; margin: .4rem 0 .8rem; font-size: .9rem; }
 .ax-commits li { padding: .2rem 0; border-bottom: 1px solid var(--line); }
@@ -883,7 +981,7 @@ button.danger-fill { background: var(--error); }
 /* ---------------------------------------------------------------- Rooms (rooms.html, rooms.js) */
 /* Full width: the same .75rem gap on every side as at the bottom, however wide the screen. */
 .rooms { display: grid; grid-template-columns: 15rem minmax(0, 1fr) auto; gap: .75rem;
-         margin: .75rem; height: calc(100vh - 5.5rem); }
+         margin: .75rem; height: calc(var(--page-h) - 1.5rem); }
 /* The inbox (.msg-columns), the pane and the head actions set their own display; hidden must still win,
    or the inbox stays under the room log, splitting its height. */
 .rooms [hidden] { display: none !important; }
@@ -956,10 +1054,15 @@ button.danger-fill { background: var(--error); }
 @media (max-width: 900px) {
   .rooms { grid-template-columns: minmax(0, 1fr); }
   .rooms-menu { display: inline; }
-  .rooms-side { position: fixed; inset: 4rem auto 1rem .5rem; width: 16rem; z-index: 10; display: none; }
-  body.rooms-drawer .rooms-side { display: block; }
-  .rooms-pane { position: fixed; inset: 4rem .5rem 1rem auto; width: min(22rem, calc(100% - 1rem)); z-index: 10; }
+  .rooms-side { position: fixed; top: calc(var(--chrome) + .75rem); bottom: .75rem; left: .75rem; width: min(17rem, 85vw);
+                z-index: 25; display: none; }
+  .rooms-side.open { display: block; }
+  .rooms-pane { position: fixed; top: calc(var(--chrome) + .75rem); bottom: .75rem; right: .75rem; width: min(22rem, calc(100% - 1.5rem));
+                z-index: 25; }
+  .rooms-suggest { left: 0; right: 0; }
 }
+/* On touch screens a tap on a message shows its actions (a mouse hovers). */
+.rooms-msg.show-actions > .rooms-actions { display: flex; }
 .rooms-preview { display: block; margin-top: .3rem; padding: .35rem .6rem; border: 1px solid var(--line);
                  border-left: 3px solid var(--rose); border-radius: 8px; background: var(--glass-strong);
                  text-decoration: none; color: var(--ink); max-width: 32rem; }

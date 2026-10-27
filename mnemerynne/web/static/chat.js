@@ -23,6 +23,14 @@
   }
   let toolsOff = new Set(remembered(OFF_KEY, []));
   let toolsLoaded = false;
+  // Phones: the history and the tools panel slide in as drawers (picker.js drawer, erynne.css .drawer).
+  const { coarse, narrow, drawer } = window.Erynne;
+  const historyDrawer = drawer(document.getElementById("chat-history"), { onClose: function () {
+    document.getElementById("chat-history-toggle").setAttribute("aria-expanded", "false");
+  } });
+  const toolsDrawer = toolsPanel ? drawer(toolsPanel, { right: true, onClose: function () {
+    if (narrow.matches && advanced && advanced.checked) { advanced.checked = false; showTools(false); }
+  } }) : null;
 
   // Token counter (right of Advanced settings): what the models used for this conversation.
   const tokenCount = document.getElementById("token-count");
@@ -120,6 +128,7 @@
     if (!toolsPanel) return;
     toolsPanel.hidden = !open;
     toolsPanel.parentElement.classList.toggle("tools-open", open);
+    if (open) toolsDrawer.open(); else toolsDrawer.close();
     remember(OPEN_KEY, open);
     if (open && !toolsLoaded) loadTools();
   }
@@ -348,6 +357,7 @@
     } else if (ev.type === "delta") {
       w.streamed += ev.text;
       renderAnswer(view.body, w.streamed, w.sources);
+      stick();
     } else if (ev.type === "reset") {
       // What streamed so far didn't hold up; a "couldn't find it" reply follows.
       w.streamed = "";
@@ -433,7 +443,13 @@
     }));
   }
 
+  // Keep the thread at its end while an answer streams, unless the person has scrolled up to read.
+  function stick() {
+    if (thread.scrollHeight - thread.scrollTop - thread.clientHeight < 160) thread.scrollTop = thread.scrollHeight;
+  }
+
   async function openConversation(id) {
+    historyDrawer.close();
     const r = await fetch("/api/conversations/" + id);
     if (!r.ok) return;
     const data = await r.json();
@@ -467,19 +483,34 @@
     resetTokens();
     thread.replaceChildren(el("div", "welcome muted", "Ask a question about your documents."));
     loadConversations();
-    input.focus();
+    if (!coarse) input.focus();   // on a phone that would pop the keyboard up over the page
   }
+
+  // The question box grows with the text (up to a few lines), then scrolls.
+  function autosize() {
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 200) + "px";
+  }
+  input.addEventListener("input", autosize);
 
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     const q = input.value.trim();
     if (!q || send.disabled) return;
     input.value = "";
+    autosize();
     ask(q);
   });
   input.addEventListener("keydown", function (e) {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
+    // Enter asks; Shift+Enter is a new line. On a touch screen Enter is a new line and the button asks.
+    if (e.key === "Enter" && !e.shiftKey && !coarse) { e.preventDefault(); form.requestSubmit(); }
   });
   document.getElementById("new-chat").addEventListener("click", newChat);
+  const historyToggle = document.getElementById("chat-history-toggle");
+  historyToggle.addEventListener("click", function () {
+    historyDrawer.toggle();
+    historyToggle.setAttribute("aria-expanded", String(historyDrawer.isOpen()));
+  });
+  document.getElementById("chat-new").addEventListener("click", function () { historyDrawer.close(); newChat(); });
   loadConversations();
 })();

@@ -67,8 +67,5 @@ Only you can see and control your screens. Screens are only for members of the g
 
 ## Erynne as an app on your phone
 
-To install it, open Erynne in Chrome on Android and choose **⋮ → Install app** (or **Add to Home screen → Install**). It then opens like an app, without the browser's address bar, and appears in the **Share** menu of other apps such as YouTube.
-
-- Press and hold its icon for shortcuts to **Media**, **Screens** and **Files**.
-- On an iPhone, **Share → Add to Home Screen** in Safari installs it too. iPhones don't let web apps appear in the Share menu, so copy the link and paste it in **Screens** instead.
+Install it from Chrome's **⋮ → Install app** (Android) or Safari's **Share → Add to Home Screen** (iPhone): it then opens like an app and, on Android, appears in the **Share** menu of other apps such as YouTube. See [Erynne on a phone](phone.md).
 

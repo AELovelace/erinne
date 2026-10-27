@@ -71,7 +71,13 @@
       const row = el("div", "tree-row" + (state.selected === a.id ? " current" : ""));
       const b = el("button", "tree-label", (a.enabled ? "" : "⏸ ") + a.name);
       b.type = "button";
-      b.addEventListener("click", function () { state.selected = a.id; renderList(); renderDetail(); });
+      b.addEventListener("click", function () {
+        state.selected = a.id; renderList(); renderDetail();
+        if (window.Erynne.narrow.matches) {   // a phone: fold the list and show the app
+          $("remote-side").open = false;
+          $("remote-pane").scrollIntoView({ block: "start" });
+        }
+      });
       row.appendChild(b);
       li.appendChild(row);
       ul.appendChild(li);

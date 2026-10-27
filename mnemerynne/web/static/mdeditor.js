@@ -86,7 +86,7 @@
       loadedText = "";
       setStatus("New page: give it a name and press Save");
       renderPreview();
-      ($("ed-name") || editor).focus();
+      if (!window.Erynne.coarse) ($("ed-name") || editor).focus();
       return;
     }
     try {
@@ -101,7 +101,7 @@
         saveButton.disabled = true;
         setStatus("You can only read this file here", "error");
       }
-      editor.focus();
+      if (!window.Erynne.coarse) editor.focus();
     } catch (e) {
       setStatus(e.message, "error");
       saveButton.disabled = true;
@@ -205,6 +205,16 @@
   });
 
   // ------------------------------------------------------------- the chrome
+  // Phones show one pane at a time (erynne.css .ed-switch); a desktop shows both and ignores this.
+  function showPane(preview) {
+    document.body.classList.toggle("ed-preview", preview);
+    $("ed-show-source").setAttribute("aria-pressed", String(!preview));
+    $("ed-show-preview").setAttribute("aria-pressed", String(preview));
+    if (!preview && editor.refresh) editor.refresh();   // CodeMirror measured itself while hidden
+  }
+  $("ed-show-source").addEventListener("click", function () { showPane(false); });
+  $("ed-show-preview").addEventListener("click", function () { showPane(true); });
+
   saveButton.addEventListener("click", function () { save(); });
   document.addEventListener("keydown", function (e) {
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {

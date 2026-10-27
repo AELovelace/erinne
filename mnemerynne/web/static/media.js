@@ -642,8 +642,10 @@
 
     fullscreen: function () {
       if (screenId) return;
+      const box = $("mc-player");
       if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
-      else $("mc-player").requestFullscreen().catch(function () {});
+      else if (box.requestFullscreen) box.requestFullscreen().catch(function () {});
+      else if (video.webkitEnterFullscreen && !box.classList.contains("youtube")) video.webkitEnterFullscreen();   // iPhone: the video alone
     },
   };
 
@@ -666,7 +668,17 @@
     }
     player.close();
   });
-  video.addEventListener("click", function () { player.toggle(); });
+  // A tap while the controls are hidden only brings them back; the next one plays or pauses.
+  let wokeByTap = false;
+  $("mc-player").addEventListener("pointerdown", function () {
+    wokeByTap = $("mc-player").classList.contains("idle");
+    player.wake();
+  });
+  $("mc-player").addEventListener("pointermove", function (e) { if (e.pointerType === "mouse") player.wake(); });
+  video.addEventListener("click", function () {
+    if (wokeByTap) { wokeByTap = false; return; }
+    player.toggle();
+  });
   $("mc-seek").addEventListener("change", function () { player.seekTo(Number($("mc-seek").value)); });
   $("mc-seek").addEventListener("input", function () { $("mc-pos").textContent = clock(Number($("mc-seek").value)); });
   $("mc-toggle").addEventListener("click", function () { player.toggle(); });
@@ -707,10 +719,16 @@
   night.init();
   $("mc-full").addEventListener("click", function () { player.fullscreen(); });
   $("mc-player-close").addEventListener("click", function () { player.close(); });
-  $("mc-player").addEventListener("mousemove", function () { player.wake(); });
 
   // --------------------------------------------------------- now playing
   const audio = $("mc-audio");
+  // The bottom dock's height (now playing, the remote) as --dock, so the list's padding keeps clear of it.
+  const dock = $("mc-dock");
+  if (dock && "ResizeObserver" in window) {
+    new ResizeObserver(function () {
+      main.style.setProperty("--dock", Math.ceil(dock.getBoundingClientRect().height) + "px");
+    }).observe(dock);
+  }
   const nowPlaying = {
     queue: [], i: -1, art: null, hls: null, session: null, offset: 0, station: null,
 
@@ -997,7 +1015,8 @@
   $("mc-viewer-next").addEventListener("click", function () { viewer.step(1); });
   $("mc-viewer-show").addEventListener("click", function () { viewer.slideshow(); });
   $("mc-viewer-close").addEventListener("click", function () { viewer.close(); });
-  $("mc-viewer").addEventListener("mousemove", function () { viewer.wake(); });
+  $("mc-viewer").addEventListener("pointermove", function (e) { if (e.pointerType === "mouse") viewer.wake(); });
+  $("mc-viewer").addEventListener("pointerdown", function () { viewer.wake(); });
 
   // ---------------------------------------------------------- remote nav
   function targets() {
@@ -1300,7 +1319,7 @@
       } catch (err) { showError(err.message); }
     });
     out.push(claim);
-    if (code) setTimeout(function () { tvName.focus(); }, 0);
+    if (code && !window.Erynne.coarse) setTimeout(function () { tvName.focus(); }, 0);
 
     const listBox = el("section", "mc-shelf");
     listBox.appendChild(el("h2", null, "Your screens"));

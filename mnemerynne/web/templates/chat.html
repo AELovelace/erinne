@@ -3,11 +3,16 @@
 {% block body %}
 {% include "_nav.html" %}
 <div class="chat-layout">
-  <aside class="history">
+  <aside class="history" id="chat-history" aria-label="Earlier questions">
     <button type="button" id="new-chat">New question</button>
     <ul id="conversations"></ul>
   </aside>
   <main class="chat">
+    {#- Phones only (erynne.css): the history opens as a drawer, and New question is in reach. -#}
+    <div class="chat-phone-bar">
+      <button type="button" class="tool" id="chat-history-toggle" aria-controls="chat-history" aria-expanded="false">☰ Chats</button>
+      <button type="button" class="tool" id="chat-new">＋ New</button>
+    </div>
     <div id="thread" aria-live="polite">
       <div class="welcome">
         <h1>Ask {{ assistant_name }}</h1>

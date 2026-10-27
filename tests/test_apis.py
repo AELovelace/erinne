@@ -536,6 +536,31 @@ def test_chat_answers_from_an_api_for_people_in_its_group(settings, conn, direct
         assert c.get(source["url"]).status_code == 404                  # not their call
 
 
+def test_claudes_api_links_open_without_signing_in(settings, conn, directory):
+    _api(conn, settings, claude=True)
+    ivan = users.create_user(conn, "ivan", "password123")
+    accounts.link(conn, ivan, "ivan", directory)
+    _upstream(lambda r: httpx.Response(200, json={"totals": {"occupancyPct": 81.5}}))
+    out, _ = Tools(settings, lambda: None, lambda: directory).query_api(conn, Caller(ivan, "ivan", 1),
+                                                                        "Hotel Stats", "Stats summary", {"days": 2})
+    link, plain = out["link"], f"/apis/calls/{out['call_id']}"
+    key = link.split("?k=")[1]
+    assert link == f"{plain}?k={key}"
+    with TestClient(create_app(settings, Services(llm=ApiLLM(), embedder=FakeEmbedder(), directory=directory))) as c:
+        page = c.get(link)                                                # Claude Desktop's signed-out browser
+        assert page.status_code == 200 and "81.5" in page.text and page.headers["referrer-policy"] == "no-referrer"
+        # A wrong key, another call's key, or no key: sign in as usual.
+        for bad in (f"{plain}?k={'0' * 32}", f"/apis/calls/{out['call_id'] + 1}?k={key}", plain):
+            moved = c.get(bad, follow_redirects=False)
+            assert moved.status_code == 303 and moved.headers["location"] == "/login"
+        # Signing in goes back to the page that asked for it.
+        back = c.post("/login", data={"username": "ivan", "password": "password123"}, follow_redirects=False)
+        assert back.headers["location"] == plain
+        c.post("/logout")
+        users.set_active(conn, "ivan", False)
+        assert c.get(link).status_code == 404                            # not once the account is off
+
+
 def test_chat_explains_an_api_failure(settings, conn, directory):
     _, op_id = _api(conn, settings)
     apis.index_examples(conn, FakeEmbedder(), op_id)

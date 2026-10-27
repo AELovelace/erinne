@@ -12,7 +12,8 @@
   apps.forEach(function (a) { bySlug[a.slug] = a; });
   const frame = $("remote-frame"), home = $("remote-home-page"), bar = $("remote-bar"), handle = $("remote-handle"),
         list = $("remote-list"), name = $("remote-name"), path = $("remote-path"), reload = $("remote-reload"),
-        open = $("remote-open"), full = $("remote-full"), windowEl = $("remote-window");
+        open = $("remote-open"), full = $("remote-full"), windowEl = $("remote-window"),
+        listButton = $("remote-list-button");   // the title bar's ▤ on phones, where the side handle is hidden
   let current = null;
 
   function mark() {
@@ -56,6 +57,7 @@
   function collapse() {
     list.hidden = true;
     handle.setAttribute("aria-expanded", "false");
+    listButton.setAttribute("aria-expanded", "false");
     bar.classList.remove("open");
   }
 
@@ -63,6 +65,7 @@
     const opening = list.hidden;
     list.hidden = !opening;
     handle.setAttribute("aria-expanded", String(opening));
+    listButton.setAttribute("aria-expanded", String(opening));
     bar.classList.toggle("open", opening);
     try { localStorage.setItem("erynne.remote.bar", opening ? "open" : "closed"); } catch (e) { /* fine */ }
   }
@@ -74,6 +77,7 @@
     if (bar.contains(b)) collapse();
   });
   handle.addEventListener("click", toggle);
+  listButton.addEventListener("click", toggle);
   $("remote-home").addEventListener("click", function () { showHome(true); });
   reload.addEventListener("click", function () { if (current) frame.src = bySlug[current].url; });
   full.addEventListener("click", function () {

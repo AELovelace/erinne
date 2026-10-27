@@ -6,9 +6,12 @@
 (function () {
   "use strict";
 
-  const { el, api } = window.Erynne;
+  const { el, api, coarse, drawer } = window.Erynne;
   const $ = function (id) { return document.getElementById(id); };
   const REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "✅", "🙏", "😮"];
+  // Phones: the room list and the details pane slide in as drawers (picker.js drawer).
+  const sideDrawer = drawer($("rooms-side"));
+  const paneDrawer = drawer($("rooms-pane"), { right: true, onClose: function () { if (!$("rooms-pane").hidden) closePane(); } });
   const GROUP_MS = 5 * 60 * 1000;      // consecutive messages from one person within this are grouped
 
   const state = {
@@ -100,7 +103,7 @@
     $("rooms-compose").hidden = true;
     $("rooms-log").hidden = true;
     $("rooms-typing").hidden = true;
-    document.body.classList.remove("rooms-drawer");
+    sideDrawer.close();
     const host = $("rooms-inbox");
     host.hidden = false;
     if (window.ErynneMessages) {
@@ -311,7 +314,7 @@
     if (!r.joined && r.kind === "channel" && r.visibility === "open") {
       $("rooms-text").placeholder = "Message #" + r.name + " (you'll join it)";
     }
-    document.body.classList.remove("rooms-drawer");
+    sideDrawer.close();
     const data = await run(function () { return api("GET", "/api/rooms/" + id + "/messages"); });
     state.messages = new Map((data ? data.messages : []).map(function (m) { return [m.id, m]; }));
     state.oldest = data && data.messages.length ? data.messages[0].id : null;
@@ -322,7 +325,7 @@
     markRead();
     if (state.pane && state.pane !== "thread") openPane(state.pane);
     else closePane();
-    $("rooms-text").focus();
+    if (!coarse) $("rooms-text").focus();   // on a phone that would pop the keyboard up over the room
   }
 
   // ----------------------------------------------------------- composing
@@ -341,7 +344,8 @@
 
   function wireComposer(form, textarea, threadFn) {
     textarea.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" && !e.shiftKey && !suggestOpen()) {
+      // Enter sends; Shift+Enter is a new line. On a touch screen Enter is a new line and the button sends.
+      if (e.key === "Enter" && !e.shiftKey && !suggestOpen() && !coarse) {
         e.preventDefault();
         form.requestSubmit();
       }
@@ -443,7 +447,7 @@
   });
 
   // ---------------------------------------------------------------- panes
-  function closePane() { $("rooms-pane").hidden = true; state.pane = null; state.threadRoot = null; }
+  function closePane() { $("rooms-pane").hidden = true; state.pane = null; state.threadRoot = null; paneDrawer.close(); }
 
   async function openThread(rootId) {
     const data = await run(function () { return api("GET", "/api/rooms/messages/" + rootId + "/thread"); });
@@ -456,7 +460,8 @@
     data.messages.forEach(function (m, i) { body.appendChild(messageNode(m, { inThread: true, compact: false })); if (i === 0) body.appendChild(el("hr")); });
     $("thread-compose").hidden = false;
     $("rooms-pane").hidden = false;
-    $("thread-text").focus();
+    paneDrawer.open();
+    if (!coarse) $("thread-text").focus();
   }
 
   async function openPane(kind) {
@@ -465,6 +470,7 @@
     const body = $("pane-body");
     body.replaceChildren(el("p", "muted small", "Loading…"));
     $("rooms-pane").hidden = false;
+    paneDrawer.open();
     if (kind === "members") {
       $("pane-title").textContent = "Members";
       const r = state.rooms.get(state.current);
@@ -616,7 +622,16 @@
     });
   });
 
-  $("rooms-menu").addEventListener("click", function () { document.body.classList.toggle("rooms-drawer"); });
+  $("rooms-menu").addEventListener("click", function () { sideDrawer.toggle(); });
+  // On a touch screen a tap on a message shows its actions (a mouse hovers over them).
+  if (coarse) {
+    $("rooms-log").addEventListener("click", function (e) {
+      if (e.target.closest("button, a, input, .rooms-actions")) return;
+      const msg = e.target.closest(".rooms-msg");
+      $("rooms-log").querySelectorAll(".rooms-msg.show-actions").forEach(function (n) { if (n !== msg) n.classList.remove("show-actions"); });
+      if (msg) msg.classList.toggle("show-actions");
+    });
+  }
 
   // ---------------------------------------------------------------- live
   function renderTyping() {
@@ -728,6 +743,7 @@
     if (location.hash === "#inbox") openInbox();
     else if (wanted) openRoom(wanted);
     else if (data.rooms.length) openRoom(data.rooms[0].id);
+    else sideDrawer.open();   // nothing to show yet: on a phone, the list with its ＋ is the way in
   })();
 
   window.addEventListener("hashchange", function () {   // the top-right button links here as /rooms#inbox

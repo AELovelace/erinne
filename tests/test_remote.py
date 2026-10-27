@@ -153,9 +153,11 @@ def test_sign_in_groups_and_the_deep_link(conn, settings, people, directory):
         assert [a["slug"] for a in alice.get("/api/remote").json()["apps"]] == ["balancer"]
     with _web(settings, "root", directory) as root:
         assert root.get("/remote/balancer/").status_code == 200                 # admins always
-    for bad in ("//evil.example/x", "/remote/x\\y", "https://evil.example/", "/files", "/remote/a\nb"):
+    for bad in ("//evil.example/x", "/remote/x\\y", "https://evil.example/", "files", "/remote/a\nb", "/login",
+                "/logout?x=1"):
         assert app_mod._safe_return(bad) is False
     assert app_mod._safe_return("/remote/balancer/status?x=1") and app_mod._safe_return("/oauth/authorize?a=b")
+    assert app_mod._safe_return("/files") and app_mod._safe_return("/apis/calls/3")
 
 
 # ------------------------------------------------------------- the proxy

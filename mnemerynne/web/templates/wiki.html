@@ -6,14 +6,15 @@
 <main class="ax-page wiki-page" id="wiki" data-library-id="{{ library.id }}" data-library-name="{{ library.name }}"
       data-file-id="{{ file_id or '' }}" data-can-write="{{ 'yes' if can_write else '' }}">
   <div class="ax">
-    <aside class="ax-tree glass" aria-label="Pages">
+    <details class="ax-side ax-tree glass" id="wiki-side" open>
+      <summary>Pages ▾</summary>
       <div class="ax-new wiki-new">
         <strong class="wiki-lib">{{ library.name }}</strong>
         <button type="button" class="small" id="wiki-new-page" hidden>New page</button>
       </div>
       <ul class="tree" id="wiki-tree" role="tree" aria-label="Wiki pages"></ul>
       <p class="muted small" id="wiki-empty" hidden>No pages yet.</p>
-    </aside>
+    </details>
     <section class="ax-pane glass wiki-pane" aria-live="polite">
       <div class="wiki-head" id="wiki-head" hidden>
         <nav class="wiki-crumbs small muted" id="wiki-crumbs" aria-label="Path"></nav>

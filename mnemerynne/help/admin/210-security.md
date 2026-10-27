@@ -6,7 +6,8 @@ Documents, questions, answers, memories, mail and the call logs live on this ser
 
 ## Built-in protections
 
-- **Sessions**: a signed cookie, `SameSite=Lax`, HTTPS-only whenever the public URL is https, 24 hours, re-checked against the database on every request (a deactivated account or a password reset ends sessions at once). State-changing requests from other sites are refused (cross-site guard).
+- **Sessions**: a signed cookie, `SameSite=Lax`, HTTPS-only whenever the public URL is https, 24 hours, re-checked against the database on every request (a deactivated account or a password reset ends sessions at once). State-changing requests from other sites are refused (cross-site guard). Signing in returns people to the page that asked for it.
+- **Claude's API links**: the link Claude gets with an API answer carries a key signed with `MNEMERYNNE_SECRET_KEY`. It opens that one call's page without signing in, because Claude Desktop often opens links in a browser that isn't signed in. It shows only what Claude was already sent, and stops working if the person's account is deactivated or the secret key changes.
 - **Headers** on every response: no framing by other sites, no MIME sniffing, no full URLs in Referer, HSTS over HTTPS. The file viewer and help pages carry a strict Content-Security-Policy; file previews are sandboxed and never render SVG inline.
 - **Sign-in throttling**: 5 wrong passwords for a username from an address, or 20 across usernames, lock for 5 minutes. Passwords are at least 8 characters, hashed with passlib.
 - **Rate limits per client IP** on what anyone can reach: sign-in (30 a minute), app registration (30 an hour), the other OAuth endpoints and Claude's text links; MCP calls per token (60 a minute). Over the limit is a 429 with `Retry-After`. The real client IP comes from the proxy (`FORWARDED_ALLOW_IPS=127.0.0.1`).

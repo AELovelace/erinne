@@ -202,6 +202,41 @@
     });
   }
 
+  /* Touch screens (phones, tablets): taps open things, long presses open menus, Enter makes a new
+     line and nothing grabs the focus on load (that would pop the keyboard up). */
+  const coarse = window.matchMedia("(pointer: coarse)").matches;
+  const narrow = window.matchMedia("(max-width: 760px)");
+
+  /* A side panel that becomes a drawer on a phone (erynne.css .drawer): open() slides it in over a
+     backdrop that closes it, close() takes it away; on a desktop the class is harmless and the panel
+     sits where its page put it. Escape closes it too. */
+  function drawer(panel, options) {
+    const opts = Object.assign({ right: false, onClose: null }, options || {});
+    panel.classList.add("drawer");
+    if (opts.right) panel.classList.add("right");
+    let backdrop = null;
+    function isOpen() { return panel.classList.contains("open"); }
+    function close() {
+      if (!isOpen()) return;
+      panel.classList.remove("open");
+      if (backdrop) { backdrop.remove(); backdrop = null; }
+      if (opts.onClose) opts.onClose();
+    }
+    function open() {
+      if (isOpen()) return;
+      panel.classList.add("open");
+      if (narrow.matches && !backdrop) {
+        backdrop = el("div", "drawer-backdrop");
+        backdrop.addEventListener("click", close);
+        document.body.appendChild(backdrop);
+      }
+    }
+    function toggle() { if (isOpen()) close(); else open(); }
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") close(); });
+    narrow.addEventListener("change", function () { if (!narrow.matches) close(); });
+    return { open: open, close: close, toggle: toggle, isOpen: isOpen };
+  }
+
   window.Erynne = { el: el, api: api, folders: folders, cachedFolders: cachedFolders, forgetFolders: forget,
-                    pickLocation: pickLocation };
+                    pickLocation: pickLocation, coarse: coarse, narrow: narrow, drawer: drawer };
 })();

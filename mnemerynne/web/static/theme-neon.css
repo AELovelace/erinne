@@ -56,9 +56,10 @@ html[data-theme="neon"] body {
    16:9, sized to the screen's height) and loops. The gradients above show
    until the first city has loaded. */
 html[data-theme="neon"] .parallax {
-  display: block; position: fixed; top: 0; left: 0; width: 100%; height: 100vh;
+  display: block; position: fixed; top: 0; left: 0; width: 100%; height: 100vh; height: 100dvh;
   z-index: 0; overflow: hidden; pointer-events: none;
 }
+html[data-theme="neon"] .parallax.paused .parallax-layer { animation-play-state: paused; }   /* the tab is away (parallax.js) */
 html[data-theme="neon"] .parallax-scene {
   position: absolute; inset: 0; opacity: 0; transition: opacity 3s ease;   /* FADE_MS in parallax.js */
   filter: saturate(1.15);

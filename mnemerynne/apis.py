@@ -22,6 +22,8 @@ itself is built here, so it can't reach anything an admin didn't set up.
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import json
 import re
 import ssl
@@ -102,6 +104,27 @@ def credential_status(settings: Settings, api: sqlite3.Row) -> str:
     if not api["secret_enc"]:
         return "missing"
     return "set" if decrypt_secret(settings, api["secret_enc"]) is not None else "needs re-entering"
+
+
+# ------------------------------------------------------------- signed links
+def view_key(settings: Settings, call_id: int) -> str | None:
+    """The key in a call's link for Claude: it opens that one call's page without signing in, since
+    Claude Desktop often opens links where the person isn't signed in. It shows no more than the tool
+    result Claude already holds. None without a secret key (development), and the link needs sign-in."""
+    if not settings.secret_key:
+        return None
+    return hmac.new(settings.secret_key.encode(), f"api-call:{call_id}".encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def view_link(settings: Settings, call_id: int) -> str:
+    """'/apis/calls/<id>', with its view key when there is one."""
+    key = view_key(settings, call_id)
+    return f"/apis/calls/{call_id}" + (f"?k={key}" if key else "")
+
+
+def check_view_key(settings: Settings, call_id: int, key: str) -> bool:
+    expected = view_key(settings, call_id)
+    return bool(expected and key) and hmac.compare_digest(expected, key)
 
 
 # -------------------------------------------------------------------- access

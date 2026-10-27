@@ -375,6 +375,11 @@ class Tools:
     def claude(self) -> bool:
         return self.mode == "claude"
 
+    def _call_link(self, call_id: int) -> str:
+        """An API call's page. Claude's links carry a view key: Desktop opens them in a browser that is
+        often signed out. Erynne's (in Rooms) don't, since everyone in the room would see them."""
+        return apis.view_link(self.settings, call_id) if self.claude else f"/apis/calls/{call_id}"
+
     def _access(self, conn: sqlite3.Connection, caller: Caller) -> fs.Access:
         return editing.ai_access(conn, caller.user_id, self.mode)
 
@@ -530,7 +535,7 @@ class Tools:
                          "params (a shorter period, one property) if the part you need is missing.")
         return {"api": result.api_name, "operation": result.operation_name, "at": result.at + " UTC",
                 "citation": f"{result.api_name} · {result.operation_name} ({live})",
-                "link": f"{self.base}/apis/calls/{result.call_id}", "call_id": result.call_id,
+                "link": self.base + self._call_link(result.call_id), "call_id": result.call_id,
                 **({"rows": rows} if rows else {}), **({"note": " ".join(notes)} if notes else {}),
                 "data": data}, []
 
@@ -1249,7 +1254,10 @@ class Tools:
         if card["status"] == "pending" and card["approver"] == "self":
             out["approve"] = f"{self.base}/proposals#p{card['id']}"
         elif card["status"] == "applied" and card.get("url"):
-            out["link"] = self.base + card["url"] if card["url"].startswith("/") else card["url"]
+            url = card["url"]
+            if url.startswith("/apis/calls/") and url[12:].isdigit():
+                url = self._call_link(int(url[12:]))
+            out["link"] = self.base + url if url.startswith("/") else url
             if card["kind"] == "api" and card.get("result"):
                 out["result"] = card["result"]
         return out

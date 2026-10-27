@@ -1,6 +1,6 @@
 # The Access page
 
-**Access** is the admin tab. It appears only for admins: local admins (role `admin`), bootstrap usernames from `MNEMERYNNE_ADMIN_USERS`, and members of the admin domain group, and only when they are signed in from an admin network if `MNEMERYNNE_ADMIN_NETWORKS` is set. Everything done here is written to **Recent changes**.
+**Access** is the admin tab. It appears only for admins: local admins (role `admin`), bootstrap usernames from `MNEMERYNNE_ADMIN_USERS`, and members of the admin domain group, and only when they are signed in from an admin network if `MNEMERYNNE_ADMIN_NETWORKS` is set. Everything done here is written to **Recent changes**. On a phone the section tabs are a strip you swipe sideways, and the trees (Files & folders, APIs, Remote) fold above the pane.
 
 ## Files & folders
 

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ name or "New page" }} · Edit · {{ assistant_name }}{% endblock %}
 {% block body %}
-<header class="topbar">
+<header class="topbar doc-bar">
   <a class="brand" href="/"><span class="blossom" aria-hidden="true">🌸</span>{{ assistant_name }}</a>
   {% if mode == 'new' %}
   <input type="text" id="ed-name" class="ed-name" value="{{ name }}" placeholder="Page name" maxlength="200"
@@ -11,6 +11,11 @@
   {% endif %}
   <span class="muted small">{{ where }}</span>
   <span id="ed-status" class="small muted push-right" aria-live="polite">Loading…</span>
+  {#- Phones show one pane at a time (erynne.css .ed-switch; mdeditor.js). -#}
+  <span class="seg ed-switch" role="group" aria-label="Pane">
+    <button type="button" class="tool" id="ed-show-source" aria-pressed="true">Source</button>
+    <button type="button" class="tool" id="ed-show-preview" aria-pressed="false">Preview</button>
+  </span>
   <button type="button" id="ed-save" title="Ctrl+S">Save</button>
   <a id="ed-view" href="{{ view_url or '' }}" target="_blank" rel="noopener" {% if not view_url %}hidden{% endif %}>View</a>
   <button type="button" class="link" id="ed-close">Close</button>

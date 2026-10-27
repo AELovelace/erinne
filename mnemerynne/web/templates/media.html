@@ -79,6 +79,8 @@
   <button type="button" class="mc-viewer-nav next" id="mc-viewer-next" title="Next (→)">›</button>
 </div>
 
+{#- The bottom bars (now playing, and the remote for a screen) stack in one dock, so they never overlap. -#}
+<div class="mc-dock" id="mc-dock">
 <footer class="mc-np" id="mc-np" aria-label="Now playing" hidden>
   <div class="mc-np-art" id="mc-np-art" aria-hidden="true">♫</div>
   <div class="mc-np-text">
@@ -116,6 +118,7 @@
   <div class="mc-np-buttons" id="mc-remote-buttons"></div>
 </footer>
 {% endif %}
+</div>
 <script src="{{ static('picker.js') }}"></script>
 <script src="{{ static('vendor/hls.js/hls.min.js') }}"></script>
 <script src="{{ static('media.js') }}"></script>
