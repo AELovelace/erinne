@@ -197,6 +197,28 @@ def test_requests_reach_the_app_and_answers_come_back_rewritten(conn, settings, 
         assert seen[-1].method == "POST"
 
 
+def test_an_apps_script_files_call_its_own_api(conn, settings, people, directory):
+    """An app whose script asks its own /api (Light Console: request("/api/config")) reaches the app, not
+    Mnemerynne's /api; other files pass as they are."""
+    _app(conn, rewrite_html=1)
+    script = (b'async function request(path) { const r = await fetch(path); return r.json(); }\n'
+              b'request("/api/config"); request(`/api/boards/${id}/color`); fetch("/static/x.json");\n'
+              b'const page = "/about";')
+
+    async def handler(request):
+        if request.url.path.endswith(".js"):
+            return httpx.Response(200, headers={"content-type": "application/javascript; charset=utf-8",
+                                                "content-length": str(len(script))}, content=script)
+        return httpx.Response(200, headers={"content-type": "text/css"}, content=b'.a { content: "/api/no"; }')
+    remote.TRANSPORT = httpx.MockTransport(handler)
+    with _web(settings, "alice", directory) as alice:
+        js = alice.get("/remote/balancer/static/app.js")
+        assert js.status_code == 200 and int(js.headers["content-length"]) == len(js.content)
+        assert 'request("/remote/balancer/api/config")' in js.text and "`/remote/balancer/api/boards/${id}/color`" in js.text
+        assert 'fetch("/remote/balancer/static/x.json")' in js.text and 'const page = "/about"' in js.text
+        assert alice.get("/remote/balancer/static/app.css").text == '.a { content: "/api/no"; }'
+
+
 def test_streams_pass_through_and_a_dead_app_is_a_502(conn, settings, people, directory):
     _app(conn)
 

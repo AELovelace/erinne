@@ -13,8 +13,9 @@ What the proxy changes on the way:
 - it drops the upstream's X-Frame-Options and frame-ancestors so the Remote tab can show the app
   in its window (the web app's own headers then allow framing by Mnemerynne only), rewrites
   Location and Set-Cookie to the /remote/<slug> prefix, and drops cookies named like Mnemerynne's;
-- with rewrite_html on, it also rewrites absolute links in HTML pages (best effort: apps that
-  build URLs at runtime need their own base-path setting instead).
+- with rewrite_html on, it also rewrites absolute links in HTML pages, and the plainest calls
+  (fetch("/..."), "/api/..." strings) in the app's script files (best effort: apps that build
+  URLs at runtime need their own base-path setting instead).
 
 A proxied app runs on Mnemerynne's origin, so its scripts could call Mnemerynne's API as the
 person: list only the organisation's own tools, for the groups that should have them.
@@ -186,10 +187,30 @@ def rewrite_html(text: str, slug: str) -> str:
     text = _SRCSET.sub(srcset, text)
     text = re.sub(rf"""(\burl\(\s*)(["']?)/(?!/|{skip[1:]}/)""", lambda m: f"{m.group(1)}{m.group(2)}{prefix}/", text,
                   flags=re.IGNORECASE)
+    return rewrite_script(text, slug)
+
+
+def rewrite_script(text: str, slug: str) -> str:
+    """Best effort, in a script file or a page's inline scripts: fetch("/...") and xhr.open("GET", "/..."),
+    and "/api/..." strings (an app's own request helper), move under the prefix."""
+    prefix = prefix_for(slug)
+    skip = re.escape(prefix)
     text = re.sub(rf"""((?:\bfetch\(|\.open\(\s*["'][A-Za-z]+["']\s*,)\s*)(["'`])/(?!/|{skip[1:]}/)""",
                   lambda m: f"{m.group(1)}{m.group(2)}{prefix}/", text)
-    text = re.sub(rf"""(["'`])/api/(?!{skip[1:]})""", lambda m: f"{m.group(1)}{prefix}/api/", text)
-    return text
+    return re.sub(rf"""(["'`])/api/(?!{skip[1:]})""", lambda m: f"{m.group(1)}{prefix}/api/", text)
+
+
+_SCRIPT_TYPES = ("application/javascript", "text/javascript", "application/x-javascript", "application/ecmascript",
+                 "text/ecmascript")
+
+
+def _rewriter(content_type: str) -> Callable[[str, str], str] | None:
+    """How a response of this type is rewritten (rewrite_html on): pages and script files; nothing else."""
+    if content_type.startswith("text/html"):
+        return rewrite_html
+    if content_type.split(";")[0].strip() in _SCRIPT_TYPES:
+        return rewrite_script
+    return None
 
 
 # ----------------------------------------------------------------- headers
@@ -399,7 +420,8 @@ class RemoteProxy:
     async def _relay(self, send, response: httpx.Response, app: sqlite3.Row, slug: str, rewrite: bool) -> None:
         content_type = response.headers.get("content-type", "").lower()
         chunks = _chunks(response)
-        if rewrite and content_type.startswith("text/html"):
+        rewriter = _rewriter(content_type) if rewrite else None
+        if rewriter is not None:
             length = response.headers.get("content-length")
             if length is None or int(length) <= HTML_MAX_BYTES:
                 parts, total, over = [], 0, False
@@ -411,7 +433,7 @@ class RemoteProxy:
                         break
                 if not over:
                     text = b"".join(parts).decode("utf-8", "surrogateescape")
-                    body = rewrite_html(text, slug).encode("utf-8", "surrogateescape")
+                    body = rewriter(text, slug).encode("utf-8", "surrogateescape")
                     headers = response_headers(response.headers, app, slug, rewritten=True)
                     headers.append((b"content-length", str(len(body)).encode()))
                     await send({"type": "http.response.start", "status": response.status_code, "headers": headers})
