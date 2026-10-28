@@ -58,6 +58,9 @@ PIN_LOCK_SECONDS = 300
 COOKIE = "mnemerynne_kiosk"
 RELEASE_RE = re.compile(r"^screen-v\d+\.\d+\.\d+$")
 URL_RE = re.compile(r"^https?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$")
+AUDIO_SCRIPT = "/usr/local/bin/mnemerynne-screen-audio"
+# The settings file is sourced by bash (install.sh's scripts): only these, as install.sh's valid_audio.
+AUDIO_RE = re.compile(r"^(hdmi|auto|card:[A-Za-z0-9._-]+:[A-Za-z0-9:+._-]+)$")
 JOBS = {"update": "mnemerynne-screen-update", "config": "mnemerynne-screen-config",
         "system": "mnemerynne-screen-osupdate"}
 JOB_NAMES = {"update": "updating the screen", "config": "changing the address", "system": "installing system updates"}
@@ -446,6 +449,35 @@ def clean_url(url: str) -> str:
     return url
 
 
+def parse_cards(text: str) -> list[dict]:
+    """Each sound card's output profiles from `pactl list cards`: {card, device, profile, label, available}.
+    Output-only profiles; one that also records (…+input:…) only when the card has no output-only one
+    for the same output."""
+    out: list[dict] = []
+    card = device = None
+    in_profiles = False
+    for line in text.splitlines():
+        if line.startswith("Card #"):
+            card = device = None
+            in_profiles = False
+        elif line.startswith("\tName: "):
+            card = line.split(": ", 1)[1].strip()
+        elif line.strip().startswith("device.description = ") and device is None:
+            device = line.split("=", 1)[1].strip().strip('"')
+        elif line.startswith("\tProfiles:"):
+            in_profiles = True
+        elif in_profiles and line.startswith("\t\t") and not line.startswith("\t\t\t"):
+            m = re.match(r"^\t\t(output:[^ ]+): (.+?) \(sinks: (\d+).*available: (\w+)\)\s*$", line)
+            if m and card and int(m.group(3)) > 0:
+                out.append({"card": card, "device": device or card, "profile": m.group(1), "label": m.group(2),
+                            "available": m.group(4) != "no"})
+        elif in_profiles and not line.startswith("\t\t"):
+            in_profiles = False
+    plain = {(c["card"], c["profile"]) for c in out if "+input:" not in c["profile"]}
+    return [c for c in out if "+input:" not in c["profile"]
+            or (c["card"], c["profile"].split("+input:")[0]) not in plain]
+
+
 class Pins:
     """The kiosk PIN: optional (none on a new box), PIN_LENGTHS digits, kept as a scrypt hash in a root-only
     file. PIN_TRIES wrong ones lock it for PIN_LOCK_SECONDS (in memory: a restart of the helper resets it)."""
@@ -623,6 +655,33 @@ class Kiosk:
         if code != 0:
             raise KioskError(f"Saved, but the sound didn't change now: {err.strip() or 'no sound server'}.", 409)
         return level
+
+    def _as_screen_user(self, cmd: list[str], timeout: int = 15) -> tuple[int, str, str]:
+        """A command in the kiosk's own sound session (PipeWire runs as the screen's user)."""
+        return self.run(["runuser", "-u", SCREEN_USER, "--", "env", f"XDG_RUNTIME_DIR=/run/user/{self.uid()}", *cmd],
+                        timeout)
+
+    def audio(self, token: str | None) -> dict:
+        """The sound output setting and the choices: HDMI (following the TV), automatic, and each output
+        profile of each sound card the box has (`pactl list cards`)."""
+        self.need(token)
+        _, out, _ = self._as_screen_user(["pactl", "list", "cards"])
+        current = self.conf().get("AUDIO_OUTPUT", "hdmi")
+        choices = [{"value": "hdmi", "label": "HDMI to the TV (switches over when the TV is turned on)", "available": True},
+                   {"value": "auto", "label": "Automatic (the system chooses)", "available": True}]
+        choices += [{"value": f"card:{c['card']}:{c['profile']}", "label": f"{c['device']} · {c['label']}",
+                     "available": c["available"]} for c in parse_cards(out)]
+        if not any(c["value"] == current for c in choices):     # a card that's unplugged right now
+            choices.append({"value": current, "label": current.removeprefix("card:") + " (not connected)",
+                            "available": False})
+        return {"current": current, "choices": choices}
+
+    def set_audio(self, token: str | None, value: str) -> str:
+        if not AUDIO_RE.match(value or "") or value not in {c["value"] for c in self.audio(token)["choices"]}:
+            raise KioskError("That isn't one of this box's sound outputs.", 422)
+        set_conf_value(self.conf_path, "AUDIO_OUTPUT", value)   # the sound script re-reads it every 30 s
+        self._as_screen_user([AUDIO_SCRIPT, "--once"], 30)       # and now
+        return value
 
     def screen(self, token: str | None) -> dict | None:
         """The screen's own settings on the server (the top bar), with a phone approval only."""
@@ -912,6 +971,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._json(200, k.jobs())
             elif path == "/api/kiosk/screen":
                 self._json(200, {"screen": k.screen(token)})
+            elif path == "/api/kiosk/audio":
+                self._json(200, k.audio(token))
             else:
                 self._send(404, "Not found", "text/plain")
         except KioskError as exc:
@@ -940,6 +1001,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._json(200, {"pin_set": k.pins.is_set()})
             elif path == "/api/kiosk/volume":
                 self._json(200, {"volume": k.set_volume(token, body.get("level"))})
+            elif path == "/api/kiosk/audio":
+                self._json(200, {"current": k.set_audio(token, str(body.get("output", "")))})
             elif path == "/api/kiosk/top-bar":
                 self._json(200, {"screen": k.set_top_bar(token, bool(body.get("on")))})
             elif path == "/api/kiosk/update":
@@ -1177,6 +1240,8 @@ section.card h2 { margin: 0 0 .6rem; font-size: 1.3rem; color: #ffd2ea; }
 .row { display: flex; gap: .7rem; flex-wrap: wrap; align-items: center; margin: .5rem 0; }
 .row input[type=text], .row input[type=url], .row input[type=password] { flex: 1 1 16rem; width: auto; }
 input[type=range] { flex: 1 1 14rem; accent-color: #ff2e97; }
+select { font: inherit; padding: .45rem .6rem; border-radius: .5rem; border: 1px solid #6b3a85; background: #1f0a2e;
+         color: inherit; flex: 1 1 16rem; min-width: 0; }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: .2rem 1rem; margin: 0; }
 dt { color: #b597c4; } dd { margin: 0; overflow-wrap: anywhere; }
 ul.releases { list-style: none; padding: 0; margin: .4rem 0; display: grid; gap: .4rem; }
@@ -1222,6 +1287,8 @@ label.switch input { width: 1.5rem; height: 1.5rem; accent-color: #ff2e97; }
         <h2>Screen</h2>
         <label class="switch"><input type="checkbox" id="top-bar"> Show the top bar (Ask, Files, the Wiki…)</label>
         <p class="muted" id="top-bar-note">Whoever signs in on the TV is signed out when they go back to the TV, or after ten minutes untouched.</p>
+        <div class="row"><label for="audio">Sound output</label>
+          <select id="audio" aria-label="Sound output"></select></div>
         <div class="row"><label for="volume">System volume</label>
           <input type="range" id="volume" min="0" max="100" step="5"><span id="volume-value"></span></div>
         <p class="muted">The sound card's level. Media's own volume (the remote's − and +) is on top of it.</p>
@@ -1313,14 +1380,28 @@ async function load() {
   const d = state.details, dl = $("details");
   dl.replaceChildren();
   [["Screen", scr ? scr.name : "(approve from a phone to see)"], ["Server", d.server], ["Name", d.hostname],
-   ["Addresses", d.addresses.join(", ") || "none"], ["System", d.os], ["Sound", d.audio === "hdmi" ? "HDMI" : "automatic"],
+   ["Addresses", d.addresses.join(", ") || "none"], ["System", d.os],
    ["Wi-Fi setup hotspot", d.wifi_setup ? "on" : "off"], ["Repository", d.source]].forEach(function (p) {
     dl.append(text("dt", p[0]), text("dd", p[1]));
   });
   $("reboot-now").hidden = !state.reboot_needed;
+  outputs();
   $("wifi-now").textContent = d.ssid ? "On " + d.ssid + "." : d.wifi ? "Not on Wi-Fi (a cable, or no network)." : "This box has no Wi-Fi.";
   releases();
   jobs();
+}
+
+async function outputs() {
+  let a;
+  try { a = await call("GET", "/api/kiosk/audio"); } catch (e) { return; }
+  const sel = $("audio");
+  sel.replaceChildren();
+  a.choices.forEach(function (c) {
+    const o = text("option", c.label + (c.available ? "" : " (nothing plugged in)"));
+    o.value = c.value;
+    sel.appendChild(o);
+  });
+  sel.value = a.current;
 }
 
 async function releases() {
@@ -1379,6 +1460,10 @@ $("top-bar").addEventListener("change", async function () {
   try { await call("POST", "/api/kiosk/top-bar", { on: $("top-bar").checked });
         say($("top-bar").checked ? "The top bar shows when you go back to the TV." : "The top bar is off."); }
   catch (err) { say(err.message, true); load(); }
+});
+$("audio").addEventListener("change", async function () {
+  try { await call("POST", "/api/kiosk/audio", { output: $("audio").value }); say("Sound now goes to " + $("audio").selectedOptions[0].textContent + "."); }
+  catch (err) { say(err.message, true); outputs(); }
 });
 $("volume").addEventListener("input", function () { $("volume-value").textContent = $("volume").value + "%"; });
 $("volume").addEventListener("change", async function () {

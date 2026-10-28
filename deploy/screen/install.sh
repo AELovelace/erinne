@@ -13,7 +13,9 @@
 #   sudo bash install.sh --update screen-v0.3.0                 # move to a release (Kiosk settings does this)
 #   sudo bash install.sh --rollback                             # back to the release before the last update
 #
-#   --audio hdmi|auto      sound over HDMI, also when the TV is turned on later (default), or leave
+#   --audio hdmi|auto|card:CARD:PROFILE
+#                          sound over HDMI, also when the TV is turned on later (default), a card and profile
+#                          from `pactl list cards` (Kiosk settings lists them), or leave
 #                          the choice to PipeWire
 #   --youtube-any-codec    let YouTube send VP9/AV1 (decoded on the CPU) instead of H.264 (the GPU)
 #   --no-auto-updates      don't install security updates nightly (dnf automatic, rebooting if needed)
@@ -125,10 +127,13 @@ EOF
 
 yes_no() { [[ $1 == 1 ]] && echo yes || echo no; }
 
+# hdmi, auto, or card:CARD:PROFILE (Kiosk settings). The settings file is sourced by bash: nothing else.
+valid_audio() { [[ $1 =~ ^(hdmi|auto|card:[A-Za-z0-9._-]+:[A-Za-z0-9:+._-]+)$ ]]; }
+
 # --keep-options: what this box has now, before the command line's options apply.
 load_options() {
     local v
-    v=$(conf_value AUDIO_OUTPUT); [[ $v == hdmi || $v == auto ]] && AUDIO=$v
+    v=$(conf_value AUDIO_OUTPUT); valid_audio "$v" && AUDIO=$v
     v=$(conf_value WIFI_SETUP); [[ $v == no ]] && WIFI_SETUP=0
     v=$(conf_value YOUTUBE_H264); [[ $v == no ]] && YOUTUBE_H264=0
     v=$(conf_value AUTO_UPDATES); [[ $v == no ]] && AUTO_UPDATES=0
@@ -148,9 +153,7 @@ PROFILE=$HOME/firefox
 mkdir -p "$PROFILE"
 rm -f "$PROFILE/lock" "$PROFILE/.parentlock"     # left by a power cut: Firefox would refuse to start
 cp /usr/local/share/mnemerynne-screen/user.js "$PROFILE/user.js"
-if [ "${AUDIO_OUTPUT:-hdmi}" = hdmi ]; then
-    /usr/local/bin/mnemerynne-screen-audio >/dev/null 2>&1 &
-fi
+/usr/local/bin/mnemerynne-screen-audio >/dev/null 2>&1 &     # the sound output; it reads the settings itself
 export MOZ_ENABLE_WAYLAND=1
 START=file:///usr/local/share/mnemerynne-screen/start.html
 # The helper's page (wifi-setup.py): it waits for the server, offers the setup hotspot when there's no
@@ -163,16 +166,18 @@ exec firefox --kiosk --no-remote --profile "$PROFILE" "$START"
 EOF
 }
 
-# Sound over HDMI: the sound card's HDMI profile and sink, checked every 30 s because the TV may be off
-# (HDMI audio unavailable) when the box starts. `--pick` reads `pactl list cards` and prints the card and
-# profile it would choose (tests).
+# The sound output (AUDIO_OUTPUT, set here or in Kiosk settings), applied every 30 s and re-read each time:
+#   hdmi           the sound card's HDMI profile and sink, as soon as the TV is on (it may be off at boot)
+#   card:CARD:PROF that card in that profile, and its sink (Kiosk settings lists what the box has)
+#   auto           left to PipeWire
+# `--pick` reads `pactl list cards` and prints the HDMI card and profile it would choose (tests); `--once`
+# applies the setting once and stops (Kiosk settings, right after a change).
 render_audio() {
     cat <<'EOF'
 #!/bin/bash
-# HDMI sound for the Mnemerynne screen (deploy/screen/install.sh).
+# Sound for the Mnemerynne screen (deploy/screen/install.sh).
 set -u
-SYSTEM_VOLUME=100
-. /etc/mnemerynne-screen.conf 2>/dev/null || true
+CONF=${MNEMERYNNE_SCREEN_CONF:-/etc/mnemerynne-screen.conf}
 pick() {
     awk '
         /^Card #/ { card = "" }
@@ -185,20 +190,32 @@ pick() {
 }
 if [ "${1:-}" = --pick ]; then pick; exit 0; fi
 
-for _ in $(seq 60); do pactl info >/dev/null 2>&1 && break; sleep 1; done
-while :; do
-    choice=$(pactl list cards 2>/dev/null | pick)
-    if [ -n "$choice" ]; then
-        card=${choice% *} profile=${choice#* }
-        active=$(pactl list cards | awk -v c="$card" '$1 == "Name:" { n = $2 } n == c && /Active Profile:/ { print $3 }')
-        [ "$active" = "$profile" ] || pactl set-card-profile "$card" "$profile"
-        sink=$(pactl list short sinks | awk '/hdmi/ { print $2; exit }')
-        if [ -n "$sink" ] && [ "$(pactl get-default-sink)" != "$sink" ]; then
-            pactl set-default-sink "$sink"
-            pactl set-sink-mute "$sink" 0
-            pactl set-sink-volume "$sink" "${SYSTEM_VOLUME:-100}%"   # Kiosk settings' volume; Media's is on top
-        fi
+apply() {
+    local choice card profile active sink
+    AUDIO_OUTPUT=hdmi SYSTEM_VOLUME=100
+    . "$CONF" 2>/dev/null || true
+    case $AUDIO_OUTPUT in
+        hdmi) choice=$(pactl list cards 2>/dev/null | pick) ;;
+        card:*) choice=${AUDIO_OUTPUT#card:}; choice="${choice%%:*} ${choice#*:}" ;;
+        *) return 0 ;;
+    esac
+    [ -n "$choice" ] || return 0
+    card=${choice%% *} profile=${choice#* }
+    active=$(pactl list cards | awk -v c="$card" '$1 == "Name:" { n = $2 } n == c && /Active Profile:/ { print $3 }')
+    [ "$active" = "$profile" ] || pactl set-card-profile "$card" "$profile" || return 0
+    # The card's sink: alsa_card.X has alsa_output.X.<profile> (HDMI: the first, for the first HDMI port).
+    sink=$(pactl list short sinks | awk -v p="alsa_output.${card#alsa_card.}." 'index($2, p) == 1 { print $2; exit }')
+    if [ -n "$sink" ] && [ "$(pactl get-default-sink)" != "$sink" ]; then
+        pactl set-default-sink "$sink"
+        pactl set-sink-mute "$sink" 0
+        pactl set-sink-volume "$sink" "${SYSTEM_VOLUME:-100}%"   # Kiosk settings' volume; Media's is on top
     fi
+}
+
+for _ in $(seq 60); do pactl info >/dev/null 2>&1 && break; sleep 1; done
+if [ "${1:-}" = --once ]; then apply; exit 0; fi
+while :; do
+    apply
     sleep 30
 done
 EOF
@@ -569,11 +586,14 @@ check() {
     else
         note "no copy of the repository in $SOURCE_DIR: Kiosk settings can't update (run the installer from a clone)"
     fi
-    if [[ -n $(pactl --server "unix:/run/user/$(id -u "$SCREEN_USER" 2>/dev/null || echo 0)/pulse/native" get-default-sink 2>/dev/null | grep -i hdmi) ]]; then
-        ok "sound goes to HDMI"
-    else
-        note "sound: not on HDMI yet (is the TV on? it switches within 30 s)"
-    fi
+    local sink output
+    sink=$(pactl --server "unix:/run/user/$(id -u "$SCREEN_USER" 2>/dev/null || echo 0)/pulse/native" get-default-sink 2>/dev/null || true)
+    output=$(conf_value AUDIO_OUTPUT)
+    case ${output:-hdmi} in
+        hdmi) if [[ $sink == *hdmi* ]]; then ok "sound goes to HDMI"; else note "sound: not on HDMI yet (is the TV on? it switches within 30 s)"; fi ;;
+        auto) note "sound: PipeWire chooses (now ${sink:-nothing})" ;;
+        *) if [[ -n $sink ]]; then ok "sound goes to $sink (Kiosk settings: $output)"; else note "sound: no output yet ($output)"; fi ;;
+    esac
     return $FAILED
 }
 
@@ -600,7 +620,7 @@ parse_args() {
     while [[ $# -gt 0 ]]; do
         case $1 in
             --audio) AUDIO=${2:-}; shift
-                     [[ $AUDIO == hdmi || $AUDIO == auto ]] || die "--audio is hdmi or auto" ;;
+                     valid_audio "$AUDIO" || die "--audio is hdmi, auto or card:CARD:PROFILE" ;;
             --youtube-any-codec) YOUTUBE_H264=0 ;;
             --no-auto-updates) AUTO_UPDATES=0 ;;
             --no-wifi-setup) WIFI_SETUP=0 ;;

@@ -230,3 +230,52 @@ def test_it_is_for_fedora_and_needs_an_address(tmp_path):
     (root / "etc" / "os-release").write_text("ID=debian\n")
     r = run("https://erynne.example.com", root=root, check=False)
     assert r.returncode != 0 and "this is for Fedora" in r.stderr
+
+
+def _sound(tmp_path, output, default_sink="alsa_output.pci-0000_00_1b.0.hdmi-stereo"):
+    """The sound script once (--once) with this AUDIO_OUTPUT, against a pactl that logs what it's told."""
+    audio = tmp_path / "audio.sh"
+    audio.write_text(bash("render_audio").stdout, newline="\n")
+    fake = tmp_path / "bin"
+    fake.mkdir(exist_ok=True)
+    (tmp_path / "cards.txt").write_text(CARDS, newline="\n")
+    (fake / "pactl").write_text(
+        "#!/bin/bash\n"
+        f'echo "$*" >> "{posix(tmp_path)}/pactl.log"\n'
+        'case "$*" in\n'
+        f'  "list cards") cat "{posix(tmp_path)}/cards.txt" ;;\n'
+        '  "list short sinks") printf "1\\talsa_output.pci-0000_00_1b.0.analog-stereo\\tPipeWire\\n"\n'
+        '                      printf "2\\talsa_output.usb-Generic_USB_Audio-00.analog-stereo\\tPipeWire\\n" ;;\n'
+        f'  get-default-sink) echo {default_sink} ;;\n'
+        "esac\n", newline="\n")
+    conf = tmp_path / "screen.conf"
+    conf.write_text(f"AUDIO_OUTPUT={output}\nSYSTEM_VOLUME=40\n", newline="\n")
+    (tmp_path / "pactl.log").unlink(missing_ok=True)
+    subprocess.run([BASH, "-c", f'chmod +x "{posix(fake)}/pactl"; PATH="{posix(fake)}:$PATH" '
+                                f'MNEMERYNNE_SCREEN_CONF="{posix(conf)}" bash "{posix(audio)}" --once'],
+                   check=True, capture_output=True, text=True)
+    log = tmp_path / "pactl.log"
+    return log.read_text().splitlines() if log.exists() else []
+
+
+def test_the_sound_goes_where_kiosk_settings_says(tmp_path):
+    told = _sound(tmp_path, "card:alsa_card.usb-Generic_USB_Audio-00:output:analog-stereo+input:mono-fallback")
+    assert "set-card-profile alsa_card.usb-Generic_USB_Audio-00 output:analog-stereo+input:mono-fallback" in told
+    assert "set-default-sink alsa_output.usb-Generic_USB_Audio-00.analog-stereo" in told
+    assert "set-sink-volume alsa_output.usb-Generic_USB_Audio-00.analog-stereo 40%" in told
+    # HDMI: the card's HDMI profile (the TV is on in CARDS), as before.
+    told = _sound(tmp_path, "hdmi")
+    assert "set-card-profile alsa_card.pci-0000_00_1b.0 output:hdmi-stereo" in told
+    # Automatic: nothing touched.
+    assert not any(t.startswith("set-") for t in _sound(tmp_path, "auto"))
+
+
+def test_a_chosen_sound_output_is_kept_and_checked(tmp_path):
+    root = _root(tmp_path)
+    card = "card:alsa_card.pci-0000_00_1b.0:output:analog-stereo"
+    run("https://erynne.example.com", "--no-packages", "--audio", card, root=root)
+    run("--keep-options", "--no-packages", root=root)
+    assert f"AUDIO_OUTPUT={card}\n" in (root / "etc" / "mnemerynne-screen.conf").read_text()
+    for bad in ("card:x;reboot", "hdmi2", "card:x"):
+        r = run("--keep-options", "--no-packages", "--audio", bad, root=root, check=False)
+        assert r.returncode != 0 and "--audio is" in r.stderr

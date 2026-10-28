@@ -57,7 +57,7 @@ Options:
 
 | Option | What it does |
 | --- | --- |
-| `--audio auto` | Let PipeWire choose the output, instead of HDMI. |
+| `--audio auto` | Let PipeWire choose the output, instead of HDMI. Kiosk settings lists the box's other outputs (`--audio card:CARD:PROFILE`). |
 | `--youtube-any-codec` | Let YouTube send VP9 or AV1. By default it's asked for H.264, which this GPU decodes. VP9 or AV1 are decoded on the CPU, which manages 1080p at 30 fps but struggles at 60 fps. |
 | `--no-auto-updates` | Don't install updates nightly. By default `dnf5-automatic` installs them and reboots when an update needs it. |
 | `--no-wifi-setup` | No setup hotspot. The start page and Kiosk settings are still there. |
@@ -132,6 +132,7 @@ They lock again after ten minutes untouched, or with **Lock**.
 | --- | --- |
 | **Mnemerynne address** | The server the TV shows. The box checks the new one answers like Mnemerynne, then runs `install.sh --reconfigure` with it and restarts. The TV shows the new server's pairing code. |
 | **Show the top bar** | The TV page gets a short top bar: Ask, Files and the Wiki, and **Sign in**. Whoever signs in on the TV is signed out when they go back to the TV (**📺 Back to TV**), or after ten minutes untouched. Kept on the server for this screen, so it needs a phone approval to change. |
+| **Sound output** | **HDMI to the TV** (the default: it switches over as soon as the TV is on), **Automatic**, or any output the box's sound cards have, such as headphones or USB speakers. Applied at once and kept (`AUDIO_OUTPUT`). |
 | **System volume** | The sound card's level, kept across restarts. Media's own volume (− and +) is on top of it. |
 | **Screen size…** | For a TV that crops the picture's edges: arrows until the pink frame shows whole, Enter to save. Back to the settings after. The phone's **Screen size** (Media → Screens) does the same. |
 | **Updates** | The installed `screen-v*` release, newer ones with their notes, **Install**, and **Roll back** to the one before the last update. Only newer releases install, and never over changes made by hand in `/opt/mnemerynne-screen`. **Install system updates now** runs `dnf5 upgrade`; **Reboot to finish** shows when a new kernel is waiting. |

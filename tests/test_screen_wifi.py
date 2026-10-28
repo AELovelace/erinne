@@ -550,3 +550,62 @@ def test_hidden_parts_of_the_pages_stay_hidden():
     # The Wi-Fi page's form is display: grid; without this its Cancel button did nothing.
     for page in (ws.START_PAGE, ws.WIFI_PAGE, ws.SETTINGS_PAGE):
         assert "[hidden] { display: none !important; }" in page
+
+
+CARDS = """Card #42
+\tName: alsa_card.pci-0000_00_1b.0
+\tDriver: alsa
+\tProperties:
+\t\tdevice.description = "Built-in Audio"
+\t\tdevice.bus = "pci"
+\tProfiles:
+\t\toff: Off (sinks: 0, sources: 0, priority: 0, available: yes)
+\t\toutput:analog-stereo: Analog Stereo Output (sinks: 1, sources: 0, priority: 6500, available: yes)
+\t\toutput:hdmi-stereo: Digital Stereo (HDMI) Output (sinks: 1, sources: 0, priority: 5900, available: yes)
+\t\toutput:hdmi-stereo+input:analog-stereo: Digital Stereo (HDMI) Output + Analog Stereo Input (sinks: 1, sources: 1, priority: 5965, available: yes)
+\t\tinput:analog-stereo: Analog Stereo Input (sinks: 0, sources: 1, priority: 65, available: yes)
+\tActive Profile: output:hdmi-stereo
+\tPorts:
+\t\tanalog-output-headphones: Headphones (type: Headphones, priority: 9900, available)
+\t\t\tProperties:
+\t\t\t\tport.type = "headphones"
+Card #43
+\tName: alsa_card.usb-Generic_USB_Audio-00
+\tProperties:
+\t\tdevice.description = "USB Speakers"
+\tProfiles:
+\t\toutput:analog-stereo+input:mono-fallback: Analog Stereo Output + Mono Input (sinks: 1, sources: 1, priority: 6501, available: no)
+\tActive Profile: off
+"""
+
+
+def test_the_sound_outputs_come_from_the_cards(kiosk):
+    k, run, server, clock, setup, conf = kiosk
+    assert [(c["device"], c["profile"], c["available"]) for c in ws.parse_cards(CARDS)] == [
+        ("Built-in Audio", "output:analog-stereo", True),
+        ("Built-in Audio", "output:hdmi-stereo", True),               # not again with the microphone
+        ("USB Speakers", "output:analog-stereo+input:mono-fallback", False)]   # its only one
+
+    real = run.__call__
+
+    def with_cards(args, timeout=60):
+        if args[-3:] == ["pactl", "list", "cards"]:
+            run.calls.append(args)
+            return 0, CARDS, ""
+        return real(args, timeout)
+    k.run = with_cards
+    token = k.unlock_grant("good-grant")
+    a = k.audio(token)
+    assert a["current"] == "hdmi"
+    assert [c["value"] for c in a["choices"]][:3] == ["hdmi", "auto", "card:alsa_card.pci-0000_00_1b.0:output:analog-stereo"]
+
+    assert k.set_audio(token, "card:alsa_card.pci-0000_00_1b.0:output:analog-stereo").endswith("analog-stereo")
+    assert "AUDIO_OUTPUT=card:alsa_card.pci-0000_00_1b.0:output:analog-stereo\n" in conf.read_text()
+    assert run.calls[-1][-2:] == ["/usr/local/bin/mnemerynne-screen-audio", "--once"]
+    assert run.calls[-1][:3] == ["runuser", "-u", "mnemerynne-screen"]
+    # The settings file is sourced by bash: only the listed values, nothing that would run.
+    for bad in ("card:alsa_card.pci-0000_00_1b.0:output:analog-stereo;reboot", "card:other:output:x", "$(id)", ""):
+        with pytest.raises(ws.KioskError):
+            k.set_audio(token, bad)
+    with pytest.raises(ws.KioskError):
+        k.audio(None)                                          # locked
