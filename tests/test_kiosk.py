@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from mnemerynne import accounts, users
 from mnemerynne.media import kiosk, screens
-from test_media import (_login, _pair, _turn_on, checker, client, conn,  # noqa: F401
+from test_media import (_hub, _login, _pair, _turn_on, checker, client, conn,  # noqa: F401
                         directory, root, settings, _no_network)
 
 
@@ -147,3 +147,151 @@ def test_a_sign_in_on_the_tv_ends_when_it_goes_back_to_the_tv(client, conn, dire
     client.get("/media/screen")
     assert client.get("/files").status_code == 200
     assert "data-kiosk-back" not in client.get("/files").text
+
+
+# ------------------------------------------------------------- screen boxes
+def test_a_box_gets_the_small_bar_and_its_underscan_on_every_page(client, conn, directory):
+    _login(client, conn, directory)
+    _turn_on(client)
+    screen_id, key = _pair(client)
+    tv = _tv(client, key)
+    assert tv.put("/media/screen/safe-area", json={"x": 3, "y": 2.5}).status_code == 200
+    page = tv.get("/media/screen").text
+    assert 'class="tv tv-page"' in page and "--safe-x: 3.0%" in page          # a TV, not (yet) a box
+
+    page = tv.get("/media/screen?kiosk=1").text                               # the box's start page opens it so
+    assert 'class="tv tv-box tv-page"' in page and "screen_link.js" not in page and "tv-strip" not in page
+    assert conn.execute("SELECT is_box FROM media_screens WHERE id = ?", (screen_id,)).fetchone()[0] == 1
+
+    # Any other page: the underscan, the small bar (Back to TV, ‹ ›) and the remote.
+    page = tv.get("/login").text
+    assert 'class="tv tv-box"' in page and "--safe-yv: 2.5vh" in page
+    assert 'class="tv-strip"' in page and 'data-tv-go="back"' in page and "screen_link.js" in page
+    framed = tv.get("/login", headers={"sec-fetch-dest": "iframe"}).text      # in a frame: the page around it has them
+    assert 'class="tv' not in framed and "tv-strip" not in framed
+    assert 'class="tv' not in TestClient(client.app).get("/login").text      # not a screen at all
+
+    # With its top bar on: one Back to TV on the sign-in page, and ‹ › in the TV page's bar.
+    kiosk.set_top_bar(conn, screen_id, True)
+    conn.commit()
+    assert tv.get("/login").text.count("Back to TV") == 1
+    assert "tv-history" in tv.get("/media/screen").text
+    assert tv.post("/login", data={"username": "boss", "password": "password123"},
+                   follow_redirects=False).status_code == 303
+    page = tv.get("/files").text                                              # signed in: the full bar has them
+    assert 'class="topbar main-bar"' in page and page.count('data-tv-go="forward"') == 2   # the bar's and the strip's
+    assert "screen_link.js" in page
+
+
+def test_documents_open_in_a_page_with_the_bar_on_a_box(client, conn, directory):
+    _login(client, conn, directory)
+    _turn_on(client)
+    made = client.post("/api/files/text", json={"name": "Runbook", "content": "# Runbook\n\nSteps.\n"})
+    assert made.status_code in (200, 201), made.text
+    file_id = made.json()["id"]
+    _, key = _pair(client)
+    tv = _tv(client, key)
+
+    def sign_in():
+        assert tv.post("/login", data={"username": "boss", "password": "password123"},
+                       follow_redirects=False).status_code == 303
+    opened = {"sec-fetch-dest": "document"}
+    sign_in()
+    assert tv.get(f"/files/{file_id}/view", headers=opened).status_code == 200      # not a box yet
+    tv.get("/media/screen?kiosk=1")
+    sign_in()                                                                        # the TV page signed it out
+    r = tv.get(f"/files/{file_id}/view", headers=opened, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == f"/files/{file_id}/tv/view"
+    page = tv.get(f"/files/{file_id}/tv/view").text
+    assert f'<iframe src="/files/{file_id}/view"' in page and "tv-strip" in page and "screen_link.js" in page
+    inside = tv.get(f"/files/{file_id}/view", headers={"sec-fetch-dest": "iframe"})
+    assert inside.status_code == 200 and "Steps." in inside.text and "tv-strip" not in inside.text
+    assert tv.get(f"/files/{file_id}/tv/elsewhere").status_code == 422
+    assert client.get(f"/files/{file_id}/view", headers=opened).status_code == 200   # the phone: as before
+
+
+def test_someone_using_the_tv_can_keep_it_and_an_admin_can_override(client, conn, directory):
+    _login(client, conn, directory)                  # boss: an admin
+    _turn_on(client)
+    screen_id, key = _pair(client)
+    tv = _tv(client, key)
+    hub = _hub(client)
+    queue = hub.listen(screen_id)
+
+    def cast(body, who=client, screen=screen_id):
+        r = who.post(f"/api/media/screens/{screen}/command", json=body)
+        assert r.status_code == 200, r.text
+        return r.json()["id"]
+
+    def answer(command_id, who=client, screen=screen_id):
+        return who.get(f"/api/media/screens/{screen}/commands/{command_id}")
+
+    # Someone using the TV keeps it.
+    first = cast({"action": "toggle"})
+    assert queue.get_nowait()["id"] == first and answer(first).json() == {"state": "sent"}
+    assert tv.post(f"/media/screen/commands/{first}", json={"state": "waiting", "seconds": 10}).status_code == 200
+    assert answer(first).json() == {"state": "waiting", "seconds": 10}
+    assert tv.post(f"/media/screen/commands/{first}", json={"state": "kept"}).status_code == 200
+    assert answer(first).json() == {"state": "kept"}
+    assert client.post(f"/api/media/screens/{screen_id}/commands/{first}/override").status_code == 409
+
+    # An admin overrides one that's counting down; the TV then says it's done.
+    second = cast({"action": "stop"})
+    queue.get_nowait()
+    tv.post(f"/media/screen/commands/{second}", json={"state": "waiting", "seconds": 10})
+    assert client.post(f"/api/media/screens/{screen_id}/commands/{second}/override").status_code == 200
+    assert queue.get_nowait() == {"action": "override", "id": second, "sender": "boss"}
+    assert tv.post(f"/media/screen/commands/{second}", json={"state": "done"}).status_code == 200
+    assert answer(second).json() == {"state": "done"}
+    assert tv.post("/media/screen/commands/nonsense", json={"state": "done"}).status_code == 404
+    assert tv.post(f"/media/screen/commands/{second}", json={"state": "maybe"}).status_code == 422
+    assert answer("nonsense").status_code == 404
+
+    # Or overrides from the start.
+    cast({"action": "stop", "override": True})
+    assert queue.get_nowait()["override"] is True
+    assert tv.put("/api/media/screen/state", json={"kind": "in_use", "title": "Someone is using the TV"}).status_code == 200
+
+    # Someone who isn't an admin: their own screens only, and no overriding.
+    jane = _signed_in(client, conn, directory, "jane", "jsmith")
+    jane_screen = jane.post("/api/media/screens", json={"name": "Kitchen"}).json()["id"]
+    jane_queue = hub.listen(jane_screen)
+    assert jane.post(f"/api/media/screens/{jane_screen}/command", json={"action": "stop", "override": True}).status_code == 403
+    assert jane.post(f"/api/media/screens/{screen_id}/command", json={"action": "stop"}).status_code == 404
+    assert answer(first, jane).status_code == 404
+    mine = cast({"action": "stop"}, jane, jane_screen)
+    jane_queue.get_nowait()
+    assert tv.post(f"/media/screen/commands/{mine}", json={"state": "waiting", "seconds": 10}).status_code == 404   # another TV
+    assert answer(mine, jane, jane_screen).json() == {"state": "sent"}
+    assert jane.post(f"/api/media/screens/{jane_screen}/commands/{mine}/override").status_code == 403
+    assert [s["owner"] for s in jane.get("/api/media/screens").json()["screens"]] == [None]
+
+    # The admin sees everyone's screens and can cast to them; only their owner removes them.
+    listed = client.get("/api/media/screens").json()
+    assert listed["admin"] is True and [(s["name"], s["owner"]) for s in listed["screens"]] == [
+        ("Living room", None), ("Kitchen", "jane")]
+    cast({"action": "toggle"}, client, jane_screen)
+    assert jane_queue.get_nowait()["sender"] == "boss"
+    assert client.delete(f"/api/media/screens/{jane_screen}").status_code == 404
+    logged = conn.execute("SELECT action, target, detail FROM access_log WHERE action LIKE 'screen.%' ORDER BY id").fetchall()
+    assert [tuple(r) for r in logged] == [("screen.override", "Living room", ""),
+                                          ("screen.cast", "Living room", "stop (override)"),
+                                          ("screen.cast", "Kitchen", "toggle")]
+    hub.unlisten(screen_id, queue)
+    hub.unlisten(jane_screen, jane_queue)
+
+
+def test_commands_answers_run_out():
+    clock = Clock()
+    hub = screens.Hub(clock=clock)
+    assert hub.send(1, {"action": "stop"}) is None                     # nobody listening
+    queue = hub.listen(1)
+    command_id = hub.send(1, {"action": "stop"})
+    assert queue.get_nowait() == {"action": "stop", "id": command_id}
+    assert not hub.answer(2, command_id, {"state": "done"})            # only the screen it went to
+    assert hub.answer(1, command_id, {"state": "done"}) and hub.answer_of(1, command_id) == {"state": "done"}
+    assert hub.answer_of(2, command_id) is None
+    clock.now += screens.COMMAND_SECONDS + 1
+    assert hub.answer_of(1, command_id) is None
+    hub.send(1, {"action": "stop"})                                    # sweeps the old ones
+    assert command_id not in hub._answers

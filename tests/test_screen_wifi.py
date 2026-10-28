@@ -3,6 +3,7 @@ when there's no network (and stepping aside for known networks), joining a netwo
 
 import http.client
 import importlib.util
+import io
 import json
 import threading
 import time
@@ -609,3 +610,65 @@ def test_the_sound_outputs_come_from_the_cards(kiosk):
             k.set_audio(token, bad)
     with pytest.raises(ws.KioskError):
         k.audio(None)                                          # locked
+
+
+# ------------------------------------------------------------- restart keys
+CTRL, SHIFT, ALT, RIGHT_ALT = 29, 42, 56, 100
+
+
+def _keys(clock=None):
+    restarts = []
+    keys = ws.RestartKeys(lambda: restarts.append(1), clock=clock or (lambda: 1000.0))
+    return keys, restarts
+
+
+def _press(keys, *codes):
+    for code in codes:
+        keys.key(code, 1)
+    for code in reversed(codes):
+        keys.key(code, 0)
+
+
+def test_ctrl_shift_alt_r_restarts_the_kiosk():
+    now = [1000.0]
+    keys, restarts = _keys(lambda: now[0])
+    _press(keys, CTRL, SHIFT, ws.KEY_R)                    # no Alt
+    _press(keys, CTRL, ALT, ws.KEY_R)                      # no Shift
+    _press(keys, ws.KEY_R)
+    assert restarts == []
+    _press(keys, CTRL, SHIFT, RIGHT_ALT, ws.KEY_R)         # either Alt
+    assert restarts == [1]
+    _press(keys, CTRL, SHIFT, ALT, ws.KEY_R)               # again at once: one restart is enough
+    assert restarts == [1]
+    now[0] += ws.RESTART_KEYS_WAIT
+    keys.key(CTRL, 1), keys.key(SHIFT, 1), keys.key(ALT, 1)
+    keys.key(ws.KEY_R, 2)                                  # held down, not pressed: nothing
+    assert restarts == [1]
+    keys.key(ws.KEY_R, 1)
+    assert restarts == [1, 1]
+
+
+def test_restart_keys_are_read_from_every_input_device(tmp_path):
+    def events(*keys):
+        return b"".join(ws.INPUT_EVENT.pack(0, 0, ws.EV_KEY, code, value) for code, value in keys) + \
+            ws.INPUT_EVENT.pack(0, 0, 0, 0, 0)            # a sync event: not a key
+    (tmp_path / "event0").write_bytes(events((CTRL, 1), (SHIFT, 1), (ALT, 1), (ws.KEY_R, 1)))
+    (tmp_path / "event1").write_bytes(events((ws.KEY_R, 1)))
+    (tmp_path / "mice").write_bytes(b"not an event device")
+    restarts = []
+    keys = ws.RestartKeys(lambda: restarts.append(1), clock=lambda: 1000.0, input_dir=str(tmp_path))
+    keys.scan()
+    for _ in range(100):                                   # each device is read in its own thread, to its end
+        if restarts and not keys.watching:
+            break
+        time.sleep(0.02)
+    assert restarts == [1] and keys.watching == set()
+    keys.read(io.BytesIO(b"short"))                        # a device that went away mid-event
+    ws.RestartKeys(lambda: None, input_dir=str(tmp_path / "missing")).scan()
+
+
+def test_the_kiosk_opens_new_windows_in_place_and_backspace_goes_back():
+    install = (PATH.parent / "install.sh").read_text(encoding="utf-8")
+    for pref in ('"browser.backspace_action", 0', '"browser.link.open_newwindow", 1',
+                 '"browser.link.open_newwindow.restriction", 0'):
+        assert f"user_pref({pref});" in install

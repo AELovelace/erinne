@@ -63,7 +63,9 @@ Either way, the TV stays paired until you remove it, even after any sign-in runs
 - **Screen size:** if the TV cuts off the edges of the picture, use **Screens → Screen size** on your phone (on a screen box an admin can also use **Kiosk settings → Screen size…** on the TV). Narrow it until the whole pink frame and the arrows in all four corners show, then **Save**. First check the TV's own picture settings for *Just Scan*, *Screen Fit* or *1:1*: that fixes it without shrinking anything.
 - **Screens** lists your screens and whether they're on. **Remove** unpairs one.
 
-Only you can see and control your screens. Screens are only for members of the group your admin chose; without it, there is no **Screens** item in the menu.
+- **Someone using the TV:** on a screen box, if someone is using another page on the TV, they get 10 seconds to keep it. Your phone says so, then whether it switched or they kept it.
+
+Only you (and admins) can see and control your screens. Screens are only for members of the group your admin chose; without it, there is no **Screens** item in the menu.
 
 ## Signage on the screens
 

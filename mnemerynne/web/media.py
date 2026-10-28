@@ -43,9 +43,11 @@ def _media_on(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> N
     if not media.enabled(conn):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
     user = _session_user(request, conn)
-    if user is None:
+    # The TV's own routes go by its screen key, even while someone is signed in on it (its top bar).
+    if user is None or request.url.path.startswith(("/media/screen", "/api/media/screen/")):
         screen = _screen(request, conn)
-        user = users.get_user_by_id(conn, screen["user_id"]) if screen is not None else None
+        if screen is not None:
+            user = users.get_user_by_id(conn, screen["user_id"])
     if user is not None and not media.may_use(conn, user, request.app.state.directory):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
 
@@ -370,18 +372,24 @@ def _key_cookie(response, request: Request, token: str) -> None:
 @router.get("/media/screen", response_class=HTMLResponse)
 def screen_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     """The TV: Media full-screen, waiting for what its owner casts. Unpaired, it shows a code to pair with
-    from a phone (no sign-in needed on the TV)."""
+    from a phone (no sign-in needed on the TV). The screen box's start page comes here as ?kiosk=1, which
+    marks the screen as a box (the small bar and the remote on every page)."""
     screen = _screen(request, conn)
     owner = users.get_user_by_id(conn, screen["user_id"]) if screen is not None else None
     if owner is None or not screens.may_use(conn, owner, request.app.state.directory):
         return request.app.state.templates.TemplateResponse(request, "media_pair.html", {})
     if request.session.get("kiosk_screen"):
         request.session.clear()      # someone signed in on the TV (its top bar): back on the TV, signed out
+    box = bool(screen["is_box"])
+    if request.query_params.get("kiosk") == "1" and not box:
+        with transaction(conn):
+            screens.mark_box(conn, screen["id"])
+        box = True
     return request.app.state.templates.TemplateResponse(request, "media.html", {
         "user": owner, "is_admin": False, "active": "media", "has_library": media.library(conn) is not None,
         "folder": _folder_name(conn), "screen": {"id": screen["id"], "name": screen["name"],
                                                  "safe_x": screen["safe_x"], "safe_y": screen["safe_y"],
-                                                 "top_bar": bool(screen["top_bar"])}})
+                                                 "top_bar": bool(screen["top_bar"]), "box": box}})
 
 
 class ScreenBody(BaseModel):
@@ -484,11 +492,18 @@ async def claim_screen(body: ClaimBody, request: Request, user=Depends(screens_u
 def list_screens(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
     h = hub(request)
     mine = _screen(request, conn)
-    # Out of the group: only their screens, to remove them (and casting refused).
-    return {"allowed": screens.may_use(conn, user, request.app.state.directory), "screens": [{"id": s["id"], "name": s["name"], "online": h.online(s["id"]), "state": h.state(s["id"]),
-                         "last_seen": s["last_seen_at"], "this": mine is not None and mine["id"] == s["id"],
-                         "safe": {"x": s["safe_x"], "y": s["safe_y"]}}
-                        for s in screens.of_user(conn, user["id"])]}
+    allowed = screens.may_use(conn, user, request.app.state.directory)
+    admin = allowed and is_admin(request, conn, user)
+
+    def row(s: sqlite3.Row, owner: str | None) -> dict:
+        return {"id": s["id"], "name": s["name"], "online": h.online(s["id"]), "state": h.state(s["id"]),
+                "last_seen": s["last_seen_at"], "this": mine is not None and mine["id"] == s["id"],
+                "safe": {"x": s["safe_x"], "y": s["safe_y"]}, "owner": owner}
+    # Out of the group: only their screens, to remove them (and casting refused). Admins: everyone's too.
+    out = [row(s, None) for s in screens.of_user(conn, user["id"])]
+    if admin:
+        out += [row(s, s["owner"]) for s in screens.of_others(conn, user["id"])]
+    return {"allowed": allowed, "admin": admin, "screens": out}
 
 
 @router.delete("/api/media/screens/{screen_id}")
@@ -516,6 +531,7 @@ class Command(BaseModel):
     by: float | None = Field(None, ge=-36000, le=36000)  # skip
     level: float | None = Field(None, ge=0, le=1)        # volume; night (none: the next step)
     step: Literal["open", "wider", "narrower", "taller", "shorter", "reset", "save", "cancel"] | None = None  # calibrate
+    override: bool = False                               # an admin: no countdown for someone using the TV
 
 
 def _command(conn: sqlite3.Connection, user, body: Command) -> dict:
@@ -556,17 +572,74 @@ def _command(conn: sqlite3.Connection, user, body: Command) -> dict:
     return {k: v for k, v in body.model_dump().items() if k in ("action", "to", "by", "level") and v is not None}
 
 
+def _castable(request: Request, conn: sqlite3.Connection, user, screen_id: int) -> sqlite3.Row:
+    """One of the person's screens; for an admin, anyone's."""
+    screen = screens.owned(conn, user["id"], screen_id)
+    if screen is None and is_admin(request, conn, user):
+        screen = conn.execute("SELECT * FROM media_screens WHERE id = ?", (screen_id,)).fetchone()
+    if screen is None:
+        raise _not_found()
+    return screen
+
+
 @router.post("/api/media/screens/{screen_id}/command")
 async def cast(screen_id: int, body: Command, request: Request, user=Depends(screens_user),
                conn: sqlite3.Connection = Depends(get_db)):
-    """Play something on, or control, one of the person's screens."""
-    screen = screens.owned(conn, user["id"], screen_id)
-    if screen is None:
-        raise _not_found()
+    """Play something on, or control, one of the person's screens (an admin: anyone's). Someone using the
+    TV gets screens.TAKEOVER_SECONDS to keep it, unless an admin overrides; ask after it by its id."""
+    screen = _castable(request, conn, user, screen_id)
+    if body.override and not is_admin(request, conn, user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only admins can override someone using the TV.")
     command = await anyio.to_thread.run_sync(_command, conn, user, body)
-    if not hub(request).push(screen_id, command):
+    command.update(sender=user["username"], override=body.override)
+    command_id = hub(request).send(screen_id, command)
+    if command_id is None:
         raise HTTPException(status.HTTP_409_CONFLICT, f"{screen['name']} isn't connected: is Media open on it?")
+    if body.override or screen["user_id"] != user["id"]:
+        with transaction(conn):
+            _log(conn, user, "screen.cast", screen["name"], body.action + (" (override)" if body.override else ""))
+    return {"status": "sent", "id": command_id}
+
+
+@router.get("/api/media/screens/{screen_id}/commands/{command_id}")
+def command_answer(screen_id: int, command_id: str, request: Request, user=Depends(screens_user),
+                   conn: sqlite3.Connection = Depends(get_db)):
+    """How a command went: sent, waiting (someone is using the TV; seconds left), done, or kept."""
+    _castable(request, conn, user, screen_id)
+    answer = hub(request).answer_of(screen_id, command_id)
+    if answer is None:
+        raise _not_found("That command is too old.")
+    return answer
+
+
+@router.post("/api/media/screens/{screen_id}/commands/{command_id}/override")
+async def override_command(screen_id: int, command_id: str, request: Request, user=Depends(screens_user),
+                           conn: sqlite3.Connection = Depends(get_db)):
+    """An admin: the TV stops waiting for the person using it and carries out the command now."""
+    if not is_admin(request, conn, user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only admins can override someone using the TV.")
+    screen = _castable(request, conn, user, screen_id)
+    answer = hub(request).answer_of(screen_id, command_id)
+    if answer is None or answer["state"] not in ("sent", "waiting"):
+        raise HTTPException(status.HTTP_409_CONFLICT, "That command isn't waiting any more.")
+    if not hub(request).push(screen_id, {"action": "override", "id": command_id, "sender": user["username"]}):
+        raise HTTPException(status.HTTP_409_CONFLICT, f"{screen['name']} isn't connected right now.")
+    with transaction(conn):
+        _log(conn, user, "screen.override", screen["name"])
     return {"status": "sent"}
+
+
+class CommandAnswer(BaseModel):
+    state: Literal["waiting", "done", "kept"]
+    seconds: int | None = Field(None, ge=0, le=60)       # waiting: how long until it takes over
+
+
+@router.post("/media/screen/commands/{command_id}")
+async def screen_answer(command_id: str, body: CommandAnswer, request: Request, screen=Depends(screen_device)):
+    """The TV says how a command went: waiting for the person using it, done, or kept by them."""
+    if not hub(request).answer(screen["id"], command_id, body.model_dump(exclude_none=True)):
+        raise _not_found()
+    return {"status": "ok"}
 
 
 @router.get("/media/screen/stream")
@@ -600,7 +673,8 @@ async def screen_stream(request: Request, screen=Depends(screen_device), conn: s
 
 
 class ScreenState(BaseModel):
-    kind: Literal["idle", "video", "live", "youtube", "audio", "radio", "pictures", "signage", "calibrating"]
+    kind: Literal["idle", "video", "live", "youtube", "audio", "radio", "pictures", "signage", "calibrating",
+                  "in_use"]                              # in_use: a box on a page other than the TV page
     title: str = Field("", max_length=300)
     sub: str = Field("", max_length=300)
     art: str | None = Field(None, max_length=300)
@@ -1147,7 +1221,8 @@ async def admin_screen_command(screen_id: int, body: ScreenCommandBody, request:
     row = conn.execute("SELECT name FROM media_screens WHERE id = ?", (screen_id,)).fetchone()
     if row is None:
         raise _not_found()
-    if not hub(request).push(screen_id, {"action": body.action}):
+    # Someone using the TV (a box, on another page): an admin's command here doesn't wait for them.
+    if hub(request).send(screen_id, {"action": body.action, "sender": user["username"], "override": True}) is None:
         raise HTTPException(status.HTTP_409_CONFLICT, f"{row['name']} isn't connected right now.")
     _log(conn, user, "signage.command", row["name"], body.action)
     conn.commit()

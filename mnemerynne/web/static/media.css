@@ -296,6 +296,10 @@ body.mc-screen-mode:has(> .topbar) .mc { margin-top: .9rem;
 /* Kiosk settings: the last thing in the TV's menu, at its bottom. */
 .mc-menu #mc-kiosk { margin-top: auto; }
 .mc-kiosk-buttons button { font-size: 1.2rem; padding: .7rem 1.6rem; }
+/* The phone: a command waiting for someone using the TV (media.js cast.follow), Override for an admin. */
+.mc-takeover-note { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; margin: 0 0 .5rem; padding: .6rem .9rem;
+                    border-radius: 12px; background: var(--busy-bg); color: var(--busy-fg); box-shadow: var(--shadow); }
+.mc-takeover-note[hidden] { display: none; }
 
 /* -------------------------------------------- pairing a TV (media_pair.html) */
 .mc-pair-row { display: flex; gap: 3rem; align-items: center; justify-content: center; text-align: left;

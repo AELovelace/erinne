@@ -148,6 +148,15 @@ Updates, address changes and system updates run in their own systemd unit (`mnem
 `-config`, `-osupdate`). The TV shows "Updating the screen…" until they finish, and the settings page shows
 their last lines. In full: `journalctl -u mnemerynne-screen-update`.
 
+**On other pages** (Ask, Files, the Wiki, a document): the TV keeps its screen size, has a small bar (**📺
+Back to TV**, **‹ ›**), and still hears the remote. A phone's command gives whoever is using the TV 10 seconds
+to keep it (**Keep using the TV**, or Escape); then an open document is saved as it is and the TV goes back to
+its page, signed out. An admin can override the countdown. Firefox opens new tabs and windows in place (the
+kiosk has no tabs), and **Backspace** goes back a page.
+
+**Ctrl+Shift+Alt+R** on any keyboard restarts the kiosk (Firefox and cage), even when Firefox has stopped
+answering: the helper reads the keyboards itself.
+
 **Releases:** the box follows git tags named `screen-vX.Y.Z`. Tag a release only on a commit that's ready
 for every box, and push the tag (`git push origin screen-v0.3.0`).
 

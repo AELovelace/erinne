@@ -686,7 +686,10 @@ def test_casting_to_a_screen(client, conn, directory, root, settings):
     def sent(body):
         r = client.post(f"/api/media/screens/{screen_id}/command", json=body)
         assert r.status_code == 200, r.text
-        return queue.get_nowait()
+        cmd = queue.get_nowait()
+        # Every command has an id to ask after, and says who sent it (the countdown on a box shows that).
+        assert cmd.pop("id") == r.json()["id"] and cmd.pop("sender") == "boss" and cmd.pop("override") is False
+        return cmd
 
     cmd = sent({"action": "play_item", "file_id": film, "start": 60})
     assert cmd["item"]["title"] == "Heat" and cmd["start"] == 60
@@ -778,7 +781,7 @@ def test_a_screen_keeps_its_underscan(client, conn, directory):
     for body, sent in [({"action": "calibrate"}, {"action": "calibrate", "step": "open"}),
                        ({"action": "calibrate", "step": "wider"}, {"action": "calibrate", "step": "wider"})]:
         assert client.post(f"/api/media/screens/{screen_id}/command", json=body).status_code == 200
-        assert queue.get_nowait() == sent
+        assert {k: v for k, v in queue.get_nowait().items() if k not in ("id", "sender", "override")} == sent
     assert client.post(f"/api/media/screens/{screen_id}/command",
                        json={"action": "calibrate", "step": "sideways"}).status_code == 422
     assert tv.put("/api/media/screen/state", json={"kind": "calibrating", "title": "Adjusting"}).status_code == 200

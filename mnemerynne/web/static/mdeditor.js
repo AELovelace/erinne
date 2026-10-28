@@ -228,6 +228,26 @@
     window.close();
     setTimeout(function () { location.href = main.dataset.back || "/files"; }, 150);   // not a popup: go back
   });
+  // A screen box's TV taken over from a phone (screen_link.js): saved as it is, then the TV closes it. A new
+  // page without a name gets one; someone else's save meanwhile stays under Versions, under this one.
+  window.addEventListener("mnemerynne:takeover", function (e) { e.detail.wait(saveAsIs()); });
+  async function saveAsIs() {
+    if (!dirty || saveButton.disabled) return;
+    const nameInput = $("ed-name");
+    if (mode === "new" && nameInput && !nameInput.value.trim()) {
+      nameInput.value = "Untitled from the TV " + new Date().toISOString().slice(0, 16).replace("T", " ").replace(":", "");
+    }
+    await save();
+    if (!$("ed-conflict").hidden) {
+      try {
+        version = (await api("GET", "/api/files/" + fileId + "/text")).version;
+        $("ed-conflict").hidden = true;
+        await save();
+      } catch (err) { setStatus(err.message, "error"); }
+    }
+    dirty = false;
+  }
+
   window.addEventListener("beforeunload", function (e) {
     if (!dirty) return;
     e.preventDefault();

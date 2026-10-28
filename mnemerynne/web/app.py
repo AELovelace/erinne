@@ -219,21 +219,35 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.add_middleware(security.SecurityHeaders, settings=settings)
 
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
+
+    def _tv(request: Request, conn: sqlite3.Connection) -> dict | None:
+        """This browser is a screen (the TV, by its key): its underscan on every page, and on a screen box
+        the small bar and the remote (base.html). Not inside a frame: the page around it has those."""
+        if request.headers.get("sec-fetch-dest") == "iframe":
+            return None
+        screen = media_screens.by_token(conn, request.cookies.get(media_screens.COOKIE))
+        if screen is None:
+            return None
+        return {"id": screen["id"], "name": screen["name"], "safe_x": screen["safe_x"], "safe_y": screen["safe_y"],
+                "box": bool(screen["is_box"])}
+
     def _nav_context(request: Request) -> dict:
         """What every page's top bar needs beyond its own context: the badge on the Messages button
-        (unread notes, and with Rooms on, mentions and unread DMs), whether Rooms and Remote are there."""
+        (unread notes, and with Rooms on, mentions and unread DMs), whether Rooms and Remote are there;
+        and on a screen, the screen (tv)."""
         session = request.scope.get("session", {}) if "session" in request.scope else {}
         user_id = session.get("user_id")
-        if not user_id:
+        if not user_id and not request.cookies.get(media_screens.COOKIE):
             return {}
         conn = db.connect(settings.db_path)
         try:
-            user = users.get_user_by_id(conn, user_id)
+            out = {"tv": _tv(request, conn)}
+            user = users.get_user_by_id(conn, user_id) if user_id else None
             if user is None:
-                return {}
+                return out
             admin = is_admin(request, conn, user)
             unread_rooms = rooms_mod.unread_summary(conn, user, app.state.directory)
-            return {"nav_unread": messages_mod.unread_count(conn, user_id) + unread_rooms["mentions"] + unread_rooms["dms"],
+            return out | {"nav_unread": messages_mod.unread_count(conn, user_id) + unread_rooms["mentions"] + unread_rooms["dms"],
                     "has_rooms": rooms_mod.enabled(conn), "has_media": media_mod.enabled(conn) and media_mod.may_use(conn, user, app.state.directory),
                     "message_max_chars": messages_mod.MAX_CHARS,
                     "has_remote": bool(remote.apps_for(conn, user, app.state.directory, admin)),

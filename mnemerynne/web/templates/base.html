@@ -1,8 +1,12 @@
 {#- The person's theme (Settings); signed out, the one this browser last used, else neon. -#}
 {%- set theme = (user.theme if user is defined and user else request.cookies.get('erynne_theme')) -%}
 {%- if theme not in ('sakura', 'neon') %}{% set theme = 'neon' %}{% endif -%}
+{#- A screen (the TV; web/app.py _tv): its underscan on every page. A screen box also gets the small bar
+    (Back to TV, ‹ ›) and listens for the remote (screen_link.js), on every page but the TV page itself. -#}
+{%- set tv = tv if tv is defined else None -%}
+{%- set tv_page = screen is defined and screen -%}
 <!doctype html>
-<html lang="en" data-theme="{{ theme }}">
+<html lang="en" data-theme="{{ theme }}"{% if tv %} class="tv{{ ' tv-box' if tv.box }}{{ ' tv-page' if tv_page }}" style="--safe-x: {{ tv.safe_x }}%; --safe-y: {{ tv.safe_y }}%; --safe-xv: {{ tv.safe_x }}vw; --safe-yv: {{ tv.safe_y }}vh"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -20,8 +24,16 @@
 <body>
   <div class="parallax" aria-hidden="true"></div>
   <div class="petals" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+  {%- if tv and tv.box and not tv_page %}
+  {#- The small bar: the kiosk has no browser buttons. Hidden where the page has the full top bar (erynne.css). -#}
+  <nav class="tv-strip" aria-label="TV">
+    <a class="tv-home" href="/media/screen" data-kiosk-back>📺 Back to TV</a>
+    <span class="tv-history"><button type="button" data-tv-go="back" title="Back (Backspace)">‹</button><button type="button" data-tv-go="forward" title="Forward">›</button></span>
+  </nav>
+  {%- endif %}
   {% block body %}{% endblock %}
   <script src="{{ static('nav.js') }}" defer></script>
+  {% if tv and tv.box and not tv_page %}<script src="{{ static('screen_link.js') }}" defer></script>{% endif %}
   <script src="{{ static('parallax.js') }}" defer></script>
   {% if user is defined and user %}<script src="{{ static('notify.js') }}" defer></script>{% endif %}
 </body>

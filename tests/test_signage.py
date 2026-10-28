@@ -247,7 +247,8 @@ def test_groups_rank_the_programme_and_screens_report_in(client, conn, lobby):
     assert client.post(f"/api/admin/signage/screens/{lobby['screen']}/command", json={"action": "identify"}).status_code == 409
     queue = _hub(client).listen(lobby["screen"])
     assert client.post(f"/api/admin/signage/screens/{lobby['screen']}/command", json={"action": "identify"}).status_code == 200
-    assert queue.get_nowait() == {"action": "identify"}
+    cmd = queue.get_nowait()                         # an admin's: a box on another page doesn't count down
+    assert cmd.pop("id") and cmd == {"action": "identify", "sender": "boss", "override": True}
     assert client.post(f"/api/admin/signage/screens/{lobby['screen']}/command", json={"action": "reboot"}).status_code == 422
 
     # Removing the group drops its entries and frees the screen; its own stream hears about it.

@@ -14,6 +14,9 @@ Who can reach it: the box itself (127.0.0.1) and phones on its hotspot, nobody o
 Every request's Host must be the box's own address (no DNS rebinding); changes need a same-origin JSON
 POST; nothing is sent with CORS headers, so other sites (a signage web page) can't read the answers.
 Python's standard library, plus python3-qrcode for the QR codes (without it, the TV shows text only).
+
+Ctrl+Shift+Alt+R on any keyboard restarts the kiosk (RestartKeys): read from the kernel's input devices,
+so it works whatever Firefox shows, or when Firefox has stopped answering.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ import re
 import secrets
 import shlex
 import socket
+import struct
 import subprocess
 import sys
 import threading
@@ -64,6 +68,14 @@ AUDIO_RE = re.compile(r"^(hdmi|auto|card:[A-Za-z0-9._-]+:[A-Za-z0-9:+._-]+)$")
 JOBS = {"update": "mnemerynne-screen-update", "config": "mnemerynne-screen-config",
         "system": "mnemerynne-screen-osupdate"}
 JOB_NAMES = {"update": "updating the screen", "config": "changing the address", "system": "installing system updates"}
+
+# The restart keys (RestartKeys, below)
+INPUT_DIR = "/dev/input"
+RESTART_KEYS_WAIT = 10                       # at most one restart this often (seconds)
+INPUT_EVENT = struct.Struct("llHHi")         # struct input_event: the time (two longs), type, code, value
+EV_KEY = 1
+KEY_R = 19
+RESTART_MODIFIERS = ((29, 97), (42, 54), (56, 100))   # Ctrl, Shift and Alt: the left and the right one
 
 
 # ------------------------------------------------------------------ helpers
@@ -1504,6 +1516,81 @@ $("lock").addEventListener("click", async function () { await call("POST", "/api
 """
 
 
+# ------------------------------------------------------------- restart keys
+class RestartKeys:
+    """Ctrl+Shift+Alt+R on any keyboard restarts the kiosk (Firefox under cage; systemd starts it again).
+    The devices are only read, never grabbed: cage gets every key as before."""
+
+    def __init__(self, restart, *, clock=time.monotonic, input_dir: str = INPUT_DIR) -> None:
+        self.restart, self.clock, self.input_dir = restart, clock, input_dir
+        self.down: set[int] = set()
+        self.last = float("-inf")
+        self.watching: set[str] = set()
+        self.lock = threading.Lock()
+
+    def key(self, code: int, value: int) -> bool:
+        """One key event (value 1 pressed, 0 released, 2 held down); True when it restarted the kiosk."""
+        with self.lock:
+            if value == 0:
+                self.down.discard(code)
+                return False
+            self.down.add(code)
+            if code != KEY_R or value != 1 or not all(self.down & set(keys) for keys in RESTART_MODIFIERS):
+                return False
+            now = self.clock()
+            if now - self.last < RESTART_KEYS_WAIT:
+                return False
+            self.last = now
+        self.restart()
+        return True
+
+    def read(self, stream) -> None:
+        """Key events from one device until it goes away (unplugged)."""
+        try:
+            while True:
+                data = stream.read(INPUT_EVENT.size)
+                if not data or len(data) < INPUT_EVENT.size:
+                    return
+                _, _, kind, code, value = INPUT_EVENT.unpack(data)
+                if kind == EV_KEY:
+                    self.key(code, value)
+        except OSError:
+            return
+
+    def scan(self) -> None:
+        """Start reading the devices that appeared since (a keyboard plugged in after boot)."""
+        try:
+            names = sorted(n for n in os.listdir(self.input_dir) if n.startswith("event"))
+        except OSError:
+            return
+        for name in names:
+            path = os.path.join(self.input_dir, name)
+            with self.lock:
+                if path in self.watching:
+                    continue
+            try:
+                stream = open(path, "rb", buffering=0)   # noqa: SIM115 - the thread below closes it
+            except OSError:
+                continue
+            with self.lock:
+                self.watching.add(path)
+            threading.Thread(target=self._watch, args=(path, stream), daemon=True).start()
+
+    def _watch(self, path: str, stream) -> None:
+        try:
+            self.read(stream)
+        finally:
+            stream.close()
+            with self.lock:
+                self.watching.discard(path)
+                self.down.clear()
+
+
+def restart_kiosk() -> None:
+    print("mnemerynne-screen-wifi: Ctrl+Shift+Alt+R: restarting the kiosk", flush=True)
+    run_cmd(["systemctl", "restart", "mnemerynne-screen.service"], 30)
+
+
 # --------------------------------------------------------------------- main
 def main() -> None:
     conf = read_conf()
@@ -1533,7 +1620,9 @@ def main() -> None:
             print("mnemerynne-screen-wifi: hotspot down", flush=True)
 
     setup.on_hotspot = on_hotspot
+    keys = RestartKeys(restart_kiosk)
     while True:
+        keys.scan()
         try:
             setup.tick()
         except Exception as exc:   # noqa: BLE001 - keep the loop alive; the journal gets why

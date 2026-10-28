@@ -14,6 +14,11 @@ pause, seek, volume, next, stop) for one of its owner's screens. The web app han
 open event stream (Hub, in memory: this is one uvicorn process), the screen's page acts on it and
 reports what it is playing back every few seconds, which is what the phone's remote shows.
 
+Taking over: a screen box (is_box) listens on every page, not only the TV page. Someone using the TV
+(any page but the TV page) gets TAKEOVER_SECONDS to cancel a command before the TV goes back to the TV
+page to carry it out; an admin may override that. Each command has an id, and the screen answers how
+it went (Hub.answer: waiting, done, kept), which the phone asks after (Hub.answer_of).
+
 Only members of the screens group (Settings → Media; AD or Entra groups) may pair screens and cast;
 with no group set, nobody may. It is checked live on every request, the screen key's included: a
 screen whose owner leaves the group stops working at once. Owners may always remove their screens.
@@ -34,6 +39,8 @@ COOKIE_DAYS = 400               # browsers cap cookies here; it's renewed whenev
 MAX_PER_USER = 10
 MAX_SAFE = 10.0                 # underscan: at most this percentage in from each edge
 STATE_SECONDS = 15              # a screen silent this long counts as gone from the remote's point of view
+TAKEOVER_SECONDS = 10           # someone using the TV has this long to keep it before a command takes over
+COMMAND_SECONDS = 120           # how long a command's answer (waiting, done, kept) is kept for the phone
 
 PAIR_COOKIE = "mnemerynne_screen_pairing"
 PAIR_SECONDS = 600              # how long a pairing code lasts
@@ -106,6 +113,18 @@ def of_user(conn: sqlite3.Connection, user_id: int) -> list[sqlite3.Row]:
                         (user_id,)).fetchall()
 
 
+def of_others(conn: sqlite3.Connection, user_id: int) -> list[sqlite3.Row]:
+    """Everyone else's screens, with their owners' names: admins may cast to them too."""
+    return conn.execute("SELECT s.*, u.username AS owner FROM media_screens s JOIN users u ON u.id = s.user_id "
+                        "WHERE s.user_id != ? ORDER BY u.username COLLATE NOCASE, s.name COLLATE NOCASE",
+                        (user_id,)).fetchall()
+
+
+def mark_box(conn: sqlite3.Connection, screen_id: int) -> None:
+    """This screen is a screen box (its start page opened the TV page as ?kiosk=1)."""
+    conn.execute("UPDATE media_screens SET is_box = 1 WHERE id = ? AND is_box = 0", (screen_id,))
+
+
 def set_safe_area(conn: sqlite3.Connection, screen_id: int, x: float, y: float) -> tuple[float, float]:
     """Underscan for a TV that crops its picture: percent in from the sides (x) and the top and bottom (y),
     in half-percent steps. Returns what was stored."""
@@ -123,9 +142,11 @@ def seen(conn: sqlite3.Connection, screen_id: int) -> None:
 class Hub:
     """Open screen streams and what each screen last said it was playing. Used from the event loop only."""
 
-    def __init__(self) -> None:
+    def __init__(self, clock=time.monotonic) -> None:
         self._listeners: dict[int, set[asyncio.Queue]] = {}
         self._state: dict[int, tuple[float, dict]] = {}
+        self._answers: dict[str, tuple[float, int, dict]] = {}   # command id: (when, screen, its answer)
+        self._clock = clock
 
     def listen(self, screen_id: int) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(maxsize=32)
@@ -158,13 +179,39 @@ class Hub:
         self.push(screen_id, {"action": "unpaired"})
 
     def set_state(self, screen_id: int, state: dict) -> None:
-        self._state[screen_id] = (time.monotonic(), state)
+        self._state[screen_id] = (self._clock(), state)
 
     def state(self, screen_id: int) -> dict | None:
         hit = self._state.get(screen_id)
-        if hit is None or time.monotonic() - hit[0] > STATE_SECONDS:
+        if hit is None or self._clock() - hit[0] > STATE_SECONDS:
             return None
         return hit[1]
+
+    # -- commands that can wait for someone using the TV
+    def send(self, screen_id: int, command: dict) -> str | None:
+        """Push a command with a new id (its answer starts as "sent"); None when no stream took it."""
+        now = self._clock()
+        for key in [k for k, (at, _, _) in self._answers.items() if now - at > COMMAND_SECONDS]:
+            del self._answers[key]
+        command_id = secrets.token_urlsafe(9)
+        if not self.push(screen_id, command | {"id": command_id}):
+            return None
+        self._answers[command_id] = (now, screen_id, {"state": "sent"})
+        return command_id
+
+    def answer(self, screen_id: int, command_id: str, answer: dict) -> bool:
+        """The screen says how its command went; only the screen it was sent to may."""
+        hit = self._answers.get(command_id)
+        if hit is None or hit[1] != screen_id:
+            return False
+        self._answers[command_id] = (hit[0], screen_id, answer)
+        return True
+
+    def answer_of(self, screen_id: int, command_id: str) -> dict | None:
+        hit = self._answers.get(command_id)
+        if hit is None or hit[1] != screen_id or self._clock() - hit[0] > COMMAND_SECONDS:
+            return None
+        return hit[2]
 
 
 def clean_code(code: str) -> str:

@@ -1088,7 +1088,7 @@
   /* This device (the phone) sends what to play to one of its owner's screens (the TV); the choice is
      kept in this browser. With a screen chosen, every Play on the page goes there instead. */
   const cast = {
-    target: null, screens: [], allowed: true, timer: null,
+    target: null, screens: [], allowed: true, admin: false, timer: null, followTimer: null,
 
     init: function () {
       if (screenId || !$("mc-cast")) return;   // a screen itself, or not in the screens group
@@ -1116,6 +1116,7 @@
       try { data = await api("GET", "/api/media/screens"); } catch (e) { return; }
       this.screens = data.screens;
       this.allowed = data.allowed;
+      this.admin = !!data.admin;
       if (this.target !== null && !this.screen()) this.choose(null);
       this.paint();
       if ((route().view === "screens" || route().view === "pair") && !document.activeElement.closest("#mc-content input, #mc-content select")) {
@@ -1132,7 +1133,7 @@
       select.replaceChildren(el("option", null, "This device"));
       select.firstChild.value = "";
       others.forEach(function (s) {
-        const o = el("option", null, s.name + (s.online ? "" : " (off)"));
+        const o = el("option", null, label(s) + (s.online ? "" : " (off)"));
         o.value = String(s.id);
         select.appendChild(o);
       });
@@ -1141,7 +1142,7 @@
       $("mc-remote").hidden = !s;
       if (!s) return;
       const st = s.state;
-      $("mc-remote-title").textContent = "📺 " + s.name + (s.online ? "" : " — not connected");
+      $("mc-remote-title").textContent = "📺 " + label(s) + (s.online ? "" : " — not connected");
       $("mc-remote-sub").textContent = !s.online ? "Open Media on it (Screens → that screen's address)."
         : !st || st.kind === "idle" ? "Nothing playing"
         : [st.title, st.sub, st.duration ? clock(st.position) + " / " + clock(st.duration) : ""].filter(Boolean).join(" · ")
@@ -1177,12 +1178,58 @@
       const id = screen || this.target;
       showError("");
       try {
-        await api("POST", "/api/media/screens/" + id + "/command", command);
+        const sent = await api("POST", "/api/media/screens/" + id + "/command", command);
+        if (sent && sent.id) this.follow(id, sent.id);
         setTimeout(function () { cast.refresh(); }, 800);
         return true;
       } catch (err) { showError(err.message); return false; }
     },
+
+    /* Someone using the TV (a screen box on another page) has a few seconds to keep it: say so here, with
+       Override for an admin, until it's done or kept. */
+    follow: function (screen, commandId) {
+      clearTimeout(this.followTimer);
+      const s = this.screens.find(function (x) { return x.id === screen; });
+      const name = s ? s.name : "The screen";
+      const url = "/api/media/screens/" + screen + "/commands/" + encodeURIComponent(commandId);
+      const giveUp = Date.now() + 25000;
+      let until = null;
+      const check = async function () {
+        let a;
+        try { a = await api("GET", url); } catch (e) { cast.note(""); return; }
+        if (a.state === "done") { cast.note(""); return; }
+        if (a.state === "kept") { cast.note(name + ": the person using it kept it."); cast.followTimer = setTimeout(function () { cast.note(""); }, 6000); return; }
+        if (a.state === "waiting") {
+          if (until === null) until = Date.now() + (a.seconds || 0) * 1000;
+          const secs = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+          cast.note("Someone is using " + name + ". It switches in " + secs + " s unless they keep it.",
+                    cast.admin ? async function () {
+                      try { await api("POST", url + "/override", {}); } catch (err) { showError(err.message); }
+                    } : null);
+        }
+        if (Date.now() < giveUp) cast.followTimer = setTimeout(check, 700); else cast.note("");
+      };
+      this.followTimer = setTimeout(check, 400);
+    },
+
+    note: function (text, override) {
+      let box = $("mc-takeover");
+      if (!box) {
+        box = el("p", "mc-takeover-note");
+        box.id = "mc-takeover";
+        box.setAttribute("role", "status");
+        $("mc-dock").prepend(box);          // with the remote, where it's seen wherever the page is scrolled
+      }
+      box.replaceChildren();
+      box.hidden = !text;
+      if (!text) return;
+      box.appendChild(el("span", null, text));
+      if (override) box.appendChild(button("Override", "small", override, "Take over the TV now (admins)"));
+    },
   };
+
+  /* A screen in the lists: an admin's view of someone else's names its owner. */
+  function label(s) { return s.name + (s.owner ? " (" + s.owner + ")" : ""); }
 
   let calibrating = null;   // the screen whose size is being adjusted from here (the phone)
 
@@ -1198,7 +1245,7 @@
       const row = el("div", "mc-screen");
       const name = el("div", "mc-screen-name");
       const dot = el("span", "mc-dot" + (s.online ? " on" : ""));
-      name.append(dot, document.createTextNode(s.name + (s.this ? " (this browser)" : "")));
+      name.append(dot, document.createTextNode(label(s) + (s.this ? " (this browser)" : "")));
       const st = s.state;
       const what = el("div", "mc-sub", !s.online ? "Not connected" + (s.last_seen ? " · last seen " + s.last_seen + " UTC" : "")
         : !st || st.kind === "idle" ? "Ready, nothing playing" : st.title + (st.paused ? " (paused)" : ""));
@@ -1229,7 +1276,7 @@
         try { await api("DELETE", "/api/media/screens/" + s.id); } catch (err) { showError(err.message); }
         cast.refresh();
       });
-      actions.appendChild(drop);
+      if (!s.owner) actions.appendChild(drop);      // only its owner removes a screen
       row.append(name, what, actions);
       list.appendChild(row);
       if (calibrating === s.id && s.online) {
@@ -1277,7 +1324,7 @@
     const target = el("select");
     target.setAttribute("aria-label", "Screen");
     cast.screens.filter(function (s) { return !s.this; }).forEach(function (s) {
-      const o = el("option", null, s.name + (s.online ? "" : " (off)"));
+      const o = el("option", null, label(s) + (s.online ? "" : " (off)"));
       o.value = String(s.id);
       target.appendChild(o);
     });
@@ -1403,7 +1450,11 @@
     connect: function () {
       const state = $("mc-splash-state");
       this.es = new EventSource("/media/screen/stream");
-      this.es.addEventListener("hello", function () { state.textContent = "Ready for casting"; screenMode.report(true); });
+      this.es.addEventListener("hello", function () {
+        state.textContent = "Ready for casting";
+        screenMode.report(true);
+        screenMode.handOver();
+      });
       this.es.addEventListener("cmd", function (e) {
         let cmd;
         try { cmd = JSON.parse(e.data); } catch (err) { return; }
@@ -1433,8 +1484,22 @@
       }, wait);
     },
 
+    /* A command the box took on another page (screen_link.js), after its countdown: carried out here, once. */
+    handOver: function () {
+      let cmd = null;
+      try {
+        cmd = JSON.parse(sessionStorage.getItem("mc-takeover") || "null");
+        sessionStorage.removeItem("mc-takeover");
+      } catch (e) { cmd = null; }
+      if (cmd && typeof cmd.action === "string") this.handle(cmd);
+    },
+
     handle: function (cmd) {
       const a = cmd.action;
+      if (a === "override") return;      // for a countdown on another page (screen_link.js); none here
+      if (cmd.id && a !== "unpaired") {  // the phone asks how it went (web/media.py command_answer)
+        api("POST", "/media/screen/commands/" + encodeURIComponent(cmd.id), { state: "done" }).catch(function () {});
+      }
       if (a === "unpaired") { this.es.close(); this.es.onerror(); return; }
       if (a === "signage") { signage.load(); return; }
       if (a === "identify") { signage.identify(); return; }

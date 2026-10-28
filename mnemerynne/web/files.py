@@ -8,12 +8,13 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from mnemerynne import api_tokens, comments, editing, fs, jobs, permissions, share
 from mnemerynne.config import Settings
 from mnemerynne.ingest import markdown, store
+from mnemerynne.media import screens as media_screens
 from mnemerynne.web.deps import api_user, get_db, get_settings, is_admin, page_user
 
 router = APIRouter()
@@ -582,12 +583,34 @@ def _blob_file(settings: Settings, row: sqlite3.Row, prefer_ocr: bool, conn: sql
     return path
 
 
+# A screen box's TV (deploy/screen) has no browser buttons: a document opened there as the page itself
+# (not in a frame) goes to one with the small bar and the remote (base.html), the document framed inside.
+def _tv_frame(request: Request, conn: sqlite3.Connection, file_id: int, how: str) -> RedirectResponse | None:
+    if request.headers.get("sec-fetch-dest") != "document":
+        return None
+    screen = media_screens.by_token(conn, request.cookies.get(media_screens.COOKIE))
+    if screen is None or not screen["is_box"]:
+        return None
+    return RedirectResponse(f"/files/{file_id}/tv/{how}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.get("/files/{file_id}/tv/{how}", response_class=HTMLResponse)
+def view_on_tv(request: Request, file_id: int, how: Literal["view", "pdf", "inline"], user=Depends(page_user),
+               conn: sqlite3.Connection = Depends(get_db)):
+    """The view, PDF or picture in a frame, on the TV's page (_tv_frame)."""
+    row = _readable_file(conn, fs.Access.of(conn, user["id"]), file_id)
+    return request.app.state.templates.TemplateResponse(request, "file_tv.html", {
+        "user": user, "file": row, "src": f"/files/{file_id}/{how}"})
+
+
 @router.get("/files/{file_id}/pdf")
-def view_pdf(file_id: int, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db),
+def view_pdf(request: Request, file_id: int, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db),
              settings: Settings = Depends(get_settings)):
     row = _readable_file(conn, fs.Access.of(conn, user["id"]), file_id)
     if row["kind"] != "pdf":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not a PDF")
+    if (tv := _tv_frame(request, conn, file_id, "pdf")) is not None:
+        return tv
     # Serve the OCR'd copy when there is one, so its text is selectable too.
     return FileResponse(
         _blob_file(settings, row, prefer_ocr=True, conn=conn), media_type="application/pdf",
@@ -627,6 +650,8 @@ def view_markdown(request: Request, file_id: int, user=Depends(page_user),
                   conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
     """Markdown rendered, or the text of a document, code or text file."""
     row = _readable_file(conn, fs.Access.of(conn, user["id"]), file_id)
+    if row["kind"] in ("md", "txt", "doc", "code") and (tv := _tv_frame(request, conn, file_id, "view")) is not None:
+        return tv
     if row["kind"] == "md":
         html = markdown.render_html(markdown.decode(_blob_file(settings, row, prefer_ocr=False, conn=conn).read_bytes()))
     elif row["kind"] in ("txt", "doc", "code"):
@@ -641,11 +666,13 @@ def view_markdown(request: Request, file_id: int, user=Depends(page_user),
 
 
 @router.get("/files/{file_id}/inline")
-def view_inline(file_id: int, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db),
+def view_inline(request: Request, file_id: int, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db),
                 settings: Settings = Depends(get_settings)):
     """Preview an image (raster only) or the start of a text file."""
     row = _readable_file(conn, fs.Access.of(conn, user["id"]), file_id)
     preview = _preview(row)
+    if preview in ("image", "text") and (tv := _tv_frame(request, conn, file_id, "inline")) is not None:
+        return tv
     headers = {"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox"}
     if preview == "image":
         return FileResponse(_blob_file(settings, row, prefer_ocr=False, conn=conn), media_type=row["mime"],

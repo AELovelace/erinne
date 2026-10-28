@@ -274,6 +274,9 @@ user_pref("full-screen-api.transition-duration.leave", "0 0");
 user_pref("media.videocontrols.picture-in-picture.video-toggle.enabled", false);
 user_pref("network.captive-portal-service.enabled", false);   // the box's own hotspot isn't a portal to it
 user_pref("network.connectivity-service.enabled", false);
+user_pref("browser.backspace_action", 0);                       // Backspace goes back a page: the kiosk has no buttons
+user_pref("browser.link.open_newwindow", 1);                    // new tabs and windows open in this one: with no tabs
+user_pref("browser.link.open_newwindow.restriction", 0);        // in the kiosk, a document opened in one strands people
 EOF
     if [[ $YOUTUBE_H264 == 1 ]]; then
         cat <<'EOF'

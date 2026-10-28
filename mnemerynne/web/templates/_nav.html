@@ -9,6 +9,7 @@
     <a href="/wiki">Wiki</a>
     <a href="/media/screen" aria-current="page">TV</a>
   </nav>
+  {% if screen.box %}<span class="tv-history"><button type="button" data-tv-go="back" title="Back (Backspace)">‹</button><button type="button" data-tv-go="forward" title="Forward">›</button></span>{% endif %}
   <a class="kiosk-signin" href="/login">Sign in</a>
 </header>
 <div class="notices" id="notices" aria-live="polite" hidden></div>
@@ -36,6 +37,8 @@
       {% if is_admin %}<a href="/admin/libraries" {% if active == 'admin' %}aria-current="page"{% endif %}>Access</a>{% endif %}
     </nav>
     {% if kiosk_back %}<a class="help-link kiosk-back" href="/media/screen" data-kiosk-back>📺 Back to TV</a>{% endif %}
+    {#- A screen box has no browser buttons (the small bar's, in base.html, gives way to this bar). -#}
+    {% if tv is defined and tv and tv.box %}{% if not kiosk_back %}<a class="help-link kiosk-back" href="/media/screen" data-kiosk-back>📺 Back to TV</a>{% endif %}<span class="tv-history"><button type="button" data-tv-go="back" title="Back (Backspace)">‹</button><button type="button" data-tv-go="forward" title="Forward">›</button></span>{% endif %}
     <a class="help-link" href="/help" target="_blank" rel="noopener">Help</a>
     <form method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
   </div>

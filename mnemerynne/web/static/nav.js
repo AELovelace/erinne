@@ -7,6 +7,7 @@
 
   const root = document.documentElement;
   const bar = document.querySelector(".topbar");
+  const strip = document.querySelector(".tv-strip");   // a screen box's small bar (base.html)
   const notices = document.getElementById("notices");
   const narrow = window.matchMedia("(max-width: 760px)");
 
@@ -14,12 +15,18 @@
   function measure() {
     let px = 0;
     if (bar) px += bar.getBoundingClientRect().height;
+    if (strip) {                                         // 0 where the full top bar hides it
+      const h = strip.getBoundingClientRect().height;
+      px += h;
+      root.style.setProperty("--tv-strip", Math.ceil(h) + "px");   // a page's own bar sticks under it
+    }
     if (notices && !notices.hidden) px += notices.getBoundingClientRect().height + 8;   // its top margin
     root.style.setProperty("--chrome", Math.ceil(px) + "px");
   }
-  if (bar && "ResizeObserver" in window) {
+  if ((bar || strip) && "ResizeObserver" in window) {
     const watch = new ResizeObserver(measure);
-    watch.observe(bar);
+    if (bar) watch.observe(bar);
+    if (strip) watch.observe(strip);
     if (notices) watch.observe(notices);
   }
   measure();
@@ -60,6 +67,11 @@
     });
     awake();
   }
+
+  // A screen box's ‹ › (the small bar, or the top bar on the TV): the kiosk has no browser buttons.
+  document.querySelectorAll("[data-tv-go]").forEach(function (b) {
+    b.addEventListener("click", function () { if (b.dataset.tvGo === "back") history.back(); else history.forward(); });
+  });
 
   // Side lists (wiki pages, help contents, Access trees) start closed on a phone; a desktop shows them open.
   function foldSides() {

@@ -57,3 +57,9 @@ A TV run by a screen box (`deploy/screen/` in the repository) has **⚙ Kiosk se
 **Show the top bar** gives that TV's page a short top bar (Ask, Files, the Wiki, **Sign in**), for a box used as a thin client. Anyone who signs in on the TV is signed out when they go back to the TV, and after ten minutes untouched. It's stored on the server for that screen, so changing it needs a phone approval.
 
 Opening the settings (`kiosk.unlock`) and changing the top bar (`kiosk.top_bar`) are logged, with the admin who approved. The box's README (`deploy/screen/README.md`, step 6) covers the rest.
+
+**On every page, not only the TV page,** a screen box keeps its screen size, has a small bar (**📺 Back to TV**, **‹ ›**), and still hears the remote. Documents open inside a page with that bar. **Backspace** goes back a page, and **Ctrl+Shift+Alt+R** restarts the kiosk.
+
+**Someone using the TV** (on any page but the TV page) gets 10 seconds to keep it when a command comes from a phone: **Keep using the TV**, or Escape. Otherwise an open document is saved as it is and the TV goes back to its page to carry the command out, signing out whoever was signed in on it.
+
+**Admins** see everyone's screens under **Media → Screens** and can play on them. While a TV counts down, the remote offers **Override**, which skips the countdown. Admins' commands from **Access → Signage** never wait. Casting to someone else's screen (`screen.cast`) and overriding (`screen.override`) are logged.
