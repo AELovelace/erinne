@@ -28,7 +28,7 @@ from mnemerynne import group_refs, media, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
-from mnemerynne.media import artwork, browse, catalog, live, probe, screens, signage, transcode
+from mnemerynne.media import artwork, browse, catalog, live, probe, remotes, screens, signage, transcode
 from mnemerynne.web import security
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import _session_user, admin_user, api_user, get_db, get_settings, is_admin, page_user
@@ -474,18 +474,21 @@ class ClaimBody(BaseModel):
 @router.post("/api/media/screens/claim", status_code=status.HTTP_201_CREATED)
 async def claim_screen(body: ClaimBody, request: Request, user=Depends(screens_user),
                        conn: sqlite3.Connection = Depends(get_db)):
-    """Pair the TV showing this code as one of the person's screens; it collects its key itself."""
+    """Pair the TV (or remote) showing this code as one of the person's screens (or remotes); it collects
+    its key itself."""
     p = pairings(request)
     try:
         name = screens.clean_name(body.name)
         code = p.check(user["id"], body.code)
+        kind = p.kind(code)
         with transaction(conn):
-            screen_id, token = screens.create(conn, user["id"], name)
+            made_id, token = (remotes if kind == "remote" else screens).create(conn, user["id"], name)
     except screens.ScreenError as exc:
         raise HTTPException(exc.status, str(exc)) from None
-    p.claim(code, screen_id, token)
-    hub(request).close(screen_id)
-    return {"id": screen_id, "name": name}
+    p.claim(code, made_id, token)
+    if kind == "screen":
+        hub(request).close(made_id)
+    return {"id": made_id, "name": name, "kind": kind}
 
 
 @router.get("/api/media/screens")
@@ -503,7 +506,9 @@ def list_screens(request: Request, user=Depends(api_user), conn: sqlite3.Connect
     out = [row(s, None) for s in screens.of_user(conn, user["id"])]
     if admin:
         out += [row(s, s["owner"]) for s in screens.of_others(conn, user["id"])]
-    return {"allowed": allowed, "admin": admin, "screens": out}
+    mine_remotes = [{"id": r["id"], "name": r["name"], "last_seen": r["last_seen_at"]}
+                    for r in remotes.of_user(conn, user["id"])]
+    return {"allowed": allowed, "admin": admin, "screens": out, "remotes": mine_remotes}
 
 
 @router.delete("/api/media/screens/{screen_id}")
@@ -738,6 +743,118 @@ def screen_signage_file(file_id: int, page: int | None = None, screen=Depends(sc
     """A picture (screen-sized), a PDF page or a video of the screen's playlists: only those, whatever its
     owner may read."""
     return _signage_file(conn, settings, signage.for_screen(conn, screen)[1], file_id, page)
+
+
+# ------------------------------------------------------------------- remotes
+def remote_device(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> sqlite3.Row:
+    """The remote (media/remotes.py) whose key came as `Authorization: Bearer …`, while its owner may use
+    screens."""
+    auth = request.headers.get("authorization", "")
+    remote = remotes.by_key(conn, auth[7:].strip()) if auth.lower().startswith("bearer ") else None
+    owner = users.get_user_by_id(conn, remote["user_id"]) if remote is not None else None
+    if owner is None or not screens.may_use(conn, owner, request.app.state.directory):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "This remote isn't paired",
+                            headers={"WWW-Authenticate": "Bearer"})
+    return remote
+
+
+@router.post("/media/remote/pair")
+async def start_remote_pairing(request: Request):
+    """A new code for an unpaired remote to show, and the secret it collects its key with (in the body:
+    the panel keeps no cookies)."""
+    try:
+        code, secret = pairings(request).start("remote")
+    except screens.ScreenError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    return {"code": screens.show_code(code), "expires_in": screens.PAIR_SECONDS,
+            "url": _pairing_url(request, code), "secret": secret}
+
+
+class RemotePairing(BaseModel):
+    secret: str = Field(..., max_length=200)
+
+
+@router.post("/media/remote/pair/status")
+async def remote_pairing_status(body: RemotePairing, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    """What the remote asks every few seconds: still waiting, paired (it gets its key, once), or expired."""
+    p = pairings(request)
+    collected = p.collect(body.secret, "remote")
+    if collected is not None:
+        remote = remotes.get(conn, collected[0])
+        return {"state": "paired", "key": collected[1], "name": remote["name"] if remote else ""}
+    found = p.waiting(body.secret, "remote")
+    if found is None:
+        return {"state": "expired"}
+    return {"state": "waiting", "expires_in": int(found[1])}
+
+
+@router.get("/api/media/remote")
+def remote_screens(request: Request, remote=Depends(remote_device), conn: sqlite3.Connection = Depends(get_db)):
+    """The remote's name and its owner's screens, with what each is playing (no artwork: a small panel)."""
+    with transaction(conn):
+        remotes.seen(conn, remote["id"])
+    h = hub(request)
+    keep = ("kind", "title", "sub", "position", "duration", "paused", "volume", "muted", "night")
+
+    def row(s: sqlite3.Row) -> dict:
+        state = h.state(s["id"])
+        return {"id": s["id"], "name": s["name"], "online": h.online(s["id"]),
+                "state": {k: state.get(k) for k in keep} if state else None}
+    return {"name": remote["name"], "owner": remote["username"],
+            "screens": [row(s) for s in screens.of_user(conn, remote["user_id"])]}
+
+
+@router.get("/api/media/remote/channels")
+def remote_channels(offset: int = 0, limit: int = 5, remote=Depends(remote_device),
+                    conn: sqlite3.Connection = Depends(get_db)):
+    """Live streams, then radio stations, a page at a time: what the remote can start on a screen."""
+    stations, _ = live.stations(conn)
+    channels = [{"kind": "stream", "id": s["id"], "name": s["name"]}
+                for s in live.sources(conn) if s["kind"] in ("rtmp", "hls", "youtube")]
+    channels += [{"kind": "station", "key": s["key"], "name": s["name"]} for s in stations]
+    offset, limit = max(0, offset), max(1, min(20, limit))
+    return {"total": len(channels), "offset": offset, "channels": channels[offset:offset + limit]}
+
+
+class RemoteCommand(BaseModel):
+    action: Literal[remotes.ACTIONS]
+    by: float | None = Field(None, ge=-36000, le=36000)  # skip
+    level: float | None = Field(None, ge=0, le=1)        # volume; night (none: the next step)
+    source_id: int | None = None                         # play_source
+    key: str | None = Field(None, max_length=2000)       # play_station
+
+
+@router.post("/api/media/remote/screens/{screen_id}/command")
+async def remote_command(screen_id: int, body: RemoteCommand, request: Request, remote=Depends(remote_device),
+                         conn: sqlite3.Connection = Depends(get_db)):
+    """Control one of the remote's owner's screens: as their phone would, but only these commands."""
+    screen = screens.owned(conn, remote["user_id"], screen_id)
+    if screen is None:
+        raise _not_found()
+    owner = users.get_user_by_id(conn, remote["user_id"])
+    command = await anyio.to_thread.run_sync(_command, conn, owner, Command(**body.model_dump()))
+    command.update(sender=owner["username"], override=False)
+    command_id = hub(request).send(screen_id, command)
+    if command_id is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"{screen['name']} isn't connected: is Media open on it?")
+    return {"status": "sent", "id": command_id}
+
+
+@router.delete("/api/media/remote")
+def forget_remote(remote=Depends(remote_device), conn: sqlite3.Connection = Depends(get_db)):
+    """The panel forgets itself (its Forget button): its key stops working."""
+    with transaction(conn):
+        remotes.remove(conn, remote["id"], remote["user_id"])
+    return {"status": "removed"}
+
+
+@router.delete("/api/media/remotes/{remote_id}")
+def remove_remote(remote_id: int, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Its owner removes a remote under Media → Screens."""
+    with transaction(conn):
+        if not remotes.remove(conn, remote_id, user["id"]):
+            raise _not_found()
+    return {"status": "removed"}
 
 
 # -------------------------------------------------------------------- admin

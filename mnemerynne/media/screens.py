@@ -7,7 +7,8 @@ working after sign-in sessions expire; removing the screen revokes it.
 Pairing with a code, for a TV with no keyboard (the kiosk in screen/): an unpaired browser on
 /media/screen asks for a code (Pairings, in memory) and shows it with a QR code; the owner types or
 scans it on their phone and names the screen; the TV, asking every few seconds, then gets its key.
-Codes last ten minutes, and each person may only try a few wrong ones.
+Codes last ten minutes, and each person may only try a few wrong ones. A remote (media/remotes.py) pairs
+the same way: its code is of kind "remote", and the same claim makes a remote instead of a screen.
 
 Casting: the phone posts a command (play this film, album, station, live source or YouTube link;
 pause, seek, volume, next, stop) for one of its owner's screens. The web app hands it to the screen's
@@ -228,7 +229,7 @@ class Pairings:
     the event loop only; lost on restart (the TV just asks for a new code)."""
 
     def __init__(self) -> None:
-        self._codes: dict[str, dict] = {}        # code -> {secret, until, token, screen}
+        self._codes: dict[str, dict] = {}        # code -> {secret, kind, until, token, screen}
         self._secrets: dict[str, str] = {}       # the TV's secret (its cookie) -> code
         self._wrong: dict[int, list[float]] = {}
 
@@ -236,8 +237,8 @@ class Pairings:
         for code in [c for c, p in self._codes.items() if p["until"] <= now]:
             self._secrets.pop(self._codes.pop(code)["secret"], None)
 
-    def start(self) -> tuple[str, str]:
-        """(code, secret): the TV shows the code and keeps the secret, to collect its key with."""
+    def start(self, kind: str = "screen") -> tuple[str, str]:
+        """(code, secret): the TV (or a remote) shows the code and keeps the secret, to collect its key with."""
         now = time.monotonic()
         self._sweep(now)
         if len(self._codes) >= MAX_PAIRINGS:
@@ -246,16 +247,17 @@ class Pairings:
         while code in self._codes:
             code = "".join(secrets.choice(PAIR_ALPHABET) for _ in range(PAIR_LENGTH))
         secret = secrets.token_urlsafe(32)
-        self._codes[code] = {"secret": secret, "until": now + PAIR_SECONDS, "token": None, "screen": None}
+        self._codes[code] = {"secret": secret, "kind": kind, "until": now + PAIR_SECONDS, "token": None,
+                             "screen": None}
         self._secrets[secret] = code
         return code, secret
 
-    def waiting(self, secret: str | None) -> tuple[str, float] | None:
+    def waiting(self, secret: str | None, kind: str = "screen") -> tuple[str, float] | None:
         """(code, seconds left) of the TV's pairing while it is still unclaimed; None once gone or claimed."""
         now = time.monotonic()
         self._sweep(now)
         code = self._secrets.get(secret or "")
-        if code is None or self._codes[code]["token"] is not None:
+        if code is None or self._codes[code]["kind"] != kind or self._codes[code]["token"] is not None:
             return None
         return code, self._codes[code]["until"] - now
 
@@ -275,16 +277,20 @@ class Pairings:
                               "by reloading the screen.")
         return code
 
+    def kind(self, code: str) -> str:
+        """What is showing a code check passed: a "screen" or a "remote"."""
+        return self._codes[code]["kind"]
+
     def claim(self, code: str, screen_id: int, token: str) -> None:
         """The screen was made (check first): the TV collects its key on its next ask."""
         hit = self._codes[code]
         hit.update(token=token, screen=screen_id, until=max(hit["until"], time.monotonic() + COLLECT_SECONDS))
 
-    def collect(self, secret: str | None) -> tuple[int, str] | None:
-        """(screen id, key) once the TV's code was claimed, and only once."""
+    def collect(self, secret: str | None, kind: str = "screen") -> tuple[int, str] | None:
+        """(screen or remote id, key) once the code was claimed, and only once."""
         code = self._secrets.get(secret or "")
         hit = self._codes.get(code) if code else None
-        if hit is None or hit["token"] is None:
+        if hit is None or hit["kind"] != kind or hit["token"] is None:
             return None
         del self._codes[code], self._secrets[secret]
         return hit["screen"], hit["token"]

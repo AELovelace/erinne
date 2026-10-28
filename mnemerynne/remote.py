@@ -206,12 +206,19 @@ def rewrite_script(text: str, slug: str) -> str:
 
 def rewrite_absolute(text: str, app: sqlite3.Row, slug: str) -> str:
     """Links to the app's own address (http://10.0.0.5/app/x) move under the prefix (rewrite_url):
-    the browser can't reach that address, or it isn't Mnemerynne's origin."""
-    netloc = urlsplit(app["base_url"]).netloc
-    if not netloc:
+    the browser can't reach that address, or it isn't Mnemerynne's origin. So do paths under the
+    app's base path (/app/x, base_url http://10.0.0.5/app) wherever they stand, not only in href
+    or src: RD Web Access lists its icons and .rdp files in its XML, and its XSL places them."""
+    base = urlsplit(app["base_url"])
+    if not base.netloc:
         return text
-    return re.sub(rf"""\b(?:https?|wss?)://{re.escape(netloc)}(?![\w.:-])[^\s"'<>()]*""",
+    text = re.sub(rf"""\b(?:https?|wss?)://{re.escape(base.netloc)}(?![\w.:-])[^\s"'<>()]*""",
                   lambda m: rewrite_url(m.group(0), app, slug), text, flags=re.IGNORECASE)
+    path = base.path.rstrip("/")
+    if not path:
+        return text
+    return re.sub(rf"""(?<![\w/.:%~-]){re.escape(path)}(?=[/"'?#<\s]|$)""", prefix_for(slug), text,
+                  flags=re.IGNORECASE)
 
 
 _SCRIPT_TYPES = ("application/javascript", "text/javascript", "application/x-javascript", "application/ecmascript",

@@ -105,6 +105,13 @@ def test_xml_pages_absolute_links_and_cookie_paths_under_a_base_path():
     assert 'baseurl="/remote/rdweb/Pages/en-US/"' in out and 'href="../Site.xsl"' in out
     assert "https://192.168.1.40/x" in out and "https://192.168.1.4:8443/y" in out and "https://elsewhere.example/z" in out
     assert remote.rewrite_absolute(page, {"base_url": "https://192.168.1.4"}, "rdweb").count('"/remote/rdweb/RDWeb/Pages/en-US/"') == 1
+    feed = ('<Icon32 FileURL="/RDWeb/Pages/rdp/Paint_32x32.png"/><RDPFile FileURL="/rdweb/Pages/rdp/cpub-Paint.rdp"/>'
+            '<a onmouseup="goRDP(this, \'x\', \'/RDWeb/Pages/rdp/cpub-Paint.rdp\');">Paint</a>'
+            '<a href="/RDWebX/y">other</a> <a href="/remote/rdweb/RDWeb/z">already</a> <a href="/x/RDWeb/w">deeper</a>')
+    out = remote.rewrite_html(remote.rewrite_absolute(feed, app, "rdweb"), "rdweb")
+    assert 'FileURL="/remote/rdweb/Pages/rdp/Paint_32x32.png"' in out and 'FileURL="/remote/rdweb/Pages/rdp/cpub-Paint.rdp"' in out
+    assert "'/remote/rdweb/Pages/rdp/cpub-Paint.rdp'" in out and 'href="/remote/rdweb/RDWebX/y"' in out
+    assert 'href="/remote/rdweb/RDWeb/z"' in out and 'href="/remote/rdweb/x/RDWeb/w"' in out
     for kind in ("text/xml", "application/xml; charset=utf-8", "text/html", "application/xhtml+xml"):
         assert remote._rewriter(kind) is remote.rewrite_html, kind
     assert remote._rewriter("application/javascript") is remote.rewrite_script and remote._rewriter("image/png") is None

@@ -1088,7 +1088,7 @@
   /* This device (the phone) sends what to play to one of its owner's screens (the TV); the choice is
      kept in this browser. With a screen chosen, every Play on the page goes there instead. */
   const cast = {
-    target: null, screens: [], allowed: true, admin: false, timer: null, followTimer: null,
+    target: null, screens: [], remotes: [], allowed: true, admin: false, timer: null, followTimer: null,
 
     init: function () {
       if (screenId || !$("mc-cast")) return;   // a screen itself, or not in the screens group
@@ -1115,6 +1115,7 @@
       let data;
       try { data = await api("GET", "/api/media/screens"); } catch (e) { return; }
       this.screens = data.screens;
+      this.remotes = data.remotes || [];
       this.allowed = data.allowed;
       this.admin = !!data.admin;
       if (this.target !== null && !this.screen()) this.choose(null);
@@ -1239,7 +1240,6 @@
     list.replaceChildren();
     if (!cast.screens.length) {
       list.appendChild(empty("No screens yet. Open /media/screen on the TV and pair it with the code it shows (below)."));
-      return;
     }
     cast.screens.forEach(function (s) {
       const row = el("div", "mc-screen");
@@ -1294,6 +1294,20 @@
         list.appendChild(pad);
       }
     });
+    /* Remotes (the touch panel, Mnemerynne-tab): they control these screens; only removing them is done here. */
+    cast.remotes.forEach(function (r) {
+      const row = el("div", "mc-screen");
+      row.appendChild(el("div", "mc-screen-name", "Remote: " + r.name));
+      row.appendChild(el("div", "mc-sub", r.last_seen ? "Last used " + r.last_seen + " UTC" : "Not used yet"));
+      const actions = el("div", "mc-actions");
+      actions.appendChild(button("Remove", "link small danger", async function () {
+        if (!confirm("Remove the remote " + r.name + "? It stops working until it's paired again.")) return;
+        try { await api("DELETE", "/api/media/remotes/" + r.id); } catch (err) { showError(err.message); }
+        cast.refresh();
+      }));
+      row.appendChild(actions);
+      list.appendChild(row);
+    });
   }
 
   /* arg: a YouTube link to fill in (#cast/<link>, from the Share menu); code: a TV's pairing code
@@ -1305,7 +1319,7 @@
     if (!cast.allowed) {
       out.push(empty("Screens (playing on a TV from your phone) are only for members of the group an admin chose. "
                      + "Ask an admin to add you.", "Not available."));
-      if (cast.screens.length) {
+      if (cast.screens.length || cast.remotes.length) {
         const own = el("div", "mc-screen-list");
         own.id = "mc-screen-list";
         out.push(own);
@@ -1349,12 +1363,12 @@
 
     /* A TV showing a code (/media/screen while unpaired): name it here and it pairs itself. */
     const claim = el("form", "mc-paste");
-    claim.appendChild(el("h2", null, "Pair a TV"));
+    claim.appendChild(el("h2", null, "Pair a TV or remote"));
     claim.appendChild(el("p", "mc-note", "Open /media/screen on the TV (the Erynne screen app does it by " +
-      "itself). Type the code it shows, or scan its QR code, and name it."));
+      "itself), or start an Erynne remote panel. Type the code it shows, or scan its QR code, and name it."));
     const codeIn = el("input");
     codeIn.placeholder = "Code, e.g. BCDF-GHJK";
-    codeIn.setAttribute("aria-label", "Code on the TV");
+    codeIn.setAttribute("aria-label", "Code on the TV or remote");
     codeIn.autocapitalize = "characters";
     codeIn.autocomplete = "off";
     codeIn.spellcheck = false;
@@ -1373,7 +1387,7 @@
         const r = await api("POST", "/api/media/screens/claim", { code: codeIn.value, name: tvName.value });
         codeIn.value = tvName.value = "";
         await cast.refresh();
-        cast.choose(r.id);
+        if (r.kind !== "remote") cast.choose(r.id);
         if (route().view === "pair") go("screens"); else paintScreens();
       } catch (err) { showError(err.message); }
     });

@@ -20,6 +20,7 @@ Media is a Kodi-style media centre for films, music and pictures from the share,
   - Changes are logged (`settings.media_folder`).
 - **Who may use Media:** an AD or Entra group, or several separated by `;`. Only members see the Media tab, its pages and its API. Empty means **nobody**, admins included, so name a group after turning Media on. Leaving the group closes Media for that person, and their screens, at once.
 - **Who may use screens:** the group whose members may pair a TV as a screen and cast to it from their phone. They must be in the Media group too. Empty means nobody. When an owner leaves either group, their screens stop at once; owners can still remove their own screens.
+  Remote panels (the touch panel in the `Mnemerynne-tab` firmware) follow the same group: a panel controls its owner's screens only while its owner may use screens.
 - **Who sees what:** the share's permissions on the Media folders, set in Windows like any library. A Movies subfolder closed to someone is closed in Media too, including its posters.
 - **Transcoding:** how films the browser can't play are converted.
   - **Automatic** tries the AMD card (VAAPI), then the NVIDIA card (NVENC), then the CPU, and keeps the first that works.

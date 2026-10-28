@@ -868,6 +868,114 @@ def test_pairing_codes_need_the_screens_group_and_sign_in(client, conn, director
     assert tv.post("/media/screen/pair").status_code == 404 and tv.get("/media/screen").status_code == 404
 
 
+# ---------------------------------------------------------------- remotes
+def _remote(client, name="Kitchen tablet"):
+    """A remote panel paired from the phone: its client (no cookies kept, like the panel) and its headers."""
+    panel = TestClient(client.app)
+    pairing = panel.post("/media/remote/pair").json()
+    assert len(pairing["code"]) == 9 and pairing["url"].endswith("/media/pair?code=" + pairing["code"].replace("-", ""))
+    assert panel.post("/media/remote/pair/status", json={"secret": pairing["secret"]}).json()["state"] == "waiting"
+    r = client.post("/api/media/screens/claim", json={"code": pairing["code"], "name": name})
+    assert r.status_code == 201 and r.json()["kind"] == "remote", r.text
+    got = panel.post("/media/remote/pair/status", json={"secret": pairing["secret"]}).json()
+    assert got["state"] == "paired" and got["name"] == name and "mnemerynne_screen" not in panel.cookies
+    assert panel.post("/media/remote/pair/status", json={"secret": pairing["secret"]}).json()["state"] == "expired"
+    return panel, {"Authorization": "Bearer " + got["key"]}, r.json()["id"]
+
+
+def test_a_remote_pairs_with_a_code_and_controls_only_its_owners_screens(client, conn, directory):
+    _login(client, conn, directory)
+    _turn_on(client)
+    screen_id, key = _pair(client)
+    panel, auth, remote_id = _remote(client)
+    assert client.get("/api/media/screens").json()["remotes"][0]["name"] == "Kitchen tablet"
+    assert [s["name"] for s in client.get("/api/media/screens").json()["screens"]] == ["Living room"]  # not a screen
+
+    seen = panel.get("/api/media/remote", headers=auth).json()
+    assert seen["name"] == "Kitchen tablet" and seen["owner"] == "boss"
+    assert seen["screens"] == [{"id": screen_id, "name": "Living room", "online": False, "state": None}]
+    assert conn.execute("SELECT last_seen_at FROM media_remotes").fetchone()[0]
+    off = panel.post(f"/api/media/remote/screens/{screen_id}/command", json={"action": "toggle"}, headers=auth)
+    assert off.status_code == 409
+
+    queue = _hub(client).listen(screen_id)                # the TV's open stream
+    tv = TestClient(client.app)
+    tv.cookies.set("mnemerynne_screen", key)
+    assert tv.put("/api/media/screen/state", json={"kind": "audio", "title": "One More Time", "volume": 0.4,
+                                                    "art": "/media/art/1", "position": 12}).status_code == 200
+    state = panel.get("/api/media/remote", headers=auth).json()["screens"][0]["state"]
+    assert state["title"] == "One More Time" and state["volume"] == 0.4 and "art" not in state
+    for body in ({"action": "toggle"}, {"action": "skip", "by": 30}, {"action": "volume", "level": 0.5},
+                 {"action": "night"}, {"action": "stop"}):
+        r = panel.post(f"/api/media/remote/screens/{screen_id}/command", json=body, headers=auth)
+        assert r.status_code == 200, r.text
+        sent = queue.get_nowait()
+        assert sent["action"] == body["action"] and sent["sender"] == "boss" and sent["override"] is False
+    assert sent == {"action": "stop", "id": sent["id"], "sender": "boss", "override": False}
+
+    # Only the remote's commands, and nothing else of Media.
+    for body in ({"action": "play_item", "file_id": 1}, {"action": "calibrate"}, {"action": "play_youtube", "url": "x"}):
+        assert panel.post(f"/api/media/remote/screens/{screen_id}/command", json=body, headers=auth).status_code == 422
+    assert panel.get("/api/media/home", headers=auth).status_code == 401
+    assert panel.get("/api/media/screens", headers=auth).status_code == 401
+    assert panel.get("/api/media/remote", headers={"Authorization": "Bearer not-a-key"}).status_code == 401
+    assert panel.get("/api/media/remote").status_code == 401
+
+    # Someone else's screen: not there, though the remote's owner is an admin.
+    _login(client, conn, directory, "jane", "jsmith")
+    other_id = client.post("/api/media/screens", json={"name": "Jane's TV"}).json()["id"]
+    assert panel.post(f"/api/media/remote/screens/{other_id}/command", json={"action": "stop"},
+                      headers=auth).status_code == 404
+    assert client.delete(f"/api/media/remotes/{remote_id}").status_code == 404     # only its owner removes it
+
+    client.cookies.clear()
+    client.post("/login", data={"username": "boss", "password": "password123"})
+    assert client.delete(f"/api/media/remotes/{remote_id}").status_code == 200
+    assert panel.get("/api/media/remote", headers=auth).status_code == 401
+    assert client.get("/api/media/screens").json()["remotes"] == []
+    _hub(client).unlisten(screen_id, queue)
+
+
+def test_a_remote_starts_channels_forgets_itself_and_follows_the_group(client, conn, directory):
+    _login(client, conn, directory)
+    _turn_on(client)
+    client.put("/api/admin/settings/media", json={"radio_directory_url": ""})
+    screen_id, _ = _pair(client)
+    for n in range(3):
+        client.post("/api/admin/media/sources", json={"kind": "hls", "name": f"Cam {n}",
+                                                      "url": f"http://10.1.1.21/stream/hls/{n}.m3u8"})
+    client.post("/api/admin/media/sources", json={"kind": "radio", "name": "Telehack", "url": "http://10.1.1.21/r.mp3"})
+    panel, auth, _ = _remote(client)
+
+    page = panel.get("/api/media/remote/channels", params={"offset": 2, "limit": 2}, headers=auth).json()
+    assert page["total"] == 4 and [c["name"] for c in page["channels"]] == ["Cam 2", "Telehack"]
+    station = page["channels"][1]
+    assert station["kind"] == "station" and station["key"].startswith("src-")
+    queue = _hub(client).listen(screen_id)
+    r = panel.post(f"/api/media/remote/screens/{screen_id}/command",
+                   json={"action": "play_station", "key": station["key"]}, headers=auth)
+    assert r.status_code == 200 and queue.get_nowait()["station"]["name"] == "Telehack"
+    assert panel.post(f"/api/media/remote/screens/{screen_id}/command",
+                      json={"action": "play_station", "key": "nope"}, headers=auth).status_code == 404
+    _hub(client).unlisten(screen_id, queue)
+
+    # The owner leaves the screens group: the remote stops at once; back in, it works again.
+    _screens_for(client, "")
+    assert panel.get("/api/media/remote", headers=auth).status_code == 401
+    _screens_for(client)
+    assert panel.get("/api/media/remote", headers=auth).status_code == 200
+
+    # A remote's pairing secret can't collect a TV's key, nor a TV's a remote's.
+    tv = TestClient(client.app)
+    tv.post("/media/screen/pair")
+    assert panel.post("/media/remote/pair/status",
+                      json={"secret": tv.cookies.get("mnemerynne_screen_pairing")}).json()["state"] == "expired"
+
+    assert panel.delete("/api/media/remote", headers=auth).status_code == 200      # the panel's Forget
+    assert panel.get("/api/media/remote", headers=auth).status_code == 401
+    assert conn.execute("SELECT count(*) FROM media_remotes").fetchone()[0] == 0
+
+
 # ------------------------------------------------------------- app, share
 def test_erynne_is_installable_and_a_share_target(client, conn, directory):
     m = client.get("/manifest.webmanifest")                     # public: fetched without the session

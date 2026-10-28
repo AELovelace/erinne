@@ -67,6 +67,15 @@ Either way, the TV stays paired until you remove it, even after any sign-in runs
 
 Only you (and admins) can see and control your screens. Screens are only for members of the group your admin chose; without it, there is no **Screens** item in the menu.
 
+## A remote panel
+
+A remote panel is a small touchscreen (the Erynne remote tablet) that controls your screens without a phone. It can play and pause, skip back 10 seconds and forward 30, go to the previous or next track, change the volume, mute, step the night filter, stop, and start a Live TV stream or radio station. It can't browse films or music.
+
+**Pair it once with a code,** like a TV: the panel shows a code and a QR code. Scan it, or type the code under **Media → Screens → Pair a TV or remote**, name the panel (for example *Kitchen tablet*) and press **Pair**.
+
+- The panel controls only your screens, and only while you may use screens. It shows each one and what it is playing; tap **Screens** on it to choose another.
+- **Screens** on your phone lists your remotes too. **Remove** unpairs one; do that if a panel is lost. The panel's own **Screens → Unpair** does the same from the panel.
+
 ## Signage on the screens
 
 An admin can give screens playlists to show while nobody is using them (Access → Signage): pictures and clips from the **Signage** folder on the share, PDFs, text, web pages and the announcements for everyone. Casting from your phone always interrupts; what you cast plays, and the signage comes back afterwards.
