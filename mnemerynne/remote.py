@@ -16,7 +16,11 @@ What the proxy changes on the way:
 - with rewrite_html on, it also rewrites links in HTML pages and in XML pages and their XSL
   stylesheets (RD Web Access builds its pages that way): root-relative ones, and absolute ones to the
   app's own address; and the plainest calls (fetch("/..."), "/api/..." strings) in the app's script
-  files (best effort: apps that build URLs at runtime need their own base-path setting instead).
+  files (best effort: apps that build URLs at runtime need their own base-path setting instead);
+- with rewrite_html on, an XML page that names an XSL stylesheet (RD Web Access) is transformed
+  here and sent as HTML: Firefox draws such pages blank in the Remote window, and browsers are
+  dropping XSLT. The stylesheet and the files it reads come from the app through the proxy, as the
+  person; if anything fails, the XML goes as it came and the browser transforms it.
 
 A proxied app runs on Mnemerynne's origin, so its scripts could call Mnemerynne's API as the
 person: list only the organisation's own tools, for the groups that should have them.
@@ -28,11 +32,12 @@ import asyncio
 import logging
 import re
 import sqlite3
-from typing import Any, Callable
-from urllib.parse import urlsplit
+from typing import Any, Awaitable, Callable
+from urllib.parse import urljoin, urlsplit
 
 import anyio
 import httpx
+from lxml import etree
 from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse, RedirectResponse
 from starlette.websockets import WebSocket
@@ -53,6 +58,8 @@ STRIP_RESPONSE = {"x-frame-options", "strict-transport-security", "alt-svc", "pu
                   "content-security-policy-report-only"}
 SESSION_COOKIES = {"mnemerynne_session", "erynne_theme"}    # never sent upstream, never accepted from it
 HTML_MAX_BYTES = 5 * 1024 * 1024
+XSLT_MAX_LOADS = 16           # files one transform may read: the stylesheet, its imports, document()
+XSLT_ORIGIN = "http://remote.invalid"   # the address lxml sees; every load under it goes through the proxy
 CONNECT_TIMEOUT = 10.0
 WEBSOCKET_CLOSE_UNAUTHENTICATED, WEBSOCKET_CLOSE_FORBIDDEN, WEBSOCKET_CLOSE_UPSTREAM = 4401, 4403, 1011
 
@@ -67,6 +74,9 @@ _SRCSET = re.compile(r"""(\bsrcset\s*=\s*)(["'])([^"']*)(["'])""", re.IGNORECASE
 _CSS_URL = re.compile(r"""(\burl\(\s*)(["']?)/(?!/)""", re.IGNORECASE)
 _JS = re.compile(r"""((?:\bfetch\(|\.open\(\s*["'][A-Za-z]+["']\s*,)\s*)(["'`])/(?!/)""")
 _API_LITERAL = re.compile(r"""(["'`])(/api/)""")
+_XML_STYLESHEET = re.compile(r"<\?xml-stylesheet\s([^?]*)\?>")
+_PI_ATTR = re.compile(r"""\b(type|href)\s*=\s*(["'])(.*?)\2""")
+_XML_TYPES = ("text/xml", "application/xml")
 
 
 class RemoteError(ValueError):
@@ -237,6 +247,49 @@ def _rewriter(content_type: str) -> Callable[[str, str], str] | None:
     return None
 
 
+# ------------------------------------------------------------------- XSLT
+def xsl_href(text: str) -> str | None:
+    """The XSL stylesheet an XML page names (<?xml-stylesheet type="text/xsl" href="..."?>), or None."""
+    for m in _XML_STYLESHEET.finditer(text):
+        attrs = {k.lower(): v for k, _, v in _PI_ATTR.findall(m.group(1))}
+        if "xsl" in attrs.get("type", "").lower() and attrs.get("href"):
+            return attrs["href"]
+    return None
+
+
+def transform_xml(text: str, page: str, href: str, load: Callable[[str], bytes | None]) -> bytes:
+    """An XML page (at `page`, a path under the prefix) with its stylesheet (`href`) applied, as the
+    browser would. Every file the transform reads, the stylesheet first, comes from load(path), a path
+    under the page's prefix, at most XSLT_MAX_LOADS of them; nothing is read from disk or elsewhere.
+    Raises etree.LxmlError when the page or the stylesheet doesn't parse or apply."""
+    loads = 0
+
+    def fetch(url: str) -> bytes | None:
+        nonlocal loads
+        parts = urlsplit(url or "")
+        if f"{parts.scheme}://{parts.netloc}" != XSLT_ORIGIN or loads >= XSLT_MAX_LOADS:
+            return None
+        loads += 1
+        return load(parts.path + (f"?{parts.query}" if parts.query else ""))
+
+    class Loader(etree.Resolver):
+        def resolve(self, url, pubid, context):
+            data = fetch(url)    # anything refused reads as an empty document, never from libxml2 itself
+            return self.resolve_string(data if data is not None else b"<nothing/>", context)
+
+    parser = etree.XMLParser(no_network=True, resolve_entities=False, load_dtd=False)
+    parser.resolvers.add(Loader())
+    doc = etree.fromstring(text.encode("utf-8", "surrogateescape"), parser, base_url=XSLT_ORIGIN + page)
+    xsl_url = urljoin(XSLT_ORIGIN + page, href)
+    source = fetch(xsl_url)
+    if source is None:
+        raise etree.XSLTParseError(f"no stylesheet at {href}")
+    stylesheet = etree.fromstring(source, parser, base_url=xsl_url)
+    access = etree.XSLTAccessControl(read_file=False, write_file=False, create_dir=False, read_network=True,
+                                     write_network=False)
+    return bytes(etree.XSLT(stylesheet, access_control=access)(doc))
+
+
 # ----------------------------------------------------------------- headers
 def _cookie_without_sessions(value: str) -> str:
     kept = [part for part in value.split(";") if part.strip().split("=", 1)[0].strip().lower() not in SESSION_COOKIES]
@@ -322,6 +375,18 @@ async def _chunks(response: httpx.Response):
 def _wants_html(headers: list[tuple[bytes, bytes]]) -> bool:
     accept = next((v.decode("latin-1") for k, v in headers if k.lower() == b"accept"), "")
     return "text/html" in accept or "*/*" in accept and "application/json" not in accept
+
+
+async def _transformed(text: str, page: str, href: str, load: Callable[[str], Awaitable[bytes | None]],
+                       slug: str) -> bytes | None:
+    """transform_xml in a worker thread, its loads back on this loop; None (send the XML) if it fails."""
+    try:
+        html = await anyio.to_thread.run_sync(transform_xml, text, page, href,
+                                              lambda path: anyio.from_thread.run(load, path))
+    except (etree.LxmlError, ValueError) as exc:
+        log.info("Remote %s: %s left for the browser to transform: %s", slug, page, exc)
+        return None
+    return html or None
 
 
 class RemoteProxy:
@@ -436,12 +501,34 @@ class RemoteProxy:
             await JSONResponse({"detail": f"{app['name']} didn't answer: {exc.__class__.__name__}"},
                                status_code=502)(scope, receive, send)
             return
+        prefix = prefix_for(slug)
+        # What the page's stylesheet reads (XSLT): a GET as this person, without the page request's body.
+        load_headers = [(k, v) for k, v in headers if k.lower() not in ("content-length", "content-type",
+                                                                        "transfer-encoding", "expect")]
+
+        async def load(path: str) -> bytes | None:
+            sub, _, sub_query = path.partition("?")
+            if not sub.startswith(prefix + "/"):
+                return None
+            try:
+                got = await client.get(upstream_url(app, sub[len(prefix):], sub_query), headers=load_headers)
+            except (RemoteError, httpx.HTTPError):
+                return None
+            if got.status_code != 200 or len(got.content) > HTML_MAX_BYTES:
+                return None
+            text = got.content.decode("utf-8", "surrogateescape")
+            rewriter = _rewriter(got.headers.get("content-type", "").lower())
+            if rewriter is not None:   # as the browser would have had it
+                text = rewriter(rewrite_absolute(text, app, slug), slug)
+            return text.encode("utf-8", "surrogateescape")
+
         try:
-            await self._relay(send, response, app, slug, rewrite)
+            await self._relay(send, response, app, slug, rewrite, page=prefix + (rest or "/"), load=load)
         finally:
             await response.aclose()
 
-    async def _relay(self, send, response: httpx.Response, app: sqlite3.Row, slug: str, rewrite: bool) -> None:
+    async def _relay(self, send, response: httpx.Response, app: sqlite3.Row, slug: str, rewrite: bool, *,
+                     page: str = "", load: Callable[[str], Awaitable[bytes | None]] | None = None) -> None:
         content_type = response.headers.get("content-type", "").lower()
         chunks = _chunks(response)
         rewriter = _rewriter(content_type) if rewrite else None
@@ -456,9 +543,15 @@ class RemoteProxy:
                         over = True
                         break
                 if not over:
-                    text = b"".join(parts).decode("utf-8", "surrogateescape")
-                    body = rewriter(rewrite_absolute(text, app, slug), slug).encode("utf-8", "surrogateescape")
+                    text = rewriter(rewrite_absolute(b"".join(parts).decode("utf-8", "surrogateescape"), app, slug), slug)
                     headers = response_headers(response.headers, app, slug, rewritten=True)
+                    href = xsl_href(text) if load is not None and content_type.split(";")[0].strip() in _XML_TYPES else None
+                    body = await _transformed(text, page, href, load, slug) if href else None
+                    if body is not None:
+                        headers = [(k, v) for k, v in headers if k != b"content-type"]
+                        headers.append((b"content-type", b"text/html; charset=utf-8"))
+                    else:
+                        body = text.encode("utf-8", "surrogateescape")
                     headers.append((b"content-length", str(len(body)).encode()))
                     await send({"type": "http.response.start", "status": response.status_code, "headers": headers})
                     await send({"type": "http.response.body", "body": body, "more_body": False})

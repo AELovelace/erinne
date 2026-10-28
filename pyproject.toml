@@ -29,6 +29,8 @@ dependencies = [
     "openpyxl==3.1.5",
     "xlrd==2.0.2",
     "striprtf==0.0.34",
+    # Applies RD Web Access's XSL stylesheets for the browser (mnemerynne/remote.py)
+    "lxml==6.1.3",
     # Encrypts API credentials (mnemerynne/apis.py)
     "cryptography==50.0.2",
     # Erynne on Claude, with each person's own API key (mnemerynne/clients/claude.py)

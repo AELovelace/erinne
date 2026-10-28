@@ -247,6 +247,71 @@ def test_an_apps_script_files_call_its_own_api(conn, settings, people, directory
         assert alice.get("/remote/balancer/static/app.css").text == '.a { content: "/api/no"; }'
 
 
+_RDWEB_PAGE = (b'<?xml version="1.0" encoding="UTF-8"?>\n'
+               b'<?xml-stylesheet type="text/xsl" href="../Site.xsl"?>\n'
+               b'<?xml-stylesheet type="text/css" href="../RenderFail.css"?>\n'
+               b'<RDWAPage baseurl="https://10.0.5.4/RDWeb/Pages/en-US/" domainuser="ORG\\alice">'
+               b'<App icon="/RDWeb/Pages/rdp/Paint.png">Paint</App></RDWAPage>')
+_RDWEB_XSL = (b'<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+              b'<xsl:output method="html" encoding="UTF-8"/>'
+              b'<xsl:variable name="baseurl" select="/RDWAPage/@baseurl"/>'
+              b'<xsl:variable name="strings" select="document(concat($baseurl, \'Strings.xml\'))/strings/s"/>'
+              b'<xsl:template match="/"><html><head><base href="{$baseurl}"/></head><body>'
+              b'<h1><xsl:value-of select="$strings[@id=\'Hello\']"/>, <xsl:value-of select="/RDWAPage/@domainuser"/></h1>'
+              b'<xsl:for-each select="/RDWAPage/App"><img src="{@icon}"/><xsl:value-of select="."/></xsl:for-each>'
+              b'<p id="far"><xsl:value-of select="document(\'http://10.9.9.9/x.xml\')"/>'
+              b'<xsl:value-of select="document(\'/elsewhere/x.xml\')"/></p>'
+              b'</body></html></xsl:template></xsl:stylesheet>')
+
+
+def test_xml_pages_with_a_stylesheet_are_transformed_here(conn, settings, people, directory):
+    """RD Web Access: its XML pages come out as HTML (Firefox draws them blank in a frame, and browsers are
+    dropping XSLT): the stylesheet and the files it reads come from the app as the person, and nothing
+    off the app is read (one that reaches for a local file isn't applied). A stylesheet that won't load,
+    parse or apply leaves the XML for the browser."""
+    _app(conn, slug="rdweb", base="https://10.0.5.4/RDWeb", rewrite_html=1)
+    seen, files = [], {"/RDWeb/Pages/en-US/Default.aspx": (_RDWEB_PAGE, "text/xml; charset=utf-8"),
+                       "/RDWeb/Pages/Site.xsl": (_RDWEB_XSL, "text/xml"),
+                       "/RDWeb/Pages/en-US/Strings.xml": (b'<strings><s id="Hello">Welcome</s></strings>', "text/xml")}
+
+    async def handler(request):
+        seen.append(request)
+        if request.url.path not in files:
+            return httpx.Response(404, content=b"no")
+        body, kind = files[request.url.path]
+        return httpx.Response(200, headers={"content-type": kind}, content=body)
+    remote.TRANSPORT = httpx.MockTransport(handler)
+
+    assert remote.xsl_href(_RDWEB_PAGE.decode()) == "../Site.xsl" and remote.xsl_href("<a/>") is None
+    with _web(settings, "alice", directory) as alice:
+        alice.cookies.set("TSWAAuthHttpOnlyCookie", "ticket", path="/remote/rdweb/")
+        page = alice.get("/remote/rdweb/Pages/en-US/Default.aspx")
+        assert page.status_code == 200 and page.headers["content-type"] == "text/html; charset=utf-8"
+        assert int(page.headers["content-length"]) == len(page.content)
+        html = page.text
+        assert "<h1>Welcome, ORG\\alice</h1>" in html and '<base href="/remote/rdweb/Pages/en-US/">' in html
+        assert '<img src="/remote/rdweb/Pages/rdp/Paint.png">Paint' in html and '<p id="far"></p>' in html
+        assert "xml-stylesheet" not in html
+        loads = [r for r in seen if r.url.path != "/RDWeb/Pages/en-US/Default.aspx"]
+        assert sorted(r.url.path for r in loads) == ["/RDWeb/Pages/Site.xsl", "/RDWeb/Pages/en-US/Strings.xml"]
+        assert all(r.method == "GET" and "TSWAAuthHttpOnlyCookie=ticket" in r.headers.get("cookie", "") and
+                   "mnemerynne_session" not in r.headers.get("cookie", "") for r in loads)
+
+        for broken in (b"<not a stylesheet", _RDWEB_XSL.replace(b"http://10.9.9.9/x.xml", b"file:///etc/hostname")):
+            files["/RDWeb/Pages/Site.xsl"] = (broken, "text/xml")
+            page = alice.get("/remote/rdweb/Pages/en-US/Default.aspx")
+            assert page.status_code == 200 and page.headers["content-type"].startswith("text/xml"), broken[:40]
+        assert '<?xml-stylesheet type="text/xsl" href="../Site.xsl"?>' in page.text
+        assert 'baseurl="/remote/rdweb/Pages/en-US/"' in page.text
+        del files["/RDWeb/Pages/Site.xsl"]
+        assert alice.get("/remote/rdweb/Pages/en-US/Default.aspx").headers["content-type"].startswith("text/xml")
+
+    conn.execute("UPDATE remote_apps SET rewrite_html = 0")
+    with _web(settings, "alice", directory) as alice:
+        files["/RDWeb/Pages/Site.xsl"] = (_RDWEB_XSL, "text/xml")
+        assert alice.get("/remote/rdweb/Pages/en-US/Default.aspx").content == _RDWEB_PAGE
+
+
 def test_streams_pass_through_and_a_dead_app_is_a_502(conn, settings, people, directory):
     _app(conn)
 
