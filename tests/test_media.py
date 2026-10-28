@@ -764,7 +764,7 @@ def test_a_screen_keeps_its_underscan(client, conn, directory):
     tv = TestClient(client.app)
     tv.cookies.set("mnemerynne_screen", key)
     assert 'data-safe-x="0.0" data-safe-y="0.0"' in tv.get("/media/screen").text
-    assert 'id="mc-calibrate"' in tv.get("/media/screen").text and 'id="mc-calibrate"' not in client.get("/media").text
+    assert 'id="mc-calibrate"' not in tv.get("/media/screen").text       # in Kiosk settings (and the phone) now
 
     r = tv.put("/media/screen/safe-area", json={"x": 3.2, "y": 2.5})
     assert r.status_code == 200 and r.json() == {"x": 3.0, "y": 2.5}         # half-percent steps

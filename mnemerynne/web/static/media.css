@@ -293,6 +293,8 @@ body.mc-screen-mode:has(> .topbar) .mc { margin-top: .9rem;
   height: calc(100vh - var(--chrome, 3.6rem) - 1.8rem - 2 * var(--safe-yv, 0px)); }
 /* Kiosk settings' code for an admin's phone (kiosk_screen.js), on the pairing page's layout. */
 .mc-kiosk-buttons { display: flex; gap: 1rem; justify-content: center; }
+/* Kiosk settings: the last thing in the TV's menu, at its bottom. */
+.mc-menu #mc-kiosk { margin-top: auto; }
 .mc-kiosk-buttons button { font-size: 1.2rem; padding: .7rem 1.6rem; }
 
 /* -------------------------------------------- pairing a TV (media_pair.html) */

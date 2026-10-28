@@ -1225,6 +1225,8 @@ label.switch input { width: 1.5rem; height: 1.5rem; accent-color: #ff2e97; }
         <div class="row"><label for="volume">System volume</label>
           <input type="range" id="volume" min="0" max="100" step="5"><span id="volume-value"></span></div>
         <p class="muted">The sound card's level. Media's own volume (the remote's − and +) is on top of it.</p>
+        <div class="row"><button class="secondary" type="button" id="screen-size">Screen size…</button>
+          <span class="muted">For a TV that cuts off the edges of the picture.</span></div>
       </section>
       <section class="card">
         <h2>Kiosk PIN</h2>
@@ -1394,6 +1396,8 @@ $("remove-pin").addEventListener("click", async function () {
   catch (err) { say(err.message, true); }
 });
 $("check").addEventListener("click", releases);
+// Calibration runs on the TV page itself (media.js, ?calibrate=1), and comes back here when done.
+$("screen-size").addEventListener("click", function () { if (state && state.server) location.href = state.server + "/media/screen?calibrate=1"; });
 $("rollback").addEventListener("click", function () { job("/api/kiosk/rollback", {}, "Rolling back…"); });
 $("system-update").addEventListener("click", function () { job("/api/kiosk/system-update", {}, "Installing system updates…"); });
 $("reboot-now").addEventListener("click", function () { job("/api/kiosk/reboot", {}, "Rebooting…"); });

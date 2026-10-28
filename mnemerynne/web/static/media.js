@@ -1536,7 +1536,7 @@
      in percent of the width (x, both sides) and height (y, top and bottom), set on the calibration screen
      (Screen size in the menu, or from the phone) and kept with the screen on the server. */
   const safeArea = {
-    x: 0, y: 0, before: null, box: null,
+    x: 0, y: 0, before: null, box: null, fromSettings: false,
 
     init: function () {
       this.x = Number(main.dataset.safeX) || 0;
@@ -1545,8 +1545,13 @@
       window.addEventListener("keydown", function (e) {
         if (safeArea.isOpen() && safeArea.key(e)) { e.preventDefault(); e.stopImmediatePropagation(); }
       }, true);
-      $("mc-calibrate").addEventListener("click", function () { safeArea.open(); });
-      // Wi-Fi is in the box's Kiosk settings (kiosk_screen.js), behind its unlock.
+      // Screen size and Wi-Fi are in the box's Kiosk settings, behind its unlock: Screen size comes back here
+      // as ?calibrate=1, and goes back to the settings when saved or cancelled. The phone can still open it.
+      if (kiosk && /[?&]calibrate=1\b/.test(location.search)) {
+        this.fromSettings = true;
+        history.replaceState(null, "", location.pathname + location.hash);
+        setTimeout(function () { safeArea.open(); }, 0);
+      }
     },
 
     isOpen: function () { return !!this.box && !this.box.hidden; },
@@ -1609,6 +1614,7 @@
     close: function () {
       if (this.box) this.box.hidden = true;
       screenMode.report(true);
+      if (this.fromSettings) { location.href = KIOSK_HOME + "settings"; return; }
       focusFirst();
     },
 

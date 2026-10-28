@@ -133,6 +133,7 @@ They lock again after ten minutes untouched, or with **Lock**.
 | **Mnemerynne address** | The server the TV shows. The box checks the new one answers like Mnemerynne, then runs `install.sh --reconfigure` with it and restarts. The TV shows the new server's pairing code. |
 | **Show the top bar** | The TV page gets a short top bar: Ask, Files and the Wiki, and **Sign in**. Whoever signs in on the TV is signed out when they go back to the TV (**📺 Back to TV**), or after ten minutes untouched. Kept on the server for this screen, so it needs a phone approval to change. |
 | **System volume** | The sound card's level, kept across restarts. Media's own volume (− and +) is on top of it. |
+| **Screen size…** | For a TV that crops the picture's edges: arrows until the pink frame shows whole, Enter to save. Back to the settings after. The phone's **Screen size** (Media → Screens) does the same. |
 | **Updates** | The installed `screen-v*` release, newer ones with their notes, **Install**, and **Roll back** to the one before the last update. Only newer releases install, and never over changes made by hand in `/opt/mnemerynne-screen`. **Install system updates now** runs `dnf5 upgrade`; **Reboot to finish** shows when a new kernel is waiting. |
 | **Kiosk PIN** | 4 to 12 digits. Five wrong tries lock it for five minutes. |
 | **Wi-Fi** | The network it's on; **Change network…** lists the networks to join. |
