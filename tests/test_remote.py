@@ -95,6 +95,27 @@ def test_links_cookies_and_pages_move_under_the_prefix(conn, people):
     assert out.count("/remote/balancer/remote/") == 0
 
 
+def test_xml_pages_absolute_links_and_cookie_paths_under_a_base_path():
+    """RD Web Access: an XML page whose XSL sets <base> from an absolute baseurl, and cookies on /RDWeb/."""
+    app = {"base_url": "https://192.168.1.4/RDWeb"}
+    page = ('<?xml-stylesheet type="text/xsl" href="../Site.xsl"?><RDWAPage baseurl="https://192.168.1.4/RDWeb/Pages/en-US/">'
+            '<a href="https://192.168.1.40/x">another box</a> <a href="https://192.168.1.4:8443/y">another port</a>'
+            '<a href="https://elsewhere.example/z">a site</a></RDWAPage>')
+    out = remote.rewrite_absolute(page, app, "rdweb")
+    assert 'baseurl="/remote/rdweb/Pages/en-US/"' in out and 'href="../Site.xsl"' in out
+    assert "https://192.168.1.40/x" in out and "https://192.168.1.4:8443/y" in out and "https://elsewhere.example/z" in out
+    assert remote.rewrite_absolute(page, {"base_url": "https://192.168.1.4"}, "rdweb").count('"/remote/rdweb/RDWeb/Pages/en-US/"') == 1
+    for kind in ("text/xml", "application/xml; charset=utf-8", "text/html", "application/xhtml+xml"):
+        assert remote._rewriter(kind) is remote.rewrite_html, kind
+    assert remote._rewriter("application/javascript") is remote.rewrite_script and remote._rewriter("image/png") is None
+
+    assert remote.rewrite_cookie("TSWAFeatureCheckCookie=true; path=/RDWeb/", "rdweb", "/RDWeb") == \
+        "TSWAFeatureCheckCookie=true; Path=/remote/rdweb/"
+    assert remote.rewrite_cookie("a=1; Path=/RDWeb/Pages", "rdweb", "/RDWeb") == "a=1; Path=/remote/rdweb/Pages"
+    assert remote.rewrite_cookie("a=1; Path=/other", "rdweb", "/RDWeb") == "a=1; Path=/remote/rdweb/other"
+    assert remote.rewrite_cookie("a=1; Path=/RDWebX", "rdweb", "/RDWeb") == "a=1; Path=/remote/rdweb/RDWebX"
+
+
 def test_request_and_response_headers(conn, people):
     app = _app(conn)
     raw = [(b"host", b"mnemerynne.io"), (b"cookie", b"mnemerynne_session=abc; erynne_theme=neon; app=1"),

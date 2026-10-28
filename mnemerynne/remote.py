@@ -13,9 +13,10 @@ What the proxy changes on the way:
 - it drops the upstream's X-Frame-Options and frame-ancestors so the Remote tab can show the app
   in its window (the web app's own headers then allow framing by Mnemerynne only), rewrites
   Location and Set-Cookie to the /remote/<slug> prefix, and drops cookies named like Mnemerynne's;
-- with rewrite_html on, it also rewrites absolute links in HTML pages, and the plainest calls
-  (fetch("/..."), "/api/..." strings) in the app's script files (best effort: apps that build
-  URLs at runtime need their own base-path setting instead).
+- with rewrite_html on, it also rewrites links in HTML pages and in XML pages and their XSL
+  stylesheets (RD Web Access builds its pages that way): root-relative ones, and absolute ones to the
+  app's own address; and the plainest calls (fetch("/..."), "/api/..." strings) in the app's script
+  files (best effort: apps that build URLs at runtime need their own base-path setting instead).
 
 A proxied app runs on Mnemerynne's origin, so its scripts could call Mnemerynne's API as the
 person: list only the organisation's own tools, for the groups that should have them.
@@ -148,8 +149,9 @@ def rewrite_url(value: str, app: sqlite3.Row, slug: str) -> str:
     return prefix + v
 
 
-def rewrite_cookie(set_cookie: str, slug: str) -> str | None:
-    """A Set-Cookie scoped to the app's prefix; cookies named like Mnemerynne's own are dropped."""
+def rewrite_cookie(set_cookie: str, slug: str, base_path: str = "") -> str | None:
+    """A Set-Cookie scoped to the app's prefix; cookies named like Mnemerynne's own are dropped. A path
+    under the app's base path (base_url's) loses it, as its pages' addresses do."""
     parts = [p.strip() for p in set_cookie.split(";")]
     name = parts[0].split("=", 1)[0].strip()
     if name.lower() in SESSION_COOKIES:
@@ -165,6 +167,8 @@ def rewrite_cookie(set_cookie: str, slug: str) -> str | None:
             val = val.strip() or "/"
             if not val.startswith("/"):
                 val = "/" + val
+            if base_path and (val.lower() == base_path.lower() or val.lower().startswith(base_path.lower() + "/")):
+                val = val[len(base_path):] or "/"
             attr = f"Path={prefix}{val if val != '/' else '/'}"
             has_path = True
         out.append(attr)
@@ -200,15 +204,28 @@ def rewrite_script(text: str, slug: str) -> str:
     return re.sub(rf"""(["'`])/api/(?!{skip[1:]})""", lambda m: f"{m.group(1)}{prefix}/api/", text)
 
 
+def rewrite_absolute(text: str, app: sqlite3.Row, slug: str) -> str:
+    """Links to the app's own address (http://10.0.0.5/app/x) move under the prefix (rewrite_url):
+    the browser can't reach that address, or it isn't Mnemerynne's origin."""
+    netloc = urlsplit(app["base_url"]).netloc
+    if not netloc:
+        return text
+    return re.sub(rf"""\b(?:https?|wss?)://{re.escape(netloc)}(?![\w.:-])[^\s"'<>()]*""",
+                  lambda m: rewrite_url(m.group(0), app, slug), text, flags=re.IGNORECASE)
+
+
 _SCRIPT_TYPES = ("application/javascript", "text/javascript", "application/x-javascript", "application/ecmascript",
                  "text/ecmascript")
+_PAGE_TYPES = ("text/html", "application/xhtml+xml", "text/xml", "application/xml", "text/xsl", "application/xslt+xml")
 
 
 def _rewriter(content_type: str) -> Callable[[str, str], str] | None:
-    """How a response of this type is rewritten (rewrite_html on): pages and script files; nothing else."""
-    if content_type.startswith("text/html"):
+    """How a response of this type is rewritten (rewrite_html on): pages (HTML, or XML and its XSL) and
+    script files; nothing else."""
+    kind = content_type.split(";")[0].strip()
+    if kind in _PAGE_TYPES:
         return rewrite_html
-    if content_type.split(";")[0].strip() in _SCRIPT_TYPES:
+    if kind in _SCRIPT_TYPES:
         return rewrite_script
     return None
 
@@ -260,7 +277,7 @@ def response_headers(headers: httpx.Headers, app: sqlite3.Row, slug: str, *, rew
         if name == "location":
             value = rewrite_url(value, app, slug)
         elif name == "set-cookie":
-            value = rewrite_cookie(value, slug)
+            value = rewrite_cookie(value, slug, urlsplit(app["base_url"]).path.rstrip("/"))
             if value is None:
                 continue
         elif name == "content-security-policy":
@@ -433,7 +450,7 @@ class RemoteProxy:
                         break
                 if not over:
                     text = b"".join(parts).decode("utf-8", "surrogateescape")
-                    body = rewriter(text, slug).encode("utf-8", "surrogateescape")
+                    body = rewriter(rewrite_absolute(text, app, slug), slug).encode("utf-8", "surrogateescape")
                     headers = response_headers(response.headers, app, slug, rewritten=True)
                     headers.append((b"content-length", str(len(body)).encode()))
                     await send({"type": "http.response.start", "status": response.status_code, "headers": headers})
