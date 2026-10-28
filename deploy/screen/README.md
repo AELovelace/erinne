@@ -109,8 +109,9 @@ a hotspot called `Mnemerynne-Setup-XXXX`. The TV shows its password and two QR c
 After a power cut the router may take longer to start than the box. While nobody is on the hotspot, the
 box steps aside every 3 minutes so it can rejoin the networks it already knows.
 
-**To change networks while the box is online:** open **Wi-Fi** in the TV's menu (with a keyboard or air
-mouse). The same page lists the networks.
+**To change networks while the box is online:** **Kiosk settings → Wi-Fi → Change network…** (step 6),
+with a keyboard or air mouse. The same page lists the networks. While the box has no network at all, the
+start page's **Set up Wi-Fi with a keyboard** opens it without unlocking.
 
 Only the box itself and phones on its hotspot can reach the setup page; nothing is opened on your
 network. The hotspot's password is new every time it starts.
@@ -134,7 +135,8 @@ They lock again after ten minutes untouched, or with **Lock**.
 | **System volume** | The sound card's level, kept across restarts. Media's own volume (− and +) is on top of it. |
 | **Updates** | The installed `screen-v*` release, newer ones with their notes, **Install**, and **Roll back** to the one before the last update. Only newer releases install, and never over changes made by hand in `/opt/mnemerynne-screen`. **Install system updates now** runs `dnf5 upgrade`; **Reboot to finish** shows when a new kernel is waiting. |
 | **Kiosk PIN** | 4 to 12 digits. Five wrong tries lock it for five minutes. |
-| **This box** | Its name, addresses, system and server; **Wi-Fi…**, **Restart the screen**, **Reboot the box**. |
+| **Wi-Fi** | The network it's on; **Change network…** lists the networks to join. |
+| **This box** | Its name, addresses, system and server; **Restart the screen**, **Reboot the box**. |
 
 **When the TV can't connect** (a new box, or a server that moved), the start page offers **Change the
 Mnemerynne address** after 20 seconds. With a kiosk PIN set it asks for the PIN first. With none, anyone at

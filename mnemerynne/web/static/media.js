@@ -1546,8 +1546,7 @@
         if (safeArea.isOpen() && safeArea.key(e)) { e.preventDefault(); e.stopImmediatePropagation(); }
       }, true);
       $("mc-calibrate").addEventListener("click", function () { safeArea.open(); });
-      $("mc-wifi").hidden = !kiosk;
-      $("mc-wifi").addEventListener("click", function () { location.href = KIOSK_HOME + "wifi"; });
+      // Wi-Fi is in the box's Kiosk settings (kiosk_screen.js), behind its unlock.
     },
 
     isOpen: function () { return !!this.box && !this.box.hidden; },

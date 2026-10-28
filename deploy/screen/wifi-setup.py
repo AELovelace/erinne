@@ -741,7 +741,9 @@ class Kiosk:
         conf = self.conf()
         os_name = read_conf("/etc/os-release").get("PRETTY_NAME", "").strip('"')
         _, addresses, _ = self.run(["hostname", "-I"], 5)
+        st = self.setup.status(True)
         return {"hostname": socket.gethostname(), "addresses": addresses.split(), "os": os_name,
+                "ssid": st["ssid"], "wifi": st["wifi"],
                 "server": self.setup.server, "wifi_setup": conf.get("WIFI_SETUP", "yes") == "yes",
                 "audio": conf.get("AUDIO_OUTPUT", "hdmi"), "source": self.source()}
 
@@ -800,6 +802,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._kiosk_get(path)
         elif path == "/" and local:
             self._send(200, START_PAGE, "text/html")
+        elif local and path in ("/wifi", "/api/networks") and not self._wifi_open():
+            if path == "/wifi":       # online: Wi-Fi is part of Kiosk settings, behind its unlock
+                self._send(302, "", "text/plain", {"Location": "/settings"})
+            else:
+                self._json(401, {"detail": "Kiosk settings are locked."})
         elif path == "/wifi" or (path == "/" and not local):
             self._send(200, WIFI_PAGE.replace("{{LOCAL}}", "true" if local else "false"), "text/html")
         elif path == "/api/status":
@@ -836,6 +843,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path != "/api/connect":
             self._json(404, {"detail": "Not found"})
             return
+        if self.server.local and not self._wifi_open():
+            self._json(401, {"detail": "Kiosk settings are locked."})
+            return
         try:
             body = self._body()
             ssid = str(body.get("ssid", "")).strip()
@@ -861,6 +871,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
     @property
     def kiosk(self) -> "Kiosk | None":
         return getattr(self.server, "kiosk", None)
+
+    def _wifi_open(self) -> bool:
+        """Wi-Fi on the TV: with Kiosk settings unlocked; or open while the box has no network (a new box,
+        the start page's "Set up Wi-Fi with a keyboard") or its hotspot is up."""
+        k = self.kiosk
+        if k is None or not self.box.network or self.box.hotspot is not None:
+            return True
+        return k.session(self._cookie()) is not None
 
     def _body(self) -> dict:
         length = min(int(self.headers.get("Content-Length", "0")), 4096)
@@ -970,6 +988,7 @@ button.secondary, .button.secondary { background: #3b1450; color: #f6d6ea; }
 button:focus-visible, .button:focus-visible, input:focus-visible { outline: 3px solid #4de8ff; outline-offset: 2px; }
 input { font: inherit; padding: .5rem .7rem; border-radius: .5rem; border: 1px solid #6b3a85; background: #1f0a2e; color: inherit; width: 100%; box-sizing: border-box; }
 .error { color: #ff8a8a; }
+[hidden] { display: none !important; }
 """
 
 START_PAGE = """<!doctype html>
@@ -1084,6 +1103,7 @@ const LOCAL = {{LOCAL}};
 const $ = function (id) { return document.getElementById(id); };
 let hidden = false, chosen = null;
 $("back").hidden = !LOCAL;
+if (/[?&]from=settings/.test(location.search)) { $("back").href = "/settings"; $("back").textContent = "Back to Kiosk settings"; }
 function bars(n) { return n >= 75 ? "▂▄▆█" : n >= 50 ? "▂▄▆" : n >= 25 ? "▂▄" : "▂"; }
 function choose(net) {
   chosen = net; hidden = !net;
@@ -1119,7 +1139,7 @@ async function watch() {
     const s = await (await fetch("/api/status", { cache: "no-store" })).json();
     const a = s.attempt;
     if (a && a.state === "connecting") { setTimeout(watch, 2000); return; }
-    if (a && a.state === "connected") { $("msg").textContent = "Joined " + a.ssid + "."; if (LOCAL) setTimeout(function () { location.href = "/"; }, 1500); return; }
+    if (a && a.state === "connected") { $("msg").textContent = "Joined " + a.ssid + "."; if (LOCAL) setTimeout(function () { location.href = $("back").href; }, 1500); return; }
     if (a && a.state === "failed") { $("msg").className = "error"; $("msg").textContent = "Couldn't join " + a.ssid + ": " + a.error; load(); return; }
   } catch (e) { setTimeout(watch, 3000); }
 }
@@ -1137,7 +1157,7 @@ $("form").addEventListener("submit", async function (e) {
 });
 $("show").addEventListener("change", function () { $("password").type = $("show").checked ? "text" : "password"; });
 $("other").addEventListener("click", function () { choose(null); });
-$("cancel").addEventListener("click", function () { $("form").hidden = true; });
+$("cancel").addEventListener("click", function () { $("form").hidden = true; chosen = null; $("msg").textContent = ""; $("other").focus(); });
 $("refresh").addEventListener("click", load);
 load();
 </script></body></html>
@@ -1230,10 +1250,14 @@ label.switch input { width: 1.5rem; height: 1.5rem; accent-color: #ff2e97; }
       <div id="job" hidden><p id="job-title"></p><pre id="job-log"></pre></div>
     </section>
     <section class="card">
+      <h2>Wi-Fi</h2>
+      <p id="wifi-now"></p>
+      <div class="row"><a class="button secondary" href="/wifi?from=settings">Change network…</a></div>
+    </section>
+    <section class="card">
       <h2>This box</h2>
       <dl id="details"></dl>
       <div class="row">
-        <a class="button secondary" href="/wifi">Wi-Fi…</a>
         <button class="secondary" type="button" id="restart">Restart the screen</button>
         <button class="secondary" type="button" id="reboot">Reboot the box</button>
       </div>
@@ -1292,6 +1316,7 @@ async function load() {
     dl.append(text("dt", p[0]), text("dd", p[1]));
   });
   $("reboot-now").hidden = !state.reboot_needed;
+  $("wifi-now").textContent = d.ssid ? "On " + d.ssid + "." : d.wifi ? "Not on Wi-Fi (a cable, or no network)." : "This box has no Wi-Fi.";
   releases();
   jobs();
 }

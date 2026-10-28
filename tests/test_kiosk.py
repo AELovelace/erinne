@@ -75,6 +75,7 @@ def test_an_admin_opens_a_tvs_kiosk_settings_and_turns_on_its_top_bar(client, co
     tv = _tv(client, key)
     assert "kiosk-bar" not in tv.get("/media/screen").text
     assert 'id="mc-kiosk"' in tv.get("/media/screen").text and "kiosk_screen.js" in tv.get("/media/screen").text
+    assert 'id="mc-wifi"' not in tv.get("/media/screen").text          # Wi-Fi is in Kiosk settings now
 
     r = tv.post("/media/screen/kiosk/unlock")
     assert r.status_code == 200, r.text

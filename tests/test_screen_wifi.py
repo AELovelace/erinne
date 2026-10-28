@@ -515,3 +515,38 @@ def test_no_wifi_setup_means_no_hotspot(box):
     clock.now += ws.OFFLINE_SECONDS * 3
     setup.tick()
     assert setup.hotspot is None and events == []
+
+
+def test_wifi_on_the_box_is_part_of_kiosk_settings(kiosk):
+    k, run, server, clock, setup, conf = kiosk
+    srv = ws.Server(("127.0.0.1", 0), setup, local=True, kiosk=k)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    own = f"127.0.0.1:{srv.server_address[1]}"
+    good = {"Origin": f"http://{own}", "Content-Type": "application/json"}
+    join = {"ssid": "Home", "password": "secret123"}
+    try:
+        # No network (a new box, the start page's keyboard setup): open to anyone at the TV.
+        setup.network = False
+        assert _request(srv, "GET", "/wifi", own)[0] == 200
+        assert _request(srv, "GET", "/api/networks", own)[0] == 200
+        # Online: behind the settings' unlock.
+        setup.network = True
+        status, headers, _ = _request(srv, "GET", "/wifi", own)
+        assert status == 302 and headers["Location"] == "/settings"
+        assert _request(srv, "GET", "/api/networks", own)[0] == 401
+        assert _request(srv, "POST", "/api/connect", own, join, good)[0] == 401
+        cookie = _request(srv, "POST", "/api/kiosk/unlock", own, {"grant": "good-grant"}, good)[1]["Set-Cookie"]
+        session = {"Cookie": cookie.split(";", 1)[0]}
+        assert _request(srv, "GET", "/wifi", own, headers=session)[0] == 200
+        assert _request(srv, "GET", "/api/networks", own, headers=session)[0] == 200
+        settings = _request(srv, "GET", "/settings", own)[2]
+        assert 'href="/wifi?from=settings"' in settings
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_hidden_parts_of_the_pages_stay_hidden():
+    # The Wi-Fi page's form is display: grid; without this its Cancel button did nothing.
+    for page in (ws.START_PAGE, ws.WIFI_PAGE, ws.SETTINGS_PAGE):
+        assert "[hidden] { display: none !important; }" in page
