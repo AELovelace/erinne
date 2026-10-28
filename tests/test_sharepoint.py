@@ -213,6 +213,20 @@ def test_claude_sees_it_only_when_switched_on(conn, settings, world, sp):
     assert not any(r["file"] == "Audit.md" for r in tools.search_documents(conn, bob, "night audit")[0]["results"])
 
 
+def test_library_counts_never_ask_sharepoint(conn, settings, world, sp, monkeypatch):
+    """list_libraries on a big SharePoint library used to take minutes: a Graph call per 20 files. The count
+    is what is synced; the per-file check stays on browsing, searching and opening."""
+    conn.execute("UPDATE collections SET claude_enabled = 1 WHERE id = ?", (world["cid"],))
+    tools = Tools(settings, lambda: world["embedder"])
+    bob = Caller(world["bob"], "bob", 2)                       # may open only Pool.md in SharePoint
+
+    def boom(*a, **k):
+        raise AssertionError("list_libraries asked SharePoint")
+    monkeypatch.setattr(sharepoint, "visible", boom)
+    lib = next(l for l in tools.list_libraries(conn, bob)[0]["libraries"] if l["id"] == world["cid"])
+    assert (lib["files"], lib["searchable_files"], lib["source"]) == (2, 2, "sharepoint") and "SharePoint" in lib["note"]
+
+
 def test_admin_adds_syncs_and_removes_libraries(settings, conn, world, sp):
     with TestClient(create_app(settings, Services(llm=None, embedder=world["embedder"],
                                                   directory=FakeDirectory({"boss": {"domain admins"}})))) as c:

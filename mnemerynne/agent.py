@@ -769,7 +769,8 @@ class Agent:
         """The same tools, descriptions and argument schemas Claude gets, except the connector's mail and
         calendar tools: Erynne gets hers per question (_mail_tools), with the person's accounts and mailboxes."""
         if self._specs is None:
-            listed = [t for t in await self._server.list_tools() if t.name not in m365_mail.CLAUDE_TOOL_NAMES]
+            listed = [t for t in await self._server.list_tools()
+                      if t.name not in m365_mail.CLAUDE_TOOL_NAMES and t.name != "about"]   # she runs on the box
             self._specs = [{"type": "function", "function": {
                 "name": t.name, "description": (t.description or "") + _HINTS.get(t.name, ""),
                 "parameters": _clean_schema(t.input_schema)}}

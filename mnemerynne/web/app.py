@@ -21,7 +21,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
-from mnemerynne import (balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, feedback as feedback_mod,
+from mnemerynne import (identity, balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, feedback as feedback_mod,
                         mcp_server, media as media_mod, memory,
                         diagnostics, messages as messages_mod, permissions, remote, rooms as rooms_mod, rooms_bus, share,
                         sharepoint, theme as theme_mod,
@@ -114,6 +114,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         try:
             version = db.migrate(conn, settings.embed_dim)
             app.state.looks = theme_mod.load_looks(conn, settings)   # the themes, as every page draws them
+            app.state.instance = identity.load(conn, settings)      # which box this is, for the connector
+            mcp_server.apply_identity(app.state.mcp, app.state.instance)
             # Every inbox has an Agents folder for Claude; inboxes on an
             # unavailable share get theirs on first use.
             made = editing.ensure_all_agents(conn)
@@ -323,7 +325,10 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.mount(remote.PREFIX, app.state.remote_proxy, name="remote")
 
     # MCP for Claude Desktop: bearer-token auth, read-only tools (mnemerynne/mcp_server.py).
-    mcp = mcp_server.build_server(settings, lambda: app.state.embedder, lambda: app.state.directory)
+    app.state.instance = identity.from_settings(settings)   # the brand name joins once the database is open
+    mcp = mcp_server.build_server(settings, lambda: app.state.embedder, lambda: app.state.directory,
+                                  instance=lambda: app.state.instance)
+    app.state.mcp = mcp
     app.add_route("/mcp", mcp_server.McpEndpoint(settings, mcp), methods=["GET", "POST", "DELETE"])
 
     @app.exception_handler(LoginRequired)

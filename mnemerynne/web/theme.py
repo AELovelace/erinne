@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, 
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import db, theme
+from mnemerynne import db, identity, mcp_server, theme
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.web.admin import _log
@@ -41,6 +41,14 @@ def looks_for(app) -> theme.Looks:
 def _refresh(request: Request, conn: sqlite3.Connection) -> theme.Looks:
     request.app.state.looks = theme.load_looks(conn, request.app.state.settings)
     return request.app.state.looks
+
+
+def _identity(request: Request, conn: sqlite3.Connection) -> None:
+    """A brand change renames the box to Claude as well (identity.py), from the next initialize on."""
+    app = request.app
+    app.state.instance = identity.load(conn, app.state.settings)
+    if getattr(app.state, "mcp", None) is not None:
+        mcp_server.apply_identity(app.state.mcp, app.state.instance)
 
 
 def _refuse(exc: theme.ThemeError) -> HTTPException:
@@ -380,6 +388,7 @@ def set_brand(body: BrandBody, request: Request, user=Depends(admin_user), conn:
             _log(conn, user, "settings.brand", "brand", ", ".join(k for k, v in body.model_dump().items() if v is not None))
     except theme.ThemeError as exc:
         raise _refuse(exc) from None
+    _identity(request, conn)
     return _status(request, conn)
 
 
@@ -397,6 +406,7 @@ async def upload_brand_asset(kind: str, request: Request, file: UploadFile = Fil
             _log(conn, user, "settings.brand", kind.replace("_", " "), "uploaded")
     except theme.ThemeError as exc:
         raise _refuse(exc) from None
+    _identity(request, conn)
     return _status(request, conn)
 
 
@@ -409,4 +419,5 @@ def remove_brand_asset(kind: str, request: Request, user=Depends(admin_user),
         theme.set_brand_asset(conn, kind, None)
         theme.remove_asset(settings, "brand", kind, "brand")
         _log(conn, user, "settings.brand", kind.replace("_", " "), "removed")
+    _identity(request, conn)
     return _status(request, conn)

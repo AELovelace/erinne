@@ -109,12 +109,17 @@ class Access:
         r = self._reach(collection_id, folder_id)
         return r is not None and r.can_write(folder_id)
 
-    def can_read_file(self, row) -> bool:
-        """A file row (with collection_id, folder_id, claude_hidden): readable here, and for Claude not taken
-        out of its view."""
+    def can_reach_file(self, row) -> bool:
+        """A file row (with collection_id, folder_id, claude_hidden): in a place readable here, and for Claude
+        not taken out of its view. What Mnemerynne itself knows; a SharePoint file is only can_read_file when
+        SharePoint agrees, which costs a round trip."""
         if self.claude and row["claude_hidden"]:
             return False
-        if not self.can_read(row["collection_id"], row["folder_id"]):
+        return self.can_read(row["collection_id"], row["folder_id"])
+
+    def can_read_file(self, row) -> bool:
+        """can_reach_file, and for a SharePoint file the person's own account can open it there."""
+        if not self.can_reach_file(row):
             return False
         if row["collection_id"] in self._sharepoint():
             if row["id"] not in self._sp_ok:
@@ -407,15 +412,15 @@ def _visible_items(conn: sqlite3.Connection, access: Access, collection_id: int,
 def file_counts(conn: sqlite3.Connection, access: Access, collection_id: int) -> tuple[int, int, int]:
     """(reachable, searchable, all) files in a collection: those browse() would show somewhere (not in
     the bin, in a folder the user may see and read, for Claude not taken out of its view), how many of
-    those are searchable, and every live file whether the user can reach it or not."""
+    those are searchable, and every live file whether the user can reach it or not. Counted from what
+    Mnemerynne knows: a SharePoint library's files are not checked one by one against SharePoint here
+    (that is a Graph call per 20 files, minutes for a big library); browse() and open do that."""
     live = live_folder_ids(conn, collection_id)
     shown = live & access.visible(collection_id, live)
     rows = conn.execute("SELECT id, collection_id, folder_id, claude_hidden, status FROM files "
                         "WHERE collection_id = ? AND deleted_at IS NULL", (collection_id,)).fetchall()
     total = sum(1 for r in rows if r["folder_id"] is None or r["folder_id"] in live)
-    rows = [r for r in rows if r["folder_id"] is None or r["folder_id"] in shown]
-    access.prefetch(rows)
-    rows = [r for r in rows if access.can_read_file(r)]
+    rows = [r for r in rows if (r["folder_id"] is None or r["folder_id"] in shown) and access.can_reach_file(r)]
     return len(rows), sum(1 for r in rows if r["status"] == "ready"), total
 
 

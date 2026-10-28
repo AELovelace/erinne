@@ -15,6 +15,8 @@ No token to paste. Preferences shows the connector address (`https://…/mcp`):
 
 Claude sends you to Erynne to sign in and approve the connection, where you choose whether it may edit files. After that it works in claude.ai, the phone apps and Desktop alike; turn it on in a chat from the tools menu. Your connections are listed under **Connected this way**, where you can disconnect one.
 
+**More than one Mnemerynne** (work and home, say): give each connector its own name when you add it. Claude shows that name on every tool, and each box also introduces itself by the product name its admins set under Branding, so Claude can say which one an answer came from; ask it "which Mnemerynne is this?" and it answers with the `about` tool.
+
 ### Claude Code
 
 ```

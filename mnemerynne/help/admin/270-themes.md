@@ -40,7 +40,7 @@ Pages remember the theme per account and in a cookie, so the sign-in page matche
 
 Branding is organisation-wide and shows on every theme:
 
-- **Product name**: in the top bar, the sign-in card, page titles and the home-screen app. The assistant is still called Erynne in chat.
+- **Product name**: in the top bar, the sign-in card, page titles and the home-screen app, and how the box introduces itself to Claude and ChatGPT through the connector ([Claude](claude.md#which-mnemerynne-this-is)). The assistant is still called Erynne in chat.
 - **Sign-in tagline**: the line under the name on the sign-in card.
 - **Logo** (PNG, JPEG, WebP or SVG up to 2 MB) with a **height** slider, replacing the 🌸; an optional **logo for dark surfaces** used on dark themes and in dark mode. SVGs with scripts, event handlers or outside links are refused, and they are served sandboxed.
 - **Mark**: a square PNG for the browser tab's icon and the home-screen icons (192, 512 and a maskable 512 on the default theme's page colour, 180 for iOS). Without one the 🌸 and the built-in icons stay.

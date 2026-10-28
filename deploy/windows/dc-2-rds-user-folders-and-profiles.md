@@ -39,6 +39,14 @@ The raw aedith User Shell Folders Personal value is already the Windows default,
 
 On DC-2, create a computer GPO linked to the **Domain Controllers** OU and security-filter it to DC-2$ with **Read** and **Apply Group Policy**. Keep **Authenticated Users** with **Read** only on the Delegation tab. Enable **Computer Configuration > Policies > Administrative Templates > System > Group Policy > Configure user Group Policy loopback processing mode** in **Merge** mode.
 
+The registry-backed value for loopback **Merge** is `HKLM\Software\Policies\Microsoft\Windows\System\UserPolicyMode = 1` (DWORD); `2` is **Replace**. `Set-GPRegistryValue` can configure this computer policy when creating the GPO from PowerShell. It does not configure Documents Folder Redirection, which is a separate Windows Settings policy extension. Set Documents through Group Policy Management as described below.
+
+Run this as Administrator in one PowerShell line on DC-2. It fails before making changes if its pilot names already exist; if it fails later, inspect the partial objects before retrying. It creates the pilot group, adds aedith, creates and scopes both GPOs, sets loopback Merge, and links them to the Domain Controllers OU:
+
+~~~powershell
+$ErrorActionPreference='Stop'; Import-Module ActiveDirectory; Import-Module GroupPolicy; $group='DC2-RDS-Documents-Pilot'; $loop='DC-2 RDS Loopback Merge'; $docs='DC-2 RDS Documents Pilot'; $ou='OU=Domain Controllers,DC=sadgirlsclub,DC=local'; if((Get-ADGroup -Identity $group -ErrorAction SilentlyContinue) -or (Get-GPO -Name $loop -ErrorAction SilentlyContinue) -or (Get-GPO -Name $docs -ErrorAction SilentlyContinue)){throw 'A pilot group or GPO already exists; inspect before retrying'}; New-ADGroup -Name $group -SamAccountName $group -GroupScope Global -GroupCategory Security -Path 'CN=Users,DC=sadgirlsclub,DC=local'; Add-ADGroupMember -Identity $group -Members 'aedith'; foreach($n in @($loop,$docs)){$null=New-GPO -Name $n; $null=Set-GPPermission -Name $n -TargetName 'Authenticated Users' -TargetType Group -PermissionLevel GpoRead -Replace}; $null=Set-GPPermission -Name $loop -TargetName 'DC-2' -TargetType Computer -PermissionLevel GpoApply; $null=Set-GPPermission -Name $docs -TargetName $group -TargetType Group -PermissionLevel GpoApply; $null=Set-GPRegistryValue -Name $loop -Key 'HKLM\Software\Policies\Microsoft\Windows\System' -ValueName 'UserPolicyMode' -Type DWord -Value 1; $null=New-GPLink -Name $loop -Target $ou; $null=New-GPLink -Name $docs -Target $ou; "Created and linked: $loop; $docs. Pilot group: $group"
+~~~
+
 Create a security group containing only aedith, then a user GPO linked to the same OU. Filter this user GPO to the pilot group and keep **Authenticated Users** with **Read** only on Delegation. In **User Configuration > Policies > Windows Settings > Folder Redirection > Documents > Properties** choose:
 
 - **Basic — Redirect everyone's folder to the same location**.

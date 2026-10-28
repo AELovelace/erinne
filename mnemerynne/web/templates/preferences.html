@@ -114,11 +114,13 @@
   <div class="grant-add"><code class="mcp-address"></code><button type="button" class="small copy-mcp">Copy address</button></div>
   <ol class="steps">
     <li><strong>Claude Team or Enterprise:</strong> an organisation owner adds it once for everyone, in the
-      organisation's connector settings (<em>Add custom connector</em>): name it {{ assistant_name }} and paste the
-      address above. Each person then finds {{ assistant_name }} in their own connector settings and presses Connect.</li>
+      organisation's connector settings (<em>Add custom connector</em>): name it {{ product_name }} and paste the
+      address above. Each person then finds {{ product_name }} in their own connector settings and presses Connect.</li>
     <li><strong>A personal Claude plan:</strong> add it yourself in your settings under Connectors, with
       <em>Add custom connector</em> and the address above, then Connect.</li>
     <li>Claude sends you here to sign in and approve. After that, turn it on in a chat from the tools menu.</li>
+    <li><strong>More than one Mnemerynne</strong> (work and home)? Give each connector its own name: Claude shows it on
+      every tool, and the connector itself introduces this one as {{ product_name }}.</li>
     <li><strong>Claude Code:</strong> <code>claude mcp add --transport http {{ assistant_name|lower }} <span class="mcp-address"></span></code>,
       then <code>/mcp</code> in Claude Code to sign in.</li>
   </ol>

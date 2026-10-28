@@ -217,6 +217,13 @@ def test_corporate_branding_and_enforcing(settings, conn, people):
             assert im.size == (512, 512)
         manifest = c.get("/manifest.webmanifest").json()
         assert manifest["name"] == "Acme Hotels" and manifest["icons"][0]["src"].startswith("/theme/brand/mark-192.png?v=")
+        # The connector introduces the box by its brand from now on, mark included (mnemerynne/identity.py).
+        low = c.app.state.mcp._lowlevel_server
+        assert low.title == "Mnemerynne · Acme Hotels" and low.instructions.startswith("This is Acme Hotels's Mnemerynne")
+        assert c.app.state.instance.name == "Acme Hotels" and low.website_url is None     # no public_url in tests
+        settings.public_url = "https://acme.test"
+        assert c.put("/api/admin/brand", json={"logo_height": 2.4}).status_code == 200
+        assert c.app.state.mcp._lowlevel_server.icons[0].src.startswith("https://acme.test/theme/brand/mark-192.png?v=")
         assert c.get(manifest["icons"][2]["src"]).status_code == 200
         c.post("/logout")
         login = c.get("/login").text

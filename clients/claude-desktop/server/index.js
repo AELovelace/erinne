@@ -16,9 +16,12 @@ const https = require("https");
 const path = require("path");
 const tls = require("tls");
 
-const VERSION = "0.7.0";   // keep in step with manifest.json
+const VERSION = "0.8.0";   // keep in step with manifest.json
 const base = (process.env.MNEMERYNNE_URL || "").trim().replace(/\/+$/, "");
 const token = (process.env.MNEMERYNNE_TOKEN || "").trim();
+// Optional: what Claude calls this Mnemerynne (someone with work and home both installed). Empty: the
+// server's own title, which carries the brand name set by its admins.
+const label = (process.env.MNEMERYNNE_LABEL || "").trim();
 
 function log(message) {
   process.stderr.write("[mnemerynne] " + message + "\n");
@@ -124,6 +127,9 @@ async function relay(line) {
     messagesIn(response).forEach(function (message) {
       if (request.method === "initialize" && message.result && message.result.protocolVersion) {
         protocolVersion = message.result.protocolVersion;
+        if (label && message.result.serverInfo) {
+          message.result.serverInfo.title = "Mnemerynne · " + label;
+        }
       }
       write(message);
     });

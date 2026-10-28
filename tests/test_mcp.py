@@ -160,6 +160,49 @@ def _initialize(client, token):
                                               "clientInfo": {"name": "pytest", "version": "1"}})
 
 
+def test_the_connector_says_which_mnemerynne_it_is(settings, conn, world, embedder):
+    """Two boxes connected to the same Claude introduce themselves apart: the brand name (else the host) in the
+    server's title and instructions, as `instance` on listings, and through `about`."""
+    from mnemerynne import identity, theme
+
+    settings.public_url = "https://mnemerynne.test"
+    _, token = api_tokens.create(conn, world["alice"], "test")
+    with TestClient(create_app(settings, Services(llm=None, embedder=embedder))) as client:
+        info = _initialize(client, token).json()["result"]
+        assert info["serverInfo"]["title"] == "Mnemerynne · mnemerynne.test"
+        assert info["serverInfo"]["websiteUrl"] == "https://mnemerynne.test" and "icons" not in info["serverInfo"]
+        assert info["instructions"].startswith("This is the Mnemerynne at mnemerynne.test. When the person has more than")
+        def call(name, **arguments):
+            result = _rpc(client, token, "tools/call", {"name": name, "arguments": arguments}).json()["result"]
+            return result.get("structuredContent") or json.loads(result["content"][0]["text"])
+
+        assert call("list_libraries")["instance"] == {
+            "name": "mnemerynne.test", "host": "mnemerynne.test", "url": "https://mnemerynne.test"}
+
+        # The admin names the box: the next initialize and every result carry the name.
+        theme.save_brand(conn, name="Sad Girls Club", tagline="no boys allowed")
+        client.app.state.instance = identity.load(conn, settings)
+        mcp_server.apply_identity(client.app.state.mcp, client.app.state.instance)
+        info = _initialize(client, token).json()["result"]
+        assert info["serverInfo"]["title"] == "Mnemerynne · Sad Girls Club"
+        assert info["instructions"].startswith("This is Sad Girls Club's Mnemerynne at mnemerynne.test (“no boys allowed”).")
+        about = call("about")
+        assert about["instance"] == {"name": "Sad Girls Club", "host": "mnemerynne.test",
+                                     "url": "https://mnemerynne.test", "tagline": "no boys allowed"}
+        assert about["mcp_version"] == mcp_server.MCP_VERSION
+        assert about["you"] == {"username": "alice", "can_edit": False, "connection": "a personal token"}
+        found = call("search_documents", query="night audit")
+        assert found["found"] and found["instance"] == "Sad Girls Club"
+        for cid in (permissions.private_collection_id(conn, world["alice"]), world["oracle"]):
+            permissions.set_claude_enabled(conn, cid, False, world["alice"])     # nothing left to search
+        missing = call("search_documents", query="night audit")
+        assert not missing["found"] and missing["instance"] == "Sad Girls Club"
+    # Without an address or a name, it is just Mnemerynne, and the instructions say so.
+    plain = identity.Instance()
+    assert plain.title == "Mnemerynne" and plain.as_json() == {"name": "Mnemerynne"}
+    assert plain.instructions("the body").startswith("This is Mnemerynne. It holds this organisation's documents: the body")
+
+
 def test_mcp_endpoint_end_to_end(mcp_client, conn, world):
     assert _initialize(mcp_client, None).status_code == 401
     assert _initialize(mcp_client, "mnemerynne_wrong").status_code == 401
@@ -168,14 +211,14 @@ def test_mcp_endpoint_end_to_end(mcp_client, conn, world):
     init = _initialize(mcp_client, token)
     assert init.status_code == 200, init.text
     assert init.json()["result"]["serverInfo"]["name"] == "mnemerynne"
-    assert init.json()["result"]["serverInfo"]["version"] == mcp_server.MCP_VERSION == "1.5.0"
+    assert init.json()["result"]["serverInfo"]["version"] == mcp_server.MCP_VERSION == "1.6.0"
 
     listed = _rpc(mcp_client, token, "tools/list").json()["result"]["tools"]
     edits = {"edit_text", "edit_document", "edit_spreadsheet", "create_file", "create_folder", "rename_item",
              "move_item", "delete_item", "add_comment", "propose_api_action", "propose_batch",
              "request_edit_access", "withdraw_proposal", "send_message", "post_to_room", "react_in_room",
              "draft_reply", "draft_mail", "run_automation", "report_automation_run"}
-    assert {t["name"] for t in listed} == {"search_documents", "read_passage", "list_libraries", "browse_folder",
+    assert {t["name"] for t in listed} == {"about", "search_documents", "read_passage", "list_libraries", "browse_folder",
                                            "find_files", "view_page", "open_file", "list_versions",
                                            "list_changes", "list_comments", "list_apis", "query_api",
                                            "list_proposals", "get_proposal", "list_messages", "diagnose",

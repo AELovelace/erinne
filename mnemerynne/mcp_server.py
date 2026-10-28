@@ -36,7 +36,7 @@ from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
-from mnemerynne import (diagnostics, messages, notices, rooms, accounts, activity, api_tokens, apis, automations,
+from mnemerynne import (identity, diagnostics, messages, notices, rooms, accounts, activity, api_tokens, apis, automations,
                         automations_run, briefings, claude_links, comments, db, editing, editing_formats,
                         fs, m365_mail, permissions, proposals, retrieval, sharepoint)
 from mnemerynne.api_tokens import Caller
@@ -53,13 +53,14 @@ log = logging.getLogger("mnemerynne.mcp")
 # 1.3.0: Rooms (channels and direct messages): list_rooms, read_room, post_to_room, react_in_room.
 # 1.4.0: mail and calendar for the group an admin names: search_mail, recent_mail, read_mail, calendar,
 #        draft_reply, draft_mail (drafts are proposals; nothing sends).
-MCP_VERSION = "1.5.0"
+MCP_VERSION = "1.6.0"
 
 PAGE_WIDTH_PX = 1200     # rendered page width: small print stays legible, JPEG stays ~100-300 KB
 PAGE_MAX_PX = 2000       # cap on either side, for unusually long or wide pages
 
-INSTRUCTIONS = """\
-Mnemerynne holds this organisation's documents: each person's private File box (their own files) and
+# The instructions' body; identity.Instance.instructions() puts the box's own introduction in front.
+INSTRUCTIONS_BODY = """\
+each person's private File box (their own files) and
 the shared libraries they have been given (brand standards, system manuals and so on).
 Use these tools whenever a question could be answered from those documents.
 
@@ -112,6 +113,9 @@ Working with others (people, and other people's Claude):
   they see it under Messages); it isn't email. list_messages shows the person's own unread notes,
   what Mnemerynne told them (a proposal decided, a comment on their file) and announcements waiting
   for them; mention those when they're relevant.
+- `about` says which Mnemerynne this is (its name and address) and who you are signed in as; listing
+  results carry the same name as `instance`. With more than one Mnemerynne connected, say which one an
+  answer came from.
 - Rooms are the team's chat: channels (#front-office) and direct messages. list_rooms shows the
   person's rooms with unread counts; read_room reads one (a channel name, "@username" for a DM, or an
   id; `thread` for one thread); post_to_room writes there as "Claude for <name>" (reply in a thread
@@ -217,7 +221,7 @@ def _collections(conn: sqlite3.Connection, access: fs.Access) -> dict[int, sqlit
         return {}
     marks = ",".join("?" * len(access.readable))
     return {r["id"]: r for r in conn.execute(
-        f"SELECT id, kind, name FROM collections WHERE id IN ({marks})", tuple(access.readable))}
+        f"SELECT id, kind, name, source FROM collections WHERE id IN ({marks})", tuple(access.readable))}
 
 
 def _label(row: sqlite3.Row) -> str:
@@ -398,12 +402,25 @@ class Tools:
 
     def __init__(self, settings: Settings, get_embedder: Callable[[], Any],
                  get_directory: Callable[[], Any] = lambda: None, *, mode: str = "claude",
-                 propose: bool | None = None):
+                 propose: bool | None = None, instance: Callable[[], identity.Instance] | None = None):
         self.settings = settings
         self.get_embedder = get_embedder
         self.get_directory = get_directory
         self.mode = mode
         self.propose = mode != "claude" if propose is None else propose
+        # Which box this is (identity.py): the live value, so a renamed brand shows in the next result.
+        self.instance = instance or (lambda: identity.from_settings(settings))
+
+    def _instance_field(self) -> dict:
+        """`instance` on listing results: the connector's answers may come from one of several boxes."""
+        return {"instance": self.instance().label} if self.claude else {}
+
+    def about(self, conn, caller: Caller) -> tuple[dict, list[int]]:
+        inst = self.instance()
+        return {"instance": inst.as_json(), "mcp_version": MCP_VERSION,
+                "you": {"username": caller.username, "can_edit": caller.can_edit,
+                        "connection": "a Claude connection (OAuth)" if caller.grant_id else "a personal token"},
+                "note": "Say which Mnemerynne you used when the person has more than one connected."}, []
 
     @property
     def base(self) -> str:
@@ -458,7 +475,7 @@ class Tools:
             notes.append(f"Searched everywhere: there's no “{place}” here.")
             library = None
         if not allowed:
-            return {"found": False, "query": query, "results": [],
+            return {"found": False, "query": query, "results": [], **self._instance_field(),
                     "note": "Nothing is shared with " + ("Claude for " if self.claude else "") +
                             "you yet; ask a Mnemerynne admin."}, []
         keep = sharepoint.trimmer(conn, caller.user_id)
@@ -470,7 +487,8 @@ class Tools:
             hint = self._api_hint(conn, caller, query)
             tip = ([f"This may be live data rather than a document: try query_api with api “{hint['api']}” "
                     f"and operation “{hint['operation']}” (see list_apis)."] if hint else [])
-            return {"found": False, "query": query, "results": [], **({"try_api": hint} if hint else {}),
+            return {"found": False, "query": query, "results": [], **self._instance_field(),
+                    **({"try_api": hint} if hint else {}),
                     "note": " ".join(notes + ["Nothing in these documents is close to this question."
                                               + (" Search again without library and folder to look everywhere."
                                                  if library else "")] + tip)}, []
@@ -490,8 +508,8 @@ class Tools:
         results = [_passage(h, self.base, names.get(h.collection_id, ""), n,
                             check.allows(h.collection_id, folders.get(h.file_id), h.file_id))
                    for n, h in enumerate(picked, 1)]
-        return {"found": True, "query": query, "results": results, **({"note": " ".join(notes)} if notes else {})}, \
-            sorted({h.file_id for h in picked})
+        return {"found": True, "query": query, "results": results, **self._instance_field(),
+                **({"note": " ".join(notes)} if notes else {})}, sorted({h.file_id for h in picked})
 
     def read_passage(self, conn, caller: Caller, chunk_id: int, around: int = 1) -> tuple[dict, list[int]]:
         around = max(0, min(int(around), 3))
@@ -652,7 +670,11 @@ class Tools:
                         "kind": "file box" if row["kind"] == "private" else "library",
                         "files": files, "searchable_files": searchable,
                         # Files in folders this connection can't open, or taken out of Claude's view.
-                        **({"not_shown": total - files} if total > files else {})})
+                        **({"not_shown": total - files} if total > files else {}),
+                        **({"source": "sharepoint",
+                            "note": "Counted as synced; files the person's own account can't open in "
+                                    "SharePoint are left out when browsing and searching."}
+                           if row["source"] == "sharepoint" else {})})
         edit = ([f"{p['library']}" + (f" / {p['folder']}" if p["folder"] else "") for p in
                  editing.editable_places(conn, caller.user_id, self.mode)] if caller.can_edit else [])
         try:
@@ -661,7 +683,8 @@ class Tools:
             agents = None   # the share is away; no upload link this time
         inbox = permissions.private_collection_id(conn, caller.user_id)
         upload = ({"upload": f"{self.base}/files#c={inbox}&f={agents}"} if agents and inbox else {})
-        return {"libraries": out, "you_can_edit_in": edit, **upload,
+        return {**({"instance": self.instance().as_json()} if self.claude else {}),
+                "libraries": out, "you_can_edit_in": edit, **upload,
                 **({} if caller.can_edit else {"editing": "This connection can only search; the person can turn "
                                                           "on editing for it on the Claude page in Mnemerynne."})}, []
 
@@ -1539,10 +1562,23 @@ async def offer_approval(ctx: Context, tools: "Tools", caller: Caller, out: dict
     return merged
 
 
+def apply_identity(server: MCPServer, instance: identity.Instance) -> None:
+    """Make the server introduce itself as this box (title, instructions, address, icon) on the next
+    `initialize`; the SDK reads these attributes per initialize, so a renamed brand needs no restart."""
+    low = server._lowlevel_server
+    low.title = instance.title
+    low.instructions = instance.instructions(INSTRUCTIONS_BODY)
+    low.website_url = instance.url or None
+    low.icons = instance.icons() or None
+
+
 def build_server(settings: Settings, get_embedder: Callable[[], Any],
-                 get_directory: Callable[[], Any] = lambda: None) -> MCPServer:
-    tools = Tools(settings, get_embedder, get_directory)
-    server = MCPServer(name="mnemerynne", title="Mnemerynne", instructions=INSTRUCTIONS, version=MCP_VERSION)
+                 get_directory: Callable[[], Any] = lambda: None,
+                 instance: Callable[[], identity.Instance] | None = None) -> MCPServer:
+    """instance: which box this is, read live (identity.load); None for the host alone (settings)."""
+    tools = Tools(settings, get_embedder, get_directory, instance=instance)
+    server = MCPServer(name="mnemerynne", version=MCP_VERSION)
+    apply_identity(server, tools.instance())
 
     async def propose(ctx: Context, name: str, args: dict, fn) -> dict:
         """A proposing tool: the call, then the in-chat approval where that's possible."""
@@ -1638,6 +1674,13 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
         which to run; get_proposal then reports each item's outcome. Every item is checked first, so a
         bad one refuses the whole batch. Never say the changes are made."""
         return await propose(ctx, "propose_batch", {"items": items}, tools.propose_batch)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def about(ctx: Context) -> dict:
+        """Which Mnemerynne this is (its name, address and tagline) and who you are signed in as. Call it when
+        the person has more than one Mnemerynne connected and you need to say which one answered, or when
+        they ask which one this is. Changes nothing."""
+        return await call(ctx, "about", {}, tools.about)
 
     @server.tool(annotations=_READ_ONLY)
     async def list_libraries(ctx: Context) -> dict:
