@@ -132,13 +132,14 @@ def propose_edit(conn: sqlite3.Connection, settings: Settings, caller, loaded: e
 
 
 def propose_new(conn: sqlite3.Connection, settings: Settings, caller, name: str, data: bytes,
-                collection_id: int | None, folder_id: int | None, changes: list[str]) -> int:
-    """A new file; it goes in the Agents folder unless a place is given."""
+                collection_id: int | None, folder_id: int | None, changes: list[str], *, raw: bool = False) -> int:
+    """A new file; it goes in the Agents folder unless a place is given. raw: any kind of file (see
+    editing.create)."""
     from mnemerynne.ingest import store
 
     name = store.clean_display_name(name)
     fmt = editing.format_of(name)
-    if fmt is None:
+    if fmt is None and not raw:
         raise editing.EditError(f"Erynne can create {', '.join(sorted(editing.EDITABLE))} files; "
                                 f"“{name}” is none of those.")
     if len(data) > settings.edit_max_bytes:
@@ -490,7 +491,8 @@ def apply(conn: sqlite3.Connection, settings: Settings, user: sqlite3.Row, propo
             file_id = row["file_id"]
         else:
             file_id, _ = editing.create(conn, settings, caller, row["name"], data, row["collection_id"],
-                                        row["folder_id"], via="erynne")
+                                        row["folder_id"], via="erynne",
+                                        raw=editing.format_of(row["name"]) is None)
     except editing.EditConflict:
         if row["kind"] == "edit" and _changed(conn, settings, row):
             _decide(conn, proposal_id, "stale")

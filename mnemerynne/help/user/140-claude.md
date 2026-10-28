@@ -41,7 +41,7 @@ The list under **What Claude can search for you** is exactly what Claude reaches
 
 ## Where Claude can change files
 
-With a token or connection that may edit, Claude can create and change **text, Markdown, Word and Excel** files in the places listed under **Where Claude can change files**: your Agents folder, folders of yours where you switched AI edit on, and libraries where an admin allowed it. Every change keeps the previous version ([Versions](versions.md)). Claude can't delete, move things to the bin, or get more access by itself: for those it hands you an **approve link** to a card on *Changes waiting for you*, and nothing happens until you press the button there ([Tools and proposals](tools-and-proposals.md#changes-waiting-for-you)).
+With a token or connection that may edit, Claude can create and change **text, Markdown, Word and Excel** files, and save **any other kind of file it made itself** (an image, a PDF, a slide deck, a zip; stored as is, up to 20 MB), in the places listed under **Where Claude can change files**: your Agents folder, folders of yours where you switched AI edit on, and libraries where an admin allowed it. Every change keeps the previous version ([Versions](versions.md)). Claude can't delete, move things to the bin, or get more access by itself: for those it hands you an **approve link** to a card on *Changes waiting for you*, and nothing happens until you press the button there ([Tools and proposals](tools-and-proposals.md#changes-waiting-for-you)).
 
 Claude can also comment on files and read comments ([Comments](comments.md)), and reads a short-lived copy of a file's text through a private link when it needs more than a passage.
 

@@ -30,7 +30,7 @@ Erynne is unaffected by any of this: she runs on the box and sees what the perso
 
 ## What Claude can change
 
-With a token or connection that may edit, Claude can create and change `.txt`, `.md`, `.docx` and `.xlsx` files (and folders, renames, moves and comments) where **all** of these hold: the person can edit there themselves; the place is shared with Claude; and AI edits are allowed, which means the person's Agents folder or a folder they switched on in their File box, or a library where *Claude and Erynne can edit files here* is on, minus anything marked read-only for the AI. Every change keeps the previous version. Claude never deletes: `delete_item` only proposes a move to the recycle bin for the person to apply, and `request_edit_access` asks the person (or, for a whole library, an admin) rather than taking.
+With a token or connection that may edit, Claude can create and change `.txt`, `.md`, `.docx` and `.xlsx` files, save any other kind of file it made as bytes (`create_file` with `data`, base64, checked like a browser upload and capped by `MNEMERYNNE_EDIT_MAX_BYTES`, 20 MB), and make folders, renames, moves and comments, where **all** of these hold: the person can edit there themselves; the place is shared with Claude; and AI edits are allowed, which means the person's Agents folder or a folder they switched on in their File box, or a library where *Claude and Erynne can edit files here* is on, minus anything marked read-only for the AI. Every change keeps the previous version. Claude never deletes: `delete_item` only proposes a move to the recycle bin for the person to apply, and `request_edit_access` asks the person (or, for a whole library, an admin) rather than taking.
 
 ## Links Claude can open
 

@@ -168,7 +168,7 @@ def test_mcp_endpoint_end_to_end(mcp_client, conn, world):
     init = _initialize(mcp_client, token)
     assert init.status_code == 200, init.text
     assert init.json()["result"]["serverInfo"]["name"] == "mnemerynne"
-    assert init.json()["result"]["serverInfo"]["version"] == mcp_server.MCP_VERSION == "1.4.1"
+    assert init.json()["result"]["serverInfo"]["version"] == mcp_server.MCP_VERSION == "1.5.0"
 
     listed = _rpc(mcp_client, token, "tools/list").json()["result"]["tools"]
     edits = {"edit_text", "edit_document", "edit_spreadsheet", "create_file", "create_folder", "rename_item",

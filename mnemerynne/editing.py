@@ -441,11 +441,14 @@ def new_file_place(conn: sqlite3.Connection, user_id: int, collection_id: int | 
 
 
 def create(conn: sqlite3.Connection, settings: Settings, caller, name: str, data: bytes,
-           collection_id: int | None = None, folder_id: int | None = None, *, via: str = "claude") -> tuple[int, str]:
+           collection_id: int | None = None, folder_id: int | None = None, *, via: str = "claude",
+           raw: bool = False) -> tuple[int, str]:
     """A new file from the assistant; in the caller's Agents folder unless
-    another place where it may edit is given. Returns (file_id, version)."""
+    another place where it may edit is given. Returns (file_id, version).
+    raw: the bytes are the file as the assistant made it (an image, a PDF, a
+    zip), so any kind is accepted under the same rules as a browser upload."""
     name = store.clean_display_name(name)
-    if format_of(name) is None:
+    if not raw and format_of(name) is None:
         raise EditError(f"{ASSISTANTS[via]} can create {', '.join(sorted(EDITABLE))} files; "
                         f"“{name}” is none of those.")
     collection_id, folder_id = new_file_place(conn, caller.user_id, collection_id, folder_id)

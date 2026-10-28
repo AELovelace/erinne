@@ -15,6 +15,8 @@ call is logged in mcp_calls.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import io
 import json
 import logging
@@ -51,7 +53,7 @@ log = logging.getLogger("mnemerynne.mcp")
 # 1.3.0: Rooms (channels and direct messages): list_rooms, read_room, post_to_room, react_in_room.
 # 1.4.0: mail and calendar for the group an admin names: search_mail, recent_mail, read_mail, calendar,
 #        draft_reply, draft_mail (drafts are proposals; nothing sends).
-MCP_VERSION = "1.4.1"
+MCP_VERSION = "1.5.0"
 
 PAGE_WIDTH_PX = 1200     # rendered page width: small print stays legible, JPEG stays ~100-300 KB
 PAGE_MAX_PX = 2000       # cap on either side, for unusually long or wide pages
@@ -103,8 +105,9 @@ Working with others (people, and other people's Claude):
   library or folder since a time, and by whom: use it to notice replies instead of browsing and guessing.
 - Talk about a document with add_comment (reply_to answers a comment) and read the thread with
   list_comments, rather than editing someone else's document to leave a message.
-- You can't save images (screenshots, photos) or other files you didn't write: give the person the
-  `upload` link from list_libraries, which opens their Agents folder for them to add the file.
+- Any other kind of file you made yourself (an image, a PDF, a zip, a deck) is saved with create_file's
+  `data`, its bytes in base64. A file on the person's own computer (a screenshot, a photo) you can't
+  reach: give them the `upload` link from list_libraries, which opens their Agents folder to add it.
 - send_message leaves a short note for a colleague inside Mnemerynne (`to` is their Mnemerynne username;
   they see it under Messages); it isn't email. list_messages shows the person's own unread notes,
   what Mnemerynne told them (a proposal decided, a comment on their file) and announcements waiting
@@ -363,6 +366,25 @@ def _passage(hit: retrieval.Hit, base: str, library: str, n: int | None = None,
 
 
 # -------------------------------------------------------------------- tools
+def _decode_base64(text: str) -> bytes:
+    """The `data` of create_file: base64, with or without a data: URL prefix, whitespace ignored."""
+    if not isinstance(text, str):
+        raise editing.EditError("`data` is the file's bytes as a base64 string.")
+    if text.startswith("data:"):
+        head, sep, text = text.partition(",")
+        if not sep or not head.endswith(";base64"):
+            raise editing.EditError("A data: URL in `data` must be base64 (data:<type>;base64,...).")
+    text = "".join(text.split())
+    try:
+        data = base64.b64decode(text, validate=True)
+    except (binascii.Error, ValueError):
+        raise editing.EditError("`data` isn't valid base64. Send the file's bytes base64-encoded, nothing else; "
+                                "for text, Word and Excel files use content, paragraphs or rows instead.") from None
+    if not data:
+        raise editing.EditError("The file is empty.")
+    return data
+
+
 class Tools:
     """The tool bodies, synchronous and testable without the MCP transport.
 
@@ -791,9 +813,15 @@ class Tools:
 
     def create_file(self, conn, caller: Caller, name: str, content: str | None = None, paragraphs: list | None = None,
                     rows: list | None = None, sheet: str | None = None, library: str | None = None,
-                    folder: str | None = None) -> tuple[dict, list[int]]:
+                    folder: str | None = None, data: str | None = None) -> tuple[dict, list[int]]:
         fmt = editing.format_of(name or "")
-        if fmt == "text":
+        raw = data is not None
+        if raw:
+            if content is not None or paragraphs is not None or rows is not None:
+                raise editing.EditError("Give either `data` (the file's bytes, base64) or content/paragraphs/rows, "
+                                        "not both.")
+            data = _decode_base64(data)
+        elif fmt == "text":
             data = editing_formats.text_new(content or "")
         elif fmt == "docx":
             data = editing_formats.docx_new(paragraphs if paragraphs is not None else
@@ -801,22 +829,30 @@ class Tools:
         elif fmt == "xlsx":
             data = editing_formats.xlsx_new(rows or [], sheet)
         else:
-            raise editing.EditError("Name the file with .txt, .md, .docx or .xlsx at the end. To save an image or "
-                                    "another kind of file, give the person the upload link from list_libraries.")
+            raise editing.EditError("Name the file with .txt, .md, .docx or .xlsx at the end, or send any other kind "
+                                    "of file you made (an image, a PDF, a zip) as `data`, its bytes in base64. For "
+                                    "a file on the person's own computer, give them the upload link from "
+                                    "list_libraries.")
         collection_id, folder_id = self._place(conn, caller, library, folder)
         if self.propose:
             proposal = proposals.propose_new(conn, self.settings, caller, name, data, collection_id, folder_id,
-                                             [f"new file {name}"])
+                                             [f"new file {name}"], raw=raw)
             row = conn.execute("SELECT name, collection_id, folder_id FROM agent_proposals WHERE id = ?",
                                (proposal,)).fetchone()
             return {"proposal": proposal, "file": row["name"],
                     "where": proposals.where(conn, row["collection_id"], row["folder_id"]),
                     "status": "proposed", "note": _PROPOSED}, []
-        file_id, version = editing.create(conn, self.settings, caller, name, data, collection_id, folder_id)
+        file_id, version = editing.create(conn, self.settings, caller, name, data, collection_id, folder_id, raw=raw)
         row = conn.execute("SELECT * FROM files f JOIN blobs b ON b.sha256 = f.blob_sha256 WHERE f.id = ?",
                            (file_id,)).fetchone()
-        return {"file_id": file_id, "file": row["display_name"], "where": self._where(conn, row), "version": version,
-                "link": _file_link(self.base, file_id, row["kind"])}, [file_id]
+        out = {"file_id": file_id, "file": row["display_name"], "where": self._where(conn, row), "version": version,
+               "link": _file_link(self.base, file_id, row["kind"])}
+        if raw:
+            out["size"] = row["size"]
+            out["kind"] = row["kind"]
+            if row["notes"]:
+                out["note"] = row["notes"]
+        return out, [file_id]
 
     def create_folder(self, conn, caller: Caller, name: str, library: str | None = None,
                       folder: str | None = None) -> tuple[dict, list[int]]:
@@ -1606,7 +1642,7 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
     @server.tool(annotations=_READ_ONLY)
     async def list_libraries(ctx: Context) -> dict:
         """List what the user can search from Claude: their File box and each shared library, with file counts,
-        where you may edit, and an `upload` link for the person to add files you can't write (images)."""
+        where you may edit, and an `upload` link for the person to add files from their own computer."""
         return await call(ctx, "list_libraries", {}, tools.list_libraries)
 
     @server.tool(annotations=_READ_ONLY)
@@ -1674,14 +1710,17 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
     @server.tool(annotations=_EDITS)
     async def create_file(ctx: Context, name: str, content: str | None = None, paragraphs: list | None = None,
                           rows: list | None = None, sheet: str | None = None, library: int | str | None = None,
-                          folder: int | str | None = None) -> dict:
+                          folder: int | str | None = None, data: str | None = None) -> dict:
         """Create a new file; the extension in `name` decides the kind. .txt/.md: `content`. .docx:
         `paragraphs`, a list of strings or {"text": "...", "style": "Heading 1"} (or `content`, paragraphs
         separated by blank lines). .xlsx: `rows`, a list of rows (lists of values), optional `sheet` name.
+        Any other kind of file you made yourself (an image, a PDF, a zip, a .pptx, code): `data`, the file's
+        bytes as base64 (a data: URL is fine), up to 20 MB; it's stored as is, like a browser upload.
         Goes in the person's Agents folder unless `library` (and `folder`, a path) name another place you may
         edit, or `folder` is a folder id. If the name is taken, it gets "(2)" added."""
         return await call(ctx, "create_file", {"name": name, "content": content, "paragraphs": paragraphs,
-                                               "rows": rows, "sheet": sheet, "library": library, "folder": folder},
+                                               "rows": rows, "sheet": sheet, "library": library, "folder": folder,
+                                               "data": data},
                           tools.create_file)
 
     @server.tool(annotations=_EDITS)

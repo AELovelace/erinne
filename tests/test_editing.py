@@ -255,6 +255,52 @@ def test_new_docx_from_paragraphs(conn, settings, world, tools):
     assert [(p.text, p.style.name) for p in d.paragraphs] == [("Memo", "Title"), ("Body text.", "Normal")]
 
 
+def test_any_kind_of_file_claude_made_is_saved_from_base64(conn, settings, world, tools):
+    """Images, PDFs, decks: create_file's `data` (base64, a data: URL too) stores the bytes as they are."""
+    import base64
+    import PIL.Image
+    from mnemerynne import agent as agent_mod, proposals, users
+
+    alice = _caller(conn, world["alice"])
+    png = io.BytesIO()
+    PIL.Image.new("RGB", (4, 4), "pink").save(png, "PNG")
+    made = tools.create_file(conn, alice, "chart.png", data=base64.b64encode(png.getvalue()).decode())[0]
+    assert _bytes(conn, settings, made["file_id"]) == png.getvalue()
+    assert made["where"] == "File box / Agents" and made["kind"] == "other" and made["size"] == len(png.getvalue())
+    assert made["version"] == editing.sha256(png.getvalue())
+    row = conn.execute("SELECT mime, edited_via FROM files f JOIN blobs b ON b.sha256 = f.blob_sha256 WHERE f.id = ?",
+                       (made["file_id"],)).fetchone()
+    assert row["mime"] == "image/png" and row["edited_via"] == "claude:alice"
+    # A data: URL, whitespace in the base64, and a name without a known editable extension.
+    pdf = b"%PDF-1.4 not really"
+    url = "data:application/pdf;base64," + base64.b64encode(pdf).decode()
+    url = url[:20] + "\n" + url[20:]
+    made = tools.create_file(conn, alice, "deck.pdf", data=url)[0]
+    assert _bytes(conn, settings, made["file_id"]) == pdf and made["kind"] in ("pdf", "other")
+    # The same upload rules as a browser: size, emptiness, and the usual places.
+    with pytest.raises(editing.EditError, match="valid base64"):
+        tools.create_file(conn, alice, "x.bin", data="not*base64")
+    with pytest.raises(editing.EditError, match="empty"):
+        tools.create_file(conn, alice, "x.bin", data="")
+    with pytest.raises(editing.EditError, match="not both"):
+        tools.create_file(conn, alice, "x.md", data="aGk=", content="hi")
+    with pytest.raises(editing.EditError, match="`data`"):
+        tools.create_file(conn, alice, "x.zip", content="hi")
+    with pytest.raises(editing.EditError, match="MB"):
+        settings.edit_max_bytes = 8
+        tools.create_file(conn, alice, "big.bin", data=base64.b64encode(b"x" * 9).decode())
+    settings.edit_max_bytes = 20 * 1024 * 1024
+    with pytest.raises(editing.EditError):
+        tools.create_file(conn, _caller(conn, world["alice"], can_edit=False), "x.bin", data="aGk=")
+    # Erynne proposes it; the person applies, and the bytes land unchanged.
+    erynne = Tools(settings, lambda: FakeEmbedder(), mode="erynne")
+    caller = agent_mod.AgentCaller(world["alice"], "alice", None)
+    proposed = erynne.create_file(conn, caller, "pic.png", data=base64.b64encode(png.getvalue()).decode())[0]
+    assert proposed["status"] == "proposed"
+    applied = proposals.apply(conn, settings, users.get_user_by_id(conn, world["alice"]), proposed["proposal"])
+    assert _bytes(conn, settings, applied["file_id"]) == png.getvalue()
+
+
 # --------------------------------------------------------------------- xlsx
 def _xlsx_bytes(formulas=True, chart=False):
     wb = openpyxl.Workbook()
