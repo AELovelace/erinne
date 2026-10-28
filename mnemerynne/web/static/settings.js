@@ -13,23 +13,46 @@
     node.hidden = !text;
   }
 
-  // Themes switch at once (theme-neon.css is always loaded, scoped to data-theme), then save.
-  function applyTheme(theme) {
-    document.documentElement.dataset.theme = theme;
+  // Themes switch at once (the base stylesheets are always loaded, scoped to data-theme; a theme's own
+  // stylesheet and attributes come from its radio, base.html's shape), then save.
+  const LOOK_ATTRS = ["data-scene", "data-border", "data-flat", "data-texture", "data-fx"];
+  function currentLook() {
+    const html = document.documentElement;
+    const link = document.getElementById("look-css");
+    const attrs = {};
+    LOOK_ATTRS.forEach(function (a) { if (html.hasAttribute(a)) attrs[a] = html.getAttribute(a); });
+    return { slug: html.dataset.look || "", base: html.dataset.theme, css: link ? link.getAttribute("href") : "", attrs: attrs };
+  }
+  function applyLook(look) {
+    const html = document.documentElement;
+    html.dataset.theme = look.base;
+    if (look.slug) html.dataset.look = look.slug; else delete html.dataset.look;
+    LOOK_ATTRS.forEach(function (a) { html.removeAttribute(a); });
+    Object.keys(look.attrs || {}).forEach(function (a) { html.setAttribute(a, look.attrs[a]); });
+    let link = document.getElementById("look-css");
+    if (look.css) {
+      if (!link) { link = document.createElement("link"); link.rel = "stylesheet"; link.id = "look-css"; document.head.appendChild(link); }
+      if (link.getAttribute("href") !== look.css) link.setAttribute("href", look.css);
+    } else if (link) link.remove();
     const meta = document.querySelector('meta[name="color-scheme"]');
-    if (meta) meta.content = theme === "neon" ? "dark" : "light dark";
+    if (meta) meta.content = look.base === "neon" ? "dark" : "light dark";
+  }
+  function lookOf(radio) {
+    let attrs = {};
+    try { attrs = JSON.parse(radio.dataset.attrs || "{}"); } catch (e) { /* none */ }
+    return { slug: radio.value, base: radio.dataset.base, css: radio.dataset.css || "", attrs: attrs };
   }
 
   document.querySelectorAll('input[name="theme"]').forEach(function (radio) {
     radio.addEventListener("change", async function () {
-      const before = document.documentElement.dataset.theme;
-      applyTheme(radio.value);
+      const before = currentLook();
+      applyLook(lookOf(radio));
       note("theme-note", "");
       try {
         await api("PUT", "/api/me/theme", { theme: radio.value });
       } catch (err) {
-        applyTheme(before);
-        const old = document.querySelector('input[name="theme"][value="' + before + '"]');
+        applyLook(before);
+        const old = document.querySelector('input[name="theme"][value="' + before.slug + '"]');
         if (old) old.checked = true;
         note("theme-note", err.message);
       }

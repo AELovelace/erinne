@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Preferences · {{ assistant_name }}{% endblock %}
+{% block title %}Preferences · {{ product_name }}{% endblock %}
 {% block body %}
 {% include "_nav.html" %}
 <main class="settings-page">
@@ -16,18 +16,31 @@
   </table>
 
   <h2 class="admin-section" id="theme">Theme</h2>
+  {%- if theme_enforced %}
+  <p class="muted small" id="theme-enforced">Your organisation's theme is set by an admin.</p>
+  {%- else %}
+  {#- The themes an admin turned on (Settings → Themes); the card's colours are the theme's own. Each radio carries
+      what settings.js needs to switch the page at once: the base stylesheet, the theme's stylesheet and attributes. -#}
   <div class="theme-picker" role="radiogroup" aria-label="Theme">
+    {%- for t in themes %}
     <label class="theme-card">
-      <input type="radio" name="theme" value="sakura" {% if user.theme != 'neon' %}checked{% endif %}>
-      <span class="theme-swatch sakura" aria-hidden="true"><span></span><span></span><span></span></span>
-      <span><strong>Sakura</strong><br><span class="muted small">Blossoms over Mt Fuji. Follows your device's light or dark mode.</span></span>
+      <input type="radio" name="theme" value="{{ t.slug }}" data-base="{{ t.base }}" data-css="{{ t.css_url or '' }}"
+             data-attrs="{{ t.attrs | tojson | forceescape }}" {% if t.slug == current_theme %}checked{% endif %}>
+      {%- if t.builtin and not t.css_url and t.slug in ('sakura', 'neon') %}
+      <span class="theme-swatch {{ t.slug }}" aria-hidden="true"><span></span><span></span><span></span></span>
+      {%- else %}
+      <span class="theme-swatch look" aria-hidden="true" style="--sw-page: {{ t.swatch.page }}; --sw-primary: {{ t.swatch.primary }}; --sw-text: {{ t.swatch.text }}; --sw-surface: {{ t.swatch.surface }}; --sw-highlight: {{ t.swatch.highlight }}"><span></span><span></span><span></span></span>
+      {%- endif %}
+      <span><strong>{{ t.name }}</strong><br><span class="muted small">
+        {%- if t.slug == 'sakura' %}Blossoms over Mt Fuji. Follows your device's light or dark mode.
+        {%- elif t.slug == 'neon' %}Hot pink on black, chromatic bloom, hard edges. Always dark.
+        {%- elif t.slug == 'sadgirlsclub' %}White on black, deep pink, scanlines and a VCR font. Always dark.
+        {%- elif t.dark_only %}Always dark.
+        {%- else %}Follows your device's light or dark mode.{% endif %}</span></span>
     </label>
-    <label class="theme-card">
-      <input type="radio" name="theme" value="neon" {% if user.theme == 'neon' %}checked{% endif %}>
-      <span class="theme-swatch neon" aria-hidden="true"><span></span><span></span><span></span></span>
-      <span><strong>Neon</strong><br><span class="muted small">Hot pink on black, chromatic bloom, hard edges. Always dark.</span></span>
-    </label>
+    {%- endfor %}
   </div>
+  {%- endif %}
   <p id="theme-note" aria-live="polite" hidden></p>
 
   <h2 class="admin-section" id="password">Password</h2>

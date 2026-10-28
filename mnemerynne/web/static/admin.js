@@ -1909,6 +1909,7 @@
     if (tab === "settings" && !updatesLoaded) {
       loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeMail(); loadClaudeLinks(); loadChatGPT(); loadExperimental(); loadRooms(); loadAutomations(); loadMedia(); loadDev();
       if (window.ErynneM365) window.ErynneM365.load();   // admin_m365.js
+      if (window.ErynneTheme) window.ErynneTheme.load();   // admin_theme.js
     }
     if (tab === "accounts") loadAccounts();
     if (tab === "apis" && window.ErynneApis) window.ErynneApis.load();   // admin_apis.js

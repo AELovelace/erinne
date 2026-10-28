@@ -1,0 +1,15 @@
+{#- The brand: the organisation's logo (Settings → Themes → Branding) or the 🌸, then the product name.
+    A look that is always dark (neon base) takes the dark logo outright; the others switch with the device. -#}
+{%- set brand = brand if brand is defined and brand else {} -%}
+{%- if brand.logo -%}
+{%- if look and look.dark_only and brand.logo_dark -%}
+<img class="brand-logo" src="{{ brand.logo_dark }}" alt="">
+{%- elif brand.logo_dark -%}
+<picture><source srcset="{{ brand.logo_dark }}" media="(prefers-color-scheme: dark)"><img class="brand-logo" src="{{ brand.logo }}" alt=""></picture>
+{%- else -%}
+<img class="brand-logo" src="{{ brand.logo }}" alt="">
+{%- endif -%}
+{%- else -%}
+<span class="blossom" aria-hidden="true">🌸</span>
+{%- endif -%}
+{{ product_name if product_name is defined else assistant_name }}

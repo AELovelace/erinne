@@ -34,7 +34,7 @@ _PAGE_NAME = re.compile(r"^(\d+)-([a-z0-9][a-z0-9-]*)\.md$")
 _PAGE_LINK = re.compile(r"^(?:\.\./(user|admin)/)?([a-z0-9][a-z0-9-]*)\.md(#[^#]*)?$")
 # The pages are ours, not uploaded content, but they still get a tight policy:
 # no inline scripts, nothing remote. base.html's parallax.js and the data: favicon are allowed.
-_CSP = ("default-src 'none'; style-src 'self'; img-src 'self' data:; script-src 'self'; connect-src 'self'; "
+_CSP = ("default-src 'none'; style-src 'self'; img-src 'self' data:; font-src 'self'; script-src 'self'; connect-src 'self'; "
         "base-uri 'none'; form-action 'self'; frame-ancestors 'self'")
 
 

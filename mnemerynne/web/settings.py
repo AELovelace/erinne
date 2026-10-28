@@ -41,10 +41,14 @@ async def preferences_page(request: Request, user=Depends(page_user), conn: sqli
     groups = [r[0] for r in conn.execute(
         "SELECT g.name FROM group_members m JOIN groups g ON g.id = m.group_id WHERE m.user_id = ? "
         "ORDER BY g.name COLLATE NOCASE", (user["id"],))]
+    from mnemerynne.web.theme import looks_for
     from mnemerynne.web.tokens import extension_path
 
+    looks = looks_for(request.app)
     return state.templates.TemplateResponse(request, "preferences.html", {
         "user": user, "is_admin": is_admin(request, conn, user), "active": "preferences",
+        "themes": looks.pickable(), "theme_enforced": bool(looks.settings.get("enforce")),
+        "current_theme": looks.resolve(user["theme"] or None, None).slug,
         "memories": await memory.list_memories(state.store, user["id"]), "memory_mode": state.settings.memory_mode,
         "admin_via": ADMIN_VIA.get(via or ""), "groups": groups, "domain": state.settings.ad_domain,
         "tokens": api_tokens.has_active(conn, user["id"]), "min_password": auth.MIN_PASSWORD_LENGTH,
@@ -87,19 +91,28 @@ def change_password(body: PasswordChange, request: Request, user=Depends(api_use
     return {"status": "changed"}
 
 
-THEME_COOKIE = "erynne_theme"   # so the sign-in page matches, read in base.html
+THEME_COOKIE = "erynne_theme"   # so the sign-in page matches (web/app.py _nav_context)
 
 
 class ThemeBody(BaseModel):
-    theme: Literal["sakura", "neon"]
+    theme: str = Field(min_length=1, max_length=40)
 
 
 @router.put("/api/me/theme")
-def set_theme(body: ThemeBody, response: Response, user=Depends(api_user),
+def set_theme(body: ThemeBody, request: Request, response: Response, user=Depends(api_user),
               conn: sqlite3.Connection = Depends(get_db)):
+    """Pick one of the themes an admin turned on (Settings → Themes). With one theme enforced there
+    is nothing to pick."""
+    from mnemerynne.web.theme import looks_for
+
+    looks = looks_for(request.app)
+    if looks.settings.get("enforce"):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Your organisation's theme is set by an admin.")
+    if body.theme not in {t.slug for t in looks.pickable()}:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That theme isn't on offer here.")
     conn.execute("UPDATE users SET theme = ? WHERE id = ?", (body.theme, user["id"]))
     response.set_cookie(THEME_COOKIE, body.theme, max_age=365 * 86400, samesite="lax", httponly=True)
-    return {"theme": body.theme}
+    return {"theme": body.theme, "look": looks.themes[body.theme].as_json()}
 
 
 @router.post("/api/me/sign-out-others")

@@ -1,24 +1,40 @@
-{#- The person's theme (Settings); signed out, the one this browser last used, else neon. -#}
-{%- set theme = (user.theme if user is defined and user else request.cookies.get('erynne_theme')) -%}
-{%- if theme not in ('sakura', 'neon') %}{% set theme = 'neon' %}{% endif -%}
+{#- The look (web/app.py _nav_context, mnemerynne/theme.py): the person's theme, or the one this browser last used
+    when signed out, or the organisation's default; its base is one of the bundled stylesheets (data-theme) and its
+    own overrides come as /theme/<slug>.css (data-look) and attributes the structural stylesheets read. -#}
+{%- set look = look if look is defined and look else none -%}
+{%- set theme = look.base if look else 'neon' -%}
+{%- set brand = brand if brand is defined and brand else {} -%}
+{%- set product_name = product_name if product_name is defined and product_name else assistant_name -%}
 {#- A screen (the TV; web/app.py _tv): its underscan on every page. A screen box also gets the small bar
     (Back to TV, ‹ ›) and listens for the remote (screen_link.js), on every page but the TV page itself. -#}
 {%- set tv = tv if tv is defined else None -%}
 {%- set tv_page = screen is defined and screen -%}
 <!doctype html>
-<html lang="en" data-theme="{{ theme }}"{% if tv %} class="tv{{ ' tv-box' if tv.box }}{{ ' tv-page' if tv_page }}" style="--safe-x: {{ tv.safe_x }}%; --safe-y: {{ tv.safe_y }}%; --safe-xv: {{ tv.safe_x }}vw; --safe-yv: {{ tv.safe_y }}vh"{% endif %}>
+<html lang="en" data-theme="{{ theme }}"{% if look %} data-look="{{ look.slug }}"{% for k, v in look.attrs.items() %} {{ k }}{% if v %}="{{ v }}"{% endif %}{% endfor %}{% endif %}{% if tv %} class="tv{{ ' tv-box' if tv.box }}{{ ' tv-page' if tv_page }}" style="--safe-x: {{ tv.safe_x }}%; --safe-y: {{ tv.safe_y }}%; --safe-xv: {{ tv.safe_x }}vw; --safe-yv: {{ tv.safe_y }}vh"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="{{ 'dark' if theme == 'neon' else 'light dark' }}">
-  <title>{% block title %}{{ assistant_name }}{% endblock %}</title>
+  <title>{% block title %}{{ product_name }}{% endblock %}</title>
+  {%- if brand.mark %}
+  <link rel="icon" href="/theme/brand/mark-192.png?v={{ brand.mark_version }}" type="image/png">
+  {%- else %}
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌸</text></svg>">
+  {%- endif %}
   {#- Installable (Add to Home screen), and on Android a Share target: /manifest.webmanifest (web/app.py). -#}
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="apple-touch-icon" href="{{ static('icons/apple-touch-icon.png') }}">
-  <meta name="theme-color" content="{{ '#12031f' if theme == 'neon' else '#fbeef0' }}">
+  <link rel="apple-touch-icon" href="{% if brand.mark %}/theme/brand/mark-180.png?v={{ brand.mark_version }}{% else %}{{ static('icons/apple-touch-icon.png') }}{% endif %}">
+  <meta name="theme-color" content="{{ look.page_light if look else '#12031f' }}">
   <link rel="stylesheet" href="{{ static('erynne.css') }}">
   <link rel="stylesheet" href="{{ static('theme-neon.css') }}">
+  <link rel="stylesheet" href="{{ static('theme-plain.css') }}">
+  <link rel="stylesheet" href="{{ static('theme-effects.css') }}">
+  {%- if brand.logo %}
+  <link rel="stylesheet" href="/theme/brand.css?v={{ brand.mark_version }}">
+  {%- endif %}
+  {%- if look and look.css_url %}
+  <link rel="stylesheet" href="{{ look.css_url }}" id="look-css">
+  {%- endif %}
   {% if user is defined and user %}<script src="{{ static('messages.js') }}"></script>{% endif %}
 </head>
 <body>

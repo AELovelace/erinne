@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Access · {{ assistant_name }}{% endblock %}
+{% block title %}Access · {{ product_name }}{% endblock %}
 {% block body %}
 {% include "_nav.html" %}
 <main class="ax-page">
@@ -240,6 +240,11 @@
       <div id="chatgpt-settings" aria-live="polite"><p class="muted">Loading…</p></div>
     </section>
   </div>
+    {#- Themes (admin_theme.js): full width under the two columns, above Experimental. -#}
+    <section class="inbox admin ax-wide" aria-labelledby="ax-themes-title">
+      <h2 class="ax-split-title" id="ax-themes-title">Themes</h2>
+      <div id="theme-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+    </section>
     <section class="inbox admin ax-wide" aria-labelledby="ax-experimental-title">
       <h2 class="ax-split-title" id="ax-experimental-title">Experimental</h2>
       <h2 class="ax-h">Experimental features</h2>
@@ -260,6 +265,7 @@
 <link rel="stylesheet" href="{{ static('signage_crt.css') }}">
 <script src="{{ static('signage_render.js') }}"></script>
 <script src="{{ static('admin_signage.js') }}"></script>
+<script src="{{ static('admin_theme.js') }}"></script>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 <script src="{{ static('admin_remote.js') }}"></script>
 {% endblock %}

@@ -21,7 +21,7 @@ router = APIRouter()
 
 # The Markdown view renders user-supplied content: no scripts, no remote
 # resources, no framing by other sites.
-_VIEW_CSP = ("default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; "
+_VIEW_CSP = ("default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; "
              "form-action 'none'; frame-ancestors 'self'")
 # Images that are safe to show inline. Never SVG: it can carry scripts.
 _INLINE_IMAGES = {"image/png", "image/jpeg", "image/gif", "image/webp"}

@@ -2,7 +2,7 @@
 {#- The TV's own page with its top bar on (Kiosk settings): nobody is signed in here, so the pages
     ask someone to sign in; going back to the TV signs them out (web/media.py screen_page). -#}
 <header class="topbar main-bar kiosk-bar">
-  <a class="brand" href="/"><span class="blossom" aria-hidden="true">🌸</span>{{ assistant_name }}</a>
+  <a class="brand" href="/">{% include "_brand.html" %}</a>
   <nav class="tabs" aria-label="Pages">
     <a href="/">Ask</a>
     <a href="/files">Files</a>
@@ -15,7 +15,7 @@
 <div class="notices" id="notices" aria-live="polite" hidden></div>
 {%- else %}
 <header class="topbar main-bar">
-  <a class="brand" href="/"><span class="blossom" aria-hidden="true">🌸</span>{{ assistant_name }}</a>
+  <a class="brand" href="/">{% include "_brand.html" %}</a>
   {#- On a phone the bar is one row (brand, ✉, ☰) and everything in .nav-more, the tabs too, is the ☰ menu
       (nav.js); on a desktop .nav-more is display: contents, so it all sits inline (the tabs after the brand). -#}
   {%- if has_rooms %}

@@ -8,12 +8,12 @@ The top shows your username, your **role** (user, local admin, or admin through 
 
 ## Theme
 
-Two themes, applied the moment you click:
+The looks your admin has turned on, applied the moment you click. Two usually come as standard:
 
 - **Sakura**: blossoms over Mt Fuji, following your device's light or dark mode.
 - **Neon**: hot pink on black, always dark.
 
-The choice is saved to your account and remembered by this browser for the sign-in page.
+There may be more: the organisation's own look, or Sad Girls Club (white on black with scanlines). The choice is saved to your account and remembered by this browser for the sign-in page. If the section says the theme is set by an admin, everyone gets the same look and there is nothing to pick.
 
 ## Password
 

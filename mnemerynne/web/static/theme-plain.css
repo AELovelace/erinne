@@ -1,0 +1,69 @@
+/* Erynne — plain base (mnemerynne/theme.py): the base of the Corporate theme and of themes made
+   "from plain". No blossoms, no cities: a quiet page the brand's own colours, gradients, logo and
+   background draw. Its stock values are theme.STOCK["plain"]; a theme's stylesheet (/theme/<slug>.css,
+   scoped to data-look) sets whatever differs. Scoped to html[data-theme="plain"] like theme-neon.css. */
+
+html[data-theme="plain"] {
+  --blush: #f4f6fa;
+  --petal: #dbe6f7;
+  --petal-soft: #edf2fb;
+  --rose: #1f4e9c;
+  --rose-deep: #163b78;
+  --bark: #3b4a63;
+  --ink: #1b2330;
+  --muted: #5b6677;
+  --glass: rgba(255, 255, 255, 0.82);
+  --glass-strong: rgba(255, 255, 255, 0.94);
+  --line: rgba(31, 78, 156, 0.18);
+  --shadow: 0 8px 30px rgba(20, 40, 80, 0.1);
+  --error: #b3261e;
+  --ok-bg: #e3f4e6; --ok-fg: #2b6a3a;
+  --bad-bg: #fde2e6; --bad-fg: #a3263d;
+  --busy-bg: #e8eefc; --busy-fg: #2f4f8f;
+  --scene-tint: rgba(244, 246, 250, 0.35);
+  --radius: 10px;
+  --serif: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  html[data-theme="plain"] {
+    --blush: #0f1520;
+    --petal: #223457;
+    --petal-soft: #182742;
+    --rose: #7aa7ff;
+    --rose-deep: #a3c1ff;
+    --bark: #9aa6b8;
+    --ink: #e8edf5;
+    --muted: #9aa6b8;
+    --glass: rgba(22, 30, 44, 0.82);
+    --glass-strong: rgba(26, 35, 52, 0.94);
+    --line: rgba(122, 167, 255, 0.22);
+    --shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+    --error: #ff8f86;
+    --ok-bg: #1f3a28; --ok-fg: #a8dcb5;
+    --bad-bg: #4a1f2a; --bad-fg: #ffb3c1;
+    --busy-bg: #1d2b4a; --busy-fg: #b9ccff;
+    --scene-tint: rgba(15, 21, 32, 0.6);
+  }
+}
+
+/* The page: the brand's gradient over its background image (either may be absent), on the page colour. */
+html[data-theme="plain"] body {
+  background-color: var(--blush);
+  background-image: var(--brand-page-bg, none), var(--brand-image, none);
+  background-size: cover, cover;
+  background-position: center, center;
+  background-attachment: fixed, fixed;
+}
+html[data-theme="plain"] .petals,
+html[data-theme="plain"] .parallax { display: none; }
+
+/* Headings in the heading font; the brand a touch heavier. */
+html[data-theme="plain"] h1, html[data-theme="plain"] h2, html[data-theme="plain"] h3 { font-family: var(--serif); letter-spacing: -0.01em; }
+html[data-theme="plain"] .brand { font-weight: 700; }
+
+/* The top bar and buttons take the brand's gradients when set (erynne.css reads the same variables). */
+html[data-theme="plain"] .topbar { border-bottom: 1px solid var(--line); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04); }
+html[data-theme="plain"] .tabs a[aria-current="page"] { box-shadow: inset 0 -2px 0 var(--rose); }
+html[data-theme="plain"] .login-card h1 { font-size: 1.9rem; }
+html[data-theme="plain"] .login-card .brand-logo { height: calc(var(--brand-logo-h, 2rem) * 1.6); }

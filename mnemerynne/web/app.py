@@ -24,7 +24,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from mnemerynne import (balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, feedback as feedback_mod,
                         mcp_server, media as media_mod, memory,
                         diagnostics, messages as messages_mod, permissions, remote, rooms as rooms_mod, rooms_bus, share,
-                        sharepoint,
+                        sharepoint, theme as theme_mod,
                         users)
 from mnemerynne.agent import Agent
 from mnemerynne.media import screens as media_screens, transcode as media_transcode
@@ -46,7 +46,7 @@ from mnemerynne.web import (admin, admin_apis, admin_notices, admin_remote, agen
                             kiosk as kiosk_pages,
                             m365 as m365_pages, media as media_pages, memories, messages as message_pages, oauth as oauth_pages, remote as remote_pages,
                             rooms as room_pages, security,
-                            settings as settings_pages, tokens, wiki as wiki_pages)
+                            settings as settings_pages, theme as theme_pages, tokens, wiki as wiki_pages)
 from mnemerynne.web.deps import LoginRequired, api_user, get_db, is_admin, page_user
 
 log = logging.getLogger("mnemerynne.web")
@@ -113,6 +113,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         conn = db.connect(settings.db_path)
         try:
             version = db.migrate(conn, settings.embed_dim)
+            app.state.looks = theme_mod.load_looks(conn, settings)   # the themes, as every page draws them
             # Every inbox has an Agents folder for Claude; inboxes on an
             # unavailable share get theirs on first use.
             made = editing.ensure_all_agents(conn)
@@ -246,14 +247,20 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         and on a screen, the screen (tv)."""
         session = request.scope.get("session", {}) if "session" in request.scope else {}
         user_id = session.get("user_id")
+        # The look (theme) and the brand: every page, signed in or not (the sign-in page follows the cookie).
+        looks = theme_pages.looks_for(app)
+        cookie = request.cookies.get(settings_pages.THEME_COOKIE)
+        out = {"look": looks.resolve(None, cookie), "brand": looks.brand,
+               "product_name": looks.brand.get("name") or ASSISTANT_NAME}
         if not user_id and not request.cookies.get(media_screens.COOKIE):
-            return {}
+            return out
         conn = db.connect(settings.db_path)
         try:
-            out = {"tv": _tv(request, conn)}
+            out["tv"] = _tv(request, conn)
             user = users.get_user_by_id(conn, user_id) if user_id else None
             if user is None:
                 return out
+            out["look"] = looks.resolve(user["theme"] or None, cookie)
             admin = is_admin(request, conn, user)
             unread_rooms = rooms_mod.unread_summary(conn, user, app.state.directory)
             return out | {"nav_unread": messages_mod.unread_count(conn, user_id) + unread_rooms["mentions"] + unread_rooms["dms"],
@@ -264,7 +271,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                     # Signed in on a screen box's TV (its top bar): back to the TV page, which signs out.
                     "kiosk_back": bool(session.get("kiosk_screen"))}
         except sqlite3.Error:
-            return {}
+            return out
         finally:
             conn.close()
 
@@ -293,6 +300,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(balancer_pages.router)
     app.include_router(bfgguf_pages.router)
     app.include_router(settings_pages.router)
+    app.include_router(theme_pages.router)
+    app.include_router(theme_pages.admin_router)
     app.include_router(claude_link_pages.router)
     app.include_router(help_pages.router)
     app.include_router(editor_pages.router)
@@ -329,12 +338,23 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         """Makes Erynne installable (Add to Home screen), and on Android a target in the Share menu:
         a YouTube link shared to it opens Media → Screens to play on the TV (web/media.py share_link).
         Public: browsers fetch it without the session cookie."""
-        icons = [{"src": static(f"icons/{name}"), "sizes": size, "type": "image/png", "purpose": purpose}
-                 for name, size, purpose in (("icon-192.png", "192x192", "any"), ("icon-512.png", "512x512", "any"),
-                                             ("maskable-512.png", "512x512", "maskable"))]
+        looks = theme_pages.looks_for(app)
+        brand = looks.brand
+        if brand.get("mark"):   # the organisation's mark (Settings → Themes → Branding)
+            v = brand["mark_version"]
+            icons = [{"src": f"/theme/brand/{name}?v={v}", "sizes": size, "type": "image/png", "purpose": purpose}
+                     for name, size, purpose in (("mark-192.png", "192x192", "any"), ("mark-512.png", "512x512", "any"),
+                                                 ("mark-maskable-512.png", "512x512", "maskable"))]
+        else:
+            icons = [{"src": static(f"icons/{name}"), "sizes": size, "type": "image/png", "purpose": purpose}
+                     for name, size, purpose in (("icon-192.png", "192x192", "any"), ("icon-512.png", "512x512", "any"),
+                                                 ("maskable-512.png", "512x512", "maskable"))]
+        name = brand.get("name") or ASSISTANT_NAME
+        default = looks.resolve(None, None)
         return JSONResponse({
-            "id": "/", "name": ASSISTANT_NAME, "short_name": ASSISTANT_NAME, "start_url": "/", "scope": "/",
-            "display": "standalone", "background_color": "#07020d", "theme_color": "#12031f", "icons": icons,
+            "id": "/", "name": name, "short_name": name, "start_url": "/", "scope": "/",
+            "display": "standalone", "background_color": default.page_dark if default.dark_only else default.page_light,
+            "theme_color": default.page_light, "icons": icons,
             "shortcuts": [{"name": "Media", "url": "/media"}, {"name": "Screens", "url": "/media#screens"},
                           {"name": "Files", "url": "/files"}],
             "share_target": {"action": "/media/share", "method": "GET",

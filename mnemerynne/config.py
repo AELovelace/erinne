@@ -239,6 +239,11 @@ class Settings(BaseSettings):
         return self.media_cache_dir or self.data_dir / "media-cache"
 
     @property
+    def theme_dir(self) -> Path:
+        # Branding (brand/) and each theme's own files (<slug>/): mnemerynne/theme.py.
+        return self.data_dir / "theme"
+
+    @property
     def share_trash_dir(self) -> Path | None:
         if self.share_root is None:
             return None

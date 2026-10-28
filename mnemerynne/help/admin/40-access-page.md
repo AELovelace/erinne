@@ -65,6 +65,10 @@ Two columns.
 - **Mail and calendar for Claude**: the group whose members' Claude gets mail and calendar tools through the connector (empty = off). See [Microsoft 365](microsoft-365.md#mail-and-calendar).
 - **Links Claude can open**: whether Claude gets short-lived text links and for how long. See [Claude](claude.md#links-claude-can-open).
 
+**Themes** (full width, between the columns and Experimental)
+
+- The looks the box can wear: Sakura, Neon, Corporate, Sad Girls Club and your own, with the default, who gets what, theme packs and the organisation's branding. See [Themes](themes.md).
+
 **Experimental** (full width, at the bottom)
 
 - **Experimental features**: the group that gets features still being tried out.

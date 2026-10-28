@@ -1,0 +1,110 @@
+/* Erynne — page-wide effects a theme can switch on (mnemerynne/theme.py attrs): html[data-fx~="…"]
+   holds the ones that are on, --fx (0 to 1, from the theme's stylesheet) scales them. Lifted from
+   signage_crt.css and sadgirlsclub.wtf: scanlines, flicker, jitter (chromatic text shadow that
+   wanders), pulse (the page breathes between two colours). Everything is opacity, gradients and
+   shadows, so it stays cheap, and it all stops for people who asked for reduced motion. */
+
+html[data-fx] { --fx: 0.6; }
+
+/* Scanlines: a dark line every 3 px plus faint red, green and blue stripes, fixed over everything. */
+html[data-fx~="scanlines"] body::before {
+  content: ""; position: fixed; inset: 0; z-index: 60; pointer-events: none;
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, calc(0.25 * var(--fx))) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(255, 0, 0, calc(0.06 * var(--fx))) 0 1px, rgba(0, 255, 0, calc(0.02 * var(--fx))) 1px 2px,
+                              rgba(0, 0, 255, calc(0.06 * var(--fx))) 2px 3px);
+}
+
+/* Flicker: a translucent sheet whose opacity jumps about every 150 ms (the site's keyframes). */
+html[data-fx~="flicker"] body::after {
+  content: ""; position: fixed; inset: 0; z-index: 61; pointer-events: none;
+  background: rgba(18, 16, 16, calc(0.35 * var(--fx)));
+  animation: fx-flicker 0.15s infinite;
+}
+@keyframes fx-flicker {
+  0% { opacity: 0.28; } 5% { opacity: 0.35; } 10% { opacity: 0.24; } 15% { opacity: 0.9; } 20% { opacity: 0.18; }
+  25% { opacity: 0.84; } 30% { opacity: 0.66; } 35% { opacity: 0.68; } 40% { opacity: 0.27; } 45% { opacity: 0.85; }
+  50% { opacity: 0.96; } 55% { opacity: 0.09; } 60% { opacity: 0.2; } 65% { opacity: 0.72; } 70% { opacity: 0.53; }
+  75% { opacity: 0.37; } 80% { opacity: 0.71; } 85% { opacity: 0.7; } 90% { opacity: 0.7; } 95% { opacity: 0.36; }
+  100% { opacity: 0.24; }
+}
+
+/* Jitter: headings and the brand carry a blue and a red shadow that wander up to 4 px apart. */
+html[data-fx~="jitter"] h1, html[data-fx~="jitter"] h2, html[data-fx~="jitter"] .brand {
+  animation: fx-jitter 1.6s infinite;
+}
+@keyframes fx-jitter {
+  0% { text-shadow: calc(0.44px * var(--fx) * 1.6) 0 1px rgba(0, 30, 255, 0.5), calc(-0.44px * var(--fx) * 1.6) 0 1px rgba(255, 0, 80, 0.3), 0 0 3px; }
+  10% { text-shadow: calc(2.8px * var(--fx) * 1.6) 0 1px rgba(0, 30, 255, 0.5), calc(-2.8px * var(--fx) * 1.6) 0 1px rgba(255, 0, 80, 0.3), 0 0 3px; }
+  20% { text-shadow: calc(0.03px * var(--fx) * 1.6) 0 1px rgba(0, 30, 255, 0.5), calc(-0.03px * var(--fx) * 1.6) 0 1px rgba(255, 0, 80, 0.3), 0 0 3px; }
+  30% { text-shadow: calc(3.5px * var(--fx) * 1.6) 0 1px rgba(0, 30, 255, 0.5), calc(-3.5px * var(--fx) * 1.6) 0 1px rgba(255, 0, 80, 0.3), 0 0 3px; }
+  40% { text-shadow: calc(0.7px * var(--fx) * 1.6) 0 1px rgba(0, 30, 255, 0.5), calc(-0.7px * var(--fx) * 1.6) 0 1px rgba(255, 0, 80, 0.3), 0 0 3px; }
+  50% { text-shadow: calc(3.9px * var(--fx) * 1.6) 0 1px rgba(0, 30, 255, 0.5), calc(-3.9px * var(--fx) * 1.6) 0 1px rgba(255, 0, 80, 0.3), 0 0 3px; }
+  60% { text-shadow: calc(2.2px * var(--fx) * 1.6) 0 1px rgba(0, 30, 255, 0.5), calc(-2.2px * var(--fx) * 1.6) 0 1px rgba(255, 0, 80, 0.3), 0 0 3px; }
+  70% { text-shadow: calc(0.08px * var(--fx) * 1.6) 0 1px rgba(0, 30, 255, 0.5), calc(-0.08px * var(--fx) * 1.6) 0 1px rgba(255, 0, 80, 0.3), 0 0 3px; }
+  80% { text-shadow: calc(2.4px * var(--fx) * 1.6) 0 1px rgba(0, 30, 255, 0.5), calc(-2.4px * var(--fx) * 1.6) 0 1px rgba(255, 0, 80, 0.3), 0 0 3px; }
+  90% { text-shadow: calc(1.9px * var(--fx) * 1.6) 0 1px rgba(0, 30, 255, 0.5), calc(-1.9px * var(--fx) * 1.6) 0 1px rgba(255, 0, 80, 0.3), 0 0 3px; }
+  100% { text-shadow: calc(2.6px * var(--fx) * 1.6) 0 1px rgba(0, 30, 255, 0.5), calc(-2.6px * var(--fx) * 1.6) 0 1px rgba(255, 0, 80, 0.3), 0 0 3px; }
+}
+
+/* Pulse: the page colour breathes between two colours over 20 s. */
+html[data-fx~="pulse"] body { animation: fx-pulse 20s ease-in-out infinite; }
+@keyframes fx-pulse {
+  0%, 100% { background-color: var(--pulse-a, var(--blush)); }
+  50% { background-color: var(--pulse-b, var(--blush)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-fx] body, html[data-fx] body::after, html[data-fx] h1, html[data-fx] h2, html[data-fx] .brand { animation: none; }
+}
+
+/* ------------------------------------------------------------------ hooks
+   What a theme's stylesheet can switch on through attributes on <html> (mnemerynne/theme.py attrs).
+   They live here, loaded after the base stylesheets, so they win over neon's and plain's own rules. */
+
+/* Scene: none hides the blossoms and the cities; image draws the theme's background under the tint. */
+html[data-scene="none"] .petals, html[data-scene="none"] .parallax,
+html[data-scene="image"] .petals, html[data-scene="image"] .parallax { display: none; }
+html[data-scene="none"] body { background-image: var(--brand-page-bg, none); }
+html[data-scene="image"] body {
+  background-image: var(--brand-page-bg, none), linear-gradient(var(--scene-tint), var(--scene-tint)), var(--brand-image, none);
+  background-size: cover; background-position: center; background-attachment: fixed;
+}
+
+/* Gradients: the page, the top bar and the buttons. */
+html[data-page-bg] body { background-image: var(--brand-page-bg); }
+html[data-bar-bg] .topbar { background: var(--brand-bar-bg); color: var(--brand-bar-fg, var(--ink)); border-bottom-color: transparent; }
+html[data-bar-bg] .topbar :is(a, .brand, .nav-who, .notify-button, button.link, .tabs a) { color: inherit; text-shadow: none; }
+html[data-bar-bg] .topbar .tabs a:hover { background: rgba(255, 255, 255, 0.18); color: inherit; }
+html[data-bar-bg] .topbar .tabs a[aria-current="page"] { background: rgba(255, 255, 255, 0.24); color: inherit; box-shadow: none; }
+html[data-bar-bg] .topbar .nav-who { opacity: .8; }
+html[data-button-bg] button:not(.link, .tool, .danger-fill, .tree-label, .tree-toggle, .crumb, .menu button, .ax-tabs button, .remote-dot),
+html[data-button-bg] .button-like, html[data-button-bg] .upload-button { background: var(--brand-button-bg); color: var(--brand-button-fg, #fff); }
+
+/* Borders: hard (2 px solid in the line colour) or ridge, on panels, the top bar, inputs and buttons. */
+html[data-border="hard"] :is(.glass, .inbox, .doc, .history, .login-card, .dlg, .topbar, .tile, .admin-table, .msg-modal),
+html[data-border="hard"] :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]), textarea, select, button:not(.link, .tool, .tree-label, .tree-toggle, .crumb)) {
+  border: 2px solid var(--line); box-shadow: none;
+}
+html[data-border="ridge"] :is(.glass, .inbox, .doc, .history, .login-card, .dlg, .topbar, .tile, .admin-table, .msg-modal) {
+  border: 3px ridge var(--line); box-shadow: none;
+}
+html[data-border="ridge"] :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]), textarea, select, button:not(.link, .tool, .tree-label, .tree-toggle, .crumb)) {
+  border: 2px solid var(--line); box-shadow: none;
+}
+html[data-border] .topbar { border-bottom-width: 2px; }
+
+/* Flat: no frosted glass, the strong surface instead. */
+html[data-flat] :is(.glass, .inbox, .doc, .history, .login-card, .dlg, .topbar) {
+  -webkit-backdrop-filter: none; backdrop-filter: none; background-color: var(--glass-strong);
+}
+
+/* Texture: a tile drawn under panels and the top bar (over their colour). */
+html[data-texture] :is(.glass, .inbox, .doc, .history, .login-card, .dlg, .topbar) {
+  background-image: var(--brand-texture); background-repeat: repeat; background-blend-mode: overlay;
+}
+
+/* The brand's logo in the top bar and on the sign-in card (Settings → Themes → Branding). */
+.brand-logo { height: var(--brand-logo-h, 2rem); width: auto; max-width: 14rem; vertical-align: middle; margin-right: .45rem; object-fit: contain; }
+.login-card h1 .brand-logo { height: calc(var(--brand-logo-h, 2rem) * 1.5); display: block; margin: 0 auto .4rem; max-width: 100%; }
+html[data-theme="neon"] .brand-logo { filter: drop-shadow(0 0 6px rgba(var(--glow), 0.6)); }

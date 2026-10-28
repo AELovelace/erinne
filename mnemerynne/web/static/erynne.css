@@ -871,7 +871,8 @@ select { font: inherit; color: var(--ink); }
 .ax-settings { display: flex; flex-direction: column; gap: .9rem; flex: 1; min-height: 0; overflow: auto; }
 .ax-settings[hidden] { display: none; }
 .ax-settings > .ax-split { flex: none; min-height: 0; overflow: visible; }
-.ax-settings > .ax-wide { flex: none; width: 100%; max-width: none; margin: auto 0 0; }
+.ax-settings > .ax-wide { flex: none; width: 100%; max-width: none; margin: 0; }
+.ax-settings > .ax-wide:last-child { margin-top: auto; }   /* Experimental stays at the bottom; Themes sits under the columns */
 .ax-split > .inbox { max-width: none; max-height: none; }
 .ax-split-title { margin: 0; font-size: 1.3rem; }
 .ax-split .ax-split-title + .ax-h { margin-top: 1rem; }
@@ -1202,4 +1203,65 @@ select { font: inherit; color: var(--ink); }
 .automator-answer { margin-top: .5rem; overflow-wrap: anywhere; }
 @media (max-width: 800px) {
   .automator-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---------------------------------------------------------------- Themes (admin_theme.js, Settings → Themes) */
+/* A Preferences card drawn from a theme's own colours (preferences.html sets the --sw-* variables). */
+.theme-swatch.look { background: var(--sw-page, #888); border: 1px solid var(--sw-primary, #444); }
+.theme-swatch.look span:nth-child(1) { left: 8%; top: 14%; width: 50%; height: 16%; border-radius: 3px; background: var(--sw-text, #fff); opacity: .9; }
+.theme-swatch.look span:nth-child(2) { left: 8%; top: 40%; width: 84%; height: 44%; border-radius: 4px; background: var(--sw-surface, rgba(255,255,255,.5)); border: 1px solid var(--sw-highlight, transparent); }
+.theme-swatch.look span:nth-child(3) { right: 14%; bottom: 20%; width: 30%; height: 16%; border-radius: 999px; background: var(--sw-primary, #444); }
+
+.th-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: .8rem; margin: .6rem 0 1rem; }
+.th-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .4rem .8rem; padding: .7rem .9rem; border: 1px solid var(--line);
+           border-radius: 10px; background: var(--glass-strong); }
+.th-card.current { box-shadow: 0 0 0 1px var(--rose); border-color: var(--rose); }
+.th-card .theme-swatch { grid-row: span 3; }
+.th-card-name { font-weight: 600; }
+.th-card-name .badge { margin-left: .3rem; }
+.th-switches { display: flex; flex-wrap: wrap; gap: .3rem .9rem; }
+.th-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: .3rem .5rem; }
+.th-new { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-bottom: .6rem; }
+.th-rows { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .5rem .8rem; align-items: center; margin: .5rem 0 1rem; }
+.th-rows > span:first-child, .th-rows > label.small { font-weight: 600; }
+.th-assets { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: .8rem; margin: .4rem 0 .8rem; }
+.th-asset { border: 1px dashed var(--line); border-radius: 8px; padding: .6rem; display: grid; gap: .4rem; }
+.th-asset-preview { height: 4rem; display: grid; place-items: center; background: repeating-conic-gradient(rgba(127,127,127,.18) 0 25%, transparent 0 50%) 0 0 / 16px 16px; border-radius: 6px; overflow: hidden; }
+.th-asset-preview img { max-height: 100%; max-width: 100%; object-fit: contain; }
+.th-asset-preview .muted { font-size: .85rem; }
+.th-asset-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
+
+.th-editor { display: grid; gap: .9rem; }
+.th-head { display: flex; flex-wrap: wrap; gap: .5rem .8rem; align-items: center; position: sticky; top: 0; z-index: 2;
+           padding: .5rem 0; background: var(--glass-strong); border-bottom: 1px solid var(--line); }
+.th-head input[type="text"] { min-width: 12rem; }
+.th-head .push-right { margin-left: auto; }
+.th-section > h3 { margin: 0 0 .4rem; font-size: 1.05rem; }
+.th-section > .muted.small { margin: 0 0 .5rem; }
+.th-palettes { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 1rem; }
+.th-palette h4 { margin: 0 0 .4rem; }
+.th-token { display: grid; grid-template-columns: 8.5rem 2.2rem minmax(0, 1fr); gap: .4rem; align-items: center; padding: .15rem 0; }
+.th-token.alpha { grid-template-columns: 8.5rem 2.2rem minmax(0, 1fr) 5rem; }
+.th-token input[type="color"] { width: 2.2rem; height: 1.7rem; padding: 0 2px; border: 1px solid var(--line); border-radius: 4px; background: none; }
+.th-token input[type="text"] { font-family: var(--mono, ui-monospace, monospace); font-size: .85rem; padding: .2rem .4rem; }
+.th-token input[type="range"] { width: 100%; }
+.th-gradients { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 1rem; }
+.th-gradient { border: 1px solid var(--line); border-radius: 8px; padding: .6rem; display: grid; gap: .4rem; }
+.th-gradient-swatch { height: 2.2rem; border-radius: 6px; border: 1px solid var(--line); }
+.th-gradient-row { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.th-stop { display: grid; grid-template-columns: 2.2rem minmax(0, 1fr) 4rem auto; gap: .4rem; align-items: center; }
+.th-stop input[type="color"] { width: 2.2rem; height: 1.7rem; padding: 0 2px; border: 1px solid var(--line); border-radius: 4px; background: none; }
+.th-shape { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .6rem 1rem; align-items: start; }
+.th-shape label.sg-field, .th-effects label.sg-field { display: grid; gap: .2rem; }
+.th-effects { display: flex; flex-wrap: wrap; gap: .5rem 1.2rem; align-items: center; }
+.th-css { width: 100%; min-height: 8rem; font-family: var(--mono, ui-monospace, monospace); font-size: .85rem; }
+.th-note { font-size: .85rem; }
+@media (max-width: 760px) {
+  .th-token, .th-token.alpha { grid-template-columns: 6.5rem 2.2rem minmax(0, 1fr); }
+  .th-token.alpha input[type="range"] { grid-column: 1 / -1; }
+  .th-head { position: static; }
+}
+.th-card .badge { background: var(--petal-soft); color: var(--rose-deep); margin-left: .3rem; vertical-align: middle; }
+@media (max-width: 760px) {
+  .th-card .th-switches { flex-direction: column; align-items: flex-start; gap: .2rem; }
 }
