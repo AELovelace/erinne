@@ -14,6 +14,7 @@ call is logged in mcp_calls.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
@@ -33,7 +34,8 @@ from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
-from mnemerynne import (diagnostics, messages, notices, rooms, accounts, activity, api_tokens, apis, claude_links, comments, db, editing, editing_formats,
+from mnemerynne import (diagnostics, messages, notices, rooms, accounts, activity, api_tokens, apis, automations,
+                        automations_run, briefings, claude_links, comments, db, editing, editing_formats,
                         fs, m365_mail, permissions, proposals, retrieval, sharepoint)
 from mnemerynne.api_tokens import Caller
 from mnemerynne.config import Settings
@@ -49,7 +51,7 @@ log = logging.getLogger("mnemerynne.mcp")
 # 1.3.0: Rooms (channels and direct messages): list_rooms, read_room, post_to_room, react_in_room.
 # 1.4.0: mail and calendar for the group an admin names: search_mail, recent_mail, read_mail, calendar,
 #        draft_reply, draft_mail (drafts are proposals; nothing sends).
-MCP_VERSION = "1.4.0"
+MCP_VERSION = "1.4.1"
 
 PAGE_WIDTH_PX = 1200     # rendered page width: small print stays legible, JPEG stays ~100-300 KB
 PAGE_MAX_PX = 2000       # cap on either side, for unusually long or wide pages
@@ -112,6 +114,20 @@ Working with others (people, and other people's Claude):
   id; `thread` for one thread); post_to_room writes there as "Claude for <name>" (reply in a thread
   with `thread`); react_in_room adds an emoji. Everyone in the room reads what you post: write only what
   the person asked you to say, and never paste documents they didn't ask you to share.
+
+Briefings and security:
+- my_briefing lists what's waiting for the person in Mnemerynne; security_feeds the new advisories from
+  the feeds admins chose (cite each with its link). For admins, mnemerynne_updates says what updates are
+  waiting and which installed packages have known vulnerabilities, and m365_security reads Microsoft 365
+  alerts, risky users, the Secure Score and risky sign-ins.
+
+Automator (alpha; only where an admin turned it on for the person):
+- list_automations shows the person's scheduled automations (a morning briefing, a security digest);
+  run_automation starts one now and get_automation_run reads its answer.
+- When you were started by a Mnemerynne automation (the task names a run id), do the task with these
+  tools, then call report_automation_run with that run_id and your report as Markdown, citing as usual.
+  If there's nothing worth reporting, report exactly NOTHING_TO_REPORT. list_automation_tasks lists
+  runs still waiting for a report.
 
 Mail and calendar (only for people an admin put in the mail group, with a linked Microsoft 365 account;
 for everyone else these tools refuse with [not_allowed], so don't retry them):
@@ -1131,6 +1147,115 @@ class Tools:
             raise Refused(str(exc), "not_found" if exc.status == 404 else "invalid") from None
         return {"message_id": m["id"], "reactions": {r["emoji"]: len(r["users"]) for r in m["reactions"]}}, []
 
+    # ------------------------------------------------- briefing and security
+    def _admin_caller(self, conn, caller: Caller) -> sqlite3.Row:
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (caller.user_id,)).fetchone()
+        if user is None or not accounts.is_admin(conn, user, self.get_directory(), self.settings.admin_usernames):
+            raise Refused("Only Mnemerynne's admins can see this.", "not_allowed")
+        return user
+
+    def my_briefing(self, conn, caller: Caller) -> tuple[dict, list[int]]:
+        """What's waiting for the person inside Mnemerynne."""
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (caller.user_id,)).fetchone()
+        return briefings.briefing(conn, user, self.get_directory()), []
+
+    def mnemerynne_updates(self, conn, caller: Caller) -> tuple[dict, list[int]]:
+        self._admin_caller(conn, caller)
+        return briefings.mnemerynne_updates(self.settings), []
+
+    def m365_security(self, conn, caller: Caller, kind: str = "alerts", tenant: str | None = None) -> tuple[dict, list[int]]:
+        self._admin_caller(conn, caller)
+        try:
+            return briefings.m365_security(conn, self.settings, kind, tenant), []
+        except briefings.BriefingError as exc:
+            raise Refused(str(exc), "invalid") from None
+
+    def security_feeds(self, conn, caller: Caller, since_days: int = 7) -> tuple[dict, list[int]]:
+        return briefings.security_feeds(conn, since_days), []
+
+    # ------------------------------------------------------------ Automator
+    def _automator_user(self, conn, caller: Caller) -> sqlite3.Row:
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (caller.user_id,)).fetchone()
+        if not automations.may_use(conn, self.settings, user, self.get_directory()):
+            raise Refused("Automator isn't turned on for this person.", "not_allowed")
+        return user
+
+    def list_automations(self, conn, caller: Caller) -> tuple[dict, list[int]]:
+        """The person's automations (alpha): what each does, when, and how its last run went."""
+        self._automator_user(conn, caller)
+        out = []
+        for row in automations.for_user(conn, caller.user_id):
+            v = automations.view(conn, row)
+            out.append({k: v[k] for k in ("id", "name", "when", "runner", "enabled", "next_run_at", "last_run",
+                                          "paused_reason")} | {"prompt": v["prompt"][:500]})
+        return {"automations": out, "link": f"{self.base}/automations"}, []
+
+    def run_automation(self, conn, caller: Caller, automation: int | str) -> tuple[dict, list[int]]:
+        self._automator_user(conn, caller)
+        if not caller.can_edit:
+            raise ToolError("This connection can only search; running an automation needs one that may edit.")
+        scheduler = automations_run.ACTIVE
+        if scheduler is None:
+            raise Refused("Automator isn't running on the server right now.", "unavailable")
+        try:
+            with db.transaction(conn):
+                row = automations.find(conn, caller.user_id, automation)
+                run_id = scheduler.run_now(conn, row, "mcp")
+        except automations.AutomationError as exc:
+            raise Refused(str(exc), "invalid") from None
+        return {"run_id": run_id, "status": "running", "link": f"{self.base}/automations#run={run_id}",
+                "note": "Started. get_automation_run shows the answer when it's done (usually within minutes)."}, []
+
+    def get_automation_run(self, conn, caller: Caller, run_id: int) -> tuple[dict, list[int]]:
+        self._automator_user(conn, caller)
+        run = automations.get_run(conn, run_id)
+        if run is None or run["owner_id"] != caller.user_id:
+            raise Refused("No such run.", "not_found")
+        return {**automations.run_view(run), "automation": run["name"],
+                "link": f"{self.base}/automations#run={run_id}"}, []
+
+    def list_automation_tasks(self, conn, caller: Caller) -> tuple[dict, list[int]]:
+        """Runs waiting for Claude (a routine was started for them): what to do, and the run_id to report."""
+        self._automator_user(conn, caller)
+        rows = conn.execute("SELECT r.id, r.started_at, a.name, a.prompt FROM automation_runs r JOIN automations a "
+                            "ON a.id = r.automation_id WHERE a.owner_id = ? AND r.status = 'waiting' ORDER BY r.id",
+                            (caller.user_id,)).fetchall()
+        return {"tasks": [{"run_id": r["id"], "automation": r["name"], "started_at": r["started_at"] + " UTC",
+                           "task": r["prompt"]} for r in rows]}, []
+
+    def report_automation_run(self, conn, caller: Caller, run_id: int, text: str,
+                              status: str = "done") -> tuple[dict, list[int]]:
+        """Claude's answer for a waiting run: recorded and delivered where the automation sends it."""
+        self._automator_user(conn, caller)
+        run = automations.get_run(conn, run_id)
+        if run is None or run["owner_id"] != caller.user_id:
+            raise Refused("No such run.", "not_found")
+        if run["status"] != "waiting":
+            raise Refused(f"That run isn't waiting for a report (it's {run['status']}).", "conflict")
+        if status not in ("done", "failed"):
+            raise Refused("status is \"done\" or \"failed\".", "invalid")
+        text = (text or "").strip()
+        if not text or len(text) > 50_000:
+            raise Refused("Report the result as Markdown (up to 50,000 characters).", "invalid")
+        scheduler = automations_run.ACTIVE
+        if scheduler is None:
+            raise Refused("Automator isn't running on the server right now.", "unavailable")
+        # Claim it first, so a second report can't deliver twice.
+        claimed = conn.execute("UPDATE automation_runs SET status = 'running' WHERE id = ? AND status = 'waiting'",
+                               (run_id,)).rowcount
+        if not claimed:
+            raise Refused("That run was just reported.", "conflict")
+        if status == "failed":
+            scheduler._finish(run_id, "failed", "", [], "claude routine", text[:2000])
+            return {"run_id": run_id, "status": "failed"}, []
+        try:
+            out = asyncio.run_coroutine_threadsafe(scheduler.complete(run_id, text, [], "claude routine"),
+                                                   scheduler.loop).result(timeout=120)
+        except Exception as exc:
+            scheduler._finish(run_id, "failed", text, [], "claude routine", f"Delivering it failed: {type(exc).__name__}.")
+            raise Refused("The report was saved, but delivering it failed.", "unavailable") from None
+        return {"run_id": run_id, **out, "link": f"{self.base}/automations#run={run_id}"}, []
+
     def diagnose(self, conn, caller: Caller, what: str, query: str | None = None, file_id: int | None = None,
                  chunk_id: int | None = None, tool: str | None = None, failed_only: bool = False,
                  since_minutes: int = 60, limit: int = 50, level: str = "INFO",
@@ -1670,6 +1795,63 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
     async def react_in_room(ctx: Context, message_id: int, emoji: str) -> dict:
         """Add an emoji reaction (e.g. "👍") to a room message, as the person."""
         return await call(ctx, "react_in_room", {"message_id": message_id, "emoji": emoji}, tools.react_in_room)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def my_briefing(ctx: Context) -> dict:
+        """What's waiting for the person inside Mnemerynne: unread notes, announcements, room mentions and
+        unread direct messages, and proposals waiting for them to apply. (Mail and calendar: their own tools.)"""
+        return await call(ctx, "my_briefing", {}, tools.my_briefing)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def mnemerynne_updates(ctx: Context) -> dict:
+        """(Admins) Mnemerynne updates waiting upstream and what they touch (migrations, services, packages),
+        and known vulnerabilities in the installed Python packages (pip-audit, when installed)."""
+        return await call(ctx, "mnemerynne_updates", {}, tools.mnemerynne_updates)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def m365_security(ctx: Context, kind: str = "alerts", tenant: str | None = None) -> dict:
+        """(Admins) Microsoft 365 security, per tenant (or one `tenant` by name): `kind` is "alerts" (open
+        Defender alerts), "risky_users", "secure_score" or "sign_ins" (risky sign-ins in the last day)."""
+        return await call(ctx, "m365_security", {"kind": kind, "tenant": tenant}, tools.m365_security)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def security_feeds(ctx: Context, since_days: int = 7) -> dict:
+        """New items from the security feeds admins set up (vendor advisories, CISA's known exploited
+        vulnerabilities, NVD CVEs), kept to the products each feed watches, from the last `since_days` (1-90).
+        Cite each item with its `link`."""
+        return await call(ctx, "security_feeds", {"since_days": since_days}, tools.security_feeds)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def list_automations(ctx: Context) -> dict:
+        """(Alpha) The person's Automator automations: scheduled jobs such as a morning briefing or a security
+        digest, with what each does, when it runs and how its last run went."""
+        return await call(ctx, "list_automations", {}, tools.list_automations)
+
+    @server.tool(annotations=_EDITS)
+    async def run_automation(ctx: Context, automation: int | str) -> dict:
+        """(Alpha) Start one of the person's automations now (its name or id from list_automations). Returns
+        the run_id; get_automation_run reads the answer when it's done."""
+        return await call(ctx, "run_automation", {"automation": automation}, tools.run_automation)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def get_automation_run(ctx: Context, run_id: int) -> dict:
+        """(Alpha) One automation run: its status, the answer (Markdown with [n] citations and `sources`),
+        and where it was delivered."""
+        return await call(ctx, "get_automation_run", {"run_id": run_id}, tools.get_automation_run)
+
+    @server.tool(annotations=_READ_ONLY)
+    async def list_automation_tasks(ctx: Context) -> dict:
+        """(Alpha) Automation runs waiting for you to do them and report back (a Claude routine was started
+        for each): the task and the run_id to pass to report_automation_run."""
+        return await call(ctx, "list_automation_tasks", {}, tools.list_automation_tasks)
+
+    @server.tool(annotations=_EDITS)
+    async def report_automation_run(ctx: Context, run_id: int, text: str, status: str = "done") -> dict:
+        """(Alpha) Report the result of an automation run you were started for: `text` is your report as
+        Markdown (cite as usual; exactly NOTHING_TO_REPORT if there's nothing worth sending), `status`
+        "done" or "failed" (then `text` says why). Mnemerynne delivers it where the automation sends it."""
+        return await call(ctx, "report_automation_run", {"run_id": run_id, "text": text, "status": status},
+                          tools.report_automation_run)
 
     @server.tool(annotations=_READ_ONLY)
     async def diagnose(ctx: Context, what: str, query: str | None = None, file_id: int | None = None,

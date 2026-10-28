@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Automator · {{ assistant_name }}{% endblock %}
+{% block body %}
+{% include "_nav.html" %}
+<main class="inbox automator" id="automator">
+  <div class="ax-bar">
+    <div>
+      <h1>Automator <span class="badge small">alpha</span></h1>
+      <p class="muted">Jobs that run on a schedule: a morning briefing, a security digest, a check on the systems
+        you can query. {{ assistant_name }} (or Claude) does them with your access and sends you the result.
+        Nothing is changed for you: at most, changes wait as proposals for you to apply.</p>
+    </div>
+    <button type="button" id="auto-new">New automation</button>
+  </div>
+  <p class="error" id="auto-error" role="alert" hidden></p>
+  <div class="automator-grid">
+    <section id="auto-list" aria-label="Your automations" aria-live="polite"><p class="muted">Loading…</p></section>
+    <section id="auto-detail" class="glass automator-detail" aria-label="Automation" hidden></section>
+  </div>
+</main>
+<script src="{{ static('picker.js') }}"></script>
+<script src="{{ static('automations.js') }}"></script>
+{% endblock %}

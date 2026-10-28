@@ -29,6 +29,8 @@ from mnemerynne import (balancer as balancer_mod, bfgguf, claude_chat, db, direc
 from mnemerynne.agent import Agent
 from mnemerynne.media import screens as media_screens, transcode as media_transcode
 from mnemerynne.rooms_erynne import RoomErynne
+from mnemerynne import automations as automations_mod, automations_run
+from mnemerynne.automations_run import Scheduler
 from mnemerynne.answer import ASSISTANT_NAME
 from mnemerynne.auth import LoginThrottle
 from mnemerynne.clients.embed import Embedder
@@ -37,7 +39,8 @@ from mnemerynne.clients.rerank import Reranker
 from mnemerynne.config import Settings, get_settings
 from mnemerynne.graph import Deps, build_graph
 from mnemerynne.router import load_router
-from mnemerynne.web import (admin, admin_apis, admin_notices, admin_remote, agent as agent_pages, apis as api_pages, balancer as balancer_pages,
+from mnemerynne.web import (admin, admin_apis, admin_notices, admin_remote, agent as agent_pages, apis as api_pages,
+                            automations as automation_pages, balancer as balancer_pages,
                             bfgguf as bfgguf_pages, chat,
                             claude_links as claude_link_pages, editor as editor_pages, files, help as help_pages,
                             kiosk as kiosk_pages,
@@ -170,6 +173,12 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         app.state.embedder = svc.embedder
         poller = asyncio.create_task(balancer.run())
         app.state.background.add(poller)
+        # Automator: scheduled automations run here, where the agent and its model path live.
+        app.state.automator = Scheduler(settings, app.state.agent, app.state.rooms_erynne, app.state.rooms_bus,
+                                        lambda: app.state.directory, app.state.background)
+        automations_run.ACTIVE = app.state.automator   # for the MCP tools (run now, a routine's report)
+        if services is None:   # tests drive it with tick() instead
+            app.state.background.add(asyncio.create_task(app.state.automator.run_forever()))
         try:
             async with mcp.session_manager.run():
                 yield
@@ -251,6 +260,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                     "has_rooms": rooms_mod.enabled(conn), "has_media": media_mod.enabled(conn) and media_mod.may_use(conn, user, app.state.directory),
                     "message_max_chars": messages_mod.MAX_CHARS,
                     "has_remote": bool(remote.apps_for(conn, user, app.state.directory, admin)),
+                    "has_automations": automations_mod.may_use(conn, settings, user, app.state.directory),
                     # Signed in on a screen box's TV (its top bar): back to the TV page, which signs out.
                     "kiosk_back": bool(session.get("kiosk_screen"))}
         except sqlite3.Error:
@@ -290,6 +300,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(message_pages.router)
     app.include_router(room_pages.router)
     app.include_router(room_pages.admin_router)
+    app.include_router(automation_pages.router)
+    app.include_router(automation_pages.admin_router)
     app.include_router(media_pages.router)
     app.include_router(media_pages.admin_router)
     app.include_router(media_pages.share_router)

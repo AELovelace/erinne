@@ -100,6 +100,17 @@ class RoomErynne:
             task.add_done_callback(self.background.discard)
         self.loop.call_soon_threadsafe(spawn)
 
+    async def report(self, user_id: int, room_id: int, prompt: str) -> tuple[str, list[dict]]:
+        """An answer for `room_id` as if asked there (Automator posts it): reading only what everyone in
+        the room may read. Not posted here; model errors propagate."""
+        message = {"id": None, "room_id": room_id, "thread_root_id": None, "body": prompt}
+        async with self.slots:
+            try:
+                p = await asyncio.to_thread(self._prepare, user_id, message, False)
+                return await self._run(p, room_id, message)
+            finally:
+                self._status(room_id, "", done=True)
+
     def _status(self, room_id: int, text: str, done: bool = False) -> None:
         self.bus.push(None, "erynne.status", {"room_id": room_id, "text": text, "done": done})
 

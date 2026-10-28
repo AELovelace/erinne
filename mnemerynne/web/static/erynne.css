@@ -1184,3 +1184,22 @@ select { font: inherit; color: var(--ink); }
   .sg-side .tree { max-height: 10rem; }
   .sg-week { grid-template-rows: auto 22rem; }
 }
+
+/* Automator (automations.js): the list on the left, the chosen automation on the right. */
+.inbox.automator { max-width: 76rem; }
+.automator-grid { display: grid; grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.automator-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
+.automator-card { padding: .7rem .9rem; border-radius: 12px; }
+.automator-card.active { outline: 2px solid var(--petal, currentColor); }
+.automator-card p { margin: .3rem 0; }
+.automator-detail { padding: 1rem 1.25rem; border-radius: 14px; }
+.automator-days { display: flex; flex-wrap: wrap; gap: .25rem .8rem; }
+.automator-tools { margin: .6rem 0; }
+.automator-tool-group { display: flex; flex-wrap: wrap; gap: .25rem .9rem; margin: .2rem 0 .5rem; }
+.automator-deliver { border: 1px solid var(--line, rgba(127, 127, 127, .3)); border-radius: 10px; margin: .6rem 0; }
+.automator-deliver .check { display: flex; margin: .2rem 0; }
+.automator-runs { list-style: none; padding: 0; margin: .3rem 0; max-height: 12rem; overflow: auto; }
+.automator-answer { margin-top: .5rem; overflow-wrap: anywhere; }
+@media (max-width: 800px) {
+  .automator-grid { grid-template-columns: minmax(0, 1fr); }
+}

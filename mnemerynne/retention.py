@@ -17,7 +17,8 @@ LOGS = (("mcp_calls", "at", "mcp_calls_days"),
         ("agent_calls", "at", "agent_calls_days"),
         ("graph_runs", "started_at", "graph_runs_days"),
         ("user_messages", "created_at", "message_days"),
-        ("announcements", "expires_at", "announcement_days"))
+        ("announcements", "expires_at", "announcement_days"),
+        ("automation_runs", "started_at", "automation_run_days"))
 
 
 def _older(days: int) -> str:

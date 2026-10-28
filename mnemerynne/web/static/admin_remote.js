@@ -7,7 +7,7 @@
   const { el, api } = window.Erynne;
   const $ = function (id) { return document.getElementById(id); };
   const errorNode = $("admin-error");
-  const state = { list: null, groups: [], selected: null };
+  const state = { list: null, groups: [], looks: [], selected: null };
 
   function showError(message) {
     errorNode.textContent = message || "";
@@ -47,6 +47,13 @@
     box.checked = !!checked;
     label.append(box, document.createTextNode(" " + labelText));
     return { label: label, box: box };
+  }
+
+  function select(value, choices) {
+    const s = el("select");
+    choices.forEach(function (c) { const o = el("option", null, c[1]); o.value = c[0]; s.appendChild(o); });
+    s.value = value || "";
+    return s;
   }
 
   function fillGroups(groups) {
@@ -112,10 +119,23 @@
     const embed = checkbox("Show it in the Remote window (otherwise it opens in a new tab)", a.embed);
     const rewrite = checkbox("Rewrite absolute links in its pages (for apps that can't be told their base path)", a.rewrite_html);
     const enabled = checkbox("Enabled", a.enabled);
-    form.append(embed.label, rewrite.label, enabled.label);
+    const LOOKS = { rdweb: "Erynne (RD Web Access)" };
+    const look = select(a.look, [["", "The app's own"]].concat(state.looks.map(function (k) { return [k, LOOKS[k] || k]; }))),
+          theme = select(a.look_theme, [["", "The viewer's theme"], ["default", "Default"], ["neon", "Neon"]]);
+    const lookField = field("Look", look, "Redraws the app's pages in Erynne's style. Needs “Rewrite absolute links”."),
+          themeField = field("Theme", theme, "For the Erynne look: follow each viewer's theme, or always one.");
+    function showLook() {
+      lookField.hidden = (!rewrite.box.checked || !state.looks.length) && !look.value;
+      themeField.hidden = lookField.hidden || !look.value;
+    }
+    rewrite.box.addEventListener("change", showLook);
+    look.addEventListener("change", showLook);
+    form.append(embed.label, rewrite.label, enabled.label, lookField, themeField);
+    showLook();
     form.appendChild(button("Save", null, function () {
       save(a, { name: name.value, description: description.value, base_url: url.value, group: group.value,
-                embed: embed.box.checked, rewrite_html: rewrite.box.checked, enabled: enabled.box.checked });
+                embed: embed.box.checked, rewrite_html: rewrite.box.checked, enabled: enabled.box.checked,
+                look: look.value, look_theme: theme.value });
     }));
     pane.appendChild(form);
 
@@ -154,6 +174,7 @@
   function render(data) {
     state.list = data.apps;
     state.groups = data.groups || [];
+    state.looks = data.looks || [];
     fillGroups(state.groups);
     if (state.selected !== null && !state.list.some(function (a) { return a.id === state.selected; })) state.selected = null;
     renderList();

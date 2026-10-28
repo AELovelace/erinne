@@ -20,7 +20,9 @@ What the proxy changes on the way:
 - with rewrite_html on, an XML page that names an XSL stylesheet (RD Web Access) is transformed
   here and sent as HTML: Firefox draws such pages blank in the Remote window, and browsers are
   dropping XSLT. The stylesheet and the files it reads come from the app through the proxy, as the
-  person; if anything fails, the XML goes as it came and the browser transforms it.
+  person; if anything fails, the XML goes as it came and the browser transforms it;
+- with a look set (xsl_override), such a page is drawn with a stylesheet bundled here instead of the
+  app's (remote_overrides/: Erynne's look for RD Web Access), falling back to the app's own.
 
 A proxied app runs on Mnemerynne's origin, so its scripts could call Mnemerynne's API as the
 person: list only the organisation's own tools, for the groups that should have them.
@@ -32,6 +34,7 @@ import asyncio
 import logging
 import re
 import sqlite3
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 from urllib.parse import urljoin, urlsplit
 
@@ -77,6 +80,12 @@ _API_LITERAL = re.compile(r"""(["'`])(/api/)""")
 _XML_STYLESHEET = re.compile(r"<\?xml-stylesheet\s([^?]*)\?>")
 _PI_ATTR = re.compile(r"""\b(type|href)\s*=\s*(["'])(.*?)\2""")
 _XML_TYPES = ("text/xml", "application/xml")
+
+# Looks bundled with Mnemerynne for apps that build their pages with XSLT (remote_apps.xsl_override).
+OVERRIDES: dict[str, Path] = {"rdweb": Path(__file__).parent / "remote_overrides" / "rdweb" / "Site.xsl"}
+LOOK_THEMES = ("default", "neon")
+THEME_COOKIE = "erynne_theme"       # web/settings.THEME_COOKIE: the viewer's theme, for a look that follows it
+_override_cache: dict[str, bytes] = {}
 
 
 class RemoteError(ValueError):
@@ -257,10 +266,43 @@ def xsl_href(text: str) -> str | None:
     return None
 
 
-def transform_xml(text: str, page: str, href: str, load: Callable[[str], bytes | None]) -> bytes:
+def override_stylesheet(name: str | None) -> bytes | None:
+    """A look bundled with Mnemerynne (remote_apps.xsl_override), or None for the app's own."""
+    if name not in _override_cache:
+        path = OVERRIDES.get(name or "")
+        try:
+            _override_cache[name] = path.read_bytes() if path is not None else None
+        except OSError:
+            log.warning("Remote look %s: %s can't be read; using the app's own stylesheet.", name, path)
+            return None
+    return _override_cache[name]
+
+
+def available_looks() -> list[str]:
+    """The bundled looks that are actually there (an admin can only pick these)."""
+    return [name for name, path in OVERRIDES.items() if path.is_file()]
+
+
+def look_params(app: sqlite3.Row, headers: list[tuple[bytes, bytes]]) -> dict[str, str]:
+    """What a bundled look is told: the theme, fixed for the app or else the viewer's (their theme cookie)."""
+    theme = app["look_theme"]
+    if not theme:
+        for name, value in headers:
+            if name.lower() == b"cookie":
+                for part in value.decode("latin-1").split(";"):
+                    key, _, val = part.strip().partition("=")
+                    if key == THEME_COOKIE:
+                        theme = val.strip()
+    return {"theme": theme if theme in LOOK_THEMES else "default"}
+
+
+def transform_xml(text: str, page: str, href: str, load: Callable[[str], bytes | None], *,
+                  stylesheet: bytes | None = None, params: dict[str, str] | None = None) -> bytes:
     """An XML page (at `page`, a path under the prefix) with its stylesheet (`href`) applied, as the
     browser would. Every file the transform reads, the stylesheet first, comes from load(path), a path
     under the page's prefix, at most XSLT_MAX_LOADS of them; nothing is read from disk or elsewhere.
+    A bundled look (`stylesheet`) is used in place of the app's, at the same address, so the files it
+    reads relative to itself still come from the app; `params` are passed to it as strings.
     Raises etree.LxmlError when the page or the stylesheet doesn't parse or apply."""
     loads = 0
 
@@ -281,13 +323,14 @@ def transform_xml(text: str, page: str, href: str, load: Callable[[str], bytes |
     parser.resolvers.add(Loader())
     doc = etree.fromstring(text.encode("utf-8", "surrogateescape"), parser, base_url=XSLT_ORIGIN + page)
     xsl_url = urljoin(XSLT_ORIGIN + page, href)
-    source = fetch(xsl_url)
+    source = stylesheet if stylesheet is not None else fetch(xsl_url)
     if source is None:
         raise etree.XSLTParseError(f"no stylesheet at {href}")
-    stylesheet = etree.fromstring(source, parser, base_url=xsl_url)
+    xsl = etree.fromstring(source, parser, base_url=xsl_url)
     access = etree.XSLTAccessControl(read_file=False, write_file=False, create_dir=False, read_network=True,
                                      write_network=False)
-    return bytes(etree.XSLT(stylesheet, access_control=access)(doc))
+    values = {k: etree.XSLT.strparam(v) for k, v in (params or {}).items()}
+    return bytes(etree.XSLT(xsl, access_control=access)(doc, **values))
 
 
 # ----------------------------------------------------------------- headers
@@ -378,11 +421,22 @@ def _wants_html(headers: list[tuple[bytes, bytes]]) -> bool:
 
 
 async def _transformed(text: str, page: str, href: str, load: Callable[[str], Awaitable[bytes | None]],
-                       slug: str) -> bytes | None:
-    """transform_xml in a worker thread, its loads back on this loop; None (send the XML) if it fails."""
+                       slug: str, look: tuple[bytes, dict[str, str]] | None = None) -> bytes | None:
+    """transform_xml in a worker thread, its loads back on this loop: with the bundled look if the app
+    has one, else (or if that fails) the app's own stylesheet; None (send the XML) if that fails too."""
+    def run(stylesheet: bytes | None, params: dict[str, str] | None) -> bytes:
+        return transform_xml(text, page, href, lambda path: anyio.from_thread.run(load, path),
+                             stylesheet=stylesheet, params=params)
+
+    if look is not None:
+        try:
+            html = await anyio.to_thread.run_sync(run, *look)
+            if html:
+                return html
+        except (etree.LxmlError, ValueError) as exc:
+            log.warning("Remote %s: the bundled look failed on %s, using the app's own: %s", slug, page, exc)
     try:
-        html = await anyio.to_thread.run_sync(transform_xml, text, page, href,
-                                              lambda path: anyio.from_thread.run(load, path))
+        html = await anyio.to_thread.run_sync(run, None, None)
     except (etree.LxmlError, ValueError) as exc:
         log.info("Remote %s: %s left for the browser to transform: %s", slug, page, exc)
         return None
@@ -522,13 +576,16 @@ class RemoteProxy:
                 text = rewriter(rewrite_absolute(text, app, slug), slug)
             return text.encode("utf-8", "surrogateescape")
 
+        stylesheet = override_stylesheet(app["xsl_override"]) if rewrite else None
+        look = (stylesheet, look_params(app, scope["headers"])) if stylesheet is not None else None
         try:
-            await self._relay(send, response, app, slug, rewrite, page=prefix + (rest or "/"), load=load)
+            await self._relay(send, response, app, slug, rewrite, page=prefix + (rest or "/"), load=load, look=look)
         finally:
             await response.aclose()
 
     async def _relay(self, send, response: httpx.Response, app: sqlite3.Row, slug: str, rewrite: bool, *,
-                     page: str = "", load: Callable[[str], Awaitable[bytes | None]] | None = None) -> None:
+                     page: str = "", load: Callable[[str], Awaitable[bytes | None]] | None = None,
+                     look: tuple[bytes, dict[str, str]] | None = None) -> None:
         content_type = response.headers.get("content-type", "").lower()
         chunks = _chunks(response)
         rewriter = _rewriter(content_type) if rewrite else None
@@ -546,7 +603,7 @@ class RemoteProxy:
                     text = rewriter(rewrite_absolute(b"".join(parts).decode("utf-8", "surrogateescape"), app, slug), slug)
                     headers = response_headers(response.headers, app, slug, rewritten=True)
                     href = xsl_href(text) if load is not None and content_type.split(";")[0].strip() in _XML_TYPES else None
-                    body = await _transformed(text, page, href, load, slug) if href else None
+                    body = await _transformed(text, page, href, load, slug, look) if href else None
                     if body is not None:
                         headers = [(k, v) for k, v in headers if k != b"content-type"]
                         headers.append((b"content-type", b"text/html; charset=utf-8"))

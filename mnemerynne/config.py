@@ -136,6 +136,9 @@ class Settings(BaseSettings):
     room_message_days: int = 365
     room_file_bytes: int = 25 * 1024 * 1024
     announcement_days: int = 90
+    # Automator (mnemerynne/automations.py): a new automation's time zone, and how long runs are kept.
+    timezone: str = "UTC"
+    automation_run_days: int = 90
 
     # Media centre (mnemerynne/media/), off until an admin turns it on (Settings → Media). ffmpeg and
     # ffprobe from RPM Fusion (Fedora's ffmpeg-free can't decode or encode H.264/HEVC). Artwork, picture

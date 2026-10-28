@@ -312,6 +312,68 @@ def test_xml_pages_with_a_stylesheet_are_transformed_here(conn, settings, people
         assert alice.get("/remote/rdweb/Pages/en-US/Default.aspx").content == _RDWEB_PAGE
 
 
+_LOOK_XSL = (b'<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+             b'<xsl:output method="html" encoding="UTF-8"/><xsl:param name="theme" select="\'none\'"/>'
+             b'<xsl:variable name="strings" select="document(concat(/RDWAPage/@baseurl, \'Strings.xml\'))/strings/s"/>'
+             b'<xsl:template match="/"><main class="erynne theme-{$theme}">'
+             b'<xsl:value-of select="$strings[@id=\'Hello\']"/>'
+             b'<p id="far"><xsl:value-of select="document(\'/elsewhere/x.xml\')"/></p></main></xsl:template>'
+             b'</xsl:stylesheet>')
+
+
+def test_a_bundled_look_redraws_xml_pages(conn, settings, people, directory, tmp_path, monkeypatch):
+    """A look (xsl_override) replaces the app's stylesheet, still reading the app's files beside it and
+    nothing else; its theme follows the viewer's cookie unless the app fixes one; a broken look falls back
+    to the app's own stylesheet."""
+    look = tmp_path / "Site.xsl"
+    look.write_bytes(_LOOK_XSL)
+    monkeypatch.setitem(remote.OVERRIDES, "rdweb", look)
+    monkeypatch.setattr(remote, "_override_cache", {})
+    _app(conn, slug="rdweb", base="https://10.0.5.4/RDWeb", rewrite_html=1, xsl_override="rdweb")
+    seen, files = [], {"/RDWeb/Pages/en-US/Default.aspx": (_RDWEB_PAGE, "text/xml; charset=utf-8"),
+                       "/RDWeb/Pages/Site.xsl": (_RDWEB_XSL, "text/xml"),
+                       "/RDWeb/Pages/en-US/Strings.xml": (b'<strings><s id="Hello">Welcome</s></strings>', "text/xml")}
+
+    async def handler(request):
+        seen.append(request.url.path)
+        body, kind = files.get(request.url.path, (b"no", "text/plain"))
+        return httpx.Response(200 if request.url.path in files else 404, headers={"content-type": kind}, content=body)
+    remote.TRANSPORT = httpx.MockTransport(handler)
+
+    with _web(settings, "alice", directory) as alice:
+        html = alice.get("/remote/rdweb/Pages/en-US/Default.aspx").text
+        assert '<main class="erynne theme-default">Welcome<p id="far"></p></main>' in html
+        assert "/RDWeb/Pages/Site.xsl" not in seen and "/RDWeb/Pages/en-US/Strings.xml" in seen
+        alice.cookies.set("erynne_theme", "neon")
+        assert 'theme-neon' in alice.get("/remote/rdweb/Pages/en-US/Default.aspx").text
+        alice.cookies.set("erynne_theme", "<x>")
+        assert 'theme-default' in alice.get("/remote/rdweb/Pages/en-US/Default.aspx").text
+        conn.execute("UPDATE remote_apps SET look_theme = 'neon'")
+        alice.cookies.set("erynne_theme", "default")
+        assert 'theme-neon' in alice.get("/remote/rdweb/Pages/en-US/Default.aspx").text
+
+        remote._override_cache["rdweb"] = b"<broken"
+        assert "<h1>Welcome, ORG\\alice</h1>" in alice.get("/remote/rdweb/Pages/en-US/Default.aspx").text
+
+    with _web(settings, "root", directory) as root:
+        app_id = conn.execute("SELECT id FROM remote_apps").fetchone()[0]
+        assert root.patch(f"/api/admin/remote/{app_id}", json={"look": "nope"}).status_code == 422
+        assert root.patch(f"/api/admin/remote/{app_id}", json={"look_theme": "pink"}).status_code == 422
+        assert root.patch(f"/api/admin/remote/{app_id}", json={"rewrite_html": False}).status_code == 422
+        got = root.patch(f"/api/admin/remote/{app_id}", json={"look": "", "look_theme": "", "rewrite_html": False})
+        shown = next(a for a in got.json()["apps"] if a["id"] == app_id)
+        assert got.status_code == 200 and shown["look"] == "" and shown["look_theme"] == ""
+        assert root.patch(f"/api/admin/remote/{app_id}", json={"look": "rdweb"}).status_code == 422
+        got = root.patch(f"/api/admin/remote/{app_id}", json={"look": "rdweb", "rewrite_html": True})
+        assert next(a for a in got.json()["apps"] if a["id"] == app_id)["look"] == "rdweb" and got.json()["looks"] == ["rdweb"]
+        # A look whose file isn't there isn't offered, and pages draw with the app's own stylesheet.
+        monkeypatch.setitem(remote.OVERRIDES, "rdweb", tmp_path / "missing.xsl")
+        monkeypatch.setattr(remote, "_override_cache", {})
+        assert root.get("/api/admin/remote").json()["looks"] == []
+        assert root.patch(f"/api/admin/remote/{app_id}", json={"look": "rdweb"}).status_code == 422
+        assert "<h1>Welcome, ORG\\alice</h1>" in root.get("/remote/rdweb/Pages/en-US/Default.aspx").text
+
+
 def test_streams_pass_through_and_a_dead_app_is_a_502(conn, settings, people, directory):
     _app(conn)
 

@@ -97,7 +97,10 @@ FILE_WRITE_TOOLS = {"edit_text", "edit_document", "edit_spreadsheet", "create_fi
 CONNECTOR_ONLY_TOOLS = {"create_folder", "rename_item", "move_item", "delete_item", "add_comment",
                         "list_changes", "list_comments", "request_edit_access", "list_proposals", "get_proposal",
                         "withdraw_proposal", "propose_batch", "diagnose",
-                        "list_rooms", "read_room", "post_to_room", "react_in_room"}
+                        "list_rooms", "read_room", "post_to_room", "react_in_room",
+                        # Automator's: an automation never starts or reports automations itself.
+                        "list_automations", "run_automation", "get_automation_run", "list_automation_tasks",
+                        "report_automation_run"}
 # What the chat's tool panel calls each tool, by group.
 TOOL_GROUPS = {
     "Documents": {"search_documents": "Search documents", "read_passage": "Read passages",
@@ -110,8 +113,15 @@ TOOL_GROUPS = {
                       "calendar": "Calendar", "search_sharepoint": "Search SharePoint",
                       "draft_reply": "Draft replies", "draft_mail": "Draft new emails"},
     "Messages": {"list_messages": "Read your messages", "send_message": "Send a note to a colleague"},
+    "Briefing and security": {"my_briefing": "What's waiting for you", "security_feeds": "Security advisories",
+                              "mnemerynne_updates": "Mnemerynne updates (admins)",
+                              "m365_security": "Microsoft 365 security (admins)"},
 }
 MAIL_WRITE_TOOLS = {"draft_reply", "draft_mail"}
+ADMIN_TOOLS = {"mnemerynne_updates", "m365_security"}   # offered to admins only (they refuse everyone else)
+# Briefing and security tools: offered in Automator's runs only, so chat's prompt (and a small local
+# model's context) doesn't carry them on every turn. Claude's connector has them everywhere.
+AUTOMATION_TOOLS = {"my_briefing", "security_feeds"} | ADMIN_TOOLS
 MAX_SUBAGENTS = 2           # MinErynnes (local Erynne instances) Claude runs at once (the generator's -np 2)
 # Tools a subagent may use: reading only. view_page hands back an image, which
 # neither model path here passes on, so neither gets it.
@@ -251,6 +261,13 @@ def _strip_links(value: Any) -> Any:
     if isinstance(value, list):
         return [_strip_links(v) for v in value]
     return value
+
+
+def _hidden(cfg: dict, automation: bool) -> set[str]:
+    """Tools not offered here: Automator's outside its runs, the admin ones to everyone else."""
+    if not automation:
+        return set(AUTOMATION_TOOLS)
+    return set() if cfg.get("admin") else set(ADMIN_TOOLS)
 
 
 def _clip(text: str, limit: int = TOOL_RESULT_CHARS) -> str:
@@ -635,6 +652,7 @@ class Agent:
             cfg = model_config(conn)
             # Everyone gets the agent; the agent group may change more (see the module docstring).
             cfg["full"] = accounts.is_agent_user(conn, user, self.get_directory())
+            cfg["admin"] = accounts.is_admin(conn, user, self.get_directory(), self.settings.admin_usernames)
             cfg["places"] = _places(conn, fs.Access.of(conn, user_id))
             cfg["notify"] = _notify(conn, user, self.get_directory())
             return cfg, user["username"]
@@ -654,6 +672,7 @@ class Agent:
                 return "nokey"
             local = model_config(conn)
             local["full"] = accounts.is_agent_user(conn, user, self.get_directory())
+            local["admin"] = accounts.is_admin(conn, user, self.get_directory(), self.settings.admin_usernames)
             local["places"] = _places(conn, fs.Access.of(conn, user_id))
             local["notify"] = _notify(conn, user, self.get_directory())
             return {**local, **CLAUDE_LIMITS}, local, user["username"], *creds
@@ -668,14 +687,15 @@ class Agent:
         """May change files anywhere they may edit, draft email and propose API actions."""
         return accounts.is_agent_user(conn, user, self.get_directory())
 
-    async def tool_list(self, user_id: int) -> dict:
-        """The tools this person can switch on or off in chat, by group, and whether they may change
-        files anywhere (the agent group) or only in their Agents folder."""
+    async def tool_list(self, user_id: int, automation: bool = False) -> dict:
+        """The tools this person can switch on or off in chat (or pick for an automation), by group, and
+        whether they may change files anywhere (the agent group) or only in their Agents folder."""
         gate = await asyncio.to_thread(self._gate, user_id)
         if gate is None:
             return {"tools": [], "full": False}
         full = gate[0]["full"]
-        listed = {s["function"]["name"] for s in await self.specs()} - GENERIC_API_TOOLS
+        listed = {s["function"]["name"] for s in await self.specs()} - GENERIC_API_TOOLS \
+            - _hidden(gate[0], automation)
         api_specs, api_map = await asyncio.to_thread(self._api_tools, user_id)
         mail_specs = (await asyncio.to_thread(self._mail_tools, user_id))[0] if full else []
         out = []
@@ -921,7 +941,7 @@ class Agent:
         off = set(state.get("disabled_tools") or [])   # switched off in chat's tool panel
         base = [s for s in await self.specs()
                 if s["function"]["name"] not in GENERIC_API_TOOLS | CONNECTOR_ONLY_TOOLS
-                | (NO_IMAGES if claude else set())]
+                | (NO_IMAGES if claude else set()) | _hidden(cfg, bool(state.get("automation")))]
         api_specs, api_map = await asyncio.to_thread(self._api_tools, state["user_id"])
         if not full:   # API actions: the agent group only
             api_specs = [s for s in api_specs if not api_map[s["function"]["name"]].action]

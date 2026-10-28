@@ -1480,6 +1480,135 @@
     catch (e) { $("rooms-settings").replaceChildren(el("p", "error", e.message)); }
   }
 
+  // --------------------------------------------------------- Automator
+  function renderAutomations(data) {
+    const box = $("automations-settings");
+    box.replaceChildren();
+    box.appendChild(el("p", "muted", "Scheduled jobs (a morning briefing, a security digest) that Erynne or Claude runs " +
+      "with the person's own access, sending the answer to their Inbox, a room, an email draft or a webhook below. " +
+      "Changes only ever become proposals they apply."));
+    async function send(method, url, body) {
+      showError("");
+      try { renderAutomations(await api(method, url, body)); }
+      catch (err) { showError(err.message); }
+    }
+
+    const onForm = el("form", "ax-new");
+    const on = agentInput("checkbox", data.enabled);
+    on.setAttribute("aria-label", "Automator on");
+    const onLabel = el("label", "check small");
+    onLabel.append(on, document.createTextNode(" Automator is on for this organisation"));
+    const saveOn = el("button", "small", "Save");
+    saveOn.type = "submit";
+    onForm.append(onLabel, saveOn);
+    onForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      if (data.enabled && !on.checked && !confirm("Turn Automator off? Nothing runs until it's back on.")) return;
+      send("PUT", "/api/admin/automations", { enabled: on.checked });
+    });
+    box.appendChild(onForm);
+
+    const groupForm = el("form", "ax-new");
+    const group = agentInput("text", data.group);
+    group.setAttribute("list", "domain-groups");
+    group.setAttribute("aria-label", "Who may use Automator");
+    group.placeholder = "Admins only";
+    const saveGroup = el("button", "small", "Save");
+    saveGroup.type = "submit";
+    groupForm.append(group, saveGroup, el("span", "small muted", "Who may make automations (admins always may)."));
+    groupForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      send("PUT", "/api/admin/automations", { group: group.value.trim() });
+    });
+    box.appendChild(groupForm);
+
+    if (data.automations.length) {
+      box.appendChild(table(["Owner", "Automation", "Runs", "Who", ""], data.automations.map(function (a) {
+        let action = el("span", "small muted", a.enabled ? "" : "paused" + (a.paused_reason ? ": " + a.paused_reason : ""));
+        if (a.enabled) {
+          action = el("button", "link small", "Pause");
+          action.type = "button";
+          action.addEventListener("click", function () {
+            if (confirm("Pause “" + a.name + "” (" + a.owner + ")? They're told, and can turn it back on.")) {
+              send("POST", "/api/admin/automations/" + a.id + "/pause");
+            }
+          });
+        }
+        return [a.owner, a.name, a.when, a.runner, action];
+      })));
+    }
+
+    box.appendChild(el("h3", "ax-h", "Webhooks"));
+    box.appendChild(el("p", "small muted", "Where automations may send their answers besides Mnemerynne: a Teams or " +
+      "Slack incoming webhook, or any https address taking JSON (signed with X-Mnemerynne-Signature when a secret is set)."));
+    if (data.destinations.length) {
+      box.appendChild(table(["Name", "Format", "Address", "For", ""], data.destinations.map(function (d) {
+        const del = el("button", "link small danger", "Delete");
+        del.type = "button";
+        del.addEventListener("click", function () {
+          if (confirm("Delete the webhook " + d.name + "? Automations stop sending there.")) {
+            send("DELETE", "/api/admin/automations/destinations/" + d.id);
+          }
+        });
+        return [d.name, d.format + (d.secret ? " · signed" : ""), d.url, d.group || "everyone", del];
+      })));
+    }
+    const hookForm = el("form", "ax-new");
+    const hookName = agentInput("text", ""), hookUrl = agentInput("text", ""), hookSecret = agentInput("text", ""),
+          hookGroup = agentInput("text", "");
+    hookName.placeholder = "Name"; hookUrl.placeholder = "https://…"; hookSecret.placeholder = "Secret (optional)";
+    hookGroup.placeholder = "For a group (optional)"; hookGroup.setAttribute("list", "domain-groups");
+    const hookFormat = el("select");
+    [["json", "JSON"], ["teams", "Teams"], ["slack", "Slack"]].forEach(function (f) {
+      const o = el("option", null, f[1]); o.value = f[0]; hookFormat.appendChild(o);
+    });
+    const addHook = el("button", "small", "Add webhook");
+    addHook.type = "submit";
+    hookForm.append(hookName, hookFormat, hookUrl, hookSecret, hookGroup, addHook);
+    hookForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      send("POST", "/api/admin/automations/destinations", { name: hookName.value.trim(), url: hookUrl.value.trim(),
+        format: hookFormat.value, secret: hookSecret.value || null, group: hookGroup.value.trim() });
+    });
+    box.appendChild(hookForm);
+
+    box.appendChild(el("h3", "ax-h", "Security feeds"));
+    box.appendChild(el("p", "small muted", "Outside advisories Erynne may read for a security digest: an RSS or Atom " +
+      "feed, CISA's Known Exploited Vulnerabilities JSON, or an NVD CVE search. Keywords (the products you run, " +
+      "comma-separated) keep only what concerns you."));
+    if (data.feeds.length) {
+      box.appendChild(table(["Name", "Kind", "Keywords", "Fetched", ""], data.feeds.map(function (f) {
+        const del = el("button", "link small danger", "Delete");
+        del.type = "button";
+        del.addEventListener("click", function () {
+          if (confirm("Delete the feed " + f.name + "?")) send("DELETE", "/api/admin/automations/feeds/" + f.id);
+        });
+        return [f.name, f.kind, f.keywords || "everything", f.fetched_at || "–", del];
+      })));
+    }
+    const feedForm = el("form", "ax-new");
+    const feedName = agentInput("text", ""), feedUrl = agentInput("text", ""), feedWords = agentInput("text", "");
+    feedName.placeholder = "Name"; feedUrl.placeholder = "https://…"; feedWords.placeholder = "Keywords (optional)";
+    const feedKind = el("select");
+    [["rss", "RSS"], ["atom", "Atom"], ["json_kev", "CISA KEV (JSON)"], ["nvd", "NVD CVE API"]].forEach(function (k) {
+      const o = el("option", null, k[1]); o.value = k[0]; feedKind.appendChild(o);
+    });
+    const addFeed = el("button", "small", "Add feed");
+    addFeed.type = "submit";
+    feedForm.append(feedName, feedKind, feedUrl, feedWords, addFeed);
+    feedForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      send("POST", "/api/admin/automations/feeds", { name: feedName.value.trim(), url: feedUrl.value.trim(),
+        kind: feedKind.value, keywords: feedWords.value.trim() });
+    });
+    box.appendChild(feedForm);
+  }
+
+  async function loadAutomations() {
+    try { renderAutomations(await api("GET", "/api/admin/automations")); }
+    catch (e) { $("automations-settings").replaceChildren(el("p", "error", e.message)); }
+  }
+
   // ------------------------------------------------------------- Media
   function renderMedia(data) {
     const box = $("media-settings");
@@ -1778,7 +1907,7 @@
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
     if (tab === "settings" && !updatesLoaded) {
-      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeMail(); loadClaudeLinks(); loadChatGPT(); loadExperimental(); loadRooms(); loadMedia(); loadDev();
+      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeMail(); loadClaudeLinks(); loadChatGPT(); loadExperimental(); loadRooms(); loadAutomations(); loadMedia(); loadDev();
       if (window.ErynneM365) window.ErynneM365.load();   // admin_m365.js
     }
     if (tab === "accounts") loadAccounts();

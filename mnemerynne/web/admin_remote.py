@@ -37,6 +37,7 @@ def _json(conn: sqlite3.Connection, r: sqlite3.Row) -> dict:
             "base_url": r["base_url"], "group": group_refs.label(conn, r["group_ref"]),
             "certificate": "pinned" if r["ca_pem"].strip() else "system", "tls_check_hostname": bool(r["tls_check_hostname"]),
             "rewrite_html": bool(r["rewrite_html"]), "embed": bool(r["embed"]), "enabled": bool(r["enabled"]),
+            "look": r["xsl_override"] or "", "look_theme": r["look_theme"],
             "url": f"{remote.PREFIX}/{r['slug']}/", "created_at": r["created_at"]}
 
 
@@ -45,7 +46,7 @@ async def _listing(request: Request, conn: sqlite3.Connection) -> dict:
     ad = await anyio.to_thread.run_sync(directory.groups) if directory.enabled else []
     rows = conn.execute("SELECT * FROM remote_apps ORDER BY name COLLATE NOCASE").fetchall()
     return {"apps": [_json(conn, r) for r in rows], "groups": group_refs.choices(conn, ad),
-            "domain": request.app.state.settings.ad_domain}
+            "domain": request.app.state.settings.ad_domain, "looks": remote.available_looks()}
 
 
 class NewApp(BaseModel):
@@ -64,6 +65,8 @@ class AppPatch(BaseModel):
     rewrite_html: bool | None = None
     embed: bool | None = None
     enabled: bool | None = None
+    look: str | None = Field(None, max_length=20)          # '' = the app's own; a key of remote.OVERRIDES
+    look_theme: str | None = Field(None, max_length=20)    # '' = the viewer's; or one of remote.LOOK_THEMES
 
 
 @router.get("")
@@ -120,6 +123,18 @@ async def update_app(app_id: int, body: AppPatch, request: Request, user=Depends
         value = getattr(body, key)
         if value is not None:
             changes[key] = int(value)
+    if body.look is not None:
+        if body.look and body.look not in remote.available_looks():
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "No such look.")
+        changes["xsl_override"] = body.look or None
+    if body.look_theme is not None:
+        if body.look_theme and body.look_theme not in remote.LOOK_THEMES:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "No such theme.")
+        changes["look_theme"] = body.look_theme
+    # A look is applied while the proxy transforms the pages, which it does only with rewriting on.
+    if changes.get("xsl_override", row["xsl_override"]) and not changes.get("rewrite_html", row["rewrite_html"]):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            "A look needs “Rewrite absolute links” on: the pages are only redrawn then.")
     if not changes:
         return await _listing(request, conn)
     with transaction(conn):

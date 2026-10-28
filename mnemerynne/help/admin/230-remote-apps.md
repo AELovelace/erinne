@@ -25,6 +25,21 @@ The app is served under a prefix, so links it writes as `/static/app.js` would m
 
 For apps that can't be told, switch on **Rewrite absolute links in its pages**: Mnemerynne then rewrites `href`, `src`, `action`, `srcset`, `url()` and the plainest `fetch("/…")` calls in HTML pages. It is best effort: URLs an app builds at runtime from `location.origin`, service workers and links inside JSON stay as they are. Prefer the app's own setting; use rewriting as a fallback and test the app.
 
+## Look: Erynne's style for RD Web Access
+
+With **Rewrite absolute links** on, RD Web Access's pages are XML that Mnemerynne transforms itself (Firefox draws them blank in a frame, and browsers are dropping XSLT).
+
+**Look** sets how those pages are drawn:
+- **The app's own:** Microsoft's stylesheet, as RD Web sends it.
+- **Erynne (RD Web Access):** a stylesheet that comes with Mnemerynne, covering sign-in, the app list (cards with a Launch link to each app's `.rdp`) and *Connect to a remote PC*.
+
+How the Erynne look behaves:
+- RD Web still signs people in and hands out the `.rdp` files, and nothing changes on the RD Web server.
+- **Theme** follows each viewer's Erynne theme, or fixes it to Default or Neon.
+- If the Erynne look ever fails on a page, that page falls back to the app's own stylesheet.
+
+A look needs link rewriting on; the setting refuses otherwise.
+
 ## What the proxy does
 
 - Streams requests and responses both ways, websockets included (Cockpit's terminal, live dashboards), and never follows redirects itself: redirects, `Set-Cookie` paths and absolute links on the app's own host are rewritten to the prefix.
