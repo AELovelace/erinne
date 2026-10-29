@@ -56,6 +56,9 @@ Two columns.
 - **Erynne agent**: the group that gets Erynne's tools, the model status, and the limits (timeout, tool steps, tokens, thinking). See [The Erynne agent](erynne-agent.md).
 - **Balancer nodes**: addresses and key of the boxes that run the answer model, with live status. See [Balancer nodes](balancer.md).
 - **Organisation wiki**: which library the Wiki tab shows. See [Setting up the wiki](wiki-setup.md).
+- **Rooms**: the switch for the Rooms tab. See [Rooms](rooms.md).
+- **Desktop backup**: the switch, who may back up, the app's builds on offer, and every backed-up folder. See [Desktop backup](desktop-backup.md).
+- **Automator** (alpha): scheduled jobs and their limits. See [Automator](automator.md).
 - **Updates**: whether a newer version is on GitHub, what it changes (database update, service files), and how the last update went. The page can't start an update; see [Updating](updating.md).
 
 **Connectors**

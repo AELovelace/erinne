@@ -10,7 +10,7 @@ Click a name to open the account:
 - **Access**: the role (`user` or local `admin`), and **Can sign in**. Turning that off ends every session at once and stops Claude connections; the account and its files stay.
 - **Domain account**: link or unlink (below).
 - **Groups**: their Mnemerynne groups.
-- **Their files and Claude**: the Claude switches for their own File box (whether Claude may search it and edit in it), and **Revoke Claude tokens**, which ends every token and OAuth connection.
+- **Their files and Claude**: the Claude switches for their own File box (whether Claude may search it and edit in it), and **Revoke all** (shown while they have Claude tokens), which ends every token and OAuth connection they have: Claude's, ChatGPT's, and their Mnemerynne Backup apps' sign-ins too. Single OAuth connections have their own **Disconnect**.
 - **Microsoft 365**: linked accounts, which you can unlink.
 
 You can't deactivate yourself, and can't drop your own admin role unless the domain admin group keeps you an admin. Deleting a user, with their File box and memories, is a CLI step: `mnemerynne-admin delete-user NAME`. `forget-memories NAME` wipes only what Erynne remembers about them; admins can wipe memories but never read them.
