@@ -146,6 +146,20 @@ def test_the_tvs_picture_follows_the_display_option(tmp_path):
     small = "HDMI-A-1 \"TV\"\n  Modes:\n    1280x720 px, 60.000000 Hz (preferred, current)\n"
     assert plan("auto", small) == "" and plan("1080p", small) == ""              # no 1080p to ask for
     assert plan("auto", "") == ""                                                 # no TV at all
+    # A box that drives 4K at 60 Hz (HDMI 2.0) keeps it; one that started at 30 Hz moves up to 60 when it can.
+    at_60 = RANDR.replace("30.000000 Hz (preferred, current)", "60.000000 Hz (preferred, current)")
+    assert plan("auto", at_60) == "" and plan("1080p", at_60) == "--output HDMI-A-1 --mode 1920x1080@60.000000Hz"
+    offers_60 = RANDR.replace("3840x2160 px, 29.969999 Hz", "3840x2160 px, 60.000000 Hz")
+    assert plan("auto", offers_60) == "--output HDMI-A-1 --mode 3840x2160@60.000000Hz"
+    assert plan("native", offers_60) == ""
+    # --check asks it for the mode the TV is in now.
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "wlr-randr").write_text(f"#!/bin/sh\ncat <<'X'\n{RANDR}X\n", newline="\n")
+    (fake / "wlr-randr").chmod(0o755)
+    now = subprocess.run([BASH, "-c", f'PATH="{posix(fake)}:$PATH" "$BASH" "$0" --now', posix(display)], capture_output=True,
+                         text=True, check=True).stdout.strip()
+    assert now == "3840x2160 at 30.000000 Hz on HDMI-A-1"
 
     # The session sets it before Firefox starts; the option is checked.
     session = bash("render_session").stdout

@@ -66,7 +66,7 @@ A TV run by a screen box (`deploy/screen/` in the repository) has **⚙ Kiosk se
 
 **Text size…** makes text and buttons bigger or smaller on that TV's pages (Media, signage's own pages, and Ask, Files and the Wiki from the top bar). It's stored on the server for that screen, like the screen size. Until someone sets it, it's automatic: 1.5× on a screen wider than 2400 pixels and 2× from 3000 (a 4K TV), otherwise normal. Any screen gets it, not only a box: its owner can change it from **Media → Screens → Text size** on their phone.
 
-A box on a 4K TV also asks the TV for 1080p by itself (the installer's `--display` option, in the box's README). Then the TV, the start page and Kiosk settings are all readable, and the automatic text size stays normal.
+A box on a 4K TV keeps 4K when it gets 60 Hz, and the automatic text size makes it readable. When the TV only takes 4K at 30 Hz, the box switches it to 1080p at 60 Hz, where the text is normal size. The installer's `--display` option changes that (the box's README, "A 4K TV").
 
 Opening the settings (`kiosk.unlock`) and changing the top bar (`kiosk.top_bar`) are logged, with the admin who approved. The box's README (`deploy/screen/README.md`, step 6) covers the rest.
 

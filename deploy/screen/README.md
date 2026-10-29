@@ -62,7 +62,7 @@ Options:
 | `--no-auto-updates` | Don't install updates nightly. By default `dnf5-automatic` installs them and reboots when an update needs it. |
 | `--no-wifi-setup` | No setup hotspot. The start page and Kiosk settings are still there. |
 | `--volume 0-100` | The system volume (default 100). Kiosk settings changes it too. |
-| `--display auto` | The TV's picture. **auto** (the default) asks a TV bigger than 1080p, such as a 4K TV, for 1920x1080 at the best refresh rate it offers, and leaves other TVs as they are. **1080p** always asks for 1920x1080, **native** keeps the TV's own mode, and **scale:N** (1 to 3, like `scale:1.5`) keeps the TV's own mode and draws everything N times bigger. Kept as `DISPLAY_MODE`. See "A 4K TV" below. |
+| `--display auto` | The TV's picture. **auto** (the default) keeps the TV's own mode, except a mode bigger than 1080p at under 50 Hz (4K at 30 Hz): then the same size at 60 Hz if the TV offers it, else 1920x1080 at the best refresh rate it offers. **1080p** always asks for 1920x1080, **native** keeps the TV's own mode, and **scale:N** (1 to 3, like `scale:1.5`) keeps the TV's own mode and draws everything N times bigger. Kept as `DISPLAY_MODE`. See "A 4K TV" below. |
 | `--keep-options` | Start from the options the box already has, then apply the ones given. Without it, options not given go back to their defaults. |
 | `--reconfigure` | `--keep-options`, and install no packages: a new address, say. |
 | `--update screen-vX.Y.Z`, `--rollback` | Move the box to a release, or back to the one before the last update. Kiosk settings runs these. |
@@ -91,7 +91,7 @@ sudo bash install.sh --check
 | **the GPU decodes H.264** | VA-API works with the i965 driver; video is cheap. If this says FAIL, video still plays, on the CPU. |
 | **… answers** / **the screen page answers** | The box reaches the server, its certificate is trusted, and Media is turned on. |
 | **running on tty1** / **sound goes to HDMI** | The kiosk is up and sound goes to the TV. If the TV was off, give it 30 seconds after turning it on. |
-| **picture: …** | The mode the TV offers the box first, and the `--display` setting. |
+| **picture: …** | The mode the TV is in and its refresh rate (or, with the screen stopped, the TV's first mode), and the `--display` setting. |
 | **start page and Kiosk settings running** / **can be a hotspot** | The helper answers, and the Wi-Fi card can offer the setup hotspot. |
 | **release …** | Which screen release the box runs, from `/opt/mnemerynne-screen`. |
 
@@ -157,14 +157,19 @@ to keep it (**Keep using the TV**, or Escape); then an open document is saved as
 its page, signed out. An admin can override the countdown. Firefox opens new tabs and windows in place (the
 kiosk has no tabs), and **Backspace** goes back a page.
 
-**A 4K TV:** this box's GPU (Intel HD 4000) has HDMI 1.4. Intel rates the 3rd-generation Core i5's HDMI
-at 1920x1200 at 60 Hz, and Linux's i915 driver limits HDMI on this generation to a 225 MHz pixel clock, below
-the 297 MHz that even 4K at 24 or 30 Hz needs. So a 4K TV most likely gets 1080p from it anyway; if a box does
-show 4K, it's at 30 Hz at best, with every page drawn at 4K by a weak GPU. That's why `--display auto` asks a 4K
-TV for 1080p: everything is readable (the start page and Kiosk settings too), films play at 60 Hz, and the TV
-upscales. `sudo bash install.sh --check` says which mode the TV offers the box first; inside the session,
-`wlr-randr` lists them all with their refresh rates. To try 4K anyway: `sudo bash install.sh --keep-options
---display native`, then **Text size** makes the pages readable (or `--display scale:2`).
+**A 4K TV:** 4K at 60 Hz needs HDMI 2.0 all the way: the graphics card (an NVIDIA GTX 900 series, such as a
+Titan X, or newer), a cable rated 18 Gbit/s ("Premium High Speed"), and a TV input with its full-bandwidth
+setting on (*Input Signal Plus* on Samsung, *HDMI Ultra HD Deep Colour* on LG, *Enhanced format* on Sony).
+Without that setting, many TVs offer 4K at 30 Hz only. The NUC's HD 4000 has HDMI 1.4, which tops out below 4K.
+
+- **4K at 60 Hz:** `--display auto` keeps it, and the TV's pages pick 2× text by themselves (**Text size**).
+- **4K at 30 Hz only:** `--display auto` switches to 1080p at 60 Hz. Menus, the remote's highlight and 60 fps
+  YouTube judder at 30 Hz, and the TV upscales 1080p well. To keep 4K at 30 anyway (films at 24 or 30 fps look
+  the same): `sudo bash install.sh --keep-options --display native`.
+- **1080p:** `--display 1080p` whatever the TV offers; the pages are then normal size.
+
+`sudo bash install.sh --check` shows the mode the TV is in and its refresh rate (**picture: …**). The start page
+and Kiosk settings grow on a 4K picture too.
 
 **Ctrl+Shift+Alt+R** on any keyboard restarts the kiosk (Firefox and cage), even when Firefox has stopped
 answering: the helper reads the keyboards itself.

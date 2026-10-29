@@ -233,12 +233,15 @@ EOF
 }
 
 # The TV's picture (DISPLAY_MODE), set with wlr-randr inside cage before Firefox starts:
-#   auto           1920x1080 when the TV's mode is wider than that (a 4K TV), else the TV's own mode
+#   auto           the TV's own mode, unless it is wider than 1920x1080 at under 50 Hz (a 4K TV at 30 Hz):
+#                  then that size at 50 Hz or more if the TV offers it, else 1920x1080 at its best refresh rate
 #   native         the TV's own mode, as cage picks it
 #   1080p          1920x1080, at the best refresh rate the TV offers for it
 #   scale:N        the TV's own mode, everything drawn N times bigger (Firefox still renders every pixel)
-# A 4K TV at 1080p is readable from the couch, and this GPU (HD 4000, HDMI 1.4) can't drive 4K at 60 Hz.
-# `--plan MODE` reads `wlr-randr` and prints the arguments it would pass (tests).
+# 4K at 60 Hz needs HDMI 2.0 (an NVIDIA GTX 900 or newer, say); the NUC's HD 4000 has HDMI 1.4. At 30 Hz the
+# menus and YouTube judder, so 1080p at 60 is better there; at 4K the pages' automatic text size is 2x.
+# `--plan MODE` reads `wlr-randr` and prints the arguments it would pass (tests); `--now` prints the mode the
+# TV is in (install.sh --check).
 render_display() {
     cat <<'EOF'
 #!/bin/bash
@@ -250,18 +253,27 @@ plan() {
         /^[^ \t]/ { n++; if (n == 1) out = $1; next }          # an output; cage shows the first
         n == 1 && /^[ \t]+[0-9]+x[0-9]+ px, / {
             split($1, wh, "x"); hz = $3 + 0
-            if (/current/) { cur_w = wh[1] + 0; cur = $1 "@" $3 }
+            sizes[NR] = $1; rates[NR] = hz; names[NR] = $1 "@" $3
+            if (/current/) { cur_w = wh[1] + 0; cur_hz = hz; cur = $1 "@" $3; cur_size = $1 }
             if (wh[1] == 1920 && wh[2] == 1080 && hz > best) { best = hz; best_mode = $1 "@" $3 }
         }
         END {
             if (out == "") exit
             if (want ~ /^scale:/) { print "--output " out " --scale " substr(want, 7); exit }
-            if (want == "auto" && cur_w <= 1920) exit
+            if (want == "auto" && (cur_w <= 1920 || cur_hz >= 50)) exit
+            if (want == "auto") {                               # the same size, faster, before 1080p
+                for (i in sizes) if (sizes[i] == cur_size && rates[i] >= 50 && rates[i] > fast) { fast = rates[i]; fast_mode = names[i] }
+                if (fast_mode != "") { print "--output " out " --mode " fast_mode "Hz"; exit }
+            }
             if ((want == "auto" || want == "1080p") && best_mode != "" && best_mode != cur)
                 print "--output " out " --mode " best_mode "Hz"
         }'
 }
 if [ "${1:-}" = --plan ]; then plan "${2:-auto}"; exit 0; fi
+if [ "${1:-}" = --now ]; then
+    wlr-randr 2>/dev/null | awk '/^[^ \t]/ { n++; out = $1 } n == 1 && /current/ { print $1 " at " $3 " Hz on " out; exit }'
+    exit 0
+fi
 
 DISPLAY_MODE=auto
 . "$CONF" 2>/dev/null || true
@@ -643,13 +655,26 @@ check() {
     else
         note "no copy of the repository in $SOURCE_DIR: Kiosk settings can't update (run the installer from a clone)"
     fi
-    # The TV's modes as the kernel offers them over HDMI, its preferred one first (refresh rates: wlr-randr).
-    local tv_mode
-    tv_mode=$(cat /sys/class/drm/card*-HDMI-A-*/modes 2>/dev/null | head -n 1 || true)
-    if [[ -n $tv_mode ]]; then
-        note "picture: the TV's best mode over this HDMI is $tv_mode (--display $(conf_value DISPLAY_MODE))"
+    # The TV's picture: the mode it's in now (from cage, as the screen's user), else the kernel's first mode for
+    # any connected output (HDMI or DisplayPort, on any of the box's GPUs).
+    local tv_mode uid socket connector
+    uid=$(id -u "$SCREEN_USER" 2>/dev/null || true)
+    socket=$(ls "/run/user/$uid"/wayland-* 2>/dev/null | grep -v '\.lock$' | head -n 1 || true)
+    if [[ -n $uid && -n $socket ]]; then
+        tv_mode=$(runuser -u "$SCREEN_USER" -- env XDG_RUNTIME_DIR="/run/user/$uid" WAYLAND_DISPLAY="${socket##*/}" \
+            /usr/local/bin/mnemerynne-screen-display --now 2>/dev/null || true)
+    fi
+    if [[ -z ${tv_mode:-} ]]; then
+        for connector in /sys/class/drm/card*-*; do
+            [[ $(cat "$connector/status" 2>/dev/null) == connected ]] || continue
+            tv_mode="$(head -n 1 "$connector/modes" 2>/dev/null) offered first on ${connector##*/card[0-9]-}"
+            break
+        done
+    fi
+    if [[ -n ${tv_mode:-} ]]; then
+        note "picture: $tv_mode (--display $(conf_value DISPLAY_MODE))"
     else
-        note "picture: no TV on HDMI right now (or it's off)"
+        note "picture: no TV connected right now (or it's off)"
     fi
     local sink output
     sink=$(pactl --server "unix:/run/user/$(id -u "$SCREEN_USER" 2>/dev/null || echo 0)/pulse/native" get-default-sink 2>/dev/null || true)
