@@ -1,7 +1,7 @@
 # Plan: the desktop sync client
 
-*Written 2026-10-29 by Claude for Doll. A plan: nothing here is built yet. The decisions were settled with Doll on
-2026-10-29; the few questions left are at the end.*
+*Written 2026-10-29 by Claude for Doll. A plan: nothing here is built yet. Every decision was settled with Doll on
+2026-10-29.*
 
 **The idea:** a small app on a person's PC or laptop, on **Windows or Linux**. They add any number of folders (Desktop,
 `D:\Photos`, `~/Projects`…) and the app keeps each one copied to a **Backups** folder in their File box on the NAS,
@@ -62,8 +62,9 @@ shows what it's doing and anything it couldn't copy.
 - Shows on **Preferences → Connected apps** as "Backup on DESKTOP-ABC, last seen 2 minutes ago", revocable there.
 - Sign-in from the app: OAuth with PKCE and a loopback redirect (already allowed). The consent page says "Back up
   folders from this computer to your Backups folder".
-- The browser sign-in uses `MNEMERYNNE_PUBLIC_URL` (where people's sessions are). The token and every sync call
-  then go to `bkp.beepsquad.wtf`. A laptop signed in once keeps working off site on its refresh token.
+- The browser sign-in uses `MNEMERYNNE_PUBLIC_URL` (where people's sessions are). It is reachable from outside with
+  a Let's Encrypt certificate, so a new laptop can be set up anywhere. The token and every sync call then go to
+  `bkp.beepsquad.wtf`.
 
 ### 3. The Backups folder
 - `Users\<name>\Backups` is created on first use, inside the File box, so it inherits the File box's ACL.
@@ -119,38 +120,43 @@ A host of its own, so the big-upload settings don't loosen the main site:
 - **The app serves only sync there:** on that host every path except `/api/sync/*`, `/oauth/token` and
   `/oauth/revoke` answers 404, before any page runs. No sign-in page, no cookies, no admin. Sync calls on the
   main host keep working for PCs in the office.
-- **The nginx config** (new file `deploy/linux/nginx-bkp.conf`; the README gets a section like 5l):
+- **The path a request takes:** the internet → **the reverse proxy at 10.1.1.20** (nginx, Let's Encrypt) →
+  **Caddy on Mnemerynne's box** (443) → the app on `127.0.0.1:38200`.
+  - Going through the box's Caddy, not straight to port 38200, keeps the app listening only on loopback, as it does
+    now, and keeps `FORWARDED_ALLOW_IPS=127.0.0.1` as it is.
+  - Caddy is told to trust `X-Forwarded-For` from 10.1.1.20 only, so rate limits and the access log still see the
+    laptop's real address, not the proxy's.
+- **The nginx config at 10.1.1.20** (new file `deploy/linux/nginx-bkp.conf`; the README gets a section like 5l):
 
   ```nginx
+  # http {}: limit_req_zone $binary_remote_addr zone=bkp:10m rate=50r/s;
   server {
       listen 443 ssl;
       server_name bkp.beepsquad.wtf;
-      # certificates from Let's Encrypt (certbot) at the proxy
+      # ssl_certificate / ssl_certificate_key: Let's Encrypt (certbot) on this proxy
 
       # One part (32 MiB) or one small file per request, plus headroom.
       client_max_body_size 40m;
 
-      location /api/sync/ {
-          proxy_pass http://MNEMERYNNE-BOX:38200;
+      location ~ ^/(api/sync/|oauth/(token|revoke)$) {
+          proxy_pass https://MNEMERYNNE-BOX;          # the box's Caddy, not port 38200
+          proxy_ssl_server_name on;
+          proxy_ssl_name bkp.beepsquad.wtf;
+          proxy_ssl_verify on;
+          proxy_ssl_trusted_certificate /etc/nginx/mnemerynne-caddy-root.crt;   # Caddy's internal CA
           proxy_set_header Host $host;
           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
           proxy_set_header X-Forwarded-Proto $scheme;
           proxy_set_header Authorization $http_authorization;
           proxy_http_version 1.1;
-          # Stream bodies to the app instead of spooling each one to the proxy's disk first,
+          # Stream bodies to Mnemerynne instead of spooling each one to the proxy's disk first,
           # and stream downloads (Restore) back the same way.
           proxy_request_buffering off;
           proxy_buffering off;
           proxy_read_timeout 600s;
           proxy_send_timeout 600s;
           client_body_timeout 120s;
-          limit_req zone=bkp burst=200 nodelay;   # zone defined in http {}: 50r/s per address
-      }
-      location ~ ^/oauth/(token|revoke)$ {
-          proxy_pass http://MNEMERYNNE-BOX:38200;
-          proxy_set_header Host $host;
-          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-          proxy_set_header X-Forwarded-Proto $scheme;
+          limit_req zone=bkp burst=200 nodelay;
       }
       location / { return 404; }
   }
@@ -158,8 +164,31 @@ A host of its own, so the big-upload settings don't loosen the main site:
 
   Parts keep each request small, so a dropped connection costs at most 32 MB, and no single upload has to beat a
   timeout.
-- **Real client addresses:** if the proxy is a different machine from Mnemerynne, add its address to
-  `FORWARDED_ALLOW_IPS`, or rate limits and the access log see only the proxy.
+- **The block in the box's Caddyfile** (added to `Caddyfile-mnemerynne` and `Caddyfile-mnemerynne-public`):
+
+  ```caddy
+  {
+      servers {
+          trusted_proxies static 10.1.1.20/32   # the reverse proxy: believe its X-Forwarded-For
+      }
+  }
+
+  bkp.beepsquad.wtf {
+      tls internal                    # the proxy checks this against Caddy's root certificate
+      @not_proxy not remote_ip 10.1.1.20
+      respond @not_proxy 403          # only the proxy talks to this host
+      request_body {
+          max_size 40MiB
+      }
+      header -Server
+      reverse_proxy 127.0.0.1:38200 {
+          flush_interval -1
+      }
+  }
+  ```
+
+  Caddy then hands the app the laptop's address as `X-Forwarded-For`, from 127.0.0.1, which the app already trusts.
+  A test from 10.1.1.20 checks it: an `access_log` row for a sync call shows the outside address.
 
 ## The app (`clients/desktop-sync/`, Python 3.14)
 
@@ -170,9 +199,8 @@ A host of its own, so the big-upload settings don't loosen the main site:
   - working out what to upload, move or delete;
   - name checks (shared with `share.py`'s `_BAD_CHARS` and `_RESERVED`);
   - retries and backoff.
-- **`transport.py`**: the sync API over HTTPS (`httpx`). Off site it uses `bkp.beepsquad.wtf`, which has a public
-  certificate. On the LAN it may use the internal address, trusting the internal CA from a bundled `ca.pem` as the
-  Claude Desktop relay does.
+- **`transport.py`**: the sync API over HTTPS (`httpx`), always through `bkp.beepsquad.wtf`, on the LAN and off
+  site alike. Its Let's Encrypt certificate is trusted everywhere, so the app bundles no CA.
 - **`app/`**: the tray icon (`pystray`), a small settings window (Tk), notifications.
 - **`mnemerynne-backup` command line**: `sync`, `status`, `add`, `remove`, `restore`, so it can also run headless
   (a Linux box with no desktop, or a systemd user service).
@@ -236,7 +264,7 @@ have a certificate, as with the `.mcpb`.
 |---|---|---|
 | 0 | Server groundwork: token scope, Backups switch and group, migration, `no_index`, Backups folder creation, `roots`, `manifest`, `PUT`, `delete`, `move`, streaming versions, tests | 2–3 evenings |
 | 1 | App engine and the `mnemerynne-backup` command line (no UI): one folder, full scan, upload/move/delete, state DB. Pilot on aedith's PC and one Linux machine. | 2 evenings |
-| 2 | `bkp.beepsquad.wtf`: host routing in the app, `nginx-bkp.conf`, DNS and certificate; resumable uploads in parts; Restore. Pilot a laptop off site. | 2 evenings |
+| 2 | `bkp.beepsquad.wtf`: host routing in the app, `nginx-bkp.conf` and the Let's Encrypt certificate on 10.1.1.20, the Caddy block on the box, DNS; resumable uploads in parts; Restore. Pilot a laptop off site. (Until this phase, the Phase 1 pilot talks to the main address on the LAN.) | 2 evenings |
 | 3 | Tray app and settings window on both platforms: folder list, watcher, OAuth sign-in, keyring, notifications, start at sign-in, the `.exe` and the AppImage | 3 evenings |
 | 4 | **Searchable** switch (ingestion queued gently, chunks removed when turned off), the Backups page under Preferences, the admin box, help pages, `sync-status`, update check | 1–2 evenings |
 | later | Locked files through shadow copies (stretch goal), round-trip mapping for Linux names, macOS | — |
@@ -268,10 +296,10 @@ have a certificate, as with the `.mcpb`.
   - restore a deleted file from Files;
   - check `getfacl` on `Backups\` matches the File box.
 
-## Still open
-1. **Where is the proxy?** If `bkp.beepsquad.wtf` is served from site-chan (or any box other than Mnemerynne's), it
-   needs a route to Mnemerynne's port and a place in `FORWARDED_ALLOW_IPS`. Which machine is it?
-2. **Signing in off site:** the browser sign-in goes to `MNEMERYNNE_PUBLIC_URL`. If that address only works on the
-   LAN, a new laptop has to be set up on site once. Fine, or should sign-in work from anywhere?
-3. **Protection of the copies:** files in `Backups\` are as safe as the NAS's own backups (Mnemerynne's backup
-   doesn't cover the share). Worth checking those cover `Users\*\Backups` before people rely on it.
+## Settled later (2026-10-29)
+1. **The reverse proxy** for `bkp.beepsquad.wtf` is **10.1.1.20**. It forwards to the box's Caddy (section 6).
+2. **Signing in off site** works: `MNEMERYNNE_PUBLIC_URL` is public, with a Let's Encrypt certificate.
+3. **Protection of the copies:** the share sits on RAID 5, which is enough for this. No separate backup of
+   `Backups\` is planned.
+
+Nothing is open; Phase 0 can start.
