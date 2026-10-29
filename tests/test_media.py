@@ -912,9 +912,14 @@ def test_a_remote_pairs_with_a_code_and_controls_only_its_owners_screens(client,
         sent = queue.get_nowait()
         assert sent["action"] == body["action"] and sent["sender"] == "boss" and sent["override"] is False
     assert sent == {"action": "stop", "id": sent["id"], "sender": "boss", "override": False}
+    r = panel.post(f"/api/media/remote/screens/{screen_id}/command", json={"action": "press", "button": "left"}, headers=auth)
+    assert r.status_code == 200, r.text                   # the panel's arrows and Enter
+    sent = queue.get_nowait()
+    assert sent == {"action": "press", "button": "left", "id": sent["id"], "sender": "boss", "override": False}
 
     # Only the remote's commands, and nothing else of Media.
-    for body in ({"action": "play_item", "file_id": 1}, {"action": "calibrate"}, {"action": "play_youtube", "url": "x"}):
+    for body in ({"action": "play_item", "file_id": 1}, {"action": "calibrate"}, {"action": "play_youtube", "url": "x"},
+                 {"action": "press"}, {"action": "press", "button": "Escape"}):
         assert panel.post(f"/api/media/remote/screens/{screen_id}/command", json=body, headers=auth).status_code == 422
     assert panel.get("/api/media/home", headers=auth).status_code == 401
     assert panel.get("/api/media/screens", headers=auth).status_code == 401

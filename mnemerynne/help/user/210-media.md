@@ -71,6 +71,8 @@ Only you (and admins) can see and control your screens. Screens are only for mem
 
 A remote panel is a small touchscreen (the Erynne remote tablet) that controls your screens without a phone. It can play and pause, skip back 10 seconds and forward 30, go to the previous or next track, change the volume, mute, step the night filter, stop, and start a Live TV stream or radio station. It can't browse films or music.
 
+Its **arrows and Enter** work like the TV's own arrow keys while the TV shows its Media page. They move the highlight between tiles and buttons, and **Enter** presses the highlighted one. While a film plays, ◀ ▶ skip back 10 seconds and forward 30, ▲ ▼ change the volume, and Enter plays or pauses. With pictures open, ◀ ▶ go to the previous or next one. While the screen size is being adjusted, they size the picture and Enter saves it. If the TV is on another page (someone is using it), the arrows do nothing.
+
 **Pair it once with a code,** like a TV: the panel shows a code and a QR code. Scan it, or type the code under **Media → Screens → Pair a TV or remote**, name the panel (for example *Kitchen tablet*) and press **Pair**.
 
 - The panel controls only your screens, and only while you may use screens. It shows each one and what it is playing; tap **Screens** on it to choose another.

@@ -524,7 +524,7 @@ async def remove_screen(screen_id: int, request: Request, user=Depends(api_user)
 
 class Command(BaseModel):
     action: Literal["play_item", "play_album", "play_youtube", "play_source", "play_station", "toggle", "seek",
-                    "skip", "volume", "mute", "night", "next", "prev", "stop", "calibrate"]
+                    "skip", "volume", "mute", "night", "next", "prev", "stop", "press", "calibrate"]
     file_id: int | None = None
     key: str | None = Field(None, max_length=2000)       # album key or station key
     index: int = Field(0, ge=0)
@@ -536,7 +536,8 @@ class Command(BaseModel):
     by: float | None = Field(None, ge=-36000, le=36000)  # skip
     level: float | None = Field(None, ge=0, le=1)        # volume; night (none: the next step)
     step: Literal["open", "wider", "narrower", "taller", "shorter", "reset", "save", "cancel"] | None = None  # calibrate
-    override: bool = False                               # an admin: no countdown for someone using the TV
+    button: Literal[remotes.BUTTONS] | None = None       # press
+    override: bool = False                              # an admin: no countdown for someone using the TV
 
 
 def _command(conn: sqlite3.Connection, user, body: Command) -> dict:
@@ -574,7 +575,9 @@ def _command(conn: sqlite3.Connection, user, body: Command) -> dict:
         return {"action": "play_station", "station": found}
     if body.action == "calibrate":
         return {"action": "calibrate", "step": body.step or "open"}
-    return {k: v for k, v in body.model_dump().items() if k in ("action", "to", "by", "level") and v is not None}
+    if body.action == "press" and body.button is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Which button?")
+    return {k: v for k, v in body.model_dump().items() if k in ("action", "to", "by", "level", "button") and v is not None}
 
 
 def _castable(request: Request, conn: sqlite3.Connection, user, screen_id: int) -> sqlite3.Row:
@@ -820,6 +823,7 @@ class RemoteCommand(BaseModel):
     action: Literal[remotes.ACTIONS]
     by: float | None = Field(None, ge=-36000, le=36000)  # skip
     level: float | None = Field(None, ge=0, le=1)        # volume; night (none: the next step)
+    button: Literal[remotes.BUTTONS] | None = None       # press: up, down, left, right or enter
     source_id: int | None = None                         # play_source
     key: str | None = Field(None, max_length=2000)       # play_station
 

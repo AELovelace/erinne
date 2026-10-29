@@ -1068,6 +1068,23 @@
     if (best) { best.focus({ preventScroll: true }); best.scrollIntoView({ block: "nearest", inline: "nearest" }); }
   }
 
+  /* An arrow or Enter from a remote panel (the "press" command): replayed as that key, so it does what the
+     TV's own keyboard would (move focus, seek a film, page pictures, size the picture, wake the splash or
+     an idle slideshow). A replayed Enter presses nothing by itself, so it presses the focused button here;
+     with a film or the pictures open, whose arrows don't move focus, it plays or pauses instead. */
+  const REMOTE_KEYS = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight", enter: "Enter" };
+  function remotePress(button) {
+    const key = REMOTE_KEYS[button];
+    if (!key) return;
+    const target = document.activeElement || document.body;
+    const field = ["INPUT", "SELECT", "TEXTAREA"].indexOf(target.tagName) >= 0;
+    if (!target.dispatchEvent(new KeyboardEvent("keydown", { key: key, bubbles: true, cancelable: true }))) return;  // taken
+    if (key !== "Enter") { if (field) move(button); return; }   // the panel can't type: its arrows leave a text box
+    if (!$("mc-player").hidden) player.toggleAny();
+    else if (!$("mc-viewer").hidden) viewer.slideshow();
+    else if (target !== document.body && !field) target.click();
+  }
+
   document.addEventListener("keydown", function (e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (!$("mc-player").hidden) { if (player.key(e)) e.preventDefault(); return; }
@@ -1565,6 +1582,8 @@
         player.close();
         nowPlaying.stop();
         viewer.close();
+      } else if (a === "press") {
+        remotePress(cmd.button);
       }
       setTimeout(function () { screenMode.report(true); }, 300);
     },

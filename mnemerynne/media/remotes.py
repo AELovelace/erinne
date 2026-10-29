@@ -6,8 +6,8 @@ names it; the panel, asking every few seconds with its pairing secret, then gets
 sends from then on as `Authorization: Bearer …`. Only the key's hash is stored.
 
 A remote key opens its owner's screens and nothing else: what they are playing, the commands that control
-them (play/pause, skip, volume, mute, night filter, next, previous, stop) and playing a live stream or a
-radio station. It can't browse the library, reach anyone else's screens or override someone using a TV.
+them (play/pause, skip, volume, mute, night filter, next, previous, stop, and the arrow and Enter buttons
+that move around the TV page) and playing a live stream or a radio station. It can't browse the library, reach anyone else's screens or override someone using a TV.
 It doesn't expire with sign-in sessions; its owner removes it under Media → Screens, or the panel forgets
 itself. Like a screen key, it stops working at once when its owner leaves the screens group.
 """
@@ -21,7 +21,8 @@ import sqlite3
 from mnemerynne.media import screens
 
 MAX_PER_USER = 10
-ACTIONS = ("toggle", "skip", "volume", "mute", "night", "next", "prev", "stop", "play_source", "play_station")
+ACTIONS = ("toggle", "skip", "volume", "mute", "night", "next", "prev", "stop", "press", "play_source", "play_station")
+BUTTONS = ("up", "down", "left", "right", "enter")   # press: the TV page replays them as its own arrow keys
 
 
 def _hash(token: str) -> str:

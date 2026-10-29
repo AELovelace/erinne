@@ -115,6 +115,7 @@
     const a = cmd.action;
     if (a === "unpaired") { location.replace("/media/screen"); return; }   // it shows its pairing code
     if (a === "signage") return;          // the programme changed: the TV page loads it when it's back
+    if (a === "press") return;            // a remote's arrows move around the TV page only, never take the TV over
     if (a === "override") {
       if (pending && pending.id === cmd.id) go(Object.assign({}, pending, { override: true, sender: cmd.sender || pending.sender }));
       return;
