@@ -2010,6 +2010,11 @@
       ? "Backup address: " + data.backup_url
       : "MNEMERYNNE_BACKUP_URL isn't set, so backups go to the main address, with its upload limits " +
         "(deploy README, section 5m)."));
+    const builds = Object.values(data.builds || {});
+    box.appendChild(el("p", "small", builds.length
+      ? "The app on offer (" + data.latest + "): " + builds.join(", ") + ", from " + data.client_dir + "."
+      : "No app to offer yet: put Mnemerynne-Backup-Setup-<version>.exe and " +
+        "Mnemerynne_Backup-<version>-x86_64.AppImage in " + data.client_dir + "."));
     async function send(body) {
       showError("");
       try { renderBackups(await api("PUT", "/api/admin/settings/backups", body)); }
