@@ -14,7 +14,7 @@ How it works:
   the network and the server, then carries on.
 - **Wi-Fi from a phone:** with no network, the box offers its own Wi-Fi hotspot, and the TV shows how
   to join it and pick the box's network from your phone (step 5).
-- **Kiosk settings:** admins change the box's address, volume and top bar, and install updates, from the
+- **Kiosk settings:** admins change the box's address, volume, top bar and text size, and install updates, from the
   TV's menu with a phone approval or a PIN (step 6).
 
 ## 1. The box
@@ -47,7 +47,7 @@ It takes a few minutes. It:
 - enables RPM Fusion (free);
 - swaps Fedora's FFmpeg for RPM Fusion's, because Fedora's own can't decode H.264, which Mnemerynne's
   transcoder sends;
-- installs the VA-API drivers, cage, Firefox and PipeWire, git, and what the Wi-Fi setup needs;
+- installs the VA-API drivers, cage, Firefox, PipeWire, wlr-randr, git, and what the Wi-Fi setup needs;
 - writes its files and starts the screen;
 - checks the box and prints what it found (step 4).
 
@@ -62,6 +62,8 @@ Options:
 | `--no-auto-updates` | Don't install updates nightly. By default `dnf5-automatic` installs them and reboots when an update needs it. |
 | `--no-wifi-setup` | No setup hotspot. The start page and Kiosk settings are still there. |
 | `--volume 0-100` | The system volume (default 100). Kiosk settings changes it too. |
+| `--display auto` | The TV's picture. **auto** (the default) keeps the TV's own mode, except a mode bigger than 1080p at under 50 Hz (4K at 30 Hz): then the same size at 60 Hz if the TV offers it, else 1920x1080 at the best refresh rate it offers. **1080p** always asks for 1920x1080, and **native** keeps the TV's own mode. Kept as `DISPLAY_MODE`. See "A 4K TV" below. |
+| `--display-scale 100` | Display scaling, like Windows': **100**, **150**, **200** or **300** percent of everything on the TV, the start page and Kiosk settings too. Kiosk settings changes it too. Kept as `DISPLAY_SCALE`. |
 | `--keep-options` | Start from the options the box already has, then apply the ones given. Without it, options not given go back to their defaults. |
 | `--reconfigure` | `--keep-options`, and install no packages: a new address, say. |
 | `--update screen-vX.Y.Z`, `--rollback` | Move the box to a release, or back to the one before the last update. Kiosk settings runs these. |
@@ -90,6 +92,7 @@ sudo bash install.sh --check
 | **the GPU decodes H.264** | VA-API works with the i965 driver; video is cheap. If this says FAIL, video still plays, on the CPU. |
 | **… answers** / **the screen page answers** | The box reaches the server, its certificate is trusted, and Media is turned on. |
 | **running on tty1** / **sound goes to HDMI** | The kiosk is up and sound goes to the TV. If the TV was off, give it 30 seconds after turning it on. |
+| **picture: …** | The mode the TV is in, its refresh rate and scaling (or, with the screen stopped, the TV's first mode), and the `--display` settings. |
 | **start page and Kiosk settings running** / **can be a hotspot** | The helper answers, and the Wi-Fi card can offer the setup hotspot. |
 | **release …** | Which screen release the box runs, from `/opt/mnemerynne-screen`. |
 
@@ -118,8 +121,9 @@ network. The hotspot's password is new every time it starts.
 
 ## 6. Kiosk settings
 
-**⚙ Kiosk settings** in the TV's menu (with a keyboard or air mouse) opens the box's settings. They are
-for Mnemerynne admins:
+**⚙ Kiosk settings** in the TV's menu opens the box's settings, with a keyboard or mouse (an air mouse too)
+plugged into the box only: a phone's or remote panel's arrows skip it and can't press it. They are for
+Mnemerynne admins:
 
 - **With a phone:** the TV shows a code and a QR code. An admin scans it (or opens `/media/kiosk` and types
   the code), signs in if asked, and approves. The TV opens the settings.
@@ -134,7 +138,9 @@ They lock again after ten minutes untouched, or with **Lock**.
 | **Show the top bar** | The TV page gets a short top bar: Ask, Files and the Wiki, and **Sign in**. Whoever signs in on the TV is signed out when they go back to the TV (**📺 Back to TV**), or after ten minutes untouched. Kept on the server for this screen, so it needs a phone approval to change. |
 | **Sound output** | **HDMI to the TV** (the default: it switches over as soon as the TV is on), **Automatic**, or any output the box's sound cards have, such as headphones or USB speakers. Applied at once and kept (`AUDIO_OUTPUT`). |
 | **System volume** | The sound card's level, kept across restarts. Media's own volume (− and +) is on top of it. |
+| **Display scaling** | **100%**, **150%**, **200%** or **300%** of everything on the TV, these settings and the start page too, like Windows' display scaling. Applied at once and kept (`DISPLAY_SCALE`). 200% on a 4K TV is the size of 1080p, drawn at 4K; the line under it says what the TV is at now. |
 | **Screen size…** | For a TV that crops the picture's edges: arrows until the pink frame shows whole, Enter to save. Back to the settings after. The phone's **Screen size** (Media → Screens) does the same. |
+| **Text size…** | Text and buttons on the TV's pages, bigger or smaller: ← → until it reads well from the couch, **0** for automatic, Enter to save. Back to the settings after. Kept on the server for this screen; the phone's **Text size** (Media → Screens) does the same. Automatic is normal size on a 1080p picture, 1.5× from 2400 pixels wide and 2× from 3000. |
 | **Updates** | The installed `screen-v*` release, newer ones with their notes, **Install**, and **Roll back** to the one before the last update. Only newer releases install, and never over changes made by hand in `/opt/mnemerynne-screen`. **Install system updates now** runs `dnf5 upgrade`; **Reboot to finish** shows when a new kernel is waiting. |
 | **Kiosk PIN** | 4 to 12 digits. Five wrong tries lock it for five minutes. |
 | **Wi-Fi** | The network it's on; **Change network…** lists the networks to join. |
@@ -153,6 +159,22 @@ Back to TV**, **‹ ›**), and still hears the remote. A phone's command gives 
 to keep it (**Keep using the TV**, or Escape); then an open document is saved as it is and the TV goes back to
 its page, signed out. An admin can override the countdown. Firefox opens new tabs and windows in place (the
 kiosk has no tabs), and **Backspace** goes back a page.
+
+**A 4K TV:** 4K at 60 Hz needs HDMI 2.0 all the way: the graphics card (an NVIDIA GTX 900 series, such as a
+Titan X, or newer), a cable rated 18 Gbit/s ("Premium High Speed"), and a TV input with its full-bandwidth
+setting on (*Input Signal Plus* on Samsung, *HDMI Ultra HD Deep Colour* on LG, *Enhanced format* on Sony).
+Without that setting, many TVs offer 4K at 30 Hz only. The NUC's HD 4000 has HDMI 1.4, which tops out below 4K.
+
+- **4K at 60 Hz:** `--display auto` keeps it. **Display scaling 200%** (Kiosk settings) makes everything the
+  size of 1080p, but sharp. At 100% the TV's pages still pick 2× text by themselves (**Text size**), but the
+  start page and Kiosk settings are only a little bigger.
+- **4K at 30 Hz only:** `--display auto` switches to 1080p at 60 Hz. Menus, the remote's highlight and 60 fps
+  YouTube judder at 30 Hz, and the TV upscales 1080p well. To keep 4K at 30 anyway (films at 24 or 30 fps look
+  the same): `sudo bash install.sh --keep-options --display native`.
+- **1080p:** `--display 1080p` whatever the TV offers; the pages are then normal size.
+
+`sudo bash install.sh --check` shows the mode the TV is in and its refresh rate (**picture: …**). The start page
+and Kiosk settings grow on a 4K picture too.
 
 **Ctrl+Shift+Alt+R** on any keyboard restarts the kiosk (Firefox and cage), even when Firefox has stopped
 answering: the helper reads the keyboards itself.
@@ -187,6 +209,7 @@ To use the box for something else: `sudo bash install.sh --uninstall`, and remov
 | `/etc/systemd/system/mnemerynne-screen.service`, `/etc/pam.d/mnemerynne-screen` | cage on tty1 with a login session. That session gives it the GPU, input and PipeWire. |
 | `/usr/local/bin/mnemerynne-screen-session` | Starts Firefox. |
 | `/usr/local/bin/mnemerynne-screen-audio` | Keeps sound on HDMI. |
+| `/usr/local/bin/mnemerynne-screen-display` | Sets the TV's picture and scaling (`DISPLAY_MODE`, `DISPLAY_SCALE`) with `wlr-randr` before Firefox starts, and when Kiosk settings changes the scaling. |
 | `/usr/local/share/mnemerynne-screen/` | `start.html`, the start page without the Wi-Fi setup; `user.js`, the Firefox preferences, copied in at every start. |
 | `/usr/local/libexec/mnemerynne-screen-wifi`, `/etc/systemd/system/mnemerynne-screen-wifi.service` | The helper, as root: the start page (`http://127.0.0.1:9187/`), Kiosk settings (`/settings`), and the Wi-Fi setup (it starts NetworkManager's hotspot and joins networks). |
 | `/etc/NetworkManager/dnsmasq-shared.d/mnemerynne-screen.conf` | On the hotspot, every name resolves to the box, so phones open the setup page. |

@@ -39,6 +39,7 @@ COOKIE = "mnemerynne_screen"
 COOKIE_DAYS = 400               # browsers cap cookies here; it's renewed whenever the screen connects
 MAX_PER_USER = 10
 MAX_SAFE = 10.0                 # underscan: at most this percentage in from each edge
+MIN_SCALE, MAX_SCALE = 0.75, 3.0   # text size: how much smaller or bigger than usual (None: automatic)
 STATE_SECONDS = 15              # a screen silent this long counts as gone from the remote's point of view
 TAKEOVER_SECONDS = 10           # someone using the TV has this long to keep it before a command takes over
 COMMAND_SECONDS = 120           # how long a command's answer (waiting, done, kept) is kept for the phone
@@ -134,6 +135,15 @@ def set_safe_area(conn: sqlite3.Connection, screen_id: int, x: float, y: float) 
     x, y = step(x), step(y)
     conn.execute("UPDATE media_screens SET safe_x = ?, safe_y = ? WHERE id = ?", (x, y, screen_id))
     return x, y
+
+
+def set_ui_scale(conn: sqlite3.Connection, screen_id: int, scale: float | None) -> float | None:
+    """Text size: how much bigger than usual the screen draws text and controls, in quarter steps, or None
+    for automatic (base.html: from how wide the screen is). Returns what was stored."""
+    if scale is not None:
+        scale = round(max(MIN_SCALE, min(MAX_SCALE, float(scale))) * 4) / 4
+    conn.execute("UPDATE media_screens SET ui_scale = ? WHERE id = ?", (scale, screen_id))
+    return scale
 
 
 def seen(conn: sqlite3.Connection, screen_id: int) -> None:

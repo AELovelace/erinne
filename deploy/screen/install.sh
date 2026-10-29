@@ -21,6 +21,11 @@
 #   --no-auto-updates      don't install security updates nightly (dnf automatic, rebooting if needed)
 #   --no-wifi-setup        no setup hotspot (and the start page is a plain local file)
 #   --volume 0-100         the system volume (default 100; Media sets its own on top)
+#   --display auto|native|1080p
+#                          the TV's picture: its own mode unless that's 4K at 30 Hz, then 4K at 60 if it can or
+#                          1080p (auto, the default), the TV's own mode (native), or 1080p always
+#   --display-scale 100|150|200|300
+#                          display scaling in percent, like Windows' (default 100; Kiosk settings changes it)
 #   --no-packages          write the files only; install nothing with dnf
 #   --keep-options         start from the options this box already has (the settings file), then apply
 #                          the ones given; without it, options not given go back to their defaults
@@ -62,6 +67,8 @@ YOUTUBE_H264=1
 AUTO_UPDATES=1
 WIFI_SETUP=1
 VOLUME=100
+DISPLAY_MODE=auto
+DISPLAY_SCALE=100
 PACKAGES=1
 KEEP_OPTIONS=0
 DRY_RUN=0
@@ -121,6 +128,8 @@ WIFI_SETUP=$(yes_no "$WIFI_SETUP")
 YOUTUBE_H264=$(yes_no "$YOUTUBE_H264")
 AUTO_UPDATES=$(yes_no "$AUTO_UPDATES")
 SYSTEM_VOLUME=$VOLUME
+DISPLAY_MODE=$DISPLAY_MODE
+DISPLAY_SCALE=$DISPLAY_SCALE
 SOURCE_DIR=${SOURCE_DIR#"$ROOT"}
 EOF
 }
@@ -130,6 +139,9 @@ yes_no() { [[ $1 == 1 ]] && echo yes || echo no; }
 # hdmi, auto, or card:CARD:PROFILE (Kiosk settings). The settings file is sourced by bash: nothing else.
 valid_audio() { [[ $1 =~ ^(hdmi|auto|card:[A-Za-z0-9._-]+:[A-Za-z0-9:+._-]+)$ ]]; }
 
+valid_display() { [[ $1 =~ ^(auto|native|1080p)$ ]]; }
+valid_scale() { [[ $1 =~ ^(100|150|200|300)$ ]]; }
+
 # --keep-options: what this box has now, before the command line's options apply.
 load_options() {
     local v
@@ -138,6 +150,8 @@ load_options() {
     v=$(conf_value YOUTUBE_H264); [[ $v == no ]] && YOUTUBE_H264=0
     v=$(conf_value AUTO_UPDATES); [[ $v == no ]] && AUTO_UPDATES=0
     v=$(conf_value SYSTEM_VOLUME); [[ $v =~ ^[0-9]{1,3}$ && $v -le 100 ]] && VOLUME=$v
+    v=$(conf_value DISPLAY_MODE); valid_display "$v" && DISPLAY_MODE=$v
+    v=$(conf_value DISPLAY_SCALE); valid_scale "$v" && DISPLAY_SCALE=$v
     return 0
 }
 
@@ -154,6 +168,7 @@ mkdir -p "$PROFILE"
 rm -f "$PROFILE/lock" "$PROFILE/.parentlock"     # left by a power cut: Firefox would refuse to start
 cp /usr/local/share/mnemerynne-screen/user.js "$PROFILE/user.js"
 /usr/local/bin/mnemerynne-screen-audio >/dev/null 2>&1 &     # the sound output; it reads the settings itself
+/usr/local/bin/mnemerynne-screen-display || true            # the TV's picture (DISPLAY_MODE), before Firefox draws
 export MOZ_ENABLE_WAYLAND=1
 START=file:///usr/local/share/mnemerynne-screen/start.html
 # The helper's page (wifi-setup.py): it waits for the server, offers the setup hotspot when there's no
@@ -221,6 +236,75 @@ done
 EOF
 }
 
+# The TV's picture, set with wlr-randr inside cage before Firefox starts, and again whenever Kiosk settings
+# changes the scaling. DISPLAY_MODE:
+#   auto           the TV's own mode, unless it is wider than 1920x1080 at under 50 Hz (a 4K TV at 30 Hz):
+#                  then that size at 50 Hz or more if the TV offers it, else 1920x1080 at its best refresh rate
+#   native         the TV's own mode, as cage picks it
+#   1080p          1920x1080, at the best refresh rate the TV offers for it
+# DISPLAY_SCALE: 100, 150, 200 or 300 (percent), like Windows' display scaling: everything Firefox draws, the
+# start page and Kiosk settings too. 200% on a 4K TV lays out like 1080p, drawn at 4K.
+# 4K at 60 Hz needs HDMI 2.0 (an NVIDIA GTX 900 or newer, say); the NUC's HD 4000 has HDMI 1.4. At 30 Hz the
+# menus and YouTube judder, so 1080p at 60 is better there.
+# `--plan MODE SCALE` reads `wlr-randr` and prints the arguments it would pass (tests); `--now` prints the mode
+# the TV is in and its scaling (install.sh --check).
+render_display() {
+    cat <<'EOF'
+#!/bin/bash
+# The TV's picture for the Mnemerynne screen (deploy/screen/install.sh): run by the session inside cage, and
+# by Kiosk settings and install.sh --check as the screen's user (it finds cage's socket itself).
+set -u
+CONF=${MNEMERYNNE_SCREEN_CONF:-/etc/mnemerynne-screen.conf}
+plan() {
+    awk -v want="$1" -v scale="${2:-100}" '
+        /^[^ \t]/ { n++; if (n == 1) out = $1; next }          # an output; cage shows the first
+        n == 1 && /^[ \t]+Scale: / { cur_scale = $2 + 0 }
+        n == 1 && /^[ \t]+[0-9]+x[0-9]+ px, / {
+            split($1, wh, "x"); hz = $3 + 0
+            sizes[NR] = $1; rates[NR] = hz; names[NR] = $1 "@" $3
+            if (/current/) { cur_w = wh[1] + 0; cur_hz = hz; cur = $1 "@" $3; cur_size = $1 }
+            if (wh[1] == 1920 && wh[2] == 1080 && hz > best) { best = hz; best_mode = $1 "@" $3 }
+        }
+        END {
+            if (out == "") exit
+            mode = ""
+            if (want == "auto" && cur_w > 1920 && cur_hz < 50) {
+                for (i in sizes) if (sizes[i] == cur_size && rates[i] >= 50 && rates[i] > fast) { fast = rates[i]; fast_mode = names[i] }
+                mode = fast_mode != "" ? fast_mode : best_mode     # the same size, faster, before 1080p
+            }
+            if (want == "1080p") mode = best_mode
+            args = ""
+            if (mode != "" && mode != cur) args = " --mode " mode "Hz"
+            s = scale / 100
+            if (cur_scale == 0) cur_scale = 1
+            if (s - cur_scale > 0.001 || cur_scale - s > 0.001) args = args " --scale " s
+            if (args != "") print "--output " out args
+        }'
+}
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then           # outside the session: cage's socket
+    for socket in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"/wayland-*; do
+        case $socket in *.lock) ;; *) [ -S "$socket" ] && export WAYLAND_DISPLAY=${socket##*/} && break ;; esac
+    done
+fi
+if [ "${1:-}" = --plan ]; then plan "${2:-auto}" "${3:-100}"; exit 0; fi
+if [ "${1:-}" = --now ]; then
+    wlr-randr 2>/dev/null | awk '
+        /^[^ \t]/ { n++; out = $1 }
+        n == 1 && /current/ { mode = $1 " at " $3 " Hz on " out }
+        n == 1 && /^[ \t]+Scale: / { scale = $2 * 100 }
+        END { if (mode != "") printf "%s, scaling %d%%\n", mode, scale }'
+    exit 0
+fi
+
+DISPLAY_MODE=auto DISPLAY_SCALE=100
+. "$CONF" 2>/dev/null || true
+args=$(wlr-randr 2>/dev/null | plan "$DISPLAY_MODE" "$DISPLAY_SCALE")
+[ -n "$args" ] || exit 0
+# shellcheck disable=SC2086
+wlr-randr $args
+EOF
+}
+
 # What Firefox shows first: it waits until the server answers, then opens the screen page. Opening the
 # server straight away would leave Firefox's error page up for good when the box starts before the
 # network or the server does.
@@ -231,6 +315,8 @@ render_start() {
 <style>
 html, body { margin: 0; height: 100%; background: #12031f; color: #f6d6ea; cursor: none; }
 body { display: grid; place-content: center; gap: 1rem; text-align: center; font: 2rem system-ui, sans-serif; }
+@media (min-width: 2400px) { html { font-size: 150%; } }   /* a 4K TV at its full size (--display native) */
+@media (min-width: 3000px) { html { font-size: 200%; } }
 small { font-size: 1.2rem; color: #a98bb5; }
 </style></head>
 <body><div>📺 Connecting to ${URL#*://}…</div><small id="state"></small>
@@ -415,7 +501,7 @@ install_packages() {
     fi
     sys dnf install -y --allowerasing --setopt=install_weak_deps=False \
         cage firefox ffmpeg ffmpeg-libs libva-intel-driver libva-utils mesa-dri-drivers \
-        pipewire pipewire-alsa pipewire-pulseaudio wireplumber pulseaudio-utils curl git \
+        pipewire pipewire-alsa pipewire-pulseaudio wireplumber pulseaudio-utils wlr-randr curl git \
         google-noto-sans-fonts google-noto-color-emoji-fonts
     sys dnf install -y --setopt=install_weak_deps=False python3 python3-qrcode
     if [[ $WIFI_SETUP == 1 ]]; then
@@ -433,6 +519,7 @@ write_files() {
     render_conf | put 0644 "$CONF"
     render_session | put 0755 "$BIN/mnemerynne-screen-session"
     render_audio | put 0755 "$BIN/mnemerynne-screen-audio"
+    render_display | put 0755 "$BIN/mnemerynne-screen-display"
     render_start | put 0644 "$SHARE/start.html"
     render_user_js | put 0644 "$SHARE/user.js"
     render_policies | put 0644 "$POLICIES"
@@ -589,6 +676,26 @@ check() {
     else
         note "no copy of the repository in $SOURCE_DIR: Kiosk settings can't update (run the installer from a clone)"
     fi
+    # The TV's picture: the mode it's in now (from cage, as the screen's user), else the kernel's first mode for
+    # any connected output (HDMI or DisplayPort, on any of the box's GPUs).
+    local tv_mode uid connector
+    uid=$(id -u "$SCREEN_USER" 2>/dev/null || true)
+    if [[ -n $uid ]]; then
+        tv_mode=$(runuser -u "$SCREEN_USER" -- env XDG_RUNTIME_DIR="/run/user/$uid" \
+            /usr/local/bin/mnemerynne-screen-display --now 2>/dev/null || true)
+    fi
+    if [[ -z ${tv_mode:-} ]]; then
+        for connector in /sys/class/drm/card*-*; do
+            [[ $(cat "$connector/status" 2>/dev/null) == connected ]] || continue
+            tv_mode="$(head -n 1 "$connector/modes" 2>/dev/null) offered first on ${connector##*/card[0-9]-}"
+            break
+        done
+    fi
+    if [[ -n ${tv_mode:-} ]]; then
+        note "picture: $tv_mode (--display $(conf_value DISPLAY_MODE), --display-scale $(conf_value DISPLAY_SCALE))"
+    else
+        note "picture: no TV connected right now (or it's off)"
+    fi
     local sink output
     sink=$(pactl --server "unix:/run/user/$(id -u "$SCREEN_USER" 2>/dev/null || echo 0)/pulse/native" get-default-sink 2>/dev/null || true)
     output=$(conf_value AUDIO_OUTPUT)
@@ -605,7 +712,7 @@ uninstall() {
     sys systemctl disable --now mnemerynne-screen.service
     sys systemctl disable --now mnemerynne-screen-wifi.service
     sys nmcli connection delete id mnemerynne-setup
-    for f in "$UNIT" "$PAM_FILE" "$CONF" "$POLICIES" "$BIN/mnemerynne-screen-session" "$BIN/mnemerynne-screen-audio" "$DNF_AUTOMATIC" \
+    for f in "$UNIT" "$PAM_FILE" "$CONF" "$POLICIES" "$BIN/mnemerynne-screen-session" "$BIN/mnemerynne-screen-audio" "$BIN/mnemerynne-screen-display" "$DNF_AUTOMATIC" \
              "$WIFI_HELPER" "$WIFI_UNIT" "$WIFI_DNS" "$PIN_FILE"; do
         sys rm -f "${f#"$ROOT"}"
     done
@@ -632,6 +739,10 @@ parse_args() {
             --auto-updates) AUTO_UPDATES=1 ;;
             --volume) VOLUME=${2:-}; shift
                       [[ $VOLUME =~ ^[0-9]{1,3}$ && $VOLUME -le 100 ]] || die "--volume is 0 to 100" ;;
+            --display) DISPLAY_MODE=${2:-}; shift
+                       valid_display "$DISPLAY_MODE" || die "--display is auto, native or 1080p" ;;
+            --display-scale) DISPLAY_SCALE=${2:-}; shift
+                             valid_scale "$DISPLAY_SCALE" || die "--display-scale is 100, 150, 200 or 300" ;;
             --no-packages) PACKAGES=0 ;;
             --keep-options) ;;
             --reconfigure) PACKAGES=0 ;;
@@ -674,9 +785,9 @@ main() {
     URL=$(clean_url "$URL") || exit 1
     [[ $URL == https://* ]] || note "warning: $URL isn't HTTPS; the screen key would cross the network in the clear"
 
-    printf 'Mnemerynne screen for %s (sound: %s at %s%%, YouTube: %s, nightly updates: %s, Wi-Fi setup: %s)\n' "$URL" "$AUDIO" \
-        "$VOLUME" "$([[ $YOUTUBE_H264 == 1 ]] && echo H.264 || echo any codec)" "$([[ $AUTO_UPDATES == 1 ]] && echo yes || echo no)" \
-        "$([[ $WIFI_SETUP == 1 ]] && echo hotspot || echo no)"
+    printf 'Mnemerynne screen for %s (sound: %s at %s%%, picture: %s at %s%%, YouTube: %s, nightly updates: %s, Wi-Fi setup: %s)\n' "$URL" \
+        "$AUDIO" "$VOLUME" "$DISPLAY_MODE" "$DISPLAY_SCALE" "$([[ $YOUTUBE_H264 == 1 ]] && echo H.264 || echo any codec)" \
+        "$([[ $AUTO_UPDATES == 1 ]] && echo yes || echo no)" "$([[ $WIFI_SETUP == 1 ]] && echo hotspot || echo no)"
     if [[ $PACKAGES == 1 ]]; then install_packages; fi
     make_user
     sync_source

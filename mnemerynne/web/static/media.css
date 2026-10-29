@@ -399,10 +399,10 @@ html.mc-sg-running, html.mc-sg-running body { overflow: hidden; }
 .mc-sg-html a { color: inherit; }
 .mc-sg-kicker { font-size: 2.6vh; letter-spacing: .3em; text-transform: uppercase; opacity: .75; }
 
-/* -------------------------------------------- calibrating the safe area (media.js safeArea) */
+/* ------------------- calibrating the safe area (media.js safeArea); the Text size screen (textSize) too */
 .mc-cal { position: fixed; inset: 0; z-index: 95; background: #000; color: #fff; }
 .mc-cal[hidden] { display: none; }
-.mc-cal-frame { position: absolute; inset: var(--safe-y, 0px) var(--safe-x, 0px); border: 4px solid var(--rose, #ff2e97);
+.mc-cal-frame { position: absolute; inset: var(--safe-y, 0px) var(--safe-x, 0px); border: max(4px, .25rem) solid var(--rose, #ff2e97);
                 display: grid; place-items: center; background: #12031f; }
 .mc-cal-corner { position: absolute; font-size: 3.2rem; line-height: 1; color: var(--rose, #ff2e97); }
 .mc-cal-corner.tl { top: .3rem; left: .5rem; }

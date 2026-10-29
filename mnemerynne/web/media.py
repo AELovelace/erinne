@@ -435,6 +435,7 @@ def screen_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
         "user": owner, "is_admin": False, "active": "media", "has_library": media.library(conn) is not None,
         "folder": _folder_name(conn), "screen": {"id": screen["id"], "name": screen["name"],
                                                  "safe_x": screen["safe_x"], "safe_y": screen["safe_y"],
+                                                 "ui_scale": screen["ui_scale"],
                                                  "top_bar": bool(screen["top_bar"]), "box": box},
         "games_allowed": _games_allowed(request, conn, owner, False)})   # the TV plays as its owner, never as an admin
 
@@ -551,7 +552,8 @@ def list_screens(request: Request, user=Depends(api_user), conn: sqlite3.Connect
     def row(s: sqlite3.Row, owner: str | None) -> dict:
         return {"id": s["id"], "name": s["name"], "online": h.online(s["id"]), "state": h.state(s["id"]),
                 "last_seen": s["last_seen_at"], "this": mine is not None and mine["id"] == s["id"],
-                "safe": {"x": s["safe_x"], "y": s["safe_y"]}, "owner": owner, "speaker": bool(s["speaker"])}
+                "safe": {"x": s["safe_x"], "y": s["safe_y"]}, "scale": s["ui_scale"], "owner": owner,
+                "speaker": bool(s["speaker"])}
     # Out of the group: only their screens, to remove them (and casting refused). Admins: everyone's too.
     out = [row(s, None) for s in screens.of_user(conn, user["id"])]
     if admin:
@@ -575,7 +577,8 @@ async def remove_screen(screen_id: int, request: Request, user=Depends(api_user)
 
 class Command(BaseModel):
     action: Literal["play_item", "play_album", "play_youtube", "play_source", "play_station", "toggle", "seek",
-                    "skip", "volume", "mute", "night", "next", "prev", "stop", "press", "calibrate"]
+                    "skip", "volume", "mute", "night", "next", "prev", "stop", "press", "calibrate",
+                    "text_size"]
     file_id: int | None = None
     key: str | None = Field(None, max_length=2000)       # album key or station key
     index: int = Field(0, ge=0)
@@ -586,9 +589,14 @@ class Command(BaseModel):
     to: float | None = Field(None, ge=0)                 # seek
     by: float | None = Field(None, ge=-36000, le=36000)  # skip
     level: float | None = Field(None, ge=0, le=1)        # volume; night (none: the next step)
-    step: Literal["open", "wider", "narrower", "taller", "shorter", "reset", "save", "cancel"] | None = None  # calibrate
+    step: Literal["open", "wider", "narrower", "taller", "shorter", "reset", "bigger", "smaller", "auto", "save",
+                  "cancel"] | None = None                # calibrate, text_size
     button: Literal[remotes.BUTTONS] | None = None       # press
     override: bool = False                              # an admin: no countdown for someone using the TV
+
+
+_CALIBRATE_STEPS = ("open", "wider", "narrower", "taller", "shorter", "reset", "save", "cancel")
+_TEXT_SIZE_STEPS = ("open", "bigger", "smaller", "auto", "save", "cancel")
 
 
 def _command(conn: sqlite3.Connection, user, body: Command) -> dict:
@@ -624,8 +632,11 @@ def _command(conn: sqlite3.Connection, user, body: Command) -> dict:
         if found is None:
             raise _not_found()
         return {"action": "play_station", "station": found}
-    if body.action == "calibrate":
-        return {"action": "calibrate", "step": body.step or "open"}
+    if body.action in ("calibrate", "text_size"):
+        steps = _CALIBRATE_STEPS if body.action == "calibrate" else _TEXT_SIZE_STEPS
+        if body.step is not None and body.step not in steps:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"{body.action} has no step {body.step}.")
+        return {"action": body.action, "step": body.step or "open"}
     if body.action == "press" and body.button is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Which button?")
     return {k: v for k, v in body.model_dump().items() if k in ("action", "to", "by", "level", "button") and v is not None}
@@ -669,7 +680,7 @@ def _for_speaker(request: Request, conn: sqlite3.Connection, user, screen: sqlit
     if action == "play_station":
         station = command["station"]
         return {"action": "play_station", "station": {"name": station["name"], "url": station["url"]}}
-    if action in ("play_source", "play_youtube", "calibrate"):
+    if action in ("play_source", "play_youtube", "calibrate", "text_size"):
         raise HTTPException(speakers.SpeakerError.status, f"{screen['name']} is a speaker: it plays music and radio only.")
     return command
 
@@ -799,6 +810,18 @@ def screen_safe_area(body: SafeArea, screen=Depends(screen_device), conn: sqlite
     with transaction(conn):
         x, y = screens.set_safe_area(conn, screen["id"], body.x, body.y)
     return {"x": x, "y": y}
+
+
+class UiScale(BaseModel):
+    scale: float | None = Field(..., ge=screens.MIN_SCALE, le=screens.MAX_SCALE)   # None: automatic
+
+
+@router.put("/media/screen/ui-scale")
+def screen_ui_scale(body: UiScale, screen=Depends(screen_device), conn: sqlite3.Connection = Depends(get_db)):
+    """The TV's own text size, saved from its Text size screen."""
+    with transaction(conn):
+        scale = screens.set_ui_scale(conn, screen["id"], body.scale)
+    return {"scale": scale}
 
 
 @router.put("/api/media/screen/state")
