@@ -13,7 +13,7 @@ from pathlib import Path
 
 import anyio
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from mnemerynne import api_tokens, db, group_refs, oauth, sync, users
@@ -61,6 +61,14 @@ def _root(conn: sqlite3.Connection, caller: Caller, root_id: int) -> sync.Root:
 def _refuse(exc: sync.SyncError) -> HTTPException:
     headers = {"ETag": f'"{exc.current}"'} if isinstance(exc, sync.Precondition) and exc.current else None
     return HTTPException(exc.status, str(exc), headers=headers)
+
+
+# ------------------------------------------------------------------- client
+@router.get("/api/sync/client")
+def client_info(request: Request, settings: Settings = Depends(get_settings)):
+    """For the backup app, before it signs in: where backups go."""
+    base = (settings.public_url or str(request.base_url)).rstrip("/")
+    return {"api_url": (settings.backup_url or base).rstrip("/"), "server": base}
 
 
 # ------------------------------------------------------------------- tokens
@@ -135,18 +143,20 @@ def _mtime(value: str | None) -> float | None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "X-Mtime is seconds since 1970, like 1761750000.5") from None
 
 
-@router.put("/api/sync/roots/{root_id}/files")
-async def put_file(root_id: int, request: Request, path: str = Query(..., max_length=sync.MAX_PATH),
-                   caller: Caller = Depends(sync_caller), settings: Settings = Depends(get_settings)):
-    """One whole file (at most 32 MB) at `path` under the root. Headers: X-Sha256 (required), X-Mtime,
-    If-None-Match: * for a new file or If-Match: <version> to replace one. Answers the new version (ETag)."""
+def _claimed_sha(request: Request) -> str:
     claimed = (request.headers.get("x-sha256") or "").strip().lower()
     if len(claimed) != 64 or any(c not in "0123456789abcdef" for c in claimed):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Send X-Sha256: the file's SHA-256 in hex.")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Send X-Sha256: the SHA-256 of the body in hex.")
+    return claimed
+
+
+async def _receive(request: Request, settings: Settings, limit: int, claimed: str) -> Path:
+    """The request body in a temp file, at most `limit` bytes and matching its X-Sha256."""
+    too_big = HTTPException(status.HTTP_413_CONTENT_TOO_LARGE,
+                            f"At most {limit // (1024 * 1024)} MB per request; bigger files go up in parts.")
     length = request.headers.get("content-length")
-    if length and length.isdigit() and int(length) > sync.MAX_PUT_BYTES:
-        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "Files over 32 MB go up in parts.")
-    mtime = _mtime(request.headers.get("x-mtime"))
+    if length and length.isdigit() and int(length) > limit:
+        raise too_big
     settings.tmp_dir.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(dir=settings.tmp_dir, suffix=".sync")
     upload = Path(name)
@@ -155,33 +165,157 @@ async def put_file(root_id: int, request: Request, path: str = Query(..., max_le
         with open(fd, "wb") as out:
             async for block in request.stream():
                 size += len(block)
-                if size > sync.MAX_PUT_BYTES:
-                    raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "Files over 32 MB go up in parts.")
+                if size > limit:
+                    raise too_big
                 digest.update(block)
                 out.write(block)
         if digest.hexdigest() != claimed:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "The file doesn't match its X-Sha256; send it again.")
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "The body doesn't match its X-Sha256; send it again.")
     except BaseException:
         upload.unlink(missing_ok=True)
         raise
+    return upload
 
-    def write() -> dict:
+
+def _conditions(request: Request) -> dict:
+    return {"mtime": _mtime(request.headers.get("x-mtime")), "if_match": request.headers.get("if-match"),
+            "if_none_match": request.headers.get("if-none-match")}
+
+
+async def _in_thread(settings: Settings, work):
+    """Run work(conn) off the event loop with its own connection; SyncError becomes the HTTP refusal."""
+    def run():
         conn = db.connect(settings.db_path)
         try:
-            root = _root(conn, caller, root_id)
-            return sync.write_file(conn, settings, root, path, upload, claimed, user_id=caller.id,
-                                   token_id=caller.token_id, mtime=mtime,
-                                   if_match=request.headers.get("if-match"),
-                                   if_none_match=request.headers.get("if-none-match"))
+            return work(conn)
         finally:
-            upload.unlink(missing_ok=True)
             conn.close()
-
     try:
-        result = await anyio.to_thread.run_sync(write)
+        return await anyio.to_thread.run_sync(run)
     except sync.SyncError as exc:
         raise _refuse(exc) from None
+
+
+def _written(result: dict) -> JSONResponse:
     return JSONResponse(result, headers={"ETag": f'"{result["version"]}"'})
+
+
+@router.put("/api/sync/roots/{root_id}/files")
+async def put_file(root_id: int, request: Request, path: str = Query(..., max_length=sync.MAX_PATH),
+                   caller: Caller = Depends(sync_caller), settings: Settings = Depends(get_settings)):
+    """One whole file (at most 32 MB) at `path` under the root. Headers: X-Sha256 (required), X-Mtime,
+    If-None-Match: * for a new file or If-Match: <version> to replace one. Answers the new version (ETag)."""
+    claimed = _claimed_sha(request)
+    conditions = _conditions(request)
+    upload = await _receive(request, settings, sync.MAX_PUT_BYTES, claimed)
+
+    def write(conn):
+        try:
+            return sync.write_file(conn, settings, _root(conn, caller, root_id), path, upload, claimed,
+                                   user_id=caller.id, token_id=caller.token_id, **conditions)
+        finally:
+            upload.unlink(missing_ok=True)
+
+    return _written(await _in_thread(settings, write))
+
+
+@router.get("/api/sync/roots/{root_id}/files")
+def get_file(root_id: int, path: str = Query(..., max_length=sync.MAX_PATH), version: int | None = Query(None),
+             caller: Caller = Depends(sync_caller), conn: sqlite3.Connection = Depends(get_db),
+             settings: Settings = Depends(get_settings)):
+    """A backed-up file (or one of its earlier versions), for Restore. Range requests work."""
+    from mnemerynne import editing, share
+
+    root = _root(conn, caller, root_id)
+    try:
+        row = sync.file_at(conn, root, path)
+    except sync.SyncError as exc:
+        raise _refuse(exc) from None
+    if version is not None:
+        v = conn.execute("SELECT * FROM file_versions WHERE id = ? AND file_id = ?", (version, row["id"])).fetchone()
+        if v is None or not editing.version_path(settings, v["rel_path"]).is_file():
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "That version isn't kept any more.")
+        return FileResponse(editing.version_path(settings, v["rel_path"]), media_type="application/octet-stream")
+    try:
+        disk = share.file_path(conn, row["id"])
+    except share.ShareError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from None
+    headers = {"X-Mtime": f"{row['disk_mtime_ns'] / 1e9:.6f}"} if row["disk_mtime_ns"] else {}
+    return FileResponse(disk, media_type="application/octet-stream", headers=headers)
+
+
+@router.get("/api/sync/roots/{root_id}/versions")
+def file_versions(root_id: int, path: str = Query(..., max_length=sync.MAX_PATH),
+                  caller: Caller = Depends(sync_caller), conn: sqlite3.Connection = Depends(get_db)):
+    try:
+        return {"versions": sync.versions(conn, _root(conn, caller, root_id), path)}
+    except sync.SyncError as exc:
+        raise _refuse(exc) from None
+
+
+# ------------------------------------------------------- uploads in parts
+class UploadBody(BaseModel):
+    root_id: int
+    path: str = Field(..., max_length=sync.MAX_PATH)
+    size: int = Field(..., gt=0)
+    sha256: str = Field(..., min_length=64, max_length=64)
+
+
+@router.post("/api/sync/uploads")
+def start_upload(body: UploadBody, caller: Caller = Depends(sync_caller), conn: sqlite3.Connection = Depends(get_db),
+                 settings: Settings = Depends(get_settings)):
+    """Start (or resume) a big file's upload; answers the part size and the parts already here."""
+    try:
+        return sync.start_upload(conn, settings, _root(conn, caller, body.root_id), body.path, body.size, body.sha256)
+    except sync.SyncError as exc:
+        raise _refuse(exc) from None
+
+
+@router.get("/api/sync/uploads/{upload_id}")
+def upload_status(upload_id: str, caller: Caller = Depends(sync_caller), conn: sqlite3.Connection = Depends(get_db),
+                  settings: Settings = Depends(get_settings)):
+    try:
+        return sync.upload_status(conn, settings, caller.id, upload_id)
+    except sync.SyncError as exc:
+        raise _refuse(exc) from None
+
+
+@router.put("/api/sync/uploads/{upload_id}/parts/{n}")
+async def put_part(upload_id: str, n: int, request: Request, caller: Caller = Depends(sync_caller),
+                   settings: Settings = Depends(get_settings)):
+    claimed = _claimed_sha(request)
+    data = await _receive(request, settings, sync.PART_BYTES, claimed)
+
+    def store(conn):
+        try:
+            return sync.store_part(conn, settings, caller.id, upload_id, n, data, claimed)
+        finally:
+            data.unlink(missing_ok=True)
+
+    return await _in_thread(settings, store)
+
+
+@router.post("/api/sync/uploads/{upload_id}/finish")
+async def finish_upload(upload_id: str, request: Request, caller: Caller = Depends(sync_caller),
+                        settings: Settings = Depends(get_settings)):
+    """Every part is here: the file goes in place, as with a PUT (same headers, same answer)."""
+    conditions = _conditions(request)
+
+    def finish(conn):
+        return sync.finish_upload(conn, settings, lambda root_id: _root(conn, caller, root_id), caller.id, upload_id,
+                                  token_id=caller.token_id, **conditions)
+
+    return _written(await _in_thread(settings, finish))
+
+
+@router.delete("/api/sync/uploads/{upload_id}")
+def drop_upload(upload_id: str, caller: Caller = Depends(sync_caller), conn: sqlite3.Connection = Depends(get_db),
+                settings: Settings = Depends(get_settings)):
+    try:
+        sync.drop_upload(conn, settings, caller.id, upload_id)
+    except sync.SyncError as exc:
+        raise _refuse(exc) from None
+    return {"status": "dropped"}
 
 
 class PathsBody(BaseModel):

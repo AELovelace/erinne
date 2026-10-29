@@ -1002,6 +1002,36 @@ people get in with a one-minute ticket from Mnemerynne, and signing out of Mneme
 Check from the box: `curl -sI https://arcade.beepsquad.wtf/lumibot/` answers **401** with
 "Open this from Mnemerynne" (no arcade cookie), and never Mnemerynne's sign-in page.
 
+## 5m. Desktop backup (the backup app)
+
+People in a chosen group install **Mnemerynne Backup** (Windows or Linux) and pick folders on their
+computer; the app keeps each one copied, one way, to `Users\<name>\Backups\<computer>\<label>` in
+their File box on the share. Off site too: laptops send through a host of its own, `bkp.beepsquad.wtf`,
+whose proxy is set up for big uploads, so the main site's limits stay as they are. On that host only
+the backup API (`/api/sync/*`) and `/oauth/token|revoke` answer; everything else is 404.
+
+```
+laptop ──https──► reverse proxy 10.1.1.20 (nginx, Let's Encrypt) ──https──► the box's Caddy ──► 127.0.0.1:38200
+```
+
+1. **DNS:** `bkp.beepsquad.wtf` pointing at the reverse proxy's public address.
+2. **The reverse proxy (10.1.1.20):** `nginx-bkp.conf` there, with `MNEMERYNNE-BOX` replaced by the
+   box's LAN address and the box's root certificate copied to `/etc/nginx/mnemerynne-box-ca.crt`.
+   `sudo certbot --nginx -d bkp.beepsquad.wtf` for the public certificate, then `sudo nginx -t &&
+   sudo systemctl reload nginx`.
+3. **The box:** `Caddyfile-mnemerynne-backup` merged into `/etc/caddy/Caddyfile` (or the bkp block at
+   the end of `nginx-mnemerynne.conf` if the box runs nginx), then reload the web server. Only
+   10.1.1.20 may talk to it.
+4. **Settings:** `MNEMERYNNE_BACKUP_URL=https://bkp.beepsquad.wtf` in the env file, then
+   `sudo systemctl restart mnemerynne-web mnemerynne-worker`. It must be a different host from
+   `MNEMERYNNE_PUBLIC_URL`; the app refuses to start otherwise.
+5. **Turn it on:** Access → Settings → Backups: the switch and the group who may back up. See the
+   admin help page *Desktop backup*.
+
+Check from outside the LAN: `curl -s https://bkp.beepsquad.wtf/api/sync/client` answers
+`{"api_url": "https://bkp.beepsquad.wtf", …}`, `curl -sI https://bkp.beepsquad.wtf/` answers **404**,
+and a backed-up file's row in Access → Log shows the laptop's own address.
+
 ## 6. Check
 
 ```sh

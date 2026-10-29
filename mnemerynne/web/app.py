@@ -21,7 +21,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
-from mnemerynne import (identity, arcade as arcade_mod, balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, feedback as feedback_mod,
+from mnemerynne import (identity, arcade as arcade_mod, sync as sync_mod, balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, feedback as feedback_mod,
                         mcp_server, media as media_mod, memory,
                         diagnostics, messages as messages_mod, permissions, remote, rooms as rooms_mod, rooms_bus, share,
                         sharepoint, theme as theme_mod,
@@ -111,6 +111,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         log.warning("MNEMERYNNE_PUBLIC_URL is not set; links and OAuth addresses follow the request's Host.")
     try:
         arcade_mod.check_config(settings)   # the arcade must be a host of its own, or it isn't a wall at all
+        sync_mod.check_config(settings)     # the backup host too: its big-upload proxy settings stay off the site
     except ValueError as exc:
         raise security.InsecureConfig(str(exc)) from None
 
@@ -240,6 +241,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     # pages, no API there. Added after everything else, so it runs first.
     app.state.arcade = arcade_mod.ArcadeProxy(settings, secret_key, lambda: app.state.directory)
     app.add_middleware(arcade_mod.ArcadeHost, proxy=app.state.arcade, arcade_host=arcade_mod.host(settings))
+    # The backup host (MNEMERYNNE_BACKUP_URL) answers only the backup app's API (sync.py).
+    app.add_middleware(sync_mod.BackupHost, host=sync_mod.backup_host(settings))
 
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
 

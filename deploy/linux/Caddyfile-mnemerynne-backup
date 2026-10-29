@@ -1,0 +1,33 @@
+# The backup host on Mnemerynne's box, for /etc/caddy/Caddyfile (README section 5m). Requests come only
+# from the reverse proxy at 10.1.1.20 (nginx-bkp.conf), which holds the public certificate.
+#
+# Merge the global options block into the one at the top of the Caddyfile (there can be only one).
+# Caddy then takes the laptop's address from the proxy's X-Forwarded-For and passes it on, so rate
+# limits and the access log see the laptop, not the proxy; FORWARDED_ALLOW_IPS stays 127.0.0.1.
+
+{
+    servers {
+        trusted_proxies static 10.1.1.20/32
+    }
+}
+
+bkp.beepsquad.wtf {
+    # The proxy checks this certificate against Caddy's own root (copy root.crt to the proxy).
+    tls internal
+
+    @not_proxy not remote_ip 10.1.1.20
+    respond @not_proxy 403
+
+    # One part (32 MiB) or one small file per request.
+    request_body {
+        max_size 40MiB
+    }
+
+    header {
+        -Server
+    }
+
+    reverse_proxy 127.0.0.1:38200 {
+        flush_interval -1
+    }
+}

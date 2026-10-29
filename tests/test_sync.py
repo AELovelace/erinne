@@ -304,3 +304,78 @@ def test_big_bodies_are_refused(client, app_auth, monkeypatch):
     auth, root_id = app_auth
     monkeypatch.setattr(sync, "MAX_PUT_BYTES", 10)
     assert _put(client, auth, root_id, "big.bin", os.urandom(11)).status_code == 413
+
+
+# ------------------------------------------------------------- backup host
+def test_the_backup_host_answers_only_the_backup_api(tmp_path, root, directory):
+    settings = Settings(_env_file=None, data_dir=tmp_path / "d2", secret_key="test-secret-key-for-the-test-suite-only",
+                        embed_dim=4, share_root=root, public_url="https://beepsquad.wtf",
+                        backup_url="https://bkp.beepsquad.wtf")
+    with TestClient(create_app(settings, Services(llm=None, embedder=FakeEmbedder(), directory=directory,
+                                                  share_checker=FakeShareChecker(root))),
+                    base_url="https://bkp.beepsquad.wtf") as c:
+        assert c.get("/api/sync/client").json() == {"api_url": "https://bkp.beepsquad.wtf",
+                                                    "server": "https://beepsquad.wtf"}
+        assert c.get("/api/sync/roots").status_code == 401           # the app's API: there, but needs a token
+        for path in ("/", "/login", "/files", "/api/files", "/api/admin/settings/backups", "/mcp", "/oauth/authorize"):
+            assert c.get(path).status_code == 404, path
+        assert c.post("/oauth/token", data={}).status_code != 404
+    for bad in ({"backup_url": "https://beepsquad.wtf"}, {"backup_url": "https://bkp.beepsquad.wtf/path"}):
+        with pytest.raises(Exception, match="MNEMERYNNE_BACKUP_URL"):
+            create_app(Settings(_env_file=None, data_dir=tmp_path / "d3", embed_dim=4,
+                                secret_key="test-secret-key-for-the-test-suite-only",
+                                public_url="https://beepsquad.wtf", **bad))
+
+
+# ---------------------------------------------------------- uploads in parts
+def test_big_files_arrive_in_parts(client, conn, root, settings, app_auth, monkeypatch):
+    auth, root_id = app_auth
+    monkeypatch.setattr(sync, "PART_BYTES", 10)
+    data = os.urandom(25)
+    sha = hashlib.sha256(data).hexdigest()
+    start = client.post("/api/sync/uploads", json={"root_id": root_id, "path": "Big/disk.img", "size": 25,
+                                                   "sha256": sha}, headers=auth)
+    assert start.status_code == 200, start.text
+    up = start.json()
+    assert up["part_size"] == 10 and up["parts"] == []
+
+    def part(n, body):
+        return client.put(f"/api/sync/uploads/{up['id']}/parts/{n}", content=body,
+                          headers=dict(auth, **{"X-Sha256": hashlib.sha256(body).hexdigest()}))
+
+    assert part(2, data[20:]).status_code == 200                       # any order
+    assert part(0, data[:9]).status_code == 400                        # wrong length
+    assert part(3, b"x").status_code == 400                            # no such part
+    assert part(0, data[:10]).status_code == 200
+    finish = client.post(f"/api/sync/uploads/{up['id']}/finish", headers=dict(auth, **{"If-None-Match": "*"}))
+    assert finish.status_code == 409 and "1" in finish.json()["detail"]        # part 1 hasn't arrived
+    # Asking again for the same file resumes it.
+    again = client.post("/api/sync/uploads", json={"root_id": root_id, "path": "Big/disk.img", "size": 25,
+                                                   "sha256": sha}, headers=auth).json()
+    assert again["id"] == up["id"] and again["parts"] == [0, 2]
+    assert part(1, data[10:20]).status_code == 200
+    finish = client.post(f"/api/sync/uploads/{up['id']}/finish", headers=dict(auth, **{"If-None-Match": "*"}))
+    assert finish.status_code == 200 and finish.json()["version"] == sha
+    assert (_backup_dir(root) / "Big" / "disk.img").read_bytes() == data
+    assert conn.execute("SELECT count(*) FROM sync_uploads").fetchone()[0] == 0
+    assert not list((settings.tmp_dir / "sync-uploads").glob("*.part"))
+
+
+def test_parts_that_dont_add_up_are_dropped_and_old_uploads_are_swept(client, conn, settings, app_auth, monkeypatch):
+    auth, root_id = app_auth
+    monkeypatch.setattr(sync, "PART_BYTES", 10)
+    up = client.post("/api/sync/uploads", json={"root_id": root_id, "path": "x.bin", "size": 5, "sha256": "a" * 64},
+                     headers=auth).json()
+    client.put(f"/api/sync/uploads/{up['id']}/parts/0", content=b"12345",
+               headers=dict(auth, **{"X-Sha256": hashlib.sha256(b"12345").hexdigest()}))
+    r = client.post(f"/api/sync/uploads/{up['id']}/finish", headers=dict(auth, **{"If-None-Match": "*"}))
+    assert r.status_code == 400 and client.get(f"/api/sync/uploads/{up['id']}", headers=auth).status_code == 404
+    up = client.post("/api/sync/uploads", json={"root_id": root_id, "path": "y.bin", "size": 5, "sha256": "b" * 64},
+                     headers=auth).json()
+    conn.execute("UPDATE sync_uploads SET created_at = datetime('now', '-2 days')")
+    (settings.tmp_dir / "sync-uploads" / "stray.part").write_bytes(b"")
+    assert sync.sweep_uploads(conn, settings) == 1
+    assert not list((settings.tmp_dir / "sync-uploads").glob("*.part"))
+    too_big = client.post("/api/sync/uploads", json={"root_id": root_id, "path": "z.bin", "size": 10 ** 15,
+                                                     "sha256": "c" * 64}, headers=auth)
+    assert too_big.status_code == 413

@@ -11,12 +11,14 @@ Plan: docs/plans/desktop-sync-client.md.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import secrets
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit
 
 from mnemerynne import editing, fs, group_refs, jobs, permissions, share
 from mnemerynne.config import Settings
@@ -46,6 +48,54 @@ class Precondition(SyncError):
     def __init__(self, message: str, current: str | None):
         super().__init__(message, 412)
         self.current = current
+
+
+# ------------------------------------------------------------ backup host
+# On MNEMERYNNE_BACKUP_URL's host only these answer: the app's API and the OAuth token calls it renews with.
+HOST_PATHS = ("/api/sync/", "/oauth/token", "/oauth/revoke")
+
+
+def backup_host(settings: Settings) -> str:
+    """The backup host's name, lower case, without a port; "" when MNEMERYNNE_BACKUP_URL isn't set."""
+    return (urlsplit((settings.backup_url or "").strip()).hostname or "").lower()
+
+
+def check_config(settings: Settings) -> None:
+    """At start: a set MNEMERYNNE_BACKUP_URL must be an https origin on a host of its own. Raises ValueError."""
+    raw = (settings.backup_url or "").strip()
+    if not raw:
+        return
+    parts = urlsplit(raw)
+    if parts.scheme not in ("http", "https") or not parts.hostname or parts.path not in ("", "/") or parts.query:
+        raise ValueError("MNEMERYNNE_BACKUP_URL is an origin only, like https://bkp.example.org")
+    others = {(urlsplit(u or "").hostname or "").lower() for u in (settings.public_url, settings.arcade_url)}
+    if backup_host(settings) in others:
+        raise ValueError("MNEMERYNNE_BACKUP_URL must be a different host from MNEMERYNNE_PUBLIC_URL and "
+                         "MNEMERYNNE_ARCADE_URL")
+
+
+class BackupHost:
+    """ASGI middleware: on the backup host, everything but HOST_PATHS is 404 before any page or session runs."""
+
+    def __init__(self, app, host: str) -> None:
+        self.app, self.host = app, host
+
+    async def __call__(self, scope, receive, send) -> None:
+        if self.host and scope["type"] in ("http", "websocket"):
+            raw = next((v.decode("latin-1") for k, v in scope.get("headers", []) if k.lower() == b"host"), "")
+            path = scope.get("path", "")
+            if raw.rsplit(":", 1)[0].strip("[]").lower() == self.host and not (
+                    path.startswith(HOST_PATHS[0]) or path in HOST_PATHS[1:]):
+                if scope["type"] == "websocket":
+                    await send({"type": "websocket.close", "code": 1008})
+                    return
+                body = b'{"detail": "Not found"}'
+                await send({"type": "http.response.start", "status": 404,
+                            "headers": [(b"content-type", b"application/json"),
+                                        (b"content-length", str(len(body)).encode())]})
+                await send({"type": "http.response.body", "body": body})
+                return
+        await self.app(scope, receive, send)
 
 
 # ---------------------------------------------------------------- settings
@@ -324,13 +374,17 @@ def _write_file(conn, settings, root, parts, upload, sha, *, user_id, token_id, 
             file_id = row["id"]
             dest = share.file_path(conn, file_id)
             ext = PurePosixPath(row["display_name"]).suffix.lower()
-            kept = editing.keep_version_file(settings, file_id, dest, ext)
+            old_size = dest.stat().st_size
+            # The old copy is kept as a version, unless it's too big for the versions folder.
+            kept = editing.keep_version_file(settings, file_id, dest, ext) \
+                if old_size <= settings.sync_version_max_bytes else None
             tmp = dest.parent / f".mnemerynne-{secrets.token_hex(6)}.tmp"
             try:
-                conn.execute("INSERT INTO file_versions(file_id, sha256, size, rel_path, created_by, via, token_id, "
-                             "summary) VALUES (?, ?, ?, ?, ?, 'sync', ?, ?)",
-                             (file_id, current, dest.stat().st_size, kept, user_id, token_id,
-                              f"Backed up from {root.computer}"))
+                if kept:
+                    conn.execute("INSERT INTO file_versions(file_id, sha256, size, rel_path, created_by, via, "
+                                 "token_id, summary) VALUES (?, ?, ?, ?, ?, 'sync', ?, ?)",
+                                 (file_id, current, old_size, kept, user_id, token_id,
+                                  f"Backed up from {root.computer}"))
                 conn.execute("UPDATE files SET blob_sha256 = ?, status = ?, error = NULL, progress = NULL, notes = ?, "
                              "updated_at = datetime('now'), edited_via = ? WHERE id = ?",
                              (sha, status, note, f"sync:{root.computer}", file_id))
@@ -342,7 +396,8 @@ def _write_file(conn, settings, root, parts, upload, sha, *, user_id, token_id, 
                     raise share._fail("save the file", exc) from exc
             except BaseException:
                 tmp.unlink(missing_ok=True)
-                editing.version_path(settings, kept).unlink(missing_ok=True)
+                if kept:
+                    editing.version_path(settings, kept).unlink(missing_ok=True)
                 raise
         share.record_stat(conn, file_id, dest)
         if status == "queued":
@@ -411,3 +466,143 @@ def _move_one(conn, access, root, src: str, dest: str, user_id: int) -> dict:
     if result.extra.get("name") != dest_parts[-1]:
         fs.rename(conn, access, item, dest_parts[-1])
     return {"ok": True}
+
+
+# ------------------------------------------------------------- downloads
+def file_at(conn: sqlite3.Connection, root: Root, path: str) -> sqlite3.Row:
+    """The live file at path under the root (Restore)."""
+    item = _find(conn, root, split_path(path))
+    if item is None or item.type != "file":
+        raise SyncError(f"“{path}” isn't in the backup.", 404)
+    return conn.execute("SELECT * FROM files WHERE id = ?", (item.id,)).fetchone()
+
+
+def versions(conn: sqlite3.Connection, root: Root, path: str) -> list[dict]:
+    """Earlier copies of a backed-up file, newest first."""
+    row = file_at(conn, root, path)
+    return [{"id": r["id"], "version": r["sha256"], "size": r["size"], "created_at": r["created_at"],
+             "via": r["via"]} for r in conn.execute(
+        "SELECT * FROM file_versions WHERE file_id = ? ORDER BY id DESC", (row["id"],))]
+
+
+# --------------------------------------------------- uploads in parts
+PART_BYTES = 32 * 1024 * 1024
+UPLOAD_DAYS = 1
+
+
+def _upload_file(settings: Settings, upload_id: str) -> Path:
+    return settings.tmp_dir / "sync-uploads" / f"{upload_id}.part"
+
+
+def start_upload(conn: sqlite3.Connection, settings: Settings, root: Root, path: str, size: int, sha256: str) -> dict:
+    """A big file arriving in PART_BYTES parts. The same file to the same place again resumes the upload."""
+    split_path(path)
+    sha256 = (sha256 or "").lower()
+    if len(sha256) != 64 or any(c not in "0123456789abcdef" for c in sha256):
+        raise SyncError("Give the file's SHA-256 in hex.")
+    if size <= 0:
+        raise SyncError("The file is empty.")
+    if size > settings.max_sync_file_bytes:
+        raise SyncError(f"Files over {settings.max_sync_file_bytes // 1024 ** 3} GB aren't backed up.", 413)
+    row = conn.execute("SELECT id FROM sync_uploads WHERE user_id = ? AND root_id = ? AND path = ? AND size = ? "
+                       "AND sha256 = ?", (root.user_id, root.id, path, size, sha256)).fetchone()
+    if row and _upload_file(settings, row["id"]).exists():
+        return upload_status(conn, settings, root.user_id, row["id"])
+    upload_id = secrets.token_urlsafe(18)
+    target = _upload_file(settings, upload_id)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with open(target, "wb") as fh:
+        fh.truncate(size)                     # sparse: parts land at their place in any order
+    conn.execute("DELETE FROM sync_uploads WHERE user_id = ? AND root_id = ? AND path = ?", (root.user_id, root.id, path))
+    conn.execute("INSERT INTO sync_uploads(id, user_id, root_id, path, size, sha256) VALUES (?, ?, ?, ?, ?, ?)",
+                 (upload_id, root.user_id, root.id, path, size, sha256))
+    return upload_status(conn, settings, root.user_id, upload_id)
+
+
+def _upload(conn: sqlite3.Connection, user_id: int, upload_id: str) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM sync_uploads WHERE id = ? AND user_id = ?", (upload_id, user_id)).fetchone()
+    if row is None:
+        raise SyncError("That upload isn't here any more; start it again.", 404)
+    return row
+
+
+def upload_status(conn: sqlite3.Connection, settings: Settings, user_id: int, upload_id: str) -> dict:
+    row = _upload(conn, user_id, upload_id)
+    return {"id": row["id"], "root_id": row["root_id"], "path": row["path"], "size": row["size"],
+            "part_size": PART_BYTES, "parts": json.loads(row["parts_received"])}
+
+
+def part_length(size: int, n: int) -> int:
+    """How long part n of a file of `size` bytes is (0: there's no such part)."""
+    start = n * PART_BYTES
+    return max(0, min(PART_BYTES, size - start)) if n >= 0 else 0
+
+
+def store_part(conn: sqlite3.Connection, settings: Settings, user_id: int, upload_id: str, n: int, data: Path,
+               sha256: str) -> dict:
+    """Put a received part (a temp file, already checked against `sha256`) in its place."""
+    row = _upload(conn, user_id, upload_id)
+    length = part_length(row["size"], n)
+    if length == 0:
+        raise SyncError(f"Part {n} isn't part of this file.")
+    if data.stat().st_size != length:
+        raise SyncError(f"Part {n} should be {length} bytes.")
+    with open(_upload_file(settings, upload_id), "r+b") as out, open(data, "rb") as part:
+        out.seek(n * PART_BYTES)
+        while block := part.read(1024 * 1024):
+            out.write(block)
+        out.flush()
+        os.fsync(out.fileno())
+    with transaction(conn):
+        parts = set(json.loads(conn.execute("SELECT parts_received FROM sync_uploads WHERE id = ?",
+                                            (upload_id,)).fetchone()[0]))
+        parts.add(n)
+        conn.execute("UPDATE sync_uploads SET parts_received = ? WHERE id = ?", (json.dumps(sorted(parts)), upload_id))
+    return upload_status(conn, settings, user_id, upload_id)
+
+
+def finish_upload(conn: sqlite3.Connection, settings: Settings, root_for, user_id: int, upload_id: str, *,
+                  token_id: int | None = None, mtime: float | None = None, if_match: str | None = None,
+                  if_none_match: str | None = None) -> dict:
+    """Every part is here: check the whole file's hash and put it in place, as write_file does."""
+    row = _upload(conn, user_id, upload_id)
+    have = set(json.loads(row["parts_received"]))
+    count = -(-row["size"] // PART_BYTES)
+    missing = sorted(set(range(count)) - have)
+    if missing:
+        raise SyncError(f"Parts {', '.join(map(str, missing[:10]))} haven't arrived yet.", 409)
+    path = _upload_file(settings, upload_id)
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        while block := fh.read(1024 * 1024):
+            digest.update(block)
+    if digest.hexdigest() != row["sha256"]:
+        drop_upload(conn, settings, user_id, upload_id)
+        raise SyncError("The file put together from its parts doesn't match its SHA-256; send it again.")
+    root = root_for(row["root_id"])
+    result = write_file(conn, settings, root, row["path"], path, row["sha256"], user_id=user_id, token_id=token_id,
+                        mtime=mtime, if_match=if_match, if_none_match=if_none_match)
+    conn.execute("DELETE FROM sync_uploads WHERE id = ?", (upload_id,))
+    return result
+
+
+def drop_upload(conn: sqlite3.Connection, settings: Settings, user_id: int, upload_id: str) -> None:
+    _upload(conn, user_id, upload_id)
+    conn.execute("DELETE FROM sync_uploads WHERE id = ?", (upload_id,))
+    _upload_file(settings, upload_id).unlink(missing_ok=True)
+
+
+def sweep_uploads(conn: sqlite3.Connection, settings: Settings) -> int:
+    """Uploads nobody finished within a day, and part files without an upload (the worker, hourly)."""
+    old = [r[0] for r in conn.execute("SELECT id FROM sync_uploads WHERE created_at < datetime('now', ?)",
+                                      (f"-{UPLOAD_DAYS} days",))]
+    for upload_id in old:
+        conn.execute("DELETE FROM sync_uploads WHERE id = ?", (upload_id,))
+        _upload_file(settings, upload_id).unlink(missing_ok=True)
+    folder = settings.tmp_dir / "sync-uploads"
+    if folder.is_dir():
+        live = {r[0] for r in conn.execute("SELECT id FROM sync_uploads")}
+        for f in folder.glob("*.part"):
+            if f.stem not in live:
+                f.unlink(missing_ok=True)
+    return len(old)
