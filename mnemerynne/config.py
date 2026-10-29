@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # The address people open Erynne at, e.g. https://erynne.example.internal;
     # links handed to Claude are built on it (relative links when empty).
     public_url: str = ""
+    # The arcade's own address, e.g. https://arcade.beepsquad.wtf (arcade.py): Games are proxied at its
+    # root, on a host of their own so their scripts never share Mnemerynne's origin. Empty: no Games.
+    arcade_url: str = ""
     # Admin rights only count from these networks (comma-separated CIDRs, e.g.
     # "192.168.1.0/24"); from anywhere else admins are treated as ordinary
     # users. Empty: admin rights from any network.

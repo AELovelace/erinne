@@ -14,6 +14,7 @@ No inline comments in the file: systemd would keep them as part of the value.
 | `SESSION_MAX_AGE` | 86400 | Seconds a browser stays signed in. |
 | `SESSION_HTTPS_ONLY` | unset | Cookie only over HTTPS. Unset: on whenever `PUBLIC_URL` is https. |
 | `PUBLIC_URL` | empty | The address people use, e.g. `https://erynne.example.internal`. Links handed to Claude and the OAuth issuer are built on it. |
+| `ARCADE_URL` | empty | The arcade's own address for Games, e.g. `https://arcade.beepsquad.wtf`: a different host from `PUBLIC_URL` (it refuses to start otherwise), with its own DNS record and certificate. The games site is proxied at its root, so the games' scripts never run on Mnemerynne's origin. Empty: no Games. |
 | `ADMIN_NETWORKS` | empty | Comma-separated CIDRs admin rights count from (`192.168.1.0/24,10.8.0.0/24`). Elsewhere admins are ordinary users. Empty: anywhere. |
 | `UPDATE_REPO`, `UPDATE_BRANCH` | empty, `main` | Where the update check and `mnemerynne-admin update` get new versions (owner/name on GitHub; empty = the checkout's origin). |
 | `FORWARDED_ALLOW_IPS` | | Not a Mnemerynne setting but uvicorn's: `127.0.0.1` trusts the proxy's `X-Forwarded-For`, so throttling sees real client addresses. |

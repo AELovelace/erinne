@@ -1,0 +1,289 @@
+"""The arcade (mnemerynne/arcade.py): the games site proxied at the root of a host of its own, reached only with a
+one-use ticket from the main origin, re-checked on every request, and with nothing of Mnemerynne's served there."""
+
+import asyncio
+import json
+from contextlib import contextmanager
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
+
+from fakes import FakeDirectory, FakeEmbedder
+from mnemerynne import arcade, remote, users
+from mnemerynne.config import Settings
+from mnemerynne.web import security
+from mnemerynne.web.app import Services, create_app
+
+MAIN = "http://erynne.test"
+ARCADE = "http://arcade.test"
+SITE = "https://sadgirlsclub.wtf"
+
+
+@pytest.fixture(autouse=True)
+def _hooks(monkeypatch):
+    monkeypatch.setattr(arcade, "_spent", {})
+    yield
+    remote.TRANSPORT = None
+    remote.WS_CONNECT = None
+
+
+@pytest.fixture
+def settings(tmp_path):
+    return Settings(_env_file=None, data_dir=tmp_path / "data", secret_key="test-secret-key-for-the-test-suite-only",
+                    embed_dim=4, public_url=MAIN, arcade_url=ARCADE)
+
+
+@pytest.fixture
+def people(conn):
+    out = {"alice": users.create_user(conn, "alice", "password123"),
+           "rob": users.create_user(conn, "rob", "password123"),
+           "root": users.create_user(conn, "root", "password123", role="admin")}
+    conn.execute("UPDATE users SET ad_account = username")
+    return out
+
+
+@pytest.fixture
+def directory(people):
+    return FakeDirectory({"alice": {"Players"}, "rob": {"Staff"}, "root": {"Domain Admins"}},
+                         groups=["Players", "Staff", "Domain Admins"])
+
+
+def _games(conn, **cfg):
+    arcade.save_settings(conn, {"enabled": True, "group": "Players", "site_url": SITE} | cfg)
+
+
+@contextmanager
+def _web(settings, name, directory):
+    with TestClient(create_app(settings, Services(llm=None, embedder=FakeEmbedder(), directory=directory)),
+                    base_url=MAIN) as c:
+        if name:
+            c.post("/login", data={"username": name, "password": "password123"})
+        yield c
+
+
+def _site(seen, handler=None):
+    """The games site: records each request; answers like LumiBot does (a redirect to its login, a cookie)."""
+    async def default(request):
+        seen.append(request)
+        return httpx.Response(200, headers={"content-type": "text/html; charset=utf-8", "x-frame-options": "DENY",
+                                            "content-security-policy": "base-uri 'self'; frame-ancestors 'none'",
+                                            "set-cookie": "sgc_panel_sess=abc; Path=/; Domain=sadgirlsclub.wtf; HttpOnly"},
+                              content=b"<h1>LUMI WEB</h1>")
+    remote.TRANSPORT = httpx.MockTransport(handler or default)
+
+
+def _enter(client, path="/lumibot/"):
+    """A ticket from the main origin, spent on the arcade: the arcade cookie is in the client's jar after."""
+    got = client.post("/api/arcade/ticket", json={"path": path})
+    assert got.status_code == 200, got.text
+    url = got.json()["url"]
+    assert url.startswith(f"{ARCADE}/__arcade/enter?t=")
+    return client.get(url, follow_redirects=False), url
+
+
+# ------------------------------------------------------------- the helpers
+def test_the_arcade_must_be_a_plain_origin_on_a_host_of_its_own(tmp_path):
+    def make(**kw):
+        return Settings(_env_file=None, data_dir=tmp_path / "d", secret_key="x" * 40, embed_dim=4, **kw)
+    assert arcade.origin(make(arcade_url="https://Arcade.Beepsquad.WTF/")) == "https://arcade.beepsquad.wtf"
+    assert arcade.host(make(arcade_url="https://arcade.beepsquad.wtf:8443")) == "arcade.beepsquad.wtf"
+    arcade.check_config(make())   # unset: no arcade, nothing to check
+    for bad in ({"arcade_url": "arcade.beepsquad.wtf"}, {"arcade_url": "https://a.example/games"},
+                {"arcade_url": "https://erynne.example", "public_url": "https://erynne.example"}):
+        with pytest.raises(ValueError):
+            arcade.check_config(make(**bad))
+    with pytest.raises(security.InsecureConfig):   # and the app refuses to start on one
+        create_app(make(arcade_url="https://erynne.example", public_url="https://erynne.example"),
+                   Services(llm=None, embedder=FakeEmbedder()))
+
+
+def test_paths_and_the_site_address_are_checked():
+    assert arcade.clean_path("/lumibot/?x=1") == "/lumibot/?x=1"
+    assert arcade.clean_path("") == "/"
+    for bad in ("//evil.example/", "https://evil.example/", "lumibot/", "/a\\b", "/__arcade/enter", "/x/../y", "/a\nb"):
+        with pytest.raises(arcade.ArcadeError):
+            arcade.clean_path(bad)
+    assert arcade.clean_site_url("https://SadGirlsClub.wtf/") == "https://sadgirlsclub.wtf"
+    assert arcade.clean_site_url("") == ""
+    for bad in ("sadgirlsclub.wtf", "https://sadgirlsclub.wtf/lumibot/", "ftp://x.example", "https://u:p@x.example"):
+        with pytest.raises(arcade.ArcadeError):
+            arcade.clean_site_url(bad)
+
+
+def test_tickets_are_signed_short_lived_and_spent_once(conn, people, monkeypatch):
+    alice = users.get_user_by_id(conn, people["alice"])
+    key = "k" * 40
+    token = arcade.make_ticket(key, alice, "/games/")
+    assert arcade.spend_ticket("another-key" * 4, token) is None        # signed with this server's key only
+    assert arcade.spend_ticket(key, token)["p"] == "/games/"
+    assert arcade.spend_ticket(key, token) is None                      # one use
+    assert arcade.read_cookie(key, token) is None                       # a ticket isn't a cookie
+    late = arcade.make_ticket(key, alice, "/games/")
+    monkeypatch.setattr(arcade, "TICKET_SECONDS", -1)
+    assert arcade.spend_ticket(key, late) is None                       # and it expires
+
+
+# ---------------------------------------------------------- getting in
+def test_a_ticket_is_only_for_someone_who_may_play(conn, settings, people, directory):
+    with _web(settings, "alice", directory) as alice:
+        assert alice.post("/api/arcade/ticket", json={"path": "/lumibot/"}).status_code == 403   # Games off
+        _games(conn)
+        assert alice.post("/api/arcade/ticket", json={"path": "/lumibot/"}).status_code == 200
+        assert alice.post("/api/arcade/ticket", json={"path": "//evil.example/"}).status_code == 400
+    with _web(settings, "rob", directory) as rob:                        # not in the Games group
+        assert rob.post("/api/arcade/ticket", json={"path": "/lumibot/"}).status_code == 403
+    with _web(settings, "root", directory) as root:                      # admins always
+        assert root.post("/api/arcade/ticket", json={"path": "/lumibot/"}).status_code == 200
+    with _web(settings, None, directory) as anon:
+        assert anon.post("/api/arcade/ticket", json={"path": "/lumibot/"}).status_code == 401
+
+
+def test_without_an_arcade_address_there_are_no_tickets(conn, settings, people, directory):
+    plain = settings.model_copy(update={"arcade_url": ""})   # same database, no MNEMERYNNE_ARCADE_URL
+    _games(conn)
+    with _web(plain, "alice", directory) as alice:
+        assert alice.post("/api/arcade/ticket", json={"path": "/lumibot/"}).status_code == 404
+
+
+def test_entering_sets_the_arcade_cookie_and_the_site_is_served_at_the_root(conn, settings, people, directory):
+    _games(conn)
+    seen = []
+    _site(seen)
+    with _web(settings, "alice", directory) as alice:
+        entered, url = _enter(alice)
+        assert entered.status_code == 303 and entered.headers["location"] == "/lumibot/"
+        cookie = entered.headers["set-cookie"]
+        assert cookie.startswith("mnemerynne_arcade=") and "HttpOnly" in cookie and "Domain" not in cookie
+        assert alice.get(url, follow_redirects=False).status_code == 403          # the ticket is spent
+
+        page = alice.get(f"{ARCADE}/lumibot/api/me?x=1", headers={"Cookie": "mnemerynne_session=main; sgc_panel_sess=abc; "
+                                                                             + cookie.split(";")[0]})
+        assert page.status_code == 200 and page.text == "<h1>LUMI WEB</h1>"
+        sent = seen[-1]
+        assert str(sent.url) == f"{SITE}/lumibot/api/me?x=1"                      # same path, the site's own host
+        assert sent.headers["x-forwarded-host"] == "arcade.test" and "x-forwarded-prefix" not in sent.headers
+        assert sent.headers["cookie"] == "sgc_panel_sess=abc"                     # Mnemerynne's cookies stay here
+        # Framed only by Mnemerynne; the site's own framing rules and cookie Domain go.
+        assert page.headers["content-security-policy"] == "base-uri 'self'; frame-ancestors http://erynne.test"
+        assert "x-frame-options" not in page.headers
+        assert page.headers["set-cookie"] == "sgc_panel_sess=abc; Path=/; HttpOnly"
+        assert page.headers["referrer-policy"] == "same-origin"
+
+
+def test_redirects_to_the_site_stay_on_the_arcade(conn, settings, people, directory):
+    _games(conn)
+
+    async def handler(request):
+        return httpx.Response(302, headers={"location": f"{SITE}/lumibot/login?next=%2Flumibot%2F"})
+    remote.TRANSPORT = httpx.MockTransport(handler)
+    with _web(settings, "alice", directory) as alice:
+        _enter(alice)
+        got = alice.get(f"{ARCADE}/lumibot/", follow_redirects=False)
+        assert got.status_code == 302 and got.headers["location"] == "/lumibot/login?next=%2Flumibot%2F"
+
+
+def test_nothing_of_mnemerynnes_answers_on_the_arcade_host(conn, settings, people, directory):
+    _games(conn)
+    seen = []
+    _site(seen)
+    with _web(settings, "alice", directory) as alice:
+        # Without the arcade cookie: the arcade's own page, never Mnemerynne's sign-in, pages or files.
+        for path in ("/login", "/static/erynne.css", "/api/me", "/mcp", "/media"):
+            got = alice.get(f"{ARCADE}{path}", follow_redirects=False)
+            assert got.status_code == 401 and "Open this from Mnemerynne" in got.text, path
+        assert not seen
+        _enter(alice)
+        # With it, the same paths are the site's: Mnemerynne's API and connector simply aren't there.
+        alice.get(f"{ARCADE}/api/me")
+        alice.post(f"{ARCADE}/mcp", json={})
+        assert [str(r.url) for r in seen] == [f"{SITE}/api/me", f"{SITE}/mcp"]
+        assert alice.get(f"{ARCADE}/__arcade/anything").status_code == 404
+        # And on the main host the arcade's own paths don't exist.
+        assert alice.get("/__arcade/enter?t=x").status_code == 404
+
+
+def test_signing_out_or_leaving_the_group_ends_the_arcade(conn, settings, people, directory, monkeypatch):
+    _games(conn)
+    _site([])
+    monkeypatch.setattr(arcade, "CHECK_SECONDS", 0)
+    with _web(settings, "alice", directory) as alice:
+        _enter(alice)
+        assert alice.get(f"{ARCADE}/lumibot/").status_code == 200
+        _games(conn, group="Staff")                                   # alice is no longer in the Games group
+        assert alice.get(f"{ARCADE}/lumibot/").status_code == 401
+        _games(conn, group="Players")
+        assert alice.get(f"{ARCADE}/lumibot/").status_code == 200
+        _games(conn, enabled=False)                                   # Games off: nothing answers
+        assert alice.get(f"{ARCADE}/lumibot/").status_code == 404
+        _games(conn, enabled=True)
+        alice.post("/logout")                                         # signing out of Mnemerynne ends it too
+        assert alice.get(f"{ARCADE}/lumibot/").status_code == 401
+    with _web(settings, "alice", directory) as alice:
+        _enter(alice)
+        left = alice.get(f"{ARCADE}/__arcade/leave")
+        assert left.status_code == 200 and "Max-Age=0" in left.headers["set-cookie"]
+        assert alice.get(f"{ARCADE}/lumibot/").status_code == 401
+
+
+class FakeSocket:
+    def __init__(self):
+        self.queue = asyncio.Queue()
+        self.subprotocol = None
+
+    async def send(self, data):
+        await self.queue.put("echo:" + data)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        item = await self.queue.get()
+        if item is None:
+            raise StopAsyncIteration
+        return item
+
+    async def close(self, code=1000, reason=""):
+        await self.queue.put(None)
+
+
+def test_websockets_are_relayed_at_the_root(conn, settings, people, directory):
+    _games(conn)
+    opened = []
+
+    async def connect(url, **kwargs):
+        opened.append((url, dict(kwargs["additional_headers"])))
+        return FakeSocket()
+    remote.WS_CONNECT = connect
+    with _web(settings, "alice", directory) as alice:
+        with pytest.raises(WebSocketDisconnect) as refused:            # no arcade cookie yet
+            with alice.websocket_connect("ws://arcade.test/games/ws"):
+                pass
+        assert refused.value.code == 4401
+        entered, _ = _enter(alice, "/games/")
+        cookie = entered.headers["set-cookie"].split(";")[0]
+        with alice.websocket_connect("ws://arcade.test/games/ws", headers={"cookie": cookie}) as ws:
+            ws.send_text("hi")
+            assert ws.receive_text() == "echo:hi"
+    url, headers = opened[0]
+    assert url == "wss://sadgirlsclub.wtf/games/ws" and "x-forwarded-prefix" not in headers
+    assert "mnemerynne_arcade" not in headers.get("cookie", "")
+
+
+# ------------------------------------------------------------- the admin
+def test_admins_set_up_games(conn, settings, people, directory):
+    with _web(settings, "alice", directory) as alice:
+        assert alice.get("/api/admin/settings/games").status_code == 403
+    with _web(settings, "root", directory) as root:
+        got = root.get("/api/admin/settings/games").json()
+        assert got == {"settings": {"enabled": False, "group": "", "site_url": ""}, "arcade_url": ARCADE}
+        saved = root.put("/api/admin/settings/games",
+                         json={"enabled": True, "group": "players", "site_url": "https://SadGirlsClub.wtf/"}).json()
+        assert saved["settings"] == {"enabled": True, "group": "Players", "site_url": SITE}
+        assert root.put("/api/admin/settings/games", json={"site_url": f"{SITE}/lumibot/"}).status_code == 400
+        assert root.put("/api/admin/settings/games", json={"group": "Nobody Here"}).status_code == 400
+        assert root.put("/api/admin/settings/games", json={"enabled": False}).json()["settings"]["site_url"] == SITE
+    logged = [r["target"] for r in conn.execute("SELECT target FROM access_log WHERE action = 'settings.games'")]
+    assert logged and "site_url=https://sadgirlsclub.wtf" in logged[0]
+    assert json.loads(conn.execute("SELECT value FROM meta WHERE key = 'games_settings'").fetchone()[0])["enabled"] is False

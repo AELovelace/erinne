@@ -59,7 +59,8 @@ HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authoriza
 STRIP_REQUEST = {"host", "forwarded", "x-real-ip"}           # plus every x-forwarded-*: ours replace them
 STRIP_RESPONSE = {"x-frame-options", "strict-transport-security", "alt-svc", "public-key-pins",
                   "content-security-policy-report-only"}
-SESSION_COOKIES = {"mnemerynne_session", "erynne_theme"}    # never sent upstream, never accepted from it
+# Never sent upstream, never accepted from it: the session, the theme, and the arcade's own sign-in (arcade.py).
+SESSION_COOKIES = {"mnemerynne_session", "erynne_theme", "mnemerynne_arcade"}
 HTML_MAX_BYTES = 5 * 1024 * 1024
 XSLT_MAX_LOADS = 16           # files one transform may read: the stylesheet, its imports, document()
 XSLT_ORIGIN = "http://remote.invalid"   # the address lxml sees; every load under it goes through the proxy
@@ -143,13 +144,14 @@ def upstream_url(app: sqlite3.Row, subpath: str, query: str = "", *, websocket: 
     return base + (subpath if subpath.startswith("/") else "/" + subpath) + (f"?{query}" if query else "")
 
 
-def rewrite_url(value: str, app: sqlite3.Row, slug: str) -> str:
+def rewrite_url(value: str, app: sqlite3.Row, slug: str, prefix: str | None = None) -> str:
     """An upstream URL as the browser should see it: absolute ones on the upstream's host and
-    root-relative ones move under the prefix; relative ones and other sites stay."""
+    root-relative ones move under the prefix; relative ones and other sites stay. `prefix` "" serves the
+    app at the root (the arcade): absolute links to it become root paths, root paths stay."""
     v = (value or "").strip()
     if not v:
         return value
-    prefix = prefix_for(slug)
+    prefix = prefix_for(slug) if prefix is None else prefix
     base = urlsplit(app["base_url"].rstrip("/"))
     parts = urlsplit(v)
     if parts.scheme and parts.netloc:
@@ -168,14 +170,14 @@ def rewrite_url(value: str, app: sqlite3.Row, slug: str) -> str:
     return prefix + v
 
 
-def rewrite_cookie(set_cookie: str, slug: str, base_path: str = "") -> str | None:
+def rewrite_cookie(set_cookie: str, slug: str, base_path: str = "", prefix: str | None = None) -> str | None:
     """A Set-Cookie scoped to the app's prefix; cookies named like Mnemerynne's own are dropped. A path
-    under the app's base path (base_url's) loses it, as its pages' addresses do."""
+    under the app's base path (base_url's) loses it, as its pages' addresses do. `prefix` "": paths stay."""
     parts = [p.strip() for p in set_cookie.split(";")]
     name = parts[0].split("=", 1)[0].strip()
     if name.lower() in SESSION_COOKIES:
         return None
-    prefix = prefix_for(slug)
+    prefix = prefix_for(slug) if prefix is None else prefix
     out, has_path = [parts[0]], False
     for attr in parts[1:]:
         key, _, val = attr.partition("=")
@@ -340,9 +342,10 @@ def _cookie_without_sessions(value: str) -> str:
 
 
 def request_headers(raw: list[tuple[bytes, bytes]], *, client_ip: str, scheme: str, host: str, slug: str,
-                    rewrite: bool, websocket: bool = False) -> list[tuple[str, str]]:
+                    rewrite: bool, websocket: bool = False, prefix: str | None = None) -> list[tuple[str, str]]:
     """The upstream request's headers: the browser's, minus hop-by-hop, forwarding and Mnemerynne's
-    cookies, plus our own X-Forwarded-*."""
+    cookies, plus our own X-Forwarded-* (X-Forwarded-Prefix only under a prefix; "" is the root)."""
+    prefix = prefix_for(slug) if prefix is None else prefix
     headers = [(k.decode("latin-1").lower(), v.decode("latin-1")) for k, v in raw]
     drop = set(HOP_BY_HOP) | STRIP_REQUEST
     for name, value in headers:
@@ -361,14 +364,17 @@ def request_headers(raw: list[tuple[bytes, bytes]], *, client_ip: str, scheme: s
         if name == "accept-encoding" and rewrite:
             continue
         out.append((name, value))
-    out += [("x-forwarded-for", client_ip or ""), ("x-forwarded-proto", scheme), ("x-forwarded-host", host),
-            ("x-forwarded-prefix", prefix_for(slug)), ("x-real-ip", client_ip or "")]
+    out += [("x-forwarded-for", client_ip or ""), ("x-forwarded-proto", scheme), ("x-forwarded-host", host)]
+    if prefix:
+        out.append(("x-forwarded-prefix", prefix))
+    out.append(("x-real-ip", client_ip or ""))
     if rewrite:
         out.append(("accept-encoding", "identity"))
     return out
 
 
-def response_headers(headers: httpx.Headers, app: sqlite3.Row, slug: str, *, rewritten: bool) -> list[tuple[bytes, bytes]]:
+def response_headers(headers: httpx.Headers, app: sqlite3.Row, slug: str, *, rewritten: bool,
+                     prefix: str | None = None) -> list[tuple[bytes, bytes]]:
     """The upstream response's headers for the browser (see the module docstring)."""
     out: list[tuple[bytes, bytes]] = []
     for key, value in headers.multi_items():
@@ -378,9 +384,9 @@ def response_headers(headers: httpx.Headers, app: sqlite3.Row, slug: str, *, rew
         if rewritten and name in ("content-length", "content-encoding"):
             continue
         if name == "location":
-            value = rewrite_url(value, app, slug)
+            value = rewrite_url(value, app, slug, prefix)
         elif name == "set-cookie":
-            value = rewrite_cookie(value, slug, urlsplit(app["base_url"]).path.rstrip("/"))
+            value = rewrite_cookie(value, slug, urlsplit(app["base_url"]).path.rstrip("/"), prefix)
             if value is None:
                 continue
         elif name == "content-security-policy":
@@ -455,6 +461,10 @@ class RemoteProxy:
         clients, self._clients = list(self._clients.values()), {}
         for client in clients:
             await client.aclose()
+
+    def _prefix(self, slug: str) -> str:
+        """Where the app sits for the browser: /remote/<slug> here; the arcade (arcade.py) serves its site at ""."""
+        return prefix_for(slug)
 
     def _client(self, app: sqlite3.Row) -> httpx.AsyncClient:
         key = (app["id"], app["updated_at"])
@@ -645,7 +655,7 @@ class RemoteProxy:
         client_ip = scope["client"][0] if scope.get("client") else ""
         host = next((v.decode("latin-1") for k, v in scope["headers"] if k.lower() == b"host"), "")
         headers = request_headers(scope["headers"], client_ip=client_ip, scheme=scope.get("scheme", "ws"), host=host,
-                                  slug=slug, rewrite=False, websocket=True)
+                                  slug=slug, rewrite=False, websocket=True, prefix=self._prefix(slug))
         offered = [p.strip() for p in ws.headers.get("sec-websocket-protocol", "").split(",") if p.strip()] or None
         ssl_ctx = apis._ssl(app) if url.startswith("wss") else None
         connect = WS_CONNECT

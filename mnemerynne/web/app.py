@@ -21,7 +21,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
-from mnemerynne import (identity, balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, feedback as feedback_mod,
+from mnemerynne import (identity, arcade as arcade_mod, balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, feedback as feedback_mod,
                         mcp_server, media as media_mod, memory,
                         diagnostics, messages as messages_mod, permissions, remote, rooms as rooms_mod, rooms_bus, share,
                         sharepoint, theme as theme_mod,
@@ -41,6 +41,7 @@ from mnemerynne.config import Settings, get_settings
 from mnemerynne.graph import Deps, build_graph
 from mnemerynne.router import load_router
 from mnemerynne.web import (admin, admin_apis, admin_notices, admin_remote, agent as agent_pages, apis as api_pages,
+                            arcade as arcade_pages,
                             automations as automation_pages, balancer as balancer_pages,
                             bfgguf as bfgguf_pages, chat,
                             claude_links as claude_link_pages, editor as editor_pages, files, help as help_pages,
@@ -108,6 +109,10 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     security.parse_networks(settings.admin_networks)   # a typo fails at start, not on every admin request
     if security.exposed(settings) and not settings.public_url:
         log.warning("MNEMERYNNE_PUBLIC_URL is not set; links and OAuth addresses follow the request's Host.")
+    try:
+        arcade_mod.check_config(settings)   # the arcade must be a host of its own, or it isn't a wall at all
+    except ValueError as exc:
+        raise security.InsecureConfig(str(exc)) from None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -194,6 +199,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             await store_conn.close()
             await app.state.agent.aclose()
             await app.state.remote_proxy.aclose()
+            await app.state.arcade.aclose()
             await balancer.aclose()
             await asyncio.to_thread(app.state.media_sessions.shutdown)
             if services is None:
@@ -230,6 +236,10 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     # Added last, so they run first: refused requests get the headers too.
     app.add_middleware(security.PublicRateLimit)
     app.add_middleware(security.SecurityHeaders, settings=settings)
+    # The arcade's host (arcade.py) is sent to the arcade before anything of Mnemerynne's runs: no session, no
+    # pages, no API there. Added after everything else, so it runs first.
+    app.state.arcade = arcade_mod.ArcadeProxy(settings, secret_key, lambda: app.state.directory)
+    app.add_middleware(arcade_mod.ArcadeHost, proxy=app.state.arcade, arcade_host=arcade_mod.host(settings))
 
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
 
@@ -322,6 +332,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(admin_notices.router)
     app.include_router(remote_pages.router)
     app.include_router(admin_remote.router)
+    app.include_router(arcade_pages.router)        # a ticket into the arcade (arcade.py)
+    app.include_router(arcade_pages.admin_router)  # Settings → Entertainment → Games
     # LAN apps served at /remote/<slug>/... (mnemerynne/remote.py); after the routers, so /remote itself is the page.
     app.state.remote_proxy = remote.RemoteProxy(settings, lambda: app.state.directory)
     app.mount(remote.PREFIX, app.state.remote_proxy, name="remote")

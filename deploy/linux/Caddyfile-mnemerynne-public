@@ -37,3 +37,15 @@ erynne.example.org {
         flush_interval -1
     }
 }
+
+# Games (README 5l): the arcade, MNEMERYNNE_ARCADE_URL's host. Same app; it sends this host to the
+# arcade before any of Mnemerynne's pages run. Remove the block if you don't use Games.
+arcade.example.org {
+    header {
+        -Server
+    }
+    # flush_interval -1: games stream; websockets pass through on their own.
+    reverse_proxy 127.0.0.1:38200 {
+        flush_interval -1
+    }
+}

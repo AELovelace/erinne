@@ -976,6 +976,32 @@ Exec=firefox --kiosk %s/media/screen
   screen keeps its key (a cookie) for 400 days from the last time it connected, so it
   needs no sign-in once paired.
 
+## 5l. The arcade (Games)
+
+Games (Lumi Web, Lumi Games, DOLL-OS…) come from another site and are proxied at the root of a
+host of their own, the **arcade**, so their scripts never run on Mnemerynne's origin: they can't
+call its API or read its cookies. Mnemerynne's pages, API and connector don't exist on that host;
+people get in with a one-minute ticket from Mnemerynne, and signing out of Mnemerynne ends it.
+
+1. **DNS:** a record for the arcade's name (e.g. `arcade.beepsquad.wtf`) pointing at the box,
+   like the main name.
+2. **Web server:** the arcade block from `Caddyfile-mnemerynne-public` (Caddy gets its
+   certificate by itself) or from `nginx-mnemerynne.conf` (give it a certificate for the name),
+   with the hostname changed. Both send it to the same app on `127.0.0.1:38200`.
+3. **Settings:** `MNEMERYNNE_ARCADE_URL=https://arcade.beepsquad.wtf` in the env file, then
+   `sudo systemctl restart mnemerynne-web`. It must be a different host from
+   `MNEMERYNNE_PUBLIC_URL`; the app refuses to start otherwise.
+4. **The games site:** it has to accept being served from the arcade's host (for LumiBot:
+   `DISCORD_OAUTH_PUBLIC_HOSTS` and `WEB_PANEL_TRUSTED_ORIGINS` include it, the Discord app lists
+   the arcade's callback addresses, and its nginx passes the arcade's `X-Forwarded-Host` through
+   from this box only).
+5. **Turn it on:** the site, the switch and who may play (Access → Settings → Entertainment →
+   Games, or `PUT /api/admin/settings/games` with `{"enabled": true, "group": "…", "site_url":
+   "https://sadgirlsclub.wtf"}` until that page is there).
+
+Check from the box: `curl -sI https://arcade.beepsquad.wtf/lumibot/` answers **401** with
+"Open this from Mnemerynne" (no arcade cookie), and never Mnemerynne's sign-in page.
+
 ## 6. Check
 
 ```sh
