@@ -1,7 +1,8 @@
 # Plan: the desktop sync client
 
 *Written 2026-10-29 by Claude for Doll. A plan: nothing here is built yet. Every decision was settled with Doll on
-2026-10-29.*
+2026-10-29. It replaces the 2026-10-25 plan in IT-OPS (Tauri/Rust, two-way sync of the File box): this one is
+Python, one-way, into `Backups`.*
 
 **The idea:** a small app on a person's PC or laptop, on **Windows or Linux**. They add any number of folders (Desktop,
 `D:\Photos`, `~/Projects`…) and the app keeps each one copied to a **Backups** folder in their File box on the NAS,
