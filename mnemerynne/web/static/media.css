@@ -113,6 +113,16 @@ html .mc-track { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr) aut
 .mc-seasons { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0 .2rem; }
 .mc-seasons button { padding: .35rem .9rem; }
 .mc-episodes .mc-track .mc-progress { position: static; height: 3px; margin-top: .3rem; max-width: 14rem; }
+.mc-episodes li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .3rem; }
+.mc-ep-overview { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+                  color: var(--muted); font-size: .82rem; font-weight: 400; margin-top: .15rem; }
+.mc-season-tools { margin: .5rem 0 0; }
+.mc-season-tools button { padding: .3rem .8rem; font-size: .85rem; }
+/* ○ / ✓ beside each episode: watched or not, without playing it. */
+html .mc-watch { width: 2.2rem; height: 2.2rem; padding: 0; border-radius: 50%; border: 2px solid var(--muted);
+                 background: none; color: var(--muted); font-size: 1rem; cursor: pointer; }
+html .mc-watch.on { border-color: var(--rose); background: var(--rose); color: #fff; }
+.mc-watch:focus-visible { outline: 2px solid var(--rose); outline-offset: 2px; }
 /* Up next: over the last frame when an episode ends, above the controls; clicks reach only its buttons. */
 .mc-upnext { position: absolute; right: 1.6rem; bottom: 6rem; z-index: 2; display: grid; gap: .5rem; max-width: 26rem;
              padding: 1rem 1.2rem; border-radius: var(--radius); background: rgba(0, 0, 0, .78); color: #fff;

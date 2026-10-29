@@ -1,9 +1,10 @@
 """Online metadata, only while an admin has it on (Settings → Entertainment → Media → Look up artwork online):
-films on TMDB (needs an API key; poster, backdrop, overview), albums on MusicBrainz and their
-covers on the Cover Art Archive (no key; MusicBrainz allows one request a second).
+films and TV shows on TMDB (needs an API key; poster, backdrop, overview; for a show's episodes, their
+names and overviews, one request a season), albums on MusicBrainz and their covers on the Cover Art
+Archive (no key; MusicBrainz allows one request a second).
 
-Only what the file name or tags say goes out (a film's title and year, an album and its artist),
-never file contents or who is asking. Art found here never replaces art that came with the files;
+Only what the file name or tags say goes out (a film's title and year, a show's folder name, a season
+number, an album and its artist), never file contents or who is asking. Art found here never replaces art that came with the files;
 it replaces a frame grabbed from the film. Whatever the answer, the item is marked looked up
 (scraped_at), so nothing is asked twice until an admin asks for it again.
 """
@@ -19,7 +20,7 @@ import httpx
 from mnemerynne import media
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
-from mnemerynne.media import artwork
+from mnemerynne.media import artwork, probe
 
 log = logging.getLogger("mnemerynne.media")
 
@@ -67,19 +68,43 @@ def _tmdb_auth(key: str) -> tuple[dict, dict]:
     return {}, {"Authorization": f"Bearer {key}"}
 
 
-def tmdb_movie(client: httpx.Client, key: str, title: str, year: int | None) -> dict | None:
+def _tmdb_get(client: httpx.Client, key: str, path: str, query: dict | None = None) -> httpx.Response:
     params, headers = _tmdb_auth(key)
-    query = {**params, "query": title, "include_adult": "false"}
-    if year:
-        query["year"] = str(year)
-    resp = client.get(f"{TMDB_API}/search/movie", params=query, headers=headers)
+    resp = client.get(f"{TMDB_API}{path}", params={**params, **(query or {})}, headers=headers)
     if resp.status_code == 401:
         raise PermissionError("TMDB refused the API key.")
+    return resp
+
+
+def _tmdb_search(client: httpx.Client, key: str, kind: str, title: str, year: int | None,
+                 year_param: str) -> dict | None:
+    """TMDB's best match for a film ('movie') or show ('tv'); without one for the year, any year's."""
+    query = {"query": title, "include_adult": "false"}
+    if year:
+        query[year_param] = str(year)
+    resp = _tmdb_get(client, key, f"/search/{kind}", query)
     resp.raise_for_status()
     results = resp.json().get("results") or []
     if not results and year:
-        return tmdb_movie(client, key, title, None)
+        return _tmdb_search(client, key, kind, title, None, year_param)
     return results[0] if results else None
+
+
+def tmdb_movie(client: httpx.Client, key: str, title: str, year: int | None) -> dict | None:
+    return _tmdb_search(client, key, "movie", title, year, "year")
+
+
+def tmdb_tv(client: httpx.Client, key: str, name: str, year: int | None) -> dict | None:
+    return _tmdb_search(client, key, "tv", name, year, "first_air_date_year")
+
+
+def tmdb_season(client: httpx.Client, key: str, tv_id: int, season: int) -> dict[int, dict]:
+    """Episode number -> TMDB's episode (id, name, overview) in one season of a show; {} if TMDB has none."""
+    resp = _tmdb_get(client, key, f"/tv/{tv_id}/season/{season}")
+    if resp.status_code == 404:
+        return {}
+    resp.raise_for_status()
+    return {e["episode_number"]: e for e in resp.json().get("episodes") or [] if e.get("episode_number") is not None}
 
 
 def _scrape_movie(conn: sqlite3.Connection, settings: Settings, client: httpx.Client, key: str, row) -> None:
@@ -99,6 +124,83 @@ def _scrape_movie(conn: sqlite3.Connection, settings: Settings, client: httpx.Cl
                          (found.get("id"), found.get("overview") or "", year, artwork.store(conn, settings, poster),
                           artwork.store(conn, settings, fanart), row["file_id"]))
         conn.execute("UPDATE media_items SET scraped_at = datetime('now') WHERE file_id = ?", (row["file_id"],))
+
+
+def _year(date: str | None) -> int | None:
+    return int(date[:4]) if (date or "")[:4].isdigit() else None
+
+
+def _scrape_tv_show(conn: sqlite3.Connection, settings: Settings, client: httpx.Client, key: str, row) -> None:
+    """One show by its folder's name ('Doctor Who (2005)' searches 'Doctor Who' from 2005): its overview and
+    year, and a poster and backdrop when its folder has none of its own."""
+    name, year = probe.movie_name(row["name"])
+    found = tmdb_tv(client, key, name, year)
+    poster = fanart = None
+    if found:
+        if artwork.source_of(conn, row["artwork_id"]) is None and found.get("poster_path"):
+            poster = artwork.prepare(_image(client, f"{TMDB_IMAGES}/w500{found['poster_path']}"), "poster", "tmdb")
+        if row["fanart_id"] is None and found.get("backdrop_path"):
+            fanart = artwork.prepare(_image(client, f"{TMDB_IMAGES}/w1280{found['backdrop_path']}"), "fanart", "tmdb")
+    with transaction(conn):
+        if found:
+            conn.execute("UPDATE media_tv_shows SET tmdb_id = ?, overview = ?, year = ?, "
+                         "artwork_id = COALESCE(artwork_id, ?), fanart_id = COALESCE(fanart_id, ?) WHERE folder_id = ?",
+                         (found.get("id"), found.get("overview") or "", _year(found.get("first_air_date")),
+                          artwork.store(conn, settings, poster), artwork.store(conn, settings, fanart),
+                          row["folder_id"]))
+        conn.execute("UPDATE media_tv_shows SET scraped_at = datetime('now') WHERE folder_id = ?", (row["folder_id"],))
+
+
+def _scrape_season(conn: sqlite3.Connection, client: httpx.Client | None, key: str, tv_id: int | None,
+                   season: int | None, rows: list) -> bool:
+    """One season's episodes: their overviews, and TMDB's name for those whose file gave none ('Episode 3').
+    Episodes TMDB can't place (no show found, no season or episode number) are just marked looked up.
+    True if TMDB was asked."""
+    asked = tv_id is not None and season is not None and any(r["episode_no"] is not None for r in rows)
+    found = tmdb_season(client, key, tv_id, season) if asked else {}
+    with transaction(conn):
+        for r in rows:
+            e = found.get(r["episode_no"]) if r["episode_no"] is not None else None
+            if e:
+                fallback = r["title"] == f"Episode {r['episode_no']}"   # the name the file didn't give
+                title = (e.get("name") or r["title"]) if fallback else r["title"]
+                conn.execute("UPDATE media_items SET tmdb_id = ?, overview = ?, title = ?, sort_title = ? "
+                             "WHERE file_id = ?", (e.get("id"), e.get("overview") or "", title,
+                                                   probe.sort_title(title), r["file_id"]))
+            conn.execute("UPDATE media_items SET scraped_at = datetime('now') WHERE file_id = ?", (r["file_id"],))
+    return asked
+
+
+def _scrape_tv(conn: sqlite3.Connection, settings: Settings, client: httpx.Client, key: str, deadline: float) -> int:
+    """Shows not looked up yet, then the episodes of shows that were, a season at a time. Returns how many
+    shows and seasons were asked about."""
+    done = 0
+    for row in conn.execute("SELECT t.folder_id, f.name, t.artwork_id, t.fanart_id FROM media_tv_shows t "
+                            "JOIN folders f ON f.id = t.folder_id WHERE t.scraped_at IS NULL AND f.deleted_at IS NULL "
+                            "ORDER BY t.folder_id LIMIT ?", (PER_PASS,)).fetchall():
+        if time.monotonic() > deadline:
+            return done
+        _scrape_tv_show(conn, settings, client, key, row)
+        done += 1
+    lib = media.library(conn)
+    if lib is None:
+        return done
+    shows = media.tv_show_folders(conn, lib["id"])
+    looked_up = {r["folder_id"]: r["tmdb_id"] for r in conn.execute(
+        "SELECT folder_id, tmdb_id FROM media_tv_shows WHERE scraped_at IS NOT NULL")}
+    seasons: dict[tuple, list] = {}   # (show folder, season) -> its episodes not looked up yet
+    for r in conn.execute("SELECT mi.file_id, mi.title, mi.season_no, mi.episode_no, f.folder_id FROM media_items mi "
+                          "JOIN files f ON f.id = mi.file_id WHERE mi.section = 'tv' AND mi.scraped_at IS NULL "
+                          "AND mi.error IS NULL AND f.deleted_at IS NULL AND f.collection_id = ?", (lib["id"],)):
+        show = shows.get(r["folder_id"])
+        if show in looked_up:   # the show first; its episodes wait for it
+            seasons.setdefault((show, r["season_no"]), []).append(r)
+    asked = 0
+    for (show, season), rows in seasons.items():
+        if time.monotonic() > deadline or asked >= PER_PASS:
+            break
+        asked += _scrape_season(conn, client, key, looked_up[show], season, rows)
+    return done + asked
 
 
 # ---------------------------------------------------------------- MusicBrainz
@@ -155,6 +257,13 @@ def run(conn: sqlite3.Connection, settings: Settings, cfg: dict, deadline: float
                     log.info("Media: TMDB lookup for %s failed: %s", row["title"], exc)
                     break   # try again next pass
                 done += 1
+            if time.monotonic() <= deadline:
+                try:
+                    done += _scrape_tv(conn, settings, client, key, deadline)
+                except PermissionError as exc:
+                    log.warning("Media: %s", exc)
+                except (httpx.HTTPError, ValueError) as exc:
+                    log.info("Media: TMDB lookup for a TV show failed: %s", exc)   # the rest wait for next pass
         albums = conn.execute(
             "SELECT a.album_key, a.artwork_id, min(mi.album) AS album, "
             "min(CASE WHEN mi.album_artist != '' THEN mi.album_artist ELSE mi.artist END) AS album_artist "

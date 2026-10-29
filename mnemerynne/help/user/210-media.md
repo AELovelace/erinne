@@ -11,7 +11,8 @@ Everything comes from the **Media** folder on the file share, or the folder your
   - The season and episode come from the file name: `S01E02`, `1x02`, `E05`, or a leading number like `05 - Title`. Without a season in the name, the folder's name gives it (`Season 2`, `Series 2` or `S02`).
   - The episode's title is whatever follows the number. Without one, it's called *Episode 2*.
   - Put specials in a `Specials` folder. They're listed after the seasons and aren't played on from the other episodes.
-  - A `poster.jpg` (or `folder.jpg`) in the show's folder becomes its poster; without one, a still from an episode is used.
+  - A `poster.jpg` (or `folder.jpg`) in the show's folder becomes its poster, and `fanart.jpg` its backdrop. You can add them any time; they show up a minute or two later. Without a poster, one is looked up online if your admin allows it, otherwise a still from an episode is used.
+  - With online lookups on, a show also gets its year and a description, and its episodes their descriptions. An episode whose file has no title gets its real one. Name the show's folder as TMDB knows it, with the year if two shows share a name (`Doctor Who (2005)`).
   - Episodes put straight into **TV**, outside a show's folder, don't appear.
 - **Music:** one folder per album, for example `Music\Daft Punk\Discovery\01 One More Time.mp3`. Titles, artists, albums and track numbers come from the files' tags. The cover is a `cover.jpg` or `folder.jpg` in the album's folder, or the art inside the files.
 - **Pictures:** photos and short clips. Each folder becomes an album, and photos are sorted by when they were taken.
@@ -33,7 +34,8 @@ You only see what you may open in that folder on the share. Who may open it is s
   - **F** switches full screen;
   - **N** steps the night filter (off, low, medium, high); the 🌙 slider sets it exactly. It makes the picture warmer and dimmer for watching late, YouTube included, and each device remembers its own level;
   - **Escape** closes the player.
-- **TV Shows:** open a show and press **Play** for the episode to watch next. That's **Resume** if you stopped part-way, otherwise the episode after the last one you finished. **From the first episode** starts over. The season buttons switch between seasons; ✓ marks the episodes you've watched.
+- **TV Shows:** search shows by name or description at the top, and sort them by **Title**, **New episodes**, **Recently watched** or **Year**. Open a show and press **Play** for the episode to watch next. That's **Resume** if you stopped part-way, otherwise the episode after the last one you finished. **From the first episode** starts over. The season buttons switch between seasons.
+  - **Watched:** the circle beside each episode shows ✓ once you've watched it. Press it to mark an episode watched (or not) without playing it, for example ones you saw somewhere else. **Mark season watched** does a whole season, and **Play** then goes on from the next unwatched episode.
   - When an episode ends, **Up next** counts down 10 seconds and then plays the next one. **Play now** skips the wait; **Cancel** closes the player.
   - ⏮ and ⏭ in the player, or **Shift+P** and **Shift+N**, go to the previous or next episode.
 - Most films play straight away. Some formats need the server to convert them first, and the player then says **Transcoding** or **Repackaged**. That takes a few seconds to start, and jumping far ahead takes a moment longer.
@@ -88,7 +90,7 @@ Its **arrows and Enter** work like the TV's own arrow keys while the TV shows it
 - The panel controls only your screens, and only while you may use screens. It shows each one and what it is playing; tap **Screens** on it to choose another.
 - **Screens** on your phone lists your remotes too. **Remove** unpairs one; do that if a panel is lost. The panel's own **Screens → Unpair** does the same from the panel.
 
-**A panel with a speaker** (the small Freenove one) pairs as a **speaker** too. One code makes it a remote and one of your screens, marked 🔊.
+**Every panel has a speaker** (the 7" CrowPanel, the M5Stack Tab5 and the small Freenove one), so each pairs as a **speaker** too. One code makes it a remote and one of your screens, marked 🔊. A panel paired before speakers existed stays a plain remote until you **Unpair** it and pair it again. On the CrowPanel, the switch on the back must be set to **MIC&SPK** for sound.
 - **Casting to it:** choose it under **Play on this screen** and cast music or a radio station, as you would to a TV. It can't play films, live TV or YouTube, and says so.
 - **Controlling it:** from your phone, or from any panel (its own included), with play/pause, skipping, next/previous, volume, mute and stop.
 - **What it can reach:** it plays only what is cast to it. It can't browse or fetch anything else.

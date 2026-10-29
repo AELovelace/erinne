@@ -21,7 +21,7 @@ from urllib.parse import quote
 import anyio
 import httpx
 import segno
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -173,9 +173,11 @@ def pictures(folder: int | None = None, user=Depends(media_user), conn: sqlite3.
 
 
 @router.get("/api/media/tv")
-def tv_shows(user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
-    """The shows in Media/TV (each folder directly in it), for the TV Shows tab."""
-    return {"shows": browse.tv_shows(_view(conn, user))}
+def tv_shows(q: str = Query("", max_length=200), sort: Literal[browse.TV_SORTS] = "title", user=Depends(media_user),
+             conn: sqlite3.Connection = Depends(get_db)):
+    """The shows in Media/TV (each folder directly in it), for the TV Shows tab: q searches names and
+    overviews; sort is title, added (newest episode), watched (most recently) or year."""
+    return {"shows": browse.tv_shows(_view(conn, user), q, sort)}
 
 
 @router.get("/api/media/tv/{folder_id}")
@@ -304,6 +306,21 @@ def progress(file_id: int, body: ProgressBody, user=Depends(media_user), conn: s
     with transaction(conn):
         browse.save_progress(conn, user["id"], file_id, body.position, body.duration)
     return {"status": "saved"}
+
+
+class WatchedBody(BaseModel):
+    file_ids: list[int] = Field(..., min_length=1, max_length=2000)
+    watched: bool = True
+
+
+@router.put("/api/media/watched")
+def watched(body: WatchedBody, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Mark episodes (a whole season, say) watched or not watched, without playing them."""
+    with transaction(conn):
+        changed = browse.mark_watched(_view(conn, user), body.file_ids, body.watched)
+    if not changed:
+        raise _not_found()
+    return {"changed": changed}
 
 
 # --------------------------------------------------------------------- live

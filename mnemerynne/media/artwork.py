@@ -121,13 +121,9 @@ def album_sidecar(path: Path) -> Path | None:
     return _beside(path.parent, COVER_NAMES)
 
 
-def tv_sidecar(path: Path, show_name: str) -> Path | None:
-    """A TV show's poster: poster.jpg (or folder, cover, show) in the show's folder, the nearest folder
-    above the episode named show_name (its seasons sit between them)."""
-    for folder in path.parents:
-        if folder.name.lower() == show_name.lower():
-            return _beside(folder, (*POSTER_NAMES, "show"))
-    return None
+def show_sidecars(show_dir: Path) -> tuple[Path | None, Path | None]:
+    """(poster, fanart) in a TV show's own folder: poster.jpg (or folder, cover, show), fanart.jpg."""
+    return _beside(show_dir, (*POSTER_NAMES, "show")), _beside(show_dir, FANART_NAMES)
 
 
 def frame(settings: Settings, path: Path, at_s: float) -> bytes | None:

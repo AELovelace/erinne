@@ -244,6 +244,7 @@
     const r = route();
     const token = ++renderToken;
     const section = SECTION_OF[r.view] || "home";
+    if (r.view !== "tvshow") state.tvSeason = null;   // a show opened afresh starts on its next episode's season
     document.querySelectorAll(".mc-menu-item").forEach(function (b) {
       b.setAttribute("aria-current", String(b.dataset.view === section));
     });
@@ -360,21 +361,61 @@
   }
 
   async function viewTv() {
-    setHead("TV Shows");
-    const data = await api("GET", "/api/media/tv");
+    // As with films: typing re-renders the grid only, so the search box keeps its cursor.
+    if (!$("mc-tv-search")) tvHead();
+    const data = await api("GET", "/api/media/tv?sort=" + state.tvSort + "&q=" + encodeURIComponent(state.tvQ));
     if (!data.shows.length) {
-      return [empty("No shows yet. Put each show in its own folder in " + folder + "\\TV on the share, its seasons in folders " +
-                    "inside, like “TV\\Bluey\\Season 1\\Bluey S01E01.mkv”.")];
+      return [empty(state.tvQ ? "No show matches that."
+        : "No shows yet. Put each show in its own folder in " + folder + "\\TV on the share, its seasons in folders " +
+          "inside, like “TV\\Bluey\\Season 1\\Bluey S01E01.mkv”.")];
     }
     return [shelf(null, data.shows.map(showCard), "poster", "grid")];
   }
 
-  /* One show: Play (or Resume) the episode to watch next, then its seasons as tabs and each one's episodes.
+  /* The TV Shows tab's search box and sort (by name, newest episodes, last watched, newest show). */
+  function tvHead() {
+    const search = el("input");
+    search.id = "mc-tv-search";
+    search.type = "search";
+    search.placeholder = "Search shows";
+    search.value = state.tvQ;
+    search.setAttribute("aria-label", "Search shows");
+    const sort = el("select");
+    sort.setAttribute("aria-label", "Sort");
+    [["title", "Title"], ["added", "New episodes"], ["watched", "Recently watched"], ["year", "Year"]].forEach(function (o) {
+      const opt = el("option", null, o[1]);
+      opt.value = o[0];
+      sort.appendChild(opt);
+    });
+    sort.value = state.tvSort;
+    let timer = null;
+    search.addEventListener("input", function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () { state.tvQ = search.value; render(); }, 300);
+    });
+    sort.addEventListener("change", function () { state.tvSort = sort.value; render(); });
+    setHead("TV Shows", [], [search, sort]);
+  }
+
+  /* Mark episodes watched (or not) without playing them: PUT /api/media/watched, then the show again. */
+  async function markWatched(ids, watched) {
+    try {
+      await api("PUT", "/api/media/watched", { file_ids: ids, watched: watched });
+      render();
+    } catch (err) { showError(err.message); }
+  }
+
+  function isWatched(e) {
+    return !!(e.progress && e.progress.duration && e.progress.position >= e.progress.duration * 0.95);
+  }
+
+  /* One show: Play (or Resume) the episode to watch next, then its seasons as tabs and each one's episodes,
+     each with a ✓ to mark it watched (or not) without playing it, and the whole season at once.
      Playing any episode plays on through the show (episodes, below), here or on the chosen screen. */
   async function viewTvShow(id) {
     const s = await api("GET", "/api/media/tv/" + encodeURIComponent(id));
     setHead("TV Shows", [button("‹ All shows", "", function () { history.length > 1 ? history.back() : go("tv"); })]);
-    backdrop(s.art);
+    backdrop(s.fanart || s.art);
     const box = el("div", "mc-detail");
     const art = el("div", "mc-art");
     if (s.art) { const img = el("img"); img.src = s.art; img.alt = ""; art.appendChild(img); }
@@ -383,9 +424,11 @@
     text.appendChild(el("h2", null, s.name));
     const facts = el("div", "mc-facts");
     const numbered = s.seasons.filter(function (x) { return x.season; }).length;
-    [numbered ? numbered + (numbered === 1 ? " season" : " seasons") : "", s.episodes + (s.episodes === 1 ? " episode" : " episodes")]
+    [s.year ? String(s.year) : "", numbered ? numbered + (numbered === 1 ? " season" : " seasons") : "",
+     s.episodes + (s.episodes === 1 ? " episode" : " episodes")]
       .filter(Boolean).forEach(function (f) { facts.appendChild(el("span", null, f)); });
     text.appendChild(facts);
+    if (s.overview) text.appendChild(el("p", "mc-overview", s.overview));   // from TMDB, with lookups on
 
     const actions = el("div", "mc-actions");
     const first = s.queue.length ? s.queue[0] : null;
@@ -407,11 +450,20 @@
     }
     text.appendChild(actions);
 
-    // Season tabs (only with more than one); the list below shows the chosen one's episodes.
+    // Season tabs (only with more than one); the list below shows the chosen one's episodes. The choice is
+    // kept while on this show, so marking episodes watched (which draws the page again) stays on it.
     const list = el("ol", "mc-tracks mc-episodes");
+    const seasonTools = el("div", "mc-season-tools");
     function showSeason(index) {
       const season = s.seasons[index];
+      state.tvSeason = { show: s.id, index: index };
       tabs.querySelectorAll("button").forEach(function (b, i) { b.className = i === index ? "" : "secondary"; });
+      const ids = season.episodes.map(function (e) { return e.id; });
+      const allSeen = season.episodes.every(isWatched);
+      const mark = button(allSeen ? "Mark " + season.label.toLowerCase() + " not watched" : "✓ Mark " + season.label.toLowerCase() + " watched",
+                          "secondary", function () { markWatched(ids, !allSeen); });
+      mark.dataset.nav = "";
+      seasonTools.replaceChildren(mark);
       list.replaceChildren();
       season.episodes.forEach(function (e) {
         const li = el("li");
@@ -419,20 +471,26 @@
         row.type = "button";
         row.dataset.nav = "";
         row.dataset.id = e.id;
-        const done = e.progress && e.progress.duration && e.progress.position >= e.progress.duration * 0.95;
+        const done = isWatched(e);
         const at = resumeAt(e);
-        row.append(el("span", "n", e.episode !== null && e.episode !== undefined ? String(e.episode) : "•"),
-                   el("span", null, e.title),
-                   el("span", "t", done ? "✓ watched" : at ? "▸ " + clock(at) + " / " + clock(e.duration) : clock(e.duration)));
+        const name = el("span", null, e.title);
+        if (e.overview) name.appendChild(el("span", "mc-ep-overview", e.overview));
+        row.append(el("span", "n", e.episode !== null && e.episode !== undefined ? String(e.episode) : "•"), name,
+                   el("span", "t", at ? "▸ " + clock(at) + " / " + clock(e.duration) : clock(e.duration)));
         if (at && e.duration) {   // how far in, under the title
           const bar = el("div", "mc-progress");
           const fill = el("span");
           fill.style.width = Math.min(100, 100 * at / e.duration).toFixed(1) + "%";
           bar.appendChild(fill);
-          row.children[1].appendChild(bar);
+          name.appendChild(bar);
         }
         row.addEventListener("click", function () { playItem(e, at); });
-        li.appendChild(row);
+        // Beside the row (a button can't hold another): ✓ watched, or ○ to mark it so.
+        const seen = button(done ? "✓" : "○", "mc-watch" + (done ? " on" : ""), function () { markWatched([e.id], !done); },
+                            done ? "Watched: mark it not watched" : "Mark it watched");
+        seen.setAttribute("aria-pressed", String(done));
+        seen.dataset.nav = "";
+        li.append(row, seen);
         list.appendChild(li);
       });
     }
@@ -443,9 +501,12 @@
       tabs.appendChild(b);
     });
     if (s.seasons.length > 1) text.appendChild(tabs);
-    text.appendChild(list);
-    if (s.seasons.length) {   // open on the season of the episode to watch next
-      const at = nxt ? s.seasons.findIndex(function (x) { return x.episodes.some(function (e) { return e.id === nxt.id; }); }) : 0;
+    text.append(seasonTools, list);
+    if (s.seasons.length) {   // the season chosen before on this show, else the one of the episode to watch next
+      const kept = state.tvSeason && state.tvSeason.show === s.id && state.tvSeason.index < s.seasons.length
+        ? state.tvSeason.index : -1;
+      const at = kept >= 0 ? kept
+        : nxt ? s.seasons.findIndex(function (x) { return x.episodes.some(function (e) { return e.id === nxt.id; }); }) : 0;
       showSeason(Math.max(0, at));
     }
     box.append(art, text);
@@ -583,7 +644,7 @@
     return out;
   }
 
-  const state = { q: "", sort: "title" };
+  const state = { q: "", sort: "title", tvQ: "", tvSort: "title", tvSeason: null };
 
   // -------------------------------------------------------------- player
   const video = $("mc-video");

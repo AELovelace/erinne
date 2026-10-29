@@ -1322,3 +1322,125 @@ def test_a_screen_browses_and_is_sent_tv_shows(client, conn, directory, root, se
     assert queue.get_nowait()["action"] == "next"                        # the TV steps to the next episode
     _hub(client).unlisten(screen_id, queue)
 
+
+def test_tv_shows_are_looked_up_online(client, conn, directory, root, settings):
+    _login(client, conn, directory)
+    _turn_on(client)
+    client.put("/api/admin/settings/media", json={"online_metadata": True, "tmdb_key": "0123456789abcdef0123456789abcdef"})
+    show = root / "Media" / "TV" / "Doctor Who (2005)"
+    _fake_video(show / "Season 1" / "Doctor Who S01E01.mkv")                          # no title in the name
+    _fake_video(show / "Season 1" / "Doctor Who S01E02 The End of the World.mkv")
+    _fake_video(show / "Specials" / "The Christmas Invasion.mkv")
+    seen = []
+
+    def handler(request):
+        seen.append(request.url.path)
+        if request.url.path == "/3/search/tv":
+            assert request.url.params["api_key"] == "0123456789abcdef0123456789abcdef"
+            assert (request.url.params["query"], request.url.params["first_air_date_year"]) == ("Doctor Who", "2005")
+            return httpx.Response(200, json={"results": [{"id": 57243, "name": "Doctor Who", "first_air_date": "2005-03-26",
+                                                          "overview": "The Doctor travels in time.",
+                                                          "poster_path": "/p.jpg", "backdrop_path": "/b.jpg"}]})
+        if request.url.path == "/3/tv/57243/season/1":
+            return httpx.Response(200, json={"episodes": [
+                {"id": 1001, "episode_number": 1, "name": "Rose", "overview": "Rose meets the Doctor."},
+                {"id": 1002, "episode_number": 2, "name": "The End of the World (TMDB)", "overview": "Year five billion."}]})
+        if request.url.host == "image.tmdb.org":
+            return httpx.Response(200, content=_jpeg((1, 2, 3), (500, 750)))
+        return httpx.Response(404)
+
+    scrape.TRANSPORT = httpx.MockTransport(handler)
+    _scan(conn, settings)
+    found = client.get("/api/media/tv").json()["shows"][0]
+    detail = client.get(f"/api/media/tv/{found['id']}").json()
+    assert (detail["overview"], detail["year"], found["year"]) == ("The Doctor travels in time.", 2005, 2005)
+    assert detail["fanart"] and client.get(detail["art"]).status_code == 200
+    episodes = detail["seasons"][0]["episodes"]
+    assert [(e["title"], e["overview"]) for e in episodes] == [
+        ("Rose", "Rose meets the Doctor."),                                  # TMDB names an unnamed episode
+        ("The End of the World", "Year five billion.")]                      # the file's own name is kept
+    assert seen.count("/3/tv/57243/season/1") == 1                          # one request a season
+    assert conn.execute("SELECT count(*) FROM media_items WHERE section = 'tv' AND scraped_at IS NULL").fetchone()[0] == 0
+    sources = conn.execute("SELECT a.source FROM media_tv_shows t JOIN media_artwork a ON a.id = t.artwork_id").fetchone()
+    assert sources["source"] == "tmdb"
+    assert client.get("/api/media/tv", params={"q": "travels in"}).json()["shows"][0]["name"] == "Doctor Who (2005)"
+
+    # The show's own poster, put in its folder later, replaces TMDB's; nothing is asked again.
+    calls = len(seen)
+    (show / "poster.jpg").write_bytes(_jpeg((9, 9, 9), (200, 300)))
+    _aged(show / "poster.jpg")
+    _scan(conn, settings)
+    assert conn.execute("SELECT a.source FROM media_tv_shows t JOIN media_artwork a ON a.id = t.artwork_id"
+                        ).fetchone()["source"] == "local"
+    assert len(seen) == calls
+
+
+def test_a_shows_poster_is_found_after_its_episodes(client, conn, directory, root, settings):
+    _login(client, conn, directory)
+    _turn_on(client)
+    show = root / "Media" / "TV" / "Bluey"
+    _fake_video(show / "Season 1" / "Bluey S01E01 Magic Xylophone.mkv")
+    _scan(conn, settings)
+    assert client.get("/api/media/tv").json()["shows"][0]["art"] is None   # no poster, no still (not a real video)
+
+    (show / "poster.jpg").write_bytes(_jpeg((40, 120, 200), (200, 300)))
+    (show / "fanart.jpg").write_bytes(_jpeg((200, 120, 40), (640, 360)))
+    for p in (show / "poster.jpg", show / "fanart.jpg"):
+        _aged(p)
+    assert _scan(conn, settings).read == 0                                    # no episode is new
+    found = client.get("/api/media/tv").json()["shows"][0]
+    detail = client.get(f"/api/media/tv/{found['id']}").json()
+    assert found["art"] and detail["fanart"] and client.get(detail["fanart"]).status_code == 200
+
+
+def test_tv_shows_can_be_searched_and_sorted(client, conn, directory, root, settings):
+    _login(client, conn, directory)
+    _turn_on(client)
+    _bluey(root)
+    _fake_video(root / "Media" / "TV" / "Archer" / "Season 1" / "Archer S01E01 Mole Hunt.mkv")
+    _scan(conn, settings)
+
+    def names(**params):
+        r = client.get("/api/media/tv", params=params)
+        assert r.status_code == 200, r.text
+        return [s["name"] for s in r.json()["shows"]]
+
+    assert names() == ["Archer", "Bluey"]
+    assert names(q="BLU") == ["Bluey"] and names(q="nothing like it") == []
+    with db.transaction(conn):   # Archer's episode added last; Bluey the newer show
+        conn.execute("UPDATE files SET created_at = '2030-01-01 00:00:00' WHERE display_name LIKE 'Archer%'")
+        conn.execute("UPDATE media_tv_shows SET year = CASE WHEN folder_id = (SELECT id FROM folders WHERE name = 'Bluey') "
+                     "THEN 2018 ELSE 2009 END")
+    assert names(sort="added") == ["Archer", "Bluey"]
+    assert names(sort="year") == ["Bluey", "Archer"]
+    bluey = client.get("/api/media/tv", params={"q": "bluey"}).json()["shows"][0]
+    client.put(f"/api/media/progress/{bluey['next_up']['id']}", json={"position": 100, "duration": 420})
+    assert names(sort="watched") == ["Bluey", "Archer"]                    # never watched: last
+    assert client.get("/api/media/tv", params={"sort": "random"}).status_code == 422
+
+
+def test_episodes_can_be_marked_watched_without_playing(client, conn, directory, root, settings, checker):
+    _login(client, conn, directory)
+    _turn_on(client)
+    _bluey(root)
+    _scan(conn, settings)
+    show_id = client.get("/api/media/tv").json()["shows"][0]["id"]
+    show = client.get(f"/api/media/tv/{show_id}").json()
+    season1 = [e["id"] for e in show["seasons"][0]["episodes"]]
+
+    r = client.put("/api/media/watched", json={"file_ids": season1, "watched": True})
+    assert r.status_code == 200 and r.json()["changed"] == 2
+    show = client.get(f"/api/media/tv/{show_id}").json()
+    assert all(e["progress"]["position"] == e["progress"]["duration"] for e in show["seasons"][0]["episodes"])
+    assert show["next_up"]["season"] == 2                                  # on to season 2
+    assert [c["season"] for c in client.get("/api/media/home").json()["continue"]] == [2]
+
+    client.put("/api/media/watched", json={"file_ids": season1[:1], "watched": False})
+    show = client.get(f"/api/media/tv/{show_id}").json()
+    assert "progress" not in show["seasons"][0]["episodes"][0]
+
+    checker.rules = {"Media/TV/Bluey": (False, False)}
+    _login(client, conn, directory, "jane", "jsmith")
+    assert client.put("/api/media/watched", json={"file_ids": season1, "watched": True}).status_code == 404
+    assert client.put("/api/media/watched", json={"file_ids": [], "watched": True}).status_code == 422
+

@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mnemerynne import media
+from mnemerynne import media, share
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
@@ -61,13 +61,12 @@ class _Read:
     art: artwork.Prepared | None = None
     fanart: artwork.Prepared | None = None
     album_art: artwork.Prepared | None = None
-    tv_show_id: int | None = None                  # TV: the show's folder
-    tv_show_art: artwork.Prepared | None = None    # TV: the show's poster, when it has none yet
+    tv_show_id: int | None = None                  # TV: the show's folder (its art: _show_art, each pass)
 
 
 def _read(conn: sqlite3.Connection, settings: Settings, path: Path, section: str, kind: str,
-          tv_show: tuple[int, str] | None = None) -> _Read:
-    """Probe one file and prepare its art. tv_show: (folder id, name) of the show a TV episode is in."""
+          tv_show_id: int | None = None) -> _Read:
+    """Probe one file and prepare its art. tv_show_id: the folder of the show a TV episode is in."""
     info = probe.read(settings, path, section, kind)
     out = _Read(info, section, kind, probe.decide(kind, info.container, info.video_codec, info.audio_codec))
     if section == "movies":
@@ -83,14 +82,10 @@ def _read(conn: sqlite3.Connection, settings: Settings, path: Path, section: str
             cover = artwork.album_sidecar(path)
             out.album_art = (artwork.prepare(artwork.read_file(cover), "cover", "local") if cover else None) \
                 or artwork.prepare(info.cover, "cover", "embedded")
-    elif section == media.TV_SECTION and tv_show is not None:
+    elif section == media.TV_SECTION and tv_show_id is not None:
         if info.duration_s:   # the episode's own still, from a tenth of the way in (past any titles)
             out.art = artwork.prepare(artwork.frame(settings, path, info.duration_s * 0.1), "thumb", "frame")
-        out.tv_show_id = tv_show[0]
-        known = conn.execute("SELECT artwork_id FROM media_tv_shows WHERE folder_id = ?", (tv_show[0],)).fetchone()
-        if not (known and known["artwork_id"]):   # the show's poster is looked for until one is found
-            poster = artwork.tv_sidecar(path, tv_show[1])
-            out.tv_show_art = artwork.prepare(artwork.read_file(poster), "poster", "local") if poster else None
+        out.tv_show_id = tv_show_id
     elif kind == "image":
         out.art = artwork.prepare(artwork.read_file(path), "thumb", "local")
     elif kind == "document":
@@ -112,10 +107,9 @@ def _write(conn: sqlite3.Connection, settings: Settings, file_id: int, mtime_ns:
                      "DO UPDATE SET artwork_id = COALESCE(media_albums.artwork_id, excluded.artwork_id)",
                      (key, album_art))
         art_id = conn.execute("SELECT artwork_id FROM media_albums WHERE album_key = ?", (key,)).fetchone()[0]
-    if r.tv_show_id is not None:   # the show's row, keeping a poster it already has
-        conn.execute("INSERT INTO media_tv_shows(folder_id, artwork_id) VALUES (?, ?) ON CONFLICT(folder_id) "
-                     "DO UPDATE SET artwork_id = COALESCE(media_tv_shows.artwork_id, excluded.artwork_id)",
-                     (r.tv_show_id, artwork.store(conn, settings, r.tv_show_art)))
+    if r.tv_show_id is not None:   # the show's row; its art comes from _show_art (or online)
+        conn.execute("INSERT INTO media_tv_shows(folder_id) VALUES (?) ON CONFLICT(folder_id) DO NOTHING",
+                     (r.tv_show_id,))
     conn.execute(
         "INSERT INTO media_items(file_id, section, media_type, title, sort_title, year, duration_s, width, height, "
         "container, video_codec, audio_codec, bitrate, artist, album_artist, album, album_key, track_no, disc_no, "
@@ -166,6 +160,7 @@ def run_pass(conn: sqlite3.Connection, settings: Settings, budget_s: float = 20.
     deadline = time.monotonic() + budget_s
     for lib, sections, root_section in roots:
         _catalog_library(conn, settings, lib, sections, root_section, deadline, stats)
+    _show_art(conn, settings)   # before the online lookups, so a show's own poster wins
     cfg = media.load_settings(conn)
     if cfg.get("online_metadata") and time.monotonic() < deadline:
         from mnemerynne.media import scrape
@@ -192,15 +187,13 @@ def _catalog_library(conn: sqlite3.Connection, settings: Settings, lib: sqlite3.
         kind = media.media_type(row["display_name"])
         if section is None or kind is None or kind not in media.SECTION_TYPES[section]:
             continue
-        tv_show = None
+        tv_show_id = None
         if section == media.TV_SECTION:
             if shows is None:
                 shows = media.tv_show_folders(conn, lib["id"])
-            show_id = shows.get(row["folder_id"])
-            if show_id is None:
+            tv_show_id = shows.get(row["folder_id"])
+            if tv_show_id is None:
                 continue   # right in the TV folder: an episode belongs in its show's folder
-            name = conn.execute("SELECT name FROM folders WHERE id = ?", (show_id,)).fetchone()
-            tv_show = (show_id, name["name"] if name else "")
         if time.monotonic() > deadline:
             stats.pending += 1
             continue
@@ -208,7 +201,7 @@ def _catalog_library(conn: sqlite3.Connection, settings: Settings, lib: sqlite3.
             path = store.content_path(conn, settings, row["id"])
             if not path.is_file():
                 continue   # the share went away, or the file did: the next scan sorts it out
-            read = _read(conn, settings, path, section, kind, tv_show)
+            read = _read(conn, settings, path, section, kind, tv_show_id)
         except OSError as exc:
             log.info("Media: couldn't read %s yet: %s", row["display_name"], exc)
             continue
@@ -238,12 +231,44 @@ def _prune_art(conn: sqlite3.Connection, settings: Settings) -> int:
             "SELECT id, rel_path FROM media_artwork a WHERE NOT EXISTS (SELECT 1 FROM media_items mi "
             "WHERE mi.artwork_id = a.id OR mi.fanart_id = a.id) AND NOT EXISTS "
             "(SELECT 1 FROM media_albums m WHERE m.artwork_id = a.id) AND NOT EXISTS "
-            "(SELECT 1 FROM media_tv_shows t WHERE t.artwork_id = a.id)").fetchall()
+            "(SELECT 1 FROM media_tv_shows t WHERE t.artwork_id = a.id OR t.fanart_id = a.id)").fetchall()
         for row in unused:
             conn.execute("DELETE FROM media_artwork WHERE id = ?", (row["id"],))
     for row in unused:
         artwork.path_of(settings, row["rel_path"]).unlink(missing_ok=True)
     return len(unused)
+
+
+def _show_art(conn: sqlite3.Connection, settings: Settings) -> int:
+    """Each pass, the poster.jpg and fanart.jpg in a show's folder, for shows without their own yet: put
+    there before or after the episodes, they're picked up, and replace art found online. Returns how many
+    shows got some."""
+    lib = media.library(conn)
+    if lib is None or share.current() is None:
+        return 0
+    found = 0
+    for row in conn.execute("SELECT t.folder_id, t.artwork_id, t.fanart_id FROM media_tv_shows t "
+                            "JOIN folders f ON f.id = t.folder_id WHERE f.collection_id = ? AND f.deleted_at IS NULL",
+                            (lib["id"],)).fetchall():
+        need_poster = artwork.source_of(conn, row["artwork_id"]) != "local"
+        need_fanart = artwork.source_of(conn, row["fanart_id"]) != "local"
+        if not (need_poster or need_fanart):
+            continue   # it has both of its own: nothing to look for
+        try:
+            poster, fanart = artwork.show_sidecars(share.folder_dir(conn, lib["id"], row["folder_id"]))
+            poster = artwork.prepare(artwork.read_file(poster), "poster", "local") if poster and need_poster else None
+            fanart = artwork.prepare(artwork.read_file(fanart), "fanart", "local") if fanart and need_fanart else None
+        except OSError as exc:
+            log.info("Media: couldn't read a show's poster yet: %s", exc)
+            continue
+        if poster is None and fanart is None:
+            continue
+        with transaction(conn):
+            conn.execute("UPDATE media_tv_shows SET artwork_id = COALESCE(?, artwork_id), "
+                         "fanart_id = COALESCE(?, fanart_id) WHERE folder_id = ?",
+                         (artwork.store(conn, settings, poster), artwork.store(conn, settings, fanart), row["folder_id"]))
+        found += 1
+    return found
 
 
 def _prune_tv_shows(conn: sqlite3.Connection) -> None:
@@ -294,4 +319,5 @@ def reset(conn: sqlite3.Connection, online: bool = False) -> int:
     if online:
         conn.execute("UPDATE media_items SET scraped_at = NULL")
         conn.execute("UPDATE media_albums SET scraped_at = NULL")
+        conn.execute("UPDATE media_tv_shows SET scraped_at = NULL")
     return n

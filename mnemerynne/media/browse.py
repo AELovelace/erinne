@@ -273,33 +273,49 @@ def _tv_root_readable(view: View) -> int | None:
     return root if root is not None and view.access.can_read(view.lib["id"], root) else None
 
 
-def _show_art(view: View, show_id: int, episodes: list) -> str | None:
-    """The show's poster (poster.jpg in its folder), else its first episode's still."""
-    row = view.conn.execute("SELECT artwork_id FROM media_tv_shows WHERE folder_id = ?", (show_id,)).fetchone()
-    if row and row["artwork_id"]:
-        return art_url(row["artwork_id"])
-    return next((art_url(r["artwork_id"]) for r in episodes if r["artwork_id"]), None)
+def _show_info(view: View, show_id: int, episodes: list) -> dict:
+    """What the show itself has: its poster (its folder's poster.jpg, or one found online; else its first
+    episode's still), backdrop, year and overview (online)."""
+    row = view.conn.execute("SELECT artwork_id, fanart_id, year, overview FROM media_tv_shows WHERE folder_id = ?",
+                            (show_id,)).fetchone()
+    art = art_url(row["artwork_id"]) if row and row["artwork_id"] else         next((art_url(r["artwork_id"]) for r in episodes if r["artwork_id"]), None)
+    return {"art": art, "fanart": art_url(row["fanart_id"]) if row else None,
+            "year": row["year"] if row else None, "overview": row["overview"] if row else ""}
 
 
-def tv_shows(view: View) -> list[dict]:
-    """The shows in TV this person may open (folders with no episodes yet left out), by name; each with
-    its poster, how many episodes and seasons, when one was last added, and the episode to watch next."""
+TV_SORTS = ("title", "added", "watched", "year")
+
+
+def tv_shows(view: View, q: str = "", sort: str = "title") -> list[dict]:
+    """The shows in TV this person may open (folders with no episodes yet left out); each with its poster,
+    how many episodes and seasons, when one was last added and last watched, and the episode to watch next.
+    q: only shows whose name or overview has it (any case). sort: by name ('title'), newest episode first
+    ('added'), most recently watched first ('watched') or newest show first ('year')."""
     root = _tv_root_readable(view)
     if root is None:
         return []
     episodes = _tv_episodes(view)
     marks = view.watched(r["file_id"] for rows in episodes.values() for r in rows)
+    needle = q.strip().lower()
     out = []
     for f in view.conn.execute("SELECT id, name FROM folders WHERE parent_id = ? AND deleted_at IS NULL "
                                "ORDER BY name COLLATE NOCASE", (root,)):
         rows = episodes.get(f["id"])
         if not rows or not view.access.can_read(view.lib["id"], f["id"]):
             continue
+        info = _show_info(view, f["id"], rows)
+        if needle and needle not in f["name"].lower() and needle not in info["overview"].lower():
+            continue
         nxt = _next_up(_tv_queue(rows), marks)
-        out.append({"id": f["id"], "name": f["name"], "art": _show_art(view, f["id"], rows), "episodes": len(rows),
-                    "seasons": len({r["season_no"] for r in rows if r["season_no"]}),
-                    "added": max(r["created_at"] for r in rows),
+        seen = [marks[r["file_id"]]["updated_at"] for r in rows if r["file_id"] in marks]
+        out.append({"id": f["id"], "name": f["name"], "art": info["art"], "year": info["year"],
+                    "episodes": len(rows), "seasons": len({r["season_no"] for r in rows if r["season_no"]}),
+                    "added": max(r["created_at"] for r in rows), "watched": max(seen) if seen else None,
                     "next_up": view.json(nxt[0], _progress_of(nxt[1])) if nxt else None})
+    if sort == "added":
+        out.sort(key=lambda s: s["added"], reverse=True)
+    elif sort in ("watched", "year"):   # those never watched, or of no known year, last (still by name)
+        out.sort(key=lambda s: (s[sort] is not None, s[sort] or 0), reverse=True)
     return out
 
 
@@ -309,8 +325,7 @@ def tv_show(view: View, folder_id: int) -> dict | None:
     root = _tv_root_readable(view)
     folder = view.conn.execute("SELECT id, name, parent_id FROM folders WHERE id = ? AND deleted_at IS NULL",
                                (folder_id,)).fetchone()
-    if root is None or folder is None or folder["parent_id"] != root \
-            or not view.access.can_read(view.lib["id"], folder_id):
+    if root is None or folder is None or folder["parent_id"] != root             or not view.access.can_read(view.lib["id"], folder_id):
         return None
     rows = _tv_episodes(view).get(folder_id, [])
     marks = view.watched(r["file_id"] for r in rows)
@@ -321,7 +336,7 @@ def tv_show(view: View, folder_id: int) -> dict | None:
         seasons[-1]["episodes"].append(view.json(r, _progress_of(marks.get(r["file_id"]))))
     queue = _tv_queue(rows)
     nxt = _next_up(queue, marks)
-    return {"id": folder_id, "name": folder["name"], "art": _show_art(view, folder_id, rows),
+    return {"id": folder_id, "name": folder["name"], **_show_info(view, folder_id, rows),
             "episodes": len(rows), "seasons": seasons, "queue": [r["file_id"] for r in queue],
             "next_up": view.json(nxt[0], _progress_of(nxt[1])) if nxt else None}
 
@@ -363,7 +378,7 @@ def home(view: View) -> dict:
         if len(recent_albums) >= RECENT:
             break
     recent_pictures = [item_json(r) for r in view.rows("mi.section = 'pictures'", (), recent_order, RECENT)]
-    recent_tv = sorted(tv_shows(view), key=lambda s: s["added"], reverse=True)[:RECENT]   # newest episodes first
+    recent_tv = tv_shows(view, sort="added")[:RECENT]   # newest episodes first
     return {"continue": cont, "movies": recent_movies, "tv": recent_tv, "albums": recent_albums,
             "pictures": recent_pictures}
 
@@ -377,9 +392,9 @@ def artwork_readable(view: View, artwork_id: int) -> bool:
             "WHERE (mi.artwork_id = ? OR mi.fanart_id = ?) AND f.deleted_at IS NULL", (artwork_id, artwork_id)):
         if view.readable(row):
             return True
-    for row in view.conn.execute(   # a TV show's poster: to whoever may open the show's folder
+    for row in view.conn.execute(   # a TV show's poster or backdrop: to whoever may open the show's folder
             "SELECT f.collection_id, f.id AS folder_id FROM media_tv_shows t JOIN folders f ON f.id = t.folder_id "
-            "WHERE t.artwork_id = ? AND f.deleted_at IS NULL", (artwork_id,)):
+            "WHERE (t.artwork_id = ? OR t.fanart_id = ?) AND f.deleted_at IS NULL", (artwork_id, artwork_id)):
         if view.readable(row):
             return True
     return False
@@ -391,3 +406,20 @@ def save_progress(conn: sqlite3.Connection, user_id: int, file_id: int, position
                  "VALUES (?, ?, ?, ?, datetime('now')) ON CONFLICT(user_id, file_id) DO UPDATE SET "
                  "position_s = excluded.position_s, duration_s = COALESCE(excluded.duration_s, duration_s), "
                  "updated_at = excluded.updated_at", (user_id, file_id, max(position, 0.0), duration))
+
+
+def mark_watched(view: View, file_ids, watched: bool) -> int:
+    """Mark episodes (or films) watched, as if played to the end, or not watched (their place forgotten),
+    for the ones this person may read. Returns how many were."""
+    ids = list(dict.fromkeys(file_ids))
+    rows = []
+    for at in range(0, len(ids), 500):   # in batches, under SQLite's limit on parameters
+        chunk = ids[at:at + 500]
+        rows += view.rows(f"mi.file_id IN ({','.join('?' * len(chunk))}) AND mi.media_type = 'video'", tuple(chunk))
+    for r in rows:
+        if watched:   # at the very end; with no known length, 1 of 1 second
+            end = r["duration_s"] or 1.0
+            save_progress(view.conn, view.user_id, r["file_id"], end, end)
+        else:
+            view.conn.execute("DELETE FROM media_progress WHERE user_id = ? AND file_id = ?", (view.user_id, r["file_id"]))
+    return len(rows)
