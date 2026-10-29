@@ -551,6 +551,12 @@ def test_hidden_parts_of_the_pages_stay_hidden():
     # The Wi-Fi page's form is display: grid; without this its Cancel button did nothing.
     for page in (ws.START_PAGE, ws.WIFI_PAGE, ws.SETTINGS_PAGE):
         assert "[hidden] { display: none !important; }" in page
+        assert "@media (min-width: 3000px) { html { font-size: 36px; } }" in page   # readable on a 4K TV
+
+
+def test_kiosk_settings_open_the_tvs_text_size():
+    assert 'id="text-size">Text size…</button>' in ws.SETTINGS_PAGE
+    assert 'state.server + "/media/screen?textsize=1"' in ws.SETTINGS_PAGE
 
 
 CARDS = """Card #42

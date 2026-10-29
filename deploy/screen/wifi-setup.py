@@ -1054,6 +1054,10 @@ class Server(http.server.ThreadingHTTPServer):
 _STYLE = """
 :root { color-scheme: dark; }
 html, body { margin: 0; min-height: 100%; background: #12031f; color: #f6d6ea; font: 18px/1.5 system-ui, sans-serif; }
+body { font-size: 1rem; }
+/* A 4K TV drawn at its full size (install.sh --display native): bigger, like the TV page's automatic text size. */
+@media (min-width: 2400px) { html { font-size: 27px; } }
+@media (min-width: 3000px) { html { font-size: 36px; } }
 main { max-width: 64rem; margin: 0 auto; padding: 4vh 1.2rem; }
 h1 { font-size: 2.2rem; margin: 0 0 .6rem; color: #ff5cad; }
 .muted { color: #b597c4; }
@@ -1306,6 +1310,8 @@ label.switch input { width: 1.5rem; height: 1.5rem; accent-color: #ff2e97; }
         <p class="muted">The sound card's level. Media's own volume (the remote's − and +) is on top of it.</p>
         <div class="row"><button class="secondary" type="button" id="screen-size">Screen size…</button>
           <span class="muted">For a TV that cuts off the edges of the picture.</span></div>
+        <div class="row"><button class="secondary" type="button" id="text-size">Text size…</button>
+          <span class="muted">Bigger or smaller text and buttons on the TV's pages.</span></div>
       </section>
       <section class="card">
         <h2>Kiosk PIN</h2>
@@ -1495,6 +1501,7 @@ $("remove-pin").addEventListener("click", async function () {
 $("check").addEventListener("click", releases);
 // Calibration runs on the TV page itself (media.js, ?calibrate=1), and comes back here when done.
 $("screen-size").addEventListener("click", function () { if (state && state.server) location.href = state.server + "/media/screen?calibrate=1"; });
+$("text-size").addEventListener("click", function () { if (state && state.server) location.href = state.server + "/media/screen?textsize=1"; });
 $("rollback").addEventListener("click", function () { job("/api/kiosk/rollback", {}, "Rolling back…"); });
 $("system-update").addEventListener("click", function () { job("/api/kiosk/system-update", {}, "Installing system updates…"); });
 $("reboot-now").addEventListener("click", function () { job("/api/kiosk/reboot", {}, "Rebooting…"); });
