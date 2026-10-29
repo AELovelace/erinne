@@ -66,11 +66,13 @@ With **Rewrite absolute links** on, RD Web Access's pages are XML that Mnemerynn
 
 **Look** sets how those pages are drawn:
 - **The app's own:** Microsoft's stylesheet, as RD Web sends it.
-- **Erynne (RD Web Access):** a stylesheet that comes with Mnemerynne, covering sign-in, the app list (cards with a Launch link to each app's `.rdp`) and *Connect to a remote PC*.
+- **Erynne (RD Web Access):** a stylesheet that comes with Mnemerynne (`mnemerynne/remote_overrides/rdweb/Site.xsl`), covering sign-in, password and error pages, and the app list: a card for each app and folder, sorted by name, with a Launch button that downloads the app's `.rdp`. It works on phones too.
 
 How the Erynne look behaves:
-- RD Web still signs people in and hands out the `.rdp` files, and nothing changes on the RD Web server.
-- **Theme** follows each viewer's Erynne theme, or fixes it to Default or Neon.
+- RD Web still signs people in and hands out the `.rdp` files, and nothing changes on the RD Web server. Its own scripts still run, so the idle sign-out and the sign-in checks work as before.
+- **Launch** downloads the `.rdp`; opening it starts the app in Remote Desktop Connection. The old Internet Explorer launcher (ActiveX) isn't offered.
+- *Connect to a remote PC* stays hidden, as RD Web hides it itself outside Internet Explorer.
+- **Theme** follows each viewer's Erynne theme, or fixes it to Default or Neon. Default (Sakura) also follows the device's light or dark mode. Themes built on other bases draw as Default.
 - If the Erynne look ever fails on a page, that page falls back to the app's own stylesheet.
 
 A look needs link rewriting on; the setting refuses otherwise.

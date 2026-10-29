@@ -3,6 +3,7 @@ groups, with headers, cookies and links moved under the prefix; websockets relay
 the admin page."""
 
 import asyncio
+import re
 from contextlib import contextmanager
 
 import httpx
@@ -372,6 +373,95 @@ def test_a_bundled_look_redraws_xml_pages(conn, settings, people, directory, tmp
         assert root.get("/api/admin/remote").json()["looks"] == []
         assert root.patch(f"/api/admin/remote/{app_id}", json={"look": "rdweb"}).status_code == 422
         assert "<h1>Welcome, ORG\\alice</h1>" in root.get("/remote/rdweb/Pages/en-US/Default.aspx").text
+
+
+# RD Web Access's own pages, cut down (made-up names): the sign-in form arrives whole in HTMLMainContent;
+# the app list is an AppFeed of Resources, each with its icon and .rdp.
+_RDWEB_LOGIN = (b'<?xml version="1.0" encoding="UTF-8"?>\n<?xml-stylesheet type="text/xsl" href="../Site.xsl"?>\n'
+                b'<RDWAPage helpurl="http://help.invalid/" workspacename="Work Resources" baseurl="/RDWeb/Pages/en-US/">'
+                b'<BodyAttr onload="onLoginPageLoad(event)" onunload="onPageUnload(event)"/><HTMLMainContent>'
+                b'<form id="FrmLogin" name="FrmLogin" action="login.aspx" method="post" onsubmit="return onLoginFormSubmit()">'
+                b'<input type="hidden" name="WorkSpaceID" value="rds.contoso.test"/><input name="isUtf8" type="hidden" value="1"/>'
+                b'<table id="tableLoginForm" width="300" style="display:none"><tr><td id="tdDomainUserNameLabel" width="130">'
+                b'Domain\\user name:</td><td width="7"></td><td><input name="DomainUserName" type="text" id="DomainUserName"/>'
+                b'</td></tr><tr id="trErrorIncorrectCredentials" style="display:none"><td><span class="wrng">Not valid.</span>'
+                b'</td></tr><tr><td><input id="rdoPrvt" type="radio" name="MachineType" value="private"/>'
+                b'<input name="UserPass" type="password" id="UserPass"/><input type="submit" class="formButton" id="btnSignIn" '
+                b'value="Sign in"/></td></tr></table></form></HTMLMainContent></RDWAPage>')
+_RDWEB_APPS = (b'<?xml version="1.0" encoding="UTF-8"?>\n<?xml-stylesheet type="text/xsl" href="/RDWeb/Pages/Site.xsl"?>\n'
+               b'<RDWAPage helpurl="http://help.invalid/" domainuser="CONTOSO\\alex" workspacename="Work Resources" '
+               b'baseurl="/RDWeb/Pages/en-US/"><HeaderJS>iSessionTimeout = parseInt("240");</HeaderJS>'
+               b'<BodyAttr onload="onPageload(event)" onkeydown="onUserActivity(event)"/>'
+               b'<PostHtmlLoadJS>onAuthenticatedPageload();</PostHtmlLoadJS>'
+               b'<NavBar showsignout="true" activetab="PORTAL_REMOTE_PROGRAMS">'
+               b'<Tab id="PORTAL_REMOTE_PROGRAMS" href="Default.aspx">RemoteApp and Desktops</Tab>'
+               b'<Tab id="PORTAL_REMOTE_DESKTOPS" href="Desktops.aspx">Connect to a remote PC</Tab></NavBar>'
+               b'<Style>#PORTAL_REMOTE_DESKTOPS { display:none; }</Style><Style condition="if IE 6">.ie6 {}</Style>'
+               b'<AppFeed showpubliccheckbox="false" privatemode="true">'
+               b'<ResourceCollection SchemaVersion="2.1" xmlns="http://schemas.microsoft.com/ts/2007/05/tswf">'
+               b'<Publisher Name="Work Resources" DisplayFolder="/"><SubFolders><Folder Name="/Office Tools"/></SubFolders>'
+               b'<Resources>'
+               + b''.join(b'<Resource Title="%s" Type="RemoteApp"><Icons><Icon32 Dimensions="32x32" FileType="Png" '
+                          b'FileURL="/RDWeb/Pages/rdp/%s_32x32.png"/></Icons><HostingTerminalServers><HostingTerminalServer>'
+                          b'<ResourceFile FileExtension=".rdp" URL="/RDWeb/Pages/rdp/cpub-%s.rdp"><Content>full%%20address'
+                          b'</Content></ResourceFile></HostingTerminalServer></HostingTerminalServers></Resource>'
+                          % (name, name, name) for name in (b"Paint", b"Calculator"))
+               + b'</Resources></Publisher></ResourceCollection></AppFeed></RDWAPage>')
+_RDWEB_STRINGS = (b'<rdwastr:strings xmlns:rdwastr="urn:microsoft.com:rdwastrings">'
+                  b'<string id="PageTitle">RD Web Access</string><string id="SignOut">Sign out</string></rdwastr:strings>')
+
+
+def test_the_erynne_look_keeps_what_rd_web_needs(conn, settings, people, directory, monkeypatch):
+    """The bundled look (remote_overrides/rdweb/Site.xsl) is there to pick, and it redraws RD Web's
+    pages without breaking them: the sign-in form keeps its fields and handlers, RD Web's scripts and
+    timers still run, FrmUserInfo carries the user, the tab ids stay (the page's own Style hides one),
+    and every app is a card whose Launch downloads its .rdp under /remote/<slug>/."""
+    assert "rdweb" in remote.available_looks()            # the file is in the repo (it was lost once)
+    monkeypatch.setattr(remote, "_override_cache", {})
+    _app(conn, slug="rdweb", base="https://10.0.5.4/RDWeb", rewrite_html=1, xsl_override="rdweb")
+    files = {"/RDWeb/Pages/en-US/login.aspx": _RDWEB_LOGIN, "/RDWeb/Pages/en-US/Default.aspx": _RDWEB_APPS,
+             "/RDWeb/Pages/en-US/RDWAStrings.xml": _RDWEB_STRINGS}
+
+    async def handler(request):
+        body = files.get(request.url.path)
+        return httpx.Response(200 if body else 404, headers={"content-type": "text/xml; charset=utf-8"},
+                              content=body or b"no")
+    remote.TRANSPORT = httpx.MockTransport(handler)
+
+    with _web(settings, "alice", directory) as alice:
+        login = alice.get("/remote/rdweb/Pages/en-US/login.aspx")
+        assert login.headers["content-type"] == "text/html; charset=utf-8"
+        html = login.text
+        assert html.startswith("<!DOCTYPE html>") and '<html lang="en" data-theme="default">' in html
+        assert '<base href="/remote/rdweb/Pages/en-US/">' in html and "<title>RD Web Access</title>" in html
+        assert '<script type="text/javascript" src="../renderscripts.js"></script>' in html
+        assert '<script type="text/javascript" src="../webscripts-domain.js"></script>' in html
+        assert 'onload="onLoginPageLoad(event)"' in html and 'onunload="onPageUnload(event)"' in html
+        assert 'onsubmit="return onLoginFormSubmit()"' in html and 'action="login.aspx"' in html
+        for field in ("WorkSpaceID", "isUtf8", "DomainUserName", "UserPass", "MachineType"):
+            assert f'name="{field}"' in html, field
+        assert 'id="tableLoginForm"' in html and 'id="trErrorIncorrectCredentials"' in html
+        assert "PORTAL_SIGNOUT" not in html and "FrmUserInfo" not in html     # nobody is signed in yet
+
+        alice.cookies.set("erynne_theme", "neon")
+        html = alice.get("/remote/rdweb/Pages/en-US/Default.aspx").text
+        assert 'data-theme="neon"' in html and "xml-stylesheet" not in html
+        assert '<input type="hidden" id="DomainUserName" name="DomainUserName" value="CONTOSO\\alex">' in html
+        assert 'title="CONTOSO\\alex">alex</span>' in html                    # the short name, the full one on hover
+        assert 'iSessionTimeout = parseInt("240");' in html and "onAuthenticatedPageload();" in html
+        assert 'onkeydown="onUserActivity(event)"' in html
+        assert 'id="PORTAL_REMOTE_PROGRAMS" aria-current="page"' in html
+        assert 'id="PORTAL_REMOTE_DESKTOPS" href="Desktops.aspx"' in html
+        assert "#PORTAL_REMOTE_DESKTOPS { display:none; }" in html and ".ie6" not in html
+        assert 'href="javascript:onUserDisconnect()"' in html and ">Sign out</a>" in html
+        cards = re.findall(r'<a class="rdw-app" title="(\w+)" target="_self" href="([^"]+)" download="">', html)
+        assert cards == [("Calculator", "/remote/rdweb/Pages/rdp/cpub-Calculator.rdp"),
+                         ("Paint", "/remote/rdweb/Pages/rdp/cpub-Paint.rdp")]          # sorted by title
+        assert '<img class="rdw-icon" src="/remote/rdweb/Pages/rdp/Paint_32x32.png"' in html
+        assert 'data-rdw-folder="Office Tools"' in html
+
+        del files["/RDWeb/Pages/en-US/RDWAStrings.xml"]                  # no strings: English stands in
+        assert ">Sign out</a>" in alice.get("/remote/rdweb/Pages/en-US/Default.aspx").text
 
 
 def test_streams_pass_through_and_a_dead_app_is_a_502(conn, settings, people, directory):
