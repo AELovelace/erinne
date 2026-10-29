@@ -6,6 +6,20 @@
     <h1>🌸 {{ assistant_name }}</h1>
     {% if error %}
     <p class="error" role="alert">{{ error }}</p>
+    {% elif scope == "sync" %}
+    <p><strong>Mnemerynne Backup</strong> wants to back folders up from this computer to <strong>{{ product_name }}</strong>
+      at <code>{{ request.url.hostname }}</code> as <strong>{{ user["username"] }}</strong>.</p>
+    <p class="muted small">It asked as “{{ name }}” and will be sent back to <code>{{ host }}</code> (this computer).</p>
+    <p>It will be able to add, change, move and delete files in your <strong>Backups</strong> folder only. Deleted files go
+      to the recycle bin and replaced ones are kept as earlier versions. It can't read anything else.</p>
+    <p class="muted small">You can sign it out any time under Preferences → Backups.</p>
+    <form method="post" action="/oauth/authorize">
+      <input type="hidden" name="nonce" value="{{ nonce }}">
+      <div class="consent-actions">
+        <button type="submit" name="decision" value="allow">Allow</button>
+        <button type="submit" name="decision" value="deny" class="link">Deny</button>
+      </div>
+    </form>
     {% else %}
     <p><strong>{{ app }}</strong> wants to use <strong>{{ product_name }}</strong> at <code>{{ request.url.hostname }}</code>
       as <strong>{{ user["username"] }}</strong>.</p>

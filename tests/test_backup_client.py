@@ -299,3 +299,88 @@ def test_big_files_go_up_in_parts_and_resume(app, root, monkeypatch):
     assert r.uploaded == 1 and (_on_nas(root) / "video.mp4").read_bytes() == data
     # Parts 0 and 1 weren't sent again.
     assert sent == ["0", "1", "2", "2", "3", "4"]
+
+
+# ------------------------------------------------------------ browser sign-in
+def _approve_in_browser(client, *, decision="allow"):
+    """What the person does in the browser: the consent page, then Allow; returns where it sent them."""
+    import re as _re
+
+    def open_browser(url):
+        page = client.get(url.replace("http://testserver", ""))
+        assert page.status_code == 200, page.text
+        assert "Backups" in page.text and "can't read anything else" in page.text
+        nonce = _re.search(r'name="nonce" value="([^"]+)"', page.text).group(1)
+        back = client.post("/oauth/authorize", data={"nonce": nonce, "decision": decision}, follow_redirects=False)
+        httpx.get(back.headers["location"])         # the browser follows it to the app on this computer
+    return open_browser
+
+
+def test_signing_in_in_the_browser(server, tmp_path, monkeypatch, settings):
+    client, conn, _ = server
+    monkeypatch.setenv("MNEMERYNNE_BACKUP_HOME", str(tmp_path / "apphome"))
+    monkeypatch.setenv("MNEMERYNNE_BACKUP_NO_KEYRING", "1")
+    from mnemerynne import api_tokens, oauth
+    from mnemerynne_backup import credentials, signin
+
+    client.post("/login", data={"username": "jane", "password": "password123"})
+    signin.browser_sign_in("http://testserver", "LAPTOP", open_browser=_approve_in_browser(client), client=client)
+    creds = credentials.load("http://testserver")
+    assert creds["kind"] == "oauth" and creds["access"].startswith(oauth.ACCESS_PREFIX)
+    assert (tmp_path / "apphome" / "credentials.json").stat().st_mode & 0o077 == 0
+    client.cookies.clear()
+    tokens = signin.Tokens("http://testserver", client=client)
+    t = Transport("http://testserver", tokens, client=client)
+    assert t.roots() == []
+    # The connection only works for backups: not on /mcp, and it isn't one of the AI connections.
+    assert oauth.verify(conn, creds["access"]) is None
+    uid = conn.execute("SELECT id FROM users WHERE username = 'jane'").fetchone()[0]
+    assert oauth.connections(conn, uid) == [] and len(oauth.connections(conn, uid, "sync")) == 1
+    # When the access token runs out, it is renewed with the refresh token.
+    creds["expires"] = 0
+    credentials.save("http://testserver", creds)
+    assert t.roots() == [] and credentials.load("http://testserver")["access"] != creds["access"]
+    # Signing out ends it on the server too.
+    signin.sign_out("http://testserver", client)
+    assert credentials.load("http://testserver") is None
+    assert conn.execute("SELECT count(*) FROM oauth_grants WHERE scope = 'sync' AND revoked_at IS NULL").fetchone()[0] == 0
+    assert api_tokens.verify(conn, creds["access"], scope="sync") is None
+
+
+def test_only_the_backup_group_and_only_a_local_app_can_sign_in(server, tmp_path, monkeypatch):
+    client, conn, _ = server
+    monkeypatch.setenv("MNEMERYNNE_BACKUP_HOME", str(tmp_path / "apphome"))
+    monkeypatch.setenv("MNEMERYNNE_BACKUP_NO_KEYRING", "1")
+    client.post("/login", data={"username": "jane", "password": "password123"})
+    claude = client.post("/oauth/register", json={"redirect_uris": ["https://claude.ai/api/mcp/auth_callback"]}).json()
+    page = client.get("/oauth/authorize", params={"response_type": "code", "client_id": claude["client_id"],
+                                                  "redirect_uri": "https://claude.ai/api/mcp/auth_callback",
+                                                  "code_challenge": "x" * 43, "code_challenge_method": "S256",
+                                                  "scope": "sync"})
+    assert page.status_code == 400 and "backup app on your own computer" in page.text
+    sync.save_settings(conn, {"enabled": False})
+    local = client.post("/oauth/register", json={"redirect_uris": ["http://127.0.0.1:5555/callback"]}).json()
+    page = client.get("/oauth/authorize", params={"response_type": "code", "client_id": local["client_id"],
+                                                  "redirect_uri": "http://127.0.0.1:5555/callback",
+                                                  "code_challenge": "x" * 43, "code_challenge_method": "S256",
+                                                  "scope": "sync"})
+    assert page.status_code == 403 and "Backups aren" in page.text
+
+
+def test_starting_at_sign_in_on_linux(tmp_path, monkeypatch):
+    from mnemerynne_backup import autostart
+
+    monkeypatch.setattr(autostart.sys, "platform", "linux")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    ran = []
+    monkeypatch.setattr(autostart.subprocess, "run", lambda cmd, **kw: ran.append(cmd))
+    assert not autostart.enabled()
+    autostart.set_enabled(True)
+    entry = (tmp_path / "autostart" / "mnemerynne-backup.desktop").read_text()
+    assert "Exec=" in entry and "tray" in entry and autostart.enabled()
+    autostart.set_enabled(False)
+    assert not autostart.enabled()
+    autostart.set_enabled(True, service=True)
+    unit = (tmp_path / "systemd" / "user" / "mnemerynne-backup.service").read_text()
+    assert "ExecStart=" in unit and " run" in unit and ["systemctl", "--user", "enable", "--now",
+                                                        "mnemerynne-backup.service"] in ran

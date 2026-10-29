@@ -7,6 +7,7 @@
 -- touch the person's Backups folder). Each kind is refused where the other belongs.
 ALTER TABLE api_tokens ADD COLUMN scope TEXT NOT NULL DEFAULT 'mcp' CHECK (scope IN ('mcp', 'sync'));
 ALTER TABLE oauth_grants ADD COLUMN scope TEXT NOT NULL DEFAULT 'mcp' CHECK (scope IN ('mcp', 'sync'));
+ALTER TABLE oauth_codes ADD COLUMN scope TEXT NOT NULL DEFAULT 'mcp' CHECK (scope IN ('mcp', 'sync'));
 
 -- Files under a folder with no_index = 1 are kept, listed and previewed but never read for search. NULL: as the
 -- folder above it; the nearest folder with a value decides (Backups is 1, a backed-up folder made Searchable is 0).

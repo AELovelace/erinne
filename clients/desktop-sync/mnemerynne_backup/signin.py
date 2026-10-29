@@ -132,13 +132,14 @@ def browser_sign_in(server: str, computer: str, *, open_browser=webbrowser.open,
         httpd.server_close()
 
 
-def sign_out(server: str) -> None:
+def sign_out(server: str, client: httpx.Client | None = None) -> None:
+    """Forget the sign-in here and end it on the server (a pasted token is revoked on the Backups page)."""
     server = server.rstrip("/")
     creds = credentials.load(server)
     if creds and creds["kind"] == "oauth":
+        http = client or httpx.Client(timeout=15)
         try:
-            httpx.post(f"{server}/oauth/revoke", data={"token": creds["refresh"], "client_id": creds["client_id"]},
-                       timeout=15)
+            http.post(f"{server}/oauth/revoke", data={"token": creds["refresh"], "client_id": creds["client_id"]})
         except httpx.HTTPError:
             pass
     credentials.forget(server)
