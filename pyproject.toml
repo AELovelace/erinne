@@ -39,6 +39,8 @@ dependencies = [
     "mutagen==1.47.0",
     # QR codes for pairing a screen from a phone (mnemerynne/media/screens.py)
     "segno==1.6.6",
+    # Checks the installed packages for known vulnerabilities (mnemerynne/briefings.py, Settings → Updates)
+    "pip-audit==2.10.1",
 ]
 
 [dependency-groups]

@@ -45,7 +45,7 @@ Runs are kept `MNEMERYNNE_AUTOMATION_RUN_DAYS` (90 by default). A new automation
 These are tools for Erynne and Claude, in chat and in automations:
 
 - **my_briefing:** what's waiting for the person in Mnemerynne (unread notes, announcements, room mentions and DMs, proposals to apply).
-- **mnemerynne_updates** (admins): updates waiting upstream and what they touch, as on Settings → Updates. With `pip-audit` installed on the server (`uv tool install pip-audit`), it also lists installed packages with known vulnerabilities, checked at most every 6 hours.
+- **mnemerynne_updates** (admins): updates waiting upstream and what they touch, as on Settings → Updates. It also lists installed packages with known vulnerabilities, checked at most every 6 hours by `pip-audit`, which `uv sync` installs with the app.
 - **m365_security** (admins): per Microsoft 365 tenant, with the app's own token. Grant the Entra app these **application** permissions with admin consent, or that kind answers with the permission it's missing:
 
   | Kind | Permission |

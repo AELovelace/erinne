@@ -2,7 +2,9 @@
 Microsoft 365 security (admins, the app's own token) and the admins' security feeds."""
 
 import json
+import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import httpx
 import pytest
@@ -55,6 +57,16 @@ def test_updates_and_package_vulnerabilities_are_for_admins(conn, world, monkeyp
     assert out["new_commits"] == 2 and out["touches"]["packages"] is True
     assert out["packages"]["vulnerable"] == [{"package": "lxml", "version": "6.1.3", "id": "GHSA-xxxx",
                                               "fixed_in": ["6.1.4"], "aliases": ["CVE-2026-1"], "summary": "XXE"}]
+
+
+def test_pip_audit_is_found_beside_the_apps_python(tmp_path, monkeypatch):
+    # systemd starts the app from .venv/bin without putting it on the PATH, so look next to the interpreter.
+    name = "pip-audit.exe" if sys.platform == "win32" else "pip-audit"
+    (tmp_path / name).write_text("")
+    (tmp_path / name).chmod(0o755)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "python"))
+    monkeypatch.setenv("PATH", "")
+    assert Path(briefings.pip_audit_exe()).parent == tmp_path
 
 
 def test_m365_security_reads_with_the_apps_token_and_names_a_missing_permission(conn, settings, world, monkeypatch):

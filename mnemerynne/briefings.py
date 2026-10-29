@@ -4,7 +4,7 @@
   mentions and direct messages, proposals to apply, open notes on their agent scratchpad). Mail and
   calendar have their own tools.
 - mnemerynne_updates (admins): new commits upstream and what they touch (updates.check), and the
-  installed packages' known vulnerabilities (pip-audit, when it's installed; cached).
+  installed packages' known vulnerabilities (pip-audit, a dependency since 2026-10-28; cached).
 - m365_security (admins): open Defender alerts, risky users, the latest Secure Score and risky sign-ins
   per Microsoft 365 tenant, read with the app's own token. They need application permissions on the
   Entra app (GRAPH_PERMISSIONS); a 403 says which.
@@ -23,6 +23,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from xml.etree import ElementTree
 
 import httpx
@@ -94,10 +95,10 @@ def package_audit() -> dict:
             return _audit["value"]
     raw = AUDIT_OUTPUT
     if raw is None:
-        exe = shutil.which("pip-audit")
+        exe = pip_audit_exe()
         if exe is None:
-            return {"checked": False, "note": "pip-audit isn't installed on the server (uv tool install pip-audit), "
-                                              "so the packages' known vulnerabilities weren't checked."}
+            return {"checked": False, "note": "pip-audit isn't installed in Mnemerynne's environment (uv sync installs "
+                                              "it), so the packages' known vulnerabilities weren't checked."}
         try:
             done = subprocess.run([exe, "--format", "json", "--progress-spinner", "off", "--path",
                                    str(_site_packages())], capture_output=True, text=True, timeout=300)
@@ -118,6 +119,12 @@ def package_audit() -> dict:
     with _audit_lock:
         _audit.update(at=time.time(), value=value)
     return value
+
+
+def pip_audit_exe() -> str | None:
+    """The pip-audit beside this Python (the venv's bin/ or Scripts/; systemd's PATH doesn't include it),
+    else one on the PATH."""
+    return shutil.which("pip-audit", path=str(Path(sys.executable).parent)) or shutil.which("pip-audit")
 
 
 def _site_packages() -> str:
