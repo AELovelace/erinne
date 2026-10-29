@@ -16,8 +16,8 @@ AppImage on the oldest distro you need to support (glibc only goes forward).
 Sign the Windows installer if there's a code-signing certificate (the command is at the end of the
 script); unsigned, SmartScreen warns once.
 
-**Offering it:** copy the installer and the AppImage into Mnemerynne's data directory under
-`backup-client/` (`/var/lib/mnemerynne/backup-client/` on the Fedora box). Preferences → Backups then
+**Offering it:** copy the installer and the AppImage into `backup-client/` in Mnemerynne's data directory
+(`MNEMERYNNE_DATA_DIR`; Access → Settings → Desktop backup shows the exact folder). Preferences → Backups then
 offers them, and running apps see the new version (`GET /api/sync/client`) within a day.
 
-Python people can skip the bundle: `uv tool install 'mnemerynne-backup[tray]'` from this folder.
+Python people can skip the bundle: `uv tool install '.[tray]'` from `clients/desktop-sync`.

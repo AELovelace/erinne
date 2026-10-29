@@ -1023,14 +1023,18 @@ laptop ──https──► reverse proxy 10.1.1.20 (nginx, Let's Encrypt) ─�
    the end of `nginx-mnemerynne.conf` if the box runs nginx), then reload the web server. Only
    10.1.1.20 may talk to it.
 4. **Settings:** `MNEMERYNNE_BACKUP_URL=https://bkp.beepsquad.wtf` in the env file, then
-   `sudo systemctl restart mnemerynne-web mnemerynne-worker`. It must be a different host from
-   `MNEMERYNNE_PUBLIC_URL`; the app refuses to start otherwise.
-5. **Turn it on:** Access → Settings → Backups: the switch and the group who may back up. See the
+   `sudo systemctl restart mnemerynne-web mnemerynne-worker`. It needs `MNEMERYNNE_PUBLIC_URL` set, and must
+   be a different host from it and from `MNEMERYNNE_ARCADE_URL`; the app refuses to start otherwise. If the
+   proxy talks to the app's port directly (no web server on the box), the app must listen beyond loopback
+   (`MNEMERYNNE_HOST`), `FORWARDED_ALLOW_IPS` must include the proxy (`127.0.0.1,10.1.1.20`), and the port
+   should be open to the proxy only.
+5. **Turn it on:** Access → Settings → Desktop backup: the switch and the group who may back up. See the
    admin help page *Desktop backup*.
 
 Check from outside the LAN: `curl -s https://bkp.beepsquad.wtf/api/sync/client` answers
 `{"api_url": "https://bkp.beepsquad.wtf", …}`, `curl -sI https://bkp.beepsquad.wtf/` answers **404**,
-and a backed-up file's row in Access → Log shows the laptop's own address.
+and the new folder's `backup.root` row in Access → Recent changes shows the laptop's own address
+(single uploads aren't logged).
 
 ## 6. Check
 
