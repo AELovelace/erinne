@@ -26,6 +26,7 @@ training/out/
 clients/claude-desktop/ca.pem
 
 # Desktop backup app builds (clients/desktop-sync/packaging)
-clients/desktop-sync/dist/
+#clients/desktop-sync/dist/
+clients/desktop-sync/dist/mnemerynne-backup
 clients/desktop-sync/packaging/build/
 clients/desktop-sync/.build-venv/
