@@ -130,15 +130,19 @@ RANDR = """HDMI-A-1 "LG Electronics LG TV SSCR2 0x01010101 (HDMI-A-1)"
 """
 
 
-def test_the_tvs_picture_follows_the_display_option(tmp_path):
+def test_the_tvs_picture_follows_the_display_options(tmp_path):
     display = tmp_path / "display.sh"
     display.write_text(bash("render_display").stdout, newline="\n")
-    plan = lambda mode, text=RANDR: subprocess.run([BASH, posix(display), "--plan", mode], input=text,
-                                                   capture_output=True, text=True, check=True).stdout.strip()
+    plan = lambda mode, text=RANDR, scale="100": subprocess.run(
+        [BASH, posix(display), "--plan", mode, scale], input=text, capture_output=True, text=True, check=True).stdout.strip()
     assert plan("auto") == "--output HDMI-A-1 --mode 1920x1080@60.000000Hz"     # the best 1080p the TV offers
     assert plan("1080p") == plan("auto")
     assert plan("native") == ""
-    assert plan("scale:1.5") == "--output HDMI-A-1 --scale 1.5"
+    # Display scaling, with the mode or alone; nothing when the TV is already at it.
+    assert plan("native", scale="150") == "--output HDMI-A-1 --scale 1.5"
+    assert plan("auto", scale="200") == "--output HDMI-A-1 --mode 1920x1080@60.000000Hz --scale 2"
+    scaled = RANDR.replace("Scale: 1.000000", "Scale: 2.000000")
+    assert plan("native", scaled, "200") == "" and plan("native", scaled, "100") == "--output HDMI-A-1 --scale 1"
     # A 1080p TV: automatic leaves it alone; so does 1080p once it's there.
     full_hd = RANDR.replace(" (preferred, current)", " (preferred)").replace("60.000000 Hz\n    1920x1080 px, 50",
                                                                            "60.000000 Hz (current)\n    1920x1080 px, 50")
@@ -159,15 +163,19 @@ def test_the_tvs_picture_follows_the_display_option(tmp_path):
     (fake / "wlr-randr").chmod(0o755)
     now = subprocess.run([BASH, "-c", f'PATH="{posix(fake)}:$PATH" "$BASH" "$0" --now', posix(display)], capture_output=True,
                          text=True, check=True).stdout.strip()
-    assert now == "3840x2160 at 30.000000 Hz on HDMI-A-1"
+    assert now == "3840x2160 at 30.000000 Hz on HDMI-A-1, scaling 100%"
 
     # The session sets it before Firefox starts; the option is checked.
     session = bash("render_session").stdout
     assert session.index("mnemerynne-screen-display") < session.index("exec firefox")
-    for good in ("auto", "native", "1080p", "scale:1", "scale:1.25", "scale:2", "scale:3"):
+    for good in ("auto", "native", "1080p"):
         assert bash(f"valid_display {good}", check=False).returncode == 0, good
-    for bad in ("4k", "scale:", "scale:0.5", "scale:3.5", "scale:1.3", "scale:2;reboot", "1080p "):
+    for bad in ("4k", "scale:2", "1080p;reboot", "1080p "):
         assert bash(f"valid_display '{bad}'", check=False).returncode != 0, bad
+    for good in ("100", "150", "200", "300"):
+        assert bash(f"valid_scale {good}", check=False).returncode == 0, good
+    for bad in ("125", "1.5", "200%", "200;reboot", ""):
+        assert bash(f"valid_scale '{bad}'", check=False).returncode != 0, bad
 
 
 def test_the_start_page_grows_on_a_4k_tv():
@@ -241,14 +249,17 @@ def test_install_under_a_root_and_run_again(tmp_path):
     assert "SYSTEM_VOLUME=35\n" in conf and "WIFI_SETUP=yes\n" in conf and "AUDIO_OUTPUT=auto\n" in conf
     assert run("--keep-options", "--no-packages", "--volume", "101", root=root, check=False).returncode != 0
     # The TV's picture: kept by --keep-options and --reconfigure, refused when it's nonsense.
-    out = run("--keep-options", "--no-packages", "--display", "scale:2", root=root).stdout
-    assert "picture: scale:2" in out and "DISPLAY_MODE=scale:2\n" in (root / "etc" / "mnemerynne-screen.conf").read_text()
+    out = run("--keep-options", "--no-packages", "--display", "1080p", "--display-scale", "200", root=root).stdout
+    conf = (root / "etc" / "mnemerynne-screen.conf").read_text()
+    assert "picture: 1080p at 200%" in out and "DISPLAY_MODE=1080p\n" in conf and "DISPLAY_SCALE=200\n" in conf
     run("--reconfigure", root=root)
     conf = (root / "etc" / "mnemerynne-screen.conf").read_text()
-    assert "DISPLAY_MODE=scale:2\n" in conf and "SYSTEM_VOLUME=35\n" in conf
-    assert run("--keep-options", "--no-packages", "--display", "4k", root=root, check=False).returncode != 0
-    run("--no-packages", root=root)                                         # without --keep-options: the default
-    assert "DISPLAY_MODE=auto\n" in (root / "etc" / "mnemerynne-screen.conf").read_text()
+    assert "DISPLAY_MODE=1080p\n" in conf and "DISPLAY_SCALE=200\n" in conf and "SYSTEM_VOLUME=35\n" in conf
+    for bad in (["--display", "4k"], ["--display-scale", "125"]):
+        assert run("--keep-options", "--no-packages", *bad, root=root, check=False).returncode != 0
+    run("--no-packages", root=root)                                         # without --keep-options: the defaults
+    conf = (root / "etc" / "mnemerynne-screen.conf").read_text()
+    assert "DISPLAY_MODE=auto\n" in conf and "DISPLAY_SCALE=100\n" in conf
 
 
 def _git(cwd, *args):

@@ -57,7 +57,7 @@ Screens double as digital signage: playlists of pictures, clips, PDFs, text, web
 
 ## Screen boxes: Kiosk settings
 
-A TV run by a screen box (`deploy/screen/` in the repository) has **⚙ Kiosk settings** in its menu: the box's Mnemerynne address, system volume, top bar, kiosk PIN and updates. Only admins can open them:
+A TV run by a screen box (`deploy/screen/` in the repository) has **⚙ Kiosk settings** in its menu: the box's Mnemerynne address, system volume, display scaling, top bar, kiosk PIN and updates. They open with a keyboard or mouse plugged into the box, never from a phone's or remote panel's buttons, and only admins can unlock them:
 
 - **From a phone:** the TV shows a code and a QR code. Scan it, or open `/media/kiosk` and type the code, and approve. Only admins can approve.
 - **With the kiosk PIN,** if one was set in the settings. It's the only way in while the box can't reach the server.
@@ -66,7 +66,7 @@ A TV run by a screen box (`deploy/screen/` in the repository) has **⚙ Kiosk se
 
 **Text size…** makes text and buttons bigger or smaller on that TV's pages (Media, signage's own pages, and Ask, Files and the Wiki from the top bar). It's stored on the server for that screen, like the screen size. Until someone sets it, it's automatic: 1.5× on a screen wider than 2400 pixels and 2× from 3000 (a 4K TV), otherwise normal. Any screen gets it, not only a box: its owner can change it from **Media → Screens → Text size** on their phone.
 
-A box on a 4K TV keeps 4K when it gets 60 Hz, and the automatic text size makes it readable. When the TV only takes 4K at 30 Hz, the box switches it to 1080p at 60 Hz, where the text is normal size. The installer's `--display` option changes that (the box's README, "A 4K TV").
+**Display scaling** (100%, 150%, 200% or 300%, like Windows) sizes everything on that box's TV, Kiosk settings and the box's own start page included; it's kept on the box. A box on a 4K TV keeps 4K when it gets 60 Hz: set **200%** there, or leave it at 100% and the automatic text size still makes Mnemerynne's pages readable. When the TV only takes 4K at 30 Hz, the box switches it to 1080p at 60 Hz, where the text is normal size. The installer's `--display` option changes that (the box's README, "A 4K TV").
 
 Opening the settings (`kiosk.unlock`) and changing the top bar (`kiosk.top_bar`) are logged, with the admin who approved. The box's README (`deploy/screen/README.md`, step 6) covers the rest.
 

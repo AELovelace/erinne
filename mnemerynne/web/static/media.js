@@ -1402,11 +1402,12 @@
   $("mc-viewer").addEventListener("pointerdown", function () { viewer.wake(); });
 
   // ---------------------------------------------------------- remote nav
-  function targets() {
+  // A remote (a phone or a remote panel) skips what only the TV's own keyboard and mouse may use: Kiosk settings.
+  function targets(remote) {
     return Array.prototype.filter.call(
       document.querySelectorAll("#mc-menu button, #mc-crumbs button, #mc-tools button, #mc-tools input, #mc-tools select, " +
                                 "#mc-content [data-nav], #mc-np:not([hidden]) button"),
-      function (n) { return n.offsetParent !== null && !n.hidden; });
+      function (n) { return n.offsetParent !== null && !n.hidden && !(remote && n.hasAttribute("data-local-only")); });
   }
 
   function focusFirst() {
@@ -1417,8 +1418,8 @@
   }
 
   /* Move focus to the nearest target in the arrow's direction, like a TV remote. */
-  function move(dir) {
-    const all = targets();
+  function move(dir, remote) {
+    const all = targets(remote);
     const cur = document.activeElement;
     if (all.indexOf(cur) < 0) { (content.querySelector("[data-nav]") || all[0]).focus(); return; }
     const r = cur.getBoundingClientRect();
@@ -1450,7 +1451,7 @@
     const target = document.activeElement || document.body;
     const field = ["INPUT", "SELECT", "TEXTAREA"].indexOf(target.tagName) >= 0;
     if (!target.dispatchEvent(new KeyboardEvent("keydown", { key: key, bubbles: true, cancelable: true }))) return;  // taken
-    if (key !== "Enter") { if (field) move(button); return; }   // the panel can't type: its arrows leave a text box
+    if (key !== "Enter") { if (field) move(button, true); return; }   // the panel can't type: its arrows leave a text box
     if (episodes.counting() && $("mc-upnext").contains(target)) target.click();   // Up next: Play now or Cancel
     else if (!$("mc-player").hidden) player.toggleAny();
     else if (!$("mc-viewer").hidden) viewer.slideshow();
@@ -1470,7 +1471,7 @@
     const tag = (document.activeElement && document.activeElement.tagName) || "";
     const typing = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
     const dirs = { ArrowRight: "right", ArrowLeft: "left", ArrowDown: "down", ArrowUp: "up" };
-    if (dirs[e.key] && !typing) { e.preventDefault(); move(dirs[e.key]); return; }
+    if (dirs[e.key] && !typing) { e.preventDefault(); move(dirs[e.key], !e.isTrusted); return; }   // untrusted: a remote
     if ((e.key === "Escape" || (e.key === "Backspace" && !typing)) && ["movie", "tvshow", "album", "artist"].indexOf(route().view) >= 0) {
       e.preventDefault(); history.back(); return;
     }

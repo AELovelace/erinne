@@ -21,10 +21,11 @@
 #   --no-auto-updates      don't install security updates nightly (dnf automatic, rebooting if needed)
 #   --no-wifi-setup        no setup hotspot (and the start page is a plain local file)
 #   --volume 0-100         the system volume (default 100; Media sets its own on top)
-#   --display auto|native|1080p|scale:N
-#                          the TV's picture: 1080p when the TV is bigger than that (auto, the default), the
-#                          TV's own mode (native), 1080p always, or the TV's own mode drawn N times bigger
-#                          (scale:2, from 1 to 3)
+#   --display auto|native|1080p
+#                          the TV's picture: its own mode unless that's 4K at 30 Hz, then 4K at 60 if it can or
+#                          1080p (auto, the default), the TV's own mode (native), or 1080p always
+#   --display-scale 100|150|200|300
+#                          display scaling in percent, like Windows' (default 100; Kiosk settings changes it)
 #   --no-packages          write the files only; install nothing with dnf
 #   --keep-options         start from the options this box already has (the settings file), then apply
 #                          the ones given; without it, options not given go back to their defaults
@@ -67,6 +68,7 @@ AUTO_UPDATES=1
 WIFI_SETUP=1
 VOLUME=100
 DISPLAY_MODE=auto
+DISPLAY_SCALE=100
 PACKAGES=1
 KEEP_OPTIONS=0
 DRY_RUN=0
@@ -127,6 +129,7 @@ YOUTUBE_H264=$(yes_no "$YOUTUBE_H264")
 AUTO_UPDATES=$(yes_no "$AUTO_UPDATES")
 SYSTEM_VOLUME=$VOLUME
 DISPLAY_MODE=$DISPLAY_MODE
+DISPLAY_SCALE=$DISPLAY_SCALE
 SOURCE_DIR=${SOURCE_DIR#"$ROOT"}
 EOF
 }
@@ -136,8 +139,8 @@ yes_no() { [[ $1 == 1 ]] && echo yes || echo no; }
 # hdmi, auto, or card:CARD:PROFILE (Kiosk settings). The settings file is sourced by bash: nothing else.
 valid_audio() { [[ $1 =~ ^(hdmi|auto|card:[A-Za-z0-9._-]+:[A-Za-z0-9:+._-]+)$ ]]; }
 
-# auto, native, 1080p or scale:N (1 to 3, in quarter steps).
-valid_display() { [[ $1 =~ ^(auto|native|1080p|scale:([12](\.(25|5|75))?|3))$ ]]; }
+valid_display() { [[ $1 =~ ^(auto|native|1080p)$ ]]; }
+valid_scale() { [[ $1 =~ ^(100|150|200|300)$ ]]; }
 
 # --keep-options: what this box has now, before the command line's options apply.
 load_options() {
@@ -148,6 +151,7 @@ load_options() {
     v=$(conf_value AUTO_UPDATES); [[ $v == no ]] && AUTO_UPDATES=0
     v=$(conf_value SYSTEM_VOLUME); [[ $v =~ ^[0-9]{1,3}$ && $v -le 100 ]] && VOLUME=$v
     v=$(conf_value DISPLAY_MODE); valid_display "$v" && DISPLAY_MODE=$v
+    v=$(conf_value DISPLAY_SCALE); valid_scale "$v" && DISPLAY_SCALE=$v
     return 0
 }
 
@@ -232,25 +236,29 @@ done
 EOF
 }
 
-# The TV's picture (DISPLAY_MODE), set with wlr-randr inside cage before Firefox starts:
+# The TV's picture, set with wlr-randr inside cage before Firefox starts, and again whenever Kiosk settings
+# changes the scaling. DISPLAY_MODE:
 #   auto           the TV's own mode, unless it is wider than 1920x1080 at under 50 Hz (a 4K TV at 30 Hz):
 #                  then that size at 50 Hz or more if the TV offers it, else 1920x1080 at its best refresh rate
 #   native         the TV's own mode, as cage picks it
 #   1080p          1920x1080, at the best refresh rate the TV offers for it
-#   scale:N        the TV's own mode, everything drawn N times bigger (Firefox still renders every pixel)
+# DISPLAY_SCALE: 100, 150, 200 or 300 (percent), like Windows' display scaling: everything Firefox draws, the
+# start page and Kiosk settings too. 200% on a 4K TV lays out like 1080p, drawn at 4K.
 # 4K at 60 Hz needs HDMI 2.0 (an NVIDIA GTX 900 or newer, say); the NUC's HD 4000 has HDMI 1.4. At 30 Hz the
-# menus and YouTube judder, so 1080p at 60 is better there; at 4K the pages' automatic text size is 2x.
-# `--plan MODE` reads `wlr-randr` and prints the arguments it would pass (tests); `--now` prints the mode the
-# TV is in (install.sh --check).
+# menus and YouTube judder, so 1080p at 60 is better there.
+# `--plan MODE SCALE` reads `wlr-randr` and prints the arguments it would pass (tests); `--now` prints the mode
+# the TV is in and its scaling (install.sh --check).
 render_display() {
     cat <<'EOF'
 #!/bin/bash
-# The TV's picture for the Mnemerynne screen (deploy/screen/install.sh): run by the session, inside cage.
+# The TV's picture for the Mnemerynne screen (deploy/screen/install.sh): run by the session inside cage, and
+# by Kiosk settings and install.sh --check as the screen's user (it finds cage's socket itself).
 set -u
 CONF=${MNEMERYNNE_SCREEN_CONF:-/etc/mnemerynne-screen.conf}
 plan() {
-    awk -v want="$1" '
+    awk -v want="$1" -v scale="${2:-100}" '
         /^[^ \t]/ { n++; if (n == 1) out = $1; next }          # an output; cage shows the first
+        n == 1 && /^[ \t]+Scale: / { cur_scale = $2 + 0 }
         n == 1 && /^[ \t]+[0-9]+x[0-9]+ px, / {
             split($1, wh, "x"); hz = $3 + 0
             sizes[NR] = $1; rates[NR] = hz; names[NR] = $1 "@" $3
@@ -259,25 +267,38 @@ plan() {
         }
         END {
             if (out == "") exit
-            if (want ~ /^scale:/) { print "--output " out " --scale " substr(want, 7); exit }
-            if (want == "auto" && (cur_w <= 1920 || cur_hz >= 50)) exit
-            if (want == "auto") {                               # the same size, faster, before 1080p
+            mode = ""
+            if (want == "auto" && cur_w > 1920 && cur_hz < 50) {
                 for (i in sizes) if (sizes[i] == cur_size && rates[i] >= 50 && rates[i] > fast) { fast = rates[i]; fast_mode = names[i] }
-                if (fast_mode != "") { print "--output " out " --mode " fast_mode "Hz"; exit }
+                mode = fast_mode != "" ? fast_mode : best_mode     # the same size, faster, before 1080p
             }
-            if ((want == "auto" || want == "1080p") && best_mode != "" && best_mode != cur)
-                print "--output " out " --mode " best_mode "Hz"
+            if (want == "1080p") mode = best_mode
+            args = ""
+            if (mode != "" && mode != cur) args = " --mode " mode "Hz"
+            s = scale / 100
+            if (cur_scale == 0) cur_scale = 1
+            if (s - cur_scale > 0.001 || cur_scale - s > 0.001) args = args " --scale " s
+            if (args != "") print "--output " out args
         }'
 }
-if [ "${1:-}" = --plan ]; then plan "${2:-auto}"; exit 0; fi
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then           # outside the session: cage's socket
+    for socket in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"/wayland-*; do
+        case $socket in *.lock) ;; *) [ -S "$socket" ] && export WAYLAND_DISPLAY=${socket##*/} && break ;; esac
+    done
+fi
+if [ "${1:-}" = --plan ]; then plan "${2:-auto}" "${3:-100}"; exit 0; fi
 if [ "${1:-}" = --now ]; then
-    wlr-randr 2>/dev/null | awk '/^[^ \t]/ { n++; out = $1 } n == 1 && /current/ { print $1 " at " $3 " Hz on " out; exit }'
+    wlr-randr 2>/dev/null | awk '
+        /^[^ \t]/ { n++; out = $1 }
+        n == 1 && /current/ { mode = $1 " at " $3 " Hz on " out }
+        n == 1 && /^[ \t]+Scale: / { scale = $2 * 100 }
+        END { if (mode != "") printf "%s, scaling %d%%\n", mode, scale }'
     exit 0
 fi
 
-DISPLAY_MODE=auto
+DISPLAY_MODE=auto DISPLAY_SCALE=100
 . "$CONF" 2>/dev/null || true
-args=$(wlr-randr 2>/dev/null | plan "$DISPLAY_MODE")
+args=$(wlr-randr 2>/dev/null | plan "$DISPLAY_MODE" "$DISPLAY_SCALE")
 [ -n "$args" ] || exit 0
 # shellcheck disable=SC2086
 wlr-randr $args
@@ -657,11 +678,10 @@ check() {
     fi
     # The TV's picture: the mode it's in now (from cage, as the screen's user), else the kernel's first mode for
     # any connected output (HDMI or DisplayPort, on any of the box's GPUs).
-    local tv_mode uid socket connector
+    local tv_mode uid connector
     uid=$(id -u "$SCREEN_USER" 2>/dev/null || true)
-    socket=$(ls "/run/user/$uid"/wayland-* 2>/dev/null | grep -v '\.lock$' | head -n 1 || true)
-    if [[ -n $uid && -n $socket ]]; then
-        tv_mode=$(runuser -u "$SCREEN_USER" -- env XDG_RUNTIME_DIR="/run/user/$uid" WAYLAND_DISPLAY="${socket##*/}" \
+    if [[ -n $uid ]]; then
+        tv_mode=$(runuser -u "$SCREEN_USER" -- env XDG_RUNTIME_DIR="/run/user/$uid" \
             /usr/local/bin/mnemerynne-screen-display --now 2>/dev/null || true)
     fi
     if [[ -z ${tv_mode:-} ]]; then
@@ -672,7 +692,7 @@ check() {
         done
     fi
     if [[ -n ${tv_mode:-} ]]; then
-        note "picture: $tv_mode (--display $(conf_value DISPLAY_MODE))"
+        note "picture: $tv_mode (--display $(conf_value DISPLAY_MODE), --display-scale $(conf_value DISPLAY_SCALE))"
     else
         note "picture: no TV connected right now (or it's off)"
     fi
@@ -720,7 +740,9 @@ parse_args() {
             --volume) VOLUME=${2:-}; shift
                       [[ $VOLUME =~ ^[0-9]{1,3}$ && $VOLUME -le 100 ]] || die "--volume is 0 to 100" ;;
             --display) DISPLAY_MODE=${2:-}; shift
-                       valid_display "$DISPLAY_MODE" || die "--display is auto, native, 1080p or scale:N (1 to 3, like scale:1.5)" ;;
+                       valid_display "$DISPLAY_MODE" || die "--display is auto, native or 1080p" ;;
+            --display-scale) DISPLAY_SCALE=${2:-}; shift
+                             valid_scale "$DISPLAY_SCALE" || die "--display-scale is 100, 150, 200 or 300" ;;
             --no-packages) PACKAGES=0 ;;
             --keep-options) ;;
             --reconfigure) PACKAGES=0 ;;
@@ -763,8 +785,8 @@ main() {
     URL=$(clean_url "$URL") || exit 1
     [[ $URL == https://* ]] || note "warning: $URL isn't HTTPS; the screen key would cross the network in the clear"
 
-    printf 'Mnemerynne screen for %s (sound: %s at %s%%, picture: %s, YouTube: %s, nightly updates: %s, Wi-Fi setup: %s)\n' "$URL" \
-        "$AUDIO" "$VOLUME" "$DISPLAY_MODE" "$([[ $YOUTUBE_H264 == 1 ]] && echo H.264 || echo any codec)" \
+    printf 'Mnemerynne screen for %s (sound: %s at %s%%, picture: %s at %s%%, YouTube: %s, nightly updates: %s, Wi-Fi setup: %s)\n' "$URL" \
+        "$AUDIO" "$VOLUME" "$DISPLAY_MODE" "$DISPLAY_SCALE" "$([[ $YOUTUBE_H264 == 1 ]] && echo H.264 || echo any codec)" \
         "$([[ $AUTO_UPDATES == 1 ]] && echo yes || echo no)" "$([[ $WIFI_SETUP == 1 ]] && echo hotspot || echo no)"
     if [[ $PACKAGES == 1 ]]; then install_packages; fi
     make_user

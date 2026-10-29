@@ -160,6 +160,7 @@ def test_a_box_gets_the_small_bar_and_its_underscan_on_every_page(client, conn, 
     assert 'class="tv tv-page"' in page and "--safe-x: 3.0%" in page          # a TV, not (yet) a box
 
     page = tv.get("/media/screen?kiosk=1").text                               # the box's start page opens it so
+    assert 'id="mc-kiosk" data-local-only hidden' in page                     # Kiosk settings: not from a remote
     assert 'class="tv tv-box tv-page"' in page and "screen_link.js" not in page and "tv-strip" not in page
     assert conn.execute("SELECT is_box FROM media_screens WHERE id = ?", (screen_id,)).fetchone()[0] == 1
 

@@ -2,7 +2,9 @@
    the box (media.js remembers it as "mc-kiosk"). It asks the server for a code, shows it with a QR code for
    an admin's phone, and once approved opens the box's own settings page (deploy/screen/wifi-setup.py) with
    the one-time grant in the URL's fragment, which the box hands back to the server. Or, without a phone,
-   the settings page's PIN. Escape or Backspace closes it. Nothing here uses innerHTML but the server's QR SVG. */
+   the settings page's PIN. Escape or Backspace closes it. Nothing here uses innerHTML but the server's QR SVG.
+   Only the TV's own keyboard or mouse opens it: a remote's presses (media.js remotePress) are replayed keys and
+   clicks, which the browser marks untrusted, so they skip the menu item and can't press it or the PIN button. */
 (function () {
   "use strict";
   const KIOSK_HOME = "http://127.0.0.1:9187/";
@@ -45,7 +47,7 @@
     const buttons = el("div", "mc-kiosk-buttons");
     const pin = el("button", "secondary", "Use the kiosk PIN");
     pin.type = "button";
-    pin.addEventListener("click", function () { location.href = KIOSK_HOME + "settings"; });
+    pin.addEventListener("click", function (e) { if (e.isTrusted) location.href = KIOSK_HOME + "settings"; });
     const cancel = el("button", "secondary", "Cancel");
     cancel.type = "button";
     cancel.addEventListener("click", close);
@@ -107,7 +109,7 @@
     button.focus();
   }
 
-  button.addEventListener("click", open);
+  button.addEventListener("click", function (e) { if (e.isTrusted) open(); });
   window.addEventListener("keydown", function (e) {
     if (!box || box.hidden) return;
     if (e.key === "Escape" || e.key === "Backspace") {

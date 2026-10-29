@@ -65,6 +65,8 @@ URL_RE = re.compile(r"^https?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1
 AUDIO_SCRIPT = "/usr/local/bin/mnemerynne-screen-audio"
 # The settings file is sourced by bash (install.sh's scripts): only these, as install.sh's valid_audio.
 AUDIO_RE = re.compile(r"^(hdmi|auto|card:[A-Za-z0-9._-]+:[A-Za-z0-9:+._-]+)$")
+DISPLAY_SCRIPT = "/usr/local/bin/mnemerynne-screen-display"
+DISPLAY_SCALES = (100, 150, 200, 300)    # percent, as install.sh's valid_scale
 JOBS = {"update": "mnemerynne-screen-update", "config": "mnemerynne-screen-config",
         "system": "mnemerynne-screen-osupdate"}
 JOB_NAMES = {"update": "updating the screen", "config": "changing the address", "system": "installing system updates"}
@@ -695,6 +697,24 @@ class Kiosk:
         self._as_screen_user([AUDIO_SCRIPT, "--once"], 30)       # and now
         return value
 
+    def display(self, token: str | None) -> dict:
+        """Display scaling (DISPLAY_SCALE, in percent) and the mode the TV is in now, from cage."""
+        self.need(token)
+        v = self.conf().get("DISPLAY_SCALE", "100")
+        _, now, _ = self._as_screen_user([DISPLAY_SCRIPT, "--now"])
+        return {"scale": int(v) if v.isdigit() and int(v) in DISPLAY_SCALES else 100, "choices": list(DISPLAY_SCALES),
+                "now": now.strip()}
+
+    def set_display_scale(self, token: str | None, scale) -> int:
+        self.need(token)
+        if isinstance(scale, bool) or scale not in DISPLAY_SCALES:
+            raise KioskError("Display scaling is 100%, 150%, 200% or 300%.", 422)
+        set_conf_value(self.conf_path, "DISPLAY_SCALE", str(scale))   # the session applies it at every start
+        code, _, err = self._as_screen_user([DISPLAY_SCRIPT], 30)      # and now
+        if code != 0:
+            raise KioskError(f"Saved; it applies when the screen restarts ({err.strip() or 'the screen is not running'}).", 409)
+        return scale
+
     def screen(self, token: str | None) -> dict | None:
         """The screen's own settings on the server (the top bar), with a phone approval only."""
         found = self.need(token)
@@ -985,6 +1005,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._json(200, {"screen": k.screen(token)})
             elif path == "/api/kiosk/audio":
                 self._json(200, k.audio(token))
+            elif path == "/api/kiosk/display":
+                self._json(200, k.display(token))
             else:
                 self._send(404, "Not found", "text/plain")
         except KioskError as exc:
@@ -1015,6 +1037,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._json(200, {"volume": k.set_volume(token, body.get("level"))})
             elif path == "/api/kiosk/audio":
                 self._json(200, {"current": k.set_audio(token, str(body.get("output", "")))})
+            elif path == "/api/kiosk/display-scale":
+                self._json(200, {"scale": k.set_display_scale(token, body.get("scale"))})
             elif path == "/api/kiosk/top-bar":
                 self._json(200, {"screen": k.set_top_bar(token, bool(body.get("on")))})
             elif path == "/api/kiosk/update":
@@ -1308,6 +1332,12 @@ label.switch input { width: 1.5rem; height: 1.5rem; accent-color: #ff2e97; }
         <div class="row"><label for="volume">System volume</label>
           <input type="range" id="volume" min="0" max="100" step="5"><span id="volume-value"></span></div>
         <p class="muted">The sound card's level. Media's own volume (the remote's − and +) is on top of it.</p>
+        <div class="row"><label for="display-scale">Display scaling</label>
+          <select id="display-scale" aria-label="Display scaling">
+            <option value="100">100%</option><option value="150">150%</option>
+            <option value="200">200%</option><option value="300">300%</option>
+          </select></div>
+        <p class="muted" id="display-note">Everything on the TV, these settings too. 200% on a 4K TV is the size of 1080p, but sharper.</p>
         <div class="row"><button class="secondary" type="button" id="screen-size">Screen size…</button>
           <span class="muted">For a TV that cuts off the edges of the picture.</span></div>
         <div class="row"><button class="secondary" type="button" id="text-size">Text size…</button>
@@ -1404,6 +1434,7 @@ async function load() {
   });
   $("reboot-now").hidden = !state.reboot_needed;
   outputs();
+  display();
   $("wifi-now").textContent = d.ssid ? "On " + d.ssid + "." : d.wifi ? "Not on Wi-Fi (a cable, or no network)." : "This box has no Wi-Fi.";
   releases();
   jobs();
@@ -1420,6 +1451,14 @@ async function outputs() {
     sel.appendChild(o);
   });
   sel.value = a.current;
+}
+
+async function display() {
+  let d;
+  try { d = await call("GET", "/api/kiosk/display"); } catch (e) { return; }
+  $("display-scale").value = String(d.scale);
+  $("display-note").textContent = (d.now ? "The TV is at " + d.now + ". " : "") +
+    "Everything on the TV, these settings too. 200% on a 4K TV is the size of 1080p, but sharper.";
 }
 
 async function releases() {
@@ -1482,6 +1521,11 @@ $("top-bar").addEventListener("change", async function () {
 $("audio").addEventListener("change", async function () {
   try { await call("POST", "/api/kiosk/audio", { output: $("audio").value }); say("Sound now goes to " + $("audio").selectedOptions[0].textContent + "."); }
   catch (err) { say(err.message, true); outputs(); }
+});
+$("display-scale").addEventListener("change", async function () {
+  try { await call("POST", "/api/kiosk/display-scale", { scale: Number($("display-scale").value) });
+        say("Display scaling is " + $("display-scale").value + "%."); display(); }
+  catch (err) { say(err.message, true); display(); }
 });
 $("volume").addEventListener("input", function () { $("volume-value").textContent = $("volume").value + "%"; });
 $("volume").addEventListener("change", async function () {
