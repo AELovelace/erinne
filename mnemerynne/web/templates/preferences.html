@@ -73,6 +73,16 @@
     <div id="m365" aria-live="polite"><p class="muted small">Loading…</p></div>
   </section>
 
+  {%- if backups %}
+  {#- Desktop backup (backups.js, web/sync.py): only for people in the Backups group. -#}
+  <h2 class="admin-section" id="backups-title">Backups</h2>
+  <p class="muted small">Mnemerynne Backup copies folders on your computer to Backups in your File box: one way, with
+    deleted files kept in the recycle bin and changed ones as earlier versions.</p>
+  <div id="backups" aria-live="polite"><p class="muted small">Loading…</p></div>
+  <p class="ok-note" hidden>Copy this token now; it isn't shown again: <code id="backups-token"></code></p>
+  <p id="backups-note" aria-live="polite" hidden></p>
+  {%- endif %}
+
   <h2 class="admin-section" id="memories">What {{ assistant_name }} remembers about you</h2>
   {% if memory_mode == 'off' %}
   <p class="muted small">Memory is turned off on this server.</p>
@@ -182,6 +192,7 @@
 <script src="{{ static('picker.js') }}"></script>
 <script src="{{ static('settings.js') }}"></script>
 <script src="{{ static('m365.js') }}"></script>
+{% if backups %}<script src="{{ static('backups.js') }}"></script>{% endif %}
 <script src="{{ static('connect.js') }}"></script>
 <script src="{{ static('claude_connect.js') }}"></script>
 {% if claude_chat %}<script src="{{ static('claude_chat.js') }}"></script>{% endif %}

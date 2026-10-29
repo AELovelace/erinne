@@ -1,0 +1,27 @@
+[project]
+name = "mnemerynne-backup"
+version = "0.1.0"
+description = "Backs up folders on this computer to your Backups folder in Mnemerynne"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx==0.28.1",
+    "watchdog==6.0.0",
+    "keyring==25.6.0",
+]
+
+[project.optional-dependencies]
+# The tray icon and settings window; without them the app runs from the command line or as a service.
+tray = [
+    "pystray==0.19.5",
+    "pillow==11.3.0",
+]
+
+[project.scripts]
+mnemerynne-backup = "mnemerynne_backup.cli:main"
+
+[project.gui-scripts]
+mnemerynne-backup-tray = "mnemerynne_backup.tray:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

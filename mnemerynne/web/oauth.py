@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
-from mnemerynne import oauth, permissions
+from mnemerynne import oauth, permissions, sync
 from mnemerynne.db import transaction
 from mnemerynne.mcp_server import public_base
 from mnemerynne.web.admin import _log
@@ -89,9 +89,22 @@ def authorize(request: Request, conn: sqlite3.Connection = Depends(get_db)):
         request.session["after_login"] = str(request.url.path) + "?" + str(request.url.query)
         return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
     nonce = secrets.token_urlsafe(24)
+    scope = "sync" if params.get("scope") == "sync" else "mcp"
     request.session["oauth_consent"] = {"nonce": nonce, "user_id": user["id"], "client_id": row["client_id"],
                                         "redirect_uri": redirect_uri, "challenge": params["code_challenge"],
-                                        "state": params.get("state")}
+                                        "state": params.get("state"), "scope": scope}
+    if scope == "sync":
+        # The desktop backup app (sync.py): only an app on the person's own computer, and only for people who may.
+        if oauth.kind(json.loads(row["redirect_uris"])) != "local":
+            request.session.pop("oauth_consent", None)
+            return _page(request, "oauth_consent.html", 400, user=None,
+                         error="Only the backup app on your own computer can ask for that.")
+        if not sync.may_backup(conn, user, request.app.state.directory):
+            request.session.pop("oauth_consent", None)
+            return _page(request, "oauth_consent.html", 403, user=None,
+                         error="Backups aren't open for you; ask an admin.")
+        return _page(request, "oauth_consent.html", user=user, nonce=nonce, scope=scope, name=row["name"],
+                     host=urlsplit(redirect_uri).hostname, error=None)
     shared = permissions.claude_collection_ids(conn, user["id"])
     places = [("📥 " + permissions.PRIVATE_LABEL if c["kind"] == "private" else "📚 " + c["name"])
               for c in permissions.readable_collections(conn, user["id"]) if c["id"] in shared]
@@ -115,8 +128,9 @@ async def decide(request: Request, conn: sqlite3.Connection = Depends(get_db)):
         row = oauth.client(conn, pending["client_id"])
         if row is None:
             return _page(request, "oauth_consent.html", 400, user=None, error="That app was removed; connect again.")
+        scope = pending.get("scope", "mcp")
         query["code"] = oauth.issue_code(conn, row, user["id"], pending["redirect_uri"], pending["challenge"],
-                                         form.get("can_edit") == "1")
+                                         scope == "mcp" and form.get("can_edit") == "1", scope)
     else:
         query["error"] = "access_denied"
     # RFC 9207 on success and error alike, exactly the metadata's issuer: ChatGPT rejects a reply without it.

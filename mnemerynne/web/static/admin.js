@@ -1998,6 +1998,68 @@
     box.appendChild(add);
   }
 
+  // --------------------------------------------- Desktop backup (Settings → This box, sync.py)
+  // The switch and who may back up (PUT /api/admin/settings/backups), and every backed-up folder: whose, from
+  // which computer, how big, and when it last sent something. Every answer is the whole state, drawn again.
+  function renderBackups(data) {
+    const box = $("backups-settings");
+    box.replaceChildren();
+    box.appendChild(el("p", "muted", "People in the group install Mnemerynne Backup (Preferences → Backups) and pick " +
+      "folders on their computer; each is copied, one way, to Backups in their File box on the share."));
+    box.appendChild(el("p", "small", data.backup_url
+      ? "Backup address: " + data.backup_url
+      : "MNEMERYNNE_BACKUP_URL isn't set, so backups go to the main address, with its upload limits " +
+        "(deploy README, section 5m)."));
+    async function send(body) {
+      showError("");
+      try { renderBackups(await api("PUT", "/api/admin/settings/backups", body)); }
+      catch (err) { showError(err.message); }
+    }
+    const s = data.settings;
+    const form = el("form");
+    const grid = el("div", "agent-settings");
+    const on = agentInput("checkbox", s.enabled);
+    const group = agentInput("text", s.group);
+    group.setAttribute("list", "domain-groups");
+    group.placeholder = "Nobody";
+    agentField(grid, "Backups are on", on).title = "Off: the backup app is refused, and stops until it's on again";
+    agentField(grid, "Who may back up", group).title = "AD or Entra group(s), separated by ;";
+    form.appendChild(grid);
+    const actions = el("div", "ax-new");
+    const save = el("button", "small", "Save");
+    save.type = "submit";
+    actions.appendChild(save);
+    form.appendChild(actions);
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      send({ enabled: on.checked, group: group.value.trim() });
+    });
+    box.appendChild(form);
+
+    if (!data.roots.length) {
+      box.appendChild(el("p", "muted small", "Nobody backs anything up yet."));
+      return;
+    }
+    const table = el("table", "small");
+    const head = el("tr");
+    ["Person", "Computer", "Folder", "Files", "Size", "Last sync"].forEach(function (t) { head.appendChild(el("th", null, t)); });
+    table.appendChild(head);
+    data.roots.forEach(function (r) {
+      const row = el("tr");
+      [r.username, r.computer, r.label + (r.present ? "" : " (deleted)"), String(r.files), sizeLabel(r.bytes),
+       r.last_seen_at || "never"].forEach(function (t) { row.appendChild(el("td", null, t)); });
+      table.appendChild(row);
+    });
+    const wrap = el("div", "table-wrap");
+    wrap.appendChild(table);
+    box.appendChild(wrap);
+  }
+
+  async function loadBackups() {
+    try { renderBackups(await api("GET", "/api/admin/settings/backups")); }
+    catch (e) { $("backups-settings").replaceChildren(el("p", "error", e.message)); }
+  }
+
   async function loadGames() {
     try { renderGames(await api("GET", "/api/admin/settings/games")); }
     catch (e) { $("games-settings").replaceChildren(el("p", "error", e.message)); }
@@ -2074,7 +2136,7 @@
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
     if (tab === "settings" && !updatesLoaded) {
-      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeMail(); loadClaudeLinks(); loadChatGPT(); loadExperimental(); loadRooms(); loadAutomations(); loadMedia(); loadGames(); loadDev();
+      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeMail(); loadClaudeLinks(); loadChatGPT(); loadExperimental(); loadRooms(); loadAutomations(); loadMedia(); loadGames(); loadBackups(); loadDev();
       if (window.ErynneM365) window.ErynneM365.load();   // admin_m365.js
       if (window.ErynneTheme) window.ErynneTheme.load();   // admin_theme.js
     }

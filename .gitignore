@@ -24,3 +24,8 @@ training/out/
 # Packed Claude Desktop extension and its internal CA certificate
 *.mcpb
 clients/claude-desktop/ca.pem
+
+# Desktop backup app builds (clients/desktop-sync/packaging)
+clients/desktop-sync/dist/
+clients/desktop-sync/packaging/build/
+clients/desktop-sync/.build-venv/

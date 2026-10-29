@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Mnemerynne Backup
+Comment=Backs folders up to Mnemerynne
+Exec=mnemerynne-backup-tray
+Icon=mnemerynne-backup
+Categories=Utility;Archiving;
+Terminal=false

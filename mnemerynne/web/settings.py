@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import accounts, api_tokens, apis, auth, claude_chat, memory, scratchpad, users
+from mnemerynne import accounts, api_tokens, apis, auth, claude_chat, memory, scratchpad, sync, users
 from mnemerynne.clients import claude as claude_client
 from mnemerynne.db import transaction
 from mnemerynne.web.admin import _log
@@ -54,7 +54,8 @@ async def preferences_page(request: Request, user=Depends(page_user), conn: sqli
         "admin_via": ADMIN_VIA.get(via or ""), "groups": groups, "domain": state.settings.ad_domain,
         "tokens": api_tokens.has_active(conn, user["id"]), "min_password": auth.MIN_PASSWORD_LENGTH,
         "has_extension": extension_path(state.settings) is not None,
-        "claude_chat": claude_chat.is_claude_user(conn, user, state.directory)})
+        "claude_chat": claude_chat.is_claude_user(conn, user, state.directory),
+        "backups": sync.may_backup(conn, user, state.directory)})
 
 
 def _keep_this_session(request: Request, conn: sqlite3.Connection, user_id: int) -> None:

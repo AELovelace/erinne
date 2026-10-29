@@ -324,12 +324,25 @@ def _lock_files(path: Path) -> list[Path]:
 
 
 # ------------------------------------------------------------------ saving
-def _keep_version(settings: Settings, file_id: int, data: bytes, ext: str) -> str:
+def _version_dest(settings: Settings, file_id: int, ext: str) -> tuple[str, Path]:
     rel = f"{file_id}/{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}{ext}"
     dest = settings.data_dir / "versions" / rel
     dest.parent.mkdir(parents=True, exist_ok=True)
+    return rel, dest
+
+
+def _keep_version(settings: Settings, file_id: int, data: bytes, ext: str) -> str:
+    rel, dest = _version_dest(settings, file_id, ext)
     with open(dest, "xb") as fh:
         fh.write(data)
+    return rel
+
+
+def keep_version_file(settings: Settings, file_id: int, src: Path, ext: str) -> str:
+    """_keep_version for content on disk (a big backed-up file): copied in blocks, never read whole."""
+    rel, dest = _version_dest(settings, file_id, ext)
+    with open(src, "rb") as fin, open(dest, "xb") as fout:
+        shutil.copyfileobj(fin, fout, 1024 * 1024)
     return rel
 
 
@@ -567,7 +580,7 @@ def versions(conn: sqlite3.Connection, file_id: int) -> list[dict]:
         "SELECT v.id, v.sha256, v.size, v.created_at, v.via, v.summary, u.username AS by FROM file_versions v "
         "LEFT JOIN users u ON u.id = v.created_by WHERE v.file_id = ? ORDER BY v.id DESC", (file_id,)).fetchall()
     return [{"id": r["id"], "version": r["sha256"], "size": r["size"], "replaced_at": r["created_at"],
-             "replaced_by": {"claude": "Claude for ", "erynne": "Erynne for ", "web": ""}.get(r["via"], "restore by ")
+             "replaced_by": {"claude": "Claude for ", "erynne": "Erynne for ", "web": "", "sync": "the backup app for "}.get(r["via"], "restore by ")
                             + (r["by"] or "a deleted user"),
              "change": r["summary"]} for r in rows]
 

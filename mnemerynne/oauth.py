@@ -194,23 +194,25 @@ def check_request(conn: sqlite3.Connection, params: dict, resource: str) -> tupl
 
 
 def issue_code(conn: sqlite3.Connection, row: sqlite3.Row, user_id: int, redirect_uri: str, challenge: str,
-               can_edit: bool) -> str:
+               can_edit: bool, scope: str = "mcp") -> str:
     code = secrets.token_urlsafe(32)
     conn.execute("INSERT INTO oauth_codes(code_hash, client_row, user_id, redirect_uri, code_challenge, can_edit, "
-                 "expires_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now', ?))",
-                 (_hash(code), row["id"], user_id, redirect_uri, challenge, int(can_edit), f"+{CODE_SECONDS} seconds"))
+                 "expires_at, scope) VALUES (?, ?, ?, ?, ?, ?, datetime('now', ?), ?)",
+                 (_hash(code), row["id"], user_id, redirect_uri, challenge, int(can_edit), f"+{CODE_SECONDS} seconds",
+                  scope))
     return code
 
 
 # -------------------------------------------------------------------- token
 def _tokens(conn: sqlite3.Connection, grant_id: int) -> dict:
+    scope = conn.execute("SELECT scope FROM oauth_grants WHERE id = ?", (grant_id,)).fetchone()["scope"]
     access, refresh = ACCESS_PREFIX + secrets.token_urlsafe(32), REFRESH_PREFIX + secrets.token_urlsafe(32)
     conn.executemany("INSERT INTO oauth_tokens(token_hash, grant_id, kind, expires_at) VALUES (?, ?, ?, datetime('now', ?))",
                      [(_hash(access), grant_id, "access", f"+{ACCESS_SECONDS} seconds"),
                       (_hash(refresh), grant_id, "refresh", f"+{REFRESH_DAYS} days")])
     conn.execute("DELETE FROM oauth_tokens WHERE grant_id = ? AND expires_at < datetime('now', '-1 day')", (grant_id,))
     return {"access_token": access, "token_type": "Bearer", "expires_in": ACCESS_SECONDS, "refresh_token": refresh,
-            "scope": "mcp"}
+            "scope": scope}
 
 
 def _client_auth(conn: sqlite3.Connection, form: dict, basic: str | None) -> tuple[sqlite3.Row, str | None]:
@@ -250,8 +252,8 @@ def token(conn: sqlite3.Connection, form: dict, basic: str | None = None) -> dic
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
         if not verifier or not secrets.compare_digest(challenge, code["code_challenge"]):
             raise OAuthError("invalid_grant", "PKCE verification failed.")
-        grant_id = conn.execute("INSERT INTO oauth_grants(user_id, client_row, can_edit) VALUES (?, ?, ?)",
-                                (code["user_id"], row["id"], code["can_edit"])).lastrowid
+        grant_id = conn.execute("INSERT INTO oauth_grants(user_id, client_row, can_edit, scope) VALUES (?, ?, ?, ?)",
+                                (code["user_id"], row["id"], code["can_edit"], code["scope"])).lastrowid
         conn.execute("UPDATE oauth_codes SET used_at = datetime('now'), grant_id = ? WHERE code_hash = ?",
                      (grant_id, code["code_hash"]))
         conn.execute("UPDATE oauth_clients SET last_used_at = datetime('now') WHERE id = ?", (row["id"],))
@@ -272,9 +274,9 @@ def token(conn: sqlite3.Connection, form: dict, basic: str | None = None) -> dic
     raise OAuthError("unsupported_grant_type", "Use authorization_code or refresh_token.")
 
 
-def verify(conn: sqlite3.Connection, value: str | None) -> Caller | None:
+def verify(conn: sqlite3.Connection, value: str | None, *, scope: str = "mcp") -> Caller | None:
     """The person behind an access token, or None (unknown, expired, disconnected,
-    or the user was deactivated)."""
+    made for another scope (api_tokens.SCOPES), or the user was deactivated)."""
     if not value or not value.startswith(ACCESS_PREFIX):
         return None
     row = conn.execute(
@@ -282,13 +284,14 @@ def verify(conn: sqlite3.Connection, value: str | None) -> Caller | None:
         "JOIN oauth_grants g ON g.id = t.grant_id JOIN users u ON u.id = g.user_id "
         "JOIN oauth_clients c ON c.id = g.client_row "
         "WHERE t.token_hash = ? AND t.kind = 'access' AND t.expires_at > datetime('now') "
-        "AND g.revoked_at IS NULL AND u.active = 1", (_hash(value),)).fetchone()
+        "AND g.scope = ? AND g.revoked_at IS NULL AND u.active = 1", (_hash(value), scope)).fetchone()
     if row is None:
         return None
     if kind(json.loads(row["redirect_uris"])) == "chatgpt" and not chatgpt_enabled(conn):
         return None
     conn.execute("UPDATE oauth_grants SET last_used_at = datetime('now') WHERE id = ?", (row["grant_id"],))
-    return Caller(row["user_id"], row["username"], None, bool(row["can_edit"]), grant_id=row["grant_id"])
+    return Caller(row["user_id"], row["username"], None, bool(row["can_edit"]), grant_id=row["grant_id"],
+                  token_scope=scope)
 
 
 def revoke_token(conn: sqlite3.Connection, value: str) -> None:
@@ -317,14 +320,16 @@ def revoke_all(conn: sqlite3.Connection, user_id: int) -> int:
 
 
 def set_can_edit(conn: sqlite3.Connection, grant_id: int, user_id: int, can_edit: bool) -> bool:
-    return conn.execute("UPDATE oauth_grants SET can_edit = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
+    return conn.execute("UPDATE oauth_grants SET can_edit = ? WHERE id = ? AND user_id = ? AND scope = 'mcp' "
+                        "AND revoked_at IS NULL",
                         (int(can_edit), grant_id, user_id)).rowcount > 0
 
 
-def connections(conn: sqlite3.Connection, user_id: int) -> list[dict]:
+def connections(conn: sqlite3.Connection, user_id: int, scope: str = "mcp") -> list[dict]:
+    """The person's live connections of one scope: AI apps ('mcp', the Connect page) or backup apps ('sync')."""
     rows = conn.execute("SELECT g.*, c.name, c.redirect_uris FROM oauth_grants g JOIN oauth_clients c "
-                        "ON c.id = g.client_row WHERE g.user_id = ? AND g.revoked_at IS NULL "
-                        "ORDER BY g.id DESC", (user_id,)).fetchall()
+                        "ON c.id = g.client_row WHERE g.user_id = ? AND g.scope = ? AND g.revoked_at IS NULL "
+                        "ORDER BY g.id DESC", (user_id, scope)).fetchall()
     return [{"id": r["id"], "app": who(json.loads(r["redirect_uris"])), "name": r["name"],
              "can_edit": bool(r["can_edit"]), "created_at": r["created_at"], "last_used_at": r["last_used_at"]}
             for r in rows]

@@ -7,7 +7,8 @@ import signal
 import sqlite3
 import time
 
-from mnemerynne import db, directory, editing, fs, health, jobs, m365, proposals, retention, share, sharepoint
+from mnemerynne import (db, directory, editing, fs, health, jobs, m365, proposals, retention, share, sharepoint,
+                        sync)
 from mnemerynne.clients.embed import Embedder
 from mnemerynne.config import Settings
 from mnemerynne.ingest import pipeline
@@ -149,6 +150,12 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
                         log.info("Dropped %d earlier file version(s) past their keep date.", dropped)
                 except Exception:
                     log.exception("File version cleanup failed")
+                try:
+                    swept = sync.sweep_uploads(conn, settings)
+                    if swept:
+                        log.info("Dropped %d backup upload(s) nobody finished.", swept)
+                except Exception:
+                    log.exception("Backup upload cleanup failed")
                 try:
                     expired = proposals.purge(conn, settings)
                     if expired:

@@ -442,7 +442,7 @@ def access_overview(user=Depends(admin_api_user), conn: sqlite3.Connection = Dep
     use and the grants that give it."""
     people = conn.execute(
         "SELECT id, username, role, (SELECT count(*) FROM api_tokens t WHERE t.user_id = users.id "
-        "AND t.revoked_at IS NULL AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))) AS tokens "
+        "AND t.scope = 'mcp' AND t.revoked_at IS NULL AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))) AS tokens "
         "FROM users WHERE active = 1 ORDER BY username COLLATE NOCASE").fetchall()
     return {"users": [{"id": p["id"], "name": p["username"], "role": p["role"], "tokens": p["tokens"],
                        "libraries": permissions.access_summary(conn, p["id"])} for p in people]}
@@ -601,8 +601,8 @@ def _target(conn: sqlite3.Connection, user_id: int) -> sqlite3.Row:
 
 
 def _tokens(conn: sqlite3.Connection, user_id: int) -> int:
-    return conn.execute("SELECT count(*) FROM api_tokens WHERE user_id = ? AND revoked_at IS NULL "
-                        "AND (expires_at IS NULL OR expires_at > datetime('now'))", (user_id,)).fetchone()[0]
+    return conn.execute("SELECT count(*) FROM api_tokens WHERE user_id = ? AND scope = 'mcp' "
+                        "AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > datetime('now'))", (user_id,)).fetchone()[0]
 
 
 def _account_json(request: Request, conn: sqlite3.Connection, r: sqlite3.Row) -> dict:
