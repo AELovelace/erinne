@@ -18,7 +18,7 @@ import webbrowser
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from mnemerynne_backup import __version__, autostart, signin
-from mnemerynne_backup.backup import Backup, BackupError, connect
+from mnemerynne_backup.backup import Backup, BackupError, connect, update_offer
 from mnemerynne_backup.cli import describe
 from mnemerynne_backup.config import APP, COMMON_EXCLUDES, Config, state_dir
 from mnemerynne_backup.engine import Report
@@ -82,6 +82,7 @@ class TrayApp:
         self.root.title(APP)
         self.settings_window: tk.Toplevel | None = None
         self.icon = None
+        self.update: tuple[str, str] | None = None      # (version, download address) when one is offered
 
     # ------------------------------------------------------------ the icon
     def _status_text(self, *_):
@@ -122,6 +123,8 @@ class TrayApp:
             Item("Settings…", later(self.open_settings), default=True),
             Item("Restore…", later(self.open_restore)),
             Item("Open Mnemerynne", later(lambda: webbrowser.open(self.config.server or "about:blank"))),
+            Item(lambda item: f"Update to {self.update[0]}…" if self.update else "", later(self.get_update),
+                 visible=lambda item: self.update is not None),
             Menu.SEPARATOR,
             Item("Quit", later(self.quit)),
         )
@@ -477,10 +480,29 @@ class TrayApp:
 
         ttk.Button(w, text="Restore to…", command=go).grid(row=3, column=1, sticky="e", **pad)
 
+    # ------------------------------------------------------------- updates
+    def check_update(self) -> None:
+        """Once a day: does the server offer a newer app? Says so once."""
+        def work():
+            return update_offer(self.config.server) if self.config.server else None
+
+        def done(result):
+            if isinstance(result, tuple) and result != self.update:
+                self.update = result
+                self._notify(f"Version {result[0]} is ready: choose Update in the menu.")
+                self.icon.update_menu()
+        self._in_background(work, done)
+        self.root.after(24 * 3600 * 1000, self.check_update)
+
+    def get_update(self) -> None:
+        if self.update:
+            webbrowser.open(self.update[1])     # the installer replaces this copy; signing in again isn't needed
+
     # ----------------------------------------------------------------- run
     def run(self) -> None:
         self._make_icon()
         self.start_runner()
+        self.root.after(60 * 1000, self.check_update)
         if not self.config.server:
             self.open_settings()
         self.root.after(500, self._pump)

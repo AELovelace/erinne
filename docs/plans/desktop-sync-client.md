@@ -10,6 +10,24 @@ Python, one-way, into `Backups`.*
 through `bkp.beepsquad.wtf`. It runs in the tray (or as a background service with no tray), starts at sign-in, and
 shows what it's doing and anything it couldn't copy.
 
+## Status (2026-10-29)
+
+| Phase | State |
+|---|---|
+| 0 Server groundwork | Built (`fb9fa59`) |
+| 1 App engine and command line | Built (`4cc7ee1`) |
+| 2 Backup host, parts, Restore | Built (`4cc7ee1`); the proxy and DNS are Doll's |
+| 3 Sign-in, tray app, packaging | Built (`de0fe54`); installers not built yet (need a Windows box and a Python with Tk) |
+| 4 Searchable, Backups page, admin box, help, `sync-status` | Built |
+
+**Testing on the dev NAS (beepsquad.wtf):**
+1. Deploy the branch; migration 0057 runs on start.
+2. Proxy and DNS per deploy README 5m; `MNEMERYNNE_BACKUP_URL=https://bkp.beepsquad.wtf`; restart web and worker.
+3. Access → Settings → Desktop backup: on, and a group you're in.
+4. On a laptop: `uv tool install './clients/desktop-sync[tray]'` (or the built AppImage/installer), then
+   `mnemerynne-backup login https://beepsquad.wtf`, `mnemerynne-backup add ~/Documents`, `mnemerynne-backup sync -v`.
+5. Then the by-hand checks under *Tests and checks* below, off site for the big-file one.
+
 ## Decisions (2026-10-29)
 
 | Question | Answer |
@@ -17,7 +35,7 @@ shows what it's doing and anything it couldn't copy.
 | Direction | **One-way, PC → NAS** (a backup), with **Restore** in the app. Two-way sync is not planned. |
 | Search | Backed-up files are **not indexed** unless the person turns on **Searchable** for that backed-up folder. |
 | Stack | **Python**, so the same app runs on Windows and Linux. |
-| Who gets it | Everyone in **a group the admin picks** (Access → Backups). |
+| Who gets it | Everyone in **a group the admin picks** (Access → Settings → Desktop backup). |
 | Quota | **None** for now. |
 | Locked files (Outlook `.pst`, running databases) | **Skipped and listed** for now. Shadow copies are a stretch goal: `docs/stretch-goals/backup-locked-files.md`. |
 | Off site | **Yes**, laptops back up from anywhere, through **`bkp.beepsquad.wtf`**, a host of its own at the proxy with an nginx config made for big uploads. |
@@ -51,7 +69,7 @@ shows what it's doing and anything it couldn't copy.
 ## On the server
 
 ### 1. Who may back up
-- **Access → Backups** (admin): an on/off switch and **the group** whose members may back up, as with Games.
+- **Access → Settings → Desktop backup** (admin): an on/off switch and **the group** whose members may back up, as with Games.
 - `backups.may_backup(conn, user_id)` is checked when a sync token is issued **and on every sync call**, so taking
   someone out of the group stops their app within the AD snapshot's few minutes.
 - The same box lists each person's computers, backed-up folders, size and last sync, and can revoke a computer.

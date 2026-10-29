@@ -20,7 +20,7 @@ from mnemerynne import api_tokens, db, group_refs, oauth, sync, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.web.admin import _log
-from mnemerynne.web.deps import admin_user, api_user, get_db, get_settings
+from mnemerynne.web.deps import admin_user, api_user, get_db, get_settings, page_user
 
 router = APIRouter()
 admin_router = APIRouter()
@@ -66,9 +66,11 @@ def _refuse(exc: sync.SyncError) -> HTTPException:
 # ------------------------------------------------------------------- client
 @router.get("/api/sync/client")
 def client_info(request: Request, settings: Settings = Depends(get_settings)):
-    """For the backup app, before it signs in: where backups go."""
+    """For the backup app, before it signs in: where backups go, and the newest app (it offers to update)."""
     base = (settings.public_url or str(request.base_url)).rstrip("/")
-    return {"api_url": (settings.backup_url or base).rstrip("/"), "server": base}
+    builds = sync.client_downloads(settings)
+    return {"api_url": (settings.backup_url or base).rstrip("/"), "server": base, "latest": builds["latest"],
+            "downloads": {kind: f"{base}/downloads/backup/{name}" for kind, name in builds["files"].items()}}
 
 
 # ------------------------------------------------------------------- tokens
@@ -125,6 +127,32 @@ def add_root(body: RootBody, caller: Caller = Depends(sync_caller), conn: sqlite
         raise HTTPException(exc.status, str(exc)) from None
     _log(conn, caller.user, "backup.root", caller.user["username"], f"{root.computer}\\{root.label}")
     return next(r for r in sync.roots(conn, caller.id) if r["id"] == root.id)
+
+
+class RootChange(BaseModel):
+    label: str | None = Field(None, min_length=1, max_length=80)
+    searchable: bool | None = None
+
+
+def _change_root(conn: sqlite3.Connection, user: sqlite3.Row, root_id: int, body: RootChange) -> dict:
+    try:
+        root = sync.get_root(conn, user["id"], root_id)
+        if body.label is not None:
+            root = sync.rename_root(conn, root, body.label)
+        if body.searchable is not None:
+            sync.set_searchable(conn, root, body.searchable)
+            _log(conn, user, "backup.searchable", user["username"],
+                 f"{root.computer}\\{root.label}: {'on' if body.searchable else 'off'}")
+    except sync.SyncError as exc:
+        raise _refuse(exc) from None
+    return next(r for r in sync.roots(conn, user["id"]) if r["id"] == root_id)
+
+
+@router.patch("/api/sync/roots/{root_id}")
+def change_root(root_id: int, body: RootChange, caller: Caller = Depends(sync_caller),
+                conn: sqlite3.Connection = Depends(get_db)):
+    """From the app: a new label, or Searchable on or off."""
+    return _change_root(conn, caller.user, root_id, body)
 
 
 @router.get("/api/sync/roots/{root_id}/manifest")
@@ -352,14 +380,68 @@ def move_paths(root_id: int, body: MovesBody, caller: Caller = Depends(sync_call
     return {"results": sync.move(conn, root, [(m.src, m.dest) for m in body.moves], caller.id)}
 
 
+# --------------------------------------------------- Preferences → Backups
+def _backup_user(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+    if not sync.may_backup(conn, user, request.app.state.directory):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Backups aren't open for you; ask an admin.")
+    return user
+
+
+@router.get("/api/me/backups")
+def my_backups(user=Depends(_backup_user), conn: sqlite3.Connection = Depends(get_db),
+               settings: Settings = Depends(get_settings)):
+    """The person's backed-up folders, the computers signed in, and the app to download."""
+    builds = sync.client_downloads(settings)
+    signins = [{"kind": "token", "id": t["id"], "name": t["name"], "created_at": t["created_at"],
+                "last_used_at": t["last_used_at"], "expires_at": t["expires_at"]}
+               for t in api_tokens.list_for_user(conn, user["id"], scope="sync") if t["active"]]
+    signins += [{"kind": "oauth", "id": c["id"], "name": c["name"], "created_at": c["created_at"],
+                 "last_used_at": c["last_used_at"], "expires_at": None}
+                for c in oauth.connections(conn, user["id"], "sync")]
+    return {"roots": sync.roots(conn, user["id"]), "signins": signins, "latest": builds["latest"],
+            "downloads": {kind: f"/downloads/backup/{name}" for kind, name in builds["files"].items()}}
+
+
+@router.patch("/api/me/backups/roots/{root_id}")
+def change_my_root(root_id: int, body: RootChange, user=Depends(_backup_user),
+                   conn: sqlite3.Connection = Depends(get_db)):
+    """Searchable on or off (or a new label) from Preferences."""
+    return _change_root(conn, user, root_id, body)
+
+
+@router.delete("/api/me/backups/signins/{kind}/{signin_id}")
+def sign_out_computer(kind: str, signin_id: int, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Sign one computer's backup app out (a pasted token, or a browser sign-in)."""
+    if kind == "token":
+        ok = any(t["id"] == signin_id for t in api_tokens.list_for_user(conn, user["id"], scope="sync")) and \
+            api_tokens.revoke(conn, signin_id, user["id"])
+    elif kind == "oauth":
+        ok = any(c["id"] == signin_id for c in oauth.connections(conn, user["id"], "sync")) and \
+            oauth.revoke_grant(conn, signin_id, user["id"])
+    else:
+        ok = False
+    if not ok:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such sign-in.")
+    return {"status": "signed out"}
+
+
+@router.get("/downloads/backup/{name}")
+def download_client(name: str, request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db),
+                    settings: Settings = Depends(get_settings)):
+    """The installer or AppImage (data_dir/backup-client), for people who may back up."""
+    if not sync.may_backup(conn, user, request.app.state.directory):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Backups aren't open for you; ask an admin.")
+    path = sync.client_file(settings, name)
+    if path is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "There's no such download.")
+    return FileResponse(path, media_type="application/octet-stream", filename=name)
+
+
 # -------------------------------------------------------------------- admin
-def _status(conn: sqlite3.Connection) -> dict:
+def _status(conn: sqlite3.Connection, settings: Settings) -> dict:
     cfg = sync.load_settings(conn)
-    people = conn.execute(
-        "SELECT u.username, r.computer, r.label, r.last_seen_at FROM sync_roots r JOIN users u ON u.id = r.user_id "
-        "ORDER BY u.username COLLATE NOCASE, r.computer COLLATE NOCASE, r.label COLLATE NOCASE").fetchall()
-    return {"settings": cfg | {"group": group_refs.label(conn, cfg["group"])},
-            "roots": [dict(r) for r in people]}
+    return {"settings": cfg | {"group": group_refs.label(conn, cfg["group"])}, "backup_url": settings.backup_url,
+            "roots": sync.all_roots(conn)}
 
 
 class BackupsSettingsBody(BaseModel):
@@ -368,13 +450,14 @@ class BackupsSettingsBody(BaseModel):
 
 
 @admin_router.get("/api/admin/settings/backups")
-def admin_backups(user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
-    return _status(conn)
+def admin_backups(user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db),
+                  settings: Settings = Depends(get_settings)):
+    return _status(conn, settings)
 
 
 @admin_router.put("/api/admin/settings/backups")
 def admin_save_backups(body: BackupsSettingsBody, request: Request, user=Depends(admin_user),
-                       conn: sqlite3.Connection = Depends(get_db)):
+                       conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
     """Backups on or off, and who may use them; only the fields sent change. Logged."""
     changes = body.model_dump(exclude_none=True)
     if "group" in changes:
@@ -387,4 +470,4 @@ def admin_save_backups(body: BackupsSettingsBody, request: Request, user=Depends
         with transaction(conn):
             sync.save_settings(conn, changes)
             _log(conn, user, "settings.backups", ", ".join(f"{k}={v}" for k, v in changes.items()))
-    return _status(conn)
+    return _status(conn, settings)

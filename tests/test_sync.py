@@ -314,17 +314,19 @@ def test_the_backup_host_answers_only_the_backup_api(tmp_path, root, directory):
     with TestClient(create_app(settings, Services(llm=None, embedder=FakeEmbedder(), directory=directory,
                                                   share_checker=FakeShareChecker(root))),
                     base_url="https://bkp.beepsquad.wtf") as c:
-        assert c.get("/api/sync/client").json() == {"api_url": "https://bkp.beepsquad.wtf",
-                                                    "server": "https://beepsquad.wtf"}
+        info = c.get("/api/sync/client").json()
+        assert (info["api_url"], info["server"], info["latest"]) == ("https://bkp.beepsquad.wtf",
+                                                                     "https://beepsquad.wtf", None)
         assert c.get("/api/sync/roots").status_code == 401           # the app's API: there, but needs a token
         for path in ("/", "/login", "/files", "/api/files", "/api/admin/settings/backups", "/mcp", "/oauth/authorize"):
             assert c.get(path).status_code == 404, path
         assert c.post("/oauth/token", data={}).status_code != 404
-    for bad in ({"backup_url": "https://beepsquad.wtf"}, {"backup_url": "https://bkp.beepsquad.wtf/path"}):
+    for bad in ({"backup_url": "https://beepsquad.wtf"}, {"backup_url": "https://bkp.beepsquad.wtf/path"},
+                {"backup_url": "https://bkp.beepsquad.wtf", "public_url": ""}):
         with pytest.raises(Exception, match="MNEMERYNNE_BACKUP_URL"):
             create_app(Settings(_env_file=None, data_dir=tmp_path / "d3", embed_dim=4,
                                 secret_key="test-secret-key-for-the-test-suite-only",
-                                public_url="https://beepsquad.wtf", **bad))
+                                **({"public_url": "https://beepsquad.wtf"} | bad)))
 
 
 # ---------------------------------------------------------- uploads in parts
@@ -379,3 +381,78 @@ def test_parts_that_dont_add_up_are_dropped_and_old_uploads_are_swept(client, co
     too_big = client.post("/api/sync/uploads", json={"root_id": root_id, "path": "z.bin", "size": 10 ** 15,
                                                      "sha256": "c" * 64}, headers=auth)
     assert too_big.status_code == 413
+
+
+# ---------------------------------------------------------------- phase 4
+def test_searchable_on_and_off(client, conn, settings, app_auth):
+    auth, root_id = app_auth
+    _put(client, auth, root_id, "notes.md", b"# Notes\n\nThe night audit runs at 2am.")
+    _put(client, auth, root_id, "photo.jpg", b"\xff\xd8\xff\xe0 not really a jpeg")
+    r = client.patch(f"/api/sync/roots/{root_id}", json={"searchable": True}, headers=auth)
+    assert r.status_code == 200 and r.json()["searchable"]
+    while worker.run_one(conn, settings, FakeEmbedder()):
+        pass
+    notes = conn.execute("SELECT * FROM files WHERE display_name = 'notes.md'").fetchone()
+    assert notes["status"] == "ready" and conn.execute("SELECT count(*) FROM chunks").fetchone()[0] > 0
+    r = client.patch(f"/api/sync/roots/{root_id}", json={"searchable": False}, headers=auth)
+    assert not r.json()["searchable"]
+    assert conn.execute("SELECT count(*) FROM chunks").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM chunk_vec").fetchone()[0] == 0
+    notes = conn.execute("SELECT * FROM files WHERE display_name = 'notes.md'").fetchone()
+    assert notes["status"] == "stored" and "not searchable" in notes["notes"]
+
+
+def test_a_root_can_be_renamed(client, conn, root, app_auth):
+    auth, root_id = app_auth
+    _put(client, auth, root_id, "a.txt", b"a")
+    r = client.patch(f"/api/sync/roots/{root_id}", json={"label": "Docs"}, headers=auth)
+    assert r.status_code == 200 and r.json()["label"] == "Docs"
+    assert (root / "Users" / "jane" / "Backups" / "DESKTOP-1" / "Docs" / "a.txt").read_bytes() == b"a"
+    other = client.post("/api/sync/roots", json={"computer": "DESKTOP-1", "label": "Music"}, headers=auth).json()
+    assert client.patch(f"/api/sync/roots/{other['id']}", json={"label": "docs"}, headers=auth).status_code == 409
+
+
+def test_preferences_backups(client, conn, directory, settings, app_auth):
+    auth, root_id = app_auth
+    client.post("/login", data={"username": "jane", "password": "password123"})
+    assert 'id="backups"' in client.get("/preferences").text
+    mine = client.get("/api/me/backups").json()
+    assert [r["label"] for r in mine["roots"]] == ["Documents"] and mine["latest"] is None
+    assert [s["kind"] for s in mine["signins"]] == ["token"]
+    assert client.patch(f"/api/me/backups/roots/{root_id}", json={"searchable": True}).json()["searchable"]
+    # The app on offer: the newest of each kind in <data_dir>/backup-client.
+    builds = settings.data_dir / "backup-client"
+    builds.mkdir()
+    for name in ("Mnemerynne-Backup-Setup-0.1.0.exe", "Mnemerynne-Backup-Setup-0.10.0.exe",
+                 "Mnemerynne_Backup-0.2.0-x86_64.AppImage", "notes.txt"):
+        (builds / name).write_bytes(b"MZ")
+    mine = client.get("/api/me/backups").json()
+    assert mine["latest"] == "0.10.0" and mine["downloads"]["windows"].endswith("Setup-0.10.0.exe")
+    assert client.get(mine["downloads"]["linux"]).content == b"MZ"
+    assert client.get("/downloads/backup/notes.txt").status_code == 404
+    assert client.get("/downloads/backup/..%2Fbackup-client%2Fnotes.txt").status_code == 404
+    # Signing a computer out from here ends its token.
+    signin = mine["signins"][0]
+    assert client.delete(f"/api/me/backups/signins/token/{signin['id']}").status_code == 200
+    assert client.get("/api/sync/roots", headers=auth).status_code == 401
+    assert client.delete(f"/api/me/backups/signins/token/{signin['id']}").status_code == 404
+
+
+def test_people_outside_the_group_see_no_backups(client, conn, directory):
+    _open_backups(conn)
+    _person(client, conn, directory, "rob", "rdoe")
+    assert 'id="backups"' not in client.get("/preferences").text
+    assert client.get("/api/me/backups").status_code == 403
+    assert client.get("/downloads/backup/Mnemerynne-Backup-Setup-0.1.0.exe").status_code == 403
+
+
+def test_admins_see_every_backup(client, conn, directory, app_auth, capsys, monkeypatch):
+    users.create_user(conn, "boss", "password123", role="admin")
+    client.post("/login", data={"username": "boss", "password": "password123"})
+    data = client.get("/api/admin/settings/backups").json()
+    assert [(r["username"], r["computer"], r["label"]) for r in data["roots"]] == [("jane", "DESKTOP-1", "Documents")]
+    from mnemerynne import cli
+    monkeypatch.setattr(cli, "_connect", lambda: conn)
+    cli.cmd_sync_status(type("A", (), {"user": "jane"})())
+    out = capsys.readouterr().out
+    assert "Backups are on" in out and "jane: DESKTOP-1\\Documents: 0 files" in out

@@ -185,3 +185,21 @@ def connect(server: str, client: httpx.Client | None = None) -> dict:
     finally:
         if client is None:
             probe.close()
+
+
+def newer(latest: str | None, current: str) -> bool:
+    """Whether the server's newest app (0.10.0) is newer than this one (0.9.2)."""
+    def parts(v: str) -> tuple[int, ...]:
+        return tuple(int(x) for x in v.split(".") if x.isdigit())
+    return bool(latest) and parts(latest) > parts(current)
+
+
+def update_offer(server: str, client: httpx.Client | None = None) -> tuple[str, str] | None:
+    """(version, download address) when the server offers a newer app for this kind of computer."""
+    import sys
+
+    from mnemerynne_backup import __version__
+
+    info = connect(server, client)
+    url = (info.get("downloads") or {}).get("windows" if sys.platform == "win32" else "linux")
+    return (info["latest"], url) if url and newer(info.get("latest"), __version__) else None

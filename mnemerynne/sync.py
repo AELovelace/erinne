@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import sqlite3
 from dataclasses import dataclass
@@ -68,6 +69,9 @@ def check_config(settings: Settings) -> None:
     parts = urlsplit(raw)
     if parts.scheme not in ("http", "https") or not parts.hostname or parts.path not in ("", "/") or parts.query:
         raise ValueError("MNEMERYNNE_BACKUP_URL is an origin only, like https://bkp.example.org")
+    if not settings.public_url:
+        # The app signs in and downloads updates at the main address; it learns it from the backup host.
+        raise ValueError("MNEMERYNNE_BACKUP_URL needs MNEMERYNNE_PUBLIC_URL set too")
     others = {(urlsplit(u or "").hostname or "").lower() for u in (settings.public_url, settings.arcade_url)}
     if backup_host(settings) in others:
         raise ValueError("MNEMERYNNE_BACKUP_URL must be a different host from MNEMERYNNE_PUBLIC_URL and "
@@ -232,6 +236,15 @@ def roots(conn: sqlite3.Connection, user_id: int) -> list[dict]:
         out.append({"id": r["id"], "computer": r["computer"], "label": r["label"], "folder_id": r["folder_id"],
                     "present": live, "searchable": live and not fs.not_indexed(conn, r["folder_id"]),
                     "files": files, "bytes": size, "last_sync": r["last_seen_at"]})
+    return out
+
+
+def all_roots(conn: sqlite3.Connection) -> list[dict]:
+    """Everyone's backed-up folders, for admins (Access → Settings → Desktop backup, sync-status)."""
+    out = []
+    for user_id, username in conn.execute("SELECT DISTINCT r.user_id, u.username FROM sync_roots r "
+                                          "JOIN users u ON u.id = r.user_id ORDER BY u.username COLLATE NOCASE"):
+        out += [{"username": username, **r, "last_seen_at": r["last_sync"]} for r in roots(conn, user_id)]
     return out
 
 
@@ -606,3 +619,77 @@ def sweep_uploads(conn: sqlite3.Connection, settings: Settings) -> int:
             if f.stem not in live:
                 f.unlink(missing_ok=True)
     return len(old)
+
+
+# -------------------------------------------------------------- searchable
+def set_searchable(conn: sqlite3.Connection, root: Root, on: bool) -> int:
+    """Let Erynne search this backup, or stop. On: its documents are queued to be read (the worker takes them one
+    at a time). Off: what was read is removed from search. Returns how many files changed."""
+    file_ids = [r[0] for r in conn.execute(
+        f"WITH RECURSIVE {_TREE} SELECT f.id FROM files f JOIN blobs b ON b.sha256 = f.blob_sha256 "
+        "WHERE f.folder_id IN (SELECT id FROM t) AND f.deleted_at IS NULL AND b.kind != 'other'", (root.folder_id,))]
+    with transaction(conn):
+        conn.execute("UPDATE folders SET no_index = ? WHERE id = ?", (0 if on else 1, root.folder_id))
+        changed = 0
+        for file_id in file_ids:
+            folder = conn.execute("SELECT folder_id FROM files WHERE id = ?", (file_id,)).fetchone()[0]
+            if fs.not_indexed(conn, folder) != (not on):
+                continue                      # a folder further down keeps its own setting
+            if on:
+                conn.execute("UPDATE files SET status = 'queued', notes = NULL, error = NULL, progress = NULL "
+                             "WHERE id = ? AND status = 'stored'", (file_id,))
+                jobs.enqueue(conn, "ingest", file_id)
+            else:
+                conn.execute("DELETE FROM chunks WHERE file_id = ?", (file_id,))   # vectors follow (trigger)
+                conn.execute("UPDATE files SET status = 'stored', notes = ?, progress = NULL WHERE id = ?",
+                             (pipeline.NOT_INDEXED_NOTE, file_id))
+            changed += 1
+    return changed
+
+
+def rename_root(conn: sqlite3.Connection, root: Root, label: str) -> Root:
+    """A new label: the folder under Backups\\<computer> is renamed (its files keep their ids and versions)."""
+    label = clean_part(label, "folder label")
+    if len(label) > 80:
+        raise SyncError("Labels are at most 80 characters.")
+    if label == root.label:
+        return root
+    if conn.execute("SELECT 1 FROM sync_roots WHERE user_id = ? AND lower(computer) = lower(?) AND lower(label) = "
+                    "lower(?) AND id != ?", (root.user_id, root.computer, label, root.id)).fetchone():
+        raise SyncError(f"Another backed-up folder from {root.computer} is already called “{label}”.", 409)
+    try:
+        fs.rename(conn, fs.Access.of(conn, root.user_id), fs.Item("folder", root.folder_id), label)
+    except fs.FsError as exc:
+        raise SyncError(str(exc), exc.status) from None
+    conn.execute("UPDATE sync_roots SET label = ? WHERE id = ?", (label, root.id))
+    return get_root(conn, root.user_id, root.id)
+
+
+# ------------------------------------------------------------- the app itself
+CLIENT_DIR = "backup-client"       # under data_dir: the installer and AppImage Preferences → Backups offers
+_CLIENT_FILES = {"windows": re.compile(r"^Mnemerynne-Backup-Setup-(\d+(?:\.\d+){1,3})\.exe$"),
+                 "linux": re.compile(r"^Mnemerynne_Backup-(\d+(?:\.\d+){1,3})-x86_64\.AppImage$")}
+
+
+def client_downloads(settings: Settings) -> dict:
+    """{"latest": "0.2.0", "files": {"windows": name, "linux": name}}: the newest build of each kind in
+    <data_dir>/backup-client, and the newest version among them."""
+    folder = settings.data_dir / CLIENT_DIR
+    best: dict[str, tuple[tuple[int, ...], str]] = {}
+    for f in (folder.iterdir() if folder.is_dir() else []):
+        for kind, pattern in _CLIENT_FILES.items():
+            m = pattern.match(f.name)
+            if m:
+                version = tuple(int(x) for x in m.group(1).split("."))
+                if kind not in best or version > best[kind][0]:
+                    best[kind] = (version, f.name)
+    latest = max((v for v, _ in best.values()), default=None)
+    return {"latest": ".".join(map(str, latest)) if latest else None, "files": {k: n for k, (_, n) in best.items()}}
+
+
+def client_file(settings: Settings, name: str) -> Path | None:
+    """One of the offered builds by its exact name, or None."""
+    if any(p.match(name) for p in _CLIENT_FILES.values()):
+        path = settings.data_dir / CLIENT_DIR / name
+        return path if path.is_file() else None
+    return None

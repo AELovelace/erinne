@@ -384,3 +384,16 @@ def test_starting_at_sign_in_on_linux(tmp_path, monkeypatch):
     unit = (tmp_path / "systemd" / "user" / "mnemerynne-backup.service").read_text()
     assert "ExecStart=" in unit and " run" in unit and ["systemctl", "--user", "enable", "--now",
                                                         "mnemerynne-backup.service"] in ran
+
+
+def test_the_app_hears_about_a_newer_version(server, settings):
+    client, _, _ = server
+    from mnemerynne_backup.backup import newer, update_offer
+
+    assert newer("0.10.0", "0.9.2") and not newer("0.1.0", "0.1.0") and not newer(None, "0.1.0")
+    assert update_offer("http://testserver", client) is None
+    builds = settings.data_dir / "backup-client"
+    builds.mkdir()
+    (builds / "Mnemerynne_Backup-9.0.0-x86_64.AppImage").write_bytes(b"x")
+    version, url = update_offer("http://testserver", client)
+    assert version == "9.0.0" and url.endswith("/downloads/backup/Mnemerynne_Backup-9.0.0-x86_64.AppImage")

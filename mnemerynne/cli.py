@@ -288,6 +288,24 @@ def cmd_purge_trash(args):
     print(f"Deleted {removed} item(s) that were in a recycle bin for more than {days} day(s).")
 
 
+def cmd_sync_status(args):
+    """Desktop backup: whether it's on and for whom, and every backed-up folder (or one person's)."""
+    from mnemerynne import sync
+
+    conn = _connect()
+    cfg = sync.load_settings(conn)
+    print(f"Backups are {'on' if cfg['enabled'] else 'off'}; group: {cfg['group'] or '(none)'}; "
+          f"backup address: {get_settings().backup_url or '(the main address)'}.")
+    rows = [r for r in sync.all_roots(conn) if not args.user or r["username"].lower() == args.user.lower()]
+    if not rows:
+        print("No backed-up folders" + (f" for {args.user}." if args.user else "."))
+    for r in rows:
+        state = "" if r["present"] else " (deleted on the NAS)"
+        print(f"{r['username']}: {r['computer']}\\{r['label']}{state}: {r['files']} files, "
+              f"{r['bytes'] / 1024 ** 3:.2f} GB, searchable {'on' if r['searchable'] else 'off'}, "
+              f"last sync {r['last_sync'] or 'never'}")
+
+
 def cmd_reclassify(args):
     from mnemerynne.ingest import store
 
@@ -714,6 +732,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("purge-trash", help="Empty recycle-bin items older than the retention period")
     p.add_argument("--days", type=int, default=None, help="Default: MNEMERYNNE_TRASH_DAYS (30)")
     p.set_defaults(func=cmd_purge_trash)
+
+    p = sub.add_parser("sync-status", help="Desktop backup: who backs up what, and when it last synced")
+    p.add_argument("user", nargs="?", help="Only this person")
+    p.set_defaults(func=cmd_sync_status)
 
     p = sub.add_parser("draft-gold", help="Draft evaluation questions with the teacher model")
     p.add_argument("--out", default="eval/gold/dev.jsonl")

@@ -105,6 +105,7 @@ uv run pytest
 | `mnemerynne create-library NAME`, `grant LIBRARY USER [--write]` | shared libraries (or the **Libraries** page, for admins) |
 | `mnemerynne import FOLDER --library NAME \| --user NAME [--flat]` | bulk upload, keeping subfolders |
 | `mnemerynne purge-trash [--days N]` | empty old recycle-bin items now (the worker does this hourly) |
+| `mnemerynne sync-status [USER]` | desktop backup: who backs up what, and when it last synced |
 | `mnemerynne reindex [--file ID] [--reextract]` | re-chunk (and re-read) files |
 | `mnemerynne reembed` | rebuild all vectors after changing the embedder |
 | `mnemerynne forget-memories USER` | wipe a user's memories (admins can't read them) |

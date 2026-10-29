@@ -8,7 +8,7 @@ import logging
 import sys
 
 from mnemerynne_backup import __version__, autostart, signin
-from mnemerynne_backup.backup import Backup, BackupError, connect
+from mnemerynne_backup.backup import Backup, BackupError, connect, update_offer
 from mnemerynne_backup.config import Config, config_dir, state_dir
 from mnemerynne_backup.engine import Report
 from mnemerynne_backup.transport import TransportError
@@ -154,6 +154,13 @@ def _run(args, config: Config, backup: Backup) -> int | None:
               f"state: {state_dir()}.")
         for label, r in backup.last_reports().items():
             print(describe(r) if r else f"{label}: not backed up yet.")
+        if config.server:
+            try:
+                offer = update_offer(config.server)
+            except TransportError:
+                offer = None
+            if offer:
+                print(f"Version {offer[0]} is available (this is {__version__}): {offer[1]}")
     elif args.cmd in ("pause", "resume"):
         backup.set_paused(args.folder, args.cmd == "pause")
     elif args.cmd == "exclude":
