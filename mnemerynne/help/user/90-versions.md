@@ -1,13 +1,13 @@
 # Versions and restoring
 
-Every change made to a file **through Erynne or Claude**, or in the **browser editor**, keeps the previous content as a version. Uploading a new copy of a file over SMB or replacing it by upload does not create a version; use the recycle bin and re-upload for that.
+Every change made to a file **through Erynne or Claude**, in the **browser editor**, or by the [desktop backup app](desktop-backup.md) keeps the previous content as a version (the backup app skips this for files over 2 GB). Uploading a new copy of a file over SMB or replacing it by upload does not create a version; use the recycle bin and re-upload for that.
 
 ## Where to find them
 
 In [Files](files.md), select the file and open the **details pane** (the ⓘ button). Under **Versions** you see each earlier version, newest first:
 
 - when it was replaced;
-- by whom: "Claude for alice" (Claude working for Alice), "Erynne for alice" (a proposal Alice applied), just a username (someone saving in the browser editor), or "restore by alice";
+- by whom: "Claude for alice" (Claude working for Alice), "Erynne for alice" (a proposal Alice applied), just a username (someone saving in the browser editor), "the backup app for alice" (Mnemerynne Backup sending a changed file), or "restore by alice";
 - what changed, in the words of whoever changed it;
 - **Download**, to look at that version without touching the file;
 - **Restore**, if you can change files in that folder.
