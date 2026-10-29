@@ -6,7 +6,7 @@ Both builds bundle Python, so people install nothing else. Bump `__version__` in
 | | Command (from `clients/desktop-sync`) | Result |
 |---|---|---|
 | Windows | `powershell -File packaging\build-windows.ps1` (needs Inno Setup 6) | `dist\Mnemerynne-Backup-Setup-<version>.exe`: per user, no admin rights, starts at sign-in |
-| Linux | `packaging/build-appimage.sh` (needs `appimagetool`) | `dist/Mnemerynne_Backup-<version>-x86_64.AppImage`; `… cli <command>` runs the command line |
+| Linux | `PYTHON=/usr/bin/python3 packaging/build-appimage.sh` (needs `appimagetool`) | `dist/Mnemerynne_Backup-<version>-x86_64.AppImage`; `… cli <command>` runs the command line |
 
 Build with a Python that has Tk: python.org's installer on Windows, the distro's Python with
 `python3-tk` (Debian/Ubuntu) or `python3-tkinter` (Fedora) on Linux. If PyInstaller warns
