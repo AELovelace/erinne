@@ -2,6 +2,7 @@
 returns: calls with errors, a search trace, file and chunk state, jobs, the log, the config."""
 
 import io
+import json
 import logging
 
 import pytest
@@ -122,3 +123,33 @@ def test_the_call_log_keeps_errors(conn, settings, people):
         assert bad.json()["result"]["isError"]
     row = conn.execute("SELECT tool, ok, error FROM mcp_calls ORDER BY id DESC LIMIT 1").fetchone()
     assert row["tool"] == "browse_folder" and row["ok"] == 0 and row["error"].startswith("[not_found]")
+
+
+def test_a_developer_who_is_not_an_admin_sees_only_their_own(conn, settings, people):
+    """calls: only the caller's own; file and chunk: only what they may read themselves (anything else reads
+    as not found, so there's nothing to enumerate). An admin in the group sees everything."""
+    diagnostics.set_group(conn, "Developers")
+    directory = FakeDirectory({"alice": {"Staff"}, "dev": {"Developers"}, "root": {"Developers", "Domain Admins"}},
+                              groups=["Staff", "Developers", "Domain Admins"])
+    embedder = KeywordEmbedder()
+    tools = Tools(settings, lambda: embedder, lambda: directory)
+    alice, dev, root = (_caller(conn, people[n]) for n in ("alice", "dev", "root"))
+    payroll = permissions.create_library(conn, "Payroll")                      # alice may read it, dev may not
+    permissions.grant_user(conn, payroll, people["alice"])
+    fid = store.add_file(conn, settings, store.receive(io.BytesIO(b"# Pay\n\nBonuses go out Friday.\n"), "pay.md", settings),
+                         payroll, people["alice"])[0]
+    worker.run_one(conn, settings, embedder)
+    chunk_id = conn.execute("SELECT id FROM chunks WHERE file_id = ?", (fid,)).fetchone()[0]
+    for who in (alice, dev):
+        conn.execute("INSERT INTO mcp_calls(user_id, token_id, tool, args, file_ids, ok, ms) VALUES (?, ?, 'search_documents', ?, '[]', 1, 2)",
+                     (who.user_id, who.token_id, json.dumps({"query": f"a question only {who.user_id} asked"})))
+
+    mine = tools.diagnose(conn, dev, "calls")[0]["claude"]
+    assert [c["username"] for c in mine] == ["dev"]                            # never alice's questions
+    assert tools.diagnose(conn, dev, "file", file_id=fid)[0]["found"] is False
+    assert tools.diagnose(conn, dev, "chunk", chunk_id=chunk_id)[0]["found"] is False
+
+    everything = tools.diagnose(conn, root, "calls")[0]["claude"]
+    assert {c["username"] for c in everything} == {"alice", "dev"}
+    assert tools.diagnose(conn, root, "file", file_id=fid)[0]["collection"] == "Payroll"
+    assert "Friday" in tools.diagnose(conn, root, "chunk", chunk_id=chunk_id)[0]["text"]

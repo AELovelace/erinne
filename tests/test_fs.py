@@ -313,3 +313,25 @@ def test_pdf_and_other_files_in_one_folder(conn, settings, embedder, world):
     assert {(r["display_name"], r["status"]) for r in listing["files"]} == {("pool.pdf", "ready"),
                                                                            ("photos.zip", "stored")}
     assert fs.search_names(conn, world["a"], "PHOTO")["files"][0]["display_name"] == "photos.zip"
+
+
+def test_restore_needs_write_access_where_the_item_lands(conn, settings, embedder, world):
+    """bob may write only inside Team. Once Team is gone his binned file would land in Oracle's root,
+    where he can't change anything: refused, and the file stays in the bin. alice (root writer) may."""
+    a, bob, oracle = world["a"], world["bob"], world["oracle"]
+    team = fs.create_folder(conn, a, oracle, None, "Team")
+    permissions.grant_folder(conn, team, "user", bob, can_write=True)
+    b = fs.Access.of(conn, bob)
+    file_id = _add(conn, settings, oracle, "notes.md", "Team notes.", folder=team)
+    assert fs.trash(conn, b, [_item("file", file_id)])[0].ok                   # inside Team: his to change
+    assert fs.trash(conn, a, [_item("folder", team)])[0].ok
+
+    [refused] = fs.restore(conn, b, [_item("file", file_id)])
+    assert not refused.ok
+    row = conn.execute("SELECT folder_id, deleted_at FROM files WHERE id = ?", (file_id,)).fetchone()
+    assert row["folder_id"] == team and row["deleted_at"] is not None          # nothing moved
+
+    [done] = fs.restore(conn, a, [_item("file", file_id)])
+    assert done.ok
+    row = conn.execute("SELECT folder_id, deleted_at FROM files WHERE id = ?", (file_id,)).fetchone()
+    assert row["folder_id"] is None and row["deleted_at"] is None

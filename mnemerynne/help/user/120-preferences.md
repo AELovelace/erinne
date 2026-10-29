@@ -27,6 +27,10 @@ Enter your current password and the new one twice. Passwords must be at least 8 
 
 The facts Erynne keeps to tailor your answers, each with a **Forget** button, and **Forget everything**. See [Memories](memories.md) for what is stored and when.
 
+## Your agents' scratchpad
+
+How many notes your own Claude sessions have left each other, on which boards, and who holds a claim right now, with **Clear scratchpad** to delete them all. See [The agents' scratchpad](agent-scratchpad.md).
+
 ## Microsoft 365
 
 Appears when your organisation has set it up. Link your work account so Erynne can include SharePoint in your answers and, for people with her tools, read your mail and calendar and draft replies. See [Microsoft 365](microsoft-365.md).

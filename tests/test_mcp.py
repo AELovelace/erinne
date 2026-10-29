@@ -211,18 +211,19 @@ def test_mcp_endpoint_end_to_end(mcp_client, conn, world):
     init = _initialize(mcp_client, token)
     assert init.status_code == 200, init.text
     assert init.json()["result"]["serverInfo"]["name"] == "mnemerynne"
-    assert init.json()["result"]["serverInfo"]["version"] == mcp_server.MCP_VERSION == "1.6.0"
+    assert init.json()["result"]["serverInfo"]["version"] == mcp_server.MCP_VERSION == "1.7.0"
 
     listed = _rpc(mcp_client, token, "tools/list").json()["result"]["tools"]
     edits = {"edit_text", "edit_document", "edit_spreadsheet", "create_file", "create_folder", "rename_item",
              "move_item", "delete_item", "add_comment", "propose_api_action", "propose_batch",
              "request_edit_access", "withdraw_proposal", "send_message", "post_to_room", "react_in_room",
-             "draft_reply", "draft_mail", "run_automation", "report_automation_run"}
+             "draft_reply", "draft_mail", "run_automation", "report_automation_run",
+             "write_scratchpad", "claim_note", "resolve_note"}
     assert {t["name"] for t in listed} == {"about", "search_documents", "read_passage", "list_libraries", "browse_folder",
                                            "find_files", "view_page", "open_file", "list_versions",
                                            "list_changes", "list_comments", "list_apis", "query_api",
                                            "list_proposals", "get_proposal", "list_messages", "diagnose",
-                                           "list_rooms", "read_room", "search_mail", "recent_mail", "read_mail",
+                                           "list_rooms", "read_room", "read_scratchpad", "search_mail", "recent_mail", "read_mail",
                                            "calendar", "list_automations", "get_automation_run",
                                            "list_automation_tasks", "my_briefing", "mnemerynne_updates",
                                            "m365_security", "security_feeds"} | edits

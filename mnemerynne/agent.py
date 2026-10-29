@@ -98,6 +98,8 @@ CONNECTOR_ONLY_TOOLS = {"create_folder", "rename_item", "move_item", "delete_ite
                         "list_changes", "list_comments", "request_edit_access", "list_proposals", "get_proposal",
                         "withdraw_proposal", "propose_batch", "diagnose",
                         "list_rooms", "read_room", "post_to_room", "react_in_room",
+                        # The agent scratchpad is for sessions handing work to each other; a chat turn isn't one.
+                        "read_scratchpad", "write_scratchpad", "claim_note", "resolve_note",
                         # Automator's: an automation never starts or reports automations itself.
                         "list_automations", "run_automation", "get_automation_run", "list_automation_tasks",
                         "report_automation_run"}
@@ -815,6 +817,10 @@ class Agent:
             try:
                 if call.error:
                     raise ToolError(call.error)
+                # First of all: a tool this model wasn't given is refused, mail tools included (a person who
+                # switched read_mail off, or a routine without it, must not have it run from a planted passage).
+                if offered is not None and call.name not in offered:
+                    raise ToolError(f"There's no tool called “{call.name}”.")
                 if mail is not None and call.name in m365_mail.TOOL_NAMES:
                     out = m365_mail.run(conn, self.settings, mail, call.name, call.arguments,
                                         lambda *a: f"[{sources.external(*a)}]")
@@ -824,8 +830,6 @@ class Agent:
                                        "it to their Drafts. Tell them briefly what you drafted."}
                     ok = True
                     return out, file_ids
-                if offered is not None and call.name not in offered:
-                    raise ToolError(f"There's no tool called “{call.name}”.")
                 if api is not None:
                     unknown = set(call.arguments) - api.params
                     if unknown:

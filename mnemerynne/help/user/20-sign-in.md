@@ -25,7 +25,7 @@ A browser stays signed in for **24 hours** since you last signed in; after that 
 
 ## Signing out
 
-- **Sign out** (top right) ends this browser's session.
+- **Sign out** (top right) ends your session everywhere: this browser and any other you were still signed in on (a shared front-desk PC, a phone). Nobody can carry on with a copy of a session you have ended.
 - **Sign out other browsers** on Preferences ends every other session (a shared front-desk PC, a phone) while this one stays signed in. Changing your password does the same.
 - Connections from Claude are separate: see [Claude](claude.md) for tokens and connections.
 

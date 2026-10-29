@@ -97,6 +97,18 @@
     if (confirm("Forget everything Erynne remembers about you?")) forget("/api/memories");
   });
 
+  // The agents' scratchpad: one Clear button wipes every board (the notes are the agents' own, not files).
+  const clearPad = $("clear-scratchpad");
+  if (clearPad) clearPad.addEventListener("click", async function () {
+    if (!confirm("Clear every note your agents left on the scratchpad? This can't be undone.")) return;
+    const r = await fetch("/api/scratchpad", { method: "DELETE" });
+    if (!r.ok) {
+      note("scratchpad-note", "Couldn't clear it: " + r.statusText);
+      return;
+    }
+    location.reload();   // the summary is rendered by the server
+  });
+
   $("sign-out-others").addEventListener("click", async function () {
     if (!confirm("Sign out of every other browser? You stay signed in here.")) return;
     try {

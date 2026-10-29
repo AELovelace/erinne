@@ -1,7 +1,8 @@
 """What the briefing and security tools read (mcp_server.Tools wraps them for Erynne and Claude):
 
 - my_briefing: what's waiting for the person inside Mnemerynne (unread notes, announcements, room
-  mentions and direct messages, proposals to apply). Mail and calendar have their own tools.
+  mentions and direct messages, proposals to apply, open notes on their agent scratchpad). Mail and
+  calendar have their own tools.
 - mnemerynne_updates (admins): new commits upstream and what they touch (updates.check), and the
   installed packages' known vulnerabilities (pip-audit, when it's installed; cached).
 - m365_security (admins): open Defender alerts, risky users, the latest Secure Score and risky sign-ins
@@ -26,7 +27,7 @@ from xml.etree import ElementTree
 
 import httpx
 
-from mnemerynne import m365, messages, notices, rooms, updates
+from mnemerynne import m365, messages, notices, rooms, scratchpad, updates
 from mnemerynne.config import Settings
 
 FEED_SECONDS = 3600
@@ -49,7 +50,9 @@ class BriefingError(ValueError):
 
 
 # ---------------------------------------------------------------- briefing
-def briefing(conn: sqlite3.Connection, user: sqlite3.Row, directory) -> dict:
+def briefing(conn: sqlite3.Connection, user: sqlite3.Row, directory, claim_minutes: int = 0) -> dict:
+    """claim_minutes: the scratchpad's claim timeout (settings.scratchpad_claim_minutes), so stale
+    claims are released before they're reported."""
     notes = messages.inbox(conn, user["id"], unread_only=True, limit=20)
     pending = notices.pending_for(conn, user, directory)
     out: dict = {"unread_notes": [{"from": n["from"], "at": n["at"], "text": n["text"][:300]} for n in notes],
@@ -61,6 +64,10 @@ def briefing(conn: sqlite3.Connection, user: sqlite3.Row, directory) -> dict:
     waiting = conn.execute("SELECT COUNT(*) FROM agent_proposals WHERE user_id = ? AND status = 'pending'",
                            (user["id"],)).fetchone()[0] if _has_table(conn, "agent_proposals") else 0
     out["proposals_waiting"] = waiting
+    if _has_table(conn, "scratchpad_notes"):                 # the agents' own notes: only when something is open
+        pad = scratchpad.summary(conn, user["id"], claim_minutes)
+        if pad["open"]:
+            out["scratchpad"] = pad
     out["note"] = ("Mail and calendar come from their own tools (recent_mail, calendar) when the person has "
                    "Microsoft 365 linked.")
     return out

@@ -83,6 +83,12 @@ def set_password(conn: sqlite3.Connection, username: str, password: str) -> bool
     return cur.rowcount > 0
 
 
+def sign_out_everywhere(conn: sqlite3.Connection, user_id: int) -> None:
+    """End every session of this account: sessions carry the epoch they were signed in at, and
+    web/deps.py refuses any whose epoch no longer matches (Sign out, password changes, "sign out others")."""
+    conn.execute("UPDATE users SET session_epoch = session_epoch + 1 WHERE id = ?", (user_id,))
+
+
 def set_role(conn: sqlite3.Connection, username: str, role: str) -> bool:
     if role not in ROLES:
         raise ValueError(f"Role must be one of {ROLES}.")

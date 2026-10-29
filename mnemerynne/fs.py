@@ -881,6 +881,9 @@ def restore(conn: sqlite3.Connection, access: Access, items: list[Item]) -> list
             on_share = _on_share(conn, row["collection_id"])
             if item.type == "file":
                 folder = row["folder_id"] if is_live_folder(conn, row["folder_id"]) else None
+                # Its folder may be gone, so it lands in the root: the person must be allowed to write there too
+                # (_binned only checked where it came from).
+                access.write(row["collection_id"], folder)
                 name = unique_name(conn, row["collection_id"], folder, row["display_name"], "file", item.id)
                 before = share.file_path(conn, item.id) if on_share else None
                 conn.execute("UPDATE files SET deleted_at = NULL, deleted_by = NULL, trash_path = NULL, "
@@ -893,6 +896,7 @@ def restore(conn: sqlite3.Connection, access: Access, items: list[Item]) -> list
                     share.record_stat(conn, item.id, after)
             else:
                 parent = row["parent_id"] if is_live_folder(conn, row["parent_id"]) else None
+                access.write(row["collection_id"], parent)   # same: the parent it lands in, root included
                 name = unique_name(conn, row["collection_id"], parent, row["name"], "folder", item.id)
                 before = share.folder_dir(conn, row["collection_id"], item.id) if on_share else None
                 conn.execute("UPDATE folders SET deleted_at = NULL, deleted_by = NULL, trash_path = NULL, "

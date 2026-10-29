@@ -136,6 +136,11 @@ class Settings(BaseSettings):
     room_message_days: int = 365
     room_file_bytes: int = 25 * 1024 * 1024
     announcement_days: int = 90
+    # The agent scratchpad (mnemerynne/scratchpad.py): notes a person's own agents leave for each other.
+    # Notes untouched for scratchpad_days go (open or not); a claim on a note lapses after
+    # scratchpad_claim_minutes so a session that stopped without resolving doesn't block the next.
+    scratchpad_days: int = 90
+    scratchpad_claim_minutes: int = 120
     # Automator (mnemerynne/automations.py): a new automation's time zone, and how long runs are kept.
     timezone: str = "UTC"
     automation_run_days: int = 90

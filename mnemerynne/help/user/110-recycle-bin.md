@@ -10,7 +10,7 @@ While an item is in the bin it is not searchable, not visible to Claude, and not
 
 ## Restoring
 
-Open the bin, select the items and press **Restore**. They go back to where they were; if that folder was deleted too, it is restored with them. If a file with the same name has appeared there since, the restored one gets " (2)" added.
+Open the bin, select the items and press **Restore**. They go back to where they were; if that folder was deleted too, they land at the top of the library, which needs permission to change files there (otherwise Restore is refused and the item stays in the bin). If a file with the same name has appeared there since, the restored one gets " (2)" added.
 
 ## Deleting for good
 

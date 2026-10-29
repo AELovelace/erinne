@@ -85,6 +85,8 @@ Also in the database (Access → Settings): the **admin group** (default `Domain
 | `PROPOSAL_DAYS` | 7 | A proposal nobody applies, dismisses or withdraws within this many days expires. |
 | `PROPOSAL_BATCH_MAX` | 25 | API actions one `propose_batch` call may hold. |
 | `MESSAGE_DAYS` | 365 | Notes and system messages in people's inboxes are deleted after this. |
+| `SCRATCHPAD_DAYS` | 90 | Notes on the agents' scratchpad nobody touched for this long are deleted, open or not ([Claude](claude.md#the-agents-scratchpad)). |
+| `SCRATCHPAD_CLAIM_MINUTES` | 120 | A claim on a scratchpad note lapses after this, so a session that stopped doesn't block the next. |
 | `ANNOUNCEMENT_DAYS` | 90 | Expired announcements are deleted this long after their expiry. |
 
 ## Backups and retention

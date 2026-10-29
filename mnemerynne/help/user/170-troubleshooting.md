@@ -4,7 +4,7 @@
 
 **"Too many failed attempts."** Five wrong passwords for your username, or many across usernames from your computer, lock sign-in for 5 minutes. Wait, then try again. Forgotten it entirely? An admin resets it on Access → Accounts.
 
-**I was signed out for no reason.** An admin reset your password, you pressed *Sign out other browsers* elsewhere, or 24 hours passed since you signed in. Sign in again.
+**I was signed out for no reason.** You signed out in another browser (signing out ends every session of your account), an admin reset your password, you pressed *Sign out other browsers* elsewhere, or 24 hours passed since you signed in. Sign in again.
 
 ## Asking
 

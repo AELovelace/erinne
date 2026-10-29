@@ -176,3 +176,15 @@ def test_admin_networks_unset_means_anywhere(tmp_path):
     assert security.admin_network_ok(limited, "fd00::1")
     assert not security.admin_network_ok(limited, "203.0.113.5")
     assert not security.admin_network_ok(limited, "testclient")
+
+
+def test_signing_out_ends_the_session_everywhere(client, conn):
+    """Sessions are signed cookies the server doesn't keep, so Sign out bumps the account's session epoch:
+    a cookie copied from a shared PC stops working the moment the person signs out anywhere."""
+    users.create_user(conn, "alice", "password123")
+    client.post("/login", data={"username": "alice", "password": "password123"})
+    stolen = client.cookies.get("mnemerynne_session")
+    assert client.get("/api/me").status_code == 200
+    client.post("/logout")
+    client.cookies.set("mnemerynne_session", stolen)
+    assert client.get("/api/me").status_code == 401

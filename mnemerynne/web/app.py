@@ -46,7 +46,7 @@ from mnemerynne.web import (admin, admin_apis, admin_notices, admin_remote, agen
                             claude_links as claude_link_pages, editor as editor_pages, files, help as help_pages,
                             kiosk as kiosk_pages,
                             m365 as m365_pages, media as media_pages, memories, messages as message_pages, oauth as oauth_pages, remote as remote_pages,
-                            rooms as room_pages, security,
+                            rooms as room_pages, scratchpad as scratchpad_pages, security,
                             settings as settings_pages, theme as theme_pages, tokens, wiki as wiki_pages)
 from mnemerynne.web.deps import LoginRequired, api_user, get_db, is_admin, page_user
 
@@ -293,6 +293,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(files.router)
     app.include_router(chat.router)
     app.include_router(memories.router)
+    app.include_router(scratchpad_pages.router)   # the agents' scratchpad summary and Clear, on Preferences
     app.include_router(admin.router)
     app.include_router(tokens.router)
     app.include_router(api_pages.router)
@@ -429,7 +430,11 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         return RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
 
     @app.post("/logout")
-    def logout(request: Request):
+    def logout(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+        # Sessions are signed cookies the server doesn't keep, so clearing this browser's wouldn't stop a copy
+        # of it; bumping the epoch (as a password change does) ends every session of this account.
+        if (user_id := request.session.get("user_id")) is not None:
+            users.sign_out_everywhere(conn, user_id)
         request.session.clear()
         return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
 

@@ -337,3 +337,21 @@ def test_claude_reads_mail_with_opaque_ids_and_drafts_as_proposals(conn, setting
     logged = mcp_server.logged_args("draft_reply", {"id": msg["id"], "body": "Thanks Sam, I'll pay it Thursday."})
     assert logged == {"id": msg["id"], "body": "(33 characters)"}
     assert mcp_server.logged_args("search_documents", {"query": "x"}) == {"query": "x"}
+
+
+def test_a_mail_tool_switched_off_is_refused_before_it_runs(client, conn, graph):
+    """The model knows the tool names whether or not they were offered (a planted passage can name one); a
+    mail tool the person switched off is refused like any other, and nothing reaches Microsoft."""
+    client.agent_llm.turns(ToolTurn("", [ToolCall("c1", "search_mail", {"query": "boiler", "account": "Eternal"})]),
+                           lambda m: ToolTurn("Couldn't: " + last_tool(m)["error"]))
+    events = []
+    with client.stream("POST", "/api/ask", json={"question": "find the boiler mail",
+                                                 "disabled_tools": ["search_mail"]}) as r:
+        assert r.status_code == 200, r.read()
+        for block in r.iter_text():
+            for line in block.split("\n"):
+                if line.startswith("data:"):
+                    events.append(json.loads(line[5:]))
+    assert "no tool called" in _final(events)["answer"]
+    assert "search_mail" not in client.agent_llm.calls[0][1]                   # it wasn't offered...
+    assert not [url for _, url in graph.calls if "/messages" in url]           # ...and it never ran

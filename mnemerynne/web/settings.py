@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import accounts, api_tokens, apis, auth, claude_chat, memory, users
+from mnemerynne import accounts, api_tokens, apis, auth, claude_chat, memory, scratchpad, users
 from mnemerynne.clients import claude as claude_client
 from mnemerynne.db import transaction
 from mnemerynne.web.admin import _log
@@ -50,6 +50,7 @@ async def preferences_page(request: Request, user=Depends(page_user), conn: sqli
         "themes": looks.pickable(), "theme_enforced": bool(looks.settings.get("enforce")),
         "current_theme": looks.resolve(user["theme"] or None, None).slug,
         "memories": await memory.list_memories(state.store, user["id"]), "memory_mode": state.settings.memory_mode,
+        "scratchpad": scratchpad.summary(conn, user["id"], state.settings.scratchpad_claim_minutes),   # the agents' notes
         "admin_via": ADMIN_VIA.get(via or ""), "groups": groups, "domain": state.settings.ad_domain,
         "tokens": api_tokens.has_active(conn, user["id"]), "min_password": auth.MIN_PASSWORD_LENGTH,
         "has_extension": extension_path(state.settings) is not None,

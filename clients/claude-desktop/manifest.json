@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "mnemerynne",
   "display_name": "Mnemerynne",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Search your Mnemerynne documents (File box and shared libraries) from Claude, with citations, and edit text, Word and Excel files.",
   "long_description": "Lets Claude search the documents you can see in Mnemerynne and answer with the file, page and section for every claim, linking back to Mnemerynne. With a token that's allowed to edit, Claude can also create and change .txt, .md, .docx and .xlsx files, and save any file it made, in your Agents folder (and wherever an admin allows); every change keeps the previous version. Uses a personal token you create under Claude in Mnemerynne; what Claude may search and edit is set by Mnemerynne's admins.",
   "author": {
@@ -147,6 +147,22 @@
     {
       "name": "react_in_room",
       "description": "React to a room message with an emoji"
+    },
+    {
+      "name": "read_scratchpad",
+      "description": "Notes your own agents left each other about work that spans sessions"
+    },
+    {
+      "name": "write_scratchpad",
+      "description": "Jot a hand-over note on a scratchpad board for your other agents"
+    },
+    {
+      "name": "claim_note",
+      "description": "Claim a scratchpad task so another session doesn't take it"
+    },
+    {
+      "name": "resolve_note",
+      "description": "Mark a scratchpad note done"
     },
     {
       "name": "my_briefing",

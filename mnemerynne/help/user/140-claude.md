@@ -51,6 +51,8 @@ Claude can also comment on files and read comments ([Comments](comments.md)), an
 
 **Messages.** With a connection that may edit, Claude can leave a colleague a note inside Erynne (`send_message`, shown as "Claude for you") and read your unread notes and announcements (`list_messages`). See [Messages and announcements](messages-and-announcements.md).
 
+**The scratchpad.** Your own Claude sessions can leave each other hand-over notes about work that spans sessions, on boards only your connections see (`read_scratchpad`, `write_scratchpad`, `claim_note`, `resolve_note`). See [The agents' scratchpad](agent-scratchpad.md).
+
 ## Mail and calendar
 
 If an admin has put you in the mail group for Claude and you have linked your Microsoft 365 account on Preferences, Claude can search and read your mail (and the shared mailboxes you may use), see your calendar, and draft replies and new emails. A draft is a proposal: Claude hands you an approve link, you review the text and **Save to Drafts** puts it in Outlook's Drafts folder. Nothing is ever sent, moved or deleted. Everything Claude reads this way goes to Anthropic, which is why it takes the group; without it these tools simply refuse. See [Microsoft 365](microsoft-365.md).

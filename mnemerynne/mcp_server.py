@@ -38,7 +38,7 @@ from starlette.types import Receive, Scope, Send
 
 from mnemerynne import (identity, diagnostics, messages, notices, rooms, accounts, activity, api_tokens, apis, automations,
                         automations_run, briefings, claude_links, comments, db, editing, editing_formats,
-                        fs, m365_mail, permissions, proposals, retrieval, sharepoint)
+                        fs, m365_mail, permissions, proposals, retrieval, scratchpad, sharepoint)
 from mnemerynne.api_tokens import Caller
 from mnemerynne.config import Settings
 from mnemerynne.ingest import store
@@ -53,7 +53,9 @@ log = logging.getLogger("mnemerynne.mcp")
 # 1.3.0: Rooms (channels and direct messages): list_rooms, read_room, post_to_room, react_in_room.
 # 1.4.0: mail and calendar for the group an admin names: search_mail, recent_mail, read_mail, calendar,
 #        draft_reply, draft_mail (drafts are proposals; nothing sends).
-MCP_VERSION = "1.6.0"
+# 1.7.0: the agent scratchpad, notes between a person's own sessions: read_scratchpad, write_scratchpad,
+#        claim_note, resolve_note; my_briefing reports open notes.
+MCP_VERSION = "1.7.0"
 
 PAGE_WIDTH_PX = 1200     # rendered page width: small print stays legible, JPEG stays ~100-300 KB
 PAGE_MAX_PX = 2000       # cap on either side, for unusually long or wide pages
@@ -121,6 +123,18 @@ Working with others (people, and other people's Claude):
   id; `thread` for one thread); post_to_room writes there as "Claude for <name>" (reply in a thread
   with `thread`); react_in_room adds an emoji. Everyone in the room reads what you post: write only what
   the person asked you to say, and never paste documents they didn't ask you to share.
+
+The scratchpad (notes between the person's own agents):
+- It is a notebook shared by the person's own sessions (their Claude Code sessions, Claude Desktop,
+  claude.ai; nobody else sees it) for work that spans sessions. read_scratchpad lists the boards, or
+  one board's notes (`since` for what changed after a time; `include_done` for the history);
+  write_scratchpad jots a note on a board named after the work (e.g. nas-migration; `agent` is your
+  own label, such as the machine or task you're on, else the connection's name signs it; `replaces`
+  retires an older note of yours so the board carries one current state).
+- For work that spans sessions: read the board first; claim_note before taking a task listed there
+  (another agent gets [conflict] naming the holder, and claims lapse on their own after a while);
+  resolve_note when it's done; and before you stop, jot a short hand-over: what's done, what's next,
+  what to leave alone. Keep notes short and never paste document text into them.
 
 Briefings and security:
 - my_briefing lists what's waiting for the person in Mnemerynne; security_feeds the new advisories from
@@ -1206,6 +1220,96 @@ class Tools:
             raise Refused(str(exc), "not_found" if exc.status == 404 else "invalid") from None
         return {"message_id": m["id"], "reactions": {r["emoji"]: len(r["users"]) for r in m["reactions"]}}, []
 
+    # --------------------------------------------------------- scratchpad
+    def _agent_label(self, conn, caller: Caller, agent: str | None) -> tuple[str, str]:
+        """(label, connection) for a note: the label the session gave, else the connection's own name
+        (the token's name, or the OAuth client's) with its id, so two unlabelled sessions still differ."""
+        if caller.token_id:
+            connection, row = f"t{caller.token_id}", conn.execute(
+                "SELECT name FROM api_tokens WHERE id = ?", (caller.token_id,)).fetchone()
+        elif caller.grant_id:
+            connection, row = f"g{caller.grant_id}", conn.execute(
+                "SELECT c.name FROM oauth_grants g JOIN oauth_clients c ON c.id = g.client_row WHERE g.id = ?",
+                (caller.grant_id,)).fetchone()
+        else:                                                        # Erynne or Claude in chat: no connection row
+            connection, row = self.mode, None
+        if agent:
+            return scratchpad.agent_label(agent), connection
+        name = (row["name"] if row else "") or "Claude"
+        label = f"{name} #{caller.token_id or caller.grant_id}" if row else name
+        return scratchpad.agent_label(label), connection
+
+    @staticmethod
+    def _scratch_refused(exc: scratchpad.ScratchpadError) -> Refused:
+        return Refused(str(exc), {404: "not_found", 409: "conflict"}.get(exc.status, "invalid"))
+
+    def _scratch_writer(self, caller: Caller) -> None:
+        if not caller.can_edit:
+            raise ToolError("This connection can only search. To let Claude write on the scratchpad, open Claude in "
+                            "Mnemerynne and turn on “Let Claude edit files” for this token.")
+
+    def read_scratchpad(self, conn, caller: Caller, board: str | None = None, since: str | None = None,
+                        include_done: bool = False, limit: int = 50) -> tuple[dict, list[int]]:
+        """The person's boards, or one board's notes (scratchpad.notes); stale claims lapse here."""
+        minutes = self.settings.scratchpad_claim_minutes
+        if board in (None, ""):
+            listed = scratchpad.boards(conn, caller.user_id)
+            return {"boards": listed,
+                    "note": ("Only the person's own connections see these boards. Call again with `board` to "
+                             "read one." if listed else
+                             "No boards yet: write_scratchpad with a board named after the work starts one.")}, []
+        try:
+            key = scratchpad.board_key(board)
+            listed = scratchpad.notes(conn, caller.user_id, key, since=since, include_done=include_done,
+                                      limit=limit, minutes=minutes)
+        except scratchpad.ScratchpadError as exc:
+            raise self._scratch_refused(exc) from None
+        label, _ = self._agent_label(conn, caller, None)
+        out = {"board": key, "notes": listed, "you": label,
+               "note": "Only the person's own connections see this board. Claim a note before taking its task; "
+                       f"claims lapse after {minutes} minutes."}
+        if not listed:
+            out["note"] = ("Nothing on this board" + (" since then" if since else "") +
+                           ("" if include_done else "; include_done shows resolved notes") + ".")
+        elif len(listed) >= max(1, min(int(limit or 50), scratchpad.MAX_LISTED)):
+            out["note"] += f" More may follow: call again with since={listed[-1]['updated']}."
+        return out, []
+
+    def write_scratchpad(self, conn, caller: Caller, board: str, text: str, agent: str | None = None,
+                         replaces: int | None = None) -> tuple[dict, list[int]]:
+        """Jot a note on a board for the person's other agents (scratchpad.write)."""
+        self._scratch_writer(caller)
+        try:
+            label, connection = self._agent_label(conn, caller, agent)
+            note_id = scratchpad.write(conn, caller.user_id, board, text, label, connection, replaces=replaces)
+        except scratchpad.ScratchpadError as exc:
+            raise self._scratch_refused(exc) from None
+        return {"note_id": note_id, "board": scratchpad.board_key(board), "agent": label,
+                "note": "Jotted. The person's other agents see it with read_scratchpad; nobody else does."}, []
+
+    def claim_note(self, conn, caller: Caller, note_id: int, agent: str | None = None,
+                   release: bool = False) -> tuple[dict, list[int]]:
+        """Take a note's task for this agent, or hand it back (scratchpad.claim)."""
+        self._scratch_writer(caller)
+        try:
+            label, _ = self._agent_label(conn, caller, agent)
+            note = scratchpad.claim(conn, caller.user_id, note_id, label, release=release,
+                                    minutes=self.settings.scratchpad_claim_minutes)
+        except scratchpad.ScratchpadError as exc:
+            raise self._scratch_refused(exc) from None
+        return {**note, "note": ("Released." if release else
+                                 f"Claimed for {label}. resolve_note when it's done; the claim lapses after "
+                                 f"{self.settings.scratchpad_claim_minutes} minutes otherwise.")}, []
+
+    def resolve_note(self, conn, caller: Caller, note_id: int, done: bool = True) -> tuple[dict, list[int]]:
+        """Mark a note done, or open again with done=false (scratchpad.resolve)."""
+        self._scratch_writer(caller)
+        try:
+            note = scratchpad.resolve(conn, caller.user_id, note_id, done=done)
+        except scratchpad.ScratchpadError as exc:
+            raise self._scratch_refused(exc) from None
+        return {**note, "note": "Done." if done else "Open again."}, []
+
     # ------------------------------------------------- briefing and security
     def _admin_caller(self, conn, caller: Caller) -> sqlite3.Row:
         user = conn.execute("SELECT * FROM users WHERE id = ?", (caller.user_id,)).fetchone()
@@ -1216,7 +1320,7 @@ class Tools:
     def my_briefing(self, conn, caller: Caller) -> tuple[dict, list[int]]:
         """What's waiting for the person inside Mnemerynne."""
         user = conn.execute("SELECT * FROM users WHERE id = ?", (caller.user_id,)).fetchone()
-        return briefings.briefing(conn, user, self.get_directory()), []
+        return briefings.briefing(conn, user, self.get_directory(), self.settings.scratchpad_claim_minutes), []
 
     def mnemerynne_updates(self, conn, caller: Caller) -> tuple[dict, list[int]]:
         self._admin_caller(conn, caller)
@@ -1330,9 +1434,13 @@ class Tools:
         what = (what or "").strip().lower()
         if what not in diagnostics.KINDS:
             raise Refused(f"what is one of {', '.join(diagnostics.KINDS)}.", "invalid")
+        # Admins in the group see everything; anyone else only their own calls (other people's carry their
+        # questions and the text they had Claude write) and only files and passages they may read themselves.
+        admin = accounts.is_admin(conn, user, self.get_directory(), self.settings.admin_usernames)
         if what == "calls":
-            return {"what": what, **diagnostics.calls(conn, tool=tool, failed_only=failed_only,
-                                                       since_minutes=since_minutes, limit=limit)}, []
+            return {"what": what, **diagnostics.calls(conn, tool=tool, user_id=None if admin else caller.user_id,
+                                                       failed_only=failed_only, since_minutes=since_minutes,
+                                                       limit=limit)}, []
         if what == "search":
             if not query:
                 raise Refused("search needs `query`: the question to trace.", "invalid")
@@ -1341,16 +1449,29 @@ class Tools:
         if what == "file":
             if file_id is None:
                 raise Refused("file needs `file_id`.", "invalid")
+            if not admin and not self._diag_readable(conn, caller, file_id):
+                return {"what": what, "file_id": file_id, "found": False}, []   # as if absent: nothing to enumerate
             return {"what": what, **diagnostics.file_state(conn, self.settings, file_id)}, []
         if what == "chunk":
             if chunk_id is None:
                 raise Refused("chunk needs `chunk_id` (a passage's chunk_id from search_documents).", "invalid")
+            owner = conn.execute("SELECT file_id FROM chunks WHERE id = ?", (chunk_id,)).fetchone()
+            if not admin and (owner is None or not self._diag_readable(conn, caller, owner["file_id"])):
+                return {"what": what, "chunk_id": chunk_id, "found": False}, []
             return {"what": what, **diagnostics.chunk_state(conn, chunk_id)}, []
         if what == "jobs":
             return {"what": what, **diagnostics.jobs(conn, status, limit)}, []
         if what == "log":
             return {"what": what, "records": diagnostics.recent_log(limit, level, tool)}, []
         return {"what": what, **diagnostics.config(conn, self.settings)}, []
+
+    @staticmethod
+    def _diag_readable(conn, caller: Caller, file_id: int) -> bool:
+        """Whether this person may read the file (binned or not) by their own permissions: what diagnose
+        may show a developer who isn't an admin."""
+        row = conn.execute("SELECT id, collection_id, folder_id, claude_hidden FROM files WHERE id = ?",
+                           (file_id,)).fetchone()
+        return row is not None and fs.Access.of(conn, caller.user_id).can_read_file(row)
 
     # ------------------------------------------------------------- mail
     def _mail(self, conn, caller: Caller) -> m365_mail.Context:
@@ -1879,9 +2000,44 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
         return await call(ctx, "react_in_room", {"message_id": message_id, "emoji": emoji}, tools.react_in_room)
 
     @server.tool(annotations=_READ_ONLY)
+    async def read_scratchpad(ctx: Context, board: str | None = None, since: str | None = None,
+                              include_done: bool = False, limit: int = 50) -> dict:
+        """The scratchpad: notes the person's own agents (their Claude Code sessions, Desktop, claude.ai)
+        leave for each other about work that spans sessions; nobody else sees it. Without `board`, lists the
+        boards with what's open on each. With `board` (e.g. "nas-migration"), that board's open notes oldest
+        first, each with its note_id, who wrote it, and who has claimed it; `since` (a UTC date-time) keeps
+        only what changed after then, `include_done` adds resolved ones. Read it first for multi-session work."""
+        return await call(ctx, "read_scratchpad", {"board": board, "since": since, "include_done": include_done,
+                                                   "limit": limit}, tools.read_scratchpad)
+
+    @server.tool(annotations=_EDITS)
+    async def write_scratchpad(ctx: Context, board: str, text: str, agent: str | None = None,
+                               replaces: int | None = None) -> dict:
+        """Jot a note on a scratchpad board for the person's other agents: what's done, what's next, what to
+        leave alone. `board` is named after the work ("nas-migration"; made on first use); `agent` is your own
+        short label (the machine or task you're on; without it the connection's name signs the note);
+        `replaces` (a note_id of yours on the same board) retires that older note so the board shows one current
+        state. Keep it short and never paste document text into it."""
+        return await call(ctx, "write_scratchpad", {"board": board, "text": text, "agent": agent, "replaces": replaces},
+                          tools.write_scratchpad)
+
+    @server.tool(annotations=_EDITS)
+    async def claim_note(ctx: Context, note_id: int, agent: str | None = None, release: bool = False) -> dict:
+        """Claim a scratchpad note's task for this agent before starting it, so another session doesn't take
+        the same work: if someone else holds it you get [conflict] naming them. `release` hands your own claim
+        back. Claims lapse by themselves after a while, so resolve_note when the work is done."""
+        return await call(ctx, "claim_note", {"note_id": note_id, "agent": agent, "release": release}, tools.claim_note)
+
+    @server.tool(annotations=_EDITS)
+    async def resolve_note(ctx: Context, note_id: int, done: bool = True) -> dict:
+        """Mark a scratchpad note done (its claim is cleared); `done` false opens it again."""
+        return await call(ctx, "resolve_note", {"note_id": note_id, "done": done}, tools.resolve_note)
+
+    @server.tool(annotations=_READ_ONLY)
     async def my_briefing(ctx: Context) -> dict:
         """What's waiting for the person inside Mnemerynne: unread notes, announcements, room mentions and
-        unread direct messages, and proposals waiting for them to apply. (Mail and calendar: their own tools.)"""
+        unread direct messages, proposals waiting for them to apply, and open notes on their agent scratchpad.
+        (Mail and calendar: their own tools.)"""
         return await call(ctx, "my_briefing", {}, tools.my_briefing)
 
     @server.tool(annotations=_READ_ONLY)

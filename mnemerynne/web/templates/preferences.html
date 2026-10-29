@@ -90,6 +90,21 @@
   </ul>
   {% if memories %}<button type="button" class="link danger" id="forget-all">Forget everything</button>{% endif %}
   <p id="memories-note" aria-live="polite" hidden></p>
+
+  <h2 class="admin-section" id="scratchpad">Your agents' scratchpad</h2>
+  <p class="muted small">Notes your own Claude sessions leave for each other about work that spans sessions
+    (through the connector: <code>read_scratchpad</code> and <code>write_scratchpad</code>). Only your own
+    connections see them. <a href="/help/user/agent-scratchpad">How it works</a>.</p>
+  {% if scratchpad.open %}
+  <p id="scratchpad-summary">{{ scratchpad.open }} open note{{ '' if scratchpad.open == 1 else 's' }} on {{ scratchpad.boards | length }} board{{ '' if scratchpad.boards | length == 1 else 's' }}:
+    {% for b in scratchpad.boards %}<code>{{ b.board }}</code> ({{ b.open }}){{ ', ' if not loop.last }}{% endfor %}.
+    {% if scratchpad.claims %}Claimed right now: {% for c in scratchpad.claims %}note {{ c.note_id }} by {{ c.claimed_by }}{{ ', ' if not loop.last }}{% endfor %}.{% endif %}
+  </p>
+  {% else %}
+  <p class="muted" id="scratchpad-summary">Nothing open.</p>
+  {% endif %}
+  <button type="button" class="link danger" id="clear-scratchpad">Clear scratchpad</button>
+  <p id="scratchpad-note" aria-live="polite" hidden></p>
 </section>
 
 <section class="inbox admin connect" id="claude" aria-labelledby="claude-title">
