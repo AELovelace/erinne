@@ -1628,6 +1628,7 @@
   function label(s) { return s.name + (s.owner ? " (" + s.owner + ")" : ""); }
 
   let calibrating = null;   // the screen whose size is being adjusted from here (the phone)
+  let textSizing = null;    // the screen whose text size is being adjusted from here
 
   function paintScreens() {
     const list = $("mc-screen-list");
@@ -1656,6 +1657,13 @@
           }, "Fit the picture to a TV that cuts off its edges");
           size.dataset.nav = "";
           actions.appendChild(size);
+          const text = button("Text size", "link small", function () {
+            textSizing = textSizing === s.id ? null : s.id;
+            if (textSizing) cast.send({ action: "text_size", step: "open" }, s.id);
+            paintScreens();
+          }, "Make text and buttons bigger or smaller on that TV");
+          text.dataset.nav = "";
+          actions.appendChild(text);
         }
         const pick = button(cast.target === s.id ? "✓ Playing here" : "Play on this screen",
                             cast.target === s.id ? "" : "secondary", function () { cast.choose(cast.target === s.id ? null : s.id); paintScreens(); });
@@ -1682,6 +1690,19 @@
           const btn = button(b[0], b[1] === "save" ? "" : "secondary small", function () {
             cast.send({ action: "calibrate", step: b[1] }, s.id);
             if (b[1] === "save" || b[1] === "cancel") { calibrating = null; paintScreens(); }
+          });
+          btn.dataset.nav = "";
+          pad.appendChild(btn);
+        });
+        list.appendChild(pad);
+      }
+      if (textSizing === s.id && s.online) {
+        const pad = el("div", "mc-cal-remote");
+        pad.appendChild(el("span", "mc-sub", "On the TV: text " + (s.scale ? s.scale + "×" : "automatic") + " saved"));
+        [["Smaller", "smaller"], ["Bigger", "bigger"], ["Automatic", "auto"], ["Save", "save"], ["Cancel", "cancel"]].forEach(function (b) {
+          const btn = button(b[0], b[1] === "save" ? "" : "secondary small", function () {
+            cast.send({ action: "text_size", step: b[1] }, s.id);
+            if (b[1] === "save" || b[1] === "cancel") { textSizing = null; paintScreens(); }
           });
           btn.dataset.nav = "";
           pad.appendChild(btn);
@@ -1847,6 +1868,7 @@
         focusFirst();
       }, true);
       safeArea.init();
+      textSize.init();
       signage.init();
       this.connect();
       setInterval(function () { screenMode.report(false); }, 3000);
@@ -1916,6 +1938,7 @@
       if (a === "signage_stop") { signage.pause(true); return; }
       if (a === "signage_start") { signage.pause(false); return; }
       if (a === "calibrate") { safeArea.step(cmd.step); return; }
+      if (a === "text_size") { textSize.step(cmd.step); return; }
       if (a.indexOf("play_") === 0 || a === "stop") signage.activity(false);
       if (a.indexOf("play_") === 0 || a === "stop") games.close();   // a cast takes the TV: the game stops
       if (a.indexOf("play_") === 0) {
@@ -1972,6 +1995,9 @@
     state: function () {
       if (safeArea.isOpen()) {
         return { kind: "calibrating", title: "Adjusting the screen size", sub: safeArea.label() };
+      }
+      if (textSize.isOpen()) {
+        return { kind: "calibrating", title: "Adjusting the text size", sub: textSize.label() };
       }
       if (signage.running) return signage.state();
       if (!$("mc-player").hidden) {
@@ -2131,6 +2157,127 @@
     },
   };
 
+  // ------------------------------------------------- text size (the TV, its UI scale)
+  /* How much bigger than usual the TV draws text and controls: the page's root font-size (erynne.css html.tv),
+     so a 4K TV is readable from the couch. Automatic (none saved) goes by the screen's width. Set on the Text
+     size screen (Kiosk settings, or from the phone) and kept with the screen on the server. */
+  const textSize = {
+    scale: null, before: null, box: null, fromSettings: false,
+    steps: [0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3],
+
+    init: function () {
+      this.scale = main.dataset.uiScale ? Number(main.dataset.uiScale) : null;
+      window.addEventListener("keydown", function (e) {
+        if (textSize.isOpen() && textSize.key(e)) { e.preventDefault(); e.stopImmediatePropagation(); }
+      }, true);
+      // From the box's Kiosk settings as ?textsize=1, and back there when saved or cancelled (like Screen size).
+      if (kiosk && /[?&]textsize=1\b/.test(location.search)) {
+        this.fromSettings = true;
+        history.replaceState(null, "", location.pathname + location.hash);
+        setTimeout(function () { textSize.open(); }, 0);
+      }
+    },
+
+    isOpen: function () { return !!this.box && !this.box.hidden; },
+    // What the page uses now: the saved scale, or what erynne.css picked for this width.
+    now: function () {
+      return Number(getComputedStyle(document.documentElement).getPropertyValue("--ui-scale")) || 1;
+    },
+    label: function () { return "text " + this.now() + "×" + (this.scale === null ? " (automatic)" : ""); },
+
+    apply: function () {
+      const root = document.documentElement;
+      if (this.scale === null) {
+        root.dataset.tvScale = "auto";
+        root.style.removeProperty("--ui-scale");
+      } else {
+        delete root.dataset.tvScale;
+        root.style.setProperty("--ui-scale", String(this.scale));
+      }
+      if (this.box) $("mc-text-values").textContent = this.label();
+    },
+
+    adjust: function (by) {
+      const from = this.scale === null ? this.now() : this.scale;
+      let i = this.steps.findIndex(function (v) { return v >= from - 0.01; });
+      if (i < 0) i = this.steps.length - 1;
+      if (by < 0 && this.steps[i] > from + 0.01) i -= 1;   // between steps: the one below is "smaller"
+      i = Math.max(0, Math.min(this.steps.length - 1, i + by));
+      this.scale = this.steps[i];
+      this.apply();
+      screenMode.report(true);
+    },
+
+    build: function () {
+      const box = el("div", "mc-cal");
+      box.id = "mc-text";
+      box.setAttribute("role", "dialog");
+      box.setAttribute("aria-label", "Text size");
+      const frame = el("div", "mc-cal-frame");
+      const help = el("div", "mc-cal-help");
+      help.append(el("h2", null, "Text size"),
+        el("p", null, "Make this text comfortable to read from where you sit."),
+        el("p", "mc-cal-keys", "← → smaller / bigger · 0 automatic · Enter saves · Esc cancels"));
+      const values = el("p", "mc-cal-values");
+      values.id = "mc-text-values";
+      const row = el("div", "mc-cal-buttons");
+      [["Smaller", "smaller"], ["Bigger", "bigger"], ["Automatic", "auto"], ["Save", "save"], ["Cancel", "cancel"]].forEach(function (b) {
+        row.appendChild(button(b[0], b[1] === "save" ? "" : "secondary", function () { textSize.step(b[1]); }));
+      });
+      help.append(values, row);
+      frame.appendChild(help);
+      box.appendChild(frame);
+      document.body.appendChild(box);
+      return box;
+    },
+
+    open: function () {
+      if (this.isOpen()) return;
+      this.before = this.scale;
+      this.box = this.box || this.build();
+      this.box.hidden = false;
+      $("mc-splash").hidden = true;
+      signage.activity(false);
+      this.apply();
+      screenMode.report(true);
+    },
+
+    close: function () {
+      if (this.box) this.box.hidden = true;
+      screenMode.report(true);
+      if (this.fromSettings) { location.href = KIOSK_HOME + "settings"; return; }
+      focusFirst();
+    },
+
+    save: async function () {
+      try {
+        const r = await api("PUT", "/media/screen/ui-scale", { scale: this.scale });
+        this.scale = r.scale;
+        this.apply();
+        this.close();
+      } catch (err) { $("mc-text-values").textContent = "Couldn't save: " + err.message; }
+    },
+
+    step: function (name) {
+      if (name === "open") { this.open(); return; }
+      if (!this.isOpen()) this.open();
+      if (name === "bigger") this.adjust(1);
+      else if (name === "smaller") this.adjust(-1);
+      else if (name === "auto") { this.scale = null; this.apply(); screenMode.report(true); }
+      else if (name === "save") this.save();
+      else if (name === "cancel") { this.scale = this.before; this.apply(); this.close(); }
+    },
+
+    key: function (e) {
+      const steps = { ArrowLeft: "smaller", ArrowDown: "smaller", ArrowRight: "bigger", ArrowUp: "bigger", "0": "auto",
+                      Enter: "save", Escape: "cancel", Backspace: "cancel" };
+      if (e.key === "Enter" && document.activeElement && this.box.contains(document.activeElement)) return false;  // a focused button
+      if (!steps[e.key]) return false;
+      this.step(steps[e.key]);
+      return true;
+    },
+  };
+
   // ------------------------------------------------------ signage (the TV, idle)
   /* What the screen shows while nobody uses it (Access → Signage). Its programme is the ranked list of
      schedule entries for this screen (its own, its group's, everyone's); the first that holds by this
@@ -2171,7 +2318,7 @@
     },
 
     busy: function () {
-      return !$("mc-player").hidden || !$("mc-viewer").hidden || !audio.paused || safeArea.isOpen();
+      return !$("mc-player").hidden || !$("mc-viewer").hidden || !audio.paused || safeArea.isOpen() || textSize.isOpen();
     },
 
     activity: function (fromKey) {

@@ -166,9 +166,13 @@ def test_a_box_gets_the_small_bar_and_its_underscan_on_every_page(client, conn, 
     # Any other page: the underscan, the small bar (Back to TV, ‹ ›) and the remote.
     page = tv.get("/login").text
     assert 'class="tv tv-box"' in page and "--safe-yv: 2.5vh" in page
+    assert 'data-tv-scale="auto"' in page                                    # its text size too: automatic,
+    assert tv.put("/media/screen/ui-scale", json={"scale": 2}).status_code == 200
+    page = tv.get("/login").text                                             # or the one saved
+    assert "--safe-yv: 2.5vh; --ui-scale: 2.0" in page and 'data-tv-scale' not in page
     assert 'class="tv-strip"' in page and 'data-tv-go="back"' in page and "screen_link.js" in page
     framed = tv.get("/login", headers={"sec-fetch-dest": "iframe"}).text      # in a frame: the page around it has them
-    assert 'class="tv' not in framed and "tv-strip" not in framed
+    assert 'class="tv' not in framed and "tv-strip" not in framed and "--ui-scale" not in framed
     assert 'class="tv' not in TestClient(client.app).get("/login").text      # not a screen at all
 
     # With its top bar on: one Back to TV on the sign-in page, and ‹ › in the TV page's bar.

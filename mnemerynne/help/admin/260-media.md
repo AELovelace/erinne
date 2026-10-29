@@ -64,9 +64,13 @@ A TV run by a screen box (`deploy/screen/` in the repository) has **⚙ Kiosk se
 
 **Show the top bar** gives that TV's page a short top bar (Ask, Files, the Wiki, **Sign in**), for a box used as a thin client. Anyone who signs in on the TV is signed out when they go back to the TV, and after ten minutes untouched. It's stored on the server for that screen, so changing it needs a phone approval.
 
+**Text size…** makes text and buttons bigger or smaller on that TV's pages (Media, signage's own pages, and Ask, Files and the Wiki from the top bar). It's stored on the server for that screen, like the screen size. Until someone sets it, it's automatic: 1.5× on a screen wider than 2400 pixels and 2× from 3000 (a 4K TV), otherwise normal. Any screen gets it, not only a box: its owner can change it from **Media → Screens → Text size** on their phone.
+
+A box on a 4K TV also asks the TV for 1080p by itself (the installer's `--display` option, in the box's README). Then the TV, the start page and Kiosk settings are all readable, and the automatic text size stays normal.
+
 Opening the settings (`kiosk.unlock`) and changing the top bar (`kiosk.top_bar`) are logged, with the admin who approved. The box's README (`deploy/screen/README.md`, step 6) covers the rest.
 
-**On every page, not only the TV page,** a screen box keeps its screen size, has a small bar (**📺 Back to TV**, **‹ ›**), and still hears the remote. Documents open inside a page with that bar. **Backspace** goes back a page, and **Ctrl+Shift+Alt+R** restarts the kiosk.
+**On every page, not only the TV page,** a screen box keeps its screen size and text size, has a small bar (**📺 Back to TV**, **‹ ›**), and still hears the remote. Documents open inside a page with that bar. **Backspace** goes back a page, and **Ctrl+Shift+Alt+R** restarts the kiosk.
 
 **Someone using the TV** (on any page but the TV page) gets 10 seconds to keep it when a command comes from a phone: **Keep using the TV**, or Escape. Otherwise an open document is saved as it is and the TV goes back to its page to carry the command out, signing out whoever was signed in on it.
 

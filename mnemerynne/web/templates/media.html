@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="{{ static('media.css') }}">
 <link rel="stylesheet" href="{{ static('signage_crt.css') }}">
 <div class="mc-backdrop" id="mc-backdrop" aria-hidden="true"></div>
-<main class="mc" id="mc" data-has-library="{{ 1 if has_library else 0 }}" data-admin="{{ 1 if is_admin else 0 }}" data-folder="{{ folder }}"{% if screen %} data-screen-id="{{ screen.id }}" data-screen-name="{{ screen.name }}" data-safe-x="{{ screen.safe_x }}" data-safe-y="{{ screen.safe_y }}"{% endif %}>
+<main class="mc" id="mc" data-has-library="{{ 1 if has_library else 0 }}" data-admin="{{ 1 if is_admin else 0 }}" data-folder="{{ folder }}"{% if screen %} data-screen-id="{{ screen.id }}" data-screen-name="{{ screen.name }}" data-safe-x="{{ screen.safe_x }}" data-safe-y="{{ screen.safe_y }}" data-ui-scale="{{ '' if screen.ui_scale is none else screen.ui_scale }}"{% endif %}>
   <nav class="mc-menu" id="mc-menu" aria-label="Media">
     <div class="mc-clock" id="mc-clock" aria-hidden="true"></div>
     <div class="mc-date" id="mc-date" aria-hidden="true"></div>
