@@ -1,8 +1,8 @@
 # Plan: the desktop sync client
 
-*Written 2026-10-29 by Claude for Doll. A plan: nothing here is built yet. Every decision was settled with Doll on
-2026-10-29. It replaces the 2026-10-25 plan in IT-OPS (Tauri/Rust, two-way sync of the File box): this one is
-Python, one-way, into `Backups`.*
+*Written 2026-10-29 by Claude for Doll; built the same day and merged in PR #1. It replaced the 2026-10-25
+IT-OPS plan (Tauri/Rust, two-way sync of the File box): this one is Python, one-way, into `Backups`. The Status
+section says what is built and what's left.*
 
 **The idea:** a small app on a person's PC or laptop, on **Windows or Linux**. They add any number of folders (Desktop,
 `D:\Photos`, `~/Projects`…) and the app keeps each one copied to a **Backups** folder in their File box on the NAS,
@@ -17,8 +17,11 @@ shows what it's doing and anything it couldn't copy.
 | 0 Server groundwork | Built (`fb9fa59`) |
 | 1 App engine and command line | Built (`4cc7ee1`) |
 | 2 Backup host, parts, Restore | Built (`4cc7ee1`); the proxy and DNS are Doll's |
-| 3 Sign-in, tray app, packaging | Built (`de0fe54`); installers not built yet (need a Windows box and a Python with Tk) |
-| 4 Searchable, Backups page, admin box, help, `sync-status` | Built |
+| 3 Sign-in, tray app, packaging | Built (`de0fe54`); the 0.1.0 Windows installer is built (482ddf5) and on beepsquad.wtf; the AppImage builds with `PYTHON=/usr/bin/python3 packaging/build-appimage.sh` |
+| 4 Searchable, Backups page, admin box, help, `sync-status` | Built; merged in PR #1. Running on beepsquad.wtf behind bkp.beepsquad.wtf (10.1.1.20 straight to the app, no Caddy) |
+
+**Left:** the by-hand pilot checks below; locked files through shadow copies (stretch goal); Linux name mapping;
+macOS.
 
 **Testing on the dev NAS (beepsquad.wtf):**
 1. Deploy the branch; migration 0057 runs on start.

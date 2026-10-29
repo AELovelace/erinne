@@ -43,7 +43,7 @@ agent a person wrote, there's no reply thread, and nothing shows which sessions 
 
 ## Shape of it
 
-### Data (migration 0058, or the next free number: check the board first)
+### Data (migration 0059, or the next free number: 0058 is `screen_ui_scale`; check the board first)
 - `scratchpad_notes` gains:
   - `author` (`agent` | `person`);
   - `for_agent` (a label; NULL = everyone on the board);
