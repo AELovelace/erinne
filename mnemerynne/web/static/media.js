@@ -1,5 +1,6 @@
 /* Media: a Kodi-style media centre over the share's Media library (mnemerynne/media/).
-   Views come from the hash (#movies, #movie/12, #album/<key>, #pictures/34, #live, #radio...).
+   Views come from the hash (#movies, #movie/12, #tv, #tvshow/56, #album/<key>, #pictures/34, #live, #radio...).
+   A TV episode plays on into the next one of its show (episodes, below).
    Films and clips play in a full-screen player, music and radio in the now-playing bar; what the
    browser can't play itself is asked of the server (/api/media/play), which answers with the file or
    an HLS session (played with hls.js). Arrow keys move between tiles like a remote; Enter opens,
@@ -12,7 +13,7 @@
   const main = $("mc");
   const content = $("mc-content");
   const isAdmin = main.dataset.admin === "1";
-  const folder = main.dataset.folder || "Media";   // the Media folder on the share (Settings → Media)
+  const folder = main.dataset.folder || "Media";   // the Media folder on the share (Settings → Entertainment → Media)
   const screenId = main.dataset.screenId ? Number(main.dataset.screenId) : null;   // this browser is a screen (the TV)
   /* The Mnemerynne screen box (deploy/screen) opens this page as ?kiosk=1 from its own start page
      (http://127.0.0.1:9187/, which also sets up Wi-Fi); remembered, since later loads come without it. */
@@ -124,6 +125,36 @@
                   progress: m.progress, onClick: function () { go("movie/" + m.id); } });
   }
 
+  /* "S1·E3", "Special 2", "E7" or "" for an episode (the season and episode the server read from its name). */
+  function episodeCode(e) {
+    if (e.season === 0) return "Special" + (e.episode !== null && e.episode !== undefined ? " " + e.episode : "");
+    return [e.season !== null && e.season !== undefined ? "S" + e.season : "",
+            e.episode !== null && e.episode !== undefined ? "E" + e.episode : ""].filter(Boolean).join("·");
+  }
+
+  /* The player's title for an episode: "Show · S1·E3 · Title". */
+  function episodeTitle(e) {
+    return [e.tv_show, episodeCode(e), e.title].filter(Boolean).join(" · ");
+  }
+
+  function showCard(s) {
+    const sub = s.seasons > 1 ? s.seasons + " seasons" : s.episodes + (s.episodes === 1 ? " episode" : " episodes");
+    return card({ title: s.name, sub: sub, art: s.art, shape: "poster", glyph: "📺",
+                  onClick: function () { go("tvshow/" + s.id); } });
+  }
+
+  /* An episode on Home's Continue watching: its still, the show's name, which episode. Opens the show. */
+  function episodeCard(e) {
+    return card({ title: e.tv_show, sub: [episodeCode(e), e.title].filter(Boolean).join(" · "), art: e.art || e.fanart,
+                  shape: "wide", glyph: "📺", progress: e.progress, onClick: function () { go("tvshow/" + e.tv_show_id); } });
+  }
+
+  /* Part-way through (from 30 s to 95%): where Resume starts. Otherwise 0. */
+  function resumeAt(item) {
+    const p = item.progress;
+    return p && p.position > 30 && (!p.duration || p.position < p.duration * 0.95) ? p.position : 0;
+  }
+
   function albumCard(a) {
     return card({ title: a.album, sub: a.artist + (a.year ? " · " + a.year : ""), art: a.art, shape: "square",
                   glyph: "♫", onClick: function () { go("album/" + encodeURIComponent(a.key)); } });
@@ -207,7 +238,7 @@
   }
 
   const SECTION_OF = { screens: "screens", cast: "screens", pair: "screens", home: "home", movies: "movies", movie: "movies", music: "music", album: "music",
-                       artist: "music", pictures: "pictures", live: "live", radio: "radio" };
+                       artist: "music", pictures: "pictures", live: "live", radio: "radio", tv: "tv", tvshow: "tv" };
 
   async function render() {
     const r = route();
@@ -219,7 +250,7 @@
     if (viewSelect) viewSelect.value = section;
     showError("");
     backdrop(null);
-    const views = { home: viewHome, movies: viewMovies, movie: viewMovie, music: viewMusic, album: viewAlbum,
+    const views = { home: viewHome, movies: viewMovies, movie: viewMovie, tv: viewTv, tvshow: viewTvShow, music: viewMusic, album: viewAlbum,
                     artist: viewArtist, pictures: viewPictures, live: viewLive, radio: viewRadio,
                     screens: viewScreens, cast: viewScreens, pair: function (code) { return viewScreens("", code); } };
     try {
@@ -240,13 +271,16 @@
     setHead("Home");
     const data = await api("GET", "/api/media/home");
     const out = [];
-    if (data.continue.length) out.push(shelf("Continue watching", data.continue.map(function (m) { return movieCard(m, true); }), "wide"));
+    if (data.continue.length) {
+      out.push(shelf("Continue watching", data.continue.map(function (m) { return m.section === "tv" ? episodeCard(m) : movieCard(m, true); }), "wide"));
+    }
     if (data.movies.length) out.push(shelf("Recently added films", data.movies.map(function (m) { return movieCard(m); })));
+    if (data.tv && data.tv.length) out.push(shelf("TV shows with new episodes", data.tv.map(showCard)));
     if (data.albums.length) out.push(shelf("Recently added music", data.albums.map(albumCard), "square"));
     if (data.pictures.length) out.push(shelf("Recent pictures", data.pictures.map(function (p, i, all) { return pictureCard(p, all, i); }), "wide"));
     if (!out.length) {
       out.push(data.library
-        ? empty("Put films in " + folder + "\\Movies, music in " + folder + "\\Music and photos in " + folder + "\\Pictures on the share. " +
+        ? empty("Put films in " + folder + "\\Movies, shows in " + folder + "\\TV, music in " + folder + "\\Music and photos in " + folder + "\\Pictures on the share. " +
                 "They show up here a minute or two later, with their artwork.", "Nothing here yet.")
         : empty(isAdmin ? "There's no " + folder + " folder you can open on the share yet. Turn Media on in Access → Settings, " +
                           "and check who may read the " + folder + " folder in Windows."
@@ -321,6 +355,99 @@
                   transcode: "converted for the browser" }[m.playback] || "";
     text.appendChild(el("p", "mc-tech", [m.container, m.video_codec, m.audio_codec].filter(Boolean).join(" · ").toUpperCase()
       + (how ? " — " + how : "")));
+    box.append(art, text);
+    return [box];
+  }
+
+  async function viewTv() {
+    setHead("TV Shows");
+    const data = await api("GET", "/api/media/tv");
+    if (!data.shows.length) {
+      return [empty("No shows yet. Put each show in its own folder in " + folder + "\\TV on the share, its seasons in folders " +
+                    "inside, like “TV\\Bluey\\Season 1\\Bluey S01E01.mkv”.")];
+    }
+    return [shelf(null, data.shows.map(showCard), "poster", "grid")];
+  }
+
+  /* One show: Play (or Resume) the episode to watch next, then its seasons as tabs and each one's episodes.
+     Playing any episode plays on through the show (episodes, below), here or on the chosen screen. */
+  async function viewTvShow(id) {
+    const s = await api("GET", "/api/media/tv/" + encodeURIComponent(id));
+    setHead("TV Shows", [button("‹ All shows", "", function () { history.length > 1 ? history.back() : go("tv"); })]);
+    backdrop(s.art);
+    const box = el("div", "mc-detail");
+    const art = el("div", "mc-art");
+    if (s.art) { const img = el("img"); img.src = s.art; img.alt = ""; art.appendChild(img); }
+    else { const f = el("div", "mc-fallback"); f.append(el("span", "mc-glyph", "📺")); art.appendChild(f); }
+    const text = el("div");
+    text.appendChild(el("h2", null, s.name));
+    const facts = el("div", "mc-facts");
+    const numbered = s.seasons.filter(function (x) { return x.season; }).length;
+    [numbered ? numbered + (numbered === 1 ? " season" : " seasons") : "", s.episodes + (s.episodes === 1 ? " episode" : " episodes")]
+      .filter(Boolean).forEach(function (f) { facts.appendChild(el("span", null, f)); });
+    text.appendChild(facts);
+
+    const actions = el("div", "mc-actions");
+    const first = s.queue.length ? s.queue[0] : null;
+    const all = {};   // episode id -> episode, for the queue's ids
+    s.seasons.forEach(function (x) { x.episodes.forEach(function (e) { all[e.id] = e; }); });
+    const nxt = s.next_up;
+    if (nxt) {   // the episode to watch next: resume it, or start it
+      const at = resumeAt(nxt);
+      const label = (at ? "▶ Resume " : "▶ Play ") + (episodeCode(nxt) || nxt.title) + (at ? " from " + clock(at) : "");
+      const p = button(label, "", function () { playItem(nxt, at); });
+      p.dataset.nav = "";
+      actions.appendChild(p);
+    }
+    if (first && (!nxt || nxt.id !== first)) {   // caught up, or part-way: start the show over
+      const again = button(nxt ? "From the first episode" : "▶ Watch again from the start", nxt ? "secondary" : "",
+                           function () { playItem(all[first], 0); });
+      again.dataset.nav = "";
+      actions.appendChild(again);
+    }
+    text.appendChild(actions);
+
+    // Season tabs (only with more than one); the list below shows the chosen one's episodes.
+    const list = el("ol", "mc-tracks mc-episodes");
+    function showSeason(index) {
+      const season = s.seasons[index];
+      tabs.querySelectorAll("button").forEach(function (b, i) { b.className = i === index ? "" : "secondary"; });
+      list.replaceChildren();
+      season.episodes.forEach(function (e) {
+        const li = el("li");
+        const row = el("button", "mc-track");
+        row.type = "button";
+        row.dataset.nav = "";
+        row.dataset.id = e.id;
+        const done = e.progress && e.progress.duration && e.progress.position >= e.progress.duration * 0.95;
+        const at = resumeAt(e);
+        row.append(el("span", "n", e.episode !== null && e.episode !== undefined ? String(e.episode) : "•"),
+                   el("span", null, e.title),
+                   el("span", "t", done ? "✓ watched" : at ? "▸ " + clock(at) + " / " + clock(e.duration) : clock(e.duration)));
+        if (at && e.duration) {   // how far in, under the title
+          const bar = el("div", "mc-progress");
+          const fill = el("span");
+          fill.style.width = Math.min(100, 100 * at / e.duration).toFixed(1) + "%";
+          bar.appendChild(fill);
+          row.children[1].appendChild(bar);
+        }
+        row.addEventListener("click", function () { playItem(e, at); });
+        li.appendChild(row);
+        list.appendChild(li);
+      });
+    }
+    const tabs = el("div", "mc-seasons");
+    s.seasons.forEach(function (season, i) {
+      const b = button(season.label, "secondary", function () { showSeason(i); });
+      b.dataset.nav = "";
+      tabs.appendChild(b);
+    });
+    if (s.seasons.length > 1) text.appendChild(tabs);
+    text.appendChild(list);
+    if (s.seasons.length) {   // open on the season of the episode to watch next
+      const at = nxt ? s.seasons.findIndex(function (x) { return x.episodes.some(function (e) { return e.id === nxt.id; }); }) : 0;
+      showSeason(Math.max(0, at));
+    }
     box.append(art, text);
     return [box];
   }
@@ -421,7 +548,7 @@
     setHead("Live TV");
     const data = await api("GET", "/api/media/live");
     if (!data.streams.length) {
-      return [empty(isAdmin ? "No live streams yet. Add RTMP, HLS or YouTube sources in Access → Settings → Media."
+      return [empty(isAdmin ? "No live streams yet. Add RTMP, HLS or YouTube sources in Access → Settings → Entertainment → Media."
                             : "No live streams have been set up.")];
     }
     return [shelf(null, data.streams.map(function (s) {
@@ -442,7 +569,7 @@
     const out = [];
     if (data.problem) out.push(el("p", "mc-note", data.problem));
     if (!data.stations.length) {
-      out.push(empty(isAdmin ? "No stations. Set the SGCRelay station list or add stations in Access → Settings → Media."
+      out.push(empty(isAdmin ? "No stations. Set the SGCRelay station list or add stations in Access → Settings → Entertainment → Media."
                              : "No radio stations have been set up."));
       return out;
     }
@@ -476,11 +603,13 @@
     },
 
     open: async function (item, start) {
+      episodes.cancel();
       this.item = item;
       this.live = false;
       this.duration = item.duration || 0;
-      this.show(item.title);
+      this.show(item.section === "tv" ? episodeTitle(item) : item.title);
       $("mc-seek").disabled = false;
+      episodes.follow(item);   // a TV episode: its show's other episodes, for ⏮ ⏭ and playing on
       await this.load(start || 0);
     },
 
@@ -600,8 +729,19 @@
         .catch(function () {});
     },
 
+    /* Another item in the open player (the next episode), staying full screen: the one playing keeps its
+       place and its server session ends. */
+    swap: function (item) {
+      this.saveProgress(true);
+      const session = this.session;
+      this.session = null;
+      if (session) api("DELETE", "/api/media/sessions/" + session).catch(function () {});
+      this.open(item, 0);
+    },
+
     close: function () {
       if ($("mc-player").hidden) return;
+      episodes.cancel();
       this.saveProgress(true);
       const session = this.session;
       this.detach();
@@ -612,7 +752,7 @@
       this.closeYouTube();
       $("mc-player").hidden = true;
       this.status("");
-      if (route().view === "movie" || route().view === "home") render();
+      if (["movie", "tvshow", "home"].indexOf(route().view) >= 0) render();   // fresh Resume buttons and progress
     },
 
     closeYouTube: function () {
@@ -639,7 +779,11 @@
     key: function (e) {
       const k = e.key;
       this.wake();
+      if (episodes.counting() && k.indexOf("Arrow") === 0) { episodes.switchFocus(); return true; }   // Play now ⇄ Cancel
+      if (episodes.counting() && k === "Enter") return false;   // the focused button's own click
       if (k === "Escape" || k === "Backspace") { this.close(); }
+      else if (k === "N") { episodes.step(1); }    // Shift+N: the next episode
+      else if (k === "P") { episodes.step(-1); }   // Shift+P: the previous one
       else if (k === " " || k === "k" || k === "MediaPlayPause") { this.toggle(); }
       else if (k === "ArrowLeft") { this.seekTo(this.position() - 10); }
       else if (k === "ArrowRight") { this.seekTo(this.position() + 30); }
@@ -678,8 +822,96 @@
       api("PUT", "/api/media/progress/" + player.item.id, { position: player.duration || player.position(), duration: player.duration || null })
         .catch(function () {});
     }
-    player.close();
+    if (!episodes.ended()) player.close();   // a show's next episode counts down instead
   });
+
+  /* TV: the playing episode's show, in watching order (GET /api/media/tv/<show>: its queue, Specials left
+     out), so ⏮ ⏭, Shift+P/N and a remote's previous/next step through it, and an episode that ends is
+     followed by the next one after a 10-second "Up next" (Play now, or Cancel to close). */
+  const episodes = {
+    COUNTDOWN: 10,
+    show: null, list: [], timer: null, left: 0,
+
+    follow: async function (item) {
+      if (!item || item.section !== "tv" || !item.tv_show_id) { this.show = null; this.list = []; this.buttons(); return; }
+      if (!this.show || this.show.id !== item.tv_show_id) {
+        this.show = { id: item.tv_show_id };
+        this.list = [];
+        this.buttons();
+        try {
+          const s = await api("GET", "/api/media/tv/" + item.tv_show_id);
+          const byId = {};
+          s.seasons.forEach(function (x) { x.episodes.forEach(function (e) { byId[e.id] = e; }); });
+          if (this.show && this.show.id === s.id) {
+            this.show = s;
+            this.list = s.queue.map(function (id) { return byId[id]; }).filter(Boolean);
+          }
+        } catch (err) { this.show = null; this.list = []; }
+      }
+      this.buttons();
+    },
+
+    /* The episode `dir` (1 next, -1 previous) from the one playing, or null. */
+    neighbour: function (dir) {
+      const id = player.item && player.item.id;
+      const i = this.list.findIndex(function (e) { return e.id === id; });
+      return i < 0 ? null : this.list[i + dir] || null;
+    },
+
+    step: function (dir) {
+      const e = this.neighbour(dir);
+      if (!e) return false;
+      player.swap(e);
+      return true;
+    },
+
+    buttons: function () {
+      $("mc-prev-ep").hidden = !this.neighbour(-1);
+      $("mc-next-ep").hidden = !this.neighbour(1);
+    },
+
+    counting: function () { return !$("mc-upnext").hidden; },
+
+    /* The episode ended: count down to the next one. False when there's none (the player then closes). */
+    ended: function () {
+      const e = this.neighbour(1);
+      if (!e) return false;
+      const self = this;
+      this.cancel();
+      this.left = this.COUNTDOWN;
+      $("mc-upnext-title").textContent = [episodeCode(e), e.title].filter(Boolean).join(" · ");
+      $("mc-upnext-count").textContent = String(this.left);
+      $("mc-upnext").hidden = false;
+      player.wake();
+      $("mc-upnext-play").focus();
+      this.timer = setInterval(function () {
+        self.left -= 1;
+        $("mc-upnext-count").textContent = String(Math.max(0, self.left));
+        if (self.left <= 0) self.playNext();
+      }, 1000);
+      return true;
+    },
+
+    playNext: function () {
+      const e = this.neighbour(1);
+      this.cancel();
+      if (e) player.swap(e);
+    },
+
+    cancel: function () {
+      clearInterval(this.timer);
+      this.timer = null;
+      $("mc-upnext").hidden = true;
+    },
+
+    switchFocus: function () {
+      ($("mc-upnext-play") === document.activeElement ? $("mc-upnext-cancel") : $("mc-upnext-play")).focus();
+    },
+  };
+  $("mc-upnext-play").addEventListener("click", function () { episodes.playNext(); });
+  $("mc-upnext-cancel").addEventListener("click", function () { episodes.cancel(); player.close(); });
+  $("mc-prev-ep").addEventListener("click", function () { episodes.step(-1); });
+  $("mc-next-ep").addEventListener("click", function () { episodes.step(1); });
   // A tap while the controls are hidden only brings them back; the next one plays or pauses.
   let wokeByTap = false;
   $("mc-player").addEventListener("pointerdown", function () {
@@ -1080,7 +1312,8 @@
     const field = ["INPUT", "SELECT", "TEXTAREA"].indexOf(target.tagName) >= 0;
     if (!target.dispatchEvent(new KeyboardEvent("keydown", { key: key, bubbles: true, cancelable: true }))) return;  // taken
     if (key !== "Enter") { if (field) move(button); return; }   // the panel can't type: its arrows leave a text box
-    if (!$("mc-player").hidden) player.toggleAny();
+    if (episodes.counting() && $("mc-upnext").contains(target)) target.click();   // Up next: Play now or Cancel
+    else if (!$("mc-player").hidden) player.toggleAny();
     else if (!$("mc-viewer").hidden) viewer.slideshow();
     else if (target !== document.body && !field) target.click();
   }
@@ -1093,7 +1326,7 @@
     const typing = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
     const dirs = { ArrowRight: "right", ArrowLeft: "left", ArrowDown: "down", ArrowUp: "up" };
     if (dirs[e.key] && !typing) { e.preventDefault(); move(dirs[e.key]); return; }
-    if ((e.key === "Escape" || (e.key === "Backspace" && !typing)) && ["movie", "album", "artist"].indexOf(route().view) >= 0) {
+    if ((e.key === "Escape" || (e.key === "Backspace" && !typing)) && ["movie", "tvshow", "album", "artist"].indexOf(route().view) >= 0) {
       e.preventDefault(); history.back(); return;
     }
     if (e.key === "MediaPlayPause" || (e.key === " " && !typing && document.activeElement === document.body)) {
@@ -1262,7 +1495,7 @@
       const row = el("div", "mc-screen");
       const name = el("div", "mc-screen-name");
       const dot = el("span", "mc-dot" + (s.online ? " on" : ""));
-      name.append(dot, document.createTextNode(label(s) + (s.this ? " (this browser)" : "")));
+      name.append(dot, document.createTextNode(label(s) + (s.speaker ? " 🔊" : "") + (s.this ? " (this browser)" : "")));
       const st = s.state;
       const what = el("div", "mc-sub", !s.online ? "Not connected" + (s.last_seen ? " · last seen " + s.last_seen + " UTC" : "")
         : !st || st.kind === "idle" ? "Ready, nothing playing" : st.title + (st.paused ? " (paused)" : ""));
@@ -1270,7 +1503,7 @@
       if (!cast.allowed) {
         // Out of the screens group: nothing but removing it.
       } else if (!s.this) {
-        if (s.online) {
+        if (s.online && !s.speaker) {                // a speaker (a remote panel) has no picture to fit
           const size = button("Screen size", "link small", function () {
             calibrating = calibrating === s.id ? null : s.id;
             if (calibrating) cast.send({ action: "calibrate", step: "open" }, s.id);
@@ -1404,7 +1637,7 @@
         const r = await api("POST", "/api/media/screens/claim", { code: codeIn.value, name: tvName.value });
         codeIn.value = tvName.value = "";
         await cast.refresh();
-        if (r.kind !== "remote") cast.choose(r.id);
+        if (r.kind === "screen") cast.choose(r.id);   // a remote's (or speaker's) id is the remote's, not a screen's
         if (route().view === "pair") go("screens"); else paintScreens();
       } catch (err) { showError(err.message); }
     });
@@ -1574,7 +1807,9 @@
       } else if (a === "mute") {
         volume.toggleMute();
       } else if (a === "next" || a === "prev") {
-        if (!$("mc-viewer").hidden) viewer.step(a === "next" ? 1 : -1);
+        if (!$("mc-player").hidden && episodes.list.length) {   // a TV episode: the next or previous one
+          if (a === "next" && episodes.counting()) episodes.playNext(); else episodes.step(a === "next" ? 1 : -1);
+        } else if (!$("mc-viewer").hidden) viewer.step(a === "next" ? 1 : -1);
         else if (a === "next") nowPlaying.next(); else nowPlaying.prev();
       } else if (a === "night") {
         if (typeof cmd.level === "number") night.set(cmd.level * 100, true); else night.step();
@@ -1598,9 +1833,11 @@
           return { kind: "youtube", title: $("mc-player-title").textContent, position: player.yt.time,
                    duration: player.yt.duration || null, paused: player.yt.state !== 1, volume: player.yt.volume / 100 };
         }
+        const up = episodes.counting() ? $("mc-upnext-title").textContent : "";
         return { kind: player.live ? "live" : "video", title: $("mc-player-title").textContent,
+                 sub: up ? "Up next: " + up : undefined,
                  position: player.live ? null : player.position(), duration: player.duration || null,
-                 paused: video.paused, volume: video.volume };
+                 paused: video.paused, volume: video.volume, has_queue: episodes.list.length > 1 };
       }
       if (!$("mc-np").hidden) {
         return { kind: nowPlaying.station ? "radio" : "audio", title: $("mc-np-title").textContent,

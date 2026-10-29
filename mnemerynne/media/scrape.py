@@ -1,4 +1,4 @@
-"""Online metadata, only while an admin has it on (Settings → Media → Look up artwork online):
+"""Online metadata, only while an admin has it on (Settings → Entertainment → Media → Look up artwork online):
 films on TMDB (needs an API key; poster, backdrop, overview), albums on MusicBrainz and their
 covers on the Cover Art Archive (no key; MusicBrainz allows one request a second).
 

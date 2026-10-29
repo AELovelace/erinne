@@ -38,7 +38,7 @@ dnf install -y \
     mesa-vulkan-drivers vulkan-tools nvtop policycoreutils-python-utils curl
 
 step "ffmpeg and video drivers (Media)"
-# Media (Settings → Media) probes and transcodes with ffmpeg. Fedora's own ffmpeg-free and
+# Media (Settings → Entertainment → Media) probes and transcodes with ffmpeg. Fedora's own ffmpeg-free and
 # mesa-va-drivers can't decode or encode H.264/HEVC, so both come from RPM Fusion: full ffmpeg
 # (with h264_vaapi and h264_nvenc) and the VAAPI driver for the RX 580. vainfo checks the card.
 fedora=$(rpm -E %fedora)

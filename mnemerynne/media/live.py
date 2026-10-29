@@ -6,7 +6,7 @@
 - YouTube (kind 'youtube'): a video, a playlist or a channel's live stream, played in YouTube's
   own embed player (youtube-nocookie.com). Any usual YouTube link is turned into its embed address
   when it is added (youtube_embed); watch pages themselves refuse to be framed.
-- Radio is SGCRelay's station list (Settings → Media → station list, default
+- Radio is SGCRelay's station list (Settings → Entertainment → Media → station list, default
   https://sadgirlsclub.wtf/rr/healthz), read the way the DOLL-OS firmware reads it (Radio.ino):
   `stations`, else `routes`; each station's address is `path` (or url, stream, stream_url,
   inputUrl), relative to the list's own folder. Plus any stations an admin added by hand.

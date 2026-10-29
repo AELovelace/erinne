@@ -893,7 +893,8 @@ def test_a_remote_pairs_with_a_code_and_controls_only_its_owners_screens(client,
 
     seen = panel.get("/api/media/remote", headers=auth).json()
     assert seen["name"] == "Kitchen tablet" and seen["owner"] == "boss"
-    assert seen["screens"] == [{"id": screen_id, "name": "Living room", "online": False, "state": None}]
+    assert seen["screens"] == [{"id": screen_id, "name": "Living room", "online": False, "speaker": False, "state": None}]
+    assert seen["speaker"] is None                                          # paired without a speaker
     assert conn.execute("SELECT last_seen_at FROM media_remotes").fetchone()[0]
     off = panel.post(f"/api/media/remote/screens/{screen_id}/command", json={"action": "toggle"}, headers=auth)
     assert off.status_code == 409
@@ -979,6 +980,92 @@ def test_a_remote_starts_channels_forgets_itself_and_follows_the_group(client, c
     assert panel.delete("/api/media/remote", headers=auth).status_code == 200      # the panel's Forget
     assert panel.get("/api/media/remote", headers=auth).status_code == 401
     assert conn.execute("SELECT count(*) FROM media_remotes").fetchone()[0] == 0
+
+
+def _speaker(client, name="Bedroom speaker"):
+    """A remote panel with a speaker, paired from the phone as a speaker."""
+    panel = TestClient(client.app)
+    pairing = panel.post("/media/remote/pair", json={"speaker": True}).json()
+    r = client.post("/api/media/screens/claim", json={"code": pairing["code"], "name": name})
+    assert r.status_code == 201 and r.json()["kind"] == "speaker", r.text
+    got = panel.post("/media/remote/pair/status", json={"secret": pairing["secret"]}).json()
+    assert got["state"] == "paired" and got["name"] == name
+    return panel, {"Authorization": "Bearer " + got["key"]}, r.json()["id"]
+
+
+@needs_ffmpeg
+def test_a_speaker_plays_only_what_is_cast_to_it_through_tickets(client, conn, directory, root, settings):
+    _login(client, conn, directory)
+    _turn_on(client)
+    _screens_for(client)
+    disc = root / "Media" / "Music" / "Daft Punk" / "Discovery"
+    disc.mkdir(parents=True)
+    _ffmpeg("-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-c:a", "libmp3lame", "-metadata", "title=One More Time",
+            "-metadata", "artist=Daft Punk", "-metadata", "album=Discovery", "-metadata", "track=1",
+            str(disc / "01 One More Time.mp3"))
+    _ffmpeg("-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-c:a", "alac", "-metadata", "title=Aerodynamic",
+            "-metadata", "artist=Daft Punk", "-metadata", "album=Discovery", "-metadata", "track=2",
+            str(disc / "02 Aerodynamic.m4a"))
+    for p in disc.iterdir():
+        _aged(p)
+    _scan(conn, settings)
+    album = client.get("/api/media/music/albums").json()["albums"][0]
+    first = client.get("/api/media/music/album", params={"key": album["key"]}).json()["tracks"][0]
+
+    panel, auth, remote_id = _speaker(client)
+    seen = panel.get("/api/media/remote", headers=auth).json()
+    speaker_id = seen["speaker"]
+    assert speaker_id and [s["speaker"] for s in seen["screens"] if s["id"] == speaker_id] == [True]
+    assert any(s["id"] == speaker_id and s["speaker"] for s in client.get("/api/media/screens").json()["screens"])
+    # Its key never opens Media, nor the speaker's screen as a TV would.
+    assert panel.get("/api/media/music/albums", headers=auth).status_code == 401
+    assert panel.get(first["stream"], headers=auth).status_code == 401
+    assert panel.get("/media/screen/stream", headers=auth).status_code == 401
+
+    queue = _hub(client).listen(speaker_id)                               # the speaker's open stream
+    r = client.post(f"/api/media/screens/{speaker_id}/command", json={"action": "play_album", "key": album["key"]})
+    assert r.status_code == 200, r.text
+    sent = queue.get_nowait()
+    assert sent["action"] == "play_queue" and sent["index"] == 0 and sent["sender"] == "boss"
+    tracks = sent["tracks"]
+    assert [(t["title"], t["sub"]) for t in tracks] == [("One More Time", "Daft Punk - Discovery"),
+                                                        ("Aerodynamic", "Daft Punk - Discovery")]
+    assert all(t["ticket"].endswith(".mp3") for t in tracks)                # ALAC goes out converted to MP3
+    played = panel.get("/media/speaker/audio/" + tracks[0]["ticket"])       # the ticket alone, no key
+    assert played.status_code == 200 and played.headers["content-type"] == "audio/mpeg"
+    assert played.content == (disc / "01 One More Time.mp3").read_bytes()
+    assert panel.get("/media/speaker/audio/" + tracks[0]["ticket"], headers={"Range": "bytes=0-9"}).status_code == 206
+    converted = panel.get("/media/speaker/audio/" + tracks[1]["ticket"])
+    assert converted.status_code == 200 and converted.content[:3] == b"ID3"
+    assert panel.get("/media/speaker/audio/" + tracks[0]["ticket"].replace(".mp3", ".flac")).status_code == 404
+    assert panel.get("/media/speaker/audio/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.mp3").status_code == 404
+
+    # From its own remote too; what a speaker can't play is refused.
+    r = panel.post(f"/api/media/remote/screens/{speaker_id}/command", json={"action": "toggle"}, headers=auth)
+    assert r.status_code == 200 and queue.get_nowait()["action"] == "toggle"
+    refused = client.post(f"/api/media/screens/{speaker_id}/command", json={"action": "calibrate"})
+    assert refused.status_code == 422 and "speaker" in refused.json()["detail"]
+
+    # It reports what it plays with the remote's key; a remote without a speaker has no such thing.
+    assert panel.put("/api/media/speaker/state", json={"kind": "audio", "title": "One More Time", "volume": 0.5},
+                     headers=auth).status_code == 200
+    mine = [s for s in panel.get("/api/media/remote", headers=auth).json()["screens"] if s["id"] == speaker_id][0]
+    assert mine["state"]["title"] == "One More Time"
+    plain, plain_auth, _ = _remote(client)
+    assert plain.put("/api/media/speaker/state", json={"kind": "idle"}, headers=plain_auth).status_code == 404
+    assert plain.get("/api/media/remote", headers=plain_auth).json()["speaker"] is None
+
+    # A speaker doesn't take over a TV's name.
+    _pair(client, "Den")
+    clash = TestClient(client.app).post("/media/remote/pair", json={"speaker": True}).json()
+    assert client.post("/api/media/screens/claim", json={"code": clash["code"], "name": "Den"}).status_code == 422
+
+    # Removing the remote removes its speaker and ends its tickets at once.
+    assert client.delete(f"/api/media/remotes/{remote_id}").status_code == 200
+    assert queue.get_nowait()["action"] == "unpaired"
+    assert panel.get("/media/speaker/audio/" + tracks[0]["ticket"]).status_code == 404
+    assert conn.execute("SELECT count(*) FROM media_screens WHERE speaker = 1").fetchone()[0] == 0
+    _hub(client).unlisten(speaker_id, queue)
 
 
 # ------------------------------------------------------------- app, share
@@ -1072,4 +1159,166 @@ def test_media_and_screens_are_for_their_groups_only(client, conn, directory, ro
     assert tv.get("/api/media/home").status_code == 404       # Media closed to its owner: the TV too
     # Out of the groups, the owner can still remove it.
     assert client.delete(f"/api/media/screens/{screen_id}").status_code in (200, 404)
+
+
+# ---------------------------------------------------------------------- TV
+def _fake_video(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x1a\x45\xdf\xa3 not a real episode")
+    _aged(path)
+
+
+def _bluey(root):
+    """Media/TV/Bluey with two seasons, a special and a poster; a stray episode right in TV; an empty show."""
+    show = root / "Media" / "TV" / "Bluey"
+    _fake_video(show / "Season 1" / "Bluey S01E02 Hammerbarn.mkv")
+    _fake_video(show / "Season 1" / "Bluey S01E01 Magic Xylophone.mkv")
+    _fake_video(show / "Season 2" / "Bluey.S02E01.Dance.Mode.1080p.WEB-DL.mkv")
+    _fake_video(show / "Specials" / "Bluey - Christmas Swim.mkv")
+    (show / "poster.jpg").write_bytes(_jpeg((40, 120, 200), (200, 300)))
+    _aged(show / "poster.jpg")
+    _fake_video(root / "Media" / "TV" / "Stray S01E01.mkv")
+    (root / "Media" / "TV" / "Nothing Yet").mkdir()
+
+
+@pytest.mark.parametrize("stem, folder, expected", [
+    ("Bluey S01E02 Hammerbarn", "Season 1", ("Hammerbarn", 1, 2)),
+    ("bluey.s2e10.the.creek.720p.WEB-DL", "", ("the creek", 2, 10)),
+    ("The Office 3x07 - Branch Wars", "Season 3", ("Branch Wars", 3, 7)),
+    ("Show.S01E01E02.1080p", "Season 1", ("Episode 1", 1, 1)),
+    ("05 - The Pool", "Season 4", ("The Pool", 4, 5)),
+    ("Episode 7", "Series 2", ("Episode 7", 2, 7)),
+    ("E03 Grannies", "S03", ("Grannies", 3, 3)),
+    ("Christmas Swim", "Specials", ("Christmas Swim", 0, None)),
+    ("Pilot", "Bluey", ("Pilot", None, None)),
+])
+def test_episode_names(stem, folder, expected):
+    assert probe.episode_name(stem, folder) == expected
+
+
+def test_tv_shows_are_catalogued_by_show_folder(client, conn, directory, root, settings):
+    from mnemerynne.media import signage
+    _login(client, conn, directory)
+    _turn_on(client)
+    assert (root / "Media" / "TV").is_dir()
+    _bluey(root)
+    assert _scan(conn, settings).read == 4                        # the stray one in TV itself belongs to no show
+
+    shows = client.get("/api/media/tv").json()["shows"]
+    assert [(s["name"], s["episodes"], s["seasons"]) for s in shows] == [("Bluey", 4, 2)]   # empty folders left out
+    poster = conn.execute("SELECT a.source, a.kind FROM media_tv_shows t JOIN media_artwork a ON a.id = t.artwork_id"
+                          ).fetchone()
+    assert tuple(poster) == ("local", "poster") and client.get(shows[0]["art"]).status_code == 200
+
+    show = client.get(f"/api/media/tv/{shows[0]['id']}").json()
+    assert [s["label"] for s in show["seasons"]] == ["Season 1", "Season 2", "Specials"]
+    assert [[(e["season"], e["episode"], e["title"]) for e in s["episodes"]] for s in show["seasons"]] == [
+        [(1, 1, "Magic Xylophone"), (1, 2, "Hammerbarn")], [(2, 1, "Dance Mode")], [(0, None, "Bluey - Christmas Swim")]]
+    first = show["seasons"][0]["episodes"][0]
+    assert first["tv_show"] == "Bluey" and first["tv_show_id"] == show["id"] and first["section"] == "tv"
+    assert show["queue"] == [e["id"] for s in show["seasons"][:2] for e in s["episodes"]]   # Specials don't play on
+    assert show["next_up"]["id"] == first["id"] and "progress" not in show["next_up"]
+    assert client.get(f"/api/media/items/{first['id']}").json()["tv_show"] == "Bluey"
+
+    assert client.get(f"/api/media/tv/{shows[0]['id'] + 999}").status_code == 404
+    tv_root = media.tv_root(conn, media.library(conn)["id"])
+    assert client.get(f"/api/media/tv/{tv_root}").status_code == 404     # TV itself is no show
+    assert client.get("/api/admin/settings/media").json()["catalog"]["counts"]["tv"] == 4
+    assert client.get("/api/media/home").json()["tv"][0]["name"] == "Bluey"
+    assert "tv" in signage._sections(conn).values()                      # signage may pick episode clips
+
+    # The show's folder removed: its episodes and its poster go.
+    shutil.rmtree(root / "Media" / "TV" / "Bluey")
+    _scan(conn, settings)
+    assert client.get("/api/media/tv").json()["shows"] == []
+    assert conn.execute("SELECT count(*) FROM media_tv_shows").fetchone()[0] == 0
+
+
+def test_tv_next_up_and_continue_watching(client, conn, directory, root, settings):
+    _login(client, conn, directory)
+    _turn_on(client)
+    _bluey(root)
+    _scan(conn, settings)
+    show = client.get("/api/media/tv").json()["shows"][0]
+    e1, e2, s2e1 = client.get(f"/api/media/tv/{show['id']}").json()["queue"]
+
+    def watch(file_id, position):
+        assert client.put(f"/api/media/progress/{file_id}", json={"position": position, "duration": 420}).status_code == 200
+
+    def next_up():
+        return client.get(f"/api/media/tv/{show['id']}").json()["next_up"]
+
+    watch(e1, 200)                                                       # part-way: resume it
+    assert next_up()["id"] == e1 and next_up()["progress"]["position"] == 200
+    cont = client.get("/api/media/home").json()["continue"]
+    assert [(c["id"], c["tv_show"]) for c in cont] == [(e1, "Bluey")]
+
+    watch(e1, 415)                                                       # finished: the next one, from the start
+    assert next_up()["id"] == e2 and "progress" not in next_up()
+    assert [c["id"] for c in client.get("/api/media/home").json()["continue"]] == [e2]
+    assert client.get("/api/media/tv").json()["shows"][0]["next_up"]["id"] == e2
+
+    watch(s2e1, 418)                                                     # the last one done: caught up
+    assert next_up() is None
+    assert client.get("/api/media/home").json()["continue"] == []
+
+
+def test_tv_shows_follow_share_permissions(client, conn, directory, root, settings, checker):
+    _login(client, conn, directory)
+    _turn_on(client)
+    _bluey(root)
+    _fake_video(root / "Media" / "TV" / "Bluey" / "Season 3" / "Bluey S03E01 Housework.mkv")
+    _scan(conn, settings)
+    show = client.get("/api/media/tv").json()["shows"][0]
+    poster = conn.execute("SELECT artwork_id FROM media_tv_shows").fetchone()[0]
+
+    checker.rules = {"Media/TV/Bluey/Season 3": (False, False)}
+    _login(client, conn, directory, "jane", "jsmith")
+    seen = client.get(f"/api/media/tv/{show['id']}").json()
+    assert [s["label"] for s in seen["seasons"]] == ["Season 1", "Season 2", "Specials"]   # a closed season: hidden
+
+    checker.rules = {"Media/TV/Bluey": (False, False)}
+    assert client.get("/api/media/tv").json()["shows"] == []
+    assert client.get(f"/api/media/tv/{show['id']}").status_code == 404
+    assert client.get(f"/media/art/{poster}").status_code == 404
+    assert client.get("/api/media/home").json()["tv"] == []
+
+
+def test_the_tv_folder_is_added_to_an_older_media_folder_once(client, conn, directory, root, settings):
+    _login(client, conn, directory)
+    _turn_on(client)
+    # As it was before TV: three section folders, and nothing recorded about which were made.
+    (root / "Media" / "TV").rmdir()
+    conn.execute("DELETE FROM meta WHERE key = ?", (media.SECTIONS_MADE_KEY,))
+    _scan(conn, settings)
+    assert (root / "Media" / "TV").is_dir()
+    (root / "Media" / "TV").rmdir()                                      # removed on purpose: left alone
+    _scan(conn, settings)
+    assert not (root / "Media" / "TV").exists()
+
+
+def test_a_screen_browses_and_is_sent_tv_shows(client, conn, directory, root, settings):
+    _login(client, conn, directory)
+    _turn_on(client)
+    _bluey(root)
+    _scan(conn, settings)
+    assert 'data-view="tv"' in client.get("/media").text
+    screen_id, key = _pair(client)
+    show = client.get("/api/media/tv").json()["shows"][0]
+
+    tv = TestClient(client.app)                                          # the TV, by its screen key alone
+    tv.cookies.set("mnemerynne_screen", key)
+    assert 'data-view="tv"' in tv.get("/media/screen").text
+    assert [s["name"] for s in tv.get("/api/media/tv").json()["shows"]] == ["Bluey"]
+    assert tv.get(f"/api/media/tv/{show['id']}").json()["queue"]        # what it plays on through
+
+    queue = _hub(client).listen(screen_id)
+    r = client.post(f"/api/media/screens/{screen_id}/command",           # Play on the show: its next episode
+                    json={"action": "play_item", "file_id": show["next_up"]["id"], "start": 0})
+    assert r.status_code == 200, r.text
+    item = queue.get_nowait()["item"]
+    assert (item["tv_show"], item["tv_show_id"], item["season"], item["episode"]) == ("Bluey", show["id"], 1, 1)
+    assert client.post(f"/api/media/screens/{screen_id}/command", json={"action": "next"}).status_code == 200
+    assert queue.get_nowait()["action"] == "next"                        # the TV steps to the next episode
+    _hub(client).unlisten(screen_id, queue)
 

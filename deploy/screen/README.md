@@ -71,7 +71,7 @@ Run it again at any time, for example with a new address. It rewrites its files 
 
 ## 3. Pair it
 
-1. **Turn on screens:** an admin sets **Settings → Media → Who may use screens**, if that isn't already done.
+1. **Turn on screens:** an admin sets **Settings → Entertainment → Media → Who may use screens**, if that isn't already done.
 2. **Open Pair a TV:** on your phone, open Media → **Screens → Pair a TV**, or scan the QR code on the TV.
 3. **Enter the code:** type the code if you didn't scan, name the screen, for example *Living room*, and press **Pair**.
 
@@ -170,9 +170,9 @@ for every box, and push the tag (`git push origin screen-v0.3.0`).
 | Kiosk settings: "no copy of the repository" | The box was installed from copied files. Clone the repository onto it and run the installer from the clone once. |
 | An update didn't finish | **Kiosk settings → Updates** shows its last lines; `journalctl -u mnemerynne-screen-update` the rest. **Roll back** returns to the release before. |
 | Forgot the kiosk PIN | Approve from an admin's phone instead, then set a new one. Or over SSH: `sudo rm /etc/mnemerynne-screen.pin`. |
-| A 404 page | Media is off, or the screens group isn't set (Settings → Media). |
+| A 404 page | Media is off, or the screens group isn't set (Settings → Entertainment → Media). |
 | No sound | Is the TV's input on this box, and is its volume up? `sudo bash install.sh --check` says whether sound goes to HDMI. `--audio auto` leaves the choice to PipeWire. |
-| Stutters on films | The GPU isn't decoding (see `--check`), or the server is transcoding something heavy. Admin → Settings → Media shows running transcodes. |
+| Stutters on films | The GPU isn't decoding (see `--check`), or the server is transcoding something heavy. Admin → Settings → Entertainment → Media shows running transcodes. |
 
 To use the box for something else: `sudo bash install.sh --uninstall`, and remove the screen under Media → Screens.
 

@@ -221,8 +221,6 @@
       <div id="rooms-settings" aria-live="polite"><p class="muted">Loading…</p></div>
       <h2 class="ax-h">Automator <span class="badge small">alpha</span></h2>
       <div id="automations-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-      <h2 class="ax-h">Media</h2>
-      <div id="media-settings" aria-live="polite"><p class="muted">Loading…</p></div>
       <h2 class="ax-h">Updates</h2>
       <div id="updates" aria-live="polite"><p class="muted">Checking…</p></div>
     </section>
@@ -240,7 +238,18 @@
       <div id="chatgpt-settings" aria-live="polite"><p class="muted">Loading…</p></div>
     </section>
   </div>
-    {#- Themes (admin_theme.js): full width under the two columns, above Experimental. -#}
+    {#- Entertainment (admin.js renderMedia): full width under the two columns, above Themes. Media is split into
+        what it is and who may use it, playback, and live sources; games and web apps join it later. -#}
+    <section class="inbox admin ax-wide" aria-labelledby="ax-entertainment-title">
+      <h2 class="ax-split-title" id="ax-entertainment-title">Entertainment</h2>
+      <h2 class="ax-h">Media</h2>
+      <div id="media-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      <h2 class="ax-h">Playback and artwork</h2>
+      <div id="media-playback-settings" aria-live="polite"></div>
+      <h2 class="ax-h">Live TV and radio</h2>
+      <div id="media-sources-settings" aria-live="polite"></div>
+    </section>
+    {#- Themes (admin_theme.js): full width under Entertainment, above Experimental. -#}
     <section class="inbox admin ax-wide" aria-labelledby="ax-themes-title">
       <h2 class="ax-split-title" id="ax-themes-title">Themes</h2>
       <div id="theme-settings" aria-live="polite"><p class="muted">Loading…</p></div>

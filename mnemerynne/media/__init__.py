@@ -1,12 +1,12 @@
 """Media: a Kodi-style media centre over the share's Media library.
 
-Off until an admin turns it on (Settings → Media, meta 'media_enabled'). Turning it on makes the
-folder Media on the share with Music, Movies and Pictures inside (or adopts a Media folder that is
+Off until an admin turns it on (Settings → Entertainment → Media, meta 'media_enabled'). Turning it on makes the
+folder Media on the share with Music, Movies, TV and Pictures inside (or adopts a Media folder that is
 already there); the worker then catalogs what people put in them (catalog.py), and the Media page
 plays it, straight from the share when the browser can, through ffmpeg when it can't
 (transcode.py). Live streams pulled by URL and internet radio (live.py) sit beside the library.
 
-Who may use Media at all is a group (Settings → Media; nobody until one is set). Within it, who sees
+Who may use Media at all is a group (Settings → Entertainment → Media; nobody until one is set). Within it, who sees
 what follows the share's own permissions on the Media folders, like any share library. Off, the page and its API answer as if they didn't exist;
 the folders, the files and the catalog are kept for when it's back.
 """
@@ -28,8 +28,12 @@ ENABLED_KEY = "media_enabled"
 SETTINGS_KEY = "media_settings"
 LIBRARY_KEY = "media_library_id"
 LIBRARY_NAME = "Media"
-# Section -> its folder directly under Media.
-SECTIONS = {"music": "Music", "movies": "Movies", "pictures": "Pictures"}
+# Section -> its folder directly under Media. In TV, each folder directly inside is one show.
+SECTIONS = {"music": "Music", "movies": "Movies", "tv": "TV", "pictures": "Pictures"}
+TV_SECTION = "tv"
+# The section folders already made in the Media library (ensure_section_folders), so one added in a later
+# version (TV) appears on its own, and one an admin removed on purpose isn't made again.
+SECTIONS_MADE_KEY = "media_sections_made"
 
 AUDIO_EXT = {".mp3", ".flac", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".wav", ".wma", ".alac", ".aiff", ".aif",
              ".ape", ".wv", ".mka"}
@@ -40,14 +44,14 @@ DOCUMENT_EXT = {".pdf"}
 # What each section catalogs: artwork beside a film or an album isn't a picture of its own. The Signage
 # folder (signage.py) is its own share library: every folder in it is the 'signage' section, which takes
 # anything a screen can show, PDFs included (one slide a page).
-SECTION_TYPES = {"music": {"audio"}, "movies": {"video"}, "pictures": {"image", "video"},
+SECTION_TYPES = {"music": {"audio"}, "movies": {"video"}, "tv": {"video"}, "pictures": {"image", "video"},
                  "signage": {"image", "video", "document"}}
 SIGNAGE_SECTION = "signage"
 SIGNAGE_LIBRARY_KEY = "signage_library_id"
 
 HWACCELS = ("auto", "vaapi", "nvenc", "software")
 DEFAULT_RADIO_DIRECTORY = "https://sadgirlsclub.wtf/rr/healthz"
-# folder: the top-level folder on the share that is the Media library (Settings → Media → Media folder).
+# folder: the top-level folder on the share that is the Media library (Settings → Entertainment → Media → Media folder).
 # media_group: who may use Media at all; screens_group: who may pair screens and cast to them (group_refs
 # values, AD or Entra groups). Empty: nobody (may_use, screens.may_use).
 # signage_folder: the top-level share folder whose pictures, clips and PDFs signage playlists draw on;
@@ -88,7 +92,7 @@ def set_enabled(conn: sqlite3.Connection, on: bool) -> None:
 
 
 def may_use(conn: sqlite3.Connection, user, directory) -> bool:
-    """In the Media group (Settings → Media → Who may use Media)? No group set: nobody. Checked live, so
+    """In the Media group (Settings → Entertainment → Media → Who may use Media)? No group set: nobody. Checked live, so
     leaving the group closes Media (and that person's screens) at once."""
     return user is not None and group_refs.in_any(conn, user, directory, load_settings(conn)["media_group"])
 
@@ -172,7 +176,7 @@ def _meta_library(conn: sqlite3.Connection, key: str, setting: str) -> sqlite3.R
 
 
 def library(conn: sqlite3.Connection) -> sqlite3.Row | None:
-    """The Media library (Settings → Media → Media folder)."""
+    """The Media library (Settings → Entertainment → Media → Media folder)."""
     return _meta_library(conn, LIBRARY_KEY, "folder")
 
 
@@ -227,20 +231,50 @@ def _ensure_share_library(conn: sqlite3.Connection, key: str, setting: str, subf
         conn.execute("UPDATE collections SET share_path = ?, share_inode = ? WHERE id = ?",
                      (name, base.stat().st_ino, library_id))
         lib = conn.execute("SELECT * FROM collections WHERE id = ?", (library_id,)).fetchone()
-    base = rt.root / Path(lib["share_path"])
+    _make_subfolders(rt.root / Path(lib["share_path"]), subfolders)
+    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (key, str(lib["id"])))
+    return lib
+
+
+def _make_subfolders(base: Path, subfolders) -> None:
+    """Each of subfolders inside base, made on the share unless it's there already (in any case)."""
     for folder in subfolders:
         existing = next((p for p in base.iterdir() if p.is_dir() and p.name.lower() == folder.lower()), None) \
             if base.is_dir() else None
         if existing is None:
             share.make_dir(base / folder)
-    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (key, str(lib["id"])))
-    return lib
 
 
 def ensure_library(conn: sqlite3.Connection) -> sqlite3.Row:
-    """The Media folder and its three folders on the share, made where missing; runs in the caller's
+    """The Media folder and its section folders on the share, made where missing; runs in the caller's
     transaction. The folders' rows come with the next share scan, like anything else made through SMB."""
-    return _ensure_share_library(conn, LIBRARY_KEY, "folder", tuple(SECTIONS.values()), "Media")
+    lib = _ensure_share_library(conn, LIBRARY_KEY, "folder", tuple(SECTIONS.values()), "Media")
+    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                 (SECTIONS_MADE_KEY, json.dumps(sorted(SECTIONS))))   # every section folder is there now
+    return lib
+
+
+def ensure_section_folders(conn: sqlite3.Connection) -> list[str]:
+    """Section folders added since Media was turned on (TV), made once in the Media library; the catalog
+    pass calls this. Does nothing while Media is off or the share is away. Returns the folders made."""
+    rt = share.current()
+    if rt is None or not enabled(conn):
+        return []
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (SECTIONS_MADE_KEY,)).fetchone()
+    try:
+        made = set(json.loads(row["value"])) if row else {"music", "movies", "pictures"}   # before TV: those three
+    except ValueError:
+        made = set()
+    missing = [s for s in SECTIONS if s not in made]
+    lib = library(conn) if missing else None
+    if lib is None or not share.mounted(rt):
+        return []
+    folders = [SECTIONS[s] for s in missing]
+    _make_subfolders(rt.root / Path(lib["share_path"]), folders)   # disk only; the next scan adds the rows
+    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                 (SECTIONS_MADE_KEY, json.dumps(sorted(made | set(missing)))))
+    log.info("Media: made %s in the Media folder.", ", ".join(folders))
+    return folders
 
 
 def ensure_signage_library(conn: sqlite3.Connection) -> sqlite3.Row:
@@ -250,7 +284,7 @@ def ensure_signage_library(conn: sqlite3.Connection) -> sqlite3.Row:
 
 def catalog_roots(conn: sqlite3.Connection) -> list[tuple[sqlite3.Row, dict[int, str], str | None]]:
     """What the catalog reads: (library, folder id -> section, the section of files at the library's
-    root) for the Media library (Music, Movies, Pictures) and the Signage library (all of it)."""
+    root) for the Media library (Music, Movies, TV, Pictures) and the Signage library (all of it)."""
     out = []
     lib = library(conn)
     if lib is not None:
@@ -264,7 +298,7 @@ def catalog_roots(conn: sqlite3.Connection) -> list[tuple[sqlite3.Row, dict[int,
 
 
 def section_folders(conn: sqlite3.Connection, library_id: int) -> dict[int, str]:
-    """Top-level folder id -> section, for the Music, Movies and Pictures folders (any case)."""
+    """Top-level folder id -> section, for the Music, Movies, TV and Pictures folders (any case)."""
     by_name = {v.lower(): k for k, v in SECTIONS.items()}
     return {r["id"]: by_name[r["name"].lower()] for r in conn.execute(
         "SELECT id, name FROM folders WHERE collection_id = ? AND parent_id IS NULL AND deleted_at IS NULL",
@@ -284,4 +318,27 @@ def folder_sections(conn: sqlite3.Connection, library_id: int) -> dict[int, str]
             cur, seen = parents.get(cur), seen + 1
         if cur in tops:
             out[fid] = tops[cur]
+    return out
+
+
+def tv_root(conn: sqlite3.Connection, library_id: int) -> int | None:
+    """The TV folder's id in the Media library, once the share scan has seen it."""
+    return next((fid for fid, s in section_folders(conn, library_id).items() if s == TV_SECTION), None)
+
+
+def tv_show_folders(conn: sqlite3.Connection, library_id: int) -> dict[int, int]:
+    """Every live folder under TV -> its show: the folder directly inside TV it sits in (a show folder maps
+    to itself). The TV folder itself is no show, so files right in it belong to none."""
+    root = tv_root(conn, library_id)
+    if root is None:
+        return {}
+    parents = {r["id"]: r["parent_id"] for r in conn.execute(
+        "SELECT id, parent_id FROM folders WHERE collection_id = ? AND deleted_at IS NULL", (library_id,))}
+    out: dict[int, int] = {}
+    for fid in parents:
+        cur, seen = fid, 0
+        while cur is not None and parents.get(cur) != root and seen < 10_000:   # climb to the child of TV
+            cur, seen = parents.get(cur), seen + 1
+        if cur is not None and parents.get(cur) == root:
+            out[fid] = cur
     return out

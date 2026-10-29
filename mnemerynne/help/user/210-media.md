@@ -1,12 +1,18 @@
 # Media
 
-**Media** is a media centre for films, music and pictures, laid out like a TV app. It also has live TV and internet radio. It appears in the top bar once an admin has turned it on.
+**Media** is a media centre for films, TV shows, music and pictures, laid out like a TV app. It also has live TV and internet radio. It appears in the top bar once an admin has turned it on.
 
 ## Adding things
 
 Everything comes from the **Media** folder on the file share, or the folder your admin chose instead; the Media page's tips name it. Copy files into it from Windows Explorer and they show up a minute or two later, with their artwork:
 
 - **Movies:** one file per film, named like `Blade Runner (1982).mkv`. A `poster.jpg` (or `Blade Runner (1982)-poster.jpg`) beside it becomes its poster, and `fanart.jpg` its backdrop. Without one, a frame from the film is used, or the poster is looked up online if your admin allows it.
+- **TV shows:** one folder per show in **TV**, with a folder for each season inside, for example `TV\Bluey\Season 1\Bluey S01E01 Magic Xylophone.mkv`.
+  - The season and episode come from the file name: `S01E02`, `1x02`, `E05`, or a leading number like `05 - Title`. Without a season in the name, the folder's name gives it (`Season 2`, `Series 2` or `S02`).
+  - The episode's title is whatever follows the number. Without one, it's called *Episode 2*.
+  - Put specials in a `Specials` folder. They're listed after the seasons and aren't played on from the other episodes.
+  - A `poster.jpg` (or `folder.jpg`) in the show's folder becomes its poster; without one, a still from an episode is used.
+  - Episodes put straight into **TV**, outside a show's folder, don't appear.
 - **Music:** one folder per album, for example `Music\Daft Punk\Discovery\01 One More Time.mp3`. Titles, artists, albums and track numbers come from the files' tags. The cover is a `cover.jpg` or `folder.jpg` in the album's folder, or the art inside the files.
 - **Pictures:** photos and short clips. Each folder becomes an album, and photos are sorted by when they were taken.
 
@@ -14,7 +20,7 @@ You only see what you may open in that folder on the share. Who may open it is s
 
 ## Getting around
 
-- The menu on the left has **Home**, **Movies**, **Music**, **Pictures**, **Live TV** and **Radio**. **Home** shows what you were watching and what was added lately.
+- The menu on the left has **Home**, **Movies**, **TV Shows**, **Music**, **Pictures**, **Live TV** and **Radio**. **Home** shows what you were watching (with the next episode of each show you're following) and what was added lately.
 - Use the **arrow keys** to move between tiles, **Enter** to open one, and **Escape** or **Backspace** to go back. A mouse or touch works too.
 
 ## Watching
@@ -27,6 +33,9 @@ You only see what you may open in that folder on the share. Who may open it is s
   - **F** switches full screen;
   - **N** steps the night filter (off, low, medium, high); the 🌙 slider sets it exactly. It makes the picture warmer and dimmer for watching late, YouTube included, and each device remembers its own level;
   - **Escape** closes the player.
+- **TV Shows:** open a show and press **Play** for the episode to watch next. That's **Resume** if you stopped part-way, otherwise the episode after the last one you finished. **From the first episode** starts over. The season buttons switch between seasons; ✓ marks the episodes you've watched.
+  - When an episode ends, **Up next** counts down 10 seconds and then plays the next one. **Play now** skips the wait; **Cancel** closes the player.
+  - ⏮ and ⏭ in the player, or **Shift+P** and **Shift+N**, go to the previous or next episode.
 - Most films play straight away. Some formats need the server to convert them first, and the player then says **Transcoding** or **Repackaged**. That takes a few seconds to start, and jumping far ahead takes a moment longer.
 
 ## Music and radio
@@ -56,7 +65,8 @@ Either way, the TV stays paired until you remove it, even after any sign-in runs
 
 **Send things from your phone:**
 
-- **Play on** at the bottom of the menu chooses where things play. With a screen chosen, every **Play** sends there instead: films, albums, tracks, pictures, Live TV and radio.
+- **Play on** at the bottom of the menu chooses where things play. With a screen chosen, every **Play** sends there instead: films, TV episodes, albums, tracks, pictures, Live TV and radio.
+- **A whole show:** with a screen chosen, **Play** on a show sends the episode to watch next. The TV then plays on through the show by itself, with **Up next** between episodes. ⏭ and ⏮ on the remote bar skip to the next or previous episode. The TV can also browse **TV Shows** itself with its remote's arrows.
 - To play a YouTube link, share it straight from the YouTube app on Android: **Share → Erynne**. Media opens with the link filled in; press **Play**. This needs Erynne installed on the phone (below). Otherwise, copy the link and use **Media → Screens → Paste**.
 - The bar at the bottom shows what the screen is playing, with buttons to pause, skip, change the volume, step the TV's night filter (🌙), go to the next track or stop. **✕** goes back to playing on your phone.
 - **Volume:** a screen has its own volume, used by everything it plays, and it remembers it. Change it from the remote bar (🔉 🔊 🔇), the TV remote's volume keys, **+** and **−** on a keyboard, or the 🔉 🔊 buttons on screen. The level shows for a moment in the top corner.
@@ -69,14 +79,20 @@ Only you (and admins) can see and control your screens. Screens are only for mem
 
 ## A remote panel
 
-A remote panel is a small touchscreen (the Erynne remote tablet) that controls your screens without a phone. It can play and pause, skip back 10 seconds and forward 30, go to the previous or next track, change the volume, mute, step the night filter, stop, and start a Live TV stream or radio station. It can't browse films or music.
+A remote panel is a small touchscreen (the Erynne remote tablet) that controls your screens without a phone. It can play and pause, skip back 10 seconds and forward 30, go to the previous or next track (or TV episode), change the volume, mute, step the night filter, stop, and start a Live TV stream or radio station. It can't browse films or music.
 
-Its **arrows and Enter** work like the TV's own arrow keys while the TV shows its Media page. They move the highlight between tiles and buttons, and **Enter** presses the highlighted one. While a film plays, ◀ ▶ skip back 10 seconds and forward 30, ▲ ▼ change the volume, and Enter plays or pauses. With pictures open, ◀ ▶ go to the previous or next one. While the screen size is being adjusted, they size the picture and Enter saves it. If the TV is on another page (someone is using it), the arrows do nothing.
+Its **arrows and Enter** work like the TV's own arrow keys while the TV shows its Media page. They move the highlight between tiles and buttons, and **Enter** presses the highlighted one. While a film plays, ◀ ▶ skip back 10 seconds and forward 30, ▲ ▼ change the volume, and Enter plays or pauses. With pictures open, ◀ ▶ go to the previous or next one. When **Up next** shows after an episode, the arrows choose **Play now** or **Cancel** and Enter presses it. While the screen size is being adjusted, they size the picture and Enter saves it. If the TV is on another page (someone is using it), the arrows do nothing.
 
 **Pair it once with a code,** like a TV: the panel shows a code and a QR code. Scan it, or type the code under **Media → Screens → Pair a TV or remote**, name the panel (for example *Kitchen tablet*) and press **Pair**.
 
 - The panel controls only your screens, and only while you may use screens. It shows each one and what it is playing; tap **Screens** on it to choose another.
 - **Screens** on your phone lists your remotes too. **Remove** unpairs one; do that if a panel is lost. The panel's own **Screens → Unpair** does the same from the panel.
+
+**A panel with a speaker** (the small Freenove one) pairs as a **speaker** too. One code makes it a remote and one of your screens, marked 🔊.
+- **Casting to it:** choose it under **Play on this screen** and cast music or a radio station, as you would to a TV. It can't play films, live TV or YouTube, and says so.
+- **Controlling it:** from your phone, or from any panel (its own included), with play/pause, skipping, next/previous, volume, mute and stop.
+- **What it can reach:** it plays only what is cast to it. It can't browse or fetch anything else.
+- **Removing it:** removing the remote removes its speaker as well.
 
 ## Signage on the screens
 

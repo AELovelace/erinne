@@ -657,7 +657,9 @@ button.danger-fill { background: var(--error); }
 .remote-cards { list-style: none; margin: 1rem 0 0; padding: 0; display: grid; gap: .9rem; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); }
 .remote-card { padding: 1rem 1.2rem; display: flex; flex-direction: column; gap: .4rem; }
 .remote-card p { margin: 0; }
-.remote-card button, .remote-card .button-like { align-self: flex-start; margin-top: .3rem; }
+/* margin-top auto: the grid makes every card in a row the same height, so the button sits on the
+   same line in all of them whether or not the card has a description. */
+.remote-card button, .remote-card .button-like { align-self: flex-start; margin-top: auto; }
 .remote-bar { position: absolute; top: 0; right: 0; height: 100%; display: flex; flex-direction: column; align-items: flex-end;
   z-index: 2; pointer-events: none; }
 .remote-handle { pointer-events: auto; writing-mode: vertical-rl; transform: rotate(180deg); margin: 0; padding: .9rem .35rem;
@@ -872,7 +874,7 @@ select { font: inherit; color: var(--ink); }
 .ax-settings[hidden] { display: none; }
 .ax-settings > .ax-split { flex: none; min-height: 0; overflow: visible; }
 .ax-settings > .ax-wide { flex: none; width: 100%; max-width: none; margin: 0; }
-.ax-settings > .ax-wide:last-child { margin-top: auto; }   /* Experimental stays at the bottom; Themes sits under the columns */
+.ax-settings > .ax-wide:last-child { margin-top: auto; }   /* Experimental stays at the bottom; Entertainment, then Themes, sit under the columns */
 .ax-split > .inbox { max-width: none; max-height: none; }
 .ax-split-title { margin: 0; font-size: 1.3rem; }
 .ax-split .ax-split-title + .ax-h { margin-top: 1rem; }

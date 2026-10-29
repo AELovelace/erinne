@@ -4,7 +4,7 @@ A playlist is a list of slides: pictures and clips from a folder, one picture, o
 slide a page), text, a web page, a YouTube video, or the announcements for everyone. Each slide can
 have its own seconds, transition and fit, and can be limited to weekdays, hours and dates. Assets
 come from two share libraries the catalog reads (media/catalog.py): the Signage folder, which takes
-anything a screen can show, and the Media library's Pictures and Movies.
+anything a screen can show, and the Media library's Pictures, Movies and TV.
 
 The schedule says what plays where and when: an entry targets every screen, a screen group or one
 screen, names a playlist, runs on weekdays between two times (start = end: all day; end before start:
@@ -238,11 +238,11 @@ def _date(value: str | None, what: str) -> str | None:
 # ------------------------------------------------------------------ library
 def _libraries(conn: sqlite3.Connection) -> dict[int, tuple[sqlite3.Row, dict[int, str], str | None]]:
     """Library id -> (row, folder id -> section, the section of its root files), from the catalog's roots:
-    the Media library (its Pictures and Movies only) and the Signage library."""
+    the Media library (its Pictures, Movies and TV only) and the Signage library."""
     out = {}
     for lib, sections, root in media.catalog_roots(conn):
         if root is None:
-            sections = {fid: sec for fid, sec in sections.items() if sec in ("pictures", "movies")}
+            sections = {fid: sec for fid, sec in sections.items() if sec in ("pictures", "movies", "tv")}
         out[lib["id"]] = (lib, sections, root)
     return out
 

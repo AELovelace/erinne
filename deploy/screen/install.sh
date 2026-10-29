@@ -573,7 +573,7 @@ check() {
         if curl -fsS -o /dev/null --max-time 10 "$url/healthz"; then ok "$url answers"; else bad "$url doesn't answer (or its certificate isn't trusted)"; fi
         case $(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url/media/screen") in
             200) ok "Media is on: the screen page answers" ;;
-            404) bad "the screen page answers 404: turn Media on (Settings → Media) and set its groups" ;;
+            404) bad "the screen page answers 404: turn Media on (Settings → Entertainment → Media) and set its groups" ;;
             *) bad "the screen page didn't answer" ;;
         esac
     fi

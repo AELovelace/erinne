@@ -1,10 +1,10 @@
 # Signage
 
-**Access → Signage** turns the screens paired under Media (TVs, kiosk boxes) into digital signage: playlists of pictures, clips, PDFs, text, web pages and announcements, scheduled per screen or screen group, with each screen's state in view. It needs Media on (Settings → Media), which also makes the **Signage** folder on the share.
+**Access → Signage** turns the screens paired under Media (TVs, kiosk boxes) into digital signage: playlists of pictures, clips, PDFs, text, web pages and announcements, scheduled per screen or screen group, with each screen's state in view. It needs Media on (Settings → Entertainment → Media), which also makes the **Signage** folder on the share.
 
 ## The content browser
 
-The left side lists two places: the **Signage folder** at the top of the share (anything a screen can show: pictures, MP4 clips, PDFs) and the Media library's **Pictures** and **Movies**. Pick a folder to see its files as thumbnails. In the Signage folder you can **Upload** files and make a **New folder**; people can also drop files into it from Windows, like any share folder. The worker reads new files within a minute or two (the same catalog as Media, so clips get their length and PDFs their page count).
+The left side lists two places: the **Signage folder** at the top of the share (anything a screen can show: pictures, MP4 clips, PDFs) and the Media library's **Pictures**, **Movies** and **TV**. Pick a folder to see its files as thumbnails. In the Signage folder you can **Upload** files and make a **New folder**; people can also drop files into it from Windows, like any share folder. The worker reads new files within a minute or two (the same catalog as Media, so clips get their length and PDFs their page count).
 
 Tick files and press **Add to playlist ▸**, drag them onto the playlist editor, or double-click one, to make them slides of the playlist you are editing. A clip that would need converting (not MP4 H.264) is greyed out: screens play files as they are.
 

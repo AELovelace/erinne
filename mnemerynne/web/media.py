@@ -1,5 +1,5 @@
 """Media: the page, its API, file and session streaming, the radio proxy, casting to screens, and
-Settings → Media (mnemerynne/media/).
+Settings → Entertainment → Media (mnemerynne/media/).
 
 Every library route takes the signed-in person, or for a paired screen (the TV) its owner
 (media_user), and serves only files they can read on the share (media.browse.View). While Media is
@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import mimetypes
+import random
 import re
 import sqlite3
 from typing import Literal
@@ -28,7 +29,7 @@ from mnemerynne import group_refs, media, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
-from mnemerynne.media import artwork, browse, catalog, live, probe, remotes, screens, signage, transcode
+from mnemerynne.media import artwork, browse, catalog, live, probe, remotes, screens, signage, speakers, transcode
 from mnemerynne.web import security
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import _session_user, admin_user, api_user, get_db, get_settings, is_admin, page_user
@@ -38,7 +39,7 @@ log = logging.getLogger("mnemerynne.media")
 
 def _media_on(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> None:
     """Every Media route but the admin settings: not there at all while Media is turned off, nor for
-    anyone outside the Media group (Settings → Media). Without a person or screen, the route's own
+    anyone outside the Media group (Settings → Entertainment → Media). Without a person or screen, the route's own
     sign-in check answers."""
     if not media.enabled(conn):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
@@ -78,15 +79,15 @@ def screen_device(request: Request, conn: sqlite3.Connection = Depends(get_db)) 
 
 
 def screens_user(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)) -> sqlite3.Row:
-    """The signed-in person, if they are in the screens group (Settings → Media)."""
+    """The signed-in person, if they are in the screens group (Settings → Entertainment → Media)."""
     if not screens.may_use(conn, user, request.app.state.directory):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Screens are only for members of the group an admin "
-                                                       "chose (Settings → Media).")
+                                                       "chose (Settings → Entertainment → Media).")
     return user
 
 
 router = APIRouter(dependencies=[Depends(_media_on)])
-admin_router = APIRouter()   # Settings → Media: reachable when it's off, to turn it on
+admin_router = APIRouter()   # Settings → Entertainment → Media: reachable when it's off, to turn it on
 share_router = APIRouter()   # the Share menu target (manifest): answers even with Media off
 
 # Browsers want these names for <video>/<audio>; mimetypes doesn't know all of them everywhere.
@@ -166,6 +167,21 @@ def album(key: str, user=Depends(media_user), conn: sqlite3.Connection = Depends
 @router.get("/api/media/pictures")
 def pictures(folder: int | None = None, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
     found = browse.pictures(_view(conn, user), folder)
+    if found is None:
+        raise _not_found()
+    return found
+
+
+@router.get("/api/media/tv")
+def tv_shows(user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
+    """The shows in Media/TV (each folder directly in it), for the TV Shows tab."""
+    return {"shows": browse.tv_shows(_view(conn, user))}
+
+
+@router.get("/api/media/tv/{folder_id}")
+def tv_show(folder_id: int, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
+    """One show: its seasons and episodes, the order they play in, and the episode to watch next."""
+    found = browse.tv_show(_view(conn, user), folder_id)
     if found is None:
         raise _not_found()
     return found
@@ -364,6 +380,12 @@ def pairings(request: Request) -> screens.Pairings:
     return request.app.state.media_pairings
 
 
+def speaker_tickets(request: Request) -> speakers.Tickets:
+    if getattr(request.app.state, "media_speaker_tickets", None) is None:
+        request.app.state.media_speaker_tickets = speakers.Tickets()
+    return request.app.state.media_speaker_tickets
+
+
 def _key_cookie(response, request: Request, token: str) -> None:
     response.set_cookie(screens.COOKIE, token, max_age=screens.COOKIE_DAYS * 86400, httponly=True, samesite="lax",
                         secure=security.https_only(request.app.state.settings), path="/")
@@ -482,7 +504,10 @@ async def claim_screen(body: ClaimBody, request: Request, user=Depends(screens_u
         code = p.check(user["id"], body.code)
         kind = p.kind(code)
         with transaction(conn):
-            made_id, token = (remotes if kind == "remote" else screens).create(conn, user["id"], name)
+            if kind == "screen":
+                made_id, token = screens.create(conn, user["id"], name)
+            else:                                    # a remote, or a remote that is also a speaker
+                made_id, token = remotes.create(conn, user["id"], name, speaker=kind == "speaker")
     except screens.ScreenError as exc:
         raise HTTPException(exc.status, str(exc)) from None
     p.claim(code, made_id, token)
@@ -501,7 +526,7 @@ def list_screens(request: Request, user=Depends(api_user), conn: sqlite3.Connect
     def row(s: sqlite3.Row, owner: str | None) -> dict:
         return {"id": s["id"], "name": s["name"], "online": h.online(s["id"]), "state": h.state(s["id"]),
                 "last_seen": s["last_seen_at"], "this": mine is not None and mine["id"] == s["id"],
-                "safe": {"x": s["safe_x"], "y": s["safe_y"]}, "owner": owner}
+                "safe": {"x": s["safe_x"], "y": s["safe_y"]}, "owner": owner, "speaker": bool(s["speaker"])}
     # Out of the group: only their screens, to remove them (and casting refused). Admins: everyone's too.
     out = [row(s, None) for s in screens.of_user(conn, user["id"])]
     if admin:
@@ -519,6 +544,7 @@ async def remove_screen(screen_id: int, request: Request, user=Depends(api_user)
     with transaction(conn):
         conn.execute("DELETE FROM media_screens WHERE id = ?", (screen_id,))
     hub(request).close(screen_id)
+    speaker_tickets(request).forget(screen_id)    # a speaker: its tickets stop at once (its remote stays)
     return {"status": "removed"}
 
 
@@ -590,6 +616,39 @@ def _castable(request: Request, conn: sqlite3.Connection, user, screen_id: int) 
     return screen
 
 
+def _for_speaker(request: Request, conn: sqlite3.Connection, user, screen: sqlite3.Row, command: dict) -> dict:
+    """A command as a speaker (media/speakers.py) takes it: tracks become a queue of tickets, a station its
+    own (public) address, and what it can't play is refused. `user` cast it: the tickets carry their access."""
+    action = command["action"]
+    if action in ("play_item", "play_album"):
+        if action == "play_item":
+            if command["item"]["type"] != "audio":
+                raise HTTPException(speakers.SpeakerError.status, f"{screen['name']} is a speaker: it plays music and radio only.")
+            tracks, index = [command["item"]], 0
+        else:
+            tracks, index = list(command["album"]["tracks"]), command["index"]
+            if command.get("shuffle"):
+                random.shuffle(tracks)
+                index = 0
+        if len(tracks) > speakers.MAX_QUEUE:                  # a huge list: from the chosen track on
+            tracks, index = tracks[index:index + speakers.MAX_QUEUE], 0
+        tickets = speaker_tickets(request)
+        queue = []
+        for track in tracks:
+            row = _readable_item(conn, user, track["id"])
+            ext, convert = speakers.plan(row["container"], row["audio_codec"])
+            queue.append({"title": track["title"] or row["display_name"], "duration": track.get("duration"),
+                          "sub": " - ".join(x for x in (track.get("artist"), track.get("album")) if x),
+                          "ticket": tickets.issue(screen["id"], user["id"], track["id"], ext, convert)})
+        return {"action": "play_queue", "tracks": queue, "index": min(index, len(queue) - 1)}
+    if action == "play_station":
+        station = command["station"]
+        return {"action": "play_station", "station": {"name": station["name"], "url": station["url"]}}
+    if action in ("play_source", "play_youtube", "calibrate"):
+        raise HTTPException(speakers.SpeakerError.status, f"{screen['name']} is a speaker: it plays music and radio only.")
+    return command
+
+
 @router.post("/api/media/screens/{screen_id}/command")
 async def cast(screen_id: int, body: Command, request: Request, user=Depends(screens_user),
                conn: sqlite3.Connection = Depends(get_db)):
@@ -599,6 +658,8 @@ async def cast(screen_id: int, body: Command, request: Request, user=Depends(scr
     if body.override and not is_admin(request, conn, user):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only admins can override someone using the TV.")
     command = await anyio.to_thread.run_sync(_command, conn, user, body)
+    if screen["speaker"]:
+        command = await anyio.to_thread.run_sync(_for_speaker, request, conn, user, screen, command)
     command.update(sender=user["username"], override=body.override)
     command_id = hub(request).send(screen_id, command)
     if command_id is None:
@@ -653,6 +714,14 @@ async def screen_answer(command_id: str, body: CommandAnswer, request: Request, 
 @router.get("/media/screen/stream")
 async def screen_stream(request: Request, screen=Depends(screen_device), conn: sqlite3.Connection = Depends(get_db)):
     """The screen's commands, as server-sent events, with a comment every 20 s so dead connections close."""
+    response = _command_stream(request, conn, screen)
+    # The key is renewed whenever the screen connects, so a TV in daily use never loses it.
+    _key_cookie(response, request, request.cookies[screens.COOKIE])
+    return response
+
+
+def _command_stream(request: Request, conn: sqlite3.Connection, screen: sqlite3.Row) -> StreamingResponse:
+    """A screen's (or a speaker's) commands as server-sent events, until it goes or is unpaired."""
     with transaction(conn):
         screens.seen(conn, screen["id"])
     h = hub(request)
@@ -673,11 +742,8 @@ async def screen_stream(request: Request, screen=Depends(screen_device), conn: s
         finally:
             h.unlisten(screen["id"], queue)
 
-    response = StreamingResponse(events(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-    # The key is renewed whenever the screen connects, so a TV in daily use never loses it.
-    _key_cookie(response, request, request.cookies[screens.COOKIE])
-    return response
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 class ScreenState(BaseModel):
@@ -715,6 +781,10 @@ async def screen_state(body: ScreenState, request: Request, screen=Depends(scree
                        conn: sqlite3.Connection = Depends(get_db)):
     """What the screen is playing, every few seconds and on every change; read by its owner's remote, and
     kept (signage.record_state) so Access → Signage shows it and "online" outlives a restart."""
+    return _record_state(request, conn, screen, body)
+
+
+def _record_state(request: Request, conn: sqlite3.Connection, screen: sqlite3.Row, body: ScreenState) -> dict:
     state = body.model_dump(exclude={"version"})
     hub(request).set_state(screen["id"], state)
     with transaction(conn):
@@ -761,12 +831,16 @@ def remote_device(request: Request, conn: sqlite3.Connection = Depends(get_db)) 
     return remote
 
 
+class RemotePairStart(BaseModel):
+    speaker: bool = False                                # the panel has a speaker (media/speakers.py)
+
+
 @router.post("/media/remote/pair")
-async def start_remote_pairing(request: Request):
+async def start_remote_pairing(request: Request, body: RemotePairStart | None = None):
     """A new code for an unpaired remote to show, and the secret it collects its key with (in the body:
-    the panel keeps no cookies)."""
+    the panel keeps no cookies). A panel with a speaker says so, and pairs as a speaker too."""
     try:
-        code, secret = pairings(request).start("remote")
+        code, secret = pairings(request).start("speaker" if body is not None and body.speaker else "remote")
     except screens.ScreenError as exc:
         raise HTTPException(exc.status, str(exc)) from None
     return {"code": screens.show_code(code), "expires_in": screens.PAIR_SECONDS,
@@ -781,11 +855,12 @@ class RemotePairing(BaseModel):
 async def remote_pairing_status(body: RemotePairing, request: Request, conn: sqlite3.Connection = Depends(get_db)):
     """What the remote asks every few seconds: still waiting, paired (it gets its key, once), or expired."""
     p = pairings(request)
-    collected = p.collect(body.secret, "remote")
-    if collected is not None:
-        remote = remotes.get(conn, collected[0])
-        return {"state": "paired", "key": collected[1], "name": remote["name"] if remote else ""}
-    found = p.waiting(body.secret, "remote")
+    for kind in ("remote", "speaker"):
+        collected = p.collect(body.secret, kind)
+        if collected is not None:
+            remote = remotes.get(conn, collected[0])
+            return {"state": "paired", "key": collected[1], "name": remote["name"] if remote else ""}
+    found = p.waiting(body.secret, "remote") or p.waiting(body.secret, "speaker")
     if found is None:
         return {"state": "expired"}
     return {"state": "waiting", "expires_in": int(found[1])}
@@ -801,9 +876,10 @@ def remote_screens(request: Request, remote=Depends(remote_device), conn: sqlite
 
     def row(s: sqlite3.Row) -> dict:
         state = h.state(s["id"])
-        return {"id": s["id"], "name": s["name"], "online": h.online(s["id"]),
+        return {"id": s["id"], "name": s["name"], "online": h.online(s["id"]), "speaker": bool(s["speaker"]),
                 "state": {k: state.get(k) for k in keep} if state else None}
-    return {"name": remote["name"], "owner": remote["username"],
+    mine = remotes.speaker_of(conn, remote)
+    return {"name": remote["name"], "owner": remote["username"], "speaker": mine["id"] if mine else None,
             "screens": [row(s) for s in screens.of_user(conn, remote["user_id"])]}
 
 
@@ -837,6 +913,8 @@ async def remote_command(screen_id: int, body: RemoteCommand, request: Request, 
         raise _not_found()
     owner = users.get_user_by_id(conn, remote["user_id"])
     command = await anyio.to_thread.run_sync(_command, conn, owner, Command(**body.model_dump()))
+    if screen["speaker"]:
+        command = await anyio.to_thread.run_sync(_for_speaker, request, conn, owner, screen, command)
     command.update(sender=owner["username"], override=False)
     command_id = hub(request).send(screen_id, command)
     if command_id is None:
@@ -844,21 +922,89 @@ async def remote_command(screen_id: int, body: RemoteCommand, request: Request, 
     return {"status": "sent", "id": command_id}
 
 
+def _speaker_gone(request: Request, screen_id: int | None) -> None:
+    """A removed remote's speaker: its stream ends and its tickets stop working."""
+    if screen_id is not None:
+        hub(request).close(screen_id)
+        speaker_tickets(request).forget(screen_id)
+
+
 @router.delete("/api/media/remote")
-def forget_remote(remote=Depends(remote_device), conn: sqlite3.Connection = Depends(get_db)):
-    """The panel forgets itself (its Forget button): its key stops working."""
+async def forget_remote(request: Request, remote=Depends(remote_device), conn: sqlite3.Connection = Depends(get_db)):
+    """The panel forgets itself (its Forget button): its key stops working, and its speaker goes with it."""
     with transaction(conn):
         remotes.remove(conn, remote["id"], remote["user_id"])
+    _speaker_gone(request, remote["screen_id"])
     return {"status": "removed"}
 
 
 @router.delete("/api/media/remotes/{remote_id}")
-def remove_remote(remote_id: int, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
-    """Its owner removes a remote under Media → Screens."""
+async def remove_remote(remote_id: int, request: Request, user=Depends(api_user),
+                        conn: sqlite3.Connection = Depends(get_db)):
+    """Its owner removes a remote under Media → Screens (and its speaker, if it is one)."""
+    found = conn.execute("SELECT screen_id FROM media_remotes WHERE id = ? AND user_id = ?", (remote_id, user["id"])).fetchone()
     with transaction(conn):
         if not remotes.remove(conn, remote_id, user["id"]):
             raise _not_found()
+    _speaker_gone(request, found["screen_id"] if found else None)
     return {"status": "removed"}
+
+
+# ------------------------------------------------------------------ speakers
+def speaker_device(remote=Depends(remote_device), conn: sqlite3.Connection = Depends(get_db)) -> sqlite3.Row:
+    """The speaker screen (media/speakers.py) of the remote whose key came; 404 for a remote without one."""
+    screen = remotes.speaker_of(conn, remote)
+    if screen is None:
+        raise _not_found("This remote isn't a speaker")
+    return screen
+
+
+@router.get("/api/media/speaker/stream")
+async def speaker_stream(request: Request, screen=Depends(speaker_device), conn: sqlite3.Connection = Depends(get_db)):
+    """What is cast to the speaker, as server-sent events: the screen stream, opened with the remote's key."""
+    return _command_stream(request, conn, screen)
+
+
+@router.put("/api/media/speaker/state")
+async def speaker_state(body: ScreenState, request: Request, screen=Depends(speaker_device),
+                        conn: sqlite3.Connection = Depends(get_db)):
+    """What the speaker is playing, as a TV reports it; the phones and panels show it."""
+    return _record_state(request, conn, screen, body)
+
+
+@router.post("/api/media/speaker/commands/{command_id}")
+async def speaker_answer(command_id: str, body: CommandAnswer, request: Request, screen=Depends(speaker_device)):
+    """The speaker says how a command went, as a TV does."""
+    if not hub(request).answer(screen["id"], command_id, body.model_dump(exclude_none=True)):
+        raise _not_found()
+    return {"status": "ok"}
+
+
+@router.get("/media/speaker/audio/{name}")
+async def speaker_audio(name: str, request: Request, conn: sqlite3.Connection = Depends(get_db),
+                        settings: Settings = Depends(get_settings)):
+    """A track cast to a speaker, by its ticket alone (the panel's audio library can't send a header). The
+    speaker must still be paired, and whoever cast the track still able to read it and use screens."""
+    ticket = speaker_tickets(request).get(name)
+    if ticket is None:
+        raise _not_found()
+    paired = conn.execute("SELECT 1 FROM media_remotes r JOIN media_screens s ON s.id = r.screen_id "
+                          "WHERE s.id = ? AND s.speaker = 1", (ticket.screen_id,)).fetchone()
+    user = users.get_user_by_id(conn, ticket.user_id)
+    if paired is None or user is None or not user["active"] or not screens.may_use(conn, user, request.app.state.directory):
+        raise _not_found()
+    _readable_item(conn, user, ticket.file_id)
+    path = store.content_path(conn, settings, ticket.file_id)
+    if not path.is_file():
+        raise _not_found("File not found")
+    if ticket.convert:
+        try:
+            path = await anyio.to_thread.run_sync(speakers.converted, settings.media_ffmpeg,
+                                                  settings.media_dir / "speaker", ticket.file_id, path)
+        except speakers.SpeakerError as exc:
+            raise HTTPException(exc.status, str(exc)) from None
+    return FileResponse(path, media_type=speakers.MIME[ticket.ext], headers={
+        "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
 
 # -------------------------------------------------------------------- admin
@@ -900,14 +1046,14 @@ class MediaSettingsBody(BaseModel):
 @admin_router.put("/api/admin/settings/media")
 def admin_settings(body: MediaSettingsBody, request: Request, user=Depends(admin_user),
                    conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
-    """Media on or off (on: the Media folder, with Music, Movies and Pictures, made on the share), which
+    """Media on or off (on: the Media folder, with Music, Movies, TV and Pictures, made on the share), which
     folder it is, and its settings."""
     try:
         with transaction(conn):
             if body.folder is not None and media.set_folder(conn, settings, body.folder):
                 _log(conn, user, "settings.media_folder", media.check_folder(body.folder))
                 if media.enabled(conn) and body.enabled is not False:
-                    media.ensure_library(conn)   # the new folder, and its Music, Movies and Pictures
+                    media.ensure_library(conn)   # the new folder, and its Music, Movies, TV and Pictures
             if body.enabled is True:
                 lib = media.ensure_library(conn)
                 if not media.enabled(conn):

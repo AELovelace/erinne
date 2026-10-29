@@ -14,9 +14,13 @@ from mnemerynne import fs, media
 
 _COLUMNS = ("mi.file_id, mi.section, mi.media_type, mi.title, mi.sort_title, mi.year, mi.duration_s, mi.width, "
             "mi.height, mi.container, mi.video_codec, mi.audio_codec, mi.artist, mi.album_artist, mi.album, "
-            "mi.album_key, mi.track_no, mi.disc_no, mi.genre, mi.taken_at, mi.camera, mi.playback, mi.artwork_id, "
-            "mi.fanart_id, mi.overview, mi.tmdb_id, f.collection_id, f.folder_id, f.display_name, f.created_at")
+            "mi.album_key, mi.track_no, mi.disc_no, mi.season_no, mi.episode_no, mi.genre, mi.taken_at, mi.camera, "
+            "mi.playback, mi.artwork_id, mi.fanart_id, mi.overview, mi.tmdb_id, f.collection_id, f.folder_id, "
+            "f.display_name, f.created_at")
 RECENT = 24
+# Watched: from 30 seconds in (less is a peek) to 95% (past that, the credits: finished).
+STARTED_S = 30
+FINISHED = 0.95
 
 
 class View:
@@ -27,6 +31,7 @@ class View:
         self.user_id = user_id
         self.lib = media.library(conn)
         self.access = fs.Access.of(conn, user_id)
+        self._tv: tuple[dict[int, int], dict[int, str]] | None = None   # folder -> show; show -> its name
 
     def readable(self, row) -> bool:
         return (self.lib is not None and row["collection_id"] == self.lib["id"]
@@ -55,12 +60,39 @@ class View:
             f"SELECT file_id, position_s, duration_s FROM media_progress WHERE user_id = ? AND file_id IN ({marks})",
             (self.user_id, *ids))}
 
+    def watched(self, file_ids) -> dict[int, sqlite3.Row]:
+        """file id -> its progress row (position_s, duration_s, updated_at), for those with one."""
+        ids, out = list(file_ids), {}
+        for at in range(0, len(ids), 500):   # in batches, under SQLite's limit on parameters
+            chunk = ids[at:at + 500]
+            out.update({r["file_id"]: r for r in self.conn.execute(
+                f"SELECT file_id, position_s, duration_s, updated_at FROM media_progress WHERE user_id = ? "
+                f"AND file_id IN ({','.join('?' * len(chunk))})", (self.user_id, *chunk))})
+        return out
+
+    def tv_show_of(self, folder_id: int | None) -> dict | None:
+        """{id, name} of the TV show a folder is in (None outside one); the map is worked out once per view."""
+        if self._tv is None:
+            shows = media.tv_show_folders(self.conn, self.lib["id"]) if self.lib is not None else {}
+            ids = sorted(set(shows.values()))
+            names = {r["id"]: r["name"] for r in self.conn.execute(
+                f"SELECT id, name FROM folders WHERE id IN ({','.join('?' * len(ids))})", ids)} if ids else {}
+            self._tv = (shows, names)
+        show_id = self._tv[0].get(folder_id) if folder_id is not None else None
+        return {"id": show_id, "name": self._tv[1].get(show_id, "")} if show_id is not None else None
+
+    def json(self, row, progress: dict | None = None) -> dict:
+        """item_json, with the show for a TV episode."""
+        return item_json(row, progress, self.tv_show_of(row["folder_id"]) if row["section"] == media.TV_SECTION
+                         else None)
+
 
 def art_url(artwork_id: int | None) -> str | None:
     return f"/media/art/{artwork_id}" if artwork_id else None
 
 
-def item_json(row, progress: dict | None = None) -> dict:
+def item_json(row, progress: dict | None = None, tv_show: dict | None = None) -> dict:
+    """One catalog row for the API; tv_show ({id, name}) is the show a TV episode is in (View.json)."""
     out = {"id": row["file_id"], "section": row["section"], "type": row["media_type"], "title": row["title"],
            "year": row["year"], "duration": row["duration_s"], "width": row["width"], "height": row["height"],
            "playback": row["playback"], "art": art_url(row["artwork_id"]), "fanart": art_url(row["fanart_id"]),
@@ -71,6 +103,10 @@ def item_json(row, progress: dict | None = None) -> dict:
     elif row["section"] == "movies":
         out.update(overview=row["overview"], genre=row["genre"], tmdb_id=row["tmdb_id"],
                    video_codec=row["video_codec"], audio_codec=row["audio_codec"], container=row["container"])
+    elif row["section"] == media.TV_SECTION:
+        out.update(season=row["season_no"], episode=row["episode_no"], overview=row["overview"], genre=row["genre"],
+                   video_codec=row["video_codec"], audio_codec=row["audio_codec"], container=row["container"],
+                   tv_show_id=tv_show["id"] if tv_show else None, tv_show=tv_show["name"] if tv_show else "")
     else:
         out.update(taken_at=row["taken_at"], camera=row["camera"], folder_id=row["folder_id"])
     if progress:
@@ -96,7 +132,7 @@ def item(view: View, file_id: int) -> dict | None:
     rows = view.rows("mi.file_id = ?", (file_id,))
     if not rows:
         return None
-    return item_json(rows[0], view.progress([file_id]).get(file_id))
+    return view.json(rows[0], view.progress([file_id]).get(file_id))
 
 
 def albums(view: View, artist: str = "") -> list[dict]:
@@ -170,17 +206,148 @@ def pictures(view: View, folder_id: int | None) -> dict | None:
     return {"folder": folder_id, "root": root, "path": path, "folders": subs, "items": items}
 
 
-def home(view: View) -> dict:
-    """Continue watching, then what was added lately in each section."""
-    conn = view.conn
-    cont = []
-    for p in conn.execute("SELECT file_id, position_s, duration_s FROM media_progress WHERE user_id = ? "
-                          "ORDER BY updated_at DESC LIMIT 40", (view.user_id,)):
-        if p["duration_s"] and not (30 <= p["position_s"] <= p["duration_s"] * 0.95):
+# ---------------------------------------------------------------------- TV
+def _finished(p) -> bool:
+    return bool(p["duration_s"]) and p["position_s"] >= p["duration_s"] * FINISHED
+
+
+def _in_progress(p) -> bool:
+    return p["position_s"] >= STARTED_S and not _finished(p)
+
+
+def _episode_order(r) -> tuple:
+    """Numbered seasons in order, then episodes with no season, then Specials; within one, by episode."""
+    season = r["season_no"]
+    group = 2 if season == 0 else (1 if season is None else 0)
+    return (group, season or 0, r["episode_no"] if r["episode_no"] is not None else 1_000_000, r["sort_title"])
+
+
+def _season_label(season: int | None) -> str:
+    return "Specials" if season == 0 else ("Episodes" if season is None else f"Season {season}")
+
+
+def _tv_episodes(view: View) -> dict[int, list]:
+    """Show folder id -> its episodes this person may read, in watching order."""
+    out: dict[int, list] = {}
+    for r in view.rows("mi.section = 'tv'"):
+        show = view.tv_show_of(r["folder_id"])
+        if show is not None:
+            out.setdefault(show["id"], []).append(r)
+    for rows in out.values():
+        rows.sort(key=_episode_order)
+    return out
+
+
+def _tv_queue(episodes: list) -> list:
+    """What plays one after another: everything but the Specials."""
+    return [r for r in episodes if r["season_no"] != 0]
+
+
+def _next_up(queue: list, marks: dict) -> tuple | None:
+    """(episode row, its progress row or None) to watch next: the one last watched if it isn't done, else
+    the one after it; the first when none was. None once the last one is finished (caught up)."""
+    if not queue:
+        return None
+    last = max(((marks[r["file_id"]]["updated_at"], i) for i, r in enumerate(queue) if r["file_id"] in marks),
+               default=None)
+    if last is None:
+        return queue[0], None
+    i = last[1]
+    mark = marks[queue[i]["file_id"]]
+    if not _finished(mark):
+        return queue[i], mark if _in_progress(mark) else None   # a peek of under 30 s starts it again
+    if i + 1 < len(queue):
+        nxt = queue[i + 1]
+        return nxt, marks.get(nxt["file_id"]) if nxt["file_id"] in marks and _in_progress(marks[nxt["file_id"]]) else None
+    return None
+
+
+def _progress_of(mark) -> dict | None:
+    return {"position": mark["position_s"], "duration": mark["duration_s"]} if mark is not None else None
+
+
+def _tv_root_readable(view: View) -> int | None:
+    if view.lib is None:
+        return None
+    root = media.tv_root(view.conn, view.lib["id"])
+    return root if root is not None and view.access.can_read(view.lib["id"], root) else None
+
+
+def _show_art(view: View, show_id: int, episodes: list) -> str | None:
+    """The show's poster (poster.jpg in its folder), else its first episode's still."""
+    row = view.conn.execute("SELECT artwork_id FROM media_tv_shows WHERE folder_id = ?", (show_id,)).fetchone()
+    if row and row["artwork_id"]:
+        return art_url(row["artwork_id"])
+    return next((art_url(r["artwork_id"]) for r in episodes if r["artwork_id"]), None)
+
+
+def tv_shows(view: View) -> list[dict]:
+    """The shows in TV this person may open (folders with no episodes yet left out), by name; each with
+    its poster, how many episodes and seasons, when one was last added, and the episode to watch next."""
+    root = _tv_root_readable(view)
+    if root is None:
+        return []
+    episodes = _tv_episodes(view)
+    marks = view.watched(r["file_id"] for rows in episodes.values() for r in rows)
+    out = []
+    for f in view.conn.execute("SELECT id, name FROM folders WHERE parent_id = ? AND deleted_at IS NULL "
+                               "ORDER BY name COLLATE NOCASE", (root,)):
+        rows = episodes.get(f["id"])
+        if not rows or not view.access.can_read(view.lib["id"], f["id"]):
             continue
-        rows = view.rows("mi.file_id = ? AND mi.section = 'movies'", (p["file_id"],))
-        if rows:
-            cont.append(item_json(rows[0], {"position": p["position_s"], "duration": p["duration_s"]}))
+        nxt = _next_up(_tv_queue(rows), marks)
+        out.append({"id": f["id"], "name": f["name"], "art": _show_art(view, f["id"], rows), "episodes": len(rows),
+                    "seasons": len({r["season_no"] for r in rows if r["season_no"]}),
+                    "added": max(r["created_at"] for r in rows),
+                    "next_up": view.json(nxt[0], _progress_of(nxt[1])) if nxt else None})
+    return out
+
+
+def tv_show(view: View, folder_id: int) -> dict | None:
+    """One show: its seasons with their episodes, the order they play in (`queue`, file ids) and the
+    episode to watch next. None when the folder isn't a show in TV, or isn't readable."""
+    root = _tv_root_readable(view)
+    folder = view.conn.execute("SELECT id, name, parent_id FROM folders WHERE id = ? AND deleted_at IS NULL",
+                               (folder_id,)).fetchone()
+    if root is None or folder is None or folder["parent_id"] != root \
+            or not view.access.can_read(view.lib["id"], folder_id):
+        return None
+    rows = _tv_episodes(view).get(folder_id, [])
+    marks = view.watched(r["file_id"] for r in rows)
+    seasons: list[dict] = []
+    for r in rows:
+        if not seasons or seasons[-1]["season"] != r["season_no"]:
+            seasons.append({"season": r["season_no"], "label": _season_label(r["season_no"]), "episodes": []})
+        seasons[-1]["episodes"].append(view.json(r, _progress_of(marks.get(r["file_id"]))))
+    queue = _tv_queue(rows)
+    nxt = _next_up(queue, marks)
+    return {"id": folder_id, "name": folder["name"], "art": _show_art(view, folder_id, rows),
+            "episodes": len(rows), "seasons": seasons, "queue": [r["file_id"] for r in queue],
+            "next_up": view.json(nxt[0], _progress_of(nxt[1])) if nxt else None}
+
+
+def home(view: View) -> dict:
+    """Continue watching (films part-way through; for each show, its next episode), then what was added
+    lately in each section."""
+    conn = view.conn
+    cont, shows_seen, episodes = [], set(), None
+    for p in conn.execute("SELECT file_id, position_s, duration_s, updated_at FROM media_progress "
+                          "WHERE user_id = ? ORDER BY updated_at DESC LIMIT 40", (view.user_id,)):
+        rows = view.rows("mi.file_id = ? AND mi.section IN ('movies', 'tv')", (p["file_id"],))
+        if not rows:
+            continue
+        if rows[0]["section"] == media.TV_SECTION:
+            show = view.tv_show_of(rows[0]["folder_id"])
+            if show is None or show["id"] in shows_seen:
+                continue
+            shows_seen.add(show["id"])   # a show's latest episode decides its card: resume it, or the next
+            episodes = _tv_episodes(view) if episodes is None else episodes
+            queue = _tv_queue(episodes.get(show["id"], []))
+            nxt = _next_up(queue, view.watched(r["file_id"] for r in queue))
+            if nxt:
+                cont.append(view.json(nxt[0], _progress_of(nxt[1])))
+        elif not p["duration_s"] or _in_progress(p):
+            cont.append(item_json(rows[0], _progress_of(p)))
         if len(cont) >= 12:
             break
     recent_order = "f.created_at DESC, mi.file_id DESC"
@@ -196,7 +363,9 @@ def home(view: View) -> dict:
         if len(recent_albums) >= RECENT:
             break
     recent_pictures = [item_json(r) for r in view.rows("mi.section = 'pictures'", (), recent_order, RECENT)]
-    return {"continue": cont, "movies": recent_movies, "albums": recent_albums, "pictures": recent_pictures}
+    recent_tv = sorted(tv_shows(view), key=lambda s: s["added"], reverse=True)[:RECENT]   # newest episodes first
+    return {"continue": cont, "movies": recent_movies, "tv": recent_tv, "albums": recent_albums,
+            "pictures": recent_pictures}
 
 
 def artwork_readable(view: View, artwork_id: int) -> bool:
@@ -206,6 +375,11 @@ def artwork_readable(view: View, artwork_id: int) -> bool:
     for row in view.conn.execute(
             "SELECT f.collection_id, f.folder_id FROM media_items mi JOIN files f ON f.id = mi.file_id "
             "WHERE (mi.artwork_id = ? OR mi.fanart_id = ?) AND f.deleted_at IS NULL", (artwork_id, artwork_id)):
+        if view.readable(row):
+            return True
+    for row in view.conn.execute(   # a TV show's poster: to whoever may open the show's folder
+            "SELECT f.collection_id, f.id AS folder_id FROM media_tv_shows t JOIN folders f ON f.id = t.folder_id "
+            "WHERE t.artwork_id = ? AND f.deleted_at IS NULL", (artwork_id,)):
         if view.readable(row):
             return True
     return False

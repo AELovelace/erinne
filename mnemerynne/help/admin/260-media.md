@@ -1,11 +1,11 @@
 # Media
 
-Media is a Kodi-style media centre for films, music and pictures from the share, plus live TV and internet radio. People see it under **Media**; this page is the admin side. Setting up the server (ffmpeg, the GPUs) is covered in the deployment README, section 5k.
+Media is a Kodi-style media centre for films, TV shows, music and pictures from the share, plus live TV and internet radio. People see it under **Media**; this page is the admin side. Setting up the server (ffmpeg, the GPUs) is covered in the deployment README, section 5k.
 
-## Settings → Media
+## Settings → Entertainment → Media
 
 - **Media is on for this organisation:** Media is off until an admin turns it on. Turning it on:
-  - makes the **Media** folder on the share with **Music**, **Movies** and **Pictures** inside, or uses a Media folder that is already there;
+  - makes the **Media** folder on the share with **Music**, **Movies**, **TV** and **Pictures** inside, or uses a Media folder that is already there;
   - starts cataloging after each share scan.
 
   While it's off:
@@ -14,14 +14,16 @@ Media is a Kodi-style media centre for films, music and pictures from the share,
   - anything playing stops.
 
   The folders, the files and the catalog are kept. Turning it on or off is logged (`settings.media`).
-- **Media folder on the share:** **Media** unless you choose another folder at the top of the share, such as an existing `Plex` or `Videos` folder. **Use this folder** takes an existing folder as it is, or makes a new one. Either way, **Music**, **Movies** and **Pictures** are made inside it if they're missing; names in any case count. Set it before turning Media on, and nothing called Media is made.
+- **Media folder on the share:** **Media** unless you choose another folder at the top of the share, such as an existing `Plex` or `Videos` folder. **Use this folder** takes an existing folder as it is, or makes a new one. Either way, **Music**, **Movies**, **TV** and **Pictures** are made inside it if they're missing; names in any case count. Set it before turning Media on, and nothing called Media is made.
+  - A Media folder made before TV shows existed gets its **TV** folder by itself, once, at the next catalog pass. If you delete it afterwards, it isn't made again.
   - Switching to another folder keeps the old folder's files and catalog, so switching back is instant.
   - Renaming the folder in Windows is fine: Media follows it.
   - Changes are logged (`settings.media_folder`).
 - **Who may use Media:** an AD or Entra group, or several separated by `;`. Only members see the Media tab, its pages and its API. Empty means **nobody**, admins included, so name a group after turning Media on. Leaving the group closes Media for that person, and their screens, at once.
 - **Who may use screens:** the group whose members may pair a TV as a screen and cast to it from their phone. They must be in the Media group too. Empty means nobody. When an owner leaves either group, their screens stop at once; owners can still remove their own screens.
-  Remote panels (the touch panel in the `Mnemerynne-tab` firmware) follow the same group: a panel controls its owner's screens only while its owner may use screens.
-- **Who sees what:** the share's permissions on the Media folders, set in Windows like any library. A Movies subfolder closed to someone is closed in Media too, including its posters.
+  Remote panels (the `Mnemerynne-tab` firmware on an Elecrow CrowPanel, `mnemerynne-tab-5` on an M5Stack Tab5, or `mnemerynne-tab-fnk0104b` on a Freenove FNK0104B) follow the same group: a panel controls its owner's screens only while its owner may use screens.
+  A panel with a speaker (the FNK0104B build) is also one of its owner's screens, so it counts toward the 10 screens. Its key still never opens Media. For each track cast to it, the server hands it a ticket that works for 6 hours, and checks the caster's access again at every fetch. Tracks the panel can't decode (ALAC, for example) are converted to MP3 once and cached under the media cache's `speaker` folder (the last 40 are kept).
+- **Who sees what:** the share's permissions on the Media folders, set in Windows like any library. A Movies subfolder closed to someone is closed in Media too, including its posters. The same goes for TV: closing a show's folder hides the show and its poster, and closing a season's folder hides that season.
 - **Transcoding:** how films the browser can't play are converted.
   - **Automatic** tries the AMD card (VAAPI), then the NVIDIA card (NVENC), then the CPU, and keeps the first that works.
   - **Test transcoding** encodes two seconds with each backend and reports which work on this server.

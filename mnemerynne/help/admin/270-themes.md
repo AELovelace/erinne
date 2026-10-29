@@ -1,6 +1,6 @@
 # Themes
 
-**Access → Settings → Themes** (the full-width section under the two columns) is where the box's looks are kept. Every look is a *theme*; people pick one under Preferences from the themes you have turned on, unless you set one theme for everyone.
+**Access → Settings → Themes** (the full-width section under Entertainment) is where the box's looks are kept. Every look is a *theme*; people pick one under Preferences from the themes you have turned on, unless you set one theme for everyone.
 
 ## Themes and bases
 

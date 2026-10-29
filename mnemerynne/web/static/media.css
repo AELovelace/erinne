@@ -109,6 +109,24 @@ html .mc-track { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr) aut
 .mc-track .n { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
 .mc-track .t { color: var(--muted); font-variant-numeric: tabular-nums; }
 
+/* --------------------------------------------------------------- TV shows */
+.mc-seasons { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0 .2rem; }
+.mc-seasons button { padding: .35rem .9rem; }
+.mc-episodes .mc-track .mc-progress { position: static; height: 3px; margin-top: .3rem; max-width: 14rem; }
+/* Up next: over the last frame when an episode ends, above the controls; clicks reach only its buttons. */
+.mc-upnext { position: absolute; right: 1.6rem; bottom: 6rem; z-index: 2; display: grid; gap: .5rem; max-width: 26rem;
+             padding: 1rem 1.2rem; border-radius: var(--radius); background: rgba(0, 0, 0, .78); color: #fff;
+             box-shadow: 0 4px 24px rgba(0, 0, 0, .6); }
+.mc-upnext[hidden] { display: none; }
+.mc-upnext-label { font-size: .8rem; letter-spacing: .05em; text-transform: uppercase; opacity: .8; }
+.mc-upnext strong { font-family: var(--serif); font-size: 1.25rem; }
+.mc-upnext-actions { display: flex; gap: .6rem; margin-top: .3rem; }
+html .mc-upnext-actions button { padding: .5rem 1.1rem; border-radius: 6px; border: 0; cursor: pointer; font: inherit;
+                                 background: var(--rose); color: #fff; }
+html .mc-upnext-actions button.secondary { background: rgba(255, 255, 255, .15); color: #fff; }
+.mc-upnext-actions button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.mc-bar button[hidden] { display: none; }
+
 /* ------------------------------------------------------------ live, radio */
 .mc-station .mc-art { display: grid; place-items: center; }
 .mc-dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%; background: var(--muted);

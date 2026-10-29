@@ -30,6 +30,15 @@ _YEAR = re.compile(r"^(?P<title>.+?)[\s._\-\[(]+(?P<year>(?:19|20)\d{2})(?:[\s._
 _JUNK = re.compile(r"[\s._\-](?:2160p|1080p|720p|480p|4k|uhd|bluray|blu-ray|brrip|bdrip|web-?dl|webrip|hdrip|dvdrip|"
                    r"x264|x265|h\.?264|h\.?265|hevc|aac|ac3|dts|hdr|remux|proper|repack|extended|unrated)\b.*$",
                    re.IGNORECASE)
+# An episode's file name: season and episode as 'S01E02' (also 's1e2', 'S01E01E02') or '1x02'; or the episode
+# alone as 'E05' / 'Ep 5' / 'Episode 5', or a leading '05', the season then coming from its folder.
+_SXE = re.compile(r"(?:^|[\s._\-\[(])s(?P<s>\d{1,3})[\s._\-]?e(?P<e>\d{1,4})(?:[\s._\-]?e\d{1,4})*"
+                  r"(?=$|[^a-z0-9])", re.IGNORECASE)
+_NXN = re.compile(r"(?:^|[\s._\-\[(])(?P<s>\d{1,2})x(?P<e>\d{1,3})(?=$|[\s._\-\])])", re.IGNORECASE)
+_EPISODE = re.compile(r"(?:^|[\s._\-\[(])(?:e|ep|episode)[\s._\-]?(?P<e>\d{1,4})(?=$|[\s._\-\])])", re.IGNORECASE)
+_LEADING = re.compile(r"^(?P<e>\d{1,3})(?=$|[\s._\-])")
+# A season's folder: 'Season 2', 'Series 2', 'S02'; 'Specials' is season 0.
+_SEASON_FOLDER = re.compile(r"^(?:season|series|s)[\s._\-]*(?P<s>\d{1,3})$", re.IGNORECASE)
 
 
 @dataclass
@@ -49,6 +58,8 @@ class Info:
     album: str = ""
     track_no: int | None = None
     disc_no: int | None = None
+    season_no: int | None = None                             # TV (0: Specials)
+    episode_no: int | None = None                            # TV
     genre: str = ""
     taken_at: str | None = None
     camera: str = ""
@@ -66,6 +77,39 @@ def movie_name(stem: str) -> tuple[str, int | None]:
         title, year = _JUNK.sub("", stem), None
     title = re.sub(r"[._]+", " ", title).strip(" -[(")
     return (title or stem), year
+
+
+def season_of_folder(name: str) -> int | None:
+    """'Season 2', 'Series 2', 'S02' -> 2; 'Specials' -> 0; any other folder name -> None."""
+    name = name.strip()
+    if name.lower() in ("specials", "special"):
+        return 0
+    match = _SEASON_FOLDER.match(name)
+    return int(match.group("s")) if match else None
+
+
+def _episode_title(text: str) -> str:
+    """What's left of an episode's name once its numbers are gone, release tags and separators removed."""
+    text = _JUNK.sub("", " " + text)                       # the space lets a tag right at the start match
+    return re.sub(r"[._]+", " ", text).strip(" -[]()")
+
+
+def episode_name(stem: str, folder: str = "") -> tuple[str, int | None, int | None]:
+    """An episode's (title, season, episode) from its file name and its folder's name:
+    'Show S01E02 The Title' -> ('The Title', 1, 2); 'show.1x02' -> ('Episode 2', 1, 2);
+    '05 - The Title' in 'Season 3' -> ('The Title', 3, 5). The name's own season beats the folder's;
+    with no number at all, the title is the tidied name and the episode None."""
+    season = season_of_folder(folder)
+    for pattern in (_SXE, _NXN):
+        match = pattern.search(stem)
+        if match:
+            episode = int(match.group("e"))
+            return _episode_title(stem[match.end():]) or f"Episode {episode}", int(match.group("s")), episode
+    match = _EPISODE.search(stem) or _LEADING.match(stem)
+    if match:
+        episode = int(match.group("e"))
+        return _episode_title(stem[match.end():]) or f"Episode {episode}", season, episode
+    return _episode_title(stem) or stem, season, None
 
 
 def sort_title(title: str) -> str:
@@ -237,6 +281,9 @@ def read(settings: Settings, path: Path, section: str, kind: str) -> Info:
         title, year = movie_name(path.stem)
         # A film's own title tag is often the release group's; the folder or file name is what people chose.
         info.title, info.year = title, year or info.year
+    elif section == "tv":
+        # Like a film's, an episode's title tag is often the release's; its name says season and episode.
+        info.title, info.season_no, info.episode_no = episode_name(path.stem, path.parent.name)
     elif not info.title:
         info.title = re.sub(r"^\d+[\s._\-]+", "", path.stem) or path.stem
     return info

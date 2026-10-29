@@ -1609,12 +1609,18 @@
     catch (e) { $("automations-settings").replaceChildren(el("p", "error", e.message)); }
   }
 
-  // ------------------------------------------------------------- Media
+  // ------------------------------------------------------------- Media (Settings → Entertainment)
+  // Three boxes under Entertainment: Media (on or off, the folder, the catalog, who may use it), Playback and
+  // artwork, and Live TV and radio. Each form sends only its own fields; the PUT keeps everything it isn't sent.
   function renderMedia(data) {
     const box = $("media-settings");
+    const playback = $("media-playback-settings");   // transcoding, artwork lookups, what's playing
+    const sources = $("media-sources-settings");     // the radio list, and the admin's own streams and stations
     box.replaceChildren();
+    playback.replaceChildren();
+    sources.replaceChildren();
     box.appendChild(el("p", "muted", "A Kodi-style media centre: films, music and pictures from the Media folder on " +
-      "the share (Music, Movies and Pictures inside it), plus live streams and internet radio. Who sees what follows " +
+      "the share (Music, Movies, TV and Pictures inside it), plus live streams and internet radio. Who sees what follows " +
       "the share's permissions on those folders."));
     async function save(body) {
       showError("");
@@ -1631,7 +1637,7 @@
     saveOn.type = "submit";
     onForm.append(onLabel, saveOn, el("span", "small muted", data.enabled
       ? "Turning it off hides Media from everyone and stops playback; the files and the catalog are kept."
-      : "Off: nobody sees Media. Turning it on makes Music, Movies and Pictures in the Media folder below."));
+      : "Off: nobody sees Media. Turning it on makes Music, Movies, TV and Pictures in the Media folder below."));
     onForm.addEventListener("submit", function (e) {
       e.preventDefault();
       if (data.enabled && !on.checked && !confirm("Turn Media off for everyone? Files and the catalog are kept.")) return;
@@ -1658,17 +1664,20 @@
       if (!name || name.toLowerCase() === String(current).toLowerCase()) return;
       const exists = data.folders.some(function (f) { return f.toLowerCase() === name.toLowerCase(); });
       if (!confirm((exists ? "Use the existing folder “" + name + "”" : "Make a new folder “" + name + "”") +
-                   " on the share as Media? Music, Movies and Pictures are made inside it if missing. " +
+                   " on the share as Media? Music, Movies, TV and Pictures are made inside it if missing. " +
                    "The catalog of “" + current + "” is kept for switching back.")) return;
       save({ folder: name });
     });
     box.appendChild(folderForm);
-    if (!data.enabled && !data.library) return;
+    if (!data.enabled && !data.library) {   // never turned on: nothing to set up below yet
+      [playback, sources].forEach(function (b) { b.appendChild(el("p", "small muted", "Turn Media on first.")); });
+      return;
+    }
 
     const c = data.catalog;
     const facts = [];
     if (data.library) facts.push("Folder: " + data.library.share_path);
-    facts.push(c.counts.movies + " films, " + c.counts.music + " tracks, " + c.counts.pictures + " pictures");
+    facts.push(c.counts.movies + " films, " + (c.counts.tv || 0) + " episodes, " + c.counts.music + " tracks, " + c.counts.pictures + " pictures");
     if (c.last_pass) {
       facts.push("last catalog pass " + c.last_pass.at + " UTC" + (c.last_pass.pending ? ", " + c.last_pass.pending + " waiting" : ""));
     }
@@ -1683,6 +1692,35 @@
     }
 
     const s = data.settings;
+
+    // Who may use it: the Media group, and the screens group inside it.
+    const access = el("form");
+    const accessGrid = el("div", "agent-settings");
+    const mediaGroup = agentInput("text", s.media_group);
+    mediaGroup.setAttribute("list", "domain-groups");
+    mediaGroup.placeholder = "Nobody: Media is hidden";
+    const screensGroup = agentInput("text", s.screens_group);
+    screensGroup.setAttribute("list", "domain-groups");
+    screensGroup.placeholder = "Nobody: screens are off";
+    agentField(accessGrid, "Who may use Media", mediaGroup).title =
+      "AD or Entra group(s), separated by ;. Only members see the Media tab; within it, the share's folder " +
+      "permissions still decide which files. Empty: nobody. Leaving the group closes it at once.";
+    agentField(accessGrid, "Who may use screens", screensGroup).title =
+      "AD or Entra group(s), separated by ;. Members may pair a TV as a screen and cast to it from their phone. " +
+      "Empty: nobody. Leaving the group stops their screens at once.";
+    access.appendChild(accessGrid);
+    const saveAccess = el("button", "small", "Save");
+    saveAccess.type = "submit";
+    const accessActions = el("div", "ax-new");
+    accessActions.appendChild(saveAccess);
+    access.appendChild(accessActions);
+    access.addEventListener("submit", function (e) {   // sends the two groups only
+      e.preventDefault();
+      save({ media_group: mediaGroup.value.trim(), screens_group: screensGroup.value.trim() });
+    });
+    box.appendChild(access);
+
+    // Playback and artwork: how films are converted, and the online lookups for posters and covers.
     const form = el("form");
     const grid = el("div", "agent-settings");
     const hw = el("select");
@@ -1699,25 +1737,10 @@
     const tmdb = agentInput("password", "");
     tmdb.placeholder = data.tmdb_key_set ? "TMDB key saved — type to replace" : "TMDB API key or read token";
     tmdb.autocomplete = "off";
-    const radio = agentInput("url", s.radio_directory_url);
-    radio.placeholder = "https://sadgirlsclub.wtf/rr/healthz";
-    const mediaGroup = agentInput("text", s.media_group);
-    mediaGroup.setAttribute("list", "domain-groups");
-    mediaGroup.placeholder = "Nobody: Media is hidden";
-    const screensGroup = agentInput("text", s.screens_group);
-    screensGroup.setAttribute("list", "domain-groups");
-    screensGroup.placeholder = "Nobody: screens are off";
     agentField(grid, "Transcoding", hw).title = "For films the browser can't play as they are";
     agentField(grid, "Transcodes at once", slots).title = "0 turns transcoding off; copying into HLS (remux) doesn't count";
     agentField(grid, "Look up artwork online", online).title = "TMDB for films, MusicBrainz and the Cover Art Archive for albums";
     agentField(grid, "TMDB key", tmdb).title = "themoviedb.org → Settings → API; only film titles and years are sent";
-    agentField(grid, "Radio station list", radio).title = "SGCRelay's /healthz; empty for none";
-    agentField(grid, "Who may use Media", mediaGroup).title =
-      "AD or Entra group(s), separated by ;. Only members see the Media tab; within it, the share's folder " +
-      "permissions still decide which files. Empty: nobody. Leaving the group closes it at once.";
-    agentField(grid, "Who may use screens", screensGroup).title =
-      "AD or Entra group(s), separated by ;. Members may pair a TV as a screen and cast to it from their phone. " +
-      "Empty: nobody. Leaving the group stops their screens at once.";
     form.appendChild(grid);
     const actions = el("div", "ax-new");
     const saveOpts = el("button", "small", "Save");
@@ -1733,13 +1756,11 @@
     form.appendChild(actions);
     form.addEventListener("submit", function (e) {
       e.preventDefault();
-      const body = { hwaccel: hw.value, max_transcodes: Number(slots.value), online_metadata: online.checked,
-                     radio_directory_url: radio.value.trim(), media_group: mediaGroup.value.trim(),
-                     screens_group: screensGroup.value.trim() };
-      if (tmdb.value.trim()) body.tmdb_key = tmdb.value.trim();
+      const body = { hwaccel: hw.value, max_transcodes: Number(slots.value), online_metadata: online.checked };
+      if (tmdb.value.trim()) body.tmdb_key = tmdb.value.trim();   // empty box: keep the saved key
       save(body);
     });
-    box.appendChild(form);
+    playback.appendChild(form);
 
     const tools = el("div", "ax-new");
     const test = el("button", "small", "Test transcoding");
@@ -1769,11 +1790,29 @@
       catch (err) { showError(err.message); }
     });
     tools.append(test, reread, relook, result);
-    box.appendChild(tools);
+    playback.appendChild(tools);
 
-    box.appendChild(el("h3", "ax-h small", "Live streams and stations"));
+    // Live TV and radio: SGCRelay's station list, then the admin's own streams and stations.
+    const radioForm = el("form");
+    const radioGrid = el("div", "agent-settings");
+    const radio = agentInput("url", s.radio_directory_url);
+    radio.placeholder = "https://sadgirlsclub.wtf/rr/healthz";
+    agentField(radioGrid, "Radio station list", radio).title = "SGCRelay's /healthz; empty for none";
+    radioForm.appendChild(radioGrid);
+    const saveRadio = el("button", "small", "Save");
+    saveRadio.type = "submit";
+    const radioActions = el("div", "ax-new");
+    radioActions.appendChild(saveRadio);
+    radioForm.appendChild(radioActions);
+    radioForm.addEventListener("submit", function (e) {   // sends the station list address only
+      e.preventDefault();
+      save({ radio_directory_url: radio.value.trim() });
+    });
+    sources.appendChild(radioForm);
+
+    sources.appendChild(el("h3", "ax-h small", "Your streams and stations"));
     if (data.sources.length) {
-      box.appendChild(table(["Name", "Kind", "Address", "", ""], data.sources.map(function (src) {
+      sources.appendChild(table(["Name", "Kind", "Address", "", ""], data.sources.map(function (src) {
         const toggle = el("button", "link small", src.enabled ? "Turn off" : "Turn on");
         toggle.type = "button";
         toggle.addEventListener("click", async function () {
@@ -1791,7 +1830,7 @@
         return [src.name + (src.enabled ? "" : " (off)"), src.kind.toUpperCase(), src.url, toggle, drop];
       })));
     } else {
-      box.appendChild(el("p", "small muted", "None yet. RTMP, HLS and YouTube sources show under Live TV; stations under Radio, after SGCRelay's."));
+      sources.appendChild(el("p", "small muted", "None yet. RTMP, HLS and YouTube sources show under Live TV; stations under Radio, after SGCRelay's."));
     }
     const add = el("form", "ax-new");
     const kind = el("select");
@@ -1821,11 +1860,11 @@
       try { renderMedia(await api("POST", "/api/admin/media/sources", { kind: kind.value, name: name.value, url: url.value })); }
       catch (err) { showError(err.message); }
     });
-    box.appendChild(add);
+    sources.appendChild(add);
 
-    if (data.sessions.length) {
-      box.appendChild(el("h3", "ax-h small", "Playing now"));
-      box.appendChild(table(["Session", "Mode", "Encoder", "Idle"], data.sessions.map(function (x) {
+    if (data.sessions.length) {   // running playback sessions: what the transcoding slots are doing
+      playback.appendChild(el("h3", "ax-h small", "Playing now"));
+      playback.appendChild(table(["Session", "Mode", "Encoder", "Idle"], data.sessions.map(function (x) {
         return [x.id, x.mode + (x.source_id ? " (live)" : ""), x.backend || "–", x.idle_s + " s"];
       })));
     }

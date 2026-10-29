@@ -15,6 +15,7 @@
     {% if not screen %}<select class="mc-view-select" id="mc-view-select" aria-label="Media type"></select>{% endif %}
     <button type="button" class="mc-menu-item" data-view="home"><span class="mc-icon">⌂</span>Home</button>
     <button type="button" class="mc-menu-item" data-view="movies"><span class="mc-icon">🎬</span>Movies</button>
+    <button type="button" class="mc-menu-item" data-view="tv"><span class="mc-icon">📺</span>TV Shows</button>
     <button type="button" class="mc-menu-item" data-view="music"><span class="mc-icon">♫</span>Music</button>
     <button type="button" class="mc-menu-item" data-view="pictures"><span class="mc-icon">🖼</span>Pictures</button>
     <button type="button" class="mc-menu-item" data-view="live"><span class="mc-icon">📡</span>Live TV</button>
@@ -47,6 +48,15 @@
   <div class="mc-night-warm" id="mc-night-warm" aria-hidden="true"></div>
   <div class="mc-night-dim" id="mc-night-dim" aria-hidden="true"></div>
   <div class="mc-status" id="mc-status"></div>
+  {#- A TV episode that ends with another after it: that one starts after a countdown (media.js episodes). -#}
+  <div class="mc-upnext" id="mc-upnext" role="status" hidden>
+    <span class="mc-upnext-label">Up next in <span id="mc-upnext-count">10</span></span>
+    <strong id="mc-upnext-title"></strong>
+    <div class="mc-upnext-actions">
+      <button type="button" id="mc-upnext-play">▶ Play now</button>
+      <button type="button" id="mc-upnext-cancel" class="secondary">Cancel</button>
+    </div>
+  </div>
   <div class="mc-osd-top">
     <strong id="mc-player-title"></strong>
     <span class="mc-tag" id="mc-player-tag" hidden></span>
@@ -54,9 +64,11 @@
   </div>
   <div class="mc-osd">
     <div class="mc-bar">
+      <button type="button" id="mc-prev-ep" title="Previous episode (Shift+P)" hidden>⏮</button>
       <button type="button" id="mc-back10" title="Back 10 s (←)">⟲</button>
       <button type="button" id="mc-toggle" title="Play / pause (Space)">⏯</button>
       <button type="button" id="mc-fwd30" title="Forward 30 s (→)">⟳</button>
+      <button type="button" id="mc-next-ep" title="Next episode (Shift+N)" hidden>⏭</button>
       <span class="mc-time" id="mc-pos">0:00</span>
       <input type="range" class="mc-seek" id="mc-seek" min="0" max="0" step="1" value="0" aria-label="Position">
       <span class="mc-time" id="mc-len">0:00</span>

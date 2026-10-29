@@ -904,14 +904,17 @@ address rather than their own (hairpin NAT). If admins lose the Access page
 on the LAN, point the public hostname at this box's LAN address in internal
 DNS.
 
-## 5k. Media (films, music, pictures, live TV and radio)
+## 5k. Media (films, TV shows, music, pictures, live TV and radio)
 
-Media is off until an admin turns it on in **Access → Settings → Media**. It needs the
-share (5d): turning it on makes `Media\Music`, `Media\Movies` and `Media\Pictures` there,
-and the worker catalogs what people put in them after each share scan. **Media folder**
-on the same page uses another top-level folder instead (an existing `Plex` folder, say);
-Music, Movies and Pictures are made inside it where missing. Who sees what
-follows the share's permissions on those folders, as for any library.
+Media is off until an admin turns it on in **Access → Settings → Entertainment → Media**. It needs the
+share (5d): turning it on makes `Media\Music`, `Media\Movies`, `Media\TV` and
+`Media\Pictures` there, and the worker catalogs what people put in them after each share
+scan. In `TV`, each folder is one show, with its seasons in folders inside it
+(`TV\Bluey\Season 1\Bluey S01E01.mkv`). **Media folder** on the same page uses another
+top-level folder instead (an existing `Plex` folder, say); Music, Movies, TV and Pictures
+are made inside it where missing, and a Media folder from before TV shows gets its `TV`
+folder at the next catalog pass. Who sees what follows the share's permissions on those
+folders, as for any library.
 
 `preinstall.sh` installs what it needs: RPM Fusion's full `ffmpeg` (Fedora's
 `ffmpeg-free` can't decode or encode H.264/HEVC), `mesa-va-drivers-freeworld` (VAAPI
@@ -924,7 +927,7 @@ ffmpeg -hide_banner -encoders | grep -E 'h264_(vaapi|nvenc)'
 sudo systemctl daemon-reload && sudo systemctl restart mnemerynne-web   # SupplementaryGroups=render video
 ```
 
-Then **Settings → Media → Test transcoding** encodes two seconds with each backend and
+Then **Settings → Entertainment → Media → Test transcoding** encodes two seconds with each backend and
 says which work. *Automatic* uses the RX 580 (VAAPI) first, then the GTX 1050 Ti
 (NVENC), then the CPU. Both cards encode on dedicated hardware beside the models they
 run; set `MNEMERYNNE_MEDIA_VAAPI_DEVICE` if the wrong render node is picked.

@@ -118,7 +118,7 @@
       if (expanded && kids.length) node.appendChild(branch(lib, null, 1));
       ul.appendChild(node);
     });
-    if (!data.tree.libraries.length) ul.appendChild(el("li", "muted small ax-empty", "No Signage folder yet: turn Media on (Settings → Media)."));
+    if (!data.tree.libraries.length) ul.appendChild(el("li", "muted small ax-empty", "No Signage folder yet: turn Media on (Settings → Entertainment → Media)."));
   }
 
   function branch(lib, parentId, depth) {
@@ -491,7 +491,7 @@
     });
     head.appendChild(f);
     sec.appendChild(head);
-    if (!data.enabled) sec.appendChild(el("p", "notice", "Media is off (Settings → Media): playlists can be made, but screens only play them with Media on."));
+    if (!data.enabled) sec.appendChild(el("p", "notice", "Media is off (Settings → Entertainment → Media): playlists can be made, but screens only play them with Media on."));
 
     const ul = el("ul", "grants sg-list");
     data.shows.forEach(function (s) {
@@ -821,7 +821,7 @@
     sec.appendChild(el("p", "small muted", lib
       ? "Signage assets live in the folder “" + lib.name + "” at the top of the share: anyone with rights there can drop in pictures, " +
         "MP4 clips and PDFs from Windows, or use Upload on the left. The worker reads them within a minute or two."
-      : "The Signage folder is made on the share once Media is on (Settings → Media)."));
+      : "The Signage folder is made on the share once Media is on (Settings → Entertainment → Media)."));
     const folder = el("form", "sg-row");
     const name = form.input("text", data.settings.signage_folder, null, { maxlength: "120" });
     const save = el("button", "small", "Save");
@@ -856,7 +856,7 @@
     document.querySelectorAll("#signage-tabs [data-sg-tab]").forEach(function (b) {
       b.setAttribute("aria-selected", String(b.dataset.sgTab === tab));
     });
-    if (!data.library && tab !== "settings") box.appendChild(el("p", "notice", "There is no Media folder yet (Settings → Media): turn Media on to get a Signage folder and screens."));
+    if (!data.library && tab !== "settings") box.appendChild(el("p", "notice", "There is no Media folder yet (Settings → Entertainment → Media): turn Media on to get a Signage folder and screens."));
     box.appendChild({ playlists: playlists, schedule: schedule, screens: screens, settings: settingsPane }[tab]());
   }
 

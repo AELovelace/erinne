@@ -14,7 +14,7 @@ when there is one:
 - nvenc: the NVIDIA card (GTX 1050 Ti), h264_nvenc, decoding with CUDA where it can;
 - software: libx264 on the CPU.
 'auto' tries them in that order once (a two-second test encode) and keeps the first that works.
-Only re-encodes count against the admin's limit (Settings → Media → transcodes at once).
+Only re-encodes count against the admin's limit (Settings → Entertainment → Media → transcodes at once).
 """
 
 from __future__ import annotations
@@ -145,7 +145,7 @@ class Manager:
         return self._vaapi or None
 
     def test_all(self) -> dict:
-        """Each backend: does a short test encode work here? (Settings → Media → Test.)"""
+        """Each backend: does a short test encode work here? (Settings → Entertainment → Media → Test.)"""
         self._vaapi = False
         self._resolved = None
         device = self.vaapi_device()
@@ -250,7 +250,7 @@ class Manager:
                 self._stop(old)
             if mode == "transcode" and kind == "video":
                 if max_transcodes <= 0:
-                    raise TranscodeError("Transcoding is turned off on this server (Settings → Media).")
+                    raise TranscodeError("Transcoding is turned off on this server (Settings → Entertainment → Media).")
                 if sum(1 for s in self._sessions.values() if s.counts() and s.alive()) >= max_transcodes:
                     raise TranscodeError("Every transcoding slot is busy right now; try again in a minute.")
         backend = self.backend(hwaccel) if mode == "transcode" and kind == "video" else None

@@ -20,7 +20,7 @@ Taking over: a screen box (is_box) listens on every page, not only the TV page. 
 page to carry it out; an admin may override that. Each command has an id, and the screen answers how
 it went (Hub.answer: waiting, done, kept), which the phone asks after (Hub.answer_of).
 
-Only members of the screens group (Settings → Media; AD or Entra groups) may pair screens and cast;
+Only members of the screens group (Settings → Entertainment → Media; AD or Entra groups) may pair screens and cast;
 with no group set, nobody may. It is checked live on every request, the screen key's included: a
 screen whose owner leaves the group stops working at once. Owners may always remove their screens.
 """
@@ -63,7 +63,7 @@ class ScreenBusy(ScreenError):
 
 
 def may_use(conn: sqlite3.Connection, user, directory) -> bool:
-    """In the screens group, and the Media group (Settings → Media)? No group set: nobody."""
+    """In the screens group, and the Media group (Settings → Entertainment → Media)? No group set: nobody."""
     return (media.may_use(conn, user, directory)
             and group_refs.in_any(conn, user, directory, media.load_settings(conn)["screens_group"]))
 
