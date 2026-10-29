@@ -995,9 +995,9 @@ people get in with a one-minute ticket from Mnemerynne, and signing out of Mneme
    `DISCORD_OAUTH_PUBLIC_HOSTS` and `WEB_PANEL_TRUSTED_ORIGINS` include it, the Discord app lists
    the arcade's callback addresses, and its nginx passes the arcade's `X-Forwarded-Host` through
    from this box only).
-5. **Turn it on:** the site, the switch and who may play (Access → Settings → Entertainment →
-   Games, or `PUT /api/admin/settings/games` with `{"enabled": true, "group": "…", "site_url":
-   "https://sadgirlsclub.wtf"}` until that page is there).
+5. **Turn it on:** the site, the switch, who may play and the games themselves (each a start page
+   on the site) under Access → Settings → Entertainment → Games; they then show in Media → Games.
+   See the admin help page *Games*.
 
 Check from the box: `curl -sI https://arcade.beepsquad.wtf/lumibot/` answers **401** with
 "Open this from Mnemerynne" (no arcade cookie), and never Mnemerynne's sign-in page.

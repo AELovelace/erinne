@@ -49,6 +49,16 @@ You only see what you may open in that folder on the share. Who may open it is s
 
 **Live TV** lists the streams your admin has added. Choose one to watch it live. YouTube ones play in YouTube's own player, with its controls; press **✕** to close it.
 
+## Games
+
+**Games** (🎮, after Radio) lists the games your admin has set up, such as Lumi Web and Lumi Games. It's there when Games are on for you.
+
+- Choose one and it opens over the whole page. **← Games** (or Escape, when the game doesn't have the keyboard) goes back; **⛶** fills the screen; **⧉** opens it in a tab of its own.
+- The games come from another site and run on an address of their own (the arcade), so they can't see anything of yours in Erynne. Opening one signs you in to the arcade for 12 hours; signing out of Erynne signs you out of it too.
+- A game may ask you to sign in with its own account (Discord, for the Lumi games). That stays between you and the game.
+- Saves and settings a game keeps in your browser belong to the arcade's address, so they don't follow you from the game's own site.
+- On a TV, Games works the same way, as the TV's owner. Sending something to the TV from your phone closes the game.
+
 ## Playing on the TV from your phone
 
 A **screen** is a browser left showing Media, such as the TV's, that you send things to from your phone.

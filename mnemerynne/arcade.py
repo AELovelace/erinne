@@ -11,7 +11,10 @@ own (MNEMERYNNE_ARCADE_URL, e.g. https://arcade.beepsquad.wtf), so their scripts
   web/arcade.py): signed, TICKET_SECONDS, one use, for one path. /__arcade/enter spends it and sets the arcade's
   own cookie (COOKIE: host-only, COOKIE_SECONDS). Every request checks again that the person is active, still on
   the same session epoch (signing out of Mnemerynne ends it), and still allowed to play (cached CHECK_SECONDS).
-- Who may play: Games on, a site set, and the person in the Games group; admins always.
+- Who may play: Games on, a site set, and the person in the Games group; admins always. A screen (the TV) plays
+  as its owner, never as an admin, and only while it is still paired: its tickets and cookie carry its id.
+- The games (table `games`): pages of the site that Media → Games lists, each with a name, an icon, a short
+  description and its start page.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import secrets
 import sqlite3
 import threading
@@ -147,6 +151,104 @@ def clean_path(path: str) -> str:
     return p
 
 
+# ------------------------------------------------------------------- games
+GAME_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+GAME_FIELDS = ("name", "description", "icon", "start_path", "enabled")
+
+
+def _slug(name: str) -> str:
+    """lumi-web from "Lumi Web!"; "game" when nothing is left."""
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40].strip("-") or "game"
+
+
+def clean_game(fields: dict) -> dict:
+    """A game's fields as stored: name (1-80), description (up to 300), icon (an emoji or up to 8 characters),
+    start_path (a path on the site), enabled. Only the fields given. Raises ArcadeError."""
+    out = {}
+    if "name" in fields:
+        name = " ".join(str(fields["name"] or "").split())
+        if not 1 <= len(name) <= 80:
+            raise ArcadeError("A game's name is 1 to 80 characters.")
+        out["name"] = name
+    if "description" in fields:
+        description = " ".join(str(fields["description"] or "").split())
+        if len(description) > 300:
+            raise ArcadeError("A game's description is at most 300 characters.")
+        out["description"] = description
+    if "icon" in fields:
+        icon = str(fields["icon"] or "").strip() or "🎮"
+        if len(icon) > 8 or any(ord(c) < 32 for c in icon):
+            raise ArcadeError("A game's icon is an emoji or a few letters.")
+        out["icon"] = icon
+    if "start_path" in fields:
+        out["start_path"] = clean_path(fields["start_path"])
+    if "enabled" in fields:
+        out["enabled"] = 1 if fields["enabled"] else 0
+    return out
+
+
+def game_json(row: sqlite3.Row) -> dict:
+    return {"id": row["id"], "slug": row["slug"], "name": row["name"], "description": row["description"],
+            "icon": row["icon"], "start_path": row["start_path"], "sort": row["sort"], "enabled": bool(row["enabled"])}
+
+
+def list_games(conn: sqlite3.Connection, enabled_only: bool = False) -> list[dict]:
+    rows = conn.execute("SELECT * FROM games" + (" WHERE enabled = 1" if enabled_only else "")
+                        + " ORDER BY sort, name COLLATE NOCASE, id").fetchall()
+    return [game_json(r) for r in rows]
+
+
+def get_game(conn: sqlite3.Connection, slug: str) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM games WHERE slug = ?", ((slug or "").strip().lower(),)).fetchone()
+
+
+def add_game(conn: sqlite3.Connection, fields: dict) -> dict:
+    """A new game at the end of the list, its slug made from its name (lumi-web, lumi-web-2...)."""
+    clean = clean_game({"description": "", "icon": "🎮", "start_path": "/", "enabled": True} | fields)
+    if "name" not in clean:
+        raise ArcadeError("A game needs a name.")
+    base = _slug(clean["name"])
+    slug, n = base, 2
+    while get_game(conn, slug) is not None:
+        slug, n = f"{base[:36]}-{n}", n + 1
+    last = conn.execute("SELECT COALESCE(MAX(sort), 0) FROM games").fetchone()[0]
+    cur = conn.execute("INSERT INTO games(slug, name, description, icon, start_path, sort, enabled) "
+                       "VALUES (?, ?, ?, ?, ?, ?, ?)", (slug, clean["name"], clean["description"], clean["icon"],
+                                                         clean["start_path"], last + 1, clean["enabled"]))
+    return game_json(conn.execute("SELECT * FROM games WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+
+def update_game(conn: sqlite3.Connection, game_id: int, fields: dict) -> dict:
+    """Change the fields given (its slug stays, so links to it keep working). Raises ArcadeError."""
+    clean = clean_game({k: v for k, v in fields.items() if k in GAME_FIELDS})
+    if conn.execute("SELECT 1 FROM games WHERE id = ?", (game_id,)).fetchone() is None:
+        raise ArcadeError("There's no such game.")
+    if clean:
+        conn.execute(f"UPDATE games SET {', '.join(f'{k} = ?' for k in clean)} WHERE id = ?",
+                     (*clean.values(), game_id))
+    return game_json(conn.execute("SELECT * FROM games WHERE id = ?", (game_id,)).fetchone())
+
+
+def move_game(conn: sqlite3.Connection, game_id: int, step: int) -> None:
+    """One place up (step -1) or down (+1) in the list; the list is renumbered 1, 2, 3..."""
+    ids = [r[0] for r in conn.execute("SELECT id FROM games ORDER BY sort, name COLLATE NOCASE, id")]
+    if game_id not in ids:
+        raise ArcadeError("There's no such game.")
+    i = ids.index(game_id)
+    j = max(0, min(len(ids) - 1, i + (1 if step > 0 else -1)))
+    ids[i], ids[j] = ids[j], ids[i]
+    conn.executemany("UPDATE games SET sort = ? WHERE id = ?", [(n, gid) for n, gid in enumerate(ids, 1)])
+
+
+def delete_game(conn: sqlite3.Connection, game_id: int) -> bool:
+    return conn.execute("DELETE FROM games WHERE id = ?", (game_id,)).rowcount > 0
+
+
+def games_for(conn: sqlite3.Connection, user: sqlite3.Row | None, directory, admin: bool) -> list[dict]:
+    """The games this person may open (all the turned-on ones, or none)."""
+    return list_games(conn, enabled_only=True) if may_play(conn, user, directory, admin) else []
+
+
 # ------------------------------------------------------- tickets and cookie
 def _serializer(secret_key: str, purpose: str) -> URLSafeTimedSerializer:
     """Signs with a key of the arcade's own, derived from the secret key, so nothing the arcade signs can pass
@@ -155,10 +257,12 @@ def _serializer(secret_key: str, purpose: str) -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(key, salt=f"arcade-{purpose}")
 
 
-def make_ticket(secret_key: str, user: sqlite3.Row, path: str) -> str:
-    """A one-use pass from the main origin to `path` on the arcade, for this person and session epoch."""
+def make_ticket(secret_key: str, user: sqlite3.Row, path: str, screen_id: int | None = None) -> str:
+    """A one-use pass from the main origin to `path` on the arcade, for this person and session epoch; from a
+    screen (the TV), for its owner and that screen."""
     return _serializer(secret_key, "ticket").dumps(
-        {"u": user["id"], "e": user["session_epoch"], "p": clean_path(path), "n": secrets.token_urlsafe(12)})
+        {"u": user["id"], "e": user["session_epoch"], "s": screen_id, "p": clean_path(path),
+         "n": secrets.token_urlsafe(12)})
 
 
 def spend_ticket(secret_key: str, token: str) -> dict | None:
@@ -179,8 +283,8 @@ def spend_ticket(secret_key: str, token: str) -> dict | None:
     return data
 
 
-def make_cookie(secret_key: str, user: sqlite3.Row) -> str:
-    return _serializer(secret_key, "cookie").dumps({"u": user["id"], "e": user["session_epoch"]})
+def make_cookie(secret_key: str, user: sqlite3.Row, screen_id: int | None = None) -> str:
+    return _serializer(secret_key, "cookie").dumps({"u": user["id"], "e": user["session_epoch"], "s": screen_id})
 
 
 def read_cookie(secret_key: str, value: str) -> dict | None:
@@ -234,7 +338,7 @@ class ArcadeProxy(remote.RemoteProxy):
     def __init__(self, settings: Settings, secret_key: str, get_directory: Callable[[], Any] = lambda: None):
         super().__init__(settings, get_directory)
         self.secret_key = secret_key
-        self._checked: dict[int, tuple[bool, float]] = {}   # user id -> (may play, until)
+        self._checked: dict[tuple[int, int | None], tuple[bool, float]] = {}   # (user, screen) -> (may play, until)
 
     def _prefix(self, slug: str) -> str:
         return ""   # the site sits at the arcade host's root
@@ -249,7 +353,8 @@ class ArcadeProxy(remote.RemoteProxy):
 
     # ------------------------------------------------------------ checks
     def _user_for(self, scope, data: dict | None) -> tuple[str, sqlite3.Row | None, str]:
-        """('ok' | 'login' | 'off', user, site_url) for a cookie's or ticket's {u, e}."""
+        """('ok' | 'login' | 'off', user, site_url) for a cookie's or ticket's {u, e, s}. With a screen (s), the
+        screen must still exist and belong to that user, who then plays as an ordinary member, never as an admin."""
         conn = db.connect(self.settings.db_path)
         try:
             cfg = load_settings(conn)
@@ -258,12 +363,19 @@ class ArcadeProxy(remote.RemoteProxy):
             user = users.get_user_by_id(conn, data["u"]) if data else None
             if user is None or not user["active"] or data.get("e") != user["session_epoch"]:
                 return "login", None, cfg["site_url"]
-            cached = self._checked.get(user["id"])
+            screen_id = data.get("s")
+            if screen_id is not None:   # the TV: unpaired or given to someone else, and it's out
+                screen = conn.execute("SELECT user_id FROM media_screens WHERE id = ?", (screen_id,)).fetchone()
+                if screen is None or screen["user_id"] != user["id"]:
+                    return "login", None, cfg["site_url"]
+            key = (user["id"], screen_id)
+            cached = self._checked.get(key)
             if cached and cached[1] > time.monotonic():
                 return ("ok" if cached[0] else "login"), user, cfg["site_url"]
             from mnemerynne.web import deps   # here, not at the top: deps imports the web package
-            ok = may_play(conn, user, self.get_directory(), deps.is_admin(HTTPConnection(scope), conn, user))
-            self._checked[user["id"]] = (ok, time.monotonic() + CHECK_SECONDS)
+            admin = screen_id is None and deps.is_admin(HTTPConnection(scope), conn, user)
+            ok = may_play(conn, user, self.get_directory(), admin)
+            self._checked[key] = (ok, time.monotonic() + CHECK_SECONDS)
             return ("ok" if ok else "login"), user, cfg["site_url"]
         finally:
             conn.close()
@@ -339,7 +451,7 @@ class ArcadeProxy(remote.RemoteProxy):
                         self._games_url())(scope, receive, send)
             return
         response = RedirectResponse(data["p"], status_code=303)
-        response.headers.append("set-cookie", cookie_header(make_cookie(self.secret_key, user),
+        response.headers.append("set-cookie", cookie_header(make_cookie(self.secret_key, user, data.get("s")),
                                                             secure=self._https()))
         response.headers["Cache-Control"] = "no-store"
         await response(scope, receive, send)

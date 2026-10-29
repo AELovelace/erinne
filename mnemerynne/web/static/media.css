@@ -8,7 +8,7 @@
 /* The page's own buttons aren't the theme's pill buttons. "html " puts these above neon's
    html[data-theme="neon"] :where(button) (same weight, and this file loads later). */
 html :is(.mc-card, .mc-menu-item, .mc-track, .mc-crumbs button, .mc-bar button, .mc-np-buttons button, .mc-osd-top button,
-    .mc-viewer-nav) { box-shadow: none; font-weight: inherit; letter-spacing: normal; transition: none;
+    .mc-viewer-nav, .mc-game-bar button) { box-shadow: none; font-weight: inherit; letter-spacing: normal; transition: none;
                       text-shadow: none; }
 :is(.mc-card, .mc-track):active { transform: none; }
 .mc-card:hover, .mc-card:focus { background: none; }
@@ -145,6 +145,20 @@ html .mc-upnext-actions button.secondary { background: rgba(255, 255, 255, .15);
 .mc-note { color: var(--muted); font-size: .85rem; margin: .3rem 0 .8rem; }
 
 /* ----------------------------------------------------------------- player */
+/* A game (Media → Games): the arcade's page in a frame under a slim bar; just below the player, which a cast
+   to the TV opens over it (media.js closes the game then). */
+.mc-game { position: fixed; inset: 0; z-index: 58; background: #000; display: flex; flex-direction: column; }
+.mc-game[hidden] { display: none; }
+.mc-game-bar { display: flex; align-items: center; gap: .7rem; padding: .45rem .9rem; color: var(--ink, #fff);
+               background: var(--glass); border-bottom: 1px solid var(--line); }
+.mc-game-bar strong { font-family: var(--serif); font-size: 1.15rem; flex: 1; min-width: 0; overflow: hidden;
+                      text-overflow: ellipsis; white-space: nowrap; }
+.mc-game-icon { font-size: 1.3rem; }
+.mc-game-status { font-size: .85rem; opacity: .8; }
+html .mc-game-bar button { background: none; border: 0; color: inherit; font-size: 1.1rem; cursor: pointer;
+                           padding: .3rem .6rem; border-radius: var(--radius); }
+html .mc-game-bar button:hover, html .mc-game-bar button:focus-visible { background: var(--petal-soft); color: var(--rose); }
+.mc-game iframe { flex: 1; width: 100%; min-height: 0; border: 0; background: #000; }
 .mc-player { position: fixed; inset: 0; z-index: 60; background: #000; display: flex; flex-direction: column; }
 .mc-player video, .mc-player iframe { flex: 1; width: 100%; min-height: 0; background: #000; border: 0; }
 .mc-player iframe[hidden], .mc-player video[hidden] { display: none; }

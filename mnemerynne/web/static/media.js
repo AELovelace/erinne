@@ -238,7 +238,8 @@
   }
 
   const SECTION_OF = { screens: "screens", cast: "screens", pair: "screens", home: "home", movies: "movies", movie: "movies", music: "music", album: "music",
-                       artist: "music", pictures: "pictures", live: "live", radio: "radio", tv: "tv", tvshow: "tv" };
+                       artist: "music", pictures: "pictures", live: "live", radio: "radio", tv: "tv", tvshow: "tv",
+                       games: "games" };
 
   async function render() {
     const r = route();
@@ -252,7 +253,7 @@
     showError("");
     backdrop(null);
     const views = { home: viewHome, movies: viewMovies, movie: viewMovie, tv: viewTv, tvshow: viewTvShow, music: viewMusic, album: viewAlbum,
-                    artist: viewArtist, pictures: viewPictures, live: viewLive, radio: viewRadio,
+                    artist: viewArtist, pictures: viewPictures, live: viewLive, radio: viewRadio, games: viewGames,
                     screens: viewScreens, cast: viewScreens, pair: function (code) { return viewScreens("", code); } };
     try {
       const nodes = await (views[r.view] || viewHome)(r.arg);
@@ -643,6 +644,83 @@
     }), "square", "grid"));
     return out;
   }
+
+  /* Games (arcade.py): the pages of the games site an admin listed, for whoever may play. Each opens in the
+     game layer below; never cast, since a game runs on the device that opened it. */
+  async function viewGames() {
+    setHead("Games");
+    const data = await api("GET", "/api/media/games");
+    if (!data.games.length) {
+      return [empty(isAdmin ? "No games yet. Add them in Access → Settings → Entertainment → Games."
+                            : "No games have been set up for you.")];
+    }
+    return [shelf(null, data.games.map(function (g) {
+      return card({ title: g.name, sub: g.description, glyph: g.icon || "🎮", shape: "square",
+                    onClick: function () { games.open(g); } });
+    }), "square", "grid")];
+  }
+
+  /* The game layer: a fresh one-use ticket from the server each time (POST /api/media/games/<slug>/ticket), whose
+     address signs this browser into the arcade and lands on the game's start page. */
+  const gameFrame = $("mc-game-frame");
+  const games = {
+    current: null,
+
+    isOpen: function () { return !$("mc-game").hidden; },
+
+    ticket: async function (g) {
+      return (await api("POST", "/api/media/games/" + encodeURIComponent(g.slug) + "/ticket")).url;
+    },
+
+    open: async function (g) {
+      player.close();
+      nowPlaying.pause();
+      this.current = g;
+      $("mc-game-title").textContent = g.name;
+      $("mc-game-icon").textContent = g.icon || "🎮";
+      $("mc-game-status").textContent = "Opening…";
+      $("mc-game").hidden = false;
+      try {
+        gameFrame.src = await this.ticket(g);
+        gameFrame.onload = function () { $("mc-game-status").textContent = ""; };
+        gameFrame.focus();
+      } catch (err) {
+        $("mc-game-status").textContent = err.message;
+      }
+    },
+
+    close: function () {
+      if (!this.isOpen()) return;
+      gameFrame.removeAttribute("src");   // stops it: nothing keeps running behind the page
+      $("mc-game").hidden = true;
+      if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
+      this.current = null;
+      focusFirst();
+    },
+
+    full: function () {
+      const box = $("mc-game");
+      if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
+      else if (box.requestFullscreen) box.requestFullscreen().catch(function () {});
+    },
+
+    /* Its own tab: a new ticket (the frame's is spent), opened while the click still counts as the person's. */
+    tab: function () {
+      const g = this.current;
+      if (!g) return;
+      const win = window.open("about:blank", "_blank");
+      this.ticket(g).then(function (url) {
+        if (win) win.location.href = url; else location.href = url;
+        games.close();
+      }).catch(function (err) {
+        if (win) win.close();
+        $("mc-game-status").textContent = err.message;
+      });
+    },
+  };
+  $("mc-game-back").addEventListener("click", function () { games.close(); });
+  $("mc-game-full").addEventListener("click", function () { games.full(); });
+  $("mc-game-tab").addEventListener("click", function () { games.tab(); });
 
   const state = { q: "", sort: "title", tvQ: "", tvSort: "title", tvSeason: null };
 
@@ -1381,6 +1459,12 @@
 
   document.addEventListener("keydown", function (e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // A game has the keyboard while it has focus (keys inside its frame never reach this page); on the bar,
+    // Escape or Backspace goes back to Games.
+    if (games.isOpen()) {
+      if (e.key === "Escape" || e.key === "Backspace") { e.preventDefault(); games.close(); }
+      return;
+    }
     if (!$("mc-player").hidden) { if (player.key(e)) e.preventDefault(); return; }
     if (!$("mc-viewer").hidden) { if (viewer.key(e)) e.preventDefault(); return; }
     const tag = (document.activeElement && document.activeElement.tagName) || "";
@@ -1833,6 +1917,7 @@
       if (a === "signage_start") { signage.pause(false); return; }
       if (a === "calibrate") { safeArea.step(cmd.step); return; }
       if (a.indexOf("play_") === 0 || a === "stop") signage.activity(false);
+      if (a.indexOf("play_") === 0 || a === "stop") games.close();   // a cast takes the TV: the game stops
       if (a.indexOf("play_") === 0) {
         $("mc-splash").hidden = true;
         viewer.close();

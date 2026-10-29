@@ -70,6 +70,7 @@ Two columns.
 - **Media**: on or off, the Media folder on the share, the catalog's counts, and who may use Media and screens.
 - **Playback and artwork**: transcoding (and **Test transcoding**), artwork lookups and the TMDB key, reading the files again, and what's playing now.
 - **Live TV and radio**: SGCRelay's station list, and your own HLS, RTMP, YouTube and radio sources. See [Media](media.md).
+- **Games**: on or off, who may play, the games site, and the games Media lists (add, edit, reorder, turn off, test). See [Games](games.md).
 
 **Themes** (full width, between Entertainment and Experimental)
 

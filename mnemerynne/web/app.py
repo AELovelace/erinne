@@ -333,6 +333,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(remote_pages.router)
     app.include_router(admin_remote.router)
     app.include_router(arcade_pages.router)        # a ticket into the arcade (arcade.py)
+    app.include_router(arcade_pages.media_router)  # Media → Games: the list, and a ticket into a game
     app.include_router(arcade_pages.admin_router)  # Settings → Entertainment → Games
     # LAN apps served at /remote/<slug>/... (mnemerynne/remote.py); after the routers, so /remote itself is the page.
     app.state.remote_proxy = remote.RemoteProxy(settings, lambda: app.state.directory)

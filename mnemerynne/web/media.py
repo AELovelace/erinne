@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import group_refs, media, users
+from mnemerynne import arcade, group_refs, media, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
@@ -114,10 +114,17 @@ def _not_found(what: str = "Not found") -> HTTPException:
 # --------------------------------------------------------------------- page
 @router.get("/media", response_class=HTMLResponse)
 def media_page(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db)):
+    admin = is_admin(request, conn, user)
     return request.app.state.templates.TemplateResponse(request, "media.html", {
-        "user": user, "is_admin": is_admin(request, conn, user), "active": "media",
+        "user": user, "is_admin": admin, "active": "media",
         "has_library": media.library(conn) is not None, "folder": _folder_name(conn),
-        "screens_allowed": screens.may_use(conn, user, request.app.state.directory)})
+        "screens_allowed": screens.may_use(conn, user, request.app.state.directory),
+        "games_allowed": _games_allowed(request, conn, user, admin)})
+
+
+def _games_allowed(request: Request, conn: sqlite3.Connection, user, admin: bool) -> bool:
+    """Media → Games shows: the arcade is set up (MNEMERYNNE_ARCADE_URL) and Games are on for this person."""
+    return bool(arcade.origin(request.app.state.settings)) and arcade.may_play(conn, user, request.app.state.directory, admin)
 
 
 def _folder_name(conn: sqlite3.Connection) -> str:
@@ -428,7 +435,8 @@ def screen_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
         "user": owner, "is_admin": False, "active": "media", "has_library": media.library(conn) is not None,
         "folder": _folder_name(conn), "screen": {"id": screen["id"], "name": screen["name"],
                                                  "safe_x": screen["safe_x"], "safe_y": screen["safe_y"],
-                                                 "top_bar": bool(screen["top_bar"]), "box": box}})
+                                                 "top_bar": bool(screen["top_bar"]), "box": box},
+        "games_allowed": _games_allowed(request, conn, owner, False)})   # the TV plays as its owner, never as an admin
 
 
 class ScreenBody(BaseModel):

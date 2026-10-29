@@ -20,6 +20,8 @@
     <button type="button" class="mc-menu-item" data-view="pictures"><span class="mc-icon">🖼</span>Pictures</button>
     <button type="button" class="mc-menu-item" data-view="live"><span class="mc-icon">📡</span>Live TV</button>
     <button type="button" class="mc-menu-item" data-view="radio"><span class="mc-icon">📻</span>Radio</button>
+    {#- Games (arcade.py): shown when the arcade is set up and Games are on for this person (or the TV's owner). -#}
+    {% if games_allowed %}<button type="button" class="mc-menu-item" data-view="games"><span class="mc-icon">🎮</span>Games</button>{% endif %}
     {#- Screen size and Wi-Fi are inside Kiosk settings, which sits at the bottom of the menu (media.css). -#}
     {% if screen %}<button type="button" class="mc-menu-item" id="mc-kiosk" hidden><span class="mc-icon">⚙</span>Kiosk settings</button>{% endif %}
     {% if not screen and screens_allowed %}<button type="button" class="mc-menu-item" data-view="screens"><span class="mc-icon">📺</span>Screens</button>
@@ -37,6 +39,20 @@
     <div class="mc-scroll" id="mc-content"></div>
   </section>
 </main>
+
+{#- A game (Media → Games, media.js games): the arcade's page for it in a frame filling the screen. The frame is
+    another origin (the arcade's host), so nothing in it can reach this page or Mnemerynne's API. -#}
+<div class="mc-game" id="mc-game" role="dialog" aria-label="Game" hidden>
+  <div class="mc-game-bar">
+    <button type="button" id="mc-game-back" title="Back to Games (Esc)">← Games</button>
+    <span class="mc-game-icon" id="mc-game-icon" aria-hidden="true"></span>
+    <strong id="mc-game-title"></strong>
+    <span class="mc-game-status" id="mc-game-status" role="status"></span>
+    <button type="button" id="mc-game-full" title="Full screen">⛶</button>
+    <button type="button" id="mc-game-tab" title="Open in a tab of its own">⧉</button>
+  </div>
+  <iframe id="mc-game-frame" title="Game" allow="fullscreen; gamepad; autoplay; clipboard-write" allowfullscreen></iframe>
+</div>
 
 <div class="mc-player" id="mc-player" role="dialog" aria-label="Player" hidden>
   <video id="mc-video" playsinline></video>
