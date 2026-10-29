@@ -16,6 +16,9 @@ PREFIX = "mnemerynne_"
 # Tokens made before the rename keep working until they expire.
 LEGACY_PREFIXES = ("erinne_", "erynne_")
 EXPIRY_DAYS = (30, 90, 365)
+# 'mcp': Claude and other MCP clients. 'sync': the desktop backup app (sync.py), which may only touch the
+# person's Backups folder. A token works only where its scope belongs.
+SCOPES = ("mcp", "sync")
 
 
 @dataclass(frozen=True)
@@ -25,6 +28,7 @@ class Caller:
     token_id: int
     can_edit: bool = False     # the token may change files (where editing is otherwise allowed)
     grant_id: int | None = None  # an OAuth connection (oauth.py) instead of a personal token
+    token_scope: str = "mcp"   # what the token is for (SCOPES)
 
 
 def _hash(token: str) -> str:
@@ -32,51 +36,54 @@ def _hash(token: str) -> str:
 
 
 def create(conn: sqlite3.Connection, user_id: int, name: str, days: int | None = 90, *,
-           can_edit: bool = False) -> tuple[int, str]:
+           can_edit: bool = False, scope: str = "mcp") -> tuple[int, str]:
     """Make a token; returns (id, token). The token can't be recovered later."""
+    if scope not in SCOPES:
+        raise ValueError(f"Unknown token scope {scope!r}")
     name = (name or "").strip()[:80] or "Claude Desktop"
     token = PREFIX + secrets.token_urlsafe(32)
     expires = f"+{int(days)} days" if days else None
     cur = conn.execute(
-        "INSERT INTO api_tokens(user_id, name, token_hash, prefix, expires_at, can_edit) "
-        "VALUES (?, ?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE datetime('now', ?) END, ?)",
-        (user_id, name, _hash(token), token[: len(PREFIX) + 4], expires, expires, int(can_edit)))
+        "INSERT INTO api_tokens(user_id, name, token_hash, prefix, expires_at, can_edit, scope) "
+        "VALUES (?, ?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE datetime('now', ?) END, ?, ?)",
+        (user_id, name, _hash(token), token[: len(PREFIX) + 4], expires, expires, int(can_edit), scope))
     return cur.lastrowid, token
 
 
 def set_can_edit(conn: sqlite3.Connection, token_id: int, user_id: int, can_edit: bool) -> bool:
     """Let one of the user's own live tokens change files, or stop it."""
-    return conn.execute("UPDATE api_tokens SET can_edit = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
+    return conn.execute("UPDATE api_tokens SET can_edit = ? WHERE id = ? AND user_id = ? AND scope = 'mcp' "
+                        "AND revoked_at IS NULL",
                         (int(can_edit), token_id, user_id)).rowcount > 0
 
 
-def verify(conn: sqlite3.Connection, token: str | None, *, touch: bool = True) -> Caller | None:
+def verify(conn: sqlite3.Connection, token: str | None, *, touch: bool = True, scope: str = "mcp") -> Caller | None:
     """The caller behind a token, or None if it is unknown, revoked, expired,
-    or belongs to a deactivated user."""
+    made for another scope, or belongs to a deactivated user."""
     if not token or not token.startswith((PREFIX, *LEGACY_PREFIXES)):
         return None
     row = conn.execute(
         "SELECT t.id, t.user_id, t.can_edit, u.username FROM api_tokens t JOIN users u ON u.id = t.user_id "
-        "WHERE t.token_hash = ? AND t.revoked_at IS NULL AND u.active = 1 "
-        "AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))", (_hash(token),)).fetchone()
+        "WHERE t.token_hash = ? AND t.scope = ? AND t.revoked_at IS NULL AND u.active = 1 "
+        "AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))", (_hash(token), scope)).fetchone()
     if row is None:
         return None
     if touch:
         conn.execute("UPDATE api_tokens SET last_used_at = datetime('now') WHERE id = ?", (row["id"],))
-    return Caller(row["user_id"], row["username"], row["id"], bool(row["can_edit"]))
+    return Caller(row["user_id"], row["username"], row["id"], bool(row["can_edit"]), token_scope=scope)
 
 
-def list_for_user(conn: sqlite3.Connection, user_id: int) -> list[dict]:
+def list_for_user(conn: sqlite3.Connection, user_id: int, scope: str = "mcp") -> list[dict]:
     rows = conn.execute(
         "SELECT id, name, prefix, created_at, expires_at, last_used_at, revoked_at, can_edit, "
         "(revoked_at IS NULL AND (expires_at IS NULL OR expires_at > datetime('now'))) AS active "
-        "FROM api_tokens WHERE user_id = ? ORDER BY id DESC", (user_id,)).fetchall()
+        "FROM api_tokens WHERE user_id = ? AND scope = ? ORDER BY id DESC", (user_id, scope)).fetchall()
     return [{**dict(r), "active": bool(r["active"]), "can_edit": bool(r["can_edit"])} for r in rows]
 
 
 def has_active(conn: sqlite3.Connection, user_id: int) -> bool:
     """The person has Claude connected: a token that isn't revoked or expired."""
-    return conn.execute("SELECT 1 FROM api_tokens WHERE user_id = ? AND revoked_at IS NULL "
+    return conn.execute("SELECT 1 FROM api_tokens WHERE user_id = ? AND scope = 'mcp' AND revoked_at IS NULL "
                         "AND (expires_at IS NULL OR expires_at > datetime('now')) LIMIT 1", (user_id,)).fetchone() is not None
 
 

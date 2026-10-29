@@ -48,7 +48,7 @@ from mnemerynne.web import (admin, admin_apis, admin_notices, admin_remote, agen
                             kiosk as kiosk_pages,
                             m365 as m365_pages, media as media_pages, memories, messages as message_pages, oauth as oauth_pages, remote as remote_pages,
                             rooms as room_pages, scratchpad as scratchpad_pages, security,
-                            settings as settings_pages, theme as theme_pages, tokens, wiki as wiki_pages)
+                            settings as settings_pages, sync as sync_pages, theme as theme_pages, tokens, wiki as wiki_pages)
 from mnemerynne.web.deps import LoginRequired, api_user, get_db, is_admin, page_user
 
 log = logging.getLogger("mnemerynne.web")
@@ -333,6 +333,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(remote_pages.router)
     app.include_router(admin_remote.router)
     app.include_router(arcade_pages.router)        # a ticket into the arcade (arcade.py)
+    app.include_router(sync_pages.router)          # the desktop backup app (sync.py)
+    app.include_router(sync_pages.admin_router)
     app.include_router(arcade_pages.media_router)  # Media → Games: the list, and a ticket into a game
     app.include_router(arcade_pages.admin_router)  # Settings → Entertainment → Games
     # LAN apps served at /remote/<slug>/... (mnemerynne/remote.py); after the routers, so /remote itself is the page.

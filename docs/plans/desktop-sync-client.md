@@ -88,7 +88,7 @@ shows what it's doing and anything it couldn't copy.
 | `GET /api/sync/roots` | This person's backed-up folders: `{computer, label, folder_id, searchable, files, bytes, last_sync}`. |
 | `POST /api/sync/roots` | Register `{computer, label}`; creates `Backups\<computer>\<label>`. Idempotent. |
 | `PATCH /api/sync/roots/{id}` | Rename the label, turn **Searchable** on or off. |
-| `GET /api/sync/roots/{id}/manifest?after=<cursor>` | Every live file and folder under the root: relative path, size, sha256, mtime, version. Paged, with a cursor so later calls return only changes. |
+| `GET /api/sync/roots/{id}/manifest?after=<cursor>` | Every live file and folder under the root: relative path, size, sha256, mtime, version. Paged by a cursor (a file id). It always lists everything; a feed of only what changed is for later, if full listings get slow. |
 | `PUT /api/sync/roots/{id}/files?path=…` | Write one file (up to 32 MB) at that path. Headers `If-Match: <version>` (or `If-None-Match: *` for new), `X-Sha256`, `X-Mtime`. Returns the new version; `412` if the server's copy changed since. |
 | `POST /api/sync/uploads` → `PUT …/{upload_id}/parts/{n}` → `POST …/{upload_id}/finish` | Resumable upload for bigger files, in **32 MB parts**, each with its own sha256. `GET …/{upload_id}` says which parts arrived, so a laptop that lost Wi-Fi carries on where it stopped. Parts are kept in `tmp_dir`, swept after a day. |
 | `POST /api/sync/roots/{id}/delete` | Move a batch of paths to the recycle bin. |
@@ -101,17 +101,19 @@ shows what it's doing and anything it couldn't copy.
 - **Versions:** change `_keep_version` to move or copy the old file on disk instead of reading it into memory,
   before big files go through it.
 - **Size:** `max_sync_file_bytes` (default 50 GB), separate from `max_file_bytes`.
-- **Logging:** every call goes in `access_log` with the token id. `mnemerynne-admin sync-status [USER]` prints the
+- **Logging:** sign-ins, new roots, deletes and admin changes go in `access_log` (uploads don't: a first backup would be thousands of rows; `sync_roots.last_seen_at` shows activity). `mnemerynne-admin sync-status [USER]` prints the
   computers, folders and last sync.
 - **Names:** the server enforces the share's Windows name rules (`share.py`) on every path, and refuses `..`,
   absolute paths, and anything that would land outside the root.
 
-### 5. Migration 0057 or later (check the scratchpad board first)
+### 5. Migration 0057 (`0057_desktop_sync.sql`, reserved on the scratchpad)
 - `api_tokens.scope`, `oauth_grants.scope`;
 - `folders.no_index`;
 - `sync_roots(id, user_id, computer, label, folder_id, searchable, created_at, last_seen_at)`;
 - `sync_uploads(id, user_id, root_id, path, size, sha256, parts_received, created_at)`;
-- settings rows for the Backups switch and group.
+- `file_versions.via` gains `'sync'`.
+
+The Backups switch and group are meta `backups_settings`, like Games', so they need no table.
 
 ### 6. `bkp.beepsquad.wtf`
 A host of its own, so the big-upload settings don't loosen the main site:

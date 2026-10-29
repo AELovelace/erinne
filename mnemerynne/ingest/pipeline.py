@@ -13,6 +13,8 @@ from mnemerynne.db import transaction
 from mnemerynne.ingest import Segment, chunk, documents, markdown, ocr, pdf, store
 
 log = logging.getLogger("mnemerynne.ingest")
+# Shown in Files for a backed-up file that isn't read for search (fs.not_indexed).
+NOT_INDEXED_NOTE = "Backed up; not searchable. Turn on Searchable for this backup to search it."
 
 
 class IngestError(RuntimeError):
@@ -143,6 +145,10 @@ def process_file(conn: sqlite3.Connection, settings: Settings, embedder: Embedde
         return
     if row["kind"] == "other":
         _set(conn, file_id, status="stored", progress=None, error=None)
+        return
+    if fs.not_indexed(conn, conn.execute("SELECT folder_id FROM files WHERE id = ?", (file_id,)).fetchone()[0]):
+        # A backup that isn't Searchable (sync.py): kept and listed, never read.
+        _set(conn, file_id, status="stored", progress=None, error=None, notes=NOT_INDEXED_NOTE)
         return
     _set(conn, file_id, status="processing", error=None)
 

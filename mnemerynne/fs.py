@@ -531,6 +531,17 @@ def set_folder_claude(conn: sqlite3.Connection, access: Access, collection_id: i
         conn.execute("UPDATE folders SET claude_hidden = ? WHERE id = ?", (0 if visible else 1, folder_id))
 
 
+def not_indexed(conn: sqlite3.Connection, folder_id: int | None) -> bool:
+    """Files in this folder are kept but never read for search: the nearest folder (this one or above) with
+    folders.no_index set decides; none set means they are read as usual (backups, sync.py)."""
+    row = conn.execute(
+        "WITH RECURSIVE up(id, parent_id, no_index, depth) AS ("
+        "SELECT id, parent_id, no_index, 0 FROM folders WHERE id = ? UNION ALL "
+        "SELECT f.id, f.parent_id, f.no_index, up.depth + 1 FROM folders f JOIN up ON f.id = up.parent_id) "
+        "SELECT no_index FROM up WHERE no_index IS NOT NULL ORDER BY depth LIMIT 1", (folder_id,)).fetchone()
+    return bool(row and row["no_index"])
+
+
 def set_ai_edit(conn: sqlite3.Connection, access: Access, item: Item, allowed: bool) -> None:
     """Let the AI (Claude, Erynne's proposals) change this file or the files in this folder, or keep it
     read-only for the AI. Only people who can change the place. Switching it on only counts in someone's own

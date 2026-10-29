@@ -272,9 +272,9 @@ def token(conn: sqlite3.Connection, form: dict, basic: str | None = None) -> dic
     raise OAuthError("unsupported_grant_type", "Use authorization_code or refresh_token.")
 
 
-def verify(conn: sqlite3.Connection, value: str | None) -> Caller | None:
+def verify(conn: sqlite3.Connection, value: str | None, *, scope: str = "mcp") -> Caller | None:
     """The person behind an access token, or None (unknown, expired, disconnected,
-    or the user was deactivated)."""
+    made for another scope (api_tokens.SCOPES), or the user was deactivated)."""
     if not value or not value.startswith(ACCESS_PREFIX):
         return None
     row = conn.execute(
@@ -282,13 +282,14 @@ def verify(conn: sqlite3.Connection, value: str | None) -> Caller | None:
         "JOIN oauth_grants g ON g.id = t.grant_id JOIN users u ON u.id = g.user_id "
         "JOIN oauth_clients c ON c.id = g.client_row "
         "WHERE t.token_hash = ? AND t.kind = 'access' AND t.expires_at > datetime('now') "
-        "AND g.revoked_at IS NULL AND u.active = 1", (_hash(value),)).fetchone()
+        "AND g.scope = ? AND g.revoked_at IS NULL AND u.active = 1", (_hash(value), scope)).fetchone()
     if row is None:
         return None
     if kind(json.loads(row["redirect_uris"])) == "chatgpt" and not chatgpt_enabled(conn):
         return None
     conn.execute("UPDATE oauth_grants SET last_used_at = datetime('now') WHERE id = ?", (row["grant_id"],))
-    return Caller(row["user_id"], row["username"], None, bool(row["can_edit"]), grant_id=row["grant_id"])
+    return Caller(row["user_id"], row["username"], None, bool(row["can_edit"]), grant_id=row["grant_id"],
+                  token_scope=scope)
 
 
 def revoke_token(conn: sqlite3.Connection, value: str) -> None:
