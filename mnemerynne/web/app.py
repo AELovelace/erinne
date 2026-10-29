@@ -247,15 +247,15 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
 
     def _tv(request: Request, conn: sqlite3.Connection) -> dict | None:
-        """This browser is a screen (the TV, by its key): its underscan on every page, and on a screen box
-        the small bar and the remote (base.html). Not inside a frame: the page around it has those."""
+        """This browser is a screen (the TV, by its key): its underscan and text size on every page, and on a
+        screen box the small bar and the remote (base.html). Not inside a frame: the page around it has those."""
         if request.headers.get("sec-fetch-dest") == "iframe":
             return None
         screen = media_screens.by_token(conn, request.cookies.get(media_screens.COOKIE))
         if screen is None:
             return None
         return {"id": screen["id"], "name": screen["name"], "safe_x": screen["safe_x"], "safe_y": screen["safe_y"],
-                "box": bool(screen["is_box"])}
+                "ui_scale": screen["ui_scale"], "box": bool(screen["is_box"])}
 
     def _nav_context(request: Request) -> dict:
         """What every page's top bar needs beyond its own context: the badge on the Messages button

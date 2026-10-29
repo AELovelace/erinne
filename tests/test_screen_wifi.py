@@ -551,6 +551,39 @@ def test_hidden_parts_of_the_pages_stay_hidden():
     # The Wi-Fi page's form is display: grid; without this its Cancel button did nothing.
     for page in (ws.START_PAGE, ws.WIFI_PAGE, ws.SETTINGS_PAGE):
         assert "[hidden] { display: none !important; }" in page
+        assert "@media (min-width: 3000px) { html { font-size: 36px; } }" in page   # readable on a 4K TV
+
+
+def test_kiosk_settings_open_the_tvs_text_size():
+    assert 'id="text-size">Text size…</button>' in ws.SETTINGS_PAGE
+    assert 'state.server + "/media/screen?textsize=1"' in ws.SETTINGS_PAGE
+
+
+def test_display_scaling_is_kept_and_applied_now(kiosk):
+    k, run, server, clock, setup, conf = kiosk
+    real = run.__call__
+
+    def with_cage(args, timeout=60):
+        if args[-2:] == ["/usr/local/bin/mnemerynne-screen-display", "--now"]:
+            run.calls.append(args)
+            return 0, "3840x2160 at 60.000000 Hz on HDMI-A-1, scaling 100%\n", ""
+        return real(args, timeout)
+    k.run = with_cage
+    token = k.unlock_grant("good-grant")
+    assert k.display(token) == {"scale": 100, "choices": [100, 150, 200, 300],
+                                "now": "3840x2160 at 60.000000 Hz on HDMI-A-1, scaling 100%"}
+    assert k.set_display_scale(token, 200) == 200
+    assert "DISPLAY_SCALE=200\n" in conf.read_text() and k.display(token)["scale"] == 200
+    assert run.calls[-2][:3] == ["runuser", "-u", "mnemerynne-screen"]
+    assert run.calls[-2][-1] == "/usr/local/bin/mnemerynne-screen-display"           # applied at once
+    # Only the four steps go into the settings file (bash sources it).
+    for bad in (125, "200", "200;reboot", True, None):
+        with pytest.raises(ws.KioskError):
+            k.set_display_scale(token, bad)
+    assert "DISPLAY_SCALE=200\n" in conf.read_text()
+    with pytest.raises(ws.KioskError):
+        k.display(None)                                                              # locked
+    assert 'id="display-scale"' in ws.SETTINGS_PAGE and '<option value="300">300%</option>' in ws.SETTINGS_PAGE
 
 
 CARDS = """Card #42

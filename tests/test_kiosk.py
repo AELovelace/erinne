@@ -160,15 +160,20 @@ def test_a_box_gets_the_small_bar_and_its_underscan_on_every_page(client, conn, 
     assert 'class="tv tv-page"' in page and "--safe-x: 3.0%" in page          # a TV, not (yet) a box
 
     page = tv.get("/media/screen?kiosk=1").text                               # the box's start page opens it so
+    assert 'id="mc-kiosk" data-local-only hidden' in page                     # Kiosk settings: not from a remote
     assert 'class="tv tv-box tv-page"' in page and "screen_link.js" not in page and "tv-strip" not in page
     assert conn.execute("SELECT is_box FROM media_screens WHERE id = ?", (screen_id,)).fetchone()[0] == 1
 
     # Any other page: the underscan, the small bar (Back to TV, ‹ ›) and the remote.
     page = tv.get("/login").text
     assert 'class="tv tv-box"' in page and "--safe-yv: 2.5vh" in page
+    assert 'data-tv-scale="auto"' in page                                    # its text size too: automatic,
+    assert tv.put("/media/screen/ui-scale", json={"scale": 2}).status_code == 200
+    page = tv.get("/login").text                                             # or the one saved
+    assert "--safe-yv: 2.5vh; --ui-scale: 2.0" in page and 'data-tv-scale' not in page
     assert 'class="tv-strip"' in page and 'data-tv-go="back"' in page and "screen_link.js" in page
     framed = tv.get("/login", headers={"sec-fetch-dest": "iframe"}).text      # in a frame: the page around it has them
-    assert 'class="tv' not in framed and "tv-strip" not in framed
+    assert 'class="tv' not in framed and "tv-strip" not in framed and "--ui-scale" not in framed
     assert 'class="tv' not in TestClient(client.app).get("/login").text      # not a screen at all
 
     # With its top bar on: one Back to TV on the sign-in page, and ‹ › in the TV page's bar.

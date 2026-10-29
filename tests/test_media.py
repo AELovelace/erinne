@@ -792,6 +792,47 @@ def test_a_screen_keeps_its_underscan(client, conn, directory):
     assert conn.execute("SELECT safe_x, safe_y FROM media_screens WHERE id = ?", (screen_id,)).fetchone()[:] == (3.0, 2.5)
 
 
+def test_a_screen_keeps_its_text_size(client, conn, directory):
+    _login(client, conn, directory)
+    _turn_on(client)
+    screen_id, key = _pair(client)
+    tv = TestClient(client.app)
+    tv.cookies.set("mnemerynne_screen", key)
+    page = tv.get("/media/screen").text
+    assert 'data-tv-scale="auto"' in page and "--ui-scale" not in page and 'data-ui-scale=""' in page   # automatic
+    assert client.get("/api/media/screens").json()["screens"][0]["scale"] is None
+
+    r = tv.put("/media/screen/ui-scale", json={"scale": 1.6})
+    assert r.status_code == 200 and r.json() == {"scale": 1.5}                   # quarter steps
+    page = tv.get("/media/screen").text
+    assert "--ui-scale: 1.5" in page and 'data-tv-scale="auto"' not in page and 'data-ui-scale="1.5"' in page
+    assert client.get("/api/media/screens").json()["screens"][0]["scale"] == 1.5
+    for wrong in (0.5, 3.5, "big"):
+        assert tv.put("/media/screen/ui-scale", json={"scale": wrong}).status_code == 422
+    assert tv.put("/media/screen/ui-scale", json={}).status_code == 422          # automatic is an explicit null
+    assert TestClient(client.app).put("/media/screen/ui-scale", json={"scale": 2}).status_code == 401   # by the key
+    assert tv.put("/media/screen/ui-scale", json={"scale": None}).json() == {"scale": None}
+    assert 'data-tv-scale="auto"' in tv.get("/media/screen").text
+    with pytest.raises(Exception):                                                # the database holds the limits too
+        conn.execute("UPDATE media_screens SET ui_scale = 5 WHERE id = ?", (screen_id,))
+
+    # The phone drives the TV's Text size screen; the underscan's steps aren't its.
+    queue = _hub(client).listen(screen_id)
+    for body, sent in [({"action": "text_size"}, {"action": "text_size", "step": "open"}),
+                       ({"action": "text_size", "step": "bigger"}, {"action": "text_size", "step": "bigger"}),
+                       ({"action": "text_size", "step": "auto"}, {"action": "text_size", "step": "auto"})]:
+        assert client.post(f"/api/media/screens/{screen_id}/command", json=body).status_code == 200
+        assert {k: v for k, v in queue.get_nowait().items() if k not in ("id", "sender", "override")} == sent
+    for body in ({"action": "text_size", "step": "wider"}, {"action": "calibrate", "step": "bigger"}):
+        assert client.post(f"/api/media/screens/{screen_id}/command", json=body).status_code == 422
+    _hub(client).unlisten(screen_id, queue)
+
+    # Pairing it again keeps it.
+    tv.put("/media/screen/ui-scale", json={"scale": 2})
+    _pair(client)
+    assert conn.execute("SELECT ui_scale FROM media_screens WHERE id = ?", (screen_id,)).fetchone()[0] == 2.0
+
+
 def _tv_code(tv):
     r = tv.post("/media/screen/pair")
     assert r.status_code == 200, r.text
@@ -1043,8 +1084,9 @@ def test_a_speaker_plays_only_what_is_cast_to_it_through_tickets(client, conn, d
     # From its own remote too; what a speaker can't play is refused.
     r = panel.post(f"/api/media/remote/screens/{speaker_id}/command", json={"action": "toggle"}, headers=auth)
     assert r.status_code == 200 and queue.get_nowait()["action"] == "toggle"
-    refused = client.post(f"/api/media/screens/{speaker_id}/command", json={"action": "calibrate"})
-    assert refused.status_code == 422 and "speaker" in refused.json()["detail"]
+    for action in ("calibrate", "text_size"):
+        refused = client.post(f"/api/media/screens/{speaker_id}/command", json={"action": action})
+        assert refused.status_code == 422 and "speaker" in refused.json()["detail"]
 
     # It reports what it plays with the remote's key; a remote without a speaker has no such thing.
     assert panel.put("/api/media/speaker/state", json={"kind": "audio", "title": "One More Time", "volume": 0.5},

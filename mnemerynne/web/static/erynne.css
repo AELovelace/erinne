@@ -120,6 +120,13 @@ label { display: block; margin: .9rem 0; font-size: .95rem; }
 /* A screen (the TV; base.html): everything inside its underscan, on every page; the TV page's own layout
    does that itself (media.css). A screen box's small bar (Back to TV, ‹ ›) gives way to the full top bar. */
 html.tv:not(.tv-page) body { padding: var(--safe-yv, 0px) var(--safe-xv, 0px); }
+/* Its text size (screens.py): the root font-size, so everything sized in rem grows with it and the vh/vw
+   layout, the underscan and --page-h stay as they are. Automatic: bigger on a screen this wide (a 4K TV). */
+html.tv { font-size: calc(100% * var(--ui-scale, 1)); }
+html.tv body { font-size: 1rem; }
+html.tv .editor-pane .CodeMirror, html.tv .editor-pane textarea { font-size: .875rem; }
+@media (min-width: 2400px) { html.tv[data-tv-scale="auto"] { --ui-scale: 1.5; } }
+@media (min-width: 3000px) { html.tv[data-tv-scale="auto"] { --ui-scale: 2; } }
 html.tv:not(.tv-page) { --page-h: calc(100vh - var(--chrome) - var(--safe-yv, 0px) * 2); }
 html.tv:not(.tv-page) .topbar { top: calc(var(--safe-yv, 0px) + var(--tv-strip, 0px)); }   /* under the small bar */
 html.tv dialog { max-width: calc(100vw - var(--safe-xv, 0px) * 2 - 2rem); max-height: calc(100vh - var(--safe-yv, 0px) * 2 - 2rem); }

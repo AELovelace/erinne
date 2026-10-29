@@ -5,12 +5,12 @@
 {%- set theme = look.base if look else 'neon' -%}
 {%- set brand = brand if brand is defined and brand else {} -%}
 {%- set product_name = product_name if product_name is defined and product_name else assistant_name -%}
-{#- A screen (the TV; web/app.py _tv): its underscan on every page. A screen box also gets the small bar
+{#- A screen (the TV; web/app.py _tv): its underscan and text size (automatic: erynne.css) on every page. A screen box also gets the small bar
     (Back to TV, ‹ ›) and listens for the remote (screen_link.js), on every page but the TV page itself. -#}
 {%- set tv = tv if tv is defined else None -%}
 {%- set tv_page = screen is defined and screen -%}
 <!doctype html>
-<html lang="en" data-theme="{{ theme }}"{% if look %} data-look="{{ look.slug }}"{% for k, v in look.attrs.items() %} {{ k }}{% if v %}="{{ v }}"{% endif %}{% endfor %}{% endif %}{% if tv %} class="tv{{ ' tv-box' if tv.box }}{{ ' tv-page' if tv_page }}" style="--safe-x: {{ tv.safe_x }}%; --safe-y: {{ tv.safe_y }}%; --safe-xv: {{ tv.safe_x }}vw; --safe-yv: {{ tv.safe_y }}vh"{% endif %}>
+<html lang="en" data-theme="{{ theme }}"{% if look %} data-look="{{ look.slug }}"{% for k, v in look.attrs.items() %} {{ k }}{% if v %}="{{ v }}"{% endif %}{% endfor %}{% endif %}{% if tv %} class="tv{{ ' tv-box' if tv.box }}{{ ' tv-page' if tv_page }}"{% if tv.ui_scale is none %} data-tv-scale="auto"{% endif %} style="--safe-x: {{ tv.safe_x }}%; --safe-y: {{ tv.safe_y }}%; --safe-xv: {{ tv.safe_x }}vw; --safe-yv: {{ tv.safe_y }}vh{% if tv.ui_scale is not none %}; --ui-scale: {{ tv.ui_scale }}{% endif %}"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
