@@ -242,6 +242,11 @@ class ArcadeProxy(remote.RemoteProxy):
     def _games_url(self) -> str:
         return (main_origin(self.settings) or "") + "/media"
 
+    def _https(self) -> bool:
+        """Whether browsers reach the arcade over https: from MNEMERYNNE_ARCADE_URL, not from the request, because
+        the hop in front of us (another nginx on the LAN) may speak plain http to the app."""
+        return origin(self.settings).startswith("https://")
+
     # ------------------------------------------------------------ checks
     def _user_for(self, scope, data: dict | None) -> tuple[str, sqlite3.Row | None, str]:
         """('ok' | 'login' | 'off', user, site_url) for a cookie's or ticket's {u, e}."""
@@ -266,7 +271,7 @@ class ArcadeProxy(remote.RemoteProxy):
     def _with_headers(self, scope, send):
         """The arcade's own headers on everything it sends: framed only by Mnemerynne, nothing sniffed."""
         frame = main_origin(self.settings) or "'none'"
-        https = scope.get("scheme") in ("https", "wss")
+        https = self._https()
 
         async def wrapped(message):
             if message["type"] == "http.response.start":
@@ -335,13 +340,13 @@ class ArcadeProxy(remote.RemoteProxy):
             return
         response = RedirectResponse(data["p"], status_code=303)
         response.headers.append("set-cookie", cookie_header(make_cookie(self.secret_key, user),
-                                                            secure=scope.get("scheme") == "https"))
+                                                            secure=self._https()))
         response.headers["Cache-Control"] = "no-store"
         await response(scope, receive, send)
 
     async def _leave(self, scope, receive, send) -> None:
         response = _page(200, "Signed out of the arcade", "Open Games again from Mnemerynne.", self._games_url())
-        response.headers.append("set-cookie", cookie_header("", secure=scope.get("scheme") == "https", max_age=0))
+        response.headers.append("set-cookie", cookie_header("", secure=self._https(), max_age=0))
         await response(scope, receive, send)
 
     # -------------------------------------------------------------- http
@@ -355,7 +360,8 @@ class ArcadeProxy(remote.RemoteProxy):
             return
         client_ip = scope["client"][0] if scope.get("client") else ""
         arcade_host = next((v.decode("latin-1") for k, v in scope["headers"] if k.lower() == b"host"), "")
-        headers = remote.request_headers(scope["headers"], client_ip=client_ip, scheme=scope.get("scheme", "http"),
+        headers = remote.request_headers(scope["headers"], client_ip=client_ip,
+                                         scheme="https" if self._https() else scope.get("scheme", "http"),
                                          host=arcade_host, slug="arcade", rewrite=False, prefix="")
         has_body = any(k.lower() in (b"content-length", b"transfer-encoding") for k, _ in scope["headers"])
         client = self._client(site)

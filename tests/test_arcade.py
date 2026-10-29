@@ -172,6 +172,20 @@ def test_entering_sets_the_arcade_cookie_and_the_site_is_served_at_the_root(conn
         assert page.headers["referrer-policy"] == "same-origin"
 
 
+def test_an_https_arcade_behind_a_plain_http_hop_still_sets_a_cookie_frames_can_use(conn, settings, people, directory):
+    # site-chan's nginx talks plain http to the app; browsers still reach the arcade over https.
+    https_settings = settings.model_copy(update={"arcade_url": "https://arcade.test"})
+    _games(conn)
+    _site([])
+    with _web(https_settings, "alice", directory) as alice:
+        got = alice.post("/api/arcade/ticket", json={"path": "/lumibot/"}).json()["url"]
+        assert got.startswith("https://arcade.test/__arcade/enter?t=")
+        entered = alice.get(got.replace("https://", "http://"), follow_redirects=False)   # the hop is http
+        cookie = entered.headers["set-cookie"]
+        assert "Secure" in cookie and "SameSite=None" in cookie and "Partitioned" in cookie
+        assert entered.headers["strict-transport-security"] == "max-age=31536000"
+
+
 def test_redirects_to_the_site_stay_on_the_arcade(conn, settings, people, directory):
     _games(conn)
 
