@@ -7,7 +7,7 @@ import signal
 import sqlite3
 import time
 
-from mnemerynne import db, directory, editing, fs, jobs, m365, proposals, retention, share, sharepoint
+from mnemerynne import db, directory, editing, fs, health, jobs, m365, proposals, retention, share, sharepoint
 from mnemerynne.clients.embed import Embedder
 from mnemerynne.config import Settings
 from mnemerynne.ingest import pipeline
@@ -101,6 +101,8 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
     if recovered:
         log.info("Requeued %d job(s) left running by a previous worker.", recovered)
     log.info("Worker ready (embedder %s).", settings.embed_url)
+    health.beat(conn)                      # /healthz/full: the worker is alive (health.worker)
+    last_beat = time.monotonic()
     last_recover = time.monotonic()
     last_purge = 0.0
     last_scan = 0.0
@@ -112,6 +114,12 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
                 break
             if not did_work:
                 time.sleep(poll_seconds)
+            if time.monotonic() - last_beat > health.HEARTBEAT_SECONDS:
+                last_beat = time.monotonic()
+                try:
+                    health.beat(conn)
+                except sqlite3.Error:      # a busy database never stops ingestion; the next beat tries again
+                    log.warning("Couldn't record the worker's heartbeat.", exc_info=True)
             if rt is not None and time.monotonic() - last_scan > settings.share_scan_seconds:
                 last_scan = time.monotonic()
                 try:

@@ -30,6 +30,7 @@ from mnemerynne.agent import Agent
 from mnemerynne.media import screens as media_screens, transcode as media_transcode
 from mnemerynne.rooms_erynne import RoomErynne
 from mnemerynne import automations as automations_mod, automations_run
+from mnemerynne import health
 from mnemerynne.automations_run import Scheduler
 from mnemerynne.answer import ASSISTANT_NAME
 from mnemerynne.auth import LoginThrottle
@@ -369,6 +370,15 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     @app.get("/healthz")
     def healthz(conn: sqlite3.Connection = Depends(get_db)):
         return JSONResponse({"status": "ok", "schema": db.schema_version(conn)})
+
+    @app.get("/healthz/full")
+    def healthz_full(conn: sqlite3.Connection = Depends(get_db)):
+        """For monitors (D8): the worker, its queue and the models too; 503 while any of them fails.
+        /healthz above stays a liveness check (update.sh and the TV boxes rely on its 200)."""
+        report = health.report(conn, settings)
+        report["schema"] = db.schema_version(conn)
+        code = status.HTTP_200_OK if report["status"] == "ok" else status.HTTP_503_SERVICE_UNAVAILABLE
+        return JSONResponse(report, status_code=code, headers={"Cache-Control": "no-store"})
 
     def _kiosk_screen(request: Request, conn: sqlite3.Connection) -> sqlite3.Row | None:
         """The screen this browser is, if its top bar is on (kiosk settings): sign-ins here are the TV's."""

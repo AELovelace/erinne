@@ -71,6 +71,35 @@ sudo mnemerynne-admin list-users
 
 Then sign in, upload a document on Files, watch it reach Ready, ask a question on Ask and click the citation.
 
+### Monitoring
+
+`/healthz` only says the web app and its database answer. Update scripts and the TV boxes rely on its 200, so it stays that simple. For a monitor (Uptime Kuma, a cron `curl -f`), watch **`/healthz/full`**: it answers **503** while anything below fails, and 200 when all is well.
+
+```sh
+curl -s http://127.0.0.1:38200/healthz/full
+# {"status":"ok","failing":[],"worker":{"state":"ok","beat_age":7},
+#  "queue":{"queued":0,"due":0,"running":0,"failed":2,"oldest_wait":0,"state":"ok"},
+#  "models":{"generator":"ok","embedder":"ok"},"schema":NN}
+```
+
+- **worker:**
+  - `ok` while it records a heartbeat (every 15 s);
+  - `busy` while it's quiet but on a job it took recently (a long OCR job);
+  - `down` after 10 minutes with neither;
+  - `never` if it hasn't run since this check was added.
+- **queue:**
+  - jobs waiting, due now, running and failed, and how long (in seconds) the oldest due job has waited;
+  - `stuck` once a due job has waited over 30 minutes.
+  - Failed jobs don't fail the check; see Files for those.
+- **models:** each llama-server's own `/health`, for the generator, the embedder and the reranker if one is set:
+  - `ok`;
+  - `loading` (still loading the model after a restart);
+  - `error`;
+  - `down` (no answer).
+  - Probes are reused for 10 seconds, so a monitor can poll often.
+
+It needs no sign-in, so it shows only states, counts and ages: no addresses, file names or error text.
+
 ## Development on a PC
 
 ```sh
