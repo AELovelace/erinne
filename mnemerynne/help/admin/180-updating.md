@@ -19,6 +19,10 @@ sudo mnemerynne-admin update            # asks first; --yes to skip the question
 
 Keep your own changes to service files in drop-ins (`sudo systemctl edit mnemerynne-generator`): an update replaces the unit files in `/etc/systemd/system` but never touches drop-ins.
 
+The web health check waits up to **300 seconds**, including during rollback. It prints the address it checks and progress every 30 seconds. It reads the running service's host and port, including systemd overrides, and bypasses HTTP proxies. A slower machine can set `MNEMERYNNE_UPDATE_HEALTH_TIMEOUT=600` in its service env file (1–3600 seconds; an environment variable passed to the updater takes precedence).
+
+If an update fails, keep the printed health-check address and error along with `journalctl -u mnemerynne-web -n 100 --no-pager`. A service marked running may still be starting; `/healthz` must report `status: ok`. Updating the updater itself does not change the script already running: the deployment README's Updating section shows how to run the fetched script for that first update.
+
 ## Database migrations
 
 Numbered SQL files in `mnemerynne/migrations/` are applied in order at start by whichever process starts first (`init-db` does it by hand). `/healthz` reports the schema version. A migration that recreates a table (for new CHECK constraints) runs with foreign keys off and copies every row; the update script's backup is the way back.

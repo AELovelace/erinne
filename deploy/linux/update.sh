@@ -39,12 +39,17 @@ main() {
 
     # Service settings: where the data is and which address and port the app listens on.
     local DATA_DIR=/var/lib/mnemerynne HOST=127.0.0.1 PORT=38200 BRANCH=main
+    local HEALTH_TIMEOUT=${MNEMERYNNE_UPDATE_HEALTH_TIMEOUT:-300}
     if [ -r "$ENV_FILE" ]; then
         DATA_DIR=$(env_value MNEMERYNNE_DATA_DIR "$DATA_DIR")
         HOST=$(env_value MNEMERYNNE_HOST "$HOST")
         PORT=$(env_value MNEMERYNNE_PORT "$PORT")
         BRANCH=$(env_value MNEMERYNNE_UPDATE_BRANCH "$BRANCH")
+        HEALTH_TIMEOUT=${MNEMERYNNE_UPDATE_HEALTH_TIMEOUT:-$(env_value MNEMERYNNE_UPDATE_HEALTH_TIMEOUT "$HEALTH_TIMEOUT")}
     fi
+    # Reject invalid deadlines before backing up, changing code or restarting anything.
+    [[ "$HEALTH_TIMEOUT" =~ ^[1-9][0-9]{0,3}$ ]] && [ "$HEALTH_TIMEOUT" -le 3600 ] \
+        || die "MNEMERYNNE_UPDATE_HEALTH_TIMEOUT must be 1..3600 seconds"
     local DB="$DATA_DIR/mnemerynne.db"
     local STATE_DIR="$DATA_DIR/update"
 
@@ -206,13 +211,55 @@ install_packages() {  # Build caches as root before the read-only services start
     "$APP/.venv/bin/python" -m compileall -q "$APP/mnemerynne"
 }
 
-wait_healthy() {
-    local i url
-    url="http://$(health_host "$HOST"):$PORT/healthz"
-    for i in $(seq 1 45); do
-        if curl -sf "$url" 2>/dev/null | grep -q '"ok"'; then return 0; fi
-        sleep 2
+web_environment() {  # Read the running service's environment, including systemd drop-in overrides.
+    local pid
+    pid=$(systemctl show mnemerynne-web --property=MainPID --value 2>/dev/null) || return 0
+    if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+        cat "/proc/$pid/environ" 2>/dev/null || true  # A restarting process may disappear; use configured defaults.
+    fi
+}
+
+health_url() {  # Only host and port leave this helper; never print the service's other settings or secrets.
+    local host=$HOST port=$PORT entry
+    while IFS= read -r -d '' entry; do
+        case $entry in
+            MNEMERYNNE_HOST=*) host=${entry#*=} ;;
+            MNEMERYNNE_PORT=*) port=${entry#*=} ;;
+        esac
+    done < <(web_environment)
+    printf 'http://%s:%s/healthz' "$(health_host "$host")" "$port"
+}
+
+wait_healthy() {  # Slow NAS startup gets a real deadline, shared by updates and rollback recovery.
+    local timeout=${HEALTH_TIMEOUT:-300} started=$SECONDS url reply remaining request_timeout delay
+    local deadline=$((SECONDS + timeout)) next_report=$((SECONDS + 30))
+    local last_error="No successful health response."
+    url=$(health_url)
+    step "Waiting up to ${timeout}s for $url"
+    while (( SECONDS < deadline )); do
+        remaining=$((deadline - SECONDS))
+        if (( remaining <= 0 )); then break; fi  # curl treats a zero timeout as unlimited.
+        request_timeout=$((remaining < 5 ? remaining : 5))
+        # The service is local: bypass inherited HTTP proxies and bound each request, too.
+        if reply=$(curl --noproxy '*' --connect-timeout 2 --max-time "$request_timeout" -fsS "$url" 2>&1); then
+            if grep -q '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$reply"; then
+                echo "  Healthy after $((SECONDS - started))s."
+                return 0
+            fi
+            last_error="The endpoint responded but did not report status ok."
+        else
+            last_error=${reply:0:500}
+        fi
+        if (( SECONDS >= next_report )); then
+            echo "  Still waiting ($((SECONDS - started))s elapsed)."
+            next_report=$((SECONDS + 30))
+        fi
+        remaining=$((deadline - SECONDS))
+        if (( remaining <= 0 )); then break; fi
+        delay=$((remaining < 2 ? remaining : 2))
+        sleep "$delay"
     done
+    printf '  Health check timed out at %s after %ss: %s\n' "$url" "$timeout" "$last_error" >&2
     return 1
 }
 

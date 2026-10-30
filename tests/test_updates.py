@@ -151,3 +151,86 @@ install_packages
     # Successful preparation leaves a usable cache; failed sync or invalid source must not claim success.
     caches = list((package / "__pycache__").glob("example.*.pyc"))
     assert bool(caches) == (sync_exit == 0 and not invalid_source)
+
+
+@pytest.fixture
+def update_shell(tmp_path):
+    """Exercise updater helpers without running its deployment entry point or touching services."""
+    bash = find_bash()
+    if not bash:
+        pytest.skip("needs bash")
+    updater = Path(__file__).resolve().parents[1] / "deploy" / "linux" / "update.sh"
+
+    def run(script):
+        source = 'set -euo pipefail\nsource <(sed \'$d\' "$1")\n' + script
+        return subprocess.run([bash, "-c", source, "_", str(updater)], cwd=tmp_path,
+                              capture_output=True, text=True, timeout=15)
+
+    return run
+
+
+@pytest.mark.parametrize("host,expected", [
+    ("192.168.1.5", "192.168.1.5"), ("0.0.0.0", "127.0.0.1"),
+    ("::", "[::1]"), ("2001:db8::5", "[2001:db8::5]"),
+])
+def test_update_health_uses_service_address_without_exposing_secrets(update_shell, host, expected):
+    result = update_shell('''
+HOST=127.0.0.1 PORT=38200
+web_environment() { printf '%s\\0' 'MNEMERYNNE_SECRET_KEY=never-print-me' 'MNEMERYNNE_HOST=''' + host + '''' 'MNEMERYNNE_PORT=38201'; }
+health_url
+''')
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"http://{expected}:38201/healthz"
+    assert "never-print-me" not in result.stderr
+
+
+def test_update_health_wait_accepts_two_minute_startup(update_shell):
+    result = update_shell('''
+HOST=127.0.0.1 PORT=38200
+web_environment() { :; }
+SECONDS=0
+# Advance the shell clock instead of making the regression test wait two minutes.
+sleep() { SECONDS=$((SECONDS + $1)); }
+curl() {
+    if (( SECONDS < 120 )); then echo 'Connection refused' >&2; return 7; fi
+    printf '{"status":"ok","schema":60}'
+}
+wait_healthy
+''')
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Waiting up to 300s for http://127.0.0.1:38200/healthz" in result.stdout
+    assert "Still waiting" in result.stdout and "Healthy after" in result.stdout
+
+
+@pytest.mark.parametrize("response", ["echo 'Connection refused' >&2; return 7", 'echo \'{"status":"error","note":"ok"}\''])
+def test_update_health_timeout_reports_failure_and_bounds_requests(update_shell, tmp_path, response):
+    result = update_shell('''
+HOST=192.168.1.5 PORT=38200 HEALTH_TIMEOUT=3
+web_environment() { :; }
+SECONDS=0
+sleep() { SECONDS=$((SECONDS + $1)); }
+curl() {
+    printf '%s\\n' "$@" >> curl-arguments
+    ''' + response + '''
+}
+wait_healthy
+''')
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "http://192.168.1.5:38200/healthz after 3s" in result.stderr
+    arguments = (tmp_path / "curl-arguments").read_text().splitlines()
+    assert arguments[:6] == ["--noproxy", "*", "--connect-timeout", "2", "--max-time", "3"]
+    limits = [int(arguments[i + 1]) for i, arg in enumerate(arguments) if arg == "--max-time"]
+    assert all(0 < limit <= 3 for limit in limits)  # No request gets a budget larger than the whole wait.
+
+
+@pytest.mark.parametrize("deadline", ["0", "3601", "not-a-number"])
+def test_update_rejects_invalid_deadline_before_git_or_service_changes(update_shell, deadline):
+    result = update_shell('''
+git() { echo UNEXPECTED_GIT_CALL; return 99; }
+systemctl() { echo UNEXPECTED_SERVICE_CALL; return 99; }
+MNEMERYNNE_UPDATE_TEST=1 MNEMERYNNE_ENV_FILE=/missing-update-test-env \\
+MNEMERYNNE_UPDATE_HEALTH_TIMEOUT=''' + deadline + ''' main check-updates
+''')
+    assert result.returncode == 1
+    assert "must be 1..3600 seconds" in result.stderr
+    assert "UNEXPECTED" not in result.stdout + result.stderr

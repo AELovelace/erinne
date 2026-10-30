@@ -1073,6 +1073,24 @@ sudo mnemerynne-admin update            # asks first; --yes to skip the question
    it: previous code and packages, previous service files, and the database backup
    if the schema had changed. Then it shows the end of the web app's log.
 
+The health check allows **300 seconds** for startup, both after updating and after
+rolling back. It prints the address it probes and progress every 30 seconds. It
+uses the running service's host and port (including systemd drop-ins), bypasses
+HTTP proxies, and limits each request to five seconds or the remaining wait.
+Set `MNEMERYNNE_UPDATE_HEALTH_TIMEOUT=600` in the service env file for a slower box,
+or pass it when invoking the updater; accepted values are 1–3600 seconds.
+
+An updater already running keeps its original functions even when it fetches a
+new version of itself. To install a fix to the updater on that first run, fetch
+and run the new script separately; it still performs the usual checks and backup:
+
+```sh
+cd /opt/mnemerynne
+sudo git fetch origin main &&
+sudo sh -c 'git -C /opt/mnemerynne show origin/main:deploy/linux/update.sh > /run/mnemerynne-update.sh' &&
+sudo bash /run/mnemerynne-update.sh update
+```
+
 Keep your own changes to service files in drop-ins
 (`sudo systemctl edit mnemerynne-generator`): an update replaces the unit files
 in `/etc/systemd/system` but never touches drop-ins. The **Settings** tab on the
