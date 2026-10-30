@@ -125,8 +125,8 @@ main() {
     step "Updating the code to $(git_ log -1 --format=%h "$target")"
     git_ merge --ff-only --quiet "$target"
     phase=packages
-    step "Installing Python packages (uv sync)"
-    uv sync --frozen --no-dev --quiet
+    step "Installing Python packages and compiling startup caches"
+    install_packages
     if command -v restorecon >/dev/null; then restorecon -R "$APP"; fi
 
     phase=units
@@ -200,6 +200,12 @@ schema_version() {
     run_py "import sqlite3, sys; print(sqlite3.connect(sys.argv[1]).execute('PRAGMA user_version').fetchone()[0])" "$DB"
 }
 
+install_packages() {  # Build caches as root before the read-only services start importing Python.
+    uv sync --frozen --no-dev --compile-bytecode --quiet || return $?
+    # uv compiles site-packages; the editable application lives outside that directory.
+    "$APP/.venv/bin/python" -m compileall -q "$APP/mnemerynne"
+}
+
 wait_healthy() {
     local i url
     url="http://$(health_host "$HOST"):$PORT/healthz"
@@ -243,7 +249,7 @@ undo() {
     set +e
     cd "$APP"
     git_ reset --hard --quiet "$current"
-    uv sync --frozen --no-dev --quiet
+    install_packages
     if command -v restorecon >/dev/null; then restorecon -R "$APP"; fi
     local f restored=0
     if [ -e "$saved_units/mnemerynne-admin.wrapper" ]; then

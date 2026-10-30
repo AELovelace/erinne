@@ -1,9 +1,14 @@
 import json
+import os
+from pathlib import Path
+import subprocess
+import sys
 
 import httpx
 import pytest
 
 from mnemerynne import updates, users
+from fakes import find_bash
 
 SHA_A = "a" * 40
 SHA_B = "b" * 40
@@ -113,3 +118,36 @@ def test_update_status_is_admin_only(client, conn, monkeypatch):
     client.post("/login", data={"username": "boss", "password": "password123"})
     assert client.get("/api/admin/updates?refresh=1").json() == {"ahead": 0, "forced": True}
     assert "data-tab=\"settings\"" in client.get("/admin/libraries").text
+
+
+@pytest.mark.parametrize("sync_exit,invalid_source", [(0, False), (9, False), (0, True)])
+def test_update_prepares_bytecode_before_startup(tmp_path, sync_exit, invalid_source):
+    """Run the updater's package helper with real compilation and a simulated package installer."""
+    bash = find_bash()
+    if not bash:
+        pytest.skip("needs bash")
+    app = tmp_path / "application with spaces"
+    package = app / "mnemerynne"
+    package.mkdir(parents=True)
+    (package / "example.py").write_text("not valid Python!" if invalid_source else "VALUE = 42\n", encoding="utf-8")
+    interpreter = app / ".venv" / "bin" / "python"
+    interpreter.parent.mkdir(parents=True)
+    # Use this test's interpreter without installing packages or touching the real environment.
+    interpreter.write_text('#!/usr/bin/env bash\nexec "$MNEM_TEST_PYTHON" "$@"\n', encoding="utf-8", newline="\n")
+    interpreter.chmod(0o755)
+    updater = Path(__file__).resolve().parents[1] / "deploy" / "linux" / "update.sh"
+    script = '''
+set -e
+source <(sed '$d' "$1")
+APP=$(cd "$2" && pwd)
+uv() { printf '%s\\n' "$@" > "$APP/uv-arguments"; return "$MNEM_TEST_SYNC_EXIT"; }
+install_packages
+'''
+    result = subprocess.run([bash, "-c", script, "_", str(updater), str(app)], capture_output=True, text=True,
+                            env={**os.environ, "MNEM_TEST_PYTHON": sys.executable,
+                                 "MNEM_TEST_SYNC_EXIT": str(sync_exit)})
+    assert result.returncode == (sync_exit or int(invalid_source)), result.stdout + result.stderr
+    assert "--compile-bytecode" in (app / "uv-arguments").read_text().splitlines()
+    # Successful preparation leaves a usable cache; failed sync or invalid source must not claim success.
+    caches = list((package / "__pycache__").glob("example.*.pyc"))
+    assert bool(caches) == (sync_exit == 0 and not invalid_source)

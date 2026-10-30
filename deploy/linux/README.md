@@ -1062,7 +1062,9 @@ sudo mnemerynne-admin update            # asks first; --yes to skip the question
 1. Backs up the database to `/var/lib/mnemerynne/update/before-*.db` (the last five are kept).
 2. Fast-forwards `/opt/mnemerynne` to GitHub's `main`. It refuses, changing nothing, if
    the checkout has local edits or commits GitHub doesn't have.
-3. `uv sync --frozen --no-dev` and `restorecon`.
+3. `uv sync --frozen --no-dev --compile-bytecode`, compile the editable application's
+   Python files, and `restorecon`. Both updates and rollbacks build these caches as
+   root: the services use `ProtectSystem=strict` and cannot save caches under `/opt`.
 4. Installs service files that changed (and the `mnemerynne-admin` command), then
    restarts what changed: the generator or embedder if their files did, then
    `mnemerynne-web` (which applies any database update), and once it reports
@@ -1080,7 +1082,9 @@ can't start one.
 **First time:** this needs the new `mnemerynne-admin` installed once by hand:
 
 ```sh
-cd /opt/mnemerynne && sudo git pull && sudo uv sync --frozen --no-dev && sudo restorecon -R /opt/mnemerynne
+cd /opt/mnemerynne && sudo git pull --ff-only && sudo uv sync --frozen --no-dev --compile-bytecode
+sudo .venv/bin/python -m compileall -q mnemerynne
+sudo restorecon -R /opt/mnemerynne
 sudo install -m 755 deploy/linux/mnemerynne-admin /usr/local/bin/
 sudo systemctl restart mnemerynne-web mnemerynne-worker
 ```
