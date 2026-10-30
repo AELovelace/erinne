@@ -104,7 +104,8 @@
   <h2 class="admin-section" id="scratchpad">Your agents' scratchpad</h2>
   <p class="muted small">Notes your own Claude sessions leave for each other about work that spans sessions
     (through the connector: <code>read_scratchpad</code> and <code>write_scratchpad</code>). Only your own
-    connections see them. <a href="/help/user/agent-scratchpad">How it works</a>.</p>
+    connections see them. <a href="/help/user/agent-scratchpad">How it works</a>.
+    <a href="/scratchpad">Open the Scratchpad</a> to read every note and write directions to your sessions.</p>
   {% if scratchpad.open %}
   <p id="scratchpad-summary">{{ scratchpad.open }} open note{{ '' if scratchpad.open == 1 else 's' }} on {{ scratchpad.boards | length }} board{{ '' if scratchpad.boards | length == 1 else 's' }}:
     {% for b in scratchpad.boards %}<code>{{ b.board }}</code> ({{ b.open }}){{ ', ' if not loop.last }}{% endfor %}.
@@ -113,7 +114,7 @@
   {% else %}
   <p class="muted" id="scratchpad-summary">Nothing open.</p>
   {% endif %}
-  <button type="button" class="link danger" id="clear-scratchpad">Clear scratchpad</button>
+  <button type="button" class="link danger" id="clear-scratchpad">Clear scratchpad</button> <span class="muted small">(notes move to the archive)</span>
   <p id="scratchpad-note" aria-live="polite" hidden></p>
 </section>
 

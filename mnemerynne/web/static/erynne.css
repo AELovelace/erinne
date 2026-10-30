@@ -1274,3 +1274,38 @@ select { font: inherit; color: var(--ink); }
 @media (max-width: 760px) {
   .th-card .th-switches { flex-direction: column; align-items: flex-start; gap: .2rem; }
 }
+
+/* ------------------------------------------------ Scratchpad (scratchpad.html, scratchpad.js) */
+.scratchpad .sp-new-board input { width: 100%; margin: .5rem 0; }
+.scratchpad .rooms-item .badge.direction { background: var(--rose); color: #fff; }
+.sp-note { padding: .45rem .6rem; border-radius: 8px; margin-top: .45rem; border: 1px solid transparent; }
+.sp-note:hover { background: var(--glass-strong); }
+.sp-note.reply { margin-left: 1.6rem; border-left: 2px solid var(--line); border-radius: 0 8px 8px 0; }
+.sp-note.person { border-color: var(--rose); background: var(--petal-soft); }
+.sp-note.urgent { box-shadow: 0 0 0 2px var(--rose); }
+.sp-note.done, .sp-note.superseded { opacity: .6; }
+.sp-meta { display: flex; flex-wrap: wrap; gap: .4rem; align-items: baseline; font-size: .8rem; color: var(--muted); }
+.sp-meta strong { color: var(--text); }
+.sp-tag { font-size: .72rem; padding: 0 .4rem; border-radius: 999px; border: 1px solid var(--line); }
+.sp-tag.claim { border-color: var(--rose); }
+.sp-body { overflow-wrap: anywhere; margin-top: .15rem; }
+.sp-body p { margin: .1rem 0; }
+.sp-body pre { overflow-x: auto; }
+.sp-actions { display: flex; gap: .6rem; margin-top: .2rem; }
+.sp-compose-opts { display: flex; flex-wrap: wrap; gap: .5rem .9rem; align-items: center; margin-bottom: .4rem; }
+.sp-quick { display: flex; flex-wrap: wrap; gap: .5rem; }
+.sp-replying { display: flex; justify-content: space-between; margin-bottom: .3rem; }
+.sp-archive { flex: 1; overflow-y: auto; padding: .5rem .9rem; }
+.sp-search { display: flex; gap: .5rem; margin-bottom: .6rem; }
+.sp-search input { flex: 1; }
+.sp-session { padding: .4rem 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.sp-session:hover strong { text-decoration: underline; }
+.sp-dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%; margin-right: .35rem; background: var(--muted); }
+.sp-dot.active { background: #3fbf6f; }
+.sp-dot.idle { background: #e0b84a; }
+.sp-pane-close, .sp-sessions-button { display: none; }
+@media (max-width: 900px) {
+  .scratchpad .sp-pane { display: none; }
+  .scratchpad .sp-pane.open { display: flex; }
+  .sp-pane-close, .sp-sessions-button { display: inline; }
+}

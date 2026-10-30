@@ -167,7 +167,7 @@ def test_the_briefing_and_preferences_carry_open_notes(settings, conn, people, t
         page = web.get("/preferences").text
         assert "1 open note on 1 board" in page and "nas-migration" in page and "cc-laptop" in page
         assert web.get("/api/scratchpad").json()["open"] == 1
-        assert web.delete("/api/scratchpad").json() == {"status": "deleted", "count": 1}
+        assert web.delete("/api/scratchpad").json() == {"status": "archived", "count": 1}
         assert "Nothing open." in web.get("/preferences").text
     assert tools.read_scratchpad(conn, me)[0]["boards"] == []
 

@@ -18,8 +18,7 @@ LOGS = (("mcp_calls", "at", "mcp_calls_days"),
         ("graph_runs", "started_at", "graph_runs_days"),
         ("user_messages", "created_at", "message_days"),
         ("announcements", "expires_at", "announcement_days"),
-        ("automation_runs", "started_at", "automation_run_days"),
-        ("scratchpad_notes", "updated_at", "scratchpad_days"))    # agent notes nobody touched in that long
+        ("automation_runs", "started_at", "automation_run_days"))
 
 
 def _older(days: int) -> str:
@@ -35,6 +34,11 @@ def purge(conn: sqlite3.Connection, settings: Settings) -> dict[str, int]:
             n = conn.execute(f"DELETE FROM {table} WHERE {column} < datetime('now', ?)", (_older(days),)).rowcount
             if n:
                 out[table] = n
+
+    from mnemerynne import scratchpad   # notes nobody touched in that long: into the archive, not away
+    n = scratchpad.expire(conn, settings.scratchpad_days)
+    if n:
+        out["scratchpad_notes"] = n
 
     from mnemerynne import rooms   # messages with files on disk, and the live-delivery log
     out.update(rooms.purge(conn, settings))

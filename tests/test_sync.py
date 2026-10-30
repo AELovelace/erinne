@@ -450,6 +450,7 @@ def test_admins_see_every_backup(client, conn, directory, app_auth, capsys, monk
     users.create_user(conn, "boss", "password123", role="admin")
     client.post("/login", data={"username": "boss", "password": "password123"})
     data = client.get("/api/admin/settings/backups").json()
+    assert data["client_dir"].endswith("backup-client") and data["builds"] == {} and data["latest"] is None
     assert [(r["username"], r["computer"], r["label"]) for r in data["roots"]] == [("jane", "DESKTOP-1", "Documents")]
     from mnemerynne import cli
     monkeypatch.setattr(cli, "_connect", lambda: conn)

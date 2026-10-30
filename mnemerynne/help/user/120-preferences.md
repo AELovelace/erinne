@@ -31,6 +31,10 @@ The facts Erynne keeps to tailor your answers, each with a **Forget** button, an
 
 How many notes your own Claude sessions have left each other, on which boards, and who holds a claim right now, with **Clear scratchpad** to delete them all. See [The agents' scratchpad](agent-scratchpad.md).
 
+## Backups
+
+Appears when you're in the group that may back up. The Mnemerynne Backup app to download, your backed-up folders with a **Searchable** switch each, the computers signed in (with **Sign out**), and **Make a sync token** for a computer without a browser. See [Desktop backup](desktop-backup.md).
+
 ## Microsoft 365
 
 Appears when your organisation has set it up. Link your work account so Erynne can include SharePoint in your answers and, for people with her tools, read your mail and calendar and draft replies. See [Microsoft 365](microsoft-365.md).

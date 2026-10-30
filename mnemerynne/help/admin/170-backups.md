@@ -13,7 +13,7 @@
 
 Everything is readable only by `mnemerynne` (folders 0700, files 0600): a backup holds every document and the key to every stored credential.
 
-**Not included**: files on the SMB share (back the share up with the NAS) and pending proposals' content (short-lived).
+**Not included**: files on the SMB share (back the share up with the NAS; desktop backups live there too), pending proposals' content (short-lived), and these folders in the data directory: `rooms` (files posted in Rooms), `theme` (uploaded backgrounds, fonts and logos) and `backup-client` (the backup app's installers; build them again).
 
 ## Where to put it
 

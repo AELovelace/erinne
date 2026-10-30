@@ -440,8 +440,10 @@ def download_client(name: str, request: Request, user=Depends(page_user), conn: 
 # -------------------------------------------------------------------- admin
 def _status(conn: sqlite3.Connection, settings: Settings) -> dict:
     cfg = sync.load_settings(conn)
+    builds = sync.client_downloads(settings)
     return {"settings": cfg | {"group": group_refs.label(conn, cfg["group"])}, "backup_url": settings.backup_url,
-            "roots": sync.all_roots(conn)}
+            "roots": sync.all_roots(conn), "client_dir": str(settings.data_dir / sync.CLIENT_DIR),
+            "latest": builds["latest"], "builds": builds["files"]}
 
 
 class BackupsSettingsBody(BaseModel):

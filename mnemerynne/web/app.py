@@ -306,7 +306,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(files.router)
     app.include_router(chat.router)
     app.include_router(memories.router)
-    app.include_router(scratchpad_pages.router)   # the agents' scratchpad summary and Clear, on Preferences
+    app.include_router(scratchpad_pages.router)   # the Scratchpad page: the agents' boards, and directions to them
     app.include_router(admin.router)
     app.include_router(tokens.router)
     app.include_router(api_pages.router)
