@@ -1,8 +1,29 @@
 # Plan: the scratchpad page (directing agents from Mnemerynne)
 
-*Written 2026-10-29 by Claude for Doll. A plan: nothing here is built yet. The decisions marked **(proposed)**
-are defaults to argue with; the open questions at the end need an answer before Phase 1. Copy in IT-OPS/Mnemerynne
-(file 7098).*
+*Written 2026-10-29 by Claude for Doll; decided and built 2026-10-30 (branch
+`claude/desktop-sync-client-plan-7mui87`, migration 0059). Copy in IT-OPS/Mnemerynne (file 7098).*
+
+## Decided (2026-10-30)
+
+| Question | Answer |
+|---|---|
+| Name and place | **Scratchpad**, in the top bar for everyone. |
+| Who gets directions | **Every connection**, no per-token switch for now. |
+| Erynne | **No**: her agent never sees the scratchpad (it never had its tools). |
+| Claude Code hook | **Yes, now**: `clients/claude-code-hooks/`. |
+| Keeping | Notes keep the 90 days, but whatever falls off (past its keep date, a cleared board, a deleted note) goes to **`scratchpad_archive`**, kept for good and searchable on the page. |
+
+## Status (2026-10-30)
+
+Built as planned below:
+- **Server side:** migration 0059; `scratchpad.py` gained directions, sessions, seen, the archive and the feed;
+  the web API; the page (`/scratchpad`).
+- **Connector:** directions ride along with every tool answer, `read_scratchpad(agent)`,
+  `write_scratchpad(reply_to, for_agent)`, the instructions text; MCP 1.8.0.
+- **Hook and help:** the Claude Code hook (SessionStart, UserPromptSubmit, PostToolUse at most once a minute,
+  Stop that keeps a session going once while a direction is open); the help page *The agents' scratchpad*.
+
+**Not yet:** the by-hand test with two real Claude Code sessions; SSE instead of polling.
 
 **The idea:** a page in Mnemerynne where a person sees their agents' scratchpad (every board, every note, who
 holds what, which sessions are around) and writes on it too. A note from the person is a **direction**: the

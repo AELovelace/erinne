@@ -19,17 +19,51 @@ What Claude can do through the connector:
 
 The connector's instructions tell Claude to read the board before multi-session work, claim a task before starting it, resolve it when done, and jot a short hand-over before it stops. You can also just ask: "check the scratchpad for nas-migration" or "leave a note for the next session".
 
+## The Scratchpad page: reading and directing
+
+**Scratchpad** in the top bar shows every board: each note with who wrote it, who holds a claim, and replies under
+the note they answer. **Sessions** (on the right; a button on a phone) lists the agents that worked on the board in
+the last week: active (a call in the last 10 minutes), idle, or gone, with the last tool each used and the notes it
+holds. The page refreshes by itself every few seconds.
+
+You can write on a board too. Your note is a **direction**:
+
+- **For:** everyone on the board (every session that has worked there), or one session by its label.
+- **Urgent** puts it first and asks the session to deal with it before what it was doing.
+- **Stop and hand over**, **Push what you have** and **Status?** fill in the common ones.
+- **Reply** answers a note; **Edit** sends a new direction in place of yours; **Resolve**, **Reopen**,
+  **Release** (someone's claim) and **Delete** work on any note.
+
+A direction reaches each session it's for **once, with that session's next call to the connector**, whatever tool
+it calls. It shows *seen by …* when it has. The session should claim it, answer on the board and resolve it. A
+session that is waiting for you, or that never calls the connector, won't see it: the
+[Claude Code hook](#the-claude-code-hook) reaches those.
+
+Agents can't write directions: a note only counts as yours when you write it on this page.
+
+## The Claude Code hook
+
+`clients/claude-code-hooks` in the Mnemerynne repository is a small script for Claude Code. It asks for your
+directions when a session starts, whenever you send a prompt, and every so often while Claude works. It also keeps
+a session from stopping while a direction for it is still open. Installing it is in its README; it uses a Claude
+token from [Claude](claude.md#tokens) and a label per session, which it tells Claude to sign its notes with.
+
 ## Claims lapse
 
 A claim is a promise, not a lock. If a session stops without resolving its note, the claim lapses after a while (two hours unless your admin changed it) and the next session can take the task. Resolving a note always clears its claim.
 
 ## On Preferences
 
-[Preferences](preferences.md#your-agents-scratchpad) shows how many notes are open on which boards, and who holds a claim right now. **Clear scratchpad** deletes every note at once; there is no undo, because notes are the agents' own working memory, not files, and keep no versions.
+[Preferences](preferences.md#your-agents-scratchpad) shows how many notes are open on which boards, and who holds a
+claim right now, with a link to the Scratchpad page. **Clear scratchpad** takes every note off at once (they move to
+the archive).
 
-## Keeping
+## Keeping and the archive
 
-Notes nobody has touched for 90 days (unless your admin set otherwise) are deleted, open or not. `my_briefing` tells Claude how many notes are open, so a fresh session finds unfinished work without being asked.
+Notes nobody has touched for 90 days (unless your admin set otherwise) come off the scratchpad, open or not. So do
+notes you delete and boards you clear. None of them is thrown away: they go to the **Archive** (on the Scratchpad
+page), where you can search them by text, agent or board. `my_briefing` tells Claude how many notes are open, so a
+fresh session finds unfinished work without being asked.
 
 ## What it isn't
 
