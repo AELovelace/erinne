@@ -21,7 +21,7 @@ from urllib.parse import quote
 import anyio
 import httpx
 import segno
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -915,10 +915,12 @@ async def remote_pairing_status(body: RemotePairing, request: Request, conn: sql
 
 
 @router.get("/api/media/remote")
-def remote_screens(request: Request, remote=Depends(remote_device), conn: sqlite3.Connection = Depends(get_db)):
-    """The remote's name and its owner's screens, with what each is playing (no artwork: a small panel)."""
-    with transaction(conn):
-        remotes.seen(conn, remote["id"])
+def remote_screens(request: Request, background: BackgroundTasks, remote=Depends(remote_device),
+                   conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
+    """The remote's name and its owner's screens, with what each is playing (no artwork: a small panel).
+    Its last-seen time is saved once a minute after the answer has gone, so a poll never waits on a write."""
+    if remotes.seen_due(remote["id"]):
+        background.add_task(remotes.save_seen, settings.db_path, remote["id"])
     h = hub(request)
     keep = ("kind", "title", "sub", "position", "duration", "paused", "volume", "muted", "night")
 

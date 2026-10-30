@@ -983,6 +983,26 @@ def test_a_remote_pairs_with_a_code_and_controls_only_its_owners_screens(client,
     _hub(client).unlisten(screen_id, queue)
 
 
+def test_a_remotes_poll_never_waits_on_the_write_lock(client, conn, directory, settings):
+    _login(client, conn, directory)
+    _turn_on(client)
+    _pair(client)
+    panel, auth, _ = _remote(client)
+    writer = db.connect(settings.db_path)               # another writer, holding the lock (a catalog pass, say)
+    writer.execute("BEGIN IMMEDIATE")
+    started = time.monotonic()
+    assert panel.get("/api/media/remote", headers=auth).status_code == 200
+    assert time.monotonic() - started < 5               # it used to wait out the 10 s busy timeout
+    writer.execute("ROLLBACK")
+    writer.close()
+    assert conn.execute("SELECT last_seen_at FROM media_remotes").fetchone()[0] is None  # skipped while locked
+    assert panel.get("/api/media/remote", headers=auth).status_code == 200
+    assert conn.execute("SELECT last_seen_at FROM media_remotes").fetchone()[0]           # so the next poll saves it
+    conn.execute("UPDATE media_remotes SET last_seen_at = NULL")
+    assert panel.get("/api/media/remote", headers=auth).status_code == 200
+    assert conn.execute("SELECT last_seen_at FROM media_remotes").fetchone()[0] is None  # then once a minute at most
+
+
 def test_a_remote_starts_channels_forgets_itself_and_follows_the_group(client, conn, directory):
     _login(client, conn, directory)
     _turn_on(client)

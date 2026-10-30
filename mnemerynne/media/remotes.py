@@ -17,12 +17,22 @@ itself. Like a screen key, it stops working at once when its owner leaves the sc
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 import sqlite3
+import threading
+import time
+from pathlib import Path
 
+from mnemerynne import db
 from mnemerynne.media import screens
 
+log = logging.getLogger(__name__)
+
 MAX_PER_USER = 10
+SEEN_SECONDS = 60                     # last_seen_at is saved at most this often per remote
+_saved: dict[int, float] = {}         # remote id -> time.monotonic() its last_seen_at was last saved, in this process
+_saved_lock = threading.Lock()
 ACTIONS = ("toggle", "skip", "volume", "mute", "night", "next", "prev", "stop", "press", "play_source", "play_station")
 BUTTONS = ("up", "down", "left", "right", "enter")   # press: the TV page replays them as its own arrow keys
 
@@ -42,12 +52,14 @@ def create(conn: sqlite3.Connection, user_id: int, name: str, speaker: bool = Fa
         screen_id = _speaker_screen(conn, user_id, name, same["screen_id"]) if speaker else same["screen_id"]
         conn.execute("UPDATE media_remotes SET name = ?, token_hash = ?, created_at = datetime('now'), "
                      "last_seen_at = NULL, screen_id = ? WHERE id = ?", (name, _hash(token), screen_id, same["id"]))
+        _forget_seen(same["id"])
         return same["id"], token
     if conn.execute("SELECT count(*) FROM media_remotes WHERE user_id = ?", (user_id,)).fetchone()[0] >= MAX_PER_USER:
         raise screens.ScreenError(f"At most {MAX_PER_USER} remotes; remove one first.")
     screen_id = _speaker_screen(conn, user_id, name, None) if speaker else None
     remote_id = conn.execute("INSERT INTO media_remotes(user_id, name, token_hash, screen_id) VALUES (?, ?, ?, ?)",
                              (user_id, name, _hash(token), screen_id)).lastrowid
+    _forget_seen(remote_id)                # ids can be reused after a removal
     return remote_id, token
 
 
@@ -91,10 +103,36 @@ def of_user(conn: sqlite3.Connection, user_id: int) -> list[sqlite3.Row]:
                         (user_id,)).fetchall()
 
 
-def seen(conn: sqlite3.Connection, remote_id: int) -> None:
-    """At most once a minute: the panel asks every few seconds."""
-    conn.execute("UPDATE media_remotes SET last_seen_at = datetime('now') WHERE id = ? "
-                 "AND (last_seen_at IS NULL OR last_seen_at < datetime('now', '-60 seconds'))", (remote_id,))
+def seen_due(remote_id: int) -> bool:
+    """Whether the remote's last_seen_at is due a save (once a minute), claiming it if so. The panel polls
+    every few seconds; deciding in memory keeps those polls off the database's write lock."""
+    now = time.monotonic()
+    with _saved_lock:
+        if now - _saved.get(remote_id, now - SEEN_SECONDS) < SEEN_SECONDS:
+            return False
+        _saved[remote_id] = now
+        return True
+
+
+def save_seen(db_path: Path | str, remote_id: int) -> None:
+    """last_seen_at, run after the panel has its answer, on a connection of its own. It waits at most a
+    second for the write lock and otherwise skips this time: polls used to queue behind other writers for
+    longer than the panel waits (7 s)."""
+    conn = db.connect(db_path)
+    try:
+        conn.execute("PRAGMA busy_timeout = 1000")
+        conn.execute("UPDATE media_remotes SET last_seen_at = datetime('now') WHERE id = ?", (remote_id,))
+    except sqlite3.OperationalError as exc:   # still locked: the next due poll tries again
+        log.info("Remote %d's last-seen time skipped: %s", remote_id, exc)
+        _forget_seen(remote_id)
+    finally:
+        conn.close()
+
+
+def _forget_seen(remote_id: int) -> None:
+    """The next poll saves last_seen_at (a re-paired, new or removed remote, or a skipped save)."""
+    with _saved_lock:
+        _saved.pop(remote_id, None)
 
 
 def remove(conn: sqlite3.Connection, remote_id: int, user_id: int) -> bool:
@@ -102,4 +140,5 @@ def remove(conn: sqlite3.Connection, remote_id: int, user_id: int) -> bool:
     screen = conn.execute("SELECT screen_id FROM media_remotes WHERE id = ? AND user_id = ?", (remote_id, user_id)).fetchone()
     if screen is not None and screen["screen_id"] is not None:
         conn.execute("DELETE FROM media_screens WHERE id = ? AND speaker = 1", (screen["screen_id"],))
+    _forget_seen(remote_id)
     return conn.execute("DELETE FROM media_remotes WHERE id = ? AND user_id = ?", (remote_id, user_id)).rowcount > 0
