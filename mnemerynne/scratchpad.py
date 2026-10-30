@@ -11,7 +11,13 @@ by itself (release_stale runs before every read and claim). Resolving a note mar
 with `replaces` marks the older note superseded so the board shows one current state.
 
 Boards are implicit (distinct `board` values); there is no board table. Notes untouched for the
-keep period are purged by retention.purge whatever their status.
+keep period are purged by retention.purge whatever their status, into scratchpad_archive (as are boards
+cleared and notes deleted), where they can still be searched.
+
+The person writes on boards too, from the Scratchpad page (web/scratchpad.py): a note with author 'person'
+is a direction, for one agent label or everyone on the board. directions_for hands each session the
+directions meant for it once, with its next connector call (mcp_server's call()); sessions are seen through
+touch_session, which every connector call makes.
 """
 
 from __future__ import annotations
@@ -84,6 +90,15 @@ def _row(r: sqlite3.Row) -> dict:
     """A note as the tools and the briefing show it."""
     out = {"note_id": r["id"], "board": r["board"], "agent": r["agent"], "status": r["status"],
            "at": r["created_at"] + " UTC", "updated": r["updated_at"] + " UTC", "text": r["body"]}
+    if r["author"] == "person":
+        out["author"] = "person"          # the person's own direction, not another agent's note
+        out["for"] = r["for_agent"] or "everyone on the board"
+    elif r["for_agent"]:
+        out["for"] = r["for_agent"]
+    if r["reply_to"]:
+        out["reply_to"] = r["reply_to"]
+    if r["urgent"]:
+        out["urgent"] = True
     if r["claimed_by"]:
         out["claimed_by"] = r["claimed_by"]
         out["claimed_at"] = r["claimed_at"] + " UTC"
@@ -177,10 +192,20 @@ def notes(conn: sqlite3.Connection, user_id: int, board: str, *, since=None, inc
 
 
 def write(conn: sqlite3.Connection, user_id: int, board: str, body: str, agent: str, connection: str = "", *,
-          replaces=None) -> int:
+          replaces=None, author: str = "agent", for_agent: str | None = None, reply_to=None,
+          urgent: bool = False) -> int:
     """Jot a note on a board. `replaces` (one of the person's own note ids on the same board) marks that
-    note superseded, so the board carries one current state instead of a trail of corrections."""
+    note superseded, so the board carries one current state instead of a trail of corrections.
+    author 'person' (the Scratchpad page only) makes it a direction; `for_agent` addresses one agent label;
+    `reply_to` answers a note on the same board."""
     key = board_key(board)
+    if author not in ("agent", "person"):
+        raise ScratchpadError("A note is written by an agent or by the person.")
+    for_agent = agent_label(for_agent) if for_agent and str(for_agent).strip() else None
+    if reply_to is not None:
+        answered = _get(conn, user_id, reply_to)
+        if answered["board"] != key:
+            raise ScratchpadError(f"Note {answered['id']} is on board {answered['board']}, not {key}; reply there.")
     body = str(body or "").strip()
     if not body:
         raise ScratchpadError("Write something for the note.")
@@ -197,8 +222,10 @@ def write(conn: sqlite3.Connection, user_id: int, board: str, body: str, agent: 
                 raise ScratchpadError(f"Note {old['id']} is on board {old['board']}, not {key}.")
             conn.execute("UPDATE scratchpad_notes SET status = 'superseded', claimed_by = NULL, claimed_at = NULL, "
                          "updated_at = datetime('now') WHERE id = ? AND status <> 'superseded'", (old["id"],))
-        cur = conn.execute("INSERT INTO scratchpad_notes(user_id, board, agent, connection, body) VALUES (?, ?, ?, ?, ?)",
-                           (user_id, key, agent, connection or "", body))
+        cur = conn.execute("INSERT INTO scratchpad_notes(user_id, board, agent, connection, body, author, for_agent, "
+                           "reply_to, urgent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                           (user_id, key, agent, connection or "", body, author, for_agent,
+                            int(reply_to) if reply_to is not None else None, int(bool(urgent))))
     return cur.lastrowid
 
 
@@ -216,12 +243,185 @@ def resolve(conn: sqlite3.Connection, user_id: int, note_id, done: bool = True) 
     return _row(_get(conn, user_id, note_id))
 
 
+# ----------------------------------------------------------------- archive
+_ARCHIVED = ("id, user_id, board, agent, connection, body, status, author, for_agent, reply_to, urgent, claimed_by, "
+             "created_at, updated_at, done_at")
+
+
+def _archive(conn: sqlite3.Connection, where: str, params: tuple, reason: str) -> int:
+    """Move notes into scratchpad_archive (then off the scratchpad). Returns how many. The caller's transaction,
+    or one of its own."""
+    def move() -> int:
+        conn.execute(f"INSERT OR REPLACE INTO scratchpad_archive({_ARCHIVED}, reason) "
+                     f"SELECT {_ARCHIVED}, ? FROM scratchpad_notes WHERE {where}", (reason, *params))
+        return conn.execute(f"DELETE FROM scratchpad_notes WHERE {where}", params).rowcount
+    if conn.in_transaction:
+        return move()
+    with db.transaction(conn):
+        return move()
+
+
 def clear(conn: sqlite3.Connection, user_id: int, board: str | None = None) -> int:
-    """Delete the person's notes: one board's, or all of them (the Preferences button). Returns how many."""
+    """Take the person's notes off the scratchpad: one board's, or all of them. They stay in the archive.
+    Returns how many."""
     if board:
-        return conn.execute("DELETE FROM scratchpad_notes WHERE user_id = ? AND board = ?",
-                            (user_id, board_key(board))).rowcount
-    return conn.execute("DELETE FROM scratchpad_notes WHERE user_id = ?", (user_id,)).rowcount
+        return _archive(conn, "user_id = ? AND board = ?", (user_id, board_key(board)), "cleared")
+    return _archive(conn, "user_id = ?", (user_id,), "cleared")
+
+
+def delete(conn: sqlite3.Connection, user_id: int, note_id) -> None:
+    """Take one note off the scratchpad (into the archive)."""
+    row = _get(conn, user_id, note_id)
+    _archive(conn, "id = ?", (row["id"],), "deleted")
+
+
+def expire(conn: sqlite3.Connection, days: int) -> int:
+    """Notes nobody touched in `days` (everyone's), into the archive (retention.purge, hourly)."""
+    if days <= 0:
+        return 0
+    return _archive(conn, "updated_at < datetime('now', ?)", (f"-{int(days)} days",), "expired")
+
+
+def search_archive(conn: sqlite3.Connection, user_id: int, query: str = "", board: str | None = None,
+                   limit: int = 50) -> list[dict]:
+    """The person's archived notes, newest first: text, agent or board containing `query`, on `board`."""
+    where, params = ["user_id = ?"], [user_id]
+    if board:
+        where.append("board = ?")
+        params.append(board_key(board))
+    words = [w for w in str(query or "").split() if w][:8]
+    for w in words:
+        where.append("(body LIKE ? ESCAPE '\\' OR agent LIKE ? ESCAPE '\\' OR board LIKE ? ESCAPE '\\')")
+        like = "%" + w.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        params += [like, like, like]
+    params.append(max(1, min(int(limit or 50), MAX_LISTED)))
+    rows = conn.execute(f"SELECT * FROM scratchpad_archive WHERE {' AND '.join(where)} ORDER BY id DESC LIMIT ?",
+                        params).fetchall()
+    return [{**_row(r), "archived": r["archived_at"] + " UTC", "reason": r["reason"]} for r in rows]
+
+
+# ---------------------------------------------------------------- sessions
+SESSION_ACTIVE_MINUTES = 10
+SESSION_GONE_HOURS = 24
+
+
+def touch_session(conn: sqlite3.Connection, user_id: int, connection: str, agent: str, tool: str,
+                  board: str | None = None) -> None:
+    """A connector call from this session: when, which tool, and (scratchpad tools) on which board."""
+    now = "datetime('now')"
+    conn.execute(f"UPDATE scratchpad_sessions SET last_at = {now}, last_tool = ? WHERE user_id = ? AND connection = ? "
+                 "AND agent = ?", (tool, user_id, connection, agent))
+    conn.execute("INSERT INTO scratchpad_sessions(user_id, connection, agent, board, last_tool) VALUES (?, ?, ?, ?, ?) "
+                 "ON CONFLICT(user_id, connection, agent, board) DO UPDATE SET last_at = datetime('now'), "
+                 "last_tool = excluded.last_tool", (user_id, connection, agent, board_key(board) if board else "", tool))
+
+
+def session_label(conn: sqlite3.Connection, user_id: int, connection: str) -> str | None:
+    """The label this connection signed with most recently (on any board), or None."""
+    row = conn.execute("SELECT agent FROM scratchpad_sessions WHERE user_id = ? AND connection = ? "
+                       "ORDER BY last_at DESC, rowid DESC LIMIT 1", (user_id, connection)).fetchone()
+    return row["agent"] if row else None
+
+
+def sessions(conn: sqlite3.Connection, user_id: int, board: str | None = None) -> list[dict]:
+    """The person's sessions seen in the last week (on `board`, or anywhere): label, state, last tool, boards,
+    and the notes each holds a claim on."""
+    rows = conn.execute("SELECT * FROM scratchpad_sessions WHERE user_id = ? AND last_at > datetime('now', '-7 days') "
+                        "ORDER BY last_at DESC", (user_id,)).fetchall()
+    out: dict[str, dict] = {}
+    for r in rows:
+        s = out.setdefault(r["agent"].lower(), {"agent": r["agent"], "boards": [], "last_at": r["last_at"] + " UTC",
+                                                "last_tool": r["last_tool"], "_last": r["last_at"]})
+        if r["board"] and r["board"] not in s["boards"]:
+            s["boards"].append(r["board"])
+    if board:
+        key = board_key(board)
+        out = {k: v for k, v in out.items() if key in v["boards"]}
+    claims = conn.execute("SELECT id, claimed_by FROM scratchpad_notes WHERE user_id = ? AND status = 'open' "
+                          "AND claimed_by IS NOT NULL", (user_id,)).fetchall()
+    for s in out.values():
+        age = _minutes_since(conn, s.pop("_last"))
+        s["state"] = ("active" if age <= SESSION_ACTIVE_MINUTES else
+                      "idle" if age <= SESSION_GONE_HOURS * 60 else "gone")
+        s["minutes_ago"] = age
+        s["holds"] = [c["id"] for c in claims if c["claimed_by"].lower() == s["agent"].lower()]
+    return list(out.values())
+
+
+# -------------------------------------------------------------- directions
+MAX_DIRECTIONS = 5
+
+
+def _for_this(r, agent: str, boards: set[str]) -> bool:
+    if r["for_agent"]:
+        return r["for_agent"].lower() == agent.lower()
+    return r["board"] in boards
+
+
+def open_directions(conn: sqlite3.Connection, user_id: int, agent: str, *, board: str | None = None) -> list[dict]:
+    """The person's directions still open for this agent: addressed to it, or to everyone on a board it has
+    worked on (or `board`), oldest first."""
+    boards = {r[0] for r in conn.execute("SELECT DISTINCT board FROM scratchpad_sessions WHERE user_id = ? "
+                                         "AND lower(agent) = lower(?) AND board != ''", (user_id, agent))}
+    if board:
+        boards.add(board_key(board))
+    rows = conn.execute("SELECT * FROM scratchpad_notes WHERE user_id = ? AND author = 'person' AND status = 'open' "
+                        "ORDER BY urgent DESC, id", (user_id,)).fetchall()
+    return [_row(r) for r in rows if _for_this(r, agent, boards)]
+
+
+def directions_for(conn: sqlite3.Connection, user_id: int, agent: str) -> list[dict]:
+    """Directions this agent hasn't been shown yet (each once), newest urgent first; marks them seen."""
+    fresh = [d for d in open_directions(conn, user_id, agent) if not conn.execute(
+        "SELECT 1 FROM scratchpad_seen WHERE note_id = ? AND agent = ?", (d["note_id"], agent.lower())).fetchone()]
+    fresh = fresh[:MAX_DIRECTIONS]
+    for d in fresh:
+        conn.execute("INSERT OR IGNORE INTO scratchpad_seen(note_id, agent) VALUES (?, ?)", (d["note_id"], agent.lower()))
+    return fresh
+
+
+def seen_by(conn: sqlite3.Connection, note_ids: list[int]) -> dict[int, list[dict]]:
+    """For the page: which agents were shown each direction, and when."""
+    if not note_ids:
+        return {}
+    marks = ",".join("?" * len(note_ids))
+    out: dict[int, list[dict]] = {}
+    for r in conn.execute(f"SELECT note_id, agent, seen_at FROM scratchpad_seen WHERE note_id IN ({marks}) "
+                          "ORDER BY seen_at", note_ids):
+        out.setdefault(r["note_id"], []).append({"agent": r["agent"], "at": r["seen_at"] + " UTC"})
+    return out
+
+
+# -------------------------------------------------------------------- page
+def feed(conn: sqlite3.Connection, user_id: int, board: str | None, after: str | None = None,
+         minutes: int = 0) -> dict:
+    """What the Scratchpad page needs, changed since `after` (a cursor from the last answer): the boards, the
+    board's notes (every status), who saw its directions, its sessions, and notes taken off since then."""
+    release_stale(conn, user_id, minutes)
+    cursor = conn.execute("SELECT datetime('now')").fetchone()[0]
+    stamp = since_at(after)
+    out: dict = {"cursor": cursor, "boards": boards(conn, user_id)}
+    waiting = dict(conn.execute("SELECT board, count(*) FROM scratchpad_notes WHERE user_id = ? AND author = 'person' "
+                                "AND status = 'open' GROUP BY board", (user_id,)).fetchall())
+    for b in out["boards"]:
+        b["directions"] = waiting.get(b["board"], 0)
+    if board:
+        key = board_key(board)
+        where, params = "user_id = ? AND board = ?", [user_id, key]
+        if stamp:
+            where += " AND updated_at >= ?"
+            params.append(stamp)
+        rows = conn.execute(f"SELECT * FROM scratchpad_notes WHERE {where} ORDER BY id LIMIT 500", params).fetchall()
+        seen = seen_by(conn, [r["id"] for r in rows if r["author"] == "person"])
+        out["board"] = key
+        out["notes"] = [{**_row(r), "seen_by": seen.get(r["id"], []), "claimed_by": r["claimed_by"]} for r in rows]
+        out["sessions"] = sessions(conn, user_id, key)
+        out["gone"] = [r[0] for r in conn.execute(
+            "SELECT id FROM scratchpad_archive WHERE user_id = ? AND board = ? AND archived_at >= ?",
+            (user_id, key, stamp))] if stamp else []
+    else:
+        out["sessions"] = sessions(conn, user_id)
+    return out
 
 
 def summary(conn: sqlite3.Connection, user_id: int, minutes: int = 0) -> dict:

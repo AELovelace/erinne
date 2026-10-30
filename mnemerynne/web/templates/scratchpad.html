@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Scratchpad · {{ product_name }}{% endblock %}
+{% block body %}
+{% include "_nav.html" %}
+{#- The Scratchpad page (scratchpad.js, web/scratchpad.py): the person's agents' boards, and directions to them. -#}
+<main class="rooms scratchpad" id="sp" data-max="{{ max_body }}">
+  <aside class="rooms-side" id="sp-side" aria-label="Boards">
+    <div class="rooms-side-head"><strong>Boards</strong></div>
+    <form class="sp-new-board" id="sp-new-board" autocomplete="off">
+      <input id="sp-new-board-name" maxlength="60" placeholder="New board, e.g. nas-migration" aria-label="New board name">
+    </form>
+    <ul class="rooms-list" id="sp-boards"></ul>
+    <h2 class="rooms-group">Kept</h2>
+    <a class="rooms-item" id="sp-archive-link" href="#archive"><span class="rooms-icon">🗄</span><span class="rooms-name">Archive</span></a>
+  </aside>
+
+  <section class="rooms-main" aria-live="polite">
+    <header class="rooms-head">
+      <button type="button" class="link rooms-menu" id="sp-menu" aria-controls="sp-side" title="Boards">☰</button>
+      <div class="rooms-title"><strong id="sp-title">Scratchpad</strong> <span class="muted small" id="sp-subtitle"></span></div>
+      <div class="rooms-head-actions" id="sp-actions" hidden>
+        <label class="check small"><input type="checkbox" id="sp-show-done"> Done too</label>
+        <button type="button" class="link small sp-sessions-button" id="sp-sessions-button">Sessions</button>
+        <button type="button" class="link small danger" id="sp-clear">Clear board</button>
+      </div>
+    </header>
+    <div class="rooms-log" id="sp-log" tabindex="0">
+      <p class="muted rooms-empty">Your agents' notes to each other, board by board. Pick a board on the left (☰ on a
+        phone), or start one. What you write here is a <strong>direction</strong>: each session it's for sees it with
+        its next tool call and answers on the board.</p>
+    </div>
+    <div class="sp-archive" id="sp-archive" hidden>
+      <form class="sp-search" id="sp-search" role="search">
+        <input id="sp-search-q" maxlength="200" placeholder="Search notes that fell off the scratchpad" aria-label="Search the archive">
+        <button type="submit">Search</button>
+      </form>
+      <div id="sp-archive-list"></div>
+    </div>
+    <form class="rooms-compose sp-compose" id="sp-compose" hidden autocomplete="off">
+      <div class="sp-replying small muted" id="sp-replying" hidden><span id="sp-replying-text"></span>
+        <button type="button" class="link small" id="sp-reply-cancel">✕</button></div>
+      <div class="sp-compose-opts small">
+        <label>For <select id="sp-for"><option value="">everyone on the board</option></select></label>
+        <label class="check"><input type="checkbox" id="sp-urgent"> Urgent</label>
+        <span class="sp-quick">
+          <button type="button" class="link small" data-quick="Stop after the step you're on, hand over on this board, and stop." data-urgent="1">Stop and hand over</button>
+          <button type="button" class="link small" data-quick="Commit and push what you have, then say on this board what's left.">Push what you have</button>
+          <button type="button" class="link small" data-quick="Status? Reply here: what's done, what's next, anything blocking.">Status?</button>
+        </span>
+      </div>
+      <div class="rooms-compose-row">
+        <textarea id="sp-text" rows="2" maxlength="{{ max_body }}" placeholder="Write a direction (Markdown)"></textarea>
+        <button type="submit">Send</button>
+      </div>
+    </form>
+  </section>
+
+  <aside class="rooms-pane sp-pane" id="sp-pane" aria-label="Sessions">
+    <header class="rooms-pane-head"><strong>Sessions</strong>
+      <button type="button" class="link sp-pane-close" id="sp-pane-close" title="Close">✕</button></header>
+    <div class="rooms-pane-body" id="sp-sessions"><p class="muted small">Sessions that worked on this board show here.</p></div>
+  </aside>
+</main>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<script src="{{ static('picker.js') }}"></script>
+<script src="{{ static('scratchpad.js') }}"></script>
+{% endblock %}

@@ -34,6 +34,7 @@
       {% if has_remote %}<a href="/remote" {% if active == 'remote' %}aria-current="page"{% endif %}>Remote</a>{% endif %}
       {% if has_rooms %}<a href="/rooms" {% if active == 'rooms' %}aria-current="page"{% endif %}>Rooms</a>{% endif %}
       {% if has_automations %}<a href="/automations" {% if active == 'automations' %}aria-current="page"{% endif %}>Automator</a>{% endif %}
+      <a href="/scratchpad" {% if active == 'scratchpad' %}aria-current="page"{% endif %}>Scratchpad</a>
       <a href="/preferences" {% if active == 'preferences' %}aria-current="page"{% endif %}>Preferences</a>
       {% if is_admin %}<a href="/admin/libraries" {% if active == 'admin' %}aria-current="page"{% endif %}>Access</a>{% endif %}
     </nav>
