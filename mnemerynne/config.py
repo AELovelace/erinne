@@ -27,9 +27,6 @@ class Settings(BaseSettings):
     # The address people open Erynne at, e.g. https://erynne.example.internal;
     # links handed to Claude are built on it (relative links when empty).
     public_url: str = ""
-    # The arcade's own address, e.g. https://arcade.beepsquad.wtf (arcade.py): Games are proxied at its
-    # root, on a host of their own so their scripts never share Mnemerynne's origin. Empty: no Games.
-    arcade_url: str = ""
     # Where the desktop backup app sends files, e.g. https://bkp.beepsquad.wtf (sync.py): a host of its own whose
     # proxy takes big uploads; only /api/sync/* and /oauth/token|revoke answer there. Empty: the app uses public_url.
     backup_url: str = ""

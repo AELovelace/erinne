@@ -72,10 +72,8 @@ def check_config(settings: Settings) -> None:
     if not settings.public_url:
         # The app signs in and downloads updates at the main address; it learns it from the backup host.
         raise ValueError("MNEMERYNNE_BACKUP_URL needs MNEMERYNNE_PUBLIC_URL set too")
-    others = {(urlsplit(u or "").hostname or "").lower() for u in (settings.public_url, settings.arcade_url)}
-    if backup_host(settings) in others:
-        raise ValueError("MNEMERYNNE_BACKUP_URL must be a different host from MNEMERYNNE_PUBLIC_URL and "
-                         "MNEMERYNNE_ARCADE_URL")
+    if backup_host(settings) == (urlsplit(settings.public_url).hostname or "").lower():
+        raise ValueError("MNEMERYNNE_BACKUP_URL must be a different host from MNEMERYNNE_PUBLIC_URL")
 
 
 class BackupHost:

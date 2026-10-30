@@ -25,7 +25,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import arcade, group_refs, media, users
+from mnemerynne import group_refs, media, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
@@ -118,13 +118,7 @@ def media_page(request: Request, user=Depends(page_user), conn: sqlite3.Connecti
     return request.app.state.templates.TemplateResponse(request, "media.html", {
         "user": user, "is_admin": admin, "active": "media",
         "has_library": media.library(conn) is not None, "folder": _folder_name(conn),
-        "screens_allowed": screens.may_use(conn, user, request.app.state.directory),
-        "games_allowed": _games_allowed(request, conn, user, admin)})
-
-
-def _games_allowed(request: Request, conn: sqlite3.Connection, user, admin: bool) -> bool:
-    """Media → Games shows: the arcade is set up (MNEMERYNNE_ARCADE_URL) and Games are on for this person."""
-    return bool(arcade.origin(request.app.state.settings)) and arcade.may_play(conn, user, request.app.state.directory, admin)
+        "screens_allowed": screens.may_use(conn, user, request.app.state.directory)})
 
 
 def _folder_name(conn: sqlite3.Connection) -> str:
@@ -436,8 +430,7 @@ def screen_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
         "folder": _folder_name(conn), "screen": {"id": screen["id"], "name": screen["name"],
                                                  "safe_x": screen["safe_x"], "safe_y": screen["safe_y"],
                                                  "ui_scale": screen["ui_scale"],
-                                                 "top_bar": bool(screen["top_bar"]), "box": box},
-        "games_allowed": _games_allowed(request, conn, owner, False)})   # the TV plays as its owner, never as an admin
+                                                 "top_bar": bool(screen["top_bar"]), "box": box}})
 
 
 class ScreenBody(BaseModel):
@@ -784,7 +777,7 @@ def _command_stream(request: Request, conn: sqlite3.Connection, screen: sqlite3.
 
 class ScreenState(BaseModel):
     kind: Literal["idle", "video", "live", "youtube", "audio", "radio", "pictures", "signage", "calibrating",
-                  "in_use"]                              # in_use: a box on a page other than the TV page
+                  "in_use", "game"]                      # in_use: a box on a page other than the TV page; game: Media → Games
     title: str = Field("", max_length=300)
     sub: str = Field("", max_length=300)
     art: str | None = Field(None, max_length=300)

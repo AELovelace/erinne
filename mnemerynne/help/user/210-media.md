@@ -51,13 +51,18 @@ You only see what you may open in that folder on the share. Who may open it is s
 
 ## Games
 
-**Games** (🎮, after Radio) lists the games your admin has set up, such as Lumi Web and Lumi Games. It's there when Games are on for you.
+**Games** (🎮, after Radio) lists the games that come with Erynne. Everyone who can use Media can play them, and so can a TV, as its owner.
 
-- Choose one and it opens over the whole page. **← Games** (or Escape, when the game doesn't have the keyboard) goes back; **⛶** fills the screen; **⧉** opens it in a tab of its own.
-- The games come from another site and run on an address of their own (the arcade), so they can't see anything of yours in Erynne. Opening one signs you in to the arcade for 12 hours; signing out of Erynne signs you out of it too.
-- A game may ask you to sign in with its own account (Discord, for the Lumi games). That stays between you and the game.
-- Saves and settings a game keeps in your browser belong to the arcade's address, so they don't follow you from the game's own site.
-- On a TV, Games works the same way, as the TV's owner. Sending something to the TV from your phone closes the game.
+- Choose one and it opens over the whole page. **← Games** (or Escape or Backspace) goes back; **⛶** fills the screen; **⧉** opens it in a tab of its own.
+- The bar at the top shows the game's controls. They're the same on a keyboard and on a **remote panel**: its arrows and **Enter** play the game while it's open on the TV, and the panel shows the score under the game's name. The panel's **Stop**, or sending anything to the TV from your phone, closes the game.
+- Scores are only for fun. Each device remembers its own best; nothing is sent anywhere.
+
+**Prism Drop** 🔮: pick one of ten pockets and drop a neon ball through twenty rows of pins. A game is ten drops.
+
+- **◀ ▶** pick the pocket, **Enter** drops (after the tenth drop, Enter starts a new game), **▲** replays the last drop without scoring, **▼** turns the sound on or off. On a phone, tap a column to pick it and tap it again to drop.
+- Points for where it lands: **20** in your pocket, **15** one pocket away, **10** two away, nothing further.
+- Each drop gets a fresh field of special pegs: **blocks** shove the ball two columns sideways, **bombs** blast it two or three spaces in any direction (each fires once), and **coin pegs** add 1–5 bonus points (once each), even if the landing misses.
+- The ball enters at pin 4, 5, 6 or 7 (marked in cyan) at random.
 
 ## Playing on the TV from your phone
 

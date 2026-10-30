@@ -20,8 +20,8 @@
     <button type="button" class="mc-menu-item" data-view="pictures"><span class="mc-icon">🖼</span>Pictures</button>
     <button type="button" class="mc-menu-item" data-view="live"><span class="mc-icon">📡</span>Live TV</button>
     <button type="button" class="mc-menu-item" data-view="radio"><span class="mc-icon">📻</span>Radio</button>
-    {#- Games (arcade.py): shown when the arcade is set up and Games are on for this person (or the TV's owner). -#}
-    {% if games_allowed %}<button type="button" class="mc-menu-item" data-view="games"><span class="mc-icon">🎮</span>Games</button>{% endif %}
+    {#- Games (mnemerynne/games.py): the built-in games, for whoever may use Media (the TV as its owner). -#}
+    <button type="button" class="mc-menu-item" data-view="games"><span class="mc-icon">🎮</span>Games</button>
     {#- Screen size and Wi-Fi are inside Kiosk settings, which sits at the bottom of the menu (media.css). -#}
     {% if screen %}<button type="button" class="mc-menu-item" id="mc-kiosk" data-local-only hidden><span class="mc-icon">⚙</span>Kiosk settings</button>{% endif %}
     {% if not screen and screens_allowed %}<button type="button" class="mc-menu-item" data-view="screens"><span class="mc-icon">📺</span>Screens</button>
@@ -40,8 +40,9 @@
   </section>
 </main>
 
-{#- A game (Media → Games, media.js games): the arcade's page for it in a frame filling the screen. The frame is
-    another origin (the arcade's host), so nothing in it can reach this page or Mnemerynne's API. -#}
+{#- A game (Media → Games, media.js games): a built-in game's page (/media/games/<slug>) in a frame filling the
+    screen. It's Mnemerynne's own code on this origin; the two talk by messages (static/games/common.js), which is
+    how a remote panel's arrows and Enter reach it. The status shows the game's controls. -#}
 <div class="mc-game" id="mc-game" role="dialog" aria-label="Game" hidden>
   <div class="mc-game-bar">
     <button type="button" id="mc-game-back" title="Back to Games (Esc)">← Games</button>

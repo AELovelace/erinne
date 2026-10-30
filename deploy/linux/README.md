@@ -976,31 +976,18 @@ Exec=firefox --kiosk %s/media/screen
   screen keeps its key (a cookie) for 400 days from the last time it connected, so it
   needs no sign-in once paired.
 
-## 5l. The arcade (Games)
+## 5l. Games (built in; the arcade is gone)
 
-Games (Lumi Web, Lumi Games, DOLL-OS…) come from another site and are proxied at the root of a
-host of their own, the **arcade**, so their scripts never run on Mnemerynne's origin: they can't
-call its API or read its cookies. Mnemerynne's pages, API and connector don't exist on that host;
-people get in with a one-minute ticket from Mnemerynne, and signing out of Mnemerynne ends it.
+Media → Games lists games that ship with Mnemerynne (`mnemerynne/games.py`, files under
+`web/static/games/`). They need no setup, no host of their own and no settings: whoever may use
+Media may play them, and a TV plays as its owner.
 
-1. **DNS:** a record for the arcade's name (e.g. `arcade.beepsquad.wtf`) pointing at the box,
-   like the main name.
-2. **Web server:** the arcade block from `Caddyfile-mnemerynne-public` (Caddy gets its
-   certificate by itself) or from `nginx-mnemerynne.conf` (give it a certificate for the name),
-   with the hostname changed. Both send it to the same app on `127.0.0.1:38200`.
-3. **Settings:** `MNEMERYNNE_ARCADE_URL=https://arcade.beepsquad.wtf` in the env file, then
-   `sudo systemctl restart mnemerynne-web`. It must be a different host from
-   `MNEMERYNNE_PUBLIC_URL`; the app refuses to start otherwise.
-4. **The games site:** it has to accept being served from the arcade's host (for LumiBot:
-   `DISCORD_OAUTH_PUBLIC_HOSTS` and `WEB_PANEL_TRUSTED_ORIGINS` include it, the Discord app lists
-   the arcade's callback addresses, and its nginx passes the arcade's `X-Forwarded-Host` through
-   from this box only).
-5. **Turn it on:** the site, the switch, who may play and the games themselves (each a start page
-   on the site) under Access → Settings → Entertainment → Games; they then show in Media → Games.
-   See the admin help page *Games*.
+The arcade that used to sit here (games proxied from another site on a host of their own) has been
+removed, along with its table (migration 0060). On a box that had it set up, after updating:
 
-Check from the box: `curl -sI https://arcade.beepsquad.wtf/lumibot/` answers **401** with
-"Open this from Mnemerynne" (no arcade cookie), and never Mnemerynne's sign-in page.
+1. Remove `MNEMERYNNE_ARCADE_URL` from the env file (the app now ignores it).
+2. Remove the arcade's server block from the web server (`arcade.…` in the Caddyfile or nginx
+   config) and reload it, then its DNS record and certificate if nothing else uses them.
 
 ## 5m. Desktop backup (the backup app)
 
@@ -1023,14 +1010,18 @@ laptop ──https──► reverse proxy 10.1.1.20 (nginx, Let's Encrypt) ─�
    the end of `nginx-mnemerynne.conf` if the box runs nginx), then reload the web server. Only
    10.1.1.20 may talk to it.
 4. **Settings:** `MNEMERYNNE_BACKUP_URL=https://bkp.beepsquad.wtf` in the env file, then
-   `sudo systemctl restart mnemerynne-web mnemerynne-worker`. It must be a different host from
-   `MNEMERYNNE_PUBLIC_URL`; the app refuses to start otherwise.
-5. **Turn it on:** Access → Settings → Backups: the switch and the group who may back up. See the
+   `sudo systemctl restart mnemerynne-web mnemerynne-worker`. It needs `MNEMERYNNE_PUBLIC_URL` set, and must
+   be a different host from it; the app refuses to start otherwise. If the
+   proxy talks to the app's port directly (no web server on the box), the app must listen beyond loopback
+   (`MNEMERYNNE_HOST`), `FORWARDED_ALLOW_IPS` must include the proxy (`127.0.0.1,10.1.1.20`), and the port
+   should be open to the proxy only.
+5. **Turn it on:** Access → Settings → Desktop backup: the switch and the group who may back up. See the
    admin help page *Desktop backup*.
 
 Check from outside the LAN: `curl -s https://bkp.beepsquad.wtf/api/sync/client` answers
 `{"api_url": "https://bkp.beepsquad.wtf", …}`, `curl -sI https://bkp.beepsquad.wtf/` answers **404**,
-and a backed-up file's row in Access → Log shows the laptop's own address.
+and the new folder's `backup.root` row in Access → Recent changes shows the laptop's own address
+(single uploads aren't logged).
 
 ## 6. Check
 

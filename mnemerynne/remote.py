@@ -59,8 +59,8 @@ HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authoriza
 STRIP_REQUEST = {"host", "forwarded", "x-real-ip"}           # plus every x-forwarded-*: ours replace them
 STRIP_RESPONSE = {"x-frame-options", "strict-transport-security", "alt-svc", "public-key-pins",
                   "content-security-policy-report-only"}
-# Never sent upstream, never accepted from it: the session, the theme, and the arcade's own sign-in (arcade.py).
-SESSION_COOKIES = {"mnemerynne_session", "erynne_theme", "mnemerynne_arcade"}
+# Never sent upstream, never accepted from it: the session and the theme.
+SESSION_COOKIES = {"mnemerynne_session", "erynne_theme"}
 HTML_MAX_BYTES = 5 * 1024 * 1024
 XSLT_MAX_LOADS = 16           # files one transform may read: the stylesheet, its imports, document()
 XSLT_ORIGIN = "http://remote.invalid"   # the address lxml sees; every load under it goes through the proxy
@@ -147,7 +147,7 @@ def upstream_url(app: sqlite3.Row, subpath: str, query: str = "", *, websocket: 
 def rewrite_url(value: str, app: sqlite3.Row, slug: str, prefix: str | None = None) -> str:
     """An upstream URL as the browser should see it: absolute ones on the upstream's host and
     root-relative ones move under the prefix; relative ones and other sites stay. `prefix` "" serves the
-    app at the root (the arcade): absolute links to it become root paths, root paths stay."""
+    app at the root: absolute links to it become root paths, root paths stay."""
     v = (value or "").strip()
     if not v:
         return value
@@ -463,7 +463,7 @@ class RemoteProxy:
             await client.aclose()
 
     def _prefix(self, slug: str) -> str:
-        """Where the app sits for the browser: /remote/<slug> here; the arcade (arcade.py) serves its site at ""."""
+        """Where the app sits for the browser: /remote/<slug>."""
         return prefix_for(slug)
 
     def _client(self, app: sqlite3.Row) -> httpx.AsyncClient:

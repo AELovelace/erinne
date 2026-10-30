@@ -1,6 +1,6 @@
 # Secrets and local settings
 .env
-
+clients/lumi-home
 # Python
 __pycache__/
 *.pyc

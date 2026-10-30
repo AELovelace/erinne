@@ -1003,6 +1003,50 @@ def test_a_remotes_poll_never_waits_on_the_write_lock(client, conn, directory, s
     assert conn.execute("SELECT last_seen_at FROM media_remotes").fetchone()[0] is None  # then once a minute at most
 
 
+# ---- built-in games (mnemerynne/games.py)
+def test_built_in_games_open_from_media_and_show_on_a_remote(client, conn, directory):
+    from mnemerynne import games
+    anonymous = TestClient(client.app)
+    _login(client, conn, directory)
+    _turn_on(client)
+    assert 'data-view="games"' in client.get("/media").text                # built in: listed with no setup
+    listed = client.get("/api/media/games").json()["games"]
+    assert [g["slug"] for g in listed] == [g.slug for g in games.GAMES] and listed[0]["name"] == "Prism Drop"
+    page = client.get("/media/games/prism-drop")
+    assert page.status_code == 200
+    for name in ("games/common.js", "games/common.css", "games/prism-drop/rules.js", "games/prism-drop/game.js",
+                 "games/prism-drop/game.css"):
+        assert f"/static/{name}?v=" in page.text
+        assert (Path(__file__).parent.parent / "mnemerynne" / "web" / "static" / name).is_file()
+    assert 'id="pd-field"' in page.text and "messages.js" not in page.text   # the game's partial, none of the app's scripts
+    assert client.get("/media/games/no-such-game").status_code == 404
+    assert anonymous.get("/api/media/games").status_code == 401
+    assert anonymous.get("/media/games/prism-drop").status_code == 401
+
+    # On the TV: it plays as its owner, and its score line reaches the remote panels.
+    screen_id, key = _pair(client)
+    panel, auth, _ = _remote(client)
+    queue = _hub(client).listen(screen_id)
+    tv = TestClient(client.app)
+    tv.cookies.set("mnemerynne_screen", key)
+    assert tv.get("/api/media/games").status_code == 200 and tv.get("/media/games/prism-drop").status_code == 200
+    r = tv.put("/api/media/screen/state", json={"kind": "game", "title": "Prism Drop", "sub": "Score 35 · drop 3 of 10 · pocket 5"})
+    assert r.status_code == 200, r.text
+    state = panel.get("/api/media/remote", headers=auth).json()["screens"][0]["state"]
+    assert state["kind"] == "game" and state["title"] == "Prism Drop" and state["sub"].startswith("Score 35")
+    r = panel.post(f"/api/media/remote/screens/{screen_id}/command", json={"action": "press", "button": "enter"}, headers=auth)
+    assert r.status_code == 200 and queue.get_nowait()["button"] == "enter"   # media.js hands it to the game
+    _hub(client).unlisten(screen_id, queue)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js isn't installed")
+def test_prism_drop_rules_pass_in_node():
+    tests = sorted(str(p) for p in (Path(__file__).parent / "js").glob("*.test.mjs"))
+    assert tests
+    r = subprocess.run(["node", "--test", *tests], capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+
+
 def test_a_remote_starts_channels_forgets_itself_and_follows_the_group(client, conn, directory):
     _login(client, conn, directory)
     _turn_on(client)

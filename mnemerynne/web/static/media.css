@@ -145,8 +145,8 @@ html .mc-upnext-actions button.secondary { background: rgba(255, 255, 255, .15);
 .mc-note { color: var(--muted); font-size: .85rem; margin: .3rem 0 .8rem; }
 
 /* ----------------------------------------------------------------- player */
-/* A game (Media → Games): the arcade's page in a frame under a slim bar; just below the player, which a cast
-   to the TV opens over it (media.js closes the game then). */
+/* A game (Media → Games): a built-in game's page in a frame under a slim bar; just below the player, which a
+   cast to the TV opens over it (media.js closes the game then). */
 .mc-game { position: fixed; inset: 0; z-index: 58; background: #000; display: flex; flex-direction: column; }
 .mc-game[hidden] { display: none; }
 .mc-game-bar { display: flex; align-items: center; gap: .7rem; padding: .45rem .9rem; color: var(--ink, #fff);

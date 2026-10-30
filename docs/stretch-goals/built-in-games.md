@@ -1,7 +1,28 @@
 # Stretch goal: Mnemerynne's own games
 
-*Written 2026-10-28 (late) by Lumi for Doll. A stretch goal: nothing here is scheduled or started. It lives in
-the repo on purpose, not in IT-OPS.*
+*Written 2026-10-28 (late) by Lumi for Doll. A stretch goal. It lives in the repo on purpose, not in IT-OPS.*
+
+## Status (2026-10-29): started, and the arcade is gone
+
+Doll's calls on 2026-10-29 changed parts of the plan below:
+
+- **The arcade is removed** (a failed experiment): `arcade.py`, `web/arcade.py`, its tests, admin box, help
+  page and deploy blocks, and its table (migration 0060). Media → Games lists only built-in games, so the plan's
+  "split `may_play`" and the Games admin box aren't needed: games follow Media's own group, and a TV plays as its
+  owner.
+- **The first game is a port, not one of the ideas below:** **Prism Drop**, from MommyBot's ball drop, without
+  the wager. It keeps score only (20/15/10 for landing 0/1/2 pockets from the pick, plus coin pegs), ten drops a
+  game, best score per device. It has the neon look, and the **remote panel works** with it: the TV page forwards the
+  panel's arrows and Enter into the game frame, and the panel shows the score (screen state kind `game`).
+- **Built so far (phase 0, trimmed):**
+  - the registry, `mnemerynne/games.py`, with no table;
+  - the page, `/media/games/<slug>` (`web/games.py`, `templates/game.html`, plus a partial per game in
+    `templates/games/`);
+  - `static/games/common.js` and `common.css`: actions from keys, remotes and taps, the frame messages, theme
+    colours, sound, and the per-device store;
+  - Node tests for the rules (`tests/js/`), which `tests/test_media.py` runs.
+- **Not built:** server-side saves and scores (the `game_saves` and `game_scores` tables and their API). "Just
+  keep score" didn't need them; add them when a game wants a leaderboard or saves.
 
 **The idea:** small, original games that ship with Mnemerynne itself and open from **Media → Games**,
 next to the arcade's (Lumi Web, Lumi Games). Played with **keyboard and mouse** on a PC first. Four kinds:

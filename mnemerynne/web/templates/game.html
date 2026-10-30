@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ game.name }} · {{ product_name }}{% endblock %}
+{% block body %}
+{#- A built-in game (mnemerynne/games.py, web/games.py), in the person's theme. Media's game layer frames this page;
+    opened on its own it works the same. The game's markup is its partial (templates/games/<slug>.html); its scripts
+    are files under /static/games/ (no inline script: ready for a script-src 'self' policy). -#}
+<link rel="stylesheet" href="{{ static('games/common.css') }}">
+<link rel="stylesheet" href="{{ static('games/' ~ game.slug ~ '/game.css') }}">
+<main class="gm" id="gm" data-game="{{ game.slug }}" data-name="{{ game.name }}">
+  {% include "games/" ~ game.slug ~ ".html" %}
+</main>
+<script src="{{ static('games/common.js') }}"></script>
+<script src="{{ static('games/' ~ game.slug ~ '/rules.js') }}"></script>
+<script src="{{ static('games/' ~ game.slug ~ '/game.js') }}"></script>
+{% endblock %}

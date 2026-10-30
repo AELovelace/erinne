@@ -21,7 +21,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
-from mnemerynne import (identity, arcade as arcade_mod, sync as sync_mod, balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, feedback as feedback_mod,
+from mnemerynne import (identity, sync as sync_mod, balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, feedback as feedback_mod,
                         mcp_server, media as media_mod, memory,
                         diagnostics, messages as messages_mod, permissions, remote, rooms as rooms_mod, rooms_bus, share,
                         sharepoint, theme as theme_mod,
@@ -41,10 +41,10 @@ from mnemerynne.config import Settings, get_settings
 from mnemerynne.graph import Deps, build_graph
 from mnemerynne.router import load_router
 from mnemerynne.web import (admin, admin_apis, admin_notices, admin_remote, agent as agent_pages, apis as api_pages,
-                            arcade as arcade_pages,
                             automations as automation_pages, balancer as balancer_pages,
                             bfgguf as bfgguf_pages, chat,
-                            claude_links as claude_link_pages, editor as editor_pages, files, help as help_pages,
+                            claude_links as claude_link_pages, editor as editor_pages, files, games as game_pages,
+                            help as help_pages,
                             kiosk as kiosk_pages,
                             m365 as m365_pages, media as media_pages, memories, messages as message_pages, oauth as oauth_pages, remote as remote_pages,
                             rooms as room_pages, scratchpad as scratchpad_pages, security,
@@ -110,8 +110,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     if security.exposed(settings) and not settings.public_url:
         log.warning("MNEMERYNNE_PUBLIC_URL is not set; links and OAuth addresses follow the request's Host.")
     try:
-        arcade_mod.check_config(settings)   # the arcade must be a host of its own, or it isn't a wall at all
-        sync_mod.check_config(settings)     # the backup host too: its big-upload proxy settings stay off the site
+        sync_mod.check_config(settings)     # the backup host must be a host of its own: its big-upload proxy settings stay off the site
     except ValueError as exc:
         raise security.InsecureConfig(str(exc)) from None
 
@@ -200,7 +199,6 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             await store_conn.close()
             await app.state.agent.aclose()
             await app.state.remote_proxy.aclose()
-            await app.state.arcade.aclose()
             await balancer.aclose()
             await asyncio.to_thread(app.state.media_sessions.shutdown)
             if services is None:
@@ -237,10 +235,6 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     # Added last, so they run first: refused requests get the headers too.
     app.add_middleware(security.PublicRateLimit)
     app.add_middleware(security.SecurityHeaders, settings=settings)
-    # The arcade's host (arcade.py) is sent to the arcade before anything of Mnemerynne's runs: no session, no
-    # pages, no API there. Added after everything else, so it runs first.
-    app.state.arcade = arcade_mod.ArcadeProxy(settings, secret_key, lambda: app.state.directory)
-    app.add_middleware(arcade_mod.ArcadeHost, proxy=app.state.arcade, arcade_host=arcade_mod.host(settings))
     # The backup host (MNEMERYNNE_BACKUP_URL) answers only the backup app's API (sync.py).
     app.add_middleware(sync_mod.BackupHost, host=sync_mod.backup_host(settings))
 
@@ -306,7 +300,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(files.router)
     app.include_router(chat.router)
     app.include_router(memories.router)
-    app.include_router(scratchpad_pages.router)   # the agents' scratchpad summary and Clear, on Preferences
+    app.include_router(scratchpad_pages.router)   # the Scratchpad page: the agents' boards, and directions to them
     app.include_router(admin.router)
     app.include_router(tokens.router)
     app.include_router(api_pages.router)
@@ -335,11 +329,9 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(admin_notices.router)
     app.include_router(remote_pages.router)
     app.include_router(admin_remote.router)
-    app.include_router(arcade_pages.router)        # a ticket into the arcade (arcade.py)
     app.include_router(sync_pages.router)          # the desktop backup app (sync.py)
     app.include_router(sync_pages.admin_router)
-    app.include_router(arcade_pages.media_router)  # Media → Games: the list, and a ticket into a game
-    app.include_router(arcade_pages.admin_router)  # Settings → Entertainment → Games
+    app.include_router(game_pages.router)          # Media → Games: the built-in games (games.py)
     # LAN apps served at /remote/<slug>/... (mnemerynne/remote.py); after the routers, so /remote itself is the page.
     app.state.remote_proxy = remote.RemoteProxy(settings, lambda: app.state.directory)
     app.mount(remote.PREFIX, app.state.remote_proxy, name="remote")

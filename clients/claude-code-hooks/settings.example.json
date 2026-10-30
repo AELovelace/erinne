@@ -1,0 +1,20 @@
+{
+  "env": {
+    "MNEMERYNNE_URL": "https://beepsquad.wtf",
+    "MNEMERYNNE_TOKEN_FILE": "~/.config/mnemerynne/claude-code-token"
+  },
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "python3 ~/.claude/hooks/mnemerynne_directions.py", "timeout": 15 } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "python3 ~/.claude/hooks/mnemerynne_directions.py", "timeout": 15 } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "*", "hooks": [ { "type": "command", "command": "python3 ~/.claude/hooks/mnemerynne_directions.py", "timeout": 15 } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "python3 ~/.claude/hooks/mnemerynne_directions.py", "timeout": 15 } ] }
+    ]
+  }
+}

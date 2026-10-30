@@ -645,48 +645,45 @@
     return out;
   }
 
-  /* Games (arcade.py): the pages of the games site an admin listed, for whoever may play. Each opens in the
-     game layer below; never cast, since a game runs on the device that opened it. */
+  /* Games (mnemerynne/games.py): the built-in games, for whoever may use Media (the TV as its owner). Each
+     opens in the game layer below; never cast, since a game runs on the device that opened it. */
   async function viewGames() {
     setHead("Games");
     const data = await api("GET", "/api/media/games");
-    if (!data.games.length) {
-      return [empty(isAdmin ? "No games yet. Add them in Access → Settings → Entertainment → Games."
-                            : "No games have been set up for you.")];
-    }
+    if (!data.games.length) return [empty("No games yet.")];
     return [shelf(null, data.games.map(function (g) {
       return card({ title: g.name, sub: g.description, glyph: g.icon || "🎮", shape: "square",
                     onClick: function () { games.open(g); } });
     }), "square", "grid")];
   }
 
-  /* The game layer: a fresh one-use ticket from the server each time (POST /api/media/games/<slug>/ticket), whose
-     address signs this browser into the arcade and lands on the game's start page. */
+  /* The game layer: the game's page (/media/games/<slug>, web/games.py) in a frame filling the screen. It's
+     Mnemerynne's own code on its own origin, so the two talk by messages (static/games/common.js):
+     - here → game: a remote panel's arrows and Enter ({type: "mnemerynne-game-key", key}), and the keyboard's
+       when the frame doesn't have focus;
+     - game → here: its score line ("mnemerynne-game-state", which a remote panel shows under the game's name)
+       and Escape or Backspace inside it ("mnemerynne-game-close").
+     The panel's Stop, or anything cast to the TV, closes the game (screenMode.command). */
   const gameFrame = $("mc-game-frame");
   const games = {
-    current: null,
+    current: null, sub: "",
 
     isOpen: function () { return !$("mc-game").hidden; },
 
-    ticket: async function (g) {
-      return (await api("POST", "/api/media/games/" + encodeURIComponent(g.slug) + "/ticket")).url;
-    },
+    url: function (g) { return "/media/games/" + encodeURIComponent(g.slug); },
 
-    open: async function (g) {
+    open: function (g) {
       player.close();
       nowPlaying.pause();
       this.current = g;
+      this.sub = "";
       $("mc-game-title").textContent = g.name;
       $("mc-game-icon").textContent = g.icon || "🎮";
-      $("mc-game-status").textContent = "Opening…";
+      $("mc-game-status").textContent = g.controls || "";
       $("mc-game").hidden = false;
-      try {
-        gameFrame.src = await this.ticket(g);
-        gameFrame.onload = function () { $("mc-game-status").textContent = ""; };
-        gameFrame.focus();
-      } catch (err) {
-        $("mc-game-status").textContent = err.message;
-      }
+      gameFrame.src = this.url(g);
+      gameFrame.focus();
+      if (screenId) screenMode.report(true);
     },
 
     close: function () {
@@ -696,6 +693,12 @@
       if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
       this.current = null;
       focusFirst();
+      if (screenId) screenMode.report(true);
+    },
+
+    /* One key for the game: a remote panel's press, or the keyboard while focus is on this page. */
+    key: function (key) {
+      if (gameFrame.contentWindow) gameFrame.contentWindow.postMessage({ type: "mnemerynne-game-key", key: key }, location.origin);
     },
 
     full: function () {
@@ -704,23 +707,26 @@
       else if (box.requestFullscreen) box.requestFullscreen().catch(function () {});
     },
 
-    /* Its own tab: a new ticket (the frame's is spent), opened while the click still counts as the person's. */
+    /* Its own tab, the same page without the bar. */
     tab: function () {
       const g = this.current;
       if (!g) return;
-      const win = window.open("about:blank", "_blank");
-      this.ticket(g).then(function (url) {
-        if (win) win.location.href = url; else location.href = url;
-        games.close();
-      }).catch(function (err) {
-        if (win) win.close();
-        $("mc-game-status").textContent = err.message;
-      });
+      window.open(this.url(g), "_blank", "noopener");
+      games.close();
     },
   };
   $("mc-game-back").addEventListener("click", function () { games.close(); });
   $("mc-game-full").addEventListener("click", function () { games.full(); });
   $("mc-game-tab").addEventListener("click", function () { games.tab(); });
+  window.addEventListener("message", function (e) {
+    if (e.origin !== location.origin || e.source !== gameFrame.contentWindow || !games.isOpen()) return;   // our game only
+    const data = e.data || {};
+    if (data.type === "mnemerynne-game-close") games.close();
+    else if (data.type === "mnemerynne-game-state") {
+      games.sub = String(data.sub || "").slice(0, 300);
+      if (screenId) screenMode.report(true);   // the remote panels see the new score at once
+    }
+  });
 
   const state = { q: "", sort: "title", tvQ: "", tvSort: "title", tvSeason: null };
 
@@ -1448,6 +1454,7 @@
   function remotePress(button) {
     const key = REMOTE_KEYS[button];
     if (!key) return;
+    if (games.isOpen()) { games.key(key); return; }   // a game takes the arrows and Enter (its frame can't hear this page's keys)
     const target = document.activeElement || document.body;
     const field = ["INPUT", "SELECT", "TEXTAREA"].indexOf(target.tagName) >= 0;
     if (!target.dispatchEvent(new KeyboardEvent("keydown", { key: key, bubbles: true, cancelable: true }))) return;  // taken
@@ -1460,10 +1467,14 @@
 
   document.addEventListener("keydown", function (e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    // A game has the keyboard while it has focus (keys inside its frame never reach this page); on the bar,
-    // Escape or Backspace goes back to Games.
+    // A game has the keyboard while its frame has focus (keys inside it never reach this page). With focus out
+    // here, Escape or Backspace goes back to Games, and arrows and Enter go to the game, unless on the bar's buttons.
     if (games.isOpen()) {
-      if (e.key === "Escape" || e.key === "Backspace") { e.preventDefault(); games.close(); }
+      if (e.key === "Escape" || e.key === "Backspace") { e.preventDefault(); games.close(); return; }
+      const onBar = document.activeElement && document.activeElement.closest && document.activeElement.closest(".mc-game-bar");
+      if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Enter", " "].indexOf(e.key) >= 0 && !onBar) {
+        e.preventDefault(); games.key(e.key === " " ? "Enter" : e.key);
+      }
       return;
     }
     if (!$("mc-player").hidden) { if (player.key(e)) e.preventDefault(); return; }
@@ -2001,6 +2012,7 @@
         return { kind: "calibrating", title: "Adjusting the text size", sub: textSize.label() };
       }
       if (signage.running) return signage.state();
+      if (games.isOpen() && games.current) return { kind: "game", title: games.current.name, sub: games.sub };   // its score line
       if (!$("mc-player").hidden) {
         if ($("mc-player").classList.contains("youtube")) {
           return { kind: "youtube", title: $("mc-player-title").textContent, position: player.yt.time,

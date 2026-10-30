@@ -1,0 +1,37 @@
+{#- Prism Drop (static/games/prism-drop/): the field in the middle, the score on one side and the controls on the
+    other (stacked on a narrow screen). Every text that changes is set with textContent by game.js. -#}
+<section class="gm-panel pd-score" aria-label="Score">
+  <p class="gm-eyebrow">// PRISM DROP</p>
+  <h1 class="gm-title">PRISM<span>DROP</span></h1>
+  <dl class="pd-stats">
+    <div><dt>Score</dt><dd id="pd-score">0</dd></div>
+    <div><dt>Best</dt><dd id="pd-best">0</dd></div>
+    <div><dt>Drop</dt><dd id="pd-drop">1 / 10</dd></div>
+  </dl>
+  <p class="pd-result" id="pd-result" role="status" aria-live="polite">Pick a pocket, then drop.</p>
+</section>
+<section class="pd-machine">
+  <canvas id="pd-field" width="640" height="920" role="img"
+          aria-label="Ten columns and twenty rows of neon pins over ten numbered pockets."></canvas>
+</section>
+<section class="gm-panel pd-controls" aria-label="Controls">
+  <p class="gm-eyebrow">// POINTS</p>
+  <ul class="pd-points">
+    <li><b>20</b> right pocket</li>
+    <li><b>15</b> one away</li>
+    <li><b>10</b> two away</li>
+    <li class="pd-coin"><b>+1–5</b> each coin peg</li>
+  </ul>
+  <p class="gm-eyebrow">// PEGS</p>
+  <ul class="pd-legend">
+    <li class="pd-block">Block: shoves two sideways</li>
+    <li class="pd-bomb">Bomb: blasts it 2–3 any way</li>
+    <li class="pd-coinpeg">Coin: bonus points</li>
+  </ul>
+  <div class="pd-buttons">
+    <button type="button" id="pd-drop-button" class="gm-primary">Drop ↓</button>
+    <button type="button" id="pd-replay">↺ Replay</button>
+    <button type="button" id="pd-sound" aria-pressed="true">Sound: on</button>
+  </div>
+  <p class="gm-keys">◀ ▶ pick · Enter drop · ▲ replay · ▼ sound</p>
+</section>

@@ -1875,129 +1875,6 @@
     catch (e) { $("media-settings").replaceChildren(el("p", "error", e.message)); }
   }
 
-  // --------------------------------------------- Games (Settings → Entertainment, arcade.py)
-  // The switch, who may play and the site (PUT /api/admin/settings/games); the games Media → Games lists
-  // (/api/admin/games: add, edit, ↑ ↓, turn off, remove, test). Every answer is the whole state, drawn again.
-  function renderGames(data) {
-    const box = $("games-settings");
-    box.replaceChildren();
-    box.appendChild(el("p", "muted", "Games from another site (e.g. Lumi Web and Lumi Games) open in Media → Games. " +
-      "They're served from the arcade, an address of their own, so nothing in them can reach Mnemerynne."));
-    if (!data.arcade_url) {
-      box.appendChild(el("p", "error", "MNEMERYNNE_ARCADE_URL isn't set on the server, so Games can't open " +
-        "(deploy README, section 5l)."));
-    } else {
-      box.appendChild(el("p", "small", "Arcade: " + data.arcade_url));
-    }
-    async function send(method, url, body) {
-      showError("");
-      try { renderGames(await api(method, url, body)); }
-      catch (err) { showError(err.message); }
-    }
-    const s = data.settings;
-
-    // On or off, who may play, and the site.
-    const form = el("form");
-    const grid = el("div", "agent-settings");
-    const on = agentInput("checkbox", s.enabled);
-    const group = agentInput("text", s.group);
-    group.setAttribute("list", "domain-groups");
-    group.placeholder = "Nobody but admins";
-    const site = agentInput("url", s.site_url);
-    site.placeholder = "https://sadgirlsclub.wtf";
-    agentField(grid, "Games are on", on).title = "Off: Media → Games disappears and the arcade answers nothing";
-    agentField(grid, "Who may play", group).title =
-      "AD or Entra group(s), separated by ;. They also need Media. Empty: admins only.";
-    agentField(grid, "Games site", site).title = "The whole site, without a path; served at the arcade's root";
-    form.appendChild(grid);
-    const actions = el("div", "ax-new");
-    const save = el("button", "small", "Save");
-    save.type = "submit";
-    actions.appendChild(save);
-    form.appendChild(actions);
-    form.addEventListener("submit", function (e) {   // sends all three: the PUT changes only what's sent
-      e.preventDefault();
-      send("PUT", "/api/admin/settings/games", { enabled: on.checked, group: group.value.trim(), site_url: site.value.trim() });
-    });
-    box.appendChild(form);
-
-    // The games, in the order Media shows them.
-    box.appendChild(el("h3", "ax-h small", "The games"));
-    const result = el("span", "small muted");
-    if (data.games.length) {
-      box.appendChild(table(["", "Name", "Start page", "", "", "", "", "", ""], data.games.map(function (g, i) {
-        function link(text, onClick, cls) {
-          const b = el("button", "link small" + (cls ? " " + cls : ""), text);
-          b.type = "button";
-          b.addEventListener("click", onClick);
-          return b;
-        }
-        const up = link("↑", function () { send("PUT", "/api/admin/games/" + g.id, { move: -1 }); });
-        up.disabled = i === 0;
-        up.title = "Move up";
-        const down = link("↓", function () { send("PUT", "/api/admin/games/" + g.id, { move: 1 }); });
-        down.disabled = i === data.games.length - 1;
-        down.title = "Move down";
-        const edit = link("Edit", function () { fill(g); });
-        const toggle = link(g.enabled ? "Turn off" : "Turn on", function () {
-          send("PUT", "/api/admin/games/" + g.id, { enabled: !g.enabled });
-        });
-        const test = link("Test", async function () {
-          result.textContent = "Asking the site for " + g.start_path + "…";
-          try {
-            const r = await api("POST", "/api/admin/games/" + g.id + "/test");
-            result.textContent = g.name + ": " + (r.status ? "HTTP " + r.status : r.detail) +
-              (r.location ? " → " + r.location : "") + (r.ok ? " ✓" : " ✗");
-          } catch (err) { result.textContent = err.message; }
-        });
-        const drop = link("Remove", function () {
-          if (confirm("Remove " + g.name + " from Games?")) send("DELETE", "/api/admin/games/" + g.id);
-        }, "danger");
-        return [g.icon, g.name + (g.enabled ? "" : " (off)"), g.start_path, up, down, edit, toggle, test, drop];
-      })));
-      box.appendChild(result);
-    } else {
-      box.appendChild(el("p", "small muted", "None yet. Add each game's page on the site below, e.g. Lumi Web at /lumibot/."));
-    }
-
-    // Add one, or edit the one picked with Edit (the same form).
-    const add = el("form", "ax-new");
-    const icon = agentInput("text", "🎮");
-    icon.setAttribute("aria-label", "Icon");
-    icon.size = 3;
-    const name = agentInput("text", "");
-    name.placeholder = "Name";
-    name.setAttribute("aria-label", "Name");
-    const path = agentInput("text", "");
-    path.placeholder = "/lumibot/";
-    path.setAttribute("aria-label", "Start page");
-    const about = agentInput("text", "");
-    about.placeholder = "A few words about it";
-    about.setAttribute("aria-label", "Description");
-    const addBtn = el("button", "small", "Add");
-    addBtn.type = "submit";
-    const cancel = el("button", "link small", "Cancel");
-    cancel.type = "button";
-    cancel.hidden = true;
-    let editing = null;   // the game being edited, or null to add
-    function fill(g) {
-      editing = g;
-      icon.value = g.icon; name.value = g.name; path.value = g.start_path; about.value = g.description;
-      addBtn.textContent = "Save " + g.name;
-      cancel.hidden = false;
-      name.focus();
-    }
-    cancel.addEventListener("click", function () { renderGames(data); });
-    add.append(icon, name, path, about, addBtn, cancel);
-    add.addEventListener("submit", function (e) {
-      e.preventDefault();
-      const body = { icon: icon.value.trim(), name: name.value.trim(), start_path: path.value.trim(), description: about.value.trim() };
-      if (editing) send("PUT", "/api/admin/games/" + editing.id, body);
-      else send("POST", "/api/admin/games", body);
-    });
-    box.appendChild(add);
-  }
-
   // --------------------------------------------- Desktop backup (Settings → This box, sync.py)
   // The switch and who may back up (PUT /api/admin/settings/backups), and every backed-up folder: whose, from
   // which computer, how big, and when it last sent something. Every answer is the whole state, drawn again.
@@ -2010,6 +1887,11 @@
       ? "Backup address: " + data.backup_url
       : "MNEMERYNNE_BACKUP_URL isn't set, so backups go to the main address, with its upload limits " +
         "(deploy README, section 5m)."));
+    const builds = Object.values(data.builds || {});
+    box.appendChild(el("p", "small", builds.length
+      ? "The app on offer (" + data.latest + "): " + builds.join(", ") + ", from " + data.client_dir + "."
+      : "No app to offer yet: put Mnemerynne-Backup-Setup-<version>.exe and " +
+        "Mnemerynne_Backup-<version>-x86_64.AppImage in " + data.client_dir + "."));
     async function send(body) {
       showError("");
       try { renderBackups(await api("PUT", "/api/admin/settings/backups", body)); }
@@ -2058,11 +1940,6 @@
   async function loadBackups() {
     try { renderBackups(await api("GET", "/api/admin/settings/backups")); }
     catch (e) { $("backups-settings").replaceChildren(el("p", "error", e.message)); }
-  }
-
-  async function loadGames() {
-    try { renderGames(await api("GET", "/api/admin/settings/games")); }
-    catch (e) { $("games-settings").replaceChildren(el("p", "error", e.message)); }
   }
 
   async function loadChatGPT() {
@@ -2136,7 +2013,7 @@
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
     if (tab === "settings" && !updatesLoaded) {
-      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeMail(); loadClaudeLinks(); loadChatGPT(); loadExperimental(); loadRooms(); loadAutomations(); loadMedia(); loadGames(); loadBackups(); loadDev();
+      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeMail(); loadClaudeLinks(); loadChatGPT(); loadExperimental(); loadRooms(); loadAutomations(); loadMedia(); loadBackups(); loadDev();
       if (window.ErynneM365) window.ErynneM365.load();   // admin_m365.js
       if (window.ErynneTheme) window.ErynneTheme.load();   // admin_theme.js
     }

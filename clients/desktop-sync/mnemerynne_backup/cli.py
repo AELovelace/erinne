@@ -63,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("folder", help="label or path")
     sub.add_parser("list", help="the backed-up folders")
     s = sub.add_parser("sync", help="one backup pass now")
+    s.add_argument("-v", "--verbose", action="store_true", default=argparse.SUPPRESS,
+                   help="list every skipped file and why")    # also after the command: `sync -v`
     s.add_argument("--check", action="store_true", help="also compare with the NAS's list")
     s.add_argument("folders", nargs="*", help="labels (default: all)")
     sub.add_parser("run", help="keep backing up until stopped (a service)")

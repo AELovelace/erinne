@@ -242,7 +242,8 @@
     </section>
   </div>
     {#- Entertainment (admin.js renderMedia): full width under the two columns, above Themes. Media is split into
-        what it is and who may use it, playback, and live sources; games and web apps join it later. -#}
+        what it is and who may use it, playback, and live sources. Games are built in (mnemerynne/games.py) and
+        follow Media's group, so they have nothing to set here. -#}
     <section class="inbox admin ax-wide" aria-labelledby="ax-entertainment-title">
       <h2 class="ax-split-title" id="ax-entertainment-title">Entertainment</h2>
       <h2 class="ax-h">Media</h2>
@@ -251,9 +252,6 @@
       <div id="media-playback-settings" aria-live="polite"></div>
       <h2 class="ax-h">Live TV and radio</h2>
       <div id="media-sources-settings" aria-live="polite"></div>
-      {#- Games (admin.js renderGames, arcade.py): the switch, who may play, the site, and the games Media lists. -#}
-      <h2 class="ax-h">Games</h2>
-      <div id="games-settings" aria-live="polite"><p class="muted">Loading…</p></div>
     </section>
     {#- Themes (admin_theme.js): full width under Entertainment, above Experimental. -#}
     <section class="inbox admin ax-wide" aria-labelledby="ax-themes-title">
