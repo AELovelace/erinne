@@ -41,7 +41,13 @@ mnemerynne-backup searchable Documents on
 mnemerynne-backup restore Documents --to ~/restored [--path Reports/2026]
 mnemerynne-backup versions Documents Reports/q1.xlsx   # then restore --path … --version ID
 mnemerynne-backup autostart on [--service]             # --service: a systemd user service, no desktop
+mnemerynne-backup                                      # the terminal app (pip install ".[tui]")
 ```
+
+In a terminal (a tiling window manager, a console), `mnemerynne-backup` on its own opens the terminal app. When
+the service is running, the app steers it (Back up now, Pause, folders and settings) and closing it leaves the
+service backing up; otherwise the app backs up by itself while it's open. The tray, the app and the service share
+one lock, so only one of them backs up at a time.
 
 Settings live in `%APPDATA%\Mnemerynne Backup` (Windows) or `~/.config/mnemerynne-backup`; what was
 backed up last in `%LOCALAPPDATA%\Mnemerynne Backup` or `~/.local/state/mnemerynne-backup`. The

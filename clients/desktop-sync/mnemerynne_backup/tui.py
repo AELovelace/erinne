@@ -1,8 +1,10 @@
 """The terminal app: the tray's Back up now, Pause, Settings and Restore in one sakura-pink screen.
 
-For a laptop without a tray (a tiling window manager, a console): `mnemerynne-backup-tui`. Backups run on a thread
-of their own (watch.Runner) while the screen is open, and stop when it closes. It takes the tray's lock, so the two
-never back up at once.
+For a laptop without a tray (a tiling window manager, a console): `mnemerynne-backup-tui`. When the background
+service (`mnemerynne-backup run`) is running, the screen steers it: Back up now and Pause go to it through state.db,
+settings go through the settings file it watches, and closing the screen leaves it backing up. Otherwise backups
+run on a thread of the screen's own (watch.Runner) and stop when it closes. Either way they share one lock, so only
+one of the tray, the screen and the service backs up at a time.
 """
 
 from __future__ import annotations
@@ -30,9 +32,9 @@ from textual.widgets import Button, Checkbox, DataTable, Footer, Input, Label, R
 from mnemerynne_backup import __version__, signin
 from mnemerynne_backup.backup import Backup, connect, update_offer
 from mnemerynne_backup.cli import describe
-from mnemerynne_backup.config import APP, COMMON_EXCLUDES, Config
+from mnemerynne_backup.config import APP, COMMON_EXCLUDES, Config, config_dir
 from mnemerynne_backup.engine import Report
-from mnemerynne_backup.watch import Runner, log_to_file, single_instance
+from mnemerynne_backup.watch import (ASK_NOW, ASK_PAUSED, Runner, log_to_file, service_status, single_instance)
 
 log = logging.getLogger(__name__)
 
@@ -359,11 +361,16 @@ class BackupTui(App):
         Binding("q", "quit", "Quit"),
     ]
 
-    def __init__(self):
+    def __init__(self, lock=None):
         super().__init__()
         self.config = Config.load()
         self.backup = Backup(self.config)
         self.runner: Runner | None = None
+        self.lock = lock                        # None: the background service has it, and this screen steers it
+        self.remote = lock is None
+        self.service: dict | None = None        # the service's {"pid", "busy", "paused"}
+        self.config_mtime = _mtime()
+        self.seen_at = 0.0                      # the newest service report already shown
         self.reports: list[Report] = []
         self.last_problem: str | None = None
         self.update: tuple[str, str] | None = None      # (version, download address) when one is offered
@@ -393,6 +400,11 @@ class BackupTui(App):
         self.set_timer(60, self.check_update)
         self.set_interval(24 * 3600, self.check_update)
         self.say(f"hello 🌸 {APP} {__version__} on {self.config.computer}", PINK)
+        if self.remote:
+            self.reports = self._stored_reports()
+            self.seen_at = max((r.finished_at for r in self.reports), default=0.0)
+            self.say("the background service is backing up; this screen steers it ✿", MAGENTA)
+            self._fill_folders()
         if self.config.server:
             self.start_runner()
         else:
@@ -404,10 +416,20 @@ class BackupTui(App):
         line.append(text, style=colour)
         self.query_one(RichLog).write(line)
 
+    def _paused(self) -> bool:
+        if self.remote:     # what was asked for: the service follows within a few seconds
+            return bool(self.service and self.backup.state.get(ASK_PAUSED, False))
+        return bool(self.runner and self.runner.paused)
+
+    def _busy(self) -> bool:
+        if self.remote:
+            return bool(self.service and self.service.get("busy"))
+        return bool(self.runner and self.runner.busy)
+
     def _state(self) -> str:
-        if self.runner and self.runner.paused:
+        if self._paused():
             return "paused"
-        if self.runner and self.runner.busy:
+        if self._busy():
             return "busy"
         if not self.config.server or any(not r.ok for r in self.reports):
             return "problem"
@@ -416,9 +438,9 @@ class BackupTui(App):
     def _status_text(self) -> str:
         if not self.config.server:
             return "Not signed in: press l"
-        if self.runner and self.runner.paused:
+        if self._paused():
             return "Paused: press p to carry on"
-        if self.runner and self.runner.busy:
+        if self._busy():
             return "Backing up…"
         problems = [r for r in self.reports if not r.ok]
         if problems:
@@ -428,6 +450,8 @@ class BackupTui(App):
         return "Starting…"
 
     def _refresh(self) -> None:
+        if self.remote:
+            self._follow_service()
         state = self._state()
         busy = state == "busy"
         if busy and not self.was_busy:
@@ -437,6 +461,8 @@ class BackupTui(App):
         status = Text(f"{dot} {self._status_text()}", style=f"bold {STATE_COLORS[state]}")
         if self.config.server:
             status.append(f"   {self.config.computer} → {self.config.server}", style=PETAL)
+        if self.remote:
+            status.append("   (the background service)", style=PETAL)
         if self.update:
             status.append(f"   version {self.update[0]} is ready: press u", style=CYAN)
         self.query_one("#status", Static).update(status)
@@ -463,9 +489,37 @@ class BackupTui(App):
         if self.config.folders:
             table.move_cursor(row=min(row, len(self.config.folders) - 1))
 
+    # ------------------------------------------------------- the service
+    def _stored_reports(self) -> list[Report]:
+        fields = Report.__dataclass_fields__
+        return [Report(**{k: v for k, v in r.items() if k in fields})
+                for r in self.backup.last_reports().values() if r]
+
+    def _follow_service(self) -> None:
+        """Every half second: the service's state, its new reports, and settings it saved (a folder's NAS id)."""
+        status = service_status(self.backup.state)
+        if status is None:
+            lock = single_instance()
+            if lock is not None:                    # it stopped: carry on from here
+                self.lock, self.remote, self.service = lock, False, None
+                self.say("the background service stopped; backing up from this screen until it closes", WARN)
+                self.start_runner()
+            return
+        self.service = status
+        mtime = _mtime()
+        if mtime != self.config_mtime:
+            self.config_mtime = mtime
+            self.config = Config.load()
+            self.backup = Backup(self.config, self.backup.state)
+            self._fill_folders()
+        new = [r for r in self._stored_reports() if r.finished_at > self.seen_at]
+        if new:
+            self.seen_at = max(r.finished_at for r in new)
+            self.reported(Reported(new))
+
     # -------------------------------------------------------------- backups
     def start_runner(self) -> None:
-        if self.runner is not None or not self.config.server:
+        if self.remote or self.runner is not None or not self.config.server:
             return
         self.runner = Runner(self.backup, lambda reports: self.post_message(Reported(reports)))
         self.run_worker(self.runner.loop, thread=True, name="backups", exit_on_error=False)
@@ -518,14 +572,22 @@ class BackupTui(App):
         return self.config.folders[min(max(row, 0), len(self.config.folders) - 1)]
 
     def action_back_up_now(self) -> None:
-        if self.runner:
+        if self.remote and self.config.server:
+            self.backup.state.set(ASK_NOW, time.time())
+            self.say("asked the service for a pass ❀", MAGENTA)
+        elif self.runner:
             self.runner.run_now()
             self.say("a pass is on its way ❀", MAGENTA)
         else:
             self.notify("Sign in first (press l).", title=APP)
 
     def action_toggle_pause(self) -> None:
-        if self.runner:
+        if self.remote and self.service:
+            paused = not self._paused()
+            self.backup.state.set(ASK_PAUSED, paused)
+            self.say("paused · petals resting" if paused else "carrying on ✿", PETAL)
+            self._refresh()
+        elif self.runner:
             self.runner.paused = not self.runner.paused
             self.say("paused · petals resting" if self.runner.paused else "carrying on ✿", PETAL)
             self._refresh()
@@ -721,13 +783,21 @@ class BackupTui(App):
             webbrowser.open(self.update[1])
 
 
+def _mtime() -> int | None:
+    try:
+        return os.stat(config_dir() / "config.json").st_mtime_ns
+    except OSError:
+        return None
+
+
 def main() -> int:
     lock = single_instance()
-    if lock is None:
+    app = BackupTui(lock)
+    if lock is None and service_status(app.backup.state) is None:
         print(f"{APP} is already running (the tray icon, or another terminal).", file=sys.stderr)
         return 0
     log_to_file()
-    BackupTui().run()
+    app.run()
     logging.shutdown()
     return 0
 

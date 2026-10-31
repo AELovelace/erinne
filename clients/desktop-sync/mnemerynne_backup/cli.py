@@ -142,14 +142,20 @@ def _run(args, config: Config, backup: Backup) -> int | None:
             _print_report(r, args.verbose)
         return 0 if all(r.ok for r in reports) else 2
     elif args.cmd == "run":
-        from mnemerynne_backup.watch import Runner
+        from mnemerynne_backup.watch import Runner, single_instance
+
+        lock = single_instance()        # the tray and the terminal app take it too: one backs up at a time
+        if lock is None:
+            print("Already backing up (the tray, the terminal app or the service); not starting another.",
+                  file=sys.stderr)
+            return 1                    # the service tries again a minute later (Restart=on-failure)
 
         def show(reports):
             for r in reports:
                 if r.uploaded or r.moved or r.deleted or not r.ok:
                     print(describe(r), flush=True)
 
-        runner = Runner(backup, show)
+        runner = Runner(backup, show, service=True)
         try:
             runner.loop()
         except KeyboardInterrupt:
