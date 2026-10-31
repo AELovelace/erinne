@@ -23,6 +23,9 @@ tui = [
 [project.scripts]
 mnemerynne-backup = "mnemerynne_backup.cli:main"
 mnemerynne-backup-tui = "mnemerynne_backup.tui:main"
+# The short names for the same two
+mbak = "mnemerynne_backup.cli:main"
+mbak-tui = "mnemerynne_backup.tui:main"
 
 [project.gui-scripts]
 mnemerynne-backup-tray = "mnemerynne_backup.tray:main"
