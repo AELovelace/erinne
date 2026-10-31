@@ -2,6 +2,14 @@
 
 *Written 2026-10-28 (late) by Lumi for Doll. A stretch goal. It lives in the repo on purpose, not in IT-OPS.*
 
+## Status (2026-11-01): shared casino tables
+
+Blackjack, Roulette, Horse Racing and Slot Machines now join Prism Drop in Media → Games, including set-top boxes. Up to eight accounts or paired TVs share a persistent table. The server owns bets, random results, blackjack hands and play-chip settlement. This follows Doll's explicit request for these traditional games; the earlier original-games-only idea below is superseded for this scope.
+
+Implementation: `mnemerynne/casino.py`, the existing Games routes and registry, `static/games/casino/`, `templates/games/casino.html`, and migration `0061_casino_rooms.sql`. Visible clients poll; deadlines advance during requests, including after reconnects. SQLite transactions serialize moves across processes. Snapshot revisions reject duplicate or stale actions. Free chips are per table and have no currency integration.
+
+See the repository's `CONTRIBUTOR_GUIDE.md`, `GENERATION_TUNING_GUIDE.md`, `PLAYER_CHECKLIST.md` and `TESTING_GUIDE.md` for the current implementation and validation. The remaining roadmap below is historical context, not a description of today's multiplayer behavior.
+
 ## Status (2026-10-29): started, and the arcade is gone
 
 Doll's calls on 2026-10-29 changed parts of the plan below:

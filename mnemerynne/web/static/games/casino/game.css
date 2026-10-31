@@ -1,0 +1,41 @@
+/* One responsive lounge for all four shared tables, using the active app theme. */
+.gm { display: block; max-width: 1600px; margin: auto; }
+.casino-heading, .casino-section-head, .casino-table-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.casino-heading { padding: .5rem 0 1rem; }
+.casino-heading .gm-title { margin-bottom: .3rem; }
+.casino-heading > p, .casino-controls p, #casino-lobby p { color: var(--muted); }
+.casino-heading > p { max-width: 18rem; text-align: right; }
+.casino-rooms { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+.casino-rooms button { min-height: 6rem; text-align: left; white-space: pre-line; }
+.casino-layout { display: grid; grid-template-columns: minmax(0, 1fr) 19rem; gap: 1rem; margin-top: 1rem; }
+.casino-board { align-self: stretch; min-height: 30rem; background: radial-gradient(ellipse at top, rgba(0, 160, 120, .15), transparent 75%), var(--glass); }
+.casino-controls { align-self: start; }
+.casino-controls h2 { font-size: 1.8rem; margin: .4rem 0 1rem; }
+.casino-controls button { min-height: 3rem; }
+#casino-bet, #casino-start, #casino-refill { width: 100%; margin-top: .7rem; }
+.casino-stepper { display: flex; justify-content: space-between; align-items: center; gap: .5rem; min-height: 3.3rem; text-align: center; }
+.casino-stage { min-height: 11rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .6rem; padding: 1rem; }
+.casino-stage h2 { margin: .2rem; }
+.casino-players { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .75rem; }
+.casino-player { padding: .8rem; border: 1px solid var(--line); background: var(--glass); min-width: 0; }
+.casino-player[data-you="true"] { border-color: var(--cyan); }
+.casino-player h3 { margin: 0 0 .5rem; overflow-wrap: anywhere; }
+.casino-player p { margin: .4rem 0; }
+.casino-cards, .casino-reels { display: flex; flex-wrap: wrap; gap: .35rem; margin: .75rem 0; }
+.casino-card { display: inline-grid; place-items: center; min-width: 2.7rem; height: 3.8rem; border-radius: .3rem; background: #fff5e8; color: #172033; border: 1px solid #c5b7a5; font-size: 1.15rem; font-weight: bold; }
+.casino-card.red { color: #ac183c; }
+.casino-card.back { background: repeating-linear-gradient(45deg, #4b265b 0 4px, #67357c 4px 8px); color: white; }
+.casino-reels span { display: grid; place-items: center; background: rgba(128, 128, 128, .12); border: 1px solid var(--line); border-radius: .5rem; min-width: 2.7rem; min-height: 3.4rem; font-size: 2rem; }
+.casino-reels.rolling span { animation: casino-reel .18s ease-in-out infinite alternate; }
+.casino-wheel { display: grid; place-items: center; width: 7rem; height: 7rem; border-radius: 50%; border: .6rem double var(--cyan); font-size: 3rem; background: #133c32; color: white; }
+.casino-wheel.red { background: #a52045; }.casino-wheel.black { background: #17151e; }
+.casino-wheel.spinning { animation: casino-spin 1.2s linear infinite; }
+.casino-tracks { width: 100%; }.casino-lane { display: grid; grid-template-columns: 10rem 1fr; align-items: center; gap: .5rem; margin: .45rem 0; }
+.casino-track { height: 1.8rem; border-bottom: 2px dashed var(--line); border-right: 3px solid var(--cyan); }
+.casino-horse { display: inline-block; font-size: 1.5rem; transition: margin-left .6s linear; transform: scaleX(-1); }
+.casino-error { padding: .8rem; border: 1px solid var(--rose); color: var(--ink); background: var(--glass); }
+.casino-win { color: var(--cyan); font-weight: bold; }
+[hidden] { display: none !important; }
+@keyframes casino-spin { to { transform: rotate(360deg); } }
+@keyframes casino-reel { to { transform: translateY(.2rem); opacity: .65; } }
+@media (max-width: 850px) { .casino-layout { grid-template-columns: minmax(0, 1fr); }.casino-heading, .casino-section-head { align-items: start; flex-direction: column; }.casino-heading > p { text-align: left; max-width: none; margin: 0; }.casino-board { min-height: 20rem; }.casino-lane { grid-template-columns: 8rem 1fr; } }

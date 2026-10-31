@@ -2,12 +2,13 @@
 (docs/stretch-goals/built-in-games.md). They replace the arcade (games proxied from another site), which is gone.
 
 - A game is "installed" by being in GAMES; there is no table and no admin form.
-- Its files are static, under web/static/games/<slug>/ (rules.js, game.js, game.css), with the shared
+- Its files are static, under web/static/games/<slug>/ (the casino games share games/casino/), with the shared
   web/static/games/common.js and common.css. web/games.py serves its page at /media/games/<slug>.
 - They are Mnemerynne's own reviewed code, so they run on its origin: Media's game layer frames the page, and the
   TV page hands a remote panel's arrows and Enter to it (media.js games.key).
 - Who may play: whoever may use Media, and a paired screen (the TV) as its owner, like the rest of Media.
-- Scores stay on the device that played (the browser's storage): nothing is sent or worth anything.
+- Prism Drop scores stay on the device. Multiplayer casino tables persist server-side free play chips,
+  with no cash value or external currency integration (casino.py).
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ class Game:
     icon: str           # an emoji, shown on its card and in the game bar
     description: str    # one line for its card
     controls: str       # how to play with the TV remote's arrows and Enter (or a keyboard)
+    multiplayer: bool = False
 
 
 GAMES: tuple[Game, ...] = (
@@ -29,6 +31,16 @@ GAMES: tuple[Game, ...] = (
          description="Pick a pocket and drop a neon ball through blocks, bombs and bonus pegs. Ten drops, best score wins.",
          controls="◀ ▶ pick a pocket · Enter drops · ▲ replays the last drop · ▼ sound on or off"),
 )
+
+# Casino tables share one renderer and server rules; each still has its own Games card.
+GAMES += tuple(Game(slug=slug, name=name, icon=icon, description=description,
+                    controls="Arrows choose a control · Enter selects · join the same table to play together",
+                    multiplayer=True) for slug, name, icon, description in (
+    ("blackjack", "Blackjack", "🂡", "Share a table, hit or stand, and try to beat the dealer. Free play chips."),
+    ("roulette", "Roulette", "🎡", "Pick a number or an outside bet and watch the wheel together. Free play chips."),
+    ("horse-racing", "Horse Racing", "🏇", "Back one of six horses and cheer on the same race. Free play chips."),
+    ("slots", "Slot Machines", "🎰", "Spin together, compare reels, and climb your table's chip standings. Free play chips."),
+))
 
 
 def get(slug: str) -> Game | None:

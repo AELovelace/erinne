@@ -26,6 +26,7 @@
 
   document.addEventListener("keydown", function (e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.target && (e.target.matches("input, select, textarea") || e.target.isContentEditable)) return; // Native form editing keeps its keys.
     if (e.key === "Escape" || e.key === "Backspace") { if (framed) { e.preventDefault(); toParent("close"); } return; }
     const action = KEYS[e.key];
     if (!action) return;

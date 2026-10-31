@@ -44,7 +44,8 @@ mnemerynne-backup autostart on [--service]             # --service: a systemd us
 mnemerynne-backup                                      # the terminal app (pip install ".[tui]")
 ```
 
-In a terminal (a tiling window manager, a console), `mnemerynne-backup` on its own opens the terminal app. When
+`mbak` is short for `mnemerynne-backup` (`mbak list`, `mbak sync`, …), and `mbak-tui` for
+`mnemerynne-backup-tui`. In a terminal (a tiling window manager, a console), `mbak` on its own opens the terminal app. When
 the service is running, the app steers it (Back up now, Pause, folders and settings) and closing it leaves the
 service backing up; otherwise the app backs up by itself while it's open. The tray, the app and the service share
 one lock, so only one of them backs up at a time.

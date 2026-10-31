@@ -1,0 +1,109 @@
+// Real-browser multiplayer checks. PUPPETEER_MODULE and CHROME_PATH may point to existing local installations.
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { mkdir } from "node:fs/promises";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import net from "node:net";
+
+const modulePath = process.env.PUPPETEER_MODULE;
+const { default: puppeteer } = await import(modulePath ? pathToFileURL(modulePath).href : "puppeteer");
+const port = await new Promise(done => { // Reserve a free loopback port for the disposable preview app.
+  const socket = net.createServer(); socket.listen(0, "127.0.0.1", () => { const p = socket.address().port; socket.close(() => done(p)); });
+});
+const base = `http://127.0.0.1:${port}`;
+const python = resolve(process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python");
+const server = spawn(python, ["python/casino_preview.py", String(port)], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+let logs = "", browser;
+server.stdout.on("data", b => { logs += b; }); server.stderr.on("data", b => { logs += b; });
+const errors = [];
+try {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try { if ((await fetch(base + "/login")).ok) break; } catch (_) { /* Wait for app startup. */ }
+    if (server.exitCode !== null) throw new Error(logs);
+    if (attempt === 99) throw new Error("Preview did not start: " + logs);
+    await new Promise(r => setTimeout(r, 200));
+  }
+  browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || undefined, headless: true,
+    args: ["--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding"] });
+  const aliceContext = await browser.createBrowserContext(), bobContext = await browser.createBrowserContext();
+  const alice = await aliceContext.newPage(), bob = await bobContext.newPage();
+  for (const [page, name] of [[alice, "alice"], [bob, "bob"]]) {
+    page.on("pageerror", e => errors.push(e.message));
+    await page.setViewport({ width: 1440, height: 1000 });
+    await page.goto(base + "/login");
+    await page.evaluate(async username => { // Use the actual session login, not a mocked game endpoint.
+      const result = await fetch("/login", { method: "POST", body: new URLSearchParams({ username, password: "preview-password" }) });
+      if (!result.ok) throw new Error("Login failed");
+    }, name);
+    await page.evaluateOnNewDocument(() => { Object.defineProperty(document, "hidden", { get: () => false }); }); // Both test tabs act like visible TV screens.
+  }
+  await mkdir("runs/casino-browser", { recursive: true });
+  for (const game of ["blackjack", "roulette", "horse-racing", "slots"]) {
+    await alice.goto(base + "/media/games/" + game);
+    await alice.waitForSelector("#casino-create:not([disabled])");
+    await alice.click("#casino-create");
+    await alice.waitForFunction(() => !document.getElementById("casino-table").hidden);
+    const code = await alice.evaluate(() => sessionStorage.getItem("casino-room:" + document.getElementById("gm").dataset.game));
+    await bob.goto(base + "/media/games/" + game);
+    await bob.waitForSelector('[data-room="' + code + '"]');
+    await bob.click('[data-room="' + code + '"]');
+    await bob.waitForFunction(() => document.querySelectorAll(".casino-player").length === 2);
+    await alice.waitForFunction(() => document.querySelectorAll(".casino-player").length === 2);
+    await alice.click("#casino-bet");
+    await alice.waitForFunction(() => document.getElementById("casino-bet").textContent === "Update bet");
+    await bob.waitForFunction(() => document.querySelector(".casino-player").textContent.includes("Bet 50"));
+    await bob.click("#casino-bet");
+    await bob.waitForFunction(() => document.getElementById("casino-bet").textContent === "Update bet");
+    await alice.waitForFunction(() => [...document.querySelectorAll(".casino-player")].every(p => p.textContent.includes("Bet 50")));
+    await alice.click("#casino-start");
+    await alice.waitForFunction(() => document.getElementById("casino-phase").textContent !== "Place your bets");
+    if (game === "blackjack") {
+      for (const page of [alice, bob]) {
+        await page.waitForFunction(() => document.getElementById("casino-phase").textContent !== "Place your bets");
+        if (await page.$eval("#casino-hand", e => !e.hidden)) await page.click("#casino-stand");
+        await page.waitForFunction(() => document.getElementById("casino-hand").hidden);
+      }
+    }
+    await alice.waitForFunction(() => document.getElementById("casino-phase").textContent === "Round complete", { timeout: 15000 });
+    await bob.waitForFunction(() => document.getElementById("casino-phase").textContent === "Round complete", { timeout: 15000 });
+    assert.equal(await alice.$eval("#casino-players", e => e.textContent.replaceAll(" · You", "")), await bob.$eval("#casino-players", e => e.textContent.replaceAll(" · You", "")));
+    await alice.screenshot({ path: `runs/casino-browser/${game}.png`, fullPage: true });
+    await alice.reload();
+    await alice.waitForFunction(() => !document.getElementById("casino-table").hidden);
+    assert.equal(await alice.evaluate(() => sessionStorage.getItem("casino-room:" + document.getElementById("gm").dataset.game)), code);
+    await alice.setViewport({ width: 390, height: 844 });
+    assert.ok(await alice.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), "Mobile board should not overflow horizontally");
+    await alice.screenshot({ path: `runs/casino-browser/${game}-phone.png`, fullPage: true });
+    await alice.setViewport({ width: 1440, height: 1000 });
+    await alice.evaluate(() => { document.getElementById("casino-leave").focus(); window.postMessage({ type: "mnemerynne-game-key", key: "Enter" }, location.origin); });
+    await alice.waitForFunction(() => !document.getElementById("casino-lobby").hidden);
+    await bob.waitForFunction(() => document.querySelectorAll(".casino-player").length === 1);
+    assert.ok(await bob.$eval(".casino-player", e => e.textContent.includes("Host")));
+    await bob.click("#casino-leave");
+    await bob.waitForFunction(() => !document.getElementById("casino-lobby").hidden);
+    console.log(`${game}: two accounts, shared settlement, refresh, mobile layout, remote input, host handoff passed`);
+  }
+  await alice.goto(base + "/media#games");
+  await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 5);
+  await alice.evaluate(() => { // The top bar keeps controls; the remote consumes the iframe's status message.
+    window.casinoTestReport = "";
+    window.addEventListener("message", e => {
+      if (e.origin === location.origin && e.source === document.getElementById("mc-game-frame").contentWindow && e.data.type === "mnemerynne-game-state") window.casinoTestReport = e.data.sub;
+    });
+  });
+  await alice.evaluate(() => [...document.querySelectorAll(".mc-card")].find(b => b.querySelector(".mc-label").textContent === "Roulette").click());
+  const frameElement = await alice.waitForSelector("#mc-game-frame");
+  const frame = await frameElement.contentFrame();
+  await frame.waitForSelector("#casino-create");
+  await alice.evaluate(() => document.getElementById("mc-game-frame").contentWindow.postMessage({ type: "mnemerynne-game-key", key: "Enter" }, location.origin));
+  await frame.waitForFunction(() => !document.getElementById("casino-table").hidden);
+  await alice.waitForFunction(() => window.casinoTestReport.includes("chips"));
+  await alice.click("#mc-game-back");
+  await alice.waitForFunction(() => document.getElementById("mc-game").hidden);
+  console.log("Media Games cards, embedded game, parent remote input and status reporting passed");
+  assert.deepEqual(errors, []);
+} finally {
+  if (browser) await browser.close();
+  server.kill();
+}

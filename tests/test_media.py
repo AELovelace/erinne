@@ -1047,6 +1047,54 @@ def test_prism_drop_rules_pass_in_node():
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
 
 
+def test_multiplayer_games_authentication_screens_and_moves(client, conn, directory):
+    from mnemerynne import casino
+    anonymous = TestClient(client.app)
+    _login(client, conn, directory)
+    _turn_on(client)
+    for slug in casino.GAMES:
+        base = f"/api/media/games/{slug}/rooms"
+        assert anonymous.get(base).status_code == 401
+        assert anonymous.post(base).status_code == 401
+        page = client.get(f"/media/games/{slug}")
+        assert page.status_code == 200 and 'id="casino-lobby"' in page.text
+        assert "/static/games/casino/game.js?v=" in page.text
+        assert "messages.js" not in page.text
+        created = client.post(base)
+        assert created.status_code == 200, created.text
+        assert created.headers["cache-control"] == "private, no-store"
+        s = created.json()
+        assert client.get(base).json()["rooms"][0]["mine"]
+        path = base + "/" + s["code"]
+        assert client.post(path, json={"action": "bet", "revision": s["revision"], "amount": True}).status_code == 422
+        assert client.post(path, json={"action": "bet", "revision": s["revision"], "amount": 50, "chips": 9999}).status_code == 422
+        assert anonymous.get(path).status_code == 401
+
+    # Two paired TVs owned by the same account still have independent seats.
+    from mnemerynne.media import screens
+    _screens_for(client)
+    with db.transaction(conn):
+        _, first_key = screens.create(conn, s_user := users.get_user(conn, "boss")["id"], "Lounge")
+        _, second_key = screens.create(conn, s_user, "Bedroom")
+    first, second = TestClient(client.app), TestClient(client.app)
+    first.cookies.set(screens.COOKIE, first_key)
+    second.cookies.set(screens.COOKIE, second_key)
+    path = "/api/media/games/roulette/rooms"
+    s = first.post(path).json()
+    joined = second.post(path + "/" + s["code"], json={"action": "join"})
+    assert joined.status_code == 200, joined.text
+    joined = joined.json()
+    assert s["you"] != joined["you"] and len(joined["players"]) == 2
+    assert {p["name"] for p in joined["players"]} == {"Lounge", "Bedroom"}
+    assert first.get(path + "/" + s["code"]).json()["players"] == joined["players"]
+    assert client.post(path + "/" + s["code"], json={"action": "join"},
+                       headers={"origin": "https://elsewhere.invalid"}).status_code == 403
+    assert client.put("/api/admin/settings/media", json={"screens_group": ""}).status_code == 200
+    assert first.get(path).status_code == 401
+    client.put("/api/admin/settings/media", json={"enabled": False})
+    assert client.get(path).status_code == 404
+
+
 def test_a_remote_starts_channels_forgets_itself_and_follows_the_group(client, conn, directory):
     _login(client, conn, directory)
     _turn_on(client)

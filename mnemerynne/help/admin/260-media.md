@@ -51,6 +51,14 @@ Media is a Kodi-style media centre for films, TV shows, music and pictures from 
 
 Adding, changing and removing sources is logged (`media.*`).
 
+## Built-in multiplayer games
+
+Media's **Games** tab includes Blackjack, Roulette, Horse Racing and Slot Machines alongside Prism Drop. They use the existing Media group; paired TVs also require their owner's screens-group access. No additional service, API key, currency integration or external game site is needed.
+
+Migration **0061** creates `casino_rooms`. It stores server-authoritative round state and free play-chip balances; normal database backups include it. Rooms survive app restarts, expire after two idle hours, and are removed on the next table creation. At most 100 rooms exist at once, eight seats per room, and three joined rooms per identity per game may be held before creating another. A signed-out paired TV has its own seat; signed-in devices share their account's seat.
+
+Clients poll active tables approximately once a second and lobbies every three seconds while visible. All table users see names, bets, cards after dealing (except the dealer's hole card), balances and results. Tables are discoverable by everyone with Media access. These chips have no cash value and never connect to SadGirlCoin.
+
 ## Signage
 
 Screens double as digital signage: playlists of pictures, clips, PDFs, text, web pages and announcements, scheduled per screen or group, with each screen's state in view. See [Signage](signage.md).

@@ -55,7 +55,7 @@ You only see what you may open in that folder on the share. Who may open it is s
 
 - Choose one and it opens over the whole page. **← Games** (or Escape or Backspace) goes back; **⛶** fills the screen; **⧉** opens it in a tab of its own.
 - The bar at the top shows the game's controls. They're the same on a keyboard and on a **remote panel**: its arrows and **Enter** play the game while it's open on the TV, and the panel shows the score under the game's name. The panel's **Stop**, or sending anything to the TV from your phone, closes the game.
-- Scores are only for fun. Each device remembers its own best; nothing is sent anywhere.
+- Scores and chips are only for fun. Prism Drop remembers its best score on this device; multiplayer table balances and rounds are saved on Erynne's server.
 
 **Prism Drop** 🔮: pick one of ten pockets and drop a neon ball through twenty rows of pins. A game is ten drops.
 
@@ -63,6 +63,19 @@ You only see what you may open in that folder on the share. Who may open it is s
 - Points for where it lands: **20** in your pocket, **15** one pocket away, **10** two away, nothing further.
 - Each drop gets a fresh field of special pegs: **blocks** shove the ball two columns sideways, **bombs** blast it two or three spaces in any direction (each fires once), and **coin pegs** add 1–5 bonus points (once each), even if the landing misses.
 - The ball enters at pin 4, 5, 6 or 7 (marked in cyan) at random.
+
+### Multiplayer casino tables
+
+**Blackjack**, **Roulette**, **Horse Racing**, and **Slot Machines** support up to eight players per table. Open a game and choose **Create table**. Friends open the same game and select that table's code in the lobby. Tables are visible to everyone who can use Media.
+
+- Each account has one seat per table. A paired TV without a signed-in session gets its own seat, so two TVs owned by the same person can play together. A remote panel controls its TV's seat.
+- Everyone starts with **1,000 free play chips**. Bet 10–500 in steps of 10. These chips have no cash value and are separate from SadGirlCoin. They belong to this table, not a global wallet.
+- Choose your pick and stake, then **Place bet**. You can update the bet while betting is open. The host can **Start round**, or it starts automatically after 45 seconds when someone has bet. Players joining mid-round watch until betting reopens.
+- Blackjack offers **Hit** and **Stand**, with a 30-second hand timer; unfinished hands stand automatically. The dealer stands on all 17s. Naturals pay 3:2, ordinary wins 1:1, ties return the stake. No splitting, doubling or insurance.
+- Roulette uses one zero. A number pays 35:1 and an outside bet pays 1:1; zero loses outside bets. The six equally likely horses pay 4:1 for the winner. Slots return 24× the stake for three stars, 12× for another triple, and the stake for a pair. Returns include the original stake.
+- Spins and races take six seconds, with a shared result; slots give each player their own reels. Results stay for ten seconds before betting reopens. Horse movement is decorative; the server determines the finish.
+- Refresh to resume the same seat. Going back to Games keeps it available in the lobby. **Leave table** removes your seat and forfeits its remaining chips and active wager; the next player becomes host. Empty tables close immediately; tables untouched for two hours expire. At fewer than ten chips, use **Refill free chips** between rounds.
+- Arrows move between visible controls and **Enter** selects them. Mouse and touch work too. The remote shows your table code, chip balance and round phase.
 
 ## Playing on the TV from your phone
 
