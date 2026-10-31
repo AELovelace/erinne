@@ -15,9 +15,14 @@ tray = [
     "pystray==0.19.5",
     "pillow==11.3.0",
 ]
+# The same in a terminal (`mnemerynne-backup-tui`), for desktops without a tray and plain consoles.
+tui = [
+    "textual==8.2.8",
+]
 
 [project.scripts]
 mnemerynne-backup = "mnemerynne_backup.cli:main"
+mnemerynne-backup-tui = "mnemerynne_backup.tui:main"
 
 [project.gui-scripts]
 mnemerynne-backup-tray = "mnemerynne_backup.tray:main"

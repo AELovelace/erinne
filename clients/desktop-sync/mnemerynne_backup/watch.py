@@ -4,11 +4,14 @@ missed: sleep, network drives, too many at once) and after the computer wakes up
 from __future__ import annotations
 
 import logging
+import logging.handlers
+import sys
 import threading
 import time
 from collections.abc import Callable
 
 from mnemerynne_backup.backup import Backup
+from mnemerynne_backup.config import state_dir
 from mnemerynne_backup.engine import Report
 
 log = logging.getLogger(__name__)
@@ -113,3 +116,30 @@ class Runner:
         finally:
             if self._observer is not None:
                 self._observer.stop()
+
+
+def single_instance():
+    """A lock only one running copy can hold (the tray and the TUI share it); None when another copy has it."""
+    path = state_dir() / "tray.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(path, "a+")
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return None
+    return fh
+
+
+def log_to_file() -> None:
+    """Log to backup.log in the state folder (the tray and the TUI have no console to log to)."""
+    path = state_dir() / "backup.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.handlers.RotatingFileHandler(path, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logging.basicConfig(level=logging.INFO, handlers=[handler])

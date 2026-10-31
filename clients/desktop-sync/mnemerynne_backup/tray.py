@@ -7,7 +7,6 @@ their own (watch.Runner). Anything they want shown goes through a queue the Tk l
 from __future__ import annotations
 
 import logging
-import logging.handlers
 import os
 import queue
 import sys
@@ -20,10 +19,10 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from mnemerynne_backup import __version__, autostart, signin
 from mnemerynne_backup.backup import Backup, BackupError, connect, update_offer
 from mnemerynne_backup.cli import describe
-from mnemerynne_backup.config import APP, COMMON_EXCLUDES, Config, state_dir
+from mnemerynne_backup.config import APP, COMMON_EXCLUDES, Config
 from mnemerynne_backup.engine import Report
 from mnemerynne_backup.transport import TransportError
-from mnemerynne_backup.watch import Runner
+from mnemerynne_backup.watch import Runner, log_to_file, single_instance
 
 log = logging.getLogger(__name__)
 
@@ -40,32 +39,6 @@ def _icon_image(state: str):
     d.rounded_rectangle((2, 2, 62, 62), radius=14, fill=COLORS[state])
     d.polygon([(32, 12), (50, 32), (39, 32), (39, 52), (25, 52), (25, 32), (14, 32)], fill="white")
     return img
-
-
-def _single_instance():
-    """A lock only one running copy can hold; None when another copy already has it."""
-    path = state_dir() / "tray.lock"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fh = open(path, "a+")
-    try:
-        if sys.platform == "win32":
-            import msvcrt
-            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        fh.close()
-        return None
-    return fh
-
-
-def _log_to_file() -> None:
-    path = state_dir() / "backup.log"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    handler = logging.handlers.RotatingFileHandler(path, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-    logging.basicConfig(level=logging.INFO, handlers=[handler])
 
 
 # --------------------------------------------------------------------- app
@@ -510,11 +483,11 @@ class TrayApp:
 
 
 def main() -> int:
-    lock = _single_instance()
+    lock = single_instance()
     if lock is None:
         print(f"{APP} is already running (look for its icon).", file=sys.stderr)
         return 0
-    _log_to_file()
+    log_to_file()
     code = 0
     try:
         TrayApp().run()

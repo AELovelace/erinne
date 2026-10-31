@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="mnemerynne-backup", description="Back folders up to Mnemerynne.")
     p.add_argument("--version", action="version", version=__version__)
     p.add_argument("-v", "--verbose", action="store_true")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    sub = p.add_subparsers(dest="cmd")    # no command: the terminal app
     s = sub.add_parser("login", help="sign this computer in to Mnemerynne")
     s.add_argument("server", help="Mnemerynne's address, like https://beepsquad.wtf")
     s.add_argument("--token", action="store_true", help="paste a sync token instead of signing in in a browser")
@@ -90,6 +90,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("on", choices=("on", "off"))
     s.add_argument("--service", action="store_true", help="Linux without a desktop: a systemd user service")
     args = p.parse_args(argv)
+    if args.cmd is None:
+        from mnemerynne_backup import tui    # textual is only needed for the full app
+        return tui.main()
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(message)s")
 
     config = Config.load()
