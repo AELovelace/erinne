@@ -13,7 +13,7 @@
   };
   const choices = game === "roulette" ? [["red", "Red"], ["black", "Black"], ["odd", "Odd"], ["even", "Even"], ["low", "1–18"], ["high", "19–36"]].concat(Array.from({ length: 37 }, (_, n) => [String(n), String(n)])) :
     game === "horse-racing" ? horses.map((name, i) => [String(i), name]) : [["", ""]];
-  let state = null, busy = false, refreshing = false, amount = 50, pick = 0, signature = "", offset = 0;
+  let state = null, busy = false, refreshing = false, amount = 50, pick = 0, signature = "", offset = 0, handPick = "hit", wheel = null;
   let resume = null;
   try { resume = sessionStorage.getItem("casino-room:" + game); } catch (_) { /* A private browser can still play. */ }
   $("casino-rules").textContent = rules[game];
@@ -69,6 +69,13 @@
     $("casino-more").disabled = busy || amount >= Math.min(500, p ? p.chips + p.bet : 500);
     ["casino-pick-prev", "casino-pick-next"].forEach(id => { $(id).disabled = busy; });
     document.querySelectorAll("[data-room]").forEach(b => { b.disabled = busy || b.dataset.full === "true"; });
+    $("casino-hit").classList.toggle("gm-primary", handPick === "hit");
+    $("casino-stand").classList.toggle("gm-primary", handPick === "stand");
+    $("casino-hit").setAttribute("aria-pressed", String(handPick === "hit"));
+    $("casino-stand").setAttribute("aria-pressed", String(handPick === "stand"));
+    $("casino-keys").textContent = !$("casino-hand").hidden ? "◀ ▶ Choose Hit or Stand · Enter confirms" :
+      "◀ ▶ Change pick · ▲ ▼ Change bet · Enter sets bet · Play starts round (host) · Keyboard: P plays, Tab reaches buttons";
+    if (wheel) wheel.setPick(choices[pick][0]);
   }
   function cards(hand) { // Decode the server's card IDs without exposing a hidden dealer card.
     const row = node("div", undefined, "casino-cards"), ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"], suits = ["♠", "♥", "♦", "♣"];
@@ -86,13 +93,15 @@
   }
   function stage() { // Give each game a distinct board while all seats share the same server round.
     const el = $("casino-stage"), playing = state.phase === "playing", result = state.result;
+    if (game === "roulette") {
+      if (!wheel) { wheel = window.CasinoRoulette.create(M.reducedMotion); el.replaceChildren(wheel.element); }
+      wheel.update(state); // Keep the rotor alive across polls, bets and joins, so animation never restarts.
+      return;
+    }
     el.replaceChildren();
     if (game === "blackjack") {
       el.append(node("h2", "Dealer"), cards(state.dealer));
       el.append(node("p", result ? "Dealer: " + result.dealer_total : playing ? "Hole card stays hidden until settlement" : "Place your bets for the next hand"));
-    } else if (game === "roulette") {
-      el.append(node("div", result ? result.number : playing ? "◈" : "0–36", "casino-wheel " + (result ? result.color : playing ? "spinning" : "")));
-      el.append(node("h2", result ? result.number + " · " + result.color : playing ? "The wheel is spinning…" : "Where will it land?"));
     } else if (game === "horse-racing") {
       el.append(node("h2", result ? horses[result.order[0]] + " wins!" : playing ? "And they’re off!" : "Meet the field"));
       const tracks = node("div", undefined, "casino-tracks");
@@ -115,6 +124,7 @@
     if (state && data.code === state.code && data.revision < state.revision) return;
     const old = state, focused = document.activeElement.id;
     state = data; offset = data.server_time * 1000 - Date.now(); remember(data.code);
+    if (!old || old.round !== data.round || old.code !== data.code) handPick = "hit";
     $("casino-lobby").hidden = true; $("casino-table").hidden = false;
     $("casino-code").textContent = "Table " + data.code + " · Round " + data.round;
     $("casino-phase").textContent = { betting: "Place your bets", playing: game === "blackjack" ? "Play your hand" : "Round in progress", results: "Round complete" }[data.phase];
@@ -163,6 +173,7 @@
     }
   }
   function lobby() { // Leave the seat view, clear its resume pointer, and reload the shared lobby.
+    if (wheel) { wheel.destroy(); wheel = null; } // Stop animation and visibility listeners when leaving a table.
     state = null; resume = null; signature = ""; remember(null);
     $("casino-table").hidden = true; $("casino-lobby").hidden = false;
     $("casino-rooms").replaceChildren(); $("casino-empty").hidden = false; $("casino-empty").textContent = "Looking for tables…";
@@ -213,17 +224,49 @@
     finally { busy = false; controls(); await refresh(); }
   }
   ["create", "leave", "bet", "start", "hit", "stand", "refill"].forEach(action => $("casino-" + action).addEventListener("click", () => perform(action)));
-  $("casino-less").addEventListener("click", () => { amount = Math.max(10, amount - 10); controls(); });
-  $("casino-more").addEventListener("click", () => { const p = mine(); amount = Math.min(500, Math.floor((p.chips + p.bet) / 10) * 10, amount + 10); controls(); });
-  $("casino-pick-prev").addEventListener("click", () => { pick = (pick + choices.length - 1) % choices.length; controls(); });
-  $("casino-pick-next").addEventListener("click", () => { pick = (pick + 1) % choices.length; controls(); });
-  M.onAction(action => { // Keyboard and remote use the same visible button order; no text entry is required.
+  function changeBet(step) { // Remote and touch share ten-chip steps and the same available-balance limit.
+    const p = mine();
+    if (busy || !p || state.phase !== "betting") return;
+    const limit = Math.max(10, Math.min(500, Math.floor((p.chips + p.bet) / 10) * 10));
+    amount = Math.max(10, Math.min(limit, amount + step * 10)); controls();
+  }
+  function changePick(step) { // Left/right wraps through picks without moving focus to unrelated buttons.
+    if (busy || !state || state.phase !== "betting") return;
+    pick = (pick + step + choices.length) % choices.length; controls();
+  }
+  $("casino-less").addEventListener("click", () => changeBet(-1));
+  $("casino-more").addEventListener("click", () => changeBet(1));
+  $("casino-pick-prev").addEventListener("click", () => changePick(-1));
+  $("casino-pick-next").addEventListener("click", () => changePick(1));
+  M.onAction(action => { // In a table the remote controls the game directly, regardless of which button had focus.
+    if (busy) return;
+    if (state) {
+      const p = mine();
+      if (state.phase === "betting") {
+        if (action === "left" || action === "right") changePick(action === "left" ? -1 : 1);
+        else if (action === "up" || action === "down") changeBet(action === "up" ? 1 : -1);
+        else if (action === "enter") {
+          if (p.chips < 10 && !p.bet) perform("refill");
+          else if (!$("casino-bet").disabled) perform("bet");
+          else error("Lower your bet to fit your chip balance.");
+        } else if (action === "play") {
+          if (state.you !== state.players[0].id) error("The host starts the round. Your bet stays on the table.");
+          else if (!state.players.some(p => p.bet)) error("Set a bet with Enter before pressing Play.");
+          else perform("start");
+        }
+      } else if (game === "blackjack" && state.phase === "playing" && p.bet && !p.stood) {
+        if (action === "left" || action === "right") { handPick = handPick === "hit" ? "stand" : "hit"; controls(); }
+        else if (action === "enter") perform(handPick);
+      }
+      return; // Locked rounds cannot accidentally activate Leave or place another wager.
+    }
     const buttons = focusable(); if (!buttons.length) return;
     const index = buttons.indexOf(document.activeElement);
     if (action === "enter") { (buttons[index] || buttons[0]).click(); return; }
+    if (action === "play") return;
     const step = action === "left" || action === "up" ? -1 : 1;
     buttons[(index + step + buttons.length) % buttons.length].focus();
-  });
+  }, { directEnter: () => !!state });
   async function poll() { await refresh(); setTimeout(poll, state ? 1000 : 3000); } // Schedule after completion to avoid overlapping polls.
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
   setInterval(tick, 500);

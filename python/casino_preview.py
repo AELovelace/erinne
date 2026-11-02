@@ -26,7 +26,7 @@ def main():
             uid = users.create_user(conn, name, "preview-password")
             accounts.link(conn, uid, name, people)
         media.set_enabled(conn, True)
-        media.save_settings(conn, settings, {"media_group": "Domain Users", "radio_directory_url": ""})
+        media.save_settings(conn, settings, {"media_group": "Domain Users", "screens_group": "Domain Users", "radio_directory_url": ""})
         conn.close()
         app = create_app(settings, Services(llm=None, embedder=FakeEmbedder(), directory=people))
         uvicorn.run(app, host="127.0.0.1", port=int(sys.argv[1]), log_level="warning")

@@ -1472,7 +1472,9 @@
     if (games.isOpen()) {
       if (e.key === "Escape" || e.key === "Backspace") { e.preventDefault(); games.close(); return; }
       const onBar = document.activeElement && document.activeElement.closest && document.activeElement.closest(".mc-game-bar");
-      if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Enter", " "].indexOf(e.key) >= 0 && !onBar) {
+      if (["MediaPlay", "MediaPlayPause", "p", "P"].indexOf(e.key) >= 0) {
+        e.preventDefault(); games.key("MediaPlay"); // Play always reaches the open game, even with the bar focused.
+      } else if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Enter", " "].indexOf(e.key) >= 0 && !onBar) {
         e.preventDefault(); games.key(e.key === " " ? "Enter" : e.key);
       }
       return;
@@ -1974,7 +1976,8 @@
       } else if (a === "play_station") {
         nowPlaying.playStation(cmd.station);
       } else if (a === "toggle") {
-        if (!$("mc-player").hidden) player.toggleAny();
+        if (games.isOpen()) games.key("MediaPlay"); // The remote panel's Play/Pause starts the table, without resuming background media.
+        else if (!$("mc-player").hidden) player.toggleAny();
         else if (!$("mc-viewer").hidden) viewer.slideshow();
         else nowPlaying.toggle();
       } else if (a === "skip" || a === "seek") {

@@ -1,7 +1,7 @@
 /* Shared by the built-in games (mnemerynne/games.py): one set of actions however they arrive, the talk with
    Media's game layer (media.js games), the theme's colours, sound and the best score kept on this device.
 
-   Actions: "left", "right", "up", "down", "enter". They come from the keyboard (arrows, WASD, Enter, Space), or
+   Actions: "left", "right", "up", "down", "enter", "play". Keyboard Play is P or a media Play key; other actions use arrows, WASD, Enter, Space, or
    from the TV page, which forwards a remote panel's arrows and Enter here as messages ({type:
    "mnemerynne-game-key", key}). Escape or Backspace inside the frame asks the TV page to close the game.
 
@@ -12,8 +12,9 @@
 
   const framed = window.parent !== window;
   const KEYS = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", Enter: "enter", " ": "enter",
-                 a: "left", d: "right", w: "up", s: "down", A: "left", D: "right", W: "up", S: "down" };
-  let onAction = null;
+                 a: "left", d: "right", w: "up", s: "down", A: "left", D: "right", W: "up", S: "down",
+                 MediaPlay: "play", MediaPlayPause: "play", p: "play", P: "play" };
+  let onAction = null, directEnter = null, tabNavigation = false;
 
   function toParent(kind, extra) { // A message to the TV page; nothing when opened on its own.
     if (framed) window.parent.postMessage(Object.assign({ type: "mnemerynne-game-" + kind }, extra || {}), location.origin);
@@ -26,12 +27,14 @@
 
   document.addEventListener("keydown", function (e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "Tab") { tabNavigation = true; return; } // Explicit keyboard focus navigation retains native button activation.
     if (e.target && (e.target.matches("input, select, textarea") || e.target.isContentEditable)) return; // Native form editing keeps its keys.
     if (e.key === "Escape" || e.key === "Backspace") { if (framed) { e.preventDefault(); toParent("close"); } return; }
     const action = KEYS[e.key];
     if (!action) return;
+    if (["left", "right", "up", "down"].includes(action)) tabNavigation = false;
     const tag = (e.target && e.target.tagName) || "";
-    if (action === "enter" && tag === "BUTTON") return;   // Enter or Space on a focused button presses that button
+    if (action === "enter" && tag === "BUTTON" && !(directEnter && directEnter() && !tabNavigation)) return; // Casino tables can make Enter submit a bet regardless of old focus.
     e.preventDefault();
     act(action);
   });
@@ -101,7 +104,7 @@
   window.MGame = {
     framed: framed,
     reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-    onAction: function (fn) { onAction = fn; },              // the game's one input handler
+    onAction: function (fn, options) { onAction = fn; directEnter = options && options.directEnter; }, // Optional direct Enter controls; older games keep native buttons.
     tap: act,                                                // the game's own buttons and taps, as actions
     report: function (sub) { toParent("state", { sub: String(sub || "").slice(0, 300) }); },   // the line a remote shows
     close: function () { toParent("close"); },

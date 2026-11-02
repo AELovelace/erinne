@@ -50,23 +50,62 @@ try {
     await bob.click('[data-room="' + code + '"]');
     await bob.waitForFunction(() => document.querySelectorAll(".casino-player").length === 2);
     await alice.waitForFunction(() => document.querySelectorAll(".casino-player").length === 2);
-    await alice.click("#casino-bet");
+    if (game === "roulette") {
+      await alice.keyboard.press("p");
+      await alice.waitForFunction(() => document.getElementById("casino-error").textContent.includes("Set a bet"));
+      await alice.evaluate(() => { for (let i = 0; i < 60; i++) window.MGame.tap("up"); });
+      assert.equal(await alice.$eval("#casino-amount", e => e.textContent), "500");
+      await alice.evaluate(() => { for (let i = 0; i < 60; i++) window.MGame.tap("down"); });
+      assert.equal(await alice.$eval("#casino-amount", e => e.textContent), "10");
+      await alice.evaluate(() => { for (let i = 0; i < 4; i++) window.MGame.tap("up"); });
+    }
+    await alice.evaluate(() => document.getElementById("casino-leave").focus()); // Stale focus must never turn Enter into Leave.
+    await alice.keyboard.press("ArrowUp");
+    assert.equal(await alice.$eval("#casino-amount", e => e.textContent), "60");
+    await alice.keyboard.press("ArrowDown");
+    assert.equal(await alice.$eval("#casino-amount", e => e.textContent), "50");
+    if (["roulette", "horse-racing"].includes(game)) {
+      const pick = await alice.$eval("#casino-pick", e => e.textContent);
+      await alice.keyboard.press("ArrowRight");
+      assert.notEqual(await alice.$eval("#casino-pick", e => e.textContent), pick);
+      await alice.keyboard.press("ArrowLeft");
+      assert.equal(await alice.$eval("#casino-pick", e => e.textContent), pick);
+    }
+    await alice.keyboard.press("Enter");
     await alice.waitForFunction(() => document.getElementById("casino-bet").textContent === "Update bet");
     await bob.waitForFunction(() => document.querySelector(".casino-player").textContent.includes("Bet 50"));
     await bob.click("#casino-bet");
     await bob.waitForFunction(() => document.getElementById("casino-bet").textContent === "Update bet");
     await alice.waitForFunction(() => [...document.querySelectorAll(".casino-player")].every(p => p.textContent.includes("Bet 50")));
-    await alice.click("#casino-start");
+    await bob.waitForSelector("#casino-bet:not([disabled])");
+    await bob.keyboard.press("p");
+    await bob.waitForFunction(() => document.getElementById("casino-error").textContent.includes("host"));
+    assert.equal(await bob.$eval("#casino-phase", e => e.textContent), "Place your bets");
+    await alice.waitForSelector("#casino-start:not([disabled])");
+    await alice.keyboard.press("MediaPlayPause");
     await alice.waitForFunction(() => document.getElementById("casino-phase").textContent !== "Place your bets");
+    if (game === "roulette") {
+      assert.equal(await alice.$$eval(".roulette-number", labels => labels.length), 37);
+      await alice.evaluate(() => { window.testRotor = document.querySelector(".roulette-rotor"); window.testAngle = window.testRotor.getAttribute("transform"); });
+      await alice.waitForFunction(() => document.querySelector(".roulette-rotor").getAttribute("transform") !== window.testAngle);
+      await alice.screenshot({ path: "runs/casino-browser/roulette-spinning.png", fullPage: true });
+    }
     if (game === "blackjack") {
       for (const page of [alice, bob]) {
         await page.waitForFunction(() => document.getElementById("casino-phase").textContent !== "Place your bets");
-        if (await page.$eval("#casino-hand", e => !e.hidden)) await page.click("#casino-stand");
+        if (await page.$eval("#casino-hand", e => !e.hidden)) { await page.keyboard.press("ArrowRight"); await page.keyboard.press("Enter"); }
         await page.waitForFunction(() => document.getElementById("casino-hand").hidden);
       }
     }
     await alice.waitForFunction(() => document.getElementById("casino-phase").textContent === "Round complete", { timeout: 15000 });
     await bob.waitForFunction(() => document.getElementById("casino-phase").textContent === "Round complete", { timeout: 15000 });
+    if (game === "roulette") {
+      await alice.waitForSelector(".roulette-wheel[data-landed]");
+      assert.ok(await alice.evaluate(() => window.testRotor === document.querySelector(".roulette-rotor")), "Polls must preserve the animated wheel");
+      const landed = await alice.$eval(".roulette-wheel", e => e.dataset.landed);
+      assert.equal(await alice.$eval(".roulette-pocket.winning", e => e.dataset.number), landed);
+      assert.ok((await alice.$eval(".roulette-caption", e => e.textContent)).startsWith(landed + " · "));
+    }
     assert.equal(await alice.$eval("#casino-players", e => e.textContent.replaceAll(" · You", "")), await bob.$eval("#casino-players", e => e.textContent.replaceAll(" · You", "")));
     await alice.screenshot({ path: `runs/casino-browser/${game}.png`, fullPage: true });
     await alice.reload();
@@ -76,7 +115,7 @@ try {
     assert.ok(await alice.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), "Mobile board should not overflow horizontally");
     await alice.screenshot({ path: `runs/casino-browser/${game}-phone.png`, fullPage: true });
     await alice.setViewport({ width: 1440, height: 1000 });
-    await alice.evaluate(() => { document.getElementById("casino-leave").focus(); window.postMessage({ type: "mnemerynne-game-key", key: "Enter" }, location.origin); });
+    await alice.click("#casino-leave");
     await alice.waitForFunction(() => !document.getElementById("casino-lobby").hidden);
     await bob.waitForFunction(() => document.querySelectorAll(".casino-player").length === 1);
     assert.ok(await bob.$eval(".casino-player", e => e.textContent.includes("Host")));
@@ -99,9 +138,61 @@ try {
   await alice.evaluate(() => document.getElementById("mc-game-frame").contentWindow.postMessage({ type: "mnemerynne-game-key", key: "Enter" }, location.origin));
   await frame.waitForFunction(() => !document.getElementById("casino-table").hidden);
   await alice.waitForFunction(() => window.casinoTestReport.includes("chips"));
+  await frame.focus("#casino-leave");
+  await alice.evaluate(() => document.getElementById("mc-game-frame").contentWindow.postMessage({ type: "mnemerynne-game-key", key: "ArrowUp" }, location.origin));
+  await frame.waitForFunction(() => document.getElementById("casino-amount").textContent === "60");
+  await alice.evaluate(() => document.getElementById("mc-game-frame").contentWindow.postMessage({ type: "mnemerynne-game-key", key: "Enter" }, location.origin));
+  await frame.waitForFunction(() => document.getElementById("casino-bet").textContent === "Update bet");
+  await frame.waitForSelector("#casino-start:not([disabled])");
+  await alice.focus("#mc-game-back");
+  await alice.keyboard.press("p"); // Play must route into the iframe even with the parent bar focused.
+  await frame.waitForFunction(() => document.getElementById("casino-phase").textContent === "Round in progress");
   await alice.click("#mc-game-back");
   await alice.waitForFunction(() => document.getElementById("mc-game").hidden);
-  console.log("Media Games cards, embedded game, parent remote input and status reporting passed");
+  console.log("Media Games cards, embedded game, direct betting, parent Play input and status reporting passed");
+
+  const screen = await alice.evaluate(async () => { // Exercise the actual remote command/SSE route, not just synthetic key events.
+    const response = await fetch("/api/media/screens", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Casino test TV" }) });
+    if (!response.ok) throw new Error("Could not pair the test TV"); return response.json();
+  });
+  await alice.goto(base + "/media/screen#games");
+  await alice.waitForFunction(async () => (await (await fetch("/api/media/screens")).json()).screens.some(s => s.online));
+  await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 5);
+  await alice.evaluate(() => [...document.querySelectorAll(".mc-card")].find(b => b.querySelector(".mc-label").textContent === "Slot Machines").click());
+  const tvFrame = await (await alice.$("#mc-game-frame")).contentFrame();
+  await tvFrame.waitForSelector("#casino-create:not([disabled])");
+  await tvFrame.click("#casino-create");
+  await tvFrame.waitForSelector("#casino-bet:not([disabled])");
+  async function command(body) { // Send the same press/toggle actions used by the existing remote panel.
+    await alice.evaluate(async (id, payload) => {
+      const result = await fetch("/api/media/screens/" + id + "/command", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      if (!result.ok) throw new Error("Remote command failed: " + result.status);
+    }, screen.id, body);
+  }
+  await command({ action: "press", button: "up" });
+  await tvFrame.waitForFunction(() => document.getElementById("casino-amount").textContent === "60");
+  await command({ action: "press", button: "enter" });
+  await tvFrame.waitForFunction(() => document.getElementById("casino-bet").textContent === "Update bet");
+  await tvFrame.waitForSelector("#casino-start:not([disabled])");
+  await command({ action: "toggle" });
+  await tvFrame.waitForFunction(() => document.getElementById("casino-phase").textContent === "Round in progress");
+  console.log("Paired TV: real remote arrows, Enter and Play/Pause reach the game through SSE");
+
+  await bob.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]);
+  await bob.goto(base + "/media/games/roulette");
+  await bob.waitForSelector("#casino-create:not([disabled])");
+  await bob.click("#casino-create");
+  await bob.waitForSelector("#casino-bet:not([disabled])");
+  await bob.click("#casino-bet");
+  await bob.waitForSelector("#casino-start:not([disabled])");
+  await bob.keyboard.press("p");
+  await bob.waitForFunction(() => document.getElementById("casino-phase").textContent === "Round in progress");
+  assert.ok(await bob.evaluate(() => window.MGame.reducedMotion));
+  assert.equal(await bob.$eval(".roulette-rotor", e => e.getAttribute("transform")), "rotate(0)");
+  await bob.waitForSelector(".roulette-wheel[data-landed]", { timeout: 15000 });
+  const reducedResult = await bob.$eval(".roulette-wheel", e => e.dataset.landed);
+  assert.equal(await bob.$eval(".roulette-pocket.winning", e => e.dataset.number), reducedResult);
+  console.log("Roulette reduced-motion mode skips spinning and displays the correct server result");
   assert.deepEqual(errors, []);
 } finally {
   if (browser) await browser.close();

@@ -75,7 +75,8 @@ You only see what you may open in that folder on the share. Who may open it is s
 - Roulette uses one zero. A number pays 35:1 and an outside bet pays 1:1; zero loses outside bets. The six equally likely horses pay 4:1 for the winner. Slots return 24× the stake for three stars, 12× for another triple, and the stake for a pair. Returns include the original stake.
 - Spins and races take six seconds, with a shared result; slots give each player their own reels. Results stay for ten seconds before betting reopens. Horse movement is decorative; the server determines the finish.
 - Refresh to resume the same seat. Going back to Games keeps it available in the lobby. **Leave table** removes your seat and forfeits its remaining chips and active wager; the next player becomes host. Empty tables close immediately; tables untouched for two hours expire. At fewer than ten chips, use **Refill free chips** between rounds.
-- Arrows move between visible controls and **Enter** selects them. Mouse and touch work too. The remote shows your table code, chip balance and round phase.
+- At a table, **◀ ▶ change the pick**, **▲ ▼ change the bet by ten chips**, and **Enter sets the bet**. The host's **Play/Play-Pause** button starts the round (**P** on a keyboard). In blackjack after dealing, ◀ ▶ choose Hit/Stand and Enter confirms. In the lobby, arrows choose a table and Enter joins. Mouse and touch buttons work too; keyboard Tab reaches individual buttons. The remote shows your table code, chip balance and round phase.
+- Roulette displays a full 37-pocket wheel and a counter-rotating ball. Your pending pick lights the covered pockets; the ball lands in the server's winning pocket when the result arrives. Reduced-motion mode shows the result without spinning.
 
 ## Playing on the TV from your phone
 

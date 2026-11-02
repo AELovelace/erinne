@@ -34,7 +34,7 @@ GAMES: tuple[Game, ...] = (
 
 # Casino tables share one renderer and server rules; each still has its own Games card.
 GAMES += tuple(Game(slug=slug, name=name, icon=icon, description=description,
-                    controls="Arrows choose a control · Enter selects · join the same table to play together",
+                    controls="◀ ▶ pick · ▲ ▼ bet · Enter sets bet · Play starts round (host) · P on keyboard",
                     multiplayer=True) for slug, name, icon, description in (
     ("blackjack", "Blackjack", "🂡", "Share a table, hit or stand, and try to beat the dealer. Free play chips."),
     ("roulette", "Roulette", "🎡", "Pick a number or an outside bet and watch the wheel together. Free play chips."),

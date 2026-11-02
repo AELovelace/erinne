@@ -15,3 +15,5 @@
 | Slots | Three independent reels, six equally likely symbols; stars triple 24×, other triples 12×, pair 1× |
 
 Returns include the stake, which was deducted when the bet was placed. Update the client rules text, Media help and payout tests with every rule change. No external wallet or money integration exists. Server deadlines advance on the next table request; a reconnect resumes the persisted phase and advances an elapsed deadline.
+
+Roulette's SVG uses the European single-zero pocket order in `static/games/casino/roulette.js`. Its six-second spin follows the server deadline; after receiving the result, a 1.4-second decorative landing places the ball at that number, including the rotor's rotation. This occurs within the existing results window and never delays or determines settlement. Reopening a settled round and reduced-motion mode show the final position immediately. Pick highlights cover the pending choice, while the winning pocket gets a gold highlight.
