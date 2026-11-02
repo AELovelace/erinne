@@ -1,0 +1,61 @@
+{# Lumi's room uses native SVG and CSS: no downloaded art, fonts or external service. #}
+<section class="lp-intro gm-panel" aria-label="Your companion">
+  <p class="gm-eyebrow">// A LITTLE LIGHT, JUST FOR YOU</p>
+  <h1 class="gm-title">LUMI<span>PET</span></h1>
+  <p class="lp-lead">A soft place to land.</p>
+  <p>Stay for a snack, a little starlight, or a quiet moment together. Lumi is always happy to see you.</p>
+  <dl class="lp-stats">
+    <div><dt>Happy moments</dt><dd id="lp-moments">0</dd></div>
+    <div><dt>Last little memory</dt><dd id="lp-memory">Our first hello</dd></div>
+  </dl>
+  <p class="lp-note">No chores. No streaks. Nothing lost while you’re away.</p>
+  <p class="lp-save" id="lp-save">Memories stay in this browser, on this device.</p>
+</section>
+
+<section class="lp-room" id="lp-room" data-palette="rose" data-sleep="false" aria-label="Lumi's room">
+  <div class="lp-room-top"><span>THE STARLIGHT NOOK</span><span id="lp-clock">A quiet afternoon</span></div>
+  <div class="lp-window" aria-hidden="true"><span class="lp-moon"></span><span class="lp-stars">✦ · ˚<br> · ✧<br>✧ · ✦</span></div>
+  <span class="lp-spark lp-spark-one" aria-hidden="true">✧</span>
+  <span class="lp-spark lp-spark-two" aria-hidden="true">✦</span>
+  <div class="lp-floor" aria-hidden="true"></div>
+  <div class="lp-rug" aria-hidden="true"></div>
+  <div class="lp-pet-wrap">
+    <span class="lp-effect" id="lp-effect" aria-hidden="true">♡</span>
+    <svg class="lp-pet" id="lp-pet" viewBox="0 0 320 300" role="img" aria-labelledby="lp-pet-title">
+      <title id="lp-pet-title">Lumi, a little glowing cat with fairy wings</title>
+      <g class="lp-wings">
+        <path d="M113 176 C8 187 25 74 79 108 C104 122 113 153 113 176Z"/>
+        <path d="M207 176 C312 187 295 74 241 108 C216 122 207 153 207 176Z"/>
+        <path d="M109 182 C36 174 48 238 93 215Z M211 182 C284 174 272 238 227 215Z"/>
+      </g>
+      <path class="lp-tail" d="M217 228 C279 254 286 188 256 193 C238 196 260 215 239 218"/>
+      <ellipse class="lp-body" cx="160" cy="214" rx="62" ry="57"/>
+      <ellipse class="lp-belly" cx="160" cy="230" rx="36" ry="31"/>
+      <path class="lp-body" d="M92 153 L88 62 Q89 49 100 58 L137 93 Q160 83 183 93 L220 58 Q231 49 232 62 L228 153 Q230 204 160 208 Q90 204 92 153Z"/>
+      <path class="lp-ear" d="M101 77 L106 118 L126 102Z M219 77 L214 118 L194 102Z"/>
+      <path class="lp-star" d="M160 103 L165 116 L179 120 L165 125 L160 139 L155 125 L141 120 L155 116Z"/>
+      <g class="lp-eyes-open"><ellipse cx="129" cy="153" rx="5" ry="9"/><ellipse cx="191" cy="153" rx="5" ry="9"/></g>
+      <g class="lp-eyes-closed"><path d="M120 154 Q129 163 138 154 M182 154 Q191 163 200 154"/></g>
+      <ellipse class="lp-cheek" cx="114" cy="169" rx="13" ry="6"/><ellipse class="lp-cheek" cx="206" cy="169" rx="13" ry="6"/>
+      <path class="lp-mouth" d="M155 165 L160 169 L165 165 M160 169 Q151 184 145 173 M160 169 Q169 184 175 173"/>
+      <ellipse class="lp-paw" cx="123" cy="259" rx="24" ry="13"/><ellipse class="lp-paw" cx="197" cy="259" rx="24" ry="13"/>
+    </svg>
+  </div>
+  <div class="lp-caption"><span class="lp-dot" aria-hidden="true"></span><span id="lp-state">Settling in</span></div>
+</section>
+
+<section class="lp-controls gm-panel" aria-label="Spend time with Lumi">
+  <p class="gm-eyebrow">// MAKE A LITTLE MOMENT</p>
+  <p id="lp-message" class="lp-message" role="status" aria-live="polite">Hello, you. There’s a place beside me.</p>
+  <div class="lp-actions" aria-label="Activities">
+    <button type="button" data-lp-action="cuddle" aria-pressed="true"><span aria-hidden="true">♡</span><span>Cuddle<small>A little closeness</small></span></button>
+    <button type="button" data-lp-action="snack" aria-pressed="false"><span aria-hidden="true">♧</span><span>Snack<small>Something sweet</small></span></button>
+    <button type="button" data-lp-action="play" aria-pressed="false"><span aria-hidden="true">✧</span><span>Play<small>Catch a falling star</small></span></button>
+    <button type="button" data-lp-action="rest" aria-pressed="false"><span aria-hidden="true">☾</span><span id="lp-rest-label">Nap<small>Dream a little dream</small></span></button>
+  </div>
+  <div class="lp-options">
+    <button type="button" id="lp-palette">Glow: Rose</button>
+    <button type="button" id="lp-sound" aria-pressed="true">Sound: on</button>
+  </div>
+  <p class="gm-keys">◀ ▶ choose · Enter interact<br>▲ glow colour · ▼ sound<br>Escape / Back returns to Games</p>
+</section>

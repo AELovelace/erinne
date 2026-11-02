@@ -5,6 +5,8 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import net from "node:net";
+import { checkLumiPet, checkLumiPetFrame } from "./lumi-pet-browser.mjs";
+import { checkSharedTV } from "./casino-tv-browser.mjs";
 
 const modulePath = process.env.PUPPETEER_MODULE;
 const { default: puppeteer } = await import(modulePath ? pathToFileURL(modulePath).href : "puppeteer");
@@ -29,7 +31,7 @@ try {
   const aliceContext = await browser.createBrowserContext(), bobContext = await browser.createBrowserContext();
   const alice = await aliceContext.newPage(), bob = await bobContext.newPage();
   for (const [page, name] of [[alice, "alice"], [bob, "bob"]]) {
-    page.on("pageerror", e => errors.push(e.message));
+    page.on("pageerror", e => errors.push(e.stack || e.message)); // Preserve the source line for asynchronous navigation failures.
     await page.setViewport({ width: 1440, height: 1000 });
     await page.goto(base + "/login");
     await page.evaluate(async username => { // Use the actual session login, not a mocked game endpoint.
@@ -39,6 +41,15 @@ try {
     await page.evaluateOnNewDocument(() => { Object.defineProperty(document, "hidden", { get: () => false }); }); // Both test tabs act like visible TV screens.
   }
   await mkdir("runs/casino-browser", { recursive: true });
+  if (process.env.CASINO_TV_ONLY === "1") { // Focused iteration for controller routing without replaying unrelated casino rounds.
+    const screen = await alice.evaluate(async () => (await fetch("/api/media/screens", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Shared TV test" }) })).json());
+    await alice.goto(base + "/media/screen#games");
+    await alice.waitForFunction(async () => (await (await fetch("/api/media/screens")).json()).screens.some(s => s.online));
+    await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 6);
+    await alice.evaluate(() => [...document.querySelectorAll(".mc-card")].find(b => b.querySelector(".mc-label").textContent === "Slot Machines").click());
+    await checkSharedTV(alice, screen, base);
+  } else {
+  await checkLumiPet(browser, alice, base);
   for (const game of ["blackjack", "roulette", "horse-racing", "slots"]) {
     await alice.goto(base + "/media/games/" + game);
     await alice.waitForSelector("#casino-create:not([disabled])");
@@ -64,6 +75,11 @@ try {
     assert.equal(await alice.$eval("#casino-amount", e => e.textContent), "60");
     await alice.keyboard.press("ArrowDown");
     assert.equal(await alice.$eval("#casino-amount", e => e.textContent), "50");
+    if (game === "slots") {
+      assert.equal(await alice.$eval("#casino-cost", e => e.textContent), "3 lines × 50 = 150 chips total");
+      assert.equal(await alice.$$eval("#casino-stage .casino-slot-line", rows => rows.length), 3);
+      assert.equal(await alice.$$eval("#casino-stage .casino-slot-symbol", cells => cells.length), 9);
+    }
     if (["roulette", "horse-racing"].includes(game)) {
       const pick = await alice.$eval("#casino-pick", e => e.textContent);
       await alice.keyboard.press("ArrowRight");
@@ -73,6 +89,7 @@ try {
     }
     await alice.keyboard.press("Enter");
     await alice.waitForFunction(() => document.getElementById("casino-bet").textContent === "Update bet");
+    if (game === "slots") assert.equal(await alice.$eval("#casino-balance", e => e.textContent), "850 chips");
     await bob.waitForFunction(() => document.querySelector(".casino-player").textContent.includes("Bet 50"));
     await bob.click("#casino-bet");
     await bob.waitForFunction(() => document.getElementById("casino-bet").textContent === "Update bet");
@@ -90,6 +107,10 @@ try {
       await alice.waitForFunction(() => document.querySelector(".roulette-rotor").getAttribute("transform") !== window.testAngle);
       await alice.screenshot({ path: "runs/casino-browser/roulette-spinning.png", fullPage: true });
     }
+    if (game === "slots") {
+      assert.equal(await alice.$$eval("#casino-stage .rolling .casino-slot-symbol", cells => cells.length), 9);
+      await alice.screenshot({ path: "runs/casino-browser/slots-spinning.png", fullPage: true });
+    }
     if (game === "blackjack") {
       for (const page of [alice, bob]) {
         await page.waitForFunction(() => document.getElementById("casino-phase").textContent !== "Place your bets");
@@ -105,6 +126,19 @@ try {
       const landed = await alice.$eval(".roulette-wheel", e => e.dataset.landed);
       assert.equal(await alice.$eval(".roulette-pocket.winning", e => e.dataset.number), landed);
       assert.ok((await alice.$eval(".roulette-caption", e => e.textContent)).startsWith(landed + " · "));
+    }
+    if (game === "slots") {
+      const result = await alice.evaluate(async table => (await fetch("/api/media/games/slots/rooms/" + table)).json(), code);
+      for (const seat of result.players) {
+        assert.equal(seat.reels.length, 3);
+        assert.ok(seat.reels.every(row => row.length === 3));
+        assert.equal(seat.payout, seat.line_payouts.reduce((sum, value) => sum + value, 0));
+      }
+      const own = result.players.find(p => p.id === result.you);
+      assert.deepEqual(await alice.$$eval("#casino-stage .casino-slot-symbol", cells => cells.map(c => c.getAttribute("aria-label"))), own.reels.flat());
+      assert.deepEqual(await alice.$$eval("#casino-stage .casino-slot-line", rows => rows.map(r => Number(r.dataset.payout))), own.line_payouts);
+      assert.equal(await alice.$$eval("#casino-stage .casino-slot-line.paid", rows => rows.length), own.line_payouts.filter(value => value > 0).length);
+      assert.ok((await alice.$eval("#casino-hint", e => e.textContent)).includes("Net " + (own.payout - own.bet * 3)));
     }
     assert.equal(await alice.$eval("#casino-players", e => e.textContent.replaceAll(" · You", "")), await bob.$eval("#casino-players", e => e.textContent.replaceAll(" · You", "")));
     await alice.screenshot({ path: `runs/casino-browser/${game}.png`, fullPage: true });
@@ -124,7 +158,8 @@ try {
     console.log(`${game}: two accounts, shared settlement, refresh, mobile layout, remote input, host handoff passed`);
   }
   await alice.goto(base + "/media#games");
-  await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 5);
+  await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 6);
+  await checkLumiPetFrame(alice);
   await alice.evaluate(() => { // The top bar keeps controls; the remote consumes the iframe's status message.
     window.casinoTestReport = "";
     window.addEventListener("message", e => {
@@ -157,7 +192,7 @@ try {
   });
   await alice.goto(base + "/media/screen#games");
   await alice.waitForFunction(async () => (await (await fetch("/api/media/screens")).json()).screens.some(s => s.online));
-  await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 5);
+  await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 6);
   await alice.evaluate(() => [...document.querySelectorAll(".mc-card")].find(b => b.querySelector(".mc-label").textContent === "Slot Machines").click());
   const tvFrame = await (await alice.$("#mc-game-frame")).contentFrame();
   await tvFrame.waitForSelector("#casino-create:not([disabled])");
@@ -177,6 +212,7 @@ try {
   await command({ action: "toggle" });
   await tvFrame.waitForFunction(() => document.getElementById("casino-phase").textContent === "Round in progress");
   console.log("Paired TV: real remote arrows, Enter and Play/Pause reach the game through SSE");
+  await checkSharedTV(alice, screen, base);
 
   await bob.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]);
   await bob.goto(base + "/media/games/roulette");
@@ -193,7 +229,18 @@ try {
   const reducedResult = await bob.$eval(".roulette-wheel", e => e.dataset.landed);
   assert.equal(await bob.$eval(".roulette-pocket.winning", e => e.dataset.number), reducedResult);
   console.log("Roulette reduced-motion mode skips spinning and displays the correct server result");
+  }
   assert.deepEqual(errors, []);
+} catch (failure) {
+  if (browser) { // Capture the visible board and error copy when a UI check fails; never print cookies or panel keys.
+    for (const page of await browser.pages()) for (const frame of page.frames()) {
+      if (frame.url().includes("/media/games/")) {
+        console.error("Game at failure:", frame.url(), await frame.evaluate(() => document.body.innerText).catch(() => "Frame closed"));
+        await page.screenshot({ path: "runs/casino-browser/failure.png", fullPage: true }).catch(() => {});
+      }
+    }
+  }
+  throw failure;
 } finally {
   if (browser) await browser.close();
   server.kill();

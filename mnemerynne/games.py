@@ -7,7 +7,7 @@
 - They are Mnemerynne's own reviewed code, so they run on its origin: Media's game layer frames the page, and the
   TV page hands a remote panel's arrows and Enter to it (media.js games.key).
 - Who may play: whoever may use Media, and a paired screen (the TV) as its owner, like the rest of Media.
-- Prism Drop scores stay on the device. Multiplayer casino tables persist server-side free play chips,
+- Prism Drop scores and Lumi Pet memories stay on the device. Multiplayer casino tables persist server-side free play chips,
   with no cash value or external currency integration (casino.py).
 """
 
@@ -30,6 +30,9 @@ GAMES: tuple[Game, ...] = (
     Game(slug="prism-drop", name="Prism Drop", icon="🔮",
          description="Pick a pocket and drop a neon ball through blocks, bombs and bonus pegs. Ten drops, best score wins.",
          controls="◀ ▶ pick a pocket · Enter drops · ▲ replays the last drop · ▼ sound on or off"),
+    Game(slug="lumi-pet", name="Lumi Pet", icon="✨",
+         description="A little neon companion. Share a snack, play, cuddle or curl up for a nap. Always happy to see you.",
+         controls="◀ ▶ choose · Enter interact · ▲ glow colour · ▼ sound on or off"),
 )
 
 # Casino tables share one renderer and server rules; each still has its own Games card.
@@ -39,7 +42,7 @@ GAMES += tuple(Game(slug=slug, name=name, icon=icon, description=description,
     ("blackjack", "Blackjack", "🂡", "Share a table, hit or stand, and try to beat the dealer. Free play chips."),
     ("roulette", "Roulette", "🎡", "Pick a number or an outside bet and watch the wheel together. Free play chips."),
     ("horse-racing", "Horse Racing", "🏇", "Back one of six horses and cheer on the same race. Free play chips."),
-    ("slots", "Slot Machines", "🎰", "Spin together, compare reels, and climb your table's chip standings. Free play chips."),
+    ("slots", "Slot Machines", "🎰", "Three reels, three horizontal paylines. Spin together and celebrate each winning line. Free play chips."),
 ))
 
 

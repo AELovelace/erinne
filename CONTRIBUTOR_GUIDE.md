@@ -8,8 +8,21 @@ The current repository is Mnemerynne/Erynne. Built-in games open from Media → 
 - Keep server text in `textContent`, scripts in static files, and controls usable through `MGame.onAction`. Preserve focus during polling, reduced-motion support, responsive layouts and remote state reports.
 - Casino table controls are direct: Left/Right picks, Up/Down adjusts ten chips, Enter submits, and Play starts for the host. `common.js` maps media keys and P to `play`; `media.js` routes the remote's existing `toggle` command into the game. Lobby arrows and explicit keyboard Tab navigation retain button access. Do not turn table controls back into focus traversal.
 - `static/games/casino/roulette.js` owns the persistent SVG wheel, its 37-pocket geometry and ball landing. Reuse it across revisions, honor reduced motion, stop its animation when hidden or destroyed, and always derive the landing from the server result.
+- Slots store three horizontal rows and their separate returns. `bet` is per line; use the round's `slot_lines` when reserving, replacing, validating or showing a stake and when computing net results. `wager_lines()` treats pre-update rounds without that field as one line until the next reset. Preserve their original charge and settlement.
 - Add explanatory comments around rules, lifecycle transitions and identity handling. Put standalone Python utilities in `python/` and PowerShell utilities in `ps/`.
 
 There is no `game_editor_gui.py` in this repository. These games use the existing registry, templates and rule constants; no separate modding GUI is shipped by this change. Update the player/help and tuning/testing guides when those interfaces change.
 
 See [Testing](TESTING_GUIDE.md) and [Tuning](GENERATION_TUNING_GUIDE.md).
+
+## Lumi Pet
+
+`static/games/lumi-pet/rules.js` owns the pure save/clock rules; `game.js` handles controls and storage, `game.css` styles the native SVG companion in `templates/games/lumi-pet.html`. It uses the existing non-multiplayer game template and Media access guard. Saves belong to this browser profile, not an account, and never leave the device. Use explanatory inline comments and preserve the no-neglect design: absence cannot reduce happy moments or cause distress. There is no game editor GUI in this repository; these assets and the tuning guide are the editing interface. The ASCII neon fireplace is a design-list item only.
+
+## One TV, multiple casino remotes
+
+The casino lobby on a paired, non-speaker TV offers **One TV, multiple remotes**. It creates a display-only host surface, leaving all eight player slots available. Each paired remote's first Enter joins its own seat; subsequent keys affect only its persisted `controls` draft. The first player is host. Normal account/device tables and guests joining their code retain the original controls.
+
+`casino_remote.py` signs the authenticated panel's exact key for the destination screen and current device pairings. `web/media.py` adds this proof to press/Play commands; `media.js` and `games/common.js` preserve it through the iframe. `web/games.py` verifies signature, 90-second expiry, current pairings, ownership and screen access before `casino.couch()` processes it. Never trust a browser-supplied remote ID or use a remote name as identity. Device fingerprints and input receipts stay out of public snapshots.
+
+`casino.couch()` serializes each key, draft, join and bet in one database transaction. Receipts suppress replay across TV refreshes, duplicate stream listeners and workers. Round/phase checks prevent a delayed betting Enter from becoming Hit. The client queues remote inputs independently of the ordinary button busy flag. Keep the viewer spectator-only, show every player's draft/hand/results, and preserve host transfer after explicit seat removal. There is no new schema migration: display and controller metadata live in the existing room JSON.

@@ -103,7 +103,7 @@ def test_shared_spin_or_race_persists_across_connections(conn, settings, monkeyp
         result = casino.room(other, game, s["code"], "bob", "Bob")
     finally:
         other.close()
-    expected = [2150, 1460] if game == "slots" else [1200, 980]
+    expected = [4450, 2380] if game == "slots" else [1200, 980]  # Three stakes reserved and three star lines returned.
     assert [p["chips"] for p in result["players"]] == expected
     assert result["phase"] == "results"
 
@@ -147,7 +147,77 @@ def test_simultaneous_move_is_applied_once(conn, settings):
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda _: bet(), range(2)))
     assert sum(r is not None for r in results) == 1
-    assert casino.room(conn, "slots", s["code"], "alice", "Alice")["players"][0]["chips"] == 950
+    assert casino.room(conn, "slots", s["code"], "alice", "Alice")["players"][0]["chips"] == 850
+
+
+@pytest.mark.parametrize("rows,returns", [
+    ([["star"] * 3, ["bell", "bell", "lemon"], ["star", "bell", "lemon"]], [240, 10, 0]),
+    ([["star", "bell", "lemon"], ["bell"] * 3, ["star", "bell", "lemon"]], [0, 120, 0]),
+    ([["star", "bell", "lemon"], ["star", "bell", "lemon"], ["lemon"] * 3], [0, 0, 120]),
+    ([["star"] * 3] * 3, [240, 240, 240]),
+    ([["star", "bell", "lemon"], ["bell", "star", "lemon"], ["lemon", "bell", "star"]], [0, 0, 0]),  # Diagonal stars do not pay.
+    ([["star", "bell", "lemon"]] * 3, [0, 0, 0]),  # Three matching columns do not pay either.
+])
+def test_slots_settles_only_three_horizontal_lines(monkeypatch, rows, returns):
+    outcomes = iter(symbol for row in rows for symbol in row)
+    monkeypatch.setattr(casino.RNG, "choice", lambda _: next(outcomes))
+    player = casino._seat("alice", "Alice")
+    player.update(bet=10, chips=970)  # Ten chips on each of three lines have already been reserved.
+    state = {"game": "slots", "slot_lines": 3, "players": [player]}
+    casino._finish(state, 100)
+    assert player["reels"] == rows
+    assert player["line_payouts"] == returns
+    assert player["payout"] == sum(returns)
+    assert player["chips"] == 970 + sum(returns)
+
+
+def test_slot_bets_reserve_replace_and_validate_all_three_stakes(conn):
+    s = casino.create(conn, "slots", "alice", "Alice")
+    assert s["slot_lines"] == 3
+    s = move(conn, s, "alice", "bet", amount=50)
+    assert s["players"][0]["chips"] == 850
+    s = move(conn, s, "alice", "bet", amount=20)
+    assert s["players"][0]["chips"] == 940
+    with pytest.raises(casino.Refused):
+        move(conn, s, "alice", "bet", amount=340)
+    s = move(conn, s, "alice", "bet", amount=330)
+    assert s["players"][0]["chips"] == 10
+    with pytest.raises(casino.Refused):
+        move(conn, s, "alice", "refill")  # Reserved bets cannot be combined with a free refill.
+
+
+def test_legacy_single_line_round_finishes_before_switching_to_three(conn, monkeypatch):
+    s = casino.create(conn, "slots", "alice", "Alice")
+    raw = json.loads(conn.execute("SELECT state FROM casino_rooms WHERE code=?", (s["code"],)).fetchone()[0])
+    raw.pop("slot_lines")  # Simulate an existing room saved by the previous release.
+    conn.execute("UPDATE casino_rooms SET state=? WHERE code=?", (json.dumps(raw), s["code"]))
+    monkeypatch.setattr(casino.RNG, "choice", lambda _: "star")
+    s = move(conn, s, "alice", "bet", amount=50)
+    assert s["players"][0]["chips"] == 950
+    s = move(conn, s, "alice", "start")
+    now = s["deadline"] + 1
+    monkeypatch.setattr(casino.time, "time", lambda: now)
+    s = casino.room(conn, "slots", s["code"], "alice", "Alice")
+    assert s["players"][0]["reels"] == ["star"] * 3
+    assert s["players"][0]["chips"] == 2150  # Honor the original one-line wager, without charging more.
+    assert casino.room(conn, "slots", s["code"], "alice", "Alice")["players"] == s["players"]
+    now = s["deadline"] + 1
+    s = casino.room(conn, "slots", s["code"], "alice", "Alice")
+    assert s["slot_lines"] == 3 and s["round"] == 2
+    assert s["players"][0]["reels"] == [] and s["players"][0]["line_payouts"] == []
+
+
+@pytest.mark.parametrize("chips,allowed", [(29, True), (30, False)])
+def test_slot_refill_uses_the_minimum_cost_of_all_lines(conn, chips, allowed):
+    s = casino.create(conn, "slots", "alice", "Alice")
+    raw = json.loads(conn.execute("SELECT state FROM casino_rooms WHERE code=?", (s["code"],)).fetchone()[0])
+    raw["players"][0]["chips"] = chips
+    conn.execute("UPDATE casino_rooms SET state=? WHERE code=?", (json.dumps(raw), s["code"]))
+    if allowed:
+        assert move(conn, s, "alice", "refill")["players"][0]["chips"] == 1000
+    else:
+        with pytest.raises(casino.Refused):
+            move(conn, s, "alice", "refill")
 
 
 def test_expiry_empty_table_and_free_refill(conn, monkeypatch):

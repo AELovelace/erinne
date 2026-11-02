@@ -51,13 +51,23 @@ Media is a Kodi-style media centre for films, TV shows, music and pictures from 
 
 Adding, changing and removing sources is logged (`media.*`).
 
+## Lumi Pet
+
+Media → Games includes Lumi Pet, a cozy companion using the existing Media permissions and paired-screen access. It needs no service or migration. Memories are saved locally in the browser profile, shared by its users; they do not sync to accounts and are not part of server backups. It has no currency or reward integration. Browser storage may be cleared to start fresh. The digital ASCII neon fireplace is currently a design-list item, not an installed game.
+
 ## Built-in multiplayer games
 
 Media's **Games** tab includes Blackjack, Roulette, Horse Racing and Slot Machines alongside Prism Drop. They use the existing Media group; paired TVs also require their owner's screens-group access. No additional service, API key, currency integration or external game site is needed.
 
 Migration **0061** creates `casino_rooms`. It stores server-authoritative round state and free play-chip balances; normal database backups include it. Rooms survive app restarts, expire after two idle hours, and are removed on the next table creation. At most 100 rooms exist at once, eight seats per room, and three joined rooms per identity per game may be held before creating another. A signed-out paired TV has its own seat; signed-in devices share their account's seat.
 
+On a paired TV, **One TV, multiple remotes** creates a spectator display with up to eight independently controlled player seats. Pair all panels to the same owner as the TV; the existing firmware's arrows/Enter/Play work unchanged. Remote names become player labels. First Enter joins; subsequent keys affect only that remote's seat. Other-owner panels cannot reach the TV. Signing in as someone other than the TV owner disables shared-TV hosting. Player removal and table closure are explicit controls on the TV. Re-pairing/deleting a panel invalidates its old inputs; its abandoned seat can be removed on the display.
+
+This mode needs no new migration or external service: controller drafts, private display identity and short-lived deduplication receipts are part of the room JSON. Signed inputs are checked against live pairings, exact destination screen, key, age and round/phase. The deployment's existing secret key signs them; no device bearer keys are forwarded to the TV. Restarting the app preserves seats/drafts, while the existing remote stream reconnects.
+
 Clients poll active tables approximately once a second and lobbies every three seconds while visible. All table users see names, bets, cards after dealing (except the dealer's hole card), balances and results. Tables are discoverable by everyone with Media access. These chips have no cash value and never connect to SadGirlCoin.
+
+Slots now play three horizontal lines on a 3×3 board. The wager is per line and the full three-line cost is shown before placing it. This needs no new database migration: existing saved one-line rounds finish at their original cost and change to three lines at the next round.
 
 ## Signage
 

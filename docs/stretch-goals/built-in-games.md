@@ -2,6 +2,14 @@
 
 *Written 2026-10-28 (late) by Lumi for Doll. A stretch goal. It lives in the repo on purpose, not in IT-OPS.*
 
+## Status (2026-11-02): Lumi Pet and the fireplace idea
+
+**Shared-TV casino mode** is also implemented: on a paired TV choose **One TV, multiple remotes**. Up to eight controllers/players have independent seats, chips, drafts and blackjack choices on one display. Each remote must be paired to the TV owner's account. First Enter joins, later Enter submits, and the first player's Play starts the round. Ordinary multi-device tables remain available. Signed panel inputs and server-side deduplication keep players separate and prevent duplicate moves; the player/testing guides cover setup and verification.
+
+**Lumi Pet** is now implemented in Media → Games as a cozy, device-local companion: a glowing fairy cat with cuddles, snacks, star play, naps and three glow colours. It sleeps from 22:00 to 07:00 on the device's clock; any interaction can gently wake it. Happy moments and the latest memory persist in this browser profile, shared by its users. There is no neglect, decay, streak, currency or penalty for time away. This first version does not use server saves or sync between devices.
+
+**Digital ASCII Neon Fireplace** is added to the design list as a future ambient toy: a looping text-character hearth with neon flames, embers and a cozy glow, intended for desktop and TV. Proposed controls: colour palette, flame intensity, pause and optional synthesized crackle. Include a still/reduced-motion mode. It is planned, not implemented; signage integration is a later possibility.
+
 ## Status (2026-11-01): shared casino tables
 
 Blackjack, Roulette, Horse Racing and Slot Machines now join Prism Drop in Media → Games, including set-top boxes. Up to eight accounts or paired TVs share a persistent table. The server owns bets, random results, blackjack hands and play-chip settlement. This follows Doll's explicit request for these traditional games; the earlier original-games-only idea below is superseded for this scope.
@@ -115,6 +123,9 @@ own. These are *our* code, reviewed like the rest of the app, so they can run on
    picture that Signage can show on the TVs.
 3. **Lumi Pet.** A little companion that naps at night, wakes in the morning, and likes being visited.
    Nothing bad happens if you don't (no guilt mechanics).
+   **Implemented 2026-11-02:** see the status above for this version's interactions and local persistence.
+4. **Digital ASCII Neon Fireplace.** An ambient text-art fireplace: neon flames and drifting embers,
+   palette and intensity controls, optional synthesized crackle, and a calm still mode. **Planned.**
 
 ### Party games (keyboard and mouse first, so one machine)
 1. **Buzzer Bloom Quiz.** Hot-seat trivia for up to 4 on one keyboard, buzzing with Q, P, Z and M. Question
@@ -139,7 +150,7 @@ own. These are *our* code, reviewed like the rest of the app, so they can run on
   - a quiz night where the winner gets a pot the host put in (paid from the host's own balance, so no coins
     are made out of nothing).
 
-## Phases
+## Original phases (historical; see current status above)
 
 | Phase | What | Size |
 |---|---|---|

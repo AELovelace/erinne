@@ -959,6 +959,11 @@ async def remote_command(screen_id: int, body: RemoteCommand, request: Request, 
     if screen["speaker"]:
         command = await anyio.to_thread.run_sync(_for_speaker, request, conn, owner, screen, command)
     command.update(sender=owner["username"], override=False)
+    if not screen["speaker"] and body.action in ("press", "toggle"):
+        from mnemerynne import casino_remote
+        # Only authenticated panel commands carry a seat proof; phone/keyboard controls remain ordinary inputs.
+        command["controller"] = casino_remote.issue(request.app.state.settings.secret_key, remote, screen,
+                                                     body.button if body.action == "press" else "play")
     command_id = hub(request).send(screen_id, command)
     if command_id is None:
         raise HTTPException(status.HTTP_409_CONFLICT, f"{screen['name']} isn't connected: is Media open on it?")

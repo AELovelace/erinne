@@ -697,8 +697,8 @@
     },
 
     /* One key for the game: a remote panel's press, or the keyboard while focus is on this page. */
-    key: function (key) {
-      if (gameFrame.contentWindow) gameFrame.contentWindow.postMessage({ type: "mnemerynne-game-key", key: key }, location.origin);
+    key: function (key, controller) {
+      if (gameFrame.contentWindow) gameFrame.contentWindow.postMessage({ type: "mnemerynne-game-key", key: key, controller: controller }, location.origin);
     },
 
     full: function () {
@@ -1451,10 +1451,10 @@
      an idle slideshow). A replayed Enter presses nothing by itself, so it presses the focused button here;
      with a film or the pictures open, whose arrows don't move focus, it plays or pauses instead. */
   const REMOTE_KEYS = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight", enter: "Enter" };
-  function remotePress(button) {
+  function remotePress(button, controller) {
     const key = REMOTE_KEYS[button];
     if (!key) return;
-    if (games.isOpen()) { games.key(key); return; }   // a game takes the arrows and Enter (its frame can't hear this page's keys)
+    if (games.isOpen()) { games.key(key, controller); return; }   // Preserve the signed remote identity through the TV frame.
     const target = document.activeElement || document.body;
     const field = ["INPUT", "SELECT", "TEXTAREA"].indexOf(target.tagName) >= 0;
     if (!target.dispatchEvent(new KeyboardEvent("keydown", { key: key, bubbles: true, cancelable: true }))) return;  // taken
@@ -1976,7 +1976,7 @@
       } else if (a === "play_station") {
         nowPlaying.playStation(cmd.station);
       } else if (a === "toggle") {
-        if (games.isOpen()) games.key("MediaPlay"); // The remote panel's Play/Pause starts the table, without resuming background media.
+        if (games.isOpen()) games.key("MediaPlay", cmd.controller); // The host remote can start its shared-TV table.
         else if (!$("mc-player").hidden) player.toggleAny();
         else if (!$("mc-viewer").hidden) viewer.slideshow();
         else nowPlaying.toggle();
@@ -2002,7 +2002,7 @@
         nowPlaying.stop();
         viewer.close();
       } else if (a === "press") {
-        remotePress(cmd.button);
+        remotePress(cmd.button, cmd.controller);
       }
       setTimeout(function () { screenMode.report(true); }, 300);
     },

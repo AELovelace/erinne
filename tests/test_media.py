@@ -957,7 +957,11 @@ def test_a_remote_pairs_with_a_code_and_controls_only_its_owners_screens(client,
     r = panel.post(f"/api/media/remote/screens/{screen_id}/command", json={"action": "press", "button": "left"}, headers=auth)
     assert r.status_code == 200, r.text                   # the panel's arrows and Enter
     sent = queue.get_nowait()
-    assert sent == {"action": "press", "button": "left", "id": sent["id"], "sender": "boss", "override": False}
+    assert sent == {"action": "press", "button": "left", "id": sent["id"], "sender": "boss", "override": False,
+                    "controller": sent["controller"]}
+    from mnemerynne import casino_remote
+    proof = casino_remote.read(client.app.state.settings.secret_key, sent["controller"])
+    assert proof["remote"] == remote_id and proof["action"] == "left"  # Identity comes from the bearer key, not a body field.
 
     # Only the remote's commands, and nothing else of Media.
     for body in ({"action": "play_item", "file_id": 1}, {"action": "calibrate"}, {"action": "play_youtube", "url": "x"},
@@ -1019,6 +1023,14 @@ def test_built_in_games_open_from_media_and_show_on_a_remote(client, conn, direc
         assert f"/static/{name}?v=" in page.text
         assert (Path(__file__).parent.parent / "mnemerynne" / "web" / "static" / name).is_file()
     assert 'id="pd-field"' in page.text and "messages.js" not in page.text   # the game's partial, none of the app's scripts
+    pet = client.get("/media/games/lumi-pet")
+    assert pet.status_code == 200 and 'id="lp-pet"' in pet.text
+    for name in ("rules.js", "game.js", "game.css"):
+        assert f"/static/games/lumi-pet/{name}?v=" in pet.text
+        assert (Path(__file__).parent.parent / "mnemerynne/web/static/games/lumi-pet" / name).is_file()
+    assert "messages.js" not in pet.text and "casino/game.js" not in pet.text
+    assert any(g["slug"] == "lumi-pet" and not g["multiplayer"] for g in listed)
+    assert anonymous.get("/media/games/lumi-pet").status_code == 401
     assert client.get("/media/games/no-such-game").status_code == 404
     assert anonymous.get("/api/media/games").status_code == 401
     assert anonymous.get("/media/games/prism-drop").status_code == 401
@@ -1030,6 +1042,7 @@ def test_built_in_games_open_from_media_and_show_on_a_remote(client, conn, direc
     tv = TestClient(client.app)
     tv.cookies.set("mnemerynne_screen", key)
     assert tv.get("/api/media/games").status_code == 200 and tv.get("/media/games/prism-drop").status_code == 200
+    assert tv.get("/media/games/lumi-pet").status_code == 200  # Paired screens inherit the same Media access.
     r = tv.put("/api/media/screen/state", json={"kind": "game", "title": "Prism Drop", "sub": "Score 35 · drop 3 of 10 · pocket 5"})
     assert r.status_code == 200, r.text
     state = panel.get("/api/media/remote", headers=auth).json()["screens"][0]["state"]

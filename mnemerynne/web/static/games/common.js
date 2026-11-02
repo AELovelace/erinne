@@ -20,9 +20,9 @@
     if (framed) window.parent.postMessage(Object.assign({ type: "mnemerynne-game-" + kind }, extra || {}), location.origin);
   }
 
-  function act(action) { // Hand one action to the game, waking the sound on the way (a key or tap counts as a gesture).
+  function act(action, controller) { // A signed panel input keeps its identity; local keys and older games need none.
     sound.unlock();
-    if (onAction) onAction(action);
+    if (onAction) onAction(action, controller);
   }
 
   document.addEventListener("keydown", function (e) {
@@ -42,7 +42,7 @@
   window.addEventListener("message", function (e) { // A remote panel's arrow or Enter, forwarded by the TV page.
     if (e.origin !== location.origin || e.source !== window.parent) return;
     const data = e.data || {};
-    if (data.type === "mnemerynne-game-key" && KEYS[data.key]) act(KEYS[data.key]);
+    if (data.type === "mnemerynne-game-key" && KEYS[data.key]) act(KEYS[data.key], typeof data.controller === "string" ? data.controller : undefined);
   });
 
   function colors() { // The theme's tokens (theme-neon.css by default), so the game matches whatever look is on.
