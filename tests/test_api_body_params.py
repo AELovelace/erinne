@@ -51,7 +51,7 @@ def test_wildcards_only_in_bodies():
 
 def test_wazuh_preset_operations(conn, settings):
     ops = {op["name"]: op for op in apis.preset("wazuh")["operations"]}
-    assert set(ops) == {"Alert summary", "Alerts", "Failed logins"}
+    assert set(ops) == {"Alert summary", "Alerts", "Failed logins", "Alerts from an IP"}
     seen = []
     apis.TRANSPORT = httpx.MockTransport(lambda r: seen.append(r) or httpx.Response(200, json={"hits": {"hits": []}}))
     alerts = ops["Alerts"]
@@ -72,15 +72,37 @@ def test_wazuh_preset_operations(conn, settings):
                                                                      "description": "How many hours back"}
 
 
+def test_wazuh_alerts_from_an_ip(conn, settings):
+    """One source IP or a pattern of them; the IP is required, so there's no "*" that hides IP-less alerts."""
+    op = next(o for o in apis.preset("wazuh")["operations"] if o["name"] == "Alerts from an IP")
+    apis.check_specs(op["path"], op["params"], op["method"], op["body"])          # the preset passes the admin checks
+    seen = []
+    apis.TRANSPORT = httpx.MockTransport(lambda r: seen.append(r) or httpx.Response(200, json={"hits": {"hits": []}}))
+    op_id = _op(conn, op["body"], op["params"])
+    assert apis.call(conn, settings, op_id, {"srcip": "192.168.1.*", "hours": 48}, user_id=None, via="chat").ok
+    sent = json.loads(seen[0].content)
+    filters = sent["query"]["bool"]["filter"]
+    assert filters[0] == {"range": {"timestamp": {"gte": "now-48h"}}}
+    assert filters[1] == {"range": {"rule.level": {"gte": 0}}}                    # quiet alerts count for one IP
+    assert filters[2] == {"wildcard": {"data.srcip": "192.168.1.*"}}
+    assert sent["size"] == 20 and set(sent["aggs"]) == {"levels", "rules", "agents", "locations", "users"}
+    with pytest.raises(apis.ApiError, match="needed"):                             # no IP, no call
+        apis.call(conn, settings, op_id, {}, user_id=None, via="chat")
+    with pytest.raises(apis.ApiError, match="characters"):                         # can't break out of the string
+        apis.call(conn, settings, op_id, {"srcip": '1.2.3.4"}'}, user_id=None, via="chat")
+    # IPv6 addresses fit the allowed characters too.
+    assert apis.validate_params(op["params"], {"srcip": "2001:db8::1"})["srcip"] == "2001:db8::1"
+
+
 def test_existing_apis_take_in_new_preset_operations(admin_client, conn):  # noqa: F811
     api_id = conn.execute("INSERT INTO apis(name, base_url, auth_type) VALUES ('Wazuh', 'https://w.test', 'basic')"
                           ).lastrowid
     conn.execute("INSERT INTO api_operations(api_id, name, method, path, body) VALUES (?, 'Alerts', 'POST', "
                  "'/x', '{}')", (api_id,))
     added = admin_client.post(f"/api/admin/apis/{api_id}/preset-operations", json={"preset": "wazuh"}).json()
-    assert added == {"added": 2}                       # "Alerts" was already there
+    assert added == {"added": 3}                       # "Alerts" was already there
     names = [r[0] for r in conn.execute("SELECT name FROM api_operations WHERE api_id = ? ORDER BY id", (api_id,))]
-    assert names == ["Alerts", "Alert summary", "Failed logins"]
+    assert names == ["Alerts", "Alert summary", "Failed logins", "Alerts from an IP"]
     assert admin_client.post(f"/api/admin/apis/{api_id}/preset-operations",
                              json={"preset": "wazuh"}).json() == {"added": 0}
     assert admin_client.post(f"/api/admin/apis/{api_id}/preset-operations",

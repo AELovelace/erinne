@@ -6,7 +6,7 @@ Erynne can answer live questions from internal systems: "did every hotel send it
 
 Pick a starting point in the box above the list and press **Add**:
 
-- **Presets**: Wazuh (alert summary, alerts, failed logins, with a time window and a machine) and Atera (tickets, statuses, customers, alerts).
+- **Presets**: Wazuh (alert summary, alerts, failed logins, with a time window and a machine; alerts from an IP, by source IP or a pattern like `192.168.1.*`) and Atera (tickets, statuses, customers, alerts). An existing Wazuh API gets *Alerts from an IP* with **Add preset operations**.
 - **Uploaded templates**: a JSON file a project hands you, describing its operations. **Upload template…** adds it to the list; re-uploading a file with the same name replaces it. The format is documented in `api-templates/api-package-guide.md` in the repository.
 - **Blank**: define operations by hand.
 

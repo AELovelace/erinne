@@ -724,6 +724,22 @@ PRESETS: list[dict] = [
                             "per hour (to spot brute force).",
              "example_questions": "Any failed logins today?\nIs anyone brute-forcing us?\n"
                                   "Which accounts had failed logins this week?\nWhere are the failed logins coming from?"},
+            # One source IP (or a pattern of them): what it set off, where, and the latest alerts themselves.
+            # Its own operation, not a filter on Alerts: a wildcard on data.srcip only matches alerts that
+            # have a source IP, so a "*" default there would hide every alert without one (Windows logons).
+            {"name": "Alerts from an IP", "method": "POST", "path": "/wazuh-alerts-*/_search", "cache_seconds": 60,
+             "params": [_p("srcip", "string", where="body", required=True,
+                           help="Source IP, e.g. 192.168.1.253, or a pattern like 192.168.1.*"),   # required: no "all IPs" default
+                        _p("hours", "int", where="body", min=1, max=720, default=24, help="How many hours back"),
+                        _p("min_level", "int", where="body", min=0, max=15, default=0,
+                           help="Lowest rule level (7+ notable, 12+ critical)"),               # 0: an IP's quiet alerts matter too
+                        _p("count", "int", where="body", min=1, max=50, default=20, help="How many alerts")],
+             "body": '{"size": {{count}}, "sort": [{"timestamp": "desc"}], "query": {"bool": {"filter": [{"range": {"timestamp": {"gte": "now-{{hours}}h"}}}, {"range": {"rule.level": {"gte": {{min_level}}}}}, {"wildcard": {"data.srcip": "{{srcip}}"}}]}}, "aggs": {"levels": {"terms": {"field": "rule.level", "size": 16}}, "rules": {"terms": {"field": "rule.description", "size": 15}, "aggs": {"level": {"max": {"field": "rule.level"}}}}, "agents": {"terms": {"field": "agent.name", "size": 10}}, "locations": {"terms": {"field": "location", "size": 10}}, "users": {"terms": {"field": "data.dstuser", "size": 10}}}, "_source": ["timestamp", "rule.level", "rule.id", "rule.description", "rule.groups", "rule.mitre.tactic", "rule.mitre.technique", "agent.name", "agent.ip", "data.srcip", "data.srcuser", "data.dstuser", "location"]}',
+             "description": "Everything one source IP (or a pattern like 192.168.1.*) set off: counts by level, "
+                            "rule, machine, log and account, plus the latest alerts, newest first.",
+             "example_questions": "What has 192.168.1.253 been doing?\nShow me the alerts from 34.14.12.83.\n"
+                                  "Which alerts came from 186.247.44.26 today?\nWhat is 192.168.1.76 setting off?\n"
+                                  "Is this IP attacking us?"},
         ],
     },
     {

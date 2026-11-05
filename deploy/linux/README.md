@@ -579,13 +579,18 @@ Atera) or a blank API.
   a time window or a machine but can never change what the query asks.
   Strings in a body may contain `*` and `?`, for patterns such as an agent
   name `FD-*`.
-- **Wazuh.** The preset has three operations, each taking a time window
-  (`hours`) and a machine (`agent`, `*` for all):
+- **Wazuh.** The preset has four operations, each taking a time window
+  (`hours`). The first three also take a machine (`agent`, `*` for all):
   - **Alert summary:** counts by level, rule, machine, MITRE tactic and
     source IP, with a minimum level.
   - **Alerts:** the alerts themselves, newest first, with a minimum level
     and how many.
   - **Failed logins:** by machine, source IP, account and hour.
+  - **Alerts from an IP:** everything one source IP (`srcip`, required; a
+    pattern like `192.168.1.*` works) set off: counts by level, rule,
+    machine, log and account, plus the latest alerts. The IP is required
+    rather than defaulting to `*`, because a pattern only matches alerts
+    that have a source IP and would hide the rest.
 
   An existing Wazuh API gets them with **Add preset operations** on its page.
   Their responses include machine names, IP addresses and usernames. With
