@@ -240,20 +240,35 @@ class PlayBody(BaseModel):
     start: float = Field(0.0, ge=0)
     slot: Literal["video", "audio"] = "video"
     caps: Caps = Caps()
+    audio: int | None = Field(None, ge=0, le=999)              # the sound track picked in the player (0:a:n)
+    audio_lang: str | None = Field(None, max_length=12)       # else: the language last picked ('jpn')
+    burn: int | None = Field(None, ge=0, le=999)               # a picture subtitle to draw into the picture (0:s:n)
 
 
 @router.post("/api/media/play/{file_id}")
 async def play(file_id: int, body: PlayBody, request: Request, user=Depends(media_user),
                conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
     """How to play a file in this browser: the file itself ('direct'), or an HLS session from the start
-    position (remux, audio, transcode) once its first segment is ready."""
+    position (remux, audio, transcode) once its first segment is ready. A film also answers its sound
+    and subtitle tracks (probe.tracks) and which sound is playing: any but the first needs an HLS
+    session (a browser plays a file's first sound track only), and a burned-in subtitle a re-encode."""
     row = _readable_item(conn, user, file_id)
-    mode = probe.decide(row["media_type"], row["container"], row["video_codec"], row["audio_codec"],
-                        body.caps.model_dump())
-    base = {"id": file_id, "duration": row["duration_s"], "title": row["title"]}
+    path = store.content_path(conn, settings, file_id)
+    found = {"audio": [], "subtitles": []}
+    if row["media_type"] == "video" and path.is_file():
+        found = await anyio.to_thread.run_sync(probe.file_tracks, settings, path)   # cached per file version
+    chosen = probe.pick_audio(found, body.audio, body.audio_lang)                    # None: no sound, or unknown
+    burn = body.burn if any(s["n"] == body.burn and not s["text"] for s in found["subtitles"]) else None
+    mode = probe.decide(row["media_type"], row["container"], row["video_codec"],
+                        chosen["codec"] if chosen else row["audio_codec"], body.caps.model_dump())
+    if mode == "direct" and chosen is not None and chosen["n"] != 0:
+        mode = "remux"                                          # the picture as it is, the other sound beside it
+    if burn is not None:
+        mode = "transcode"                                      # a picture subtitle needs the picture redrawn
+    base = {"id": file_id, "duration": row["duration_s"], "title": row["title"], "tracks": found,
+            "audio": chosen["n"] if chosen else None, "burn": burn}
     if mode == "direct":
         return {**base, "mode": "direct", "url": f"/media/files/{file_id}/stream", "start": body.start}
-    path = store.content_path(conn, settings, file_id)
     if not path.is_file():
         raise _not_found("File not found")
     cfg = media.load_settings(conn)
@@ -262,8 +277,10 @@ async def play(file_id: int, body: PlayBody, request: Request, user=Depends(medi
     def start():
         session = manager.start_file(user_id=user["id"], slot=body.slot, file_id=file_id, path=path,
                                      kind=row["media_type"], video_codec=row["video_codec"],
-                                     audio_codec=row["audio_codec"], mode=mode, start=body.start,
-                                     hwaccel=cfg["hwaccel"], max_transcodes=int(cfg["max_transcodes"]))
+                                     audio_codec=chosen["codec"] if chosen else row["audio_codec"], mode=mode,
+                                     start=body.start, hwaccel=cfg["hwaccel"],
+                                     max_transcodes=int(cfg["max_transcodes"]),
+                                     audio_track=chosen["n"] if chosen else 0, burn=burn)   # the picked tracks
         manager.wait_ready(session)
         return session
 
@@ -273,6 +290,26 @@ async def play(file_id: int, body: PlayBody, request: Request, user=Depends(medi
         raise HTTPException(exc.status, str(exc)) from None
     return {**base, "mode": mode, "url": f"/media/sessions/{session.id}/index.m3u8", "session": session.id,
             "start": body.start, "backend": session.backend}
+
+
+@router.get("/media/files/{file_id}/subtitles/{n}.vtt")
+async def subtitle(file_id: int, n: int, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db),
+                   settings: Settings = Depends(get_settings)):
+    """A text subtitle track (0:s:n) as WebVTT, for the player's <track>: converted once per version of the
+    file and kept in the media cache. Picture subtitles aren't here: play() burns those in."""
+    _readable_item(conn, user, file_id)                         # 404 unless this person may read the film
+    path = store.content_path(conn, settings, file_id)
+    if not path.is_file():
+        raise _not_found("File not found")
+    found = await anyio.to_thread.run_sync(probe.file_tracks, settings, path)
+    if not any(s["n"] == n and s["text"] for s in found["subtitles"]):
+        raise _not_found("No such subtitle track")
+    try:
+        vtt = await anyio.to_thread.run_sync(transcode.subtitle_vtt, settings, path, n)
+    except transcode.TranscodeError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    return FileResponse(vtt, media_type="text/vtt; charset=utf-8", headers={
+        "Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/media/sessions/{sid}/{name}")
@@ -571,7 +608,7 @@ async def remove_screen(screen_id: int, request: Request, user=Depends(api_user)
 class Command(BaseModel):
     action: Literal["play_item", "play_album", "play_youtube", "play_source", "play_station", "toggle", "seek",
                     "skip", "volume", "mute", "night", "next", "prev", "stop", "press", "calibrate",
-                    "text_size"]
+                    "text_size", "audio_track", "subtitles"]   # the last two: the film's next sound / subtitle
     file_id: int | None = None
     key: str | None = Field(None, max_length=2000)       # album key or station key
     index: int = Field(0, ge=0)

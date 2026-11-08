@@ -175,6 +175,95 @@ def _apply_ffprobe(info: Info, data: dict, path: Path) -> None:
     info.year = info.year or _int(tags.get("date") or tags.get("year"))
 
 
+# ------------------------------------------------------------------ tracks
+# Subtitles ffmpeg turns into WebVTT for the browser to draw itself (<track>).
+TEXT_SUBTITLES = {"subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text", "microdvd", "sami", "mpl2",
+                  "subviewer", "realtext", "vplayer", "pjs", "jacosub"}
+# Subtitles that are pictures (Blu-ray, DVD, DVB): only burned into a re-encoded picture can show them.
+PICTURE_SUBTITLES = {"hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "xsub"}
+_LANGUAGES = {"eng": "English", "en": "English", "jpn": "Japanese", "ja": "Japanese", "spa": "Spanish",
+              "es": "Spanish", "fre": "French", "fra": "French", "fr": "French", "ger": "German", "deu": "German",
+              "de": "German", "ita": "Italian", "it": "Italian", "por": "Portuguese", "pt": "Portuguese",
+              "rus": "Russian", "ru": "Russian", "chi": "Chinese", "zho": "Chinese", "zh": "Chinese",
+              "kor": "Korean", "ko": "Korean", "dut": "Dutch", "nld": "Dutch", "swe": "Swedish", "nor": "Norwegian",
+              "dan": "Danish", "fin": "Finnish", "pol": "Polish", "hun": "Hungarian", "cze": "Czech", "ces": "Czech",
+              "gre": "Greek", "ell": "Greek", "tur": "Turkish", "ara": "Arabic", "heb": "Hebrew", "hin": "Hindi",
+              "tha": "Thai", "vie": "Vietnamese", "ind": "Indonesian", "ukr": "Ukrainian", "rum": "Romanian",
+              "ron": "Romanian"}
+_CHANNELS = {1: "Mono", 2: "Stereo", 6: "5.1", 8: "7.1"}
+_tracks_cache: dict[tuple[str, int, int], dict] = {}   # (path, mtime_ns, size) -> tracks(); small and per process
+
+
+def _language(stream: dict) -> str:
+    """The stream's language tag, lower case ('eng'); '' when it has none or says 'und'."""
+    lang = str((stream.get("tags") or {}).get("language") or "").strip().lower()
+    return "" if lang in ("und", "unk", "zxx", "mis") else lang
+
+
+def _track_label(n: int, lang: str, title: str, extra: list[str]) -> str:
+    """What the picker shows: 'English · Commentary · 5.1', falling back to 'Track 2'."""
+    name = _LANGUAGES.get(lang, lang.upper() if lang else "")
+    parts = [p for p in (name, title if title and title.lower() != name.lower() else "", *extra) if p]
+    return " · ".join(parts) or f"Track {n + 1}"
+
+
+def tracks(data: dict | None) -> dict:
+    """A file's sound and subtitle tracks from ffprobe's JSON, numbered within their kind (n is ffmpeg's
+    '0:a:n' / '0:s:n'): {'audio': [...], 'subtitles': [...]}. Subtitles ffmpeg can't show at all (teletext,
+    closed captions) are left out; 'text' says whether the browser draws it (else it must be burned in)."""
+    out: dict[str, list[dict]] = {"audio": [], "subtitles": []}
+    sub_n = 0                                                  # ffmpeg numbers every subtitle stream, shown or not
+    for stream in (data or {}).get("streams") or []:
+        kind, codec = stream.get("codec_type"), str(stream.get("codec_name") or "")
+        disposition = stream.get("disposition") or {}
+        lang, title = _language(stream), str((stream.get("tags") or {}).get("title") or "").strip()[:80]
+        if kind == "audio":
+            n = len(out["audio"])
+            channels = stream.get("channels")
+            extra = [_CHANNELS.get(channels, f"{channels} ch") if channels else "", codec.upper()]
+            out["audio"].append({"n": n, "codec": codec, "language": lang, "title": title, "channels": channels,
+                                 "default": bool(disposition.get("default")),
+                                 "label": _track_label(n, lang, title, extra)})
+        elif kind == "subtitle":
+            n, sub_n = sub_n, sub_n + 1                        # this stream is 0:s:n even when it isn't listed
+            text = codec in TEXT_SUBTITLES
+            if not text and codec not in PICTURE_SUBTITLES:
+                continue                                       # teletext, captions: nothing ffmpeg can show
+            forced = bool(disposition.get("forced"))
+            extra = ["Forced" if forced else "", "" if text else "burned in"]
+            out["subtitles"].append({"n": n, "codec": codec, "language": lang, "title": title, "text": text,
+                                     "forced": forced, "default": bool(disposition.get("default")),
+                                     "label": _track_label(n, lang, title, extra)})
+    return out
+
+
+def file_tracks(settings: Settings, path: Path) -> dict:
+    """tracks() of a file, probed once per version of it (its time and size); empty when unreadable."""
+    try:
+        st = path.stat()
+    except OSError:
+        return {"audio": [], "subtitles": []}
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    if key not in _tracks_cache:
+        if len(_tracks_cache) > 256:
+            _tracks_cache.clear()                       # crude but bounded; probing again is cheap
+        _tracks_cache[key] = tracks(ffprobe(settings, path))
+    return _tracks_cache[key]
+
+
+def pick_audio(found: dict, n: int | None, language: str | None) -> dict | None:
+    """The sound track to play: number n if the file has it, else the first in `language` (the person's
+    last choice), else the one marked default, else the first. None for a file without sound."""
+    audio = found.get("audio") or []
+    if not audio:
+        return None
+    if n is not None and 0 <= n < len(audio):
+        return audio[n]
+    lang = (language or "").strip().lower()
+    return (next((a for a in audio if lang and a["language"] == lang), None)
+            or next((a for a in audio if a["default"]), None) or audio[0])
+
+
 # ------------------------------------------------------------------ mutagen
 def _music_tags(info: Info, path: Path) -> None:
     try:

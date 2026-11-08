@@ -454,6 +454,98 @@ def test_transcoding_commands_use_the_gpu_that_was_chosen(settings, tmp_path):
     assert "h264_nvenc" in cmd and cmd[cmd.index("-hwaccel") + 1] == "cuda"
 
 
+# ------------------------------------------------------------------- tracks
+_PROBED = {"streams": [
+    {"codec_type": "video", "codec_name": "h264"},
+    {"codec_type": "audio", "codec_name": "ac3", "channels": 6, "tags": {"language": "eng"}, "disposition": {"default": 0}},
+    {"codec_type": "audio", "codec_name": "aac", "channels": 2, "tags": {"language": "jpn", "title": "Commentary"},
+     "disposition": {"default": 1}},
+    {"codec_type": "subtitle", "codec_name": "subrip", "tags": {"language": "eng"}},
+    {"codec_type": "subtitle", "codec_name": "dvb_teletext", "tags": {"language": "ger"}},
+    {"codec_type": "subtitle", "codec_name": "hdmv_pgs_subtitle", "tags": {"language": "und"},
+     "disposition": {"forced": 1}},
+]}
+
+
+def test_tracks_are_listed_with_ffmpegs_own_numbers():
+    found = probe.tracks(_PROBED)
+    assert [(a["n"], a["language"], a["label"]) for a in found["audio"]] == [
+        (0, "eng", "English · 5.1 · AC3"), (1, "jpn", "Japanese · Commentary · Stereo · AAC")]
+    # Teletext can't be shown, so it's left out, but it still holds number 1 in ffmpeg's 0:s:n.
+    assert [(s["n"], s["text"], s["forced"], s["label"]) for s in found["subtitles"]] == [
+        (0, True, False, "English"), (2, False, True, "Forced · burned in")]
+    assert probe.tracks(None) == {"audio": [], "subtitles": []}
+
+
+def test_the_sound_track_is_picked_by_number_then_language_then_default():
+    found = probe.tracks(_PROBED)
+    assert probe.pick_audio(found, 0, "jpn")["n"] == 0          # a pick in the player wins
+    assert probe.pick_audio(found, 9, None)["n"] == 1           # no such track: the one marked default
+    assert probe.pick_audio(found, None, "ENG")["n"] == 0       # the language last picked
+    assert probe.pick_audio(found, None, "fre")["n"] == 1
+    assert probe.pick_audio({"audio": [], "subtitles": []}, 0, None) is None
+
+
+def test_track_commands_keep_the_picked_sound_and_burn_in_picture_subtitles(settings, tmp_path):
+    manager = transcode.Manager(settings)
+    manager._vaapi = "/dev/dri/renderD128"
+    cmd = manager.file_command(tmp_path / "x.mkv", "video", "h264", "aac", "remux", 0, None, audio_track=1)
+    assert "0:a:1?" in cmd and "0:v:0" in cmd and "-filter_complex" not in cmd
+    cmd = manager.file_command(tmp_path / "x.mkv", "video", "h264", "aac", "remux", 0, None, burn=2)
+    assert "-filter_complex" not in cmd                         # a copied picture can't carry a subtitle
+    cmd = manager.file_command(tmp_path / "x.mkv", "video", "h264", "ac3", "transcode", 0, "software", 1, 2)
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert graph.startswith("[0:v:0][0:s:2]overlay") and graph.endswith("format=yuv420p[v]")
+    assert cmd[cmd.index("-map") + 1] == "[v]" and "0:a:1?" in cmd and "-vf" not in cmd
+    assert cmd.index("-filter_complex") < cmd.index("-map")     # the graph is defined before [v] is mapped
+    cmd = manager.file_command(tmp_path / "x.mkv", "video", "hevc", "aac", "transcode", 0, "vaapi", 0, 0)
+    assert "-hwaccel" not in cmd and cmd[cmd.index("-filter_complex") + 1].endswith("hwupload[v]")
+    cmd = manager.file_command(tmp_path / "x.mkv", "video", "hevc", "aac", "transcode", 0, "nvenc", 0, 0)
+    assert "h264_nvenc" in cmd and "overlay" in cmd[cmd.index("-filter_complex") + 1]
+
+
+@needs_ffmpeg
+def test_films_offer_their_sound_and_subtitle_tracks(client, conn, directory, root, settings, tmp_path):
+    _login(client, conn, directory)
+    _turn_on(client)
+    srt = tmp_path / "subs.srt"
+    srt.write_text("1\n00:00:01,000 --> 00:00:03,000\nHello from Lumi\n\n2\n00:00:04,000 --> 00:00:05,500\nBye!\n",
+                   encoding="utf-8")
+    film = root / "Media" / "Movies" / "Tracks (2020).mp4"
+    _ffmpeg("-f", "lavfi", "-i", "testsrc2=size=160x90:rate=12", "-f", "lavfi", "-i", "sine=frequency=440",
+            "-f", "lavfi", "-i", "sine=frequency=660", "-i", str(srt), "-t", "6",
+            "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:s", "-c:v", "libx264", "-preset", "ultrafast",
+            "-c:a", "aac", "-ac:a:0", "2", "-ac:a:1", "1", "-c:s", "mov_text",
+            "-metadata:s:a:0", "language=eng", "-metadata:s:a:1", "language=jpn",
+            "-metadata:s:s:0", "language=eng", str(film))
+    _aged(film)
+    _scan(conn, settings)
+    file_id = conn.execute("SELECT file_id FROM media_items").fetchone()[0]
+
+    # The first sound plays straight from the file; the answer lists every track.
+    play = client.post(f"/api/media/play/{file_id}", json={}).json()
+    assert play["mode"] == "direct" and play["audio"] == 0 and play["burn"] is None
+    assert [a["language"] for a in play["tracks"]["audio"]] == ["eng", "jpn"]
+    assert [(s["n"], s["text"]) for s in play["tracks"]["subtitles"]] == [(0, True)]
+
+    # Another sound needs a session; the language last picked chooses it too, and it's the one copied in.
+    for body in ({"audio": 1}, {"audio_lang": "jpn"}):
+        play = client.post(f"/api/media/play/{file_id}", json={**body, "start": 1}).json()
+        assert play["mode"] == "remux" and play["audio"] == 1, play
+        init = Path(client.app.state.media_sessions.root) / play["session"] / "init.mp4"
+        probed = probe.ffprobe(settings, init)
+        assert [s["channels"] for s in probed["streams"] if s["codec_type"] == "audio"] == [1]
+        client.delete(f"/api/media/sessions/{play['session']}")
+    # A text subtitle is never burned in: the browser draws it.
+    assert client.post(f"/api/media/play/{file_id}", json={"burn": 0}).json()["mode"] == "direct"
+
+    vtt = client.get(f"/media/files/{file_id}/subtitles/0.vtt")
+    assert vtt.status_code == 200 and vtt.headers["content-type"].startswith("text/vtt")
+    assert vtt.text.startswith("WEBVTT") and "Hello from Lumi" in vtt.text and "00:01.000 -->" in vtt.text
+    assert client.get(f"/media/files/{file_id}/subtitles/0.vtt").text == vtt.text   # the kept conversion
+    assert client.get(f"/media/files/{file_id}/subtitles/3.vtt").status_code == 404
+
+
 # ---------------------------------------------------------- progress, home
 def test_resume_positions_feed_continue_watching(client, conn, directory, root, settings):
     _login(client, conn, directory)

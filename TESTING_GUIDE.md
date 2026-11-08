@@ -1,5 +1,13 @@
 # Built-in games testing
 
+## Sound and subtitle tracks
+
+Run `.venv/Scripts/python.exe -m pytest tests/test_media.py -q -k track -p no:cacheprovider`. The unit tests cover ffprobe track listing (ffmpeg's own `0:s:n` numbers survive skipped teletext), the sound-track choice (pick, then remembered language, then default), and the ffmpeg commands for a picked sound track and for burned-in picture subtitles on each backend. With ffmpeg installed, `test_films_offer_their_sound_and_subtitle_tracks` builds a two-sound-track MP4 with a text subtitle. It checks direct play of the first track, a remuxed session that really carries the second (mono) track, and the WebVTT conversion and its cache.
+
+Not automated: burned-in PGS was checked once by hand. It was a hand-made `.sup` muxed into an MKV and sent through the software burn-in command, with the pixels checked: the box shows from 1 s to 3 s, and a session started at 1.5 s skips the line already on screen, as documented. The player UI was checked once in headless Chrome with a throwaway preview and Puppeteer. It covered the lists, cue alignment in direct and remuxed sessions, the A and C keys, and the remembered languages. On a real TV, check that 🗣 and CC appear, and that the phone remote's 🗣 and 💬 switch tracks.
+
+## Game checks
+
 Run the server and Media regression tests from the repository root:
 
 ```text

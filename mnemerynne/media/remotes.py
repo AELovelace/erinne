@@ -6,7 +6,7 @@ names it; the panel, asking every few seconds with its pairing secret, then gets
 sends from then on as `Authorization: Bearer …`. Only the key's hash is stored.
 
 A remote key opens its owner's screens and nothing else: what they are playing, the commands that control
-them (play/pause, skip, volume, mute, night filter, next, previous, stop, and the arrow and Enter buttons
+them (play/pause, skip, volume, mute, night filter, sound and subtitle track, next, previous, stop, and the arrow and Enter buttons
 that move around the TV page) and playing a live stream or a radio station. It can't browse the library, reach anyone else's screens or override someone using a TV.
 A remote that pairs as a speaker (media/speakers.py) is also one of its owner's screens, and plays only
 what is cast to it.
@@ -33,7 +33,8 @@ MAX_PER_USER = 10
 SEEN_SECONDS = 60                     # last_seen_at is saved at most this often per remote
 _saved: dict[int, float] = {}         # remote id -> time.monotonic() its last_seen_at was last saved, in this process
 _saved_lock = threading.Lock()
-ACTIONS = ("toggle", "skip", "volume", "mute", "night", "next", "prev", "stop", "press", "play_source", "play_station")
+ACTIONS = ("toggle", "skip", "volume", "mute", "night", "next", "prev", "stop", "press", "play_source", "play_station",
+           "audio_track", "subtitles")   # the last two step the playing film to its next sound / subtitle track
 BUTTONS = ("up", "down", "left", "right", "enter")   # press: the TV page replays them as its own arrow keys
 
 

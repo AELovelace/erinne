@@ -28,6 +28,11 @@ Media is a Kodi-style media centre for films, TV shows, music and pictures from 
   - **Automatic** tries the AMD card (VAAPI), then the NVIDIA card (NVENC), then the CPU, and keeps the first that works.
   - **Test transcoding** encodes two seconds with each backend and reports which work on this server.
 - **Transcodes at once:** how many films may be re-encoded at the same time; **0** turns transcoding off. Copying a film into a browser-friendly package (**Repackaged**) is cheap and doesn't count.
+- **Sound and subtitle tracks:** the player's 🗣 and **CC** buttons list a film's tracks. ffprobe reads them when the film is played (once per version of the file, kept in memory), so they need no rescan and no migration.
+  - A sound track other than the first plays through a **Repackaged** session, because browsers only play a file's first sound track. It doesn't count toward **Transcodes at once**.
+  - Text subtitles are converted to WebVTT once and cached under the media cache's `subtitles` folder (the 300 most recently used are kept). Converting one reads the whole film file, so the first time is slow on a big file over the share.
+  - Picture subtitles (PGS, DVD, DVB) are **burned in**: the overlay is drawn on the CPU, then the chosen backend encodes. So it's a transcode (it counts, and **0** blocks it), and on VAAPI the picture is decoded on the CPU instead of the card. Teletext and closed captions aren't offered.
+  - The phone remote's 🗣 and 💬 send `audio_track` and `subtitles`. Remote panels may send them too (`remotes.ACTIONS`), but the tablet firmware doesn't have buttons for them yet.
 - **Look up artwork online:** with this on, the following come from online sources:
   - from TMDB: posters, backdrops and plots of films and TV shows, and episode descriptions (episode names too, where the file gave none);
   - from MusicBrainz and the Cover Art Archive: album covers.

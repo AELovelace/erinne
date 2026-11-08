@@ -15,11 +15,16 @@ when there is one:
 - software: libx264 on the CPU.
 'auto' tries them in that order once (a two-second test encode) and keeps the first that works.
 Only re-encodes count against the admin's limit (Settings → Entertainment → Media → transcodes at once).
+
+Tracks: a session keeps the sound track the player picked (0:a:n), and can draw a picture subtitle
+(PGS, DVD) onto a re-encoded picture. Text subtitles are converted to WebVTT once (subtitle_vtt) and
+the browser draws them over whatever plays.
 """
 
 from __future__ import annotations
 
 import glob
+import hashlib
 import logging
 import os
 import re
@@ -184,38 +189,50 @@ class Manager:
         return [*common, "-hls_time", str(SEGMENT_SECONDS), "-hls_list_size", "0", "-hls_playlist_type", "event",
                 "-hls_flags", "independent_segments", "index.m3u8"]
 
-    def video_args(self, backend: str, codec: str | None) -> tuple[list[str], list[str]]:
-        """(before -i, after -i) for re-encoding the picture to H.264 with `backend`."""
+    def video_args(self, backend: str, codec: str | None, burn: int | None = None) -> tuple[list[str], list[str]]:
+        """(before -i, after -i) for re-encoding the picture to H.264 with `backend`. With `burn` (a picture
+        subtitle's number, 0:s:n), the subtitle is drawn onto the picture on the CPU first, so the GPU only
+        encodes; the result is the filter graph's [v] output, which file_command maps instead of 0:v:0."""
         keys = ["-force_key_frames", f"expr:gte(t,n_forced*{SEGMENT_SECONDS})"]
         rate = ["-b:v", "8M", "-maxrate", "10M", "-bufsize", "16M"]
+        overlay = f"[0:v:0][0:s:{burn}]overlay=eof_action=pass," if burn is not None else ""
+
+        def chain(tail: str) -> list[str]:
+            """The CPU filter chain: -vf on its own, or a -filter_complex ending in [v] when burning in."""
+            graph = f"{overlay}{_scale(False)},{tail}"
+            return ["-filter_complex", f"{graph}[v]"] if burn is not None else ["-vf", graph]
+
         if backend == "vaapi":
             device = self.vaapi_device() or "/dev/dri/renderD128"
-            if codec in HW_DECODE["vaapi"]:
+            if codec in HW_DECODE["vaapi"] and burn is None:   # decoded and scaled on the card, never on the CPU
                 return (["-hwaccel", "vaapi", "-hwaccel_device", device, "-hwaccel_output_format", "vaapi"],
                         ["-vf", _scale(True), "-c:v", "h264_vaapi", *rate, *keys])
-            return (["-vaapi_device", device],
-                    ["-vf", f"{_scale(False)},format=nv12,hwupload", "-c:v", "h264_vaapi", *rate, *keys])
+            return ["-vaapi_device", device], [*chain("format=nv12,hwupload"), "-c:v", "h264_vaapi", *rate, *keys]
         if backend == "nvenc":
-            pre = ["-hwaccel", "cuda"] if codec in HW_DECODE["nvenc"] else []
-            return pre, ["-vf", f"{_scale(False)},format=yuv420p", "-c:v", "h264_nvenc", "-preset", "p4",
-                         *rate, *keys]
-        return [], ["-vf", f"{_scale(False)},format=yuv420p", "-c:v", "libx264", "-preset", "veryfast",
+            pre = ["-hwaccel", "cuda"] if codec in HW_DECODE["nvenc"] else []   # CUDA decodes to system memory
+            return pre, [*chain("format=yuv420p"), "-c:v", "h264_nvenc", "-preset", "p4", *rate, *keys]
+        return [], [*chain("format=yuv420p"), "-c:v", "libx264", "-preset", "veryfast",
                     "-crf", "21", "-maxrate", "10M", "-bufsize", "16M", *keys]
 
     def file_command(self, path: Path, kind: str, video_codec: str | None, audio_codec: str | None, mode: str,
-                     start: float, backend: str | None) -> list[str]:
-        """The ffmpeg command for a file; it runs in the session folder."""
+                     start: float, backend: str | None, audio_track: int = 0, burn: int | None = None) -> list[str]:
+        """The ffmpeg command for a file; it runs in the session folder. audio_track is the sound to keep
+        (0:a:n; audio_codec is that track's codec); burn, a picture subtitle (0:s:n) drawn onto a
+        re-encoded picture (mode 'transcode' only)."""
         cmd = [self.settings.media_ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin"]
         audio = (["-c:a", "copy"] if audio_codec in COPY_AUDIO and mode == "remux"
                  else ["-c:a", "aac", "-b:a", "256k" if kind == "audio" else "192k", "-ac", "2"])
+        sound = f"0:a:{max(0, int(audio_track))}"              # the chosen track; '?' below: a silent film is fine
         if kind == "audio" or not video_codec:
-            return [*cmd, "-ss", f"{start:.3f}", "-i", str(path), "-map", "0:a:0", "-vn", *audio,
+            return [*cmd, "-ss", f"{start:.3f}", "-i", str(path), "-map", sound, "-vn", *audio,
                     *self._hls(live=False)]
+        burn = burn if mode == "transcode" else None            # only a re-encoded picture can carry it
         pre, post = ([], ["-c:v", "copy", *(["-tag:v", "hvc1"] if video_codec == "hevc" else [])])
         if mode == "transcode":
-            pre, post = self.video_args(backend or "software", video_codec)
-        return [*cmd, *pre, "-ss", f"{start:.3f}", "-i", str(path), "-map", "0:v:0", "-map", "0:a:0?",
-                "-sn", "-dn", *post, *audio, *self._hls(live=False)]
+            pre, post = self.video_args(backend or "software", video_codec, burn)
+        picture = "[v]" if burn is not None else "0:v:0"        # the overlay graph's output, or the file's own
+        return [*cmd, *pre, "-ss", f"{start:.3f}", "-i", str(path), *post, "-map", picture, "-map", f"{sound}?",
+                "-sn", "-dn", *audio, *self._hls(live=False)]
 
     def live_command(self, url: str) -> list[str]:
         """Pull a live stream (rtmp://, HLS...) and repackage it; the picture is copied (H.264 expected)."""
@@ -243,7 +260,8 @@ class Manager:
         return session
 
     def start_file(self, *, user_id: int, slot: str, file_id: int, path: Path, kind: str, video_codec: str | None,
-                   audio_codec: str | None, mode: str, start: float, hwaccel: str, max_transcodes: int) -> Session:
+                   audio_codec: str | None, mode: str, start: float, hwaccel: str, max_transcodes: int,
+                   audio_track: int = 0, burn: int | None = None) -> Session:
         key = f"user:{user_id}:{slot}"
         with self._lock:
             for old in [s for s in self._sessions.values() if s.key == key]:
@@ -255,7 +273,8 @@ class Manager:
                     raise TranscodeError("Every transcoding slot is busy right now; try again in a minute.")
         backend = self.backend(hwaccel) if mode == "transcode" and kind == "video" else None
         with self._lock:
-            return self._spawn(key, self.file_command(path, kind, video_codec, audio_codec, mode, start, backend),
+            return self._spawn(key, self.file_command(path, kind, video_codec, audio_codec, mode, start, backend,
+                                                      audio_track, burn),   # the picked sound and burned-in subtitle
                                user_id=user_id, file_id=file_id, source_id=None,
                                mode=mode if kind == "video" else "audio", start_s=start, backend=backend)
 
@@ -358,3 +377,46 @@ class Manager:
 
 def media_type_of(name: str) -> str:
     return MEDIA_TYPES.get(os.path.splitext(name)[1], "application/octet-stream")
+
+
+SUBTITLE_KEEP = 300          # converted subtitle files kept in <media_dir>/subtitles, newest first
+SUBTITLE_SECONDS = 180       # reading a subtitle means reading the whole file: a big film over the share is slow
+
+
+def subtitle_vtt(settings: Settings, path: Path, n: int) -> Path:
+    """A text subtitle (0:s:n) of a file as WebVTT, converted by ffmpeg once per version of the file (its
+    time and size) and kept in the media cache; TranscodeError if ffmpeg can't. Styling (ASS) is dropped."""
+    st = path.stat()
+    folder = settings.media_dir / "subtitles"
+    folder.mkdir(parents=True, exist_ok=True)
+    name = hashlib.sha1(f"{path}|{st.st_mtime_ns}|{st.st_size}|{n}".encode()).hexdigest()[:24]
+    out = folder / f"{name}.vtt"
+    if out.is_file():
+        os.utime(out)                                          # recently used: kept longer by _prune_subtitles
+        return out
+    part = folder / f"{name}.{uuid.uuid4().hex[:8]}.part"      # two requests at once each write their own
+    cmd = [settings.media_ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-i", str(path),
+           "-map", f"0:s:{int(n)}", "-c:s", "webvtt", "-f", "webvtt", str(part)]
+    try:
+        done = subprocess.run(cmd, capture_output=True, timeout=SUBTITLE_SECONDS, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        part.unlink(missing_ok=True)
+        raise TranscodeError(f"The subtitles couldn't be read: {exc}") from None
+    if done.returncode != 0 or not part.is_file():
+        part.unlink(missing_ok=True)
+        problem = done.stderr.decode(errors="replace").strip().splitlines()
+        raise TranscodeError("The subtitles couldn't be read" + (f": {problem[-1][:200]}" if problem else "."))
+    os.replace(part, out)                                      # appears whole, never half written
+    _prune_subtitles(folder)
+    return out
+
+
+def _prune_subtitles(folder: Path) -> None:
+    """Keep the SUBTITLE_KEEP most recently used conversions; leftovers of failed ones go too."""
+    try:
+        files = sorted((p for p in folder.iterdir() if p.suffix == ".vtt"), key=lambda p: p.stat().st_mtime,
+                       reverse=True)
+    except OSError:
+        return
+    for old in files[SUBTITLE_KEEP:]:
+        old.unlink(missing_ok=True)

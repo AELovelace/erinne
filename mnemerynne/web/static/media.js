@@ -1,6 +1,7 @@
 /* Media: a Kodi-style media centre over the share's Media library (mnemerynne/media/).
    Views come from the hash (#movies, #movie/12, #tv, #tvshow/56, #album/<key>, #pictures/34, #live, #radio...).
    A TV episode plays on into the next one of its show (episodes, below).
+   A film's sound and subtitle tracks are picked from 🗣 and CC in the player (tracks, below).
    Films and clips play in a full-screen player, music and radio in the now-playing bar; what the
    browser can't play itself is asked of the server (/api/media/play), which answers with the file or
    an HLS session (played with hls.js). Arrow keys move between tiles like a remote; Enter opens,
@@ -741,6 +742,7 @@
     show: function (title) {
       this.closeYouTube();
       nowPlaying.pause();
+      tracks.reset();   // the last film's sound and subtitle lists go; the languages picked are kept
       $("mc-player").hidden = false;
       $("mc-player-title").textContent = title;
       this.wake();
@@ -821,7 +823,8 @@
       this.status("Preparing…");
       let r;
       try {
-        r = await api("POST", "/api/media/play/" + this.item.id, { start: start, slot: "video", caps: caps() });
+        r = await api("POST", "/api/media/play/" + this.item.id,
+                      Object.assign({ start: start, slot: "video", caps: caps() }, tracks.request()));   // + the picked tracks
       } catch (err) { this.status(err.message); return; }
       if (this.item === null || $("mc-player").hidden) { if (r.session) api("DELETE", "/api/media/sessions/" + r.session).catch(function () {}); return; }
       this.duration = r.duration || this.duration;
@@ -837,6 +840,7 @@
         this.session = r.session;
         this.attach(r.url, r.start);
       }
+      tracks.loaded(r);   // after attach: a text subtitle's cues are shifted by the session's offset
     },
 
     attach: function (url, offset) {
@@ -895,6 +899,7 @@
       if (session) api("DELETE", "/api/media/sessions/" + session).catch(function () {});
       if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
       this.closeYouTube();
+      tracks.reset();
       $("mc-player").hidden = true;
       this.status("");
       if (["movie", "tvshow", "home"].indexOf(route().view) >= 0) render();   // fresh Resume buttons and progress
@@ -917,7 +922,7 @@
       clearTimeout(this.idleTimer);
       // Never idle over YouTube: mouse moves inside its frame don't reach this page to wake the bar again.
       this.idleTimer = setTimeout(function () {
-        if (!video.paused && !box.classList.contains("youtube")) box.classList.add("idle");
+        if (!video.paused && !box.classList.contains("youtube") && !tracks.isOpen()) box.classList.add("idle");
       }, 3000);
     },
 
@@ -926,6 +931,7 @@
       this.wake();
       if (episodes.counting() && k.indexOf("Arrow") === 0) { episodes.switchFocus(); return true; }   // Play now ⇄ Cancel
       if (episodes.counting() && k === "Enter") return false;   // the focused button's own click
+      if (tracks.isOpen()) return tracks.key(e);                 // the track list has the arrows, Enter and Escape
       if (k === "Escape" || k === "Backspace") { this.close(); }
       else if (k === "N") { episodes.step(1); }    // Shift+N: the next episode
       else if (k === "P") { episodes.step(-1); }   // Shift+P: the previous one
@@ -937,6 +943,8 @@
       else if (k === "f") { this.fullscreen(); }
       else if (k === "m") { volume.toggleMute(); }
       else if (k === "n") { night.step(); }
+      else if (k === "a") { tracks.cycle("audio"); }       // the next sound track
+      else if (k === "c") { tracks.cycle("subtitles"); }   // the next subtitles, then off
       else return false;
       return true;
     },
@@ -1055,6 +1063,225 @@
   };
   $("mc-upnext-play").addEventListener("click", function () { episodes.playNext(); });
   $("mc-upnext-cancel").addEventListener("click", function () { episodes.cancel(); player.close(); });
+  /* The film's sound and subtitle tracks, from /api/media/play (probe.tracks): 🗣 and CC open a list to pick
+     from; A and C (and the phone remote's 🗣 and 💬) step to the next one. A sound track other than the first,
+     or a picture subtitle (burned in), restarts playback on the server at the same place (player.load); a
+     text subtitle is the browser's own <track>, from its WebVTT (/media/files/<id>/subtitles/<n>.vtt). The
+     languages picked are kept on this device, so the next film or episode starts with them. */
+  const tracks = {
+    list: { audio: [], subtitles: [] },
+    audio: null,      // the sound track playing (its n), as the server last answered
+    sub: null,        // the subtitle shown (its n), or null for none
+    burned: null,     // the picture subtitle the playing session draws in, or null
+    itemId: null,     // the film these are for: a new one gets the remembered languages
+    flashTimer: null,
+
+    prefs: function () {   // { audio: "jpn", sub: "eng" | "off" | "*" }, kept in this browser
+      try { return JSON.parse(localStorage.getItem("mc-tracks") || "{}") || {}; } catch (e) { return {}; }
+    },
+    remember: function (key, value) {   // one remembered choice, merged into the rest
+      const p = this.prefs();
+      p[key] = value;
+      try { localStorage.setItem("mc-tracks", JSON.stringify(p)); } catch (e) { /* private window */ }
+    },
+
+    reset: function () {   // a new thing in the player (or none): no lists, no subtitles, no menu
+      this.list = { audio: [], subtitles: [] };
+      this.audio = this.sub = this.burned = this.itemId = null;
+      this.close(false);
+      this.clearCues();
+      this.paint();
+    },
+
+    /* What the next /api/media/play asks for: the sound picked for this film, else the language last picked;
+       and the picture subtitle to burn in, if that's the one chosen. */
+    request: function () {
+      const out = { audio_lang: this.prefs().audio || null };
+      if (player.item && this.itemId === player.item.id) {   // a seek or a pick: keep this film's own choices
+        if (this.audio !== null) out.audio = this.audio;
+        const s = this.find("subtitles", this.sub);
+        if (s && !s.text) out.burn = s.n;
+      }
+      return out;
+    },
+
+    /* The server's answer: its lists and choices; a new film picks the remembered subtitle language. */
+    loaded: function (r) {
+      const fresh = this.itemId !== (player.item && player.item.id);
+      this.itemId = player.item ? player.item.id : null;
+      this.list = r.tracks || { audio: [], subtitles: [] };
+      this.audio = r.audio === undefined ? null : r.audio;
+      this.burned = r.burn === undefined ? null : r.burn;
+      if (this.burned !== null) this.sub = this.burned;     // the server is drawing this one in
+      else if (fresh) this.sub = this.preferredSub();       // a new film: the remembered language, if it has it
+      else if (!this.find("subtitles", this.sub) || !this.find("subtitles", this.sub).text) this.sub = null;
+      this.showCues();
+      this.paint();
+    },
+
+    find: function (kind, n) {   // the track numbered n of a kind, or null
+      return n === null ? null : this.list[kind].find(function (t) { return t.n === n; }) || null;
+    },
+
+    /* The text subtitle in the remembered language ("*": the first), never a picture one by itself (burning in
+       costs a re-encode, so only a pick in the list starts that). */
+    preferredSub: function () {
+      const want = this.prefs().sub;
+      if (!want || want === "off") return null;
+      const text = this.list.subtitles.filter(function (s) { return s.text; });
+      const hit = want === "*" ? text[0]
+        : text.find(function (s) { return s.language === want && !s.forced; }) || text.find(function (s) { return s.language === want; });
+      return hit ? hit.n : null;
+    },
+
+    pickAudio: function (n) {   // another sound track: only the server can switch it, from the same place
+      const t = this.find("audio", n);
+      if (n === this.audio || !t) return;
+      this.audio = n;
+      this.remember("audio", t.language || "");
+      player.load(player.position()).then(function () { tracks.flash("Sound: " + t.label); });
+    },
+
+    pickSub: function (n) {   // other subtitles (null: off); a picture subtitle starting or stopping means a new session
+      const next = this.find("subtitles", n);
+      this.sub = next ? n : null;
+      this.remember("sub", next ? (next.language || "*") : "off");
+      const note = next ? "Subtitles: " + next.label : "Subtitles off";
+      const wantBurn = next && !next.text ? next.n : null;
+      if (wantBurn !== this.burned) {
+        player.load(player.position()).then(function () { tracks.flash(note); });
+      } else {
+        this.showCues();
+        this.paint();
+        this.flash(note);
+      }
+    },
+
+    /* A and C, and the phone remote: the next sound track; the next subtitles, then off. */
+    cycle: function (kind) {
+      if (!player.item || player.live || player.youtube()) return;
+      const list = this.list[kind];
+      if (kind === "audio") {
+        if (list.length < 2) { this.flash(list.length ? "This has one sound track" : "No sound tracks"); return; }
+        const i = list.findIndex(function (t) { return t.n === tracks.audio; });
+        this.pickAudio(list[(i + 1) % list.length].n);
+      } else {
+        if (!list.length) { this.flash("No subtitles"); return; }
+        const order = [null].concat(list.map(function (t) { return t.n; }));
+        this.pickSub(order[(order.indexOf(this.sub) + 1) % order.length]);
+      }
+    },
+
+    clearCues: function () {   // every <track> off the video
+      Array.prototype.forEach.call(video.querySelectorAll("track"), function (t) { t.remove(); });
+      $("mc-subs-btn").classList.remove("loading");
+    },
+
+    /* The chosen text subtitle as a <track> on the video. An HLS session starts at player.offset, so its
+       cues move back by that much to line up with the session's own clock. */
+    showCues: function () {
+      this.clearCues();
+      const s = this.find("subtitles", this.sub);
+      if (!s || !s.text || !player.item) return;
+      const el = document.createElement("track");
+      const offset = player.offset;
+      el.kind = "subtitles";
+      el.label = s.label;
+      if (/^[a-z]{2,3}$/.test(s.language)) el.srclang = s.language;
+      el.src = "/media/files/" + player.item.id + "/subtitles/" + s.n + ".vtt";
+      const btn = $("mc-subs-btn");
+      btn.classList.add("loading");   // the first time, the server reads the whole file: it can take a while
+      el.addEventListener("load", function () {
+        btn.classList.remove("loading");
+        if (offset) Array.prototype.forEach.call(el.track.cues || [], function (c) {
+          c.startTime = Math.max(0, c.startTime - offset);   // start first: moving back, it never passes the end
+          c.endTime = Math.max(0, c.endTime - offset);
+        });
+      });
+      el.addEventListener("error", function () { btn.classList.remove("loading"); tracks.flash("The subtitles couldn't be loaded"); });
+      video.appendChild(el);
+      el.track.mode = "showing";
+    },
+
+    /* The 🗣 and CC buttons: shown when there's a choice to make; CC lit while subtitles show. */
+    paint: function () {
+      $("mc-audio-btn").hidden = this.list.audio.length < 2;
+      const cc = $("mc-subs-btn");
+      cc.hidden = !this.list.subtitles.length;
+      cc.classList.toggle("on", this.sub !== null);
+      cc.setAttribute("aria-pressed", this.sub !== null ? "true" : "false");
+    },
+
+    isOpen: function () { return !$("mc-tracks").hidden; },
+
+    /* The list for one kind (pressing its button again closes it), the current choice ticked and focused. */
+    open: function (kind) {
+      const box = $("mc-tracks");
+      if (this.isOpen() && box.dataset.kind === kind) { this.close(true); return; }
+      box.textContent = "";
+      box.dataset.kind = kind;
+      const head = document.createElement("h3");
+      head.textContent = kind === "audio" ? "Sound" : "Subtitles";
+      box.appendChild(head);
+      const options = (kind === "audio" ? [] : [{ n: null, label: "Off" }]).concat(
+        this.list[kind].map(function (t) { return { n: t.n, label: t.label }; }));
+      const current = kind === "audio" ? this.audio : this.sub;
+      let focus = null;
+      options.forEach(function (o) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.setAttribute("role", "menuitemradio");
+        b.setAttribute("aria-checked", o.n === current ? "true" : "false");
+        b.textContent = o.label;
+        b.addEventListener("click", function () {
+          tracks.close(true);
+          if (kind === "audio") tracks.pickAudio(o.n); else tracks.pickSub(o.n);
+        });
+        box.appendChild(b);
+        if (o.n === current || focus === null) focus = o.n === current ? b : (focus || b);
+      });
+      box.hidden = false;
+      player.wake();
+      if (focus) focus.focus();
+    },
+
+    close: function (refocus) {   // refocus: back to the button the list came from
+      const box = $("mc-tracks");
+      if (box.hidden) return;
+      const kind = box.dataset.kind;
+      box.hidden = true;
+      box.textContent = "";
+      if (refocus) $(kind === "audio" ? "mc-audio-btn" : "mc-subs-btn").focus();
+      player.wake();
+    },
+
+    /* Keys while the list is open: ↑ ↓ move, Enter picks (a remote's replayed Enter too), Escape closes. */
+    key: function (e) {
+      const items = Array.prototype.slice.call($("mc-tracks").querySelectorAll("button"));
+      const i = items.indexOf(document.activeElement);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        items[(i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length].focus();
+      } else if (e.key === "Enter" || e.key === " ") {
+        (items[i] || items[0]).click();
+      } else if (["Escape", "Backspace", "ArrowLeft", "ArrowRight"].indexOf(e.key) >= 0) {
+        this.close(true);
+      } else return false;
+      return true;
+    },
+
+    /* A short note in the middle of the picture (which track is now playing). */
+    flash: function (text) {
+      player.status(text);
+      clearTimeout(this.flashTimer);
+      this.flashTimer = setTimeout(function () { if ($("mc-status").textContent === text) player.status(""); }, 2500);
+    },
+  };
+  $("mc-audio-btn").addEventListener("click", function () { tracks.open("audio"); });
+  $("mc-subs-btn").addEventListener("click", function () { tracks.open("subtitles"); });
+  // A press anywhere else in the player closes an open list.
+  $("mc-player").addEventListener("pointerdown", function (e) {
+    if (tracks.isOpen() && !e.target.closest("#mc-tracks, #mc-audio-btn, #mc-subs-btn")) tracks.close(false);
+  }, true);
   $("mc-prev-ep").addEventListener("click", function () { episodes.step(-1); });
   $("mc-next-ep").addEventListener("click", function () { episodes.step(1); });
   // A tap while the controls are hidden only brings them back; the next one plays or pauses.
@@ -1564,6 +1791,7 @@
        ["⏭", "Next", { action: "next" }], ["🔉", "Quieter", "down"], ["🔊", "Louder", "up"],
        ["🔇", "Mute / unmute", { action: "mute" }],
        ["🌙", "Night filter: off, low, medium, high", "night"],
+       ["🗣", "Next sound track", { action: "audio_track" }], ["💬", "Subtitles: next language, then off", { action: "subtitles" }],
        ["⏹", "Stop", { action: "stop" }], ["✕", "Play on this device again", "leave"]].forEach(function (b) {
         bar.appendChild(button(b[0], "", function () {
           if (b[2] === "leave") { cast.choose(null); return; }
@@ -1997,6 +2225,8 @@
         else if (a === "next") nowPlaying.next(); else nowPlaying.prev();
       } else if (a === "night") {
         if (typeof cmd.level === "number") night.set(cmd.level * 100, true); else night.step();
+      } else if (a === "audio_track" || a === "subtitles") {
+        if (!$("mc-player").hidden) tracks.cycle(a === "audio_track" ? "audio" : "subtitles");   // the film's next track
       } else if (a === "stop") {
         player.close();
         nowPlaying.stop();

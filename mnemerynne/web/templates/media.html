@@ -80,6 +80,8 @@
     <button type="button" id="mc-player-close" title="Close (Esc)">✕</button>
   </div>
   <div class="mc-osd">
+    {#- 🗣 and CC open this list of the film's sound or subtitle tracks (media.js tracks). -#}
+    <div class="mc-tracks" id="mc-tracks" role="menu" aria-label="Tracks" hidden></div>
     <div class="mc-bar">
       <button type="button" id="mc-prev-ep" title="Previous episode (Shift+P)" hidden>⏮</button>
       <button type="button" id="mc-back10" title="Back 10 s (←)">⟲</button>
@@ -95,6 +97,8 @@
       <label class="mc-night" title="Night filter: warmer and dimmer (N)">🌙
         <input type="range" id="mc-night" min="0" max="100" step="5" value="0" aria-label="Night filter">
       </label>
+      <button type="button" id="mc-audio-btn" title="Sound track (A)" aria-haspopup="menu" hidden>🗣</button>
+      <button type="button" id="mc-subs-btn" class="mc-cc" title="Subtitles (C)" aria-haspopup="menu" hidden>CC</button>
       <button type="button" id="mc-full" title="Full screen (F)">⛶</button>
     </div>
   </div>
