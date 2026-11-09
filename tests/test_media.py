@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -1761,3 +1762,13 @@ def test_episodes_can_be_marked_watched_without_playing(client, conn, directory,
     assert client.put("/api/media/watched", json={"file_ids": season1, "watched": True}).status_code == 404
     assert client.put("/api/media/watched", json={"file_ids": [], "watched": True}).status_code == 422
 
+
+
+def test_the_track_picker_doesnt_restyle_the_episode_and_album_lists():
+    """The lists are .mc-tracks in the page; the player's floating 🗣/CC menu must not share that class."""
+    static = Path(__file__).parent.parent / "mnemerynne" / "web"
+    css = (static / "static" / "media.css").read_text(encoding="utf-8")
+    rules = re.findall(r"^\s*\.mc-tracks\s*\{([^}]*)\}", css, re.M)      # the list's own rule, and no other
+    assert len(rules) == 1 and "position" not in rules[0]
+    assert ".mc-picker[hidden] { display: none; }" in css             # flex would otherwise keep the closed menu showing
+    assert '<div class="mc-picker" id="mc-tracks"' in (static / "templates" / "media.html").read_text(encoding="utf-8")
