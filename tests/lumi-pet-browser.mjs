@@ -7,6 +7,7 @@ export async function checkLumiPet(browser, page, base) { // Exercise real contr
   assert.equal(await page.$eval("#lp-moments", el => el.textContent), "0");
   await page.click('[data-lp-action="cuddle"]');
   assert.equal(await page.$eval("#lp-moments", el => el.textContent), "1");
+  await page.waitForFunction(() => document.getElementById("lp-coins").textContent === "1,025"); // The day's first visit pays its coins.
   await page.focus("#lp-sound"); // Arrow navigation must supersede stale focus on a different control.
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("Enter");

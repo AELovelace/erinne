@@ -152,6 +152,7 @@ body:has(> .topbar .tv-history) > .tv-strip { display: none; }
 .topbar.main-bar .brand { order: -2; }   /* the tabs live in .nav-more but sit after the brand on a desktop */
 .topbar.main-bar .tabs { order: -1; }
 .nav-more form { display: contents; }
+.nav-install { display: none; }   /* phones only: the install buttons at the bottom of the ☰ menu (below) */
 .tabs a {
   text-decoration: none; color: var(--muted); padding: .3rem .8rem; border-radius: 999px;
 }
@@ -815,6 +816,11 @@ button.danger-fill { background: var(--error); }
   .nav-more .nav-who { margin: 0; padding: .2rem 0 .35rem; border-bottom: 1px solid var(--line); }
   .nav-more .help-link { padding: .35rem 0; }
   .nav-more button.link { padding: .35rem 0; }
+  .nav-more .nav-install:not([hidden]) { display: flex; flex-direction: column; gap: .35rem;   /* stacked, under Sign out */
+    margin-top: .2rem; padding-top: .5rem; border-top: 1px solid var(--line); }
+  .nav-install button { width: 100%; }
+  .nav-install button[hidden], .nav-install p[hidden] { display: none; }   /* a button's display rule mustn't unhide it */
+  .nav-install p { margin: 0; max-width: 14rem; overflow-wrap: anywhere; }   /* a long address wraps inside the menu */
   /* Document bars (the editor, a file view, an API call): the name wraps instead of pushing the bar out. */
   .topbar.doc-bar { flex-wrap: wrap; gap: .4rem .7rem; padding: .5rem .75rem; }
   .topbar.doc-bar > strong { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; font-size: .95rem; }

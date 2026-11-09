@@ -1169,7 +1169,7 @@ def test_built_in_games_open_from_media_and_show_on_a_remote(client, conn, direc
     _turn_on(client)
     assert 'data-view="games"' in client.get("/media").text                # built in: listed with no setup
     listed = client.get("/api/media/games").json()["games"]
-    assert [g["slug"] for g in listed] == [g.slug for g in games.GAMES] and listed[0]["name"] == "Prism Drop"
+    assert [g["slug"] for g in listed] == [g.slug for g in games.GAMES] and [g["name"] for g in listed[:2]] == ["Lumi Pet", "Prism Drop"]
     page = client.get("/media/games/prism-drop")
     assert page.status_code == 200
     for name in ("games/common.js", "games/common.css", "games/prism-drop/rules.js", "games/prism-drop/game.js",
@@ -1207,7 +1207,7 @@ def test_built_in_games_open_from_media_and_show_on_a_remote(client, conn, direc
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js isn't installed")
-def test_prism_drop_rules_pass_in_node():
+def test_game_rules_pass_in_node():
     tests = sorted(str(p) for p in (Path(__file__).parent / "js").glob("*.test.mjs"))
     assert tests
     r = subprocess.run(["node", "--test", *tests], capture_output=True, text=True, timeout=120)
@@ -1300,6 +1300,59 @@ def test_a_remote_starts_channels_forgets_itself_and_follows_the_group(client, c
     assert panel.delete("/api/media/remote", headers=auth).status_code == 200      # the panel's Forget
     assert panel.get("/api/media/remote", headers=auth).status_code == 401
     assert conn.execute("SELECT count(*) FROM media_remotes").fetchone()[0] == 0
+
+
+def test_a_phone_pairs_itself_as_a_remote_and_gets_a_panels_powers(client, conn, directory):
+    uid = _login(client, conn, directory)
+    _turn_on(client)
+    screen_id, _ = _pair(client)
+    page = client.get("/media/panel")
+    assert page.status_code == 200 and 'data-signed-in="1"' in page.text and "media-panel.js" in page.text
+    assert 'href="/media/panel"' in client.get("/media").text                  # reachable from Media's menu
+
+    # Its own installable app beside the main one: its own manifest, id, scope and icons.
+    assert 'href="/media/panel/manifest.webmanifest"' in page.text and 'href="/manifest.webmanifest"' not in page.text
+    assert 'href="/manifest.webmanifest"' in client.get("/media").text
+    app = client.get("/media/panel/manifest.webmanifest").json()
+    main = client.get("/manifest.webmanifest").json()
+    assert app["id"] == app["scope"] == app["start_url"] == "/media/panel" and app["id"] != main["id"]
+    assert app["name"].endswith(" Remote") and not any(s["url"] == "/media/panel" for s in main["shortcuts"])
+    for icon in app["icons"]:
+        assert client.get(icon["src"]).status_code == 200
+
+    made = client.post("/api/media/panel/pair", json={"name": "My phone"})
+    assert made.status_code == 201, made.text
+    phone = TestClient(client.app)                                             # no cookies, like a panel
+    auth = {"Authorization": "Bearer " + made.json()["key"]}
+    assert phone.get("/api/media/remote", headers=auth).json()["name"] == "My phone"
+    assert [r["name"] for r in client.get("/api/media/screens").json()["remotes"]] == ["My phone"]
+
+    # Same name, any case: refused, and the first phone's key keeps working (the code flow would replace it).
+    taken = client.post("/api/media/panel/pair", json={"name": "my PHONE"})
+    assert taken.status_code == 422 and "already called" in taken.json()["detail"]
+    assert phone.get("/api/media/remote", headers=auth).status_code == 200
+
+    # A press carries the same seat proof a panel's does, so game tables treat the phone as a remote.
+    queue = _hub(client).listen(screen_id)
+    r = phone.post(f"/api/media/remote/screens/{screen_id}/command", json={"action": "press", "button": "enter"}, headers=auth)
+    assert r.status_code == 200, r.text
+    from mnemerynne import casino_remote
+    proof = casino_remote.read(client.app.state.settings.secret_key, queue.get_nowait()["controller"])
+    assert proof["remote"] == made.json()["id"] and proof["action"] == "enter"
+
+    # Signed out: the page still opens (a paired phone needs no sign-in), but pairing needs one.
+    stranger = TestClient(client.app)
+    assert 'data-signed-in="0"' in stranger.get("/media/panel").text
+    assert stranger.post("/api/media/panel/pair", json={"name": "Thief"}).status_code == 401
+    to_login = stranger.get("/media/panel?signin=1", follow_redirects=False)
+    assert to_login.status_code == 303 and to_login.headers["location"] == "/login"
+    assert phone.get("/api/media/remote", headers=auth).status_code == 200     # and the key outlives the sign-in
+
+    # Blank names are refused, and a person outside the screens group can't pair.
+    assert client.post("/api/media/panel/pair", json={"name": "   "}).status_code == 422
+    _screens_for(client, "")
+    assert client.post("/api/media/panel/pair", json={"name": "Other"}).status_code == 403
+    assert conn.execute("SELECT count(*) FROM media_remotes WHERE user_id = ?", (uid,)).fetchone()[0] == 1
 
 
 def _speaker(client, name="Bedroom speaker"):

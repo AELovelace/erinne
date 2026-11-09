@@ -33,18 +33,8 @@
     $("casino-error").textContent = message || "";
     $("casino-error").hidden = !message;
   }
-  async function api(path, body) { // A bounded request prevents a lost connection from locking controls forever.
-    const response = await fetch(base + path, { method: body === undefined ? "GET" : "POST", credentials: "same-origin",
-      headers: body === undefined ? {} : { "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(10000), cache: "no-store" });
-    const data = await response.json();
-    if (!response.ok) {
-      const failure = new Error(typeof data.detail === "string" ? data.detail : "This move could not be accepted.");
-      failure.status = response.status;
-      throw failure;
-    }
-    return data;
-  }
+  function api(path, body) { return M.api(base + path, body); } // A bounded request prevents a lost connection from locking controls forever.
+  function unit() { return state && state.couch ? "credits" : "coins"; } // Local multiplayer tables play on free credits; online tables on the account's coins.
   function remember(code) { // Refreshing a page resumes its existing seat instead of minting a new balance.
     try {
       if (code) { sessionStorage.setItem("casino-room:" + game, code); sessionStorage.setItem("casino-view:" + game, tvMode ? "tv" : "individual"); }
@@ -73,15 +63,16 @@
     $("casino-betting").hidden = !betting;
     $("casino-hand").hidden = !(p && game === "blackjack" && state.phase === "playing" && p.bet && !p.stood);
     $("casino-amount").textContent = amount;
-    $("casino-stake-label").textContent = game === "slots" ? "Chips per line" : "Chips to play";
+    $("casino-stake-label").textContent = (state && state.couch ? "Credits" : "Coins") + (game === "slots" ? " per line" : " to play");
     $("casino-cost").hidden = game !== "slots";
-    $("casino-cost").textContent = wagerLines() + " lines × " + amount + " = " + (wagerLines() * amount) + " chips total";
+    $("casino-cost").textContent = wagerLines() + " lines × " + amount + " = " + (wagerLines() * amount) + " " + unit() + " total";
     $("casino-pick").textContent = choices[pick][1];
     $("casino-bet").textContent = p && p.bet ? "Update bet" : "Place bet";
     $("casino-bet").disabled = busy || !p || amount > betLimit(p);
     $("casino-start").hidden = !state || !state.players.length || state.you !== state.players[0].id;
     $("casino-start").disabled = busy || !state || !state.players.some(p => p.bet);
     $("casino-refill").hidden = !(p && p.chips < 10 * wagerLines() && !p.bet);
+    $("casino-refill").textContent = "Refill free " + unit();
     ["casino-create", "casino-create-tv", "casino-leave", "casino-hit", "casino-stand", "casino-refill"].forEach(id => { $(id).disabled = busy; });
     $("casino-less").disabled = busy || amount <= 10;
     $("casino-more").disabled = busy || amount >= (p ? betLimit(p) : 500);
@@ -174,9 +165,9 @@
     $("casino-code").textContent = "Table " + data.code + " · Round " + data.round;
     $("casino-phase").textContent = { betting: "Place your bets", playing: game === "blackjack" ? "Play your hand" : "Round in progress", results: "Round complete" }[data.phase];
     const p = mine();
-    $("casino-balance").textContent = p ? p.chips.toLocaleString() + " chips" : "Shared TV";
-    $("casino-hint").textContent = !p ? "Each remote controls its own player card." : data.phase === "betting" ? (p.bet ? "Bet locked in: " + stake(p) + " chips total. You can update it until the round starts." : "Choose your stake, then place a bet. The host or timer starts the round.") :
-      data.phase === "results" ? (p.bet ? "Returned " + p.payout + " chips · Net " + (p.payout - stake(p)) : "You watched this round. Join the next one!") :
+    $("casino-balance").textContent = p ? p.chips.toLocaleString() + " " + unit() : "Shared TV";
+    $("casino-hint").textContent = !p ? "Each remote controls its own player card." : data.phase === "betting" ? (p.bet ? "Bet locked in: " + stake(p) + " " + unit() + " total. You can update it until the round starts." : "Choose your stake, then place a bet. The host or timer starts the round.") :
+      data.phase === "results" ? (p.bet ? "Returned " + p.payout + " " + unit() + " · Net " + (p.payout - stake(p)) : "You watched this round. Join the next one!") :
       !p.bet ? "You’re watching this round. Betting reopens after the results." : p.stood ? "Your hand is finished. Waiting for the table." : "Bets are closed. Watch the table!";
     if (!old || old.revision !== data.revision || old.code !== data.code) {
       stage();
@@ -184,7 +175,7 @@
       data.players.forEach((seat, i) => {
         const box = node("article", undefined, "casino-player"); box.dataset.you = seat.id === data.you; box.dataset.seat = seat.id;
         box.append(node("h3", seat.name + (seat.id === data.you ? " · You" : "") + (i === 0 ? " · Host" : "")));
-        box.append(node("p", seat.chips.toLocaleString() + " chips · Bet " + seat.bet + (game === "slots" ? "/line · Total " + stake(seat) : "")));
+        box.append(node("p", seat.chips.toLocaleString() + " " + unit() + " · Bet " + seat.bet + (game === "slots" ? "/line · Total " + stake(seat) : "")));
         if (seat.choice && choices.length > 1) box.append(node("p", (choices.find(c => c[0] === seat.choice) || ["", seat.choice])[1]));
         if (seat.cards.length) {
           const value = handTotal(seat.cards);
@@ -201,8 +192,8 @@
           box.querySelector("h3").prepend(node("span", "P" + (i + 1) + " · ", "casino-seat-number"));
           if (data.phase === "betting") {
             const choice = choices[draft.pick][1];
-            box.append(node("p", "Selected: " + (choice ? choice + " · " : "") + draft.amount + (game === "slots" ? "/line · " + draft.amount * wagerLines() + " total" : " chips"), "casino-draft"));
-            box.append(node("p", seat.chips < 10 * wagerLines() && !seat.bet ? "Enter: refill free chips" : "Enter: " + (seat.bet ? "update bet" : "place bet"), "casino-controller-hint"));
+            box.append(node("p", "Selected: " + (choice ? choice + " · " : "") + draft.amount + (game === "slots" ? "/line · " + draft.amount * wagerLines() + " total" : " " + unit()), "casino-draft"));
+            box.append(node("p", seat.chips < 10 * wagerLines() && !seat.bet ? "Enter: refill free " + unit() :"Enter: " + (seat.bet ? "update bet" : "place bet"), "casino-controller-hint"));
           } else if (game === "blackjack" && data.phase === "playing" && seat.bet && !seat.stood) {
             box.append(node("p", "◀ ▶ " + (draft.hand === "hit" ? "[HIT] · Stand" : "Hit · [STAND]") + " · Enter confirms", "casino-draft"));
           } else if (data.phase === "playing" && !seat.bet) box.append(node("p", "Watching · play next round"));
@@ -210,7 +201,7 @@
         }
         if (tvMode) {
           const remove = node("button", "Remove player", "casino-remove"); remove.type = "button"; remove.id = "remove-" + seat.id;
-          remove.setAttribute("aria-label", "Remove " + seat.name + " and forfeit their chips");
+          remove.setAttribute("aria-label", "Remove " + seat.name + " and forfeit their " + unit());
           remove.addEventListener("click", () => manageTV("remove", seat.id)); box.append(remove);
         }
         players.append(box);
@@ -219,7 +210,7 @@
       if (old && old.phase !== "results" && data.phase === "results") M.sound.tone(p && p.payout > stake(p) ? 660 : 220, .22);
     }
     controls(); tick(); restoreFocus(focused);
-    M.report("Table " + data.code + " · " + data.players.length + "/8 players · " + (p ? p.chips + " chips" : "Each remote has its own seat") + " · " + data.phase);
+    M.report("Table " + data.code + " · " + data.players.length + "/8 players · " + (p ? p.chips + " " + unit() : "Each remote has its own seat") + " · " + data.phase);
   }
   function tick() { // Countdown and decorative horse movement use the server clock, never decide a winner.
     if (!state) return;
@@ -242,6 +233,7 @@
     $("casino-table").hidden = true; $("casino-lobby").hidden = false;
     $("casino-rooms").replaceChildren(); $("casino-empty").hidden = false; $("casino-empty").textContent = "Looking for tables…";
     M.report("Choose a table to play together");
+    M.showCoins("casino-coins");                         // leaving a table may have changed them
   }
   async function refresh() { // Poll only while visible; persisted state survives navigation and server restarts.
     if (busy || refreshing || document.hidden) return;
@@ -368,5 +360,5 @@
   async function poll() { await refresh(); setTimeout(poll, state ? 1000 : 3000); } // Schedule after completion to avoid overlapping polls.
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
   setInterval(tick, 500);
-  controls(); poll();
+  controls(); poll(); M.showCoins("casino-coins");
 })();

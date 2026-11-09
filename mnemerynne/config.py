@@ -151,6 +151,7 @@ class Settings(BaseSettings):
     # Automator (mnemerynne/automations.py): a new automation's time zone, and how long runs are kept.
     timezone: str = "UTC"
     automation_run_days: int = 90
+    coin_ledger_days: int = 365                           # the games' coin history; balances are kept regardless
 
     # Media centre (mnemerynne/media/), off until an admin turns it on (Settings → Entertainment → Media). ffmpeg and
     # ffprobe from RPM Fusion (Fedora's ffmpeg-free can't decode or encode H.264/HEVC). Artwork, picture

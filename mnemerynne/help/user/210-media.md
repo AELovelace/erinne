@@ -49,7 +49,7 @@ You only see what you may open in that folder on the share. Who may open it is s
 
 ## Music and radio
 
-- Open an album and press **Play** or **Shuffle**, or choose a track. Music plays in the bar at the bottom while you keep browsing.
+- Open an album and press **Play** or **Shuffle**, or choose a track. Music plays in the bar at the bottom while you keep browsing. On a phone, press **♫** beside the menu at the top: the controls slide out from the side, and tapping outside them puts them away.
 - **Radio** lists the stations. **On air** means someone is already listening. Other stations start when you tune in, which can take a few seconds.
 
 ## SoundCloud
@@ -57,7 +57,7 @@ You only see what you may open in that folder on the share. Who may open it is s
 **SoundCloud** in the menu shows someone's profile: **Tracks**, **Albums**, **Playlists**, **Likes**, **Liked sets** and **Reposts**.
 
 - The first time, type the name after `soundcloud.com/` or paste the profile's address. **Change profile** switches to another. It's saved for you, and it's your own: other people pick theirs.
-- Press **Play** or **Shuffle**, or choose a track. It plays in the bar at the bottom while you keep browsing, like your music.
+- Press **Play** or **Shuffle**, or choose a track. It plays while you keep browsing, with the same controls as your music.
 - **Load more** at the bottom of a long list brings the next tracks. **↗** opens a track on SoundCloud.
 - **Search SoundCloud** at the top finds **Tracks**, **Playlists** and **Profiles**, and works before you've picked a profile. Opening a profile from the results doesn't change the one saved for you. A TV's remote can't type, so search on your phone with **Play on** set to the TV.
 - **📻** beside a track starts a station: that track, then ones like it, topping itself up for as long as it plays. On a TV, press right on a track to reach it.
@@ -76,13 +76,16 @@ A few tracks only have a 30-second **Preview only**, and some can't be played he
 
 - Choose one and it opens over the whole page. **← Games** (or Escape or Backspace) goes back; **⛶** fills the screen; **⧉** opens it in a tab of its own.
 - The bar at the top shows the game's controls. They're the same on a keyboard and on a **remote panel**: its arrows and **Enter** play the game while it's open on the TV, and the panel shows the score under the game's name. The panel's **Stop**, or sending anything to the TV from your phone, closes the game.
-- Scores and chips are only for fun. Prism Drop remembers its best score on this device; multiplayer table balances and rounds are saved on Erynne's server.
+- **Coins** are one purse for your whole account, shared by every game and shown at the top of Games. You start with 1,000. They're only for fun: they have no cash value, belong to this Erynne server alone, and aren't SadGirlCoin. A TV uses the coins of the account it's paired to.
+- Online casino tables bet your coins. Prism Drop and Lumi Pet pay some. If you can't afford the smallest bet, a casino table offers a free refill back to 1,000.
+- Several players on one TV with remotes play for **free credits** instead, and never touch anyone's coins.
+- Prism Drop remembers its best score on this device; coins, table balances and rounds are saved on Erynne's server.
 
-**Prism Drop** 🔮: pick one of ten pockets and drop a neon ball through twenty rows of pins. A game is ten drops.
+**Prism Drop** 🔮: pick one of ten pockets and drop a neon ball through twenty rows of pins. A game is ten drops, and a finished game pays **1 coin for every 10 points**, up to 200 coins a day. A game you leave unfinished carries on when you come back, even on another device.
 
 - **◀ ▶** pick the pocket, **Enter** drops (after the tenth drop, Enter starts a new game), **▲** replays the last drop without scoring, **▼** turns the sound on or off. On a phone, tap a column to pick it and tap it again to drop.
 - Points for where it lands: **20** in your pocket, **15** one pocket away, **10** two away, nothing further.
-- Each drop gets a fresh field of special pegs: **blocks** shove the ball two columns sideways, **bombs** blast it two or three spaces in any direction (each fires once), and **coin pegs** add 1–5 bonus points (once each), even if the landing misses.
+- Each drop gets a fresh field of special pegs: **blocks** shove the ball two columns sideways, **bombs** blast it two or three spaces in any direction (each fires once), and **coin pegs** add 1–5 bonus points (once each), even if the landing misses. Two **platforms** slide left and right and bounce the ball back up like a breakout paddle: the edge it lands on sends it that way, and each platform gives two bounces per drop before it fades.
 - The ball enters at pin 4, 5, 6 or 7 (marked in cyan) at random.
 
 All built-in games on a paired TV follow **Screens → Text size**, just like the Media UI. Automatic keeps the 1080p size and enlarges games at higher resolutions (1.5× at 2560×1440, 2× at 3840×2160, using the browser's CSS viewport). A saved custom size takes precedence. Changes apply to an open game without restarting it.
@@ -93,23 +96,25 @@ Visit a little glowing fairy cat in **Games → Lumi Pet**. **Left/Right** selec
 
 Lumi sleeps from 22:00 to 07:00 on your device's clock. A daytime nap lasts two minutes; any activity can gently wake Lumi for fifteen minutes. There are no hunger meters, streaks, chores or penalties for being away. Happy moments and the latest memory stay in this browser profile, shared by anyone using it. They do not sync to other devices or accounts; clearing browser storage clears them. If your browser blocks saving, Lumi still plays and the page explains that the visit will not be saved.
 
+Your first activity with Lumi each day pays **25 coins**. Missing a day costs nothing.
+
 ### Multiplayer casino tables
 
 **Blackjack**, **Roulette**, **Horse Racing**, and **Slot Machines** support up to eight players per table. Open a game and choose **Create table**. Friends open the same game and select that table's code in the lobby. Tables are visible to everyone who can use Media.
 
-**Several players on one TV:** pair the TV and each remote to the same owner's account, give the remotes distinct names, and select that TV on each panel. On the paired TV choose **One TV, multiple remotes**. Each remote presses **Enter once to join** its own named seat. Left/Right chooses that player's pick, Up/Down adjusts their stake, and **Enter again places the bet**. The first player is host; their Play/Pause starts the round. Each blackjack player independently chooses Hit/Stand and confirms with Enter. Every player's balance, draft, wager and results appear on the TV; slots show a separate three-line board for each player. The TV itself uses no player slot. Other devices may still join the table code.
+**Several players on one TV:** pair the TV and each remote to the same owner's account, give the remotes distinct names, and select that TV on each panel. On the paired TV choose **One TV, multiple remotes**. Each remote presses **Enter once to join** its own named seat. Left/Right chooses that player's pick, Up/Down adjusts their stake, and **Enter again places the bet**. The first player is host; their Play/Pause starts the round. Each blackjack player independently chooses Hit/Stand and confirms with Enter. Every player's balance, draft, wager and results appear on the TV; slots show a separate three-line board for each player. The TV itself uses no player slot. Other devices may still join the table code. These tables play for **free credits**, not coins: 1,000 for each player at each table, gone when the table ends.
 
-Refresh keeps these seats and selections; a fresh tab can choose **Resume on this TV** in the lobby. Enter during betting refills a seat below the minimum chip balance. A late join watches until the next round. TV keyboard/mouse/touch controls can **Remove player** or **End TV table**, forfeiting the removed chips and wagers; the next player becomes host. Back to Games preserves the table, while a remote's Stop closes the game view for everyone on that TV. Re-pairing a remote changes its identity; remove any old seat on the TV. Ordinary **Create table** keeps the original shared TV seat controlled by all its remotes.
+Refresh keeps these seats and selections; a fresh tab can choose **Resume on this TV** in the lobby. Enter during betting refills a seat below the minimum credit balance. A late join watches until the next round. TV keyboard/mouse/touch controls can **Remove player** or **End TV table**, forfeiting the removed credits and wagers; the next player becomes host. Back to Games preserves the table, while a remote's Stop closes the game view for everyone on that TV. Re-pairing a remote changes its identity; remove any old seat on the TV. Ordinary **Create table** keeps the original shared TV seat controlled by all its remotes.
 
-- Each account has one seat per table. A paired TV without a signed-in session gets its own seat, so two TVs owned by the same person can play together. A remote panel controls its TV's seat.
-- Everyone starts with **1,000 free play chips**. Bet 10–500 in steps of 10, within your balance. For slots this is **per line**, and the displayed total covers all three lines (50 per line costs 150). These chips have no cash value and are separate from SadGirlCoin. They belong to this table, not a global wallet.
+- Each account has one seat per table. A paired TV without a signed-in session gets its own seat, so two TVs owned by the same person can play together, spending the same coins. A remote panel controls its TV's seat.
+- Online tables play for your **coins**, so your balance follows you from table to table. Bet 10–500 in steps of 10, within your balance. For slots this is **per line**, and the displayed total covers all three lines (50 per line costs 150).
 - Choose your pick and stake, then **Place bet**. You can update the bet while betting is open. The host can **Start round**, or it starts automatically after 45 seconds when someone has bet. Players joining mid-round watch until betting reopens.
 - Blackjack offers **Hit** and **Stand**, with a 30-second hand timer; unfinished hands stand automatically. The dealer stands on all 17s. Naturals pay 3:2, ordinary wins 1:1, ties return the stake. No splitting, doubling or insurance.
 - Roulette uses one zero. A number pays 35:1 and an outside bet pays 1:1; zero loses outside bets. The six equally likely horses pay 4:1 for the winner.
 - Slots have **three reels and three horizontal paylines**: top, middle, bottom. All three lines play on every spin. Each line returns 24× its line bet for three stars, 12× for another triple, or 1× for a pair. Paying lines light up and display their returns; these are added together. Returns include the original line stake. Columns and diagonals do not pay.
 - Spins and races take six seconds, with a shared result; slots give each player their own reels. Results stay for ten seconds before betting reopens. Horse movement is decorative; the server determines the finish.
-- Refresh to resume the same seat. Going back to Games keeps it available in the lobby. **Leave table** removes your seat and forfeits its remaining chips and active wager; the next player becomes host. Empty tables close immediately; tables untouched for two hours expire. Below the minimum wager (30 chips for three-line slots, ten for other games), use **Refill free chips** between rounds. A previously saved single-line slot round finishes at its original price, then switches to three lines.
-- At a table, **◀ ▶ change the pick**, **▲ ▼ change the bet by ten chips**, and **Enter sets the bet**. The host's **Play/Play-Pause** button starts the round (**P** on a keyboard). In blackjack after dealing, ◀ ▶ choose Hit/Stand and Enter confirms. In the lobby, arrows choose a table and Enter joins. Mouse and touch buttons work too; keyboard Tab reaches individual buttons. The remote shows your table code, chip balance and round phase.
+- Refresh to resume the same seat. Going back to Games keeps it available in the lobby. **Leave table** removes your seat and forfeits its active wager; your other coins stay yours, and the next player becomes host. Empty tables close immediately; tables untouched for two hours expire and hand back any bets still open. Below the minimum wager (30 coins for three-line slots, ten for other games), use **Refill free coins** between rounds. A previously saved single-line slot round finishes at its original price, then switches to three lines.
+- At a table, **◀ ▶ change the pick**, **▲ ▼ change the bet by ten**, and **Enter sets the bet**. The host's **Play/Play-Pause** button starts the round (**P** on a keyboard). In blackjack after dealing, ◀ ▶ choose Hit/Stand and Enter confirms. In the lobby, arrows choose a table and Enter joins. Mouse and touch buttons work too; keyboard Tab reaches individual buttons. The remote shows your table code, balance and round phase.
 - Roulette displays a full 37-pocket wheel and a counter-rotating ball. Your pending pick lights the covered pockets; the ball lands in the server's winning pocket when the result arrives. Reduced-motion mode shows the result without spinning.
 
 ## Playing on the TV from your phone
@@ -133,7 +138,7 @@ Either way, the TV stays paired until you remove it, even after any sign-in runs
 - **Play on** at the bottom of the menu chooses where things play. With a screen chosen, every **Play** sends there instead: films, TV episodes, albums, tracks, pictures, Live TV and radio.
 - **A whole show:** with a screen chosen, **Play** on a show sends the episode to watch next. The TV then plays on through the show by itself, with **Up next** between episodes. ⏭ and ⏮ on the remote bar skip to the next or previous episode. The TV can also browse **TV Shows** itself with its remote's arrows.
 - To play a YouTube link, share it straight from the YouTube app on Android: **Share → Erynne**. Media opens with the link filled in; press **Play**. This needs Erynne installed on the phone (below). Otherwise, copy the link and use **Media → Screens → Paste**.
-- The bar at the bottom shows what the screen is playing, with buttons to pause, skip, change the volume, step the TV's night filter (🌙), switch the film's sound track (🗣) or subtitles (💬, then off), go to the next track or stop. **✕** goes back to playing on your phone.
+- The remote shows what the screen is playing. It's the bar at the bottom on a computer; on a phone, press **📺** beside the menu at the top and it slides out from the side. It has buttons to pause, skip, change the volume, step the TV's night filter (🌙), switch the film's sound track (🗣) or subtitles (💬, then off), go to the next track or stop. **✕** goes back to playing on your phone.
 - **Volume:** a screen has its own volume, used by everything it plays, and it remembers it. Change it from the remote bar (🔉 🔊 🔇), the TV remote's volume keys, **+** and **−** on a keyboard, or the 🔉 🔊 buttons on screen. The level shows for a moment in the top corner.
 - **Screen size:** if the TV cuts off the edges of the picture, use **Screens → Screen size** on your phone (on a screen box an admin can also use **Kiosk settings → Screen size…** on the TV). Narrow it until the whole pink frame and the arrows in all four corners show, then **Save**. First check the TV's own picture settings for *Just Scan*, *Screen Fit* or *1:1*: that fixes it without shrinking anything.
 - **Text size:** if text and buttons on the TV are too small (or too big) to read from the couch, use **Screens → Text size** on your phone (on a screen box, also **Kiosk settings → Text size…**). **Bigger** and **Smaller** change the TV as you go; **Save** keeps it, **Automatic** goes back to the size picked from the TV's width (bigger on a 4K TV). It applies to every page the TV opens, not only Media.
@@ -159,6 +164,19 @@ Its **arrows and Enter** work like the TV's own arrow keys while the TV shows it
 - **Controlling it:** from your phone, or from any panel (its own included), with play/pause, skipping, next/previous, volume, mute and stop.
 - **What it can reach:** it plays only what is cast to it. It can't browse or fetch anything else.
 - **Removing it:** removing the remote removes its speaker as well.
+
+## Your phone as a remote
+
+**Media → Remote** turns your phone into a remote panel, with the same buttons and the same limits: play and pause, back 10 seconds and forward 30, previous and next, the arrows and **Enter**, volume, mute, night filter, stop, **Screens** to choose a TV, and **Channels** to start a Live TV stream or radio station. It takes a seat at game tables the way a panel does.
+
+**Pair it once:** signed in, name it (every phone needs its own name) and press **Pair this phone**. Signed out, it shows a code instead: type that under **Media → Screens → Pair a TV or remote** on any device where you're signed in.
+
+**Install it as its own app:** in your phone's browser, press **☰ → Install TV Remote**, then **Install TV Remote** on the page that opens (on an iPhone, **Share → Add to Home Screen**). It gets its own **Remote** icon and opens straight to the buttons. An iPhone keeps an installed app separate from Safari, so pair it with the code there.
+
+- It stays paired after you sign out, because it has its own key. Anyone holding the unlocked phone can use it to control your screens, and nothing else of yours.
+- **Screens → Unpair** (tap it twice) removes it from the phone. If the phone is lost, **Remove** it under **Media → Screens** on another device.
+- It counts as one of your ten remotes. Unlike a panel, it doesn't play music cast to it.
+- For browsing, or casting films and music, use **Play on** in Media as usual. The **Media** button goes back there.
 
 ## Signage on the screens
 

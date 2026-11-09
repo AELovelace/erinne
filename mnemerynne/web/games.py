@@ -10,7 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from mnemerynne import casino, casino_remote, games
+from mnemerynne import casino, casino_remote, coins, games, prism
+from mnemerynne.db import transaction
 from mnemerynne.media import remotes, screens
 from mnemerynne.web.deps import _session_user, get_db
 from mnemerynne.web.media import _media_on, _screen, media_user, screen_device
@@ -27,6 +28,39 @@ router = APIRouter(dependencies=[Depends(_media_on), Depends(_uncached)])
 def media_games(user=Depends(media_user)):
     """The games Media → Games shows, for a signed-in person or a paired screen (the TV)."""
     return {"games": games.listing()}
+
+
+@router.get("/api/media/games/coins")
+def coin_balance(user=Depends(media_user), conn=Depends(get_db)):
+    """This account's coins (a paired TV shows its owner's). Also brings home stakes from any table that has expired."""
+    casino.sweep(conn)
+    return {"coins": coins.peek(conn, user["id"])}
+
+
+class PrismDrop(BaseModel):
+    """The player only says which pocket: the server rolls the drop and keeps the score."""
+    model_config = ConfigDict(extra="forbid")
+    pick: int = Field(ge=1, le=prism.WIDTH, strict=True)
+
+
+@router.get("/api/media/games/prism-drop/run")
+def prism_run(user=Depends(media_user), conn=Depends(get_db)):
+    """The game in progress, so a reload or another device picks it up."""
+    return prism.current(conn, user["id"])
+
+
+@router.post("/api/media/games/prism-drop/drop")
+def prism_drop(body: PrismDrop, user=Depends(media_user), conn=Depends(get_db)):
+    """One drop; the tenth finishes the game and pays its coins."""
+    return prism.play(conn, user["id"], body.pick)
+
+
+@router.post("/api/media/games/lumi-pet/visit")
+def pet_visit(user=Depends(media_user), conn=Depends(get_db)):
+    """The first time someone spends a moment with Lumi today. Takes no numbers from the page, so there's nothing to fake."""
+    with transaction(conn):
+        paid = coins.pet_visit(conn, user["id"])
+        return {"paid": paid, "coins": coins.peek(conn, user["id"])}
 
 
 @router.get("/media/games/{slug}", response_class=HTMLResponse)
@@ -122,14 +156,14 @@ def table_create(slug: str, request: Request, body: TableCreate | None = None,
         screen, actor = _tv_identity(request, conn, user)
         return _casino_call(casino.create, conn, slug, actor, screen["name"], couch=True)
     actor, name = _table_identity(request, conn, user)
-    return _casino_call(casino.create, conn, slug, actor, name)
+    return _casino_call(casino.create, conn, slug, actor, name, account=user["id"])   # a TV here is its paired account
 
 
 @router.get("/api/media/games/{slug}/rooms/{code}")
 def table_state(slug: str, code: str, request: Request, user=Depends(media_user), conn=Depends(get_db)):
     _casino_game(slug)
     actor, name = _table_identity(request, conn, user)
-    return _casino_call(casino.room, conn, slug, code, actor, name)
+    return _casino_call(casino.room, conn, slug, code, actor, name, account=user["id"])
 
 
 @router.post("/api/media/games/{slug}/rooms/{code}")
@@ -137,7 +171,7 @@ def table_move(slug: str, code: str, body: TableMove, request: Request,
                user=Depends(media_user), conn=Depends(get_db)):
     _casino_game(slug)
     actor, name = _table_identity(request, conn, user)
-    return _casino_call(casino.room, conn, slug, code, actor, name, **body.model_dump())
+    return _casino_call(casino.room, conn, slug, code, actor, name, account=user["id"], **body.model_dump())
 
 
 @router.get("/api/media/games/{slug}/rooms/{code}/tv")

@@ -1,4 +1,5 @@
-/* The companion's controls and presentation. All memories stay on this browser; there is no neglect mechanic. */
+/* The companion's controls and presentation. All memories stay on this browser; there is no neglect mechanic. The first
+   visit of the day pays a few coins, which the server decides by its own date. */
 (function () {
   "use strict";
   const G = window.MGame, R = window.LumiPetRules;
@@ -12,7 +13,7 @@
     snack: ["A star biscuit! Lumi saves the sparkliest half for you.", "Crumbs on the cushion. Lumi looks very pleased with this picnic."],
     play: ["One falling star, two little paws. Caught it! Your turn.", "Lumi pounces on a ribbon of light, then proudly brings it back."],
   };
-  let state = read(), selected = 0, effectUntil = 0, lastReport = "", timer = null, lastScene = "";
+  let state = read(), selected = 0, effectUntil = 0, lastReport = "", timer = null, lastScene = "", visited = false;
 
   function read() { // Storage can be blocked or malformed; the companion remains playable either way.
     let saved = null;
@@ -59,6 +60,15 @@
     if (report !== lastReport) { G.report(report); lastReport = report; }
   }
 
+  function greet() { // A real moment with Lumi, not just opening the page, counts as today's visit. If it can't be counted, nothing is lost.
+    if (visited) return;
+    visited = true;
+    G.api("/api/media/games/lumi-pet/visit", {}).then(function (data) {
+      $("lp-coins").textContent = data.coins.toLocaleString();
+      if (data.paid) $("lp-message").textContent += " +" + data.paid + " coins for visiting today.";
+    }).catch(function () { /* Lumi is just as happy either way */ });
+  }
+
   function interact(action) { // One intentional tap or Enter creates one moment and a brief expressive response.
     const now = Date.now();
     state = R.interact(state, action, now);
@@ -72,7 +82,7 @@
     G.sound.unlock();
     G.sound.tone(action === "rest" ? 392 : 659.25, .22, 0, .09);
     G.sound.tone(action === "rest" ? 293.66 : 880, .3, .14, .06);
-    save(); render();
+    save(); render(); greet();
   }
 
   G.onAction(function (action) { // Keyboard, TV remote and buttons use the same four activities.
@@ -101,4 +111,5 @@
   window.addEventListener("pagehide", function () { clearInterval(timer); });
   window.addEventListener("pageshow", visibility);
   save(); visibility();
+  G.showCoins("lp-coins");
 })();

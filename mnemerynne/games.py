@@ -7,8 +7,9 @@
 - They are Mnemerynne's own reviewed code, so they run on its origin: Media's game layer frames the page, and the
   TV page hands a remote panel's arrows and Enter to it (media.js games.key).
 - Who may play: whoever may use Media, and a paired screen (the TV) as its owner, like the rest of Media.
-- Prism Drop scores and Lumi Pet memories stay on the device. Multiplayer casino tables persist server-side free play chips,
-  with no cash value or external currency integration (casino.py).
+- Coins are one purse per account, shared by every game and kept on this server (coins.py). Online casino tables bet them,
+  local multiplayer tables use free-to-play credits instead, and Prism Drop and Lumi Pet pay small rewards the server has
+  checked. Prism Drop's best score and Lumi Pet's memories stay on the device. Coins have no cash value.
 """
 
 from __future__ import annotations
@@ -27,22 +28,22 @@ class Game:
 
 
 GAMES: tuple[Game, ...] = (
-    Game(slug="prism-drop", name="Prism Drop", icon="🔮",
-         description="Pick a pocket and drop a neon ball through blocks, bombs and bonus pegs. Ten drops, best score wins.",
-         controls="◀ ▶ pick a pocket · Enter drops · ▲ replays the last drop · ▼ sound on or off"),
     Game(slug="lumi-pet", name="Lumi Pet", icon="✨",
-         description="A little neon companion. Share a snack, play, cuddle or curl up for a nap. Always happy to see you.",
+         description="A little neon companion. Share a snack, play, cuddle or curl up for a nap. Your first visit each day pays coins.",
          controls="◀ ▶ choose · Enter interact · ▲ glow colour · ▼ sound on or off"),
+    Game(slug="prism-drop", name="Prism Drop", icon="🔮",
+         description="Pick a pocket and drop a neon ball through blocks, bombs, bonus pegs and sliding platforms. Ten drops, and your score pays coins.",
+         controls="◀ ▶ pick a pocket · Enter drops · ▲ replays the last drop · ▼ sound on or off"),
 )
 
 # Casino tables share one renderer and server rules; each still has its own Games card.
 GAMES += tuple(Game(slug=slug, name=name, icon=icon, description=description,
                     controls="◀ ▶ pick · ▲ ▼ bet · Enter sets bet · Play starts round (host) · P on keyboard",
                     multiplayer=True) for slug, name, icon, description in (
-    ("blackjack", "Blackjack", "🂡", "Share a table, hit or stand, and try to beat the dealer. Free play chips."),
-    ("roulette", "Roulette", "🎡", "Pick a number or an outside bet and watch the wheel together. Free play chips."),
-    ("horse-racing", "Horse Racing", "🏇", "Back one of six horses and cheer on the same race. Free play chips."),
-    ("slots", "Slot Machines", "🎰", "Three reels, three horizontal paylines. Spin together and celebrate each winning line. Free play chips."),
+    ("blackjack", "Blackjack", "🂡", "Share a table, hit or stand, and try to beat the dealer. Plays for coins online."),
+    ("roulette", "Roulette", "🎡", "Pick a number or an outside bet and watch the wheel together. Plays for coins online."),
+    ("horse-racing", "Horse Racing", "🏇", "Back one of six horses and cheer on the same race. Plays for coins online."),
+    ("slots", "Slot Machines", "🎰", "Three reels, three horizontal paylines. Spin together and celebrate each winning line. Plays for coins online."),
 ))
 
 

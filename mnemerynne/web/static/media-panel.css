@@ -1,0 +1,105 @@
+/* The phone's remote mode (/media/panel, media-panel.js): the Erynne remote panel's cyberpunk sakura look. */
+#mp {
+  --bg: #0D0614; --card: #24102E; --ink: #FFF0F6; --muted: #B89CC8;   /* the firmware's BG, CARD, INK and MUTED */
+  --pink: #FF4FA3; --teal: #22F0FF; --red: #FF2050;                   /* its PINK, TEAL and RED */
+  --petal: #FFB7D5; --edge: #7A2A6A; --track: #3A1A4A;                /* its PETAL, EDGE and TRACK */
+  position: fixed; inset: 0; z-index: 10; overflow-y: auto;           /* covers the page, and scrolls if a phone is short */
+  background: var(--bg); color: var(--ink); color-scheme: dark;       /* the panel's own colours, whatever the theme */
+  font-size: 1rem; -webkit-tap-highlight-color: transparent;          /* the keys flash by themselves */
+}
+#mp [hidden] { display: none !important; }                            /* a view's display rule mustn't unhide it */
+
+.mp-page {
+  display: flex; flex-direction: column; gap: .5rem;                  /* the panel's stack, top to bottom */
+  min-height: 100%; max-width: 30rem; margin: 0 auto;                 /* a phone's width, centred on anything wider */
+  padding: calc(env(safe-area-inset-top) + .5rem) calc(env(safe-area-inset-right) + 1rem)
+           calc(env(safe-area-inset-bottom) + .5rem) calc(env(safe-area-inset-left) + 1rem);   /* clear of notches */
+  box-sizing: border-box;
+}
+.mp-view { display: flex; flex: 1 1 auto; flex-direction: column; gap: .5rem; }   /* one view fills the space */
+
+.mp-head {
+  display: flex; align-items: center; justify-content: space-between;  /* the title, with a blossom in the corner */
+  border-bottom: 2px solid var(--pink); padding-bottom: .25rem;        /* the header's neon rule */
+  box-shadow: 0 2px 0 -1px var(--teal);                                /* the cyan trace under it */
+}
+.mp-head h1 { margin: 0; color: var(--pink); font-size: 1.35rem; font-weight: 700; }
+.mp-blossom { color: var(--petal); font-size: 1.3rem; }
+.mp-muted { color: var(--muted); font-size: .85rem; overflow-wrap: anywhere; }   /* long titles wrap, never widen the page */
+
+/* The now-playing card. */
+.mp-card { background: var(--card); border: 1px solid var(--pink); padding: .55rem .75rem; }
+.mp-screen { display: flex; align-items: center; gap: .45rem; font-weight: 700; overflow-wrap: anywhere; }
+.mp-dot { flex: none; width: .65rem; height: .65rem; background: var(--edge); }   /* dim: not connected */
+.mp-dot.mp-online { background: var(--teal); }                         /* the cyan dot: connected */
+.mp-now { font-size: 1.15rem; font-weight: 700; overflow-wrap: anywhere; }
+.mp-levels { color: var(--petal); font-size: .85rem; }
+.mp-progress { display: flex; align-items: center; gap: .5rem; margin-top: .25rem; }
+.mp-track { flex: 1 1 auto; height: .4rem; border-radius: .2rem; background: var(--track); overflow: hidden; }
+.mp-fill { width: 0; height: 100%; background: var(--pink); }          /* its width is set as the position moves */
+.mp-time { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mp-time.mp-live { color: var(--teal); font-weight: 700; }             /* a live stream's LIVE */
+
+/* Buttons: glass bodies, neon rims and a cyan circuit tick on top. The id outranks the themes' button styles. */
+#mp button, #mp .mp-link {
+  position: relative; display: flex; align-items: center; justify-content: center;   /* the label centred */
+  min-height: 3.1rem; margin: 0; padding: 0 .2rem; box-sizing: border-box;           /* a comfortable finger target */
+  border: 1px solid var(--edge); box-shadow: none;
+  background: var(--card); color: var(--ink); font: inherit; font-size: .9rem; font-weight: 700;
+  text-decoration: none; cursor: pointer; touch-action: manipulation;                /* no double-tap zoom delay */
+}
+#mp button:not(.mp-key)::before, #mp .mp-link::before {
+  content: ""; position: absolute; top: -1px; left: .6rem; width: 25%; height: 1px; background: var(--teal);  /* the tick */
+}
+#mp button:active, #mp .mp-link:active { border-color: var(--teal); }  /* a press shows at once */
+#mp button:focus-visible, #mp .mp-link:focus-visible, #mp input:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+#mp button.mp-on, #mp .mp-link.mp-on { background: var(--pink); border-color: var(--petal); color: var(--bg); }   /* Play, Pair */
+#mp button.mp-armed { background: var(--red); }                        /* Unpair: tap again to confirm */
+#mp button:disabled { opacity: .4; cursor: default; }
+.mp-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: .4rem; }
+.mp-bar { display: grid; grid-template-columns: 2fr 2fr 1fr; gap: .4rem; }   /* Screens, Channels and the way back */
+.mp-foot { display: grid; grid-template-columns: repeat(4, 1fr); gap: .4rem; margin-top: auto; }   /* kept at the bottom */
+
+/* The round D-pad: a glass disc with a neon rim, and blossoms between the arrows. */
+.mp-pad {
+  display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); place-items: center;   /* arrows around Enter */
+  width: min(72vw, 34vh, 20rem); width: min(72vw, 34dvh, 20rem); aspect-ratio: 1;       /* vh for browsers without dvh */
+  margin: auto; padding: .35rem; box-sizing: border-box;               /* centred in whatever height is left */
+  border: 2px solid var(--pink); background: var(--card);
+  box-shadow: 0 0 0 1px var(--edge) inset;                             /* the dim inner rim */
+}
+.mp-petal { color: var(--edge); font-size: 1.2rem; }
+#mp button.mp-key { width: 100%; height: 100%; min-height: 0; border: 0; background: transparent; }
+.mp-arrow { width: 44%; aspect-ratio: 1; background: var(--pink); }    /* a triangle, drawn rather than a font's glyph */
+.mp-up { clip-path: polygon(50% 8%, 100% 92%, 0 92%); }
+.mp-down { clip-path: polygon(50% 92%, 100% 8%, 0 8%); }
+.mp-left { clip-path: polygon(8% 50%, 92% 0, 92% 100%); }
+.mp-right { clip-path: polygon(92% 50%, 8% 0, 8% 100%); }
+#mp button.mp-key.mp-lit .mp-arrow { background: var(--teal); }        /* a tapped arrow flashes cyan */
+#mp button.mp-enter { background: var(--pink); color: var(--bg); box-shadow: 0 0 0 2px var(--teal); }   /* Enter's ring */
+#mp button.mp-enter.mp-lit { background: var(--teal); box-shadow: 0 0 0 2px var(--pink); }              /* Enter's flash */
+
+/* Install, when the ☰ menu sends someone here. */
+.mp-install { display: flex; flex-direction: column; gap: .35rem; }
+.mp-install p { margin: 0; }
+
+/* Pair. */
+#mp-pair-form { display: flex; flex-direction: column; gap: .5rem; }
+#mp input {
+  min-height: 3rem; padding: 0 .7rem; box-sizing: border-box; font: inherit; font-size: 1rem;   /* 1rem: iPhones zoom on smaller */
+  border: 1px solid var(--pink); background: var(--card); color: var(--ink);
+}
+
+.mp-code { color: var(--teal); font-size: 2.2rem; font-weight: 700; letter-spacing: .08em; text-align: center; }   /* the pairing code */
+
+/* Screens and Channels. */
+.mp-rows { display: flex; flex-direction: column; gap: .4rem; }
+#mp button.mp-item { flex-direction: column; align-items: flex-start; min-height: 3.5rem; padding: .35rem .75rem; text-align: left; overflow-wrap: anywhere; }
+#mp button.mp-item.mp-chosen { border-color: var(--pink); }            /* the chosen screen */
+.mp-item small { color: var(--muted); font-size: .8rem; font-weight: 400; }
+.mp-status { min-height: 1.2em; margin: 0; color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+.mp-status.mp-alert { color: var(--pink); }                            /* a message, or STALE */
+
+/* Corners. The neon theme squares everything with !important, but the panel's are round: an id outranks it. */
+#mp .mp-card, #mp button, #mp .mp-link, #mp input { border-radius: .5rem !important; }
+#mp .mp-pad, #mp .mp-dot, #mp button.mp-key { border-radius: 50% !important; }   /* the D-pad, its keys and the status dot */

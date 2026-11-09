@@ -1,4 +1,10 @@
-"""Shared casino tables with free play chips, persisted rounds, and private server randomness."""
+"""Shared casino tables with persisted rounds and private server randomness.
+
+Online tables spend the seat's account coins (coins.py); local multiplayer tables (state["couch"], phone remotes around
+one TV) play on free-to-play credits that belong to the table. Each seat's "chips" is whichever of those it plays with:
+for an account seat it is loaded from the purse at the start of every request and the difference written back at the end,
+all in that request's transaction, so the rules below never need to know which kind they are handling.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +13,7 @@ import json
 import secrets
 import time
 
+from mnemerynne import coins
 from mnemerynne.db import transaction
 
 GAMES = {"blackjack", "roulette", "horse-racing", "slots"}
@@ -60,10 +67,63 @@ def wager_lines(state):
     return state.get("slot_lines", 1) if state["game"] == "slots" else 1
 
 
-def _seat(actor, name):
-    """Make an authenticated seat; the browser never supplies an identity or a balance."""
-    return {"id": secrets.token_hex(8), "actor": actor, "name": name[:60], "chips": 1000,
+def _seat(actor, name, account=None):
+    """Make an authenticated seat; the browser never supplies an identity or a balance. account: whose coins it plays
+    with, or None for table-only credits."""
+    return {"id": secrets.token_hex(8), "actor": actor, "name": name[:60], "chips": 1000, "account": account,
             "bet": 0, "choice": "", "cards": [], "stood": False, "payout": 0, "reels": [], "line_payouts": []}
+
+
+def _unit(state):
+    """What this table's money is called."""
+    return "credits" if state.get("couch") else "coins"
+
+
+def _load_purses(conn, state):
+    """Give every account seat its purse's balance now, so a win or bet at another table already counts here."""
+    for p in state["players"]:
+        if p.get("account") is not None:
+            balance = coins.held(conn, p["account"])
+            if balance is None:
+                p["account"] = None                       # that account was deleted: the seat plays on with credits
+            else:
+                p["chips"] = balance
+
+
+def _pay_purses(conn, state, held, why):
+    """Write what the rules did to each account seat. held: each seat's balance before they ran. Seats sharing an account
+    (a phone and its TV) are added together."""
+    owed = {}
+    for p in state["players"]:
+        if p["id"] in held and p.get("account") is not None:
+            owed[p["account"]] = owed.get(p["account"], 0) + p["chips"] - held[p["id"]]
+    for account, delta in owed.items():
+        coins.table(conn, account, delta, state["game"], why)
+
+
+def _refund_stakes(conn, state):
+    """A table that ended by itself hands back whatever is still riding on it. In results, stakes are already settled."""
+    if state["phase"] == "results":
+        return
+    for p in state["players"]:
+        if p.get("account") is not None and p["bet"] and coins.held(conn, p["account"]) is not None:
+            coins.table(conn, p["account"], p["bet"] * wager_lines(state), state["game"], "refund")
+
+
+def _sweep(conn, now):
+    """Close tables idle too long, refunding open stakes. Inside the caller's transaction."""
+    for row in conn.execute("SELECT state FROM casino_rooms WHERE updated_at<=?", (now - IDLE_SECONDS,)).fetchall():
+        _refund_stakes(conn, json.loads(row["state"]))
+    conn.execute("DELETE FROM casino_rooms WHERE updated_at<=?", (now - IDLE_SECONDS,))
+
+
+def sweep(conn):
+    """Close idle tables now, if there are any, so a stake doesn't wait for someone to open a new table to come home."""
+    now = time.time()
+    if conn.execute("SELECT 1 FROM casino_rooms WHERE updated_at<=? LIMIT 1", (now - IDLE_SECONDS,)).fetchone() is None:
+        return
+    with transaction(conn):
+        _sweep(conn, now)
 
 
 def _reset(state, now):
@@ -169,6 +229,7 @@ def _public(state, actor):
     result["you"] = next((p["id"] for p in result["players"] if p["actor"] == actor), None)
     for p in result["players"]:
         p.pop("actor")
+        p.pop("account", None)                            # whose purse it is stays on the server
     if result["game"] == "blackjack" and result["phase"] == "playing":
         result["dealer"] = result["dealer"][:1] + [None]
     result["server_time"] = time.time()
@@ -205,11 +266,12 @@ def rooms(conn, game, actor, display=None):
     return result
 
 
-def create(conn, game, actor, name, couch=False):
-    """Create a durable table with bounded per-player and global room counts."""
+def create(conn, game, actor, name, couch=False, account=None):
+    """Create a durable table with bounded per-player and global room counts. account: whose coins the creator's seat
+    plays with; a couch table has no seat yet and never uses coins."""
     now = time.time()
     with transaction(conn):
-        conn.execute("DELETE FROM casino_rooms WHERE updated_at<=?", (now - IDLE_SECONDS,))
+        _sweep(conn, now)
         if conn.execute("SELECT count(*) FROM casino_rooms").fetchone()[0] >= 100:
             raise Refused("The lobby is full. Join an existing table.", 429)
         if sum(r["mine"] for r in rooms(conn, game, actor)) >= 3:
@@ -217,33 +279,39 @@ def create(conn, game, actor, name, couch=False):
         code = secrets.token_hex(4).upper()
         while conn.execute("SELECT 1 FROM casino_rooms WHERE code=?", (code,)).fetchone():
             code = secrets.token_hex(4).upper()
-        state = {"code": code, "game": game, "players": [] if couch else [_seat(actor, name)], "revision": 1, "round": 0}
+        state = {"code": code, "game": game, "players": [] if couch else [_seat(actor, name, account)], "revision": 1, "round": 0}
         if couch:
             state.update(couch=True, display_actor=actor, display_name=name[:60], inputs={})
+        _load_purses(conn, state)
         _reset(state, now)
         conn.execute("INSERT INTO casino_rooms VALUES (?, ?, ?, ?)", (code, game, json.dumps(state), now))
     return _public(state, actor)
 
 
-def room(conn, game, code, actor, name, action=None, revision=None, amount=0, choice=""):
-    """Serialize joins, wagers, deadlines and settlements across all app workers."""
+def room(conn, game, code, actor, name, action=None, revision=None, amount=0, choice="", account=None):
+    """Serialize joins, wagers, deadlines and settlements across all app workers. account: whose coins a new seat plays
+    with; a couch table's seats always use credits instead."""
     now = time.time()
     with transaction(conn):
         state = _read(conn, game, code, now)
+        _load_purses(conn, state)                         # before the snapshot: another table's win isn't a change here
         before = json.dumps(state)
         player = next((p for p in state["players"] if p["actor"] == actor), None)
         if action == "join" and player is None:
             if len(state["players"]) >= 8:
                 raise Refused("This table has eight players. Choose another table.")
-            player = _seat(actor, name)
+            player = _seat(actor, name, None if state.get("couch") else account)
             state["players"].append(player)
+            _load_purses(conn, state)
         if player is None:
             raise Refused("Join this table first.", 403)
+        held = {p["id"]: p["chips"] for p in state["players"] if p.get("account") is not None}
         _advance(state, now)
         if action not in (None, "join"):
             if revision != state["revision"]:
                 raise Refused("The table changed. Please try your move again.")
             _act(state, player, action, amount, choice, now)
+        _pay_purses(conn, state, held, "refill" if action == "refill" else "refund" if action == "bet" else None)
         if not state["players"] and not state.get("couch"):
             conn.execute("DELETE FROM casino_rooms WHERE code=?", (code,))
             return {"left": True}
@@ -341,8 +409,8 @@ def _act(state, player, action, amount, choice, now):
             raise Refused("Bets are locked until the next round.")
         lines = wager_lines(state)
         if amount < 10 or amount > 500 or amount % 10 or amount * lines > player["chips"] + player["bet"] * lines:
-            raise Refused("Choose 10–500 chips per line in steps of 10; your balance must cover all lines."
-                          if lines > 1 else "Choose 10–500 chips in steps of 10, within your balance.", 422)
+            raise Refused(f"Choose 10–500 {_unit(state)} per line in steps of 10; your balance must cover all lines."
+                          if lines > 1 else f"Choose 10–500 {_unit(state)} in steps of 10, within your balance.", 422)
         if game == "roulette" and choice not in {"red", "black", "odd", "even", "low", "high", *map(str, range(37))}:
             raise Refused("Choose a roulette number or an outside bet.", 422)
         if game == "horse-racing" and choice not in set(map(str, range(6))):
@@ -364,7 +432,7 @@ def _act(state, player, action, amount, choice, now):
     elif action == "refill":
         minimum = 10 * wager_lines(state)
         if phase != "betting" or player["bet"] or player["chips"] >= minimum:
-            raise Refused(f"Free refills are available between rounds when you have fewer than {minimum} chips.")
+            raise Refused(f"Free refills are available between rounds when you have fewer than {minimum} {_unit(state)}.")
         player["chips"] = 1000
     else:
         raise Refused("That move is not available.", 422)

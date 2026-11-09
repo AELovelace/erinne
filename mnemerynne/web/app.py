@@ -277,6 +277,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             unread_rooms = rooms_mod.unread_summary(conn, user, app.state.directory)
             return out | {"nav_unread": messages_mod.unread_count(conn, user_id) + unread_rooms["mentions"] + unread_rooms["dms"],
                     "has_rooms": rooms_mod.enabled(conn), "has_media": media_mod.enabled(conn) and media_mod.may_use(conn, user, app.state.directory),
+                    "has_screens": media_mod.enabled(conn) and media_screens.may_use(conn, user, app.state.directory),
                     "message_max_chars": messages_mod.MAX_CHARS,
                     "has_remote": bool(remote.apps_for(conn, user, app.state.directory, admin)),
                     "has_automations": automations_mod.may_use(conn, settings, user, app.state.directory),
@@ -379,6 +380,20 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                           {"name": "Files", "url": "/files"}],
             "share_target": {"action": "/media/share", "method": "GET",
                              "params": {"title": "title", "text": "text", "url": "url"}},
+        }, media_type="application/manifest+json", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/media/panel/manifest.webmanifest", include_in_schema=False)
+    def remote_manifest():
+        """Makes the phone's remote (/media/panel) an app of its own, installed beside Erynne with its own
+        icon: its own id and a scope covering only its page. Public, like the main manifest."""
+        name = theme_pages.looks_for(app).brand.get("name") or ASSISTANT_NAME
+        icons = [{"src": static(f"icons/{file}"), "sizes": size, "type": "image/png", "purpose": purpose}
+                 for file, size, purpose in (("remote-192.png", "192x192", "any"), ("remote-512.png", "512x512", "any"),
+                                             ("remote-maskable-512.png", "512x512", "maskable"))]
+        return JSONResponse({
+            "id": "/media/panel", "name": f"{name} Remote", "short_name": "Remote", "start_url": "/media/panel",
+            "scope": "/media/panel", "display": "standalone", "orientation": "portrait",
+            "background_color": "#0D0614", "theme_color": "#0D0614", "icons": icons,   # the remote panel's night plum
         }, media_type="application/manifest+json", headers={"Cache-Control": "no-cache"})
 
     @app.get("/healthz")

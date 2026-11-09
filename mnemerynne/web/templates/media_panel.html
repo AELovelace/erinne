@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Remote · {{ product_name }}{% endblock %}
+{#- Its own app: installed from this page, it gets the Remote's name and icon rather than the main site's. -#}
+{% block app_links %}
+  <link rel="manifest" href="/media/panel/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="{{ static('icons/remote-180.png') }}">
+  <meta name="theme-color" content="#0D0614">
+  <script src="{{ static('install.js') }}"></script>
+{% endblock %}
+{% block body %}
+{#- The phone's remote mode (/media/panel): the Erynne remote panel (the Mnemerynne-tab ESP32 firmware), button
+    for button, on a phone. media-panel.js speaks the panel's own API with the panel's own kind of key. -#}
+<link rel="stylesheet" href="{{ static('media-panel.css') }}">
+<main class="mp" id="mp" data-signed-in="{{ 1 if signed_in else 0 }}">
+  <div class="mp-page">
+    <header class="mp-head">
+      <h1 id="mp-title">Remote</h1>
+      <span class="mp-blossom" aria-hidden="true">✿</span>
+    </header>
+
+    {#- Shown only when the ☰ menu's Install TV Remote sends someone here (install.js). -#}
+    <div class="mp-install" id="install-box" data-install-only="hash" hidden>
+      <button type="button" class="mp-on" data-install="this">Install TV Remote</button>
+      <p class="mp-muted" id="install-hint" hidden></p>
+    </div>
+
+    {#- Pair: one tap while signed in; signed out (an installed iPhone app always is), a code, as on a panel. -#}
+    <section class="mp-view" id="mp-pair" hidden>
+      <p>Turn this phone into a remote for your screens, like an Erynne remote panel.</p>
+      <form id="mp-pair-form" hidden>
+        <label for="mp-pair-name">Name this remote</label>
+        <input id="mp-pair-name" type="text" maxlength="40" value="Phone remote" autocomplete="off" required>
+        <button type="submit" class="mp-on">Pair this phone</button>
+      </form>
+      <div id="mp-code-box" hidden>
+        <p>On a device where you're signed in, open Media → Screens → Pair a TV or remote, type this code, name it and press Pair.</p>
+        <div class="mp-code" id="mp-code" aria-live="polite">…</div>
+        <p class="mp-muted" id="mp-code-line">Getting a code...</p>
+      </div>
+      <a class="mp-link" id="mp-signin" href="/media/panel?signin=1" hidden>Or sign in here</a>
+      <p class="mp-muted">It stays paired after you sign out, until you press Unpair here or Remove under Media → Screens.</p>
+      <a class="mp-link" href="/media">Back to Media</a>
+    </section>
+
+    {#- Remote: the panel's main page, top to bottom. -#}
+    <section class="mp-view mp-remote" id="mp-remote" hidden>
+      <div class="mp-card" aria-live="polite">
+        <div class="mp-screen"><span class="mp-dot" id="mp-dot"></span><span id="mp-name"></span></div>
+        <div class="mp-muted" id="mp-state"></div>
+        <div class="mp-now" id="mp-now"></div>
+        <div class="mp-muted" id="mp-sub"></div>
+        <div class="mp-levels" id="mp-levels"></div>
+        <div class="mp-progress" id="mp-progress" hidden>
+          <div class="mp-track" id="mp-track"><div class="mp-fill" id="mp-fill"></div></div>
+          <span class="mp-time" id="mp-time"></span>
+        </div>
+      </div>
+
+      <div class="mp-row">
+        <button type="button" data-action="prev">Prev</button>
+        <button type="button" data-action="skip" data-by="-10">-10s</button>
+        <button type="button" class="mp-on" data-action="toggle" id="mp-play">Play</button>
+        <button type="button" data-action="skip" data-by="30">+30s</button>
+        <button type="button" data-action="next">Next</button>
+      </div>
+
+      <div class="mp-pad">
+        <span class="mp-petal" aria-hidden="true">✿</span>
+        <button type="button" class="mp-key" data-pad="up" aria-label="Up"><span class="mp-arrow mp-up"></span></button>
+        <span class="mp-petal" aria-hidden="true">✿</span>
+        <button type="button" class="mp-key" data-pad="left" aria-label="Left"><span class="mp-arrow mp-left"></span></button>
+        <button type="button" class="mp-key mp-enter" data-pad="enter">Enter</button>
+        <button type="button" class="mp-key" data-pad="right" aria-label="Right"><span class="mp-arrow mp-right"></span></button>
+        <span class="mp-petal" aria-hidden="true">✿</span>
+        <button type="button" class="mp-key" data-pad="down" aria-label="Down"><span class="mp-arrow mp-down"></span></button>
+        <span class="mp-petal" aria-hidden="true">✿</span>
+      </div>
+
+      <div class="mp-row">
+        <button type="button" data-step="-0.1">Vol -</button>
+        <button type="button" data-action="mute">Mute</button>
+        <button type="button" data-step="0.1">Vol +</button>
+        <button type="button" data-action="night">Night</button>
+        <button type="button" data-action="stop">Stop</button>
+      </div>
+
+      {#- A panel's third button here is Wi-Fi; a phone has its own, and needs a way back to the full app. -#}
+      <div class="mp-bar">
+        <button type="button" id="mp-open-screens">Screens</button>
+        <button type="button" id="mp-open-channels">Channels</button>
+        <a class="mp-link" href="/media">Media</a>
+      </div>
+    </section>
+
+    {#- Screens and Channels: the panel's two list pages, eight rows at a time. -#}
+    <section class="mp-view mp-list" id="mp-list" hidden>
+      <div class="mp-rows" id="mp-rows"></div>
+      <div class="mp-muted" id="mp-line"></div>
+      <div class="mp-foot">
+        <button type="button" id="mp-back">Back</button>
+        <button type="button" id="mp-prev">Prev</button>
+        <button type="button" id="mp-next">Next</button>
+        <button type="button" id="mp-extra"></button>
+      </div>
+    </section>
+
+    <p class="mp-status" id="mp-status" role="status"></p>
+  </div>
+</main>
+<script src="{{ static('media-panel.js') }}"></script>
+{% endblock %}

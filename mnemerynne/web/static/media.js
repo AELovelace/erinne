@@ -940,13 +940,25 @@
   /* Games (mnemerynne/games.py): the built-in games, for whoever may use Media (the TV as its owner). Each
      opens in the game layer below; never cast, since a game runs on the device that opened it. */
   async function viewGames() {
-    setHead("Games");
+    const purse = el("span", "mc-coins");
+    purse.id = "mc-coins";
+    setHead("Games", [], [purse]);
+    refreshCoins();
     const data = await api("GET", "/api/media/games");
     if (!data.games.length) return [empty("No games yet.")];
     return [shelf(null, data.games.map(function (g) {
       return card({ title: g.name, sub: g.description, glyph: g.icon || "🎮", shape: "square",
                     onClick: function () { games.open(g); } });
     }), "square", "grid")];
+  }
+
+  /* This account's coins, in the Games header if it's showing (on a TV, its owner's). */
+  function refreshCoins() {
+    const box = $("mc-coins");
+    if (!box) return;
+    api("GET", "/api/media/games/coins").then(function (data) {
+      box.textContent = data.coins.toLocaleString() + " coins";
+    }).catch(function () { box.textContent = ""; });
   }
 
   /* The game layer: the game's page (/media/games/<slug>, web/games.py) in a frame filling the screen. It's
@@ -986,6 +998,7 @@
       this.current = null;
       focusFirst();
       if (screenId) screenMode.report(true);
+      refreshCoins();                     // the game may have paid or spent some
     },
 
     /* One key for the game: a remote panel's press, or the keyboard while focus is on this page. */
@@ -1639,18 +1652,36 @@
   const audio = $("mc-audio");
   // The bottom dock's height (now playing, the remote) as --dock, so the list's padding keeps clear of it.
   const dock = $("mc-dock");
+  // Phones: the dock is a side drawer opened from the button by the view dropdown (media.css .mc-dock.drawer). A TV has no button, so it keeps the bar.
+  const dockHandle = $("mc-dock-handle");
+  const dockDrawer = dockHandle ? window.Erynne.drawer(dock, { right: true }) : null;   // the same drawer the other pages use: backdrop, Escape
+  const dockIsDrawer = function () { return !!dockDrawer && window.Erynne.narrow.matches; };   // true only on a phone-width page with the button
+  if (dockHandle) dockHandle.addEventListener("click", function () { dockDrawer.toggle(); });   // the button opens and closes it
   if (dock && "ResizeObserver" in window) {
     new ResizeObserver(function () {
-      main.style.setProperty("--dock", Math.ceil(dock.getBoundingClientRect().height) + "px");
+      main.style.setProperty("--dock", (dockIsDrawer() ? 0 : Math.ceil(dock.getBoundingClientRect().height)) + "px");   // a drawer floats over the list, so it needs no room
     }).observe(dock);
   }
+  /* Call whenever now playing or the remote appears or goes: makes room under the list, and shows or hides the phone's button. */
+  function dockChanged() {
+    const remote = $("mc-remote");                                 // missing on a TV
+    const casting = !!remote && !remote.hidden;                    // a screen is chosen, so its remote is showing
+    const filled = casting || !$("mc-np").hidden;                  // is there anything in the dock at all?
+    main.classList.toggle("mc-has-np", filled);                    // the list's bottom padding (media.css)
+    if (!dockHandle) return;                                       // a TV: nothing more to do
+    dockHandle.hidden = !filled;                                   // no button while there's nothing to open
+    dockHandle.textContent = casting ? "📺" : "♫";                 // says which it will open
+    if (!filled) dockDrawer.close();                               // don't leave an empty drawer open
+  }
+  /* Something in the dock needs reading (a warning, playback failed): on a phone, bring the closed drawer out. */
+  function dockReveal() { if (dockIsDrawer()) dockDrawer.open(); }
   const nowPlaying = {
     queue: [], i: -1, art: null, hls: null, session: null, offset: 0, station: null, skips: 0, retried: null,
     scStation: null,                                     // a SoundCloud station: { seen, growing } (station above is the radio)
 
     show: function (title, sub, art, seekable) {
       $("mc-np").hidden = false;
-      main.classList.add("mc-has-np");
+      dockChanged();                                     // room under the list, or the phone's button
       $("mc-np-title").textContent = title;
       $("mc-np-sub").textContent = sub || "";
       const box = $("mc-np-art");
@@ -1716,6 +1747,7 @@
           this.skips++; this.i++; this.load(0); return;
         }
         $("mc-np-sub").textContent = err.message;
+        dockReveal();                                    // on a phone the reason would otherwise stay in the closed drawer
         return;
       }
       if (this.queue[this.i] !== t) return;
@@ -1731,6 +1763,7 @@
           // A signed link can run out during a long pause: ask for a new one once, from where it stopped.
           if (soundcloud && self.retried !== t.id && self.queue[self.i] === t) { self.retried = t.id; self.load(self.position(), true); return; }
           $("mc-np-sub").textContent = "Playback stopped: " + d;
+          dockReveal();                                  // show why, on a phone too
         });
       }
       if (!this.session) {                               // a session seeks on the server; these are seeked here
@@ -1803,7 +1836,7 @@
       this.queue = []; this.i = -1; this.station = null; this.scStation = null;
       this.credit(null);
       $("mc-np").hidden = true;
-      main.classList.remove("mc-has-np");
+      dockChanged();                                     // gives the room back unless a remote is still showing
       this.markTracks(document);
     },
 
@@ -1831,7 +1864,7 @@
   audio.addEventListener("ended", function () { nowPlaying.next(); });
   audio.addEventListener("playing", function () { nowPlaying.retried = null; });   // it recovered: a later long pause may retry too
   audio.addEventListener("error", function () {
-    if (nowPlaying.station) $("mc-np-sub").textContent = "Radio · the station isn't answering";
+    if (nowPlaying.station) { $("mc-np-sub").textContent = "Radio · the station isn't answering"; dockReveal(); }   // show why, on a phone too
   });
   $("mc-np-seek").addEventListener("change", function () { nowPlaying.seekTo(Number($("mc-np-seek").value)); });
   $("mc-np-toggle").addEventListener("click", function () { nowPlaying.toggle(); });
@@ -2149,6 +2182,7 @@
       select.value = keep ? String(keep) : "";
       const s = this.screen();
       $("mc-remote").hidden = !s;
+      dockChanged();                                     // casting needs the room or the button too (this was the list sliding under the bar)
       if (!s) return;
       const st = s.state;
       $("mc-remote-title").textContent = "📺 " + label(s) + (s.online ? "" : " — not connected");
@@ -2230,9 +2264,11 @@
         box.setAttribute("role", "status");
         $("mc-dock").prepend(box);          // with the remote, where it's seen wherever the page is scrolled
       }
+      const firstShown = !!text && !box.childElementCount;   // the countdown calls this every moment; only pop out at its start, so it can be closed
       box.replaceChildren();
       box.hidden = !text;
       if (!text) return;
+      if (firstShown) dockReveal();                      // a takeover countdown must be seen on a phone
       box.appendChild(el("span", null, text));
       if (override) box.appendChild(button("Override", "small", override, "Take over the TV now (admins)"));
     },

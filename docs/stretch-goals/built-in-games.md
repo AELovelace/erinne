@@ -2,9 +2,13 @@
 
 *Written 2026-10-28 (late) by Lumi for Doll. A stretch goal. It lives in the repo on purpose, not in IT-OPS.*
 
+## Status (2026-11-09): shared coins
+
+Every Media game now shares one purse per account, kept on this server (`mnemerynne/coins.py`, migration 0063). It's built the way LumiBot's SadGirlCoin is, but Doll decided each NAS has its own coins, so it isn't connected to SadGirlCoin and the tie-in ideas below are not what shipped. Online casino tables bet coins, and a TV at one spends the account it's paired to. Local multiplayer (remotes around one TV) stays on free credits. Prism Drop's rules moved to the server (`mnemerynne/prism.py`) so a finished game can pay; Lumi Pet pays for the day's first visit. Where this conflicts with older sections below, this section is current.
+
 ## Status (2026-11-02): Lumi Pet and the fireplace idea
 
-**Shared-TV casino mode** is also implemented: on a paired TV choose **One TV, multiple remotes**. Up to eight controllers/players have independent seats, chips, drafts and blackjack choices on one display. Each remote must be paired to the TV owner's account. First Enter joins, later Enter submits, and the first player's Play starts the round. Ordinary multi-device tables remain available. Signed panel inputs and server-side deduplication keep players separate and prevent duplicate moves; the player/testing guides cover setup and verification.
+**Shared-TV casino mode** is also implemented: on a paired TV choose **One TV, multiple remotes**. Up to eight controllers/players have independent seats, credits, drafts and blackjack choices on one display. Each remote must be paired to the TV owner's account. First Enter joins, later Enter submits, and the first player's Play starts the round. Ordinary multi-device tables remain available. Signed panel inputs and server-side deduplication keep players separate and prevent duplicate moves; the player/testing guides cover setup and verification.
 
 **Lumi Pet** is now implemented in Media → Games as a cozy, device-local companion: a glowing fairy cat with cuddles, snacks, star play, naps and three glow colours. It sleeps from 22:00 to 07:00 on the device's clock; any interaction can gently wake it. Happy moments and the latest memory persist in this browser profile, shared by its users. There is no neglect, decay, streak, currency or penalty for time away. This first version does not use server saves or sync between devices.
 

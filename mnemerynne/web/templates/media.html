@@ -12,7 +12,9 @@
     <div class="mc-clock" id="mc-clock" aria-hidden="true"></div>
     <div class="mc-date" id="mc-date" aria-hidden="true"></div>
     {#- On a narrow browser the list below takes rows of space; this stands in for it (media.css). -#}
-    {% if not screen %}<select class="mc-view-select" id="mc-view-select" aria-label="Media type"></select>{% endif %}
+    {% if not screen %}<select class="mc-view-select" id="mc-view-select" aria-label="Media type"></select>
+    {#- Phones only (media.css): opens the now-playing and remote drawer; shown while either has something (media.js dockChanged). -#}
+    <button type="button" class="mc-dock-handle" id="mc-dock-handle" title="Now playing" aria-label="Now playing" hidden>♫</button>{% endif %}
     <button type="button" class="mc-menu-item" data-view="home"><span class="mc-icon">⌂</span>Home</button>
     <button type="button" class="mc-menu-item" data-view="movies"><span class="mc-icon">🎬</span>Movies</button>
     <button type="button" class="mc-menu-item" data-view="tv"><span class="mc-icon">📺</span>TV Shows</button>
@@ -26,6 +28,8 @@
     {#- Screen size and Wi-Fi are inside Kiosk settings, which sits at the bottom of the menu (media.css). -#}
     {% if screen %}<button type="button" class="mc-menu-item" id="mc-kiosk" data-local-only hidden><span class="mc-icon">⚙</span>Kiosk settings</button>{% endif %}
     {% if not screen and screens_allowed %}<button type="button" class="mc-menu-item" data-view="screens"><span class="mc-icon">📺</span>Screens</button>
+    {#- No data-view: it opens its own page, and so stays visible on a phone (media.css). -#}
+    <a class="mc-menu-item" href="/media/panel" style="text-decoration: none"><span class="mc-icon">🎛</span>Remote</a>
     <label class="mc-cast" id="mc-cast-wrap" hidden>Play on
       <select id="mc-cast"><option value="">This device</option></select>
     </label>{% endif %}

@@ -1046,6 +1046,40 @@ async def remove_remote(remote_id: int, request: Request, user=Depends(api_user)
     return {"status": "removed"}
 
 
+# ---------------------------------------------------------- the phone's remote mode
+@router.get("/media/panel", response_class=HTMLResponse)
+def panel_page(request: Request, signin: int = 0, conn: sqlite3.Connection = Depends(get_db)):
+    """The phone's remote mode (static/media-panel.js): a remote panel on a phone. Public, like a panel's
+    own screen: it holds nothing itself, and once paired it needs only its remote key, not a sign-in.
+    ?signin=1 is its "Sign in to pair" link, which comes back here afterwards."""
+    signed_in = _session_user(request, conn) is not None
+    if signin and not signed_in:
+        request.session["after_login"] = "/media/panel"     # /login returns here
+        return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+    return request.app.state.templates.TemplateResponse(request, "media_panel.html", {"signed_in": signed_in})
+
+
+class PanelPair(BaseModel):
+    name: str = Field(..., max_length=200)
+
+
+@router.post("/api/media/panel/pair", status_code=status.HTTP_201_CREATED)
+async def pair_panel(body: PanelPair, user=Depends(screens_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Pair the phone asking as a remote of the signed-in person, without a code: it's already signed in.
+    The key comes back once. A name in use is refused here, where the code flow re-pairs it, so a second
+    phone keeping the default name can't silently unpair the first."""
+    try:
+        name = screens.clean_name(body.name)
+        if any(r["name"].lower() == name.lower() for r in remotes.of_user(conn, user["id"])):
+            raise screens.ScreenError(f"A remote is already called {name}. Choose another name, or remove it "
+                                      "under Media → Screens first.")
+        with transaction(conn):
+            remote_id, key = remotes.create(conn, user["id"], name)
+    except screens.ScreenError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    return {"id": remote_id, "name": name, "key": key}
+
+
 # ------------------------------------------------------------------ speakers
 def speaker_device(remote=Depends(remote_device), conn: sqlite3.Connection = Depends(get_db)) -> sqlite3.Row:
     """The speaker screen (media/speakers.py) of the remote whose key came; 404 for a remote without one."""

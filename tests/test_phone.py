@@ -69,7 +69,31 @@ def test_the_pages_carry_the_phone_controls(client, conn):
 def test_the_media_and_remote_pages_fit_a_phone():
     media = (REPO / "mnemerynne" / "web" / "templates" / "media.html").read_text(encoding="utf-8")
     assert 'class="mc-dock"' in media and media.index('id="mc-dock"') < media.index('id="mc-np"') < media.index('id="mc-remote"')
+    # On a phone the dock is a drawer, opened from a button that sits above the list instead of floating over it.
+    assert 'id="mc-dock-handle"' in media and media.index('id="mc-dock-handle"') < media.index('class="mc-main"')
+    css = (STATIC / "media.css").read_text(encoding="utf-8")
+    assert ".mc-dock.drawer" in css and "html .mc-dock-handle" in css
+    script = (STATIC / "media.js").read_text(encoding="utf-8")
+    assert 'Erynne.drawer(dock, { right: true })' in script
+    # Casting must make room too: that was the list sliding under the remote bar.
+    remote_shown = script.index('$("mc-remote").hidden = !s;')
+    assert script.index("dockChanged();", remote_shown) - remote_shown < 60
+    assert 'classList.add("mc-has-np")' not in script
     remote = (REPO / "mnemerynne" / "web" / "templates" / "remote.html").read_text(encoding="utf-8")
     assert 'id="remote-list-button"' in remote
     editor = (REPO / "mnemerynne" / "web" / "templates" / "editor.html").read_text(encoding="utf-8")
     assert 'class="topbar doc-bar"' in editor and 'id="ed-show-preview"' in editor
+
+
+def test_install_buttons_sit_last_in_the_phone_menu_and_know_browser_from_app():
+    root = Path(__file__).resolve().parents[1] / "mnemerynne" / "web"
+    nav = (root / "templates" / "_nav.html").read_text(encoding="utf-8")
+    script = (root / "static" / "install.js").read_text(encoding="utf-8")
+    css = (root / "static" / "erynne.css").read_text(encoding="utf-8")
+    assert nav.index("Sign out") < nav.index('id="install-box"') < nav.index("</header>", nav.index('id="install-box"'))
+    assert nav.index('data-install="this"') < nav.index('data-install="remote"') and "has_screens" in nav
+    assert "(display-mode: standalone)" in script and "navigator.standalone" in script   # Android, and iPhones
+    assert "beforeinstallprompt" in script and "/media/panel#install" in script
+    assert ".nav-install { display: none; }" in css and "flex-direction: column" in css[css.index(".nav-more .nav-install"):]
+    assert "install.js" in (root / "templates" / "base.html").read_text(encoding="utf-8")
+    assert 'data-install-only="hash"' in (root / "templates" / "media_panel.html").read_text(encoding="utf-8")

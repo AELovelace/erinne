@@ -106,7 +106,28 @@
     return { unlock: unlock, stop: stop, tone: tone, toggle: toggle, isOn: function () { return on; } };
   })();
 
+  async function api(url, body) { // A bounded GET, or a POST when there's a body. A refusal throws with its status and the server's words.
+    const response = await fetch(url, { method: body === undefined ? "GET" : "POST", credentials: "same-origin",
+      headers: body === undefined ? {} : { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(10000), cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok) {
+      const failure = new Error(typeof data.detail === "string" ? data.detail : "This move could not be accepted.");
+      failure.status = response.status;
+      throw failure;
+    }
+    return data;
+  }
+
+  function showCoins(id) { // Put this account's coins in an element; if they can't be read, the game simply plays on.
+    api("/api/media/games/coins").then(function (data) {
+      const box = document.getElementById(id);
+      if (box) box.textContent = data.coins.toLocaleString();
+    }).catch(function () { /* the balance is a nicety, never a reason to stop */ });
+  }
+
   window.MGame = {
+    api: api, showCoins: showCoins,
     framed: framed,
     reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
     onAction: function (fn, options) { onAction = fn; directEnter = options && options.directEnter; }, // Optional direct Enter controls; older games keep native buttons.

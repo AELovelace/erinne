@@ -1,6 +1,7 @@
 /* Prism Drop (mnemerynne/games.py): pick one of ten pockets, drop a neon ball through twenty rows of pins, score
-   points. A game is ten drops; the best total stays on this device. Rules (the field, the path, the points) are
-   rules.js; this file draws the field, animates the ball, plays the sounds and handles the controls.
+   points. A game is ten drops and pays coins when it ends; the best total stays on this device. The server rolls each
+   drop and keeps the score (mnemerynne/prism.py); this file draws the field, animates the ball, plays the sounds and
+   handles the controls.
 
    Controls, the same from a keyboard or a remote panel (common.js turns both into actions):
    ◀ ▶ pick a pocket · Enter drop (or start again after the tenth) · ▲ replay the last drop · ▼ sound on or off.
@@ -21,6 +22,7 @@
   let pick = 5, score = 0, drops = 0, best = Number(G.store.get("best", 0)) || 0;
   let last = null, shown = null, animating = false, busy = false, over = false;   // busy: a drop until it's scored
   let ball = null, particles = [], impacts = [], used = new Set(), scale = 1;
+  let tick = 0, bounced = [];                                    // how far the platforms have moved, and each one's bounces so far
 
   // ---------------------------------------------------------------- drawing
   function fit() { // Match the canvas's pixels to its size on screen (crisp on a 4K TV and a phone alike).
@@ -60,7 +62,32 @@
     }
   }
 
-  function draw() { // The whole field: grid, lanes, pins, pockets, then hits, sparks and the ball on top.
+  function reflect(value, low, high) { // Bounce a position back inside low..high: the same sum as the server's _reflect.
+    while (value < low || value > high) value = value < low ? low * 2 - value : high * 2 - value;
+    return value;
+  }
+
+  function platformLeft(p, at) { // A platform's leftmost column at this point in the drop, smoothly between whole steps (prism.py platform_left).
+    const whole = Math.floor(at), last = R.WIDTH - R.PLATFORM_SPAN + 1;
+    const from = reflect(p.left + p.dir * whole, 1, last), to = reflect(p.left + p.dir * (whole + 1), 1, last);
+    return from + (to - from) * (at - whole);
+  }
+
+  function drawPlatforms() { // The sliding bars, under the ball; one that has given all its bounces fades and lets the ball through.
+    ((shown && shown.platforms) || []).forEach(function (p, index) {
+      const left = x(platformLeft(p, tick)) - 22, width = 61.1 * (R.PLATFORM_SPAN - 1) + 44;
+      const spent = (bounced[index] || 0) >= R.PLATFORM_BOUNCES;
+      ctx.save();
+      ctx.globalAlpha = spent ? .3 : 1;
+      ctx.shadowColor = NEON.cyan; ctx.shadowBlur = spent ? 0 : 14;
+      ctx.fillStyle = "#0b3a46"; ctx.fillRect(left, y(p.row), width, 9);
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = NEON.cyan; ctx.lineWidth = 1.5; ctx.strokeRect(left, y(p.row), width, 9);
+      ctx.restore();
+    });
+  }
+
+  function draw() { // The whole field: grid, lanes, pins, pockets, platforms, then hits, sparks and the ball on top.
     const field = new Map(((shown && shown.obstacles) || []).map(function (o) { return [o.row + ":" + o.column, o.type]; }));
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = NEON.night; ctx.fillRect(0, 0, W, H);
@@ -88,6 +115,7 @@
       ctx.fillStyle = landed ? "#0a0010" : NEON.ink; ctx.font = "800 20px " + NEON.font; ctx.fillText(String(col), x(col), 872);
       if (chosen) { ctx.fillStyle = NEON.cyan; ctx.font = "700 9px " + NEON.font; ctx.fillText("PICK", x(col), 908); }
     }
+    drawPlatforms();
     impacts.forEach(function (hit) { // Rings where the ball struck, and the coin peg's +N rising.
       ctx.globalAlpha = Math.max(0, hit.life);
       ctx.beginPath(); ctx.arc(hit.x, hit.y, (1 - hit.life) * (hit.type === "bomb" ? 60 : 26) + 5, 0, Math.PI * 2);
@@ -108,6 +136,7 @@
     else if (kind === "block") { t(190, .11, 0, .28, "triangle", 95); t(380, .07, 0, .08); }
     else if (kind === "bomb") { t(155, .34, 0, .42, "triangle", 35); t(510, .17, 0, .12, "sawtooth", 65); t(240, .22, .05, .16, "sine", 55); }
     else if (kind === "coin") { t(1046.5, .15, 0, .22); t(1568, .23, .065, .18); }
+    else if (kind === "platform") { t(330, .08, 0, .24, "square"); t(660, .12, .05, .14, "triangle", 880); }
     else if (kind === "landing") {
       const notes = [[523.25, 659.25, 783.99, 1046.5], [523.25, 659.25, 880], [523.25, 659.25]][Math.abs(detail.pick - detail.landing)] || [392, 293.66];
       notes.forEach(function (note, i) { t(note, .25, i * .105, .2, "triangle"); });
@@ -116,7 +145,7 @@
 
   // -------------------------------------------------------------- animation
   function animate(round) { // Play a drop's path; resolves when the ball is in its pocket. Reduced motion skips to the end.
-    G.sound.stop(); animating = true; shown = round; used = new Set(); particles = []; impacts = []; buttons();
+    G.sound.stop(); animating = true; shown = round; used = new Set(); particles = []; impacts = []; tick = 0; bounced = []; buttons();
     if (G.reducedMotion) { finishAnimation(round); return Promise.resolve(); }
     cue("drop");
     return new Promise(function (resolve) {
@@ -124,7 +153,7 @@
         return Object.assign({}, p, { x: x(p.column), y: p.row === R.HEIGHT ? 858 : y(p.row) - 8 });
       }));
       const ends = [0];
-      points.slice(0, -1).forEach(function (p) { ends.push(ends[ends.length - 1] + (p.hit === "bomb" ? 360 : 195)); });
+      points.slice(0, -1).forEach(function (p) { ends.push(ends[ends.length - 1] + (p.hit === "bomb" ? 360 : p.hit === "platform" ? 300 : 195)); });
       const started = performance.now();
       let lastTime = started, seen = -1;
       function frame(time) {
@@ -133,17 +162,22 @@
         const f = Math.min(1, (elapsed - ends[seg]) / (ends[seg + 1] - ends[seg])), step = Math.min(2, (time - lastTime) / 16.67);
         lastTime = time;
         const from = points[seg], to = points[seg + 1];
-        ball = { x: from.x + (to.x - from.x) * f, y: from.y + (to.y - from.y) * f - Math.sin(f * Math.PI) * (from.hit === "bomb" ? 30 : 10) };
+        tick = Math.max(0, seg - 1 + f);                           // the ball reaches path step N as this segment ends, so the platforms are there too
+        ball = { x: from.x + (to.x - from.x) * f, y: from.y + (to.y - from.y) * f - Math.sin(f * Math.PI) * (from.hit === "bomb" ? 30 : from.hit === "platform" ? 20 : 10) };
         if (seg !== seen) {
-          for (let s = seen + 1; s <= seg; s++) { const p = points[s]; if (p.hit === "coin" || p.hit === "bomb") used.add(p.row + ":" + p.column); }
+          for (let s = seen + 1; s <= seg; s++) {
+            const p = points[s];
+            if (p.hit === "coin" || p.hit === "bomb") used.add(p.row + ":" + p.column);
+            if (p.hit === "platform") bounced[p.platform] = (bounced[p.platform] || 0) + 1;
+          }
           seen = seg;
           if (seg > 0 && elapsed - ends[seg] < 120) cue(from.hit || "peg", from);   // no backlog of hits after a stall
-          const color = from.hit === "coin" ? "#ffe14d" : from.hit === "bomb" ? "#ff5a3c" : from.hit === "block" ? "#b14bff" : LANES[Math.max(0, from.column - 1)] || NEON.cyan;
+          const color = from.hit === "coin" ? "#ffe14d" : from.hit === "bomb" ? "#ff5a3c" : from.hit === "block" ? "#b14bff" : from.hit === "platform" ? NEON.cyan : LANES[Math.max(0, from.column - 1)] || NEON.cyan;
           impacts.push({ x: from.x, y: from.y, life: 1, color: color, type: from.hit, coins: from.coins });
           if (from.hit) { // A burst of sparks: bigger for a bomb.
             const n = from.hit === "bomb" ? 36 : 16, speed = from.hit === "bomb" ? 4 : 2;
             for (let i = 0; i < n; i++) { const a = i * Math.PI * 2 / n; particles.push({ x: from.x, y: from.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, size: 2.5, life: 1, color: color }); }
-            say(from.hit === "bomb" ? "Boom! New direction…" : from.hit === "coin" ? "Coin peg! +" + from.coins : "Blocked! Shoved sideways…");
+            say(from.hit === "bomb" ? "Boom! New direction…" : from.hit === "coin" ? "Coin peg! +" + from.coins : from.hit === "platform" ? "Bounce! Back up it goes…" : "Blocked! Shoved sideways…");
           }
         }
         for (let i = 0; i < 3; i++) particles.push({ x: ball.x, y: ball.y, vx: (Math.random() - .5) * 2, vy: -Math.random() * 1.8, size: 1.5 + Math.random() * 3, life: 1, color: LANES[(seg + i) % 10] });
@@ -159,7 +193,12 @@
   }
 
   function finishAnimation(round) { // The ball at rest in its pocket, every pickup counted even if frames were skipped.
-    round.trajectory.forEach(function (p) { if (p.hit === "coin" || p.hit === "bomb") used.add(p.row + ":" + p.column); });
+    round.trajectory.forEach(function (p) {
+      if (p.hit === "coin" || p.hit === "bomb") used.add(p.row + ":" + p.column);
+    });
+    bounced = [];                                                  // counted afresh, in case frames were skipped
+    round.trajectory.forEach(function (p) { if (p.hit === "platform") bounced[p.platform] = (bounced[p.platform] || 0) + 1; });
+    tick = round.trajectory.length - 1;
     ball = { x: x(round.landing), y: 852 }; animating = false; particles = []; impacts = [];
     cue("landing", round); draw();
   }
@@ -183,24 +222,36 @@
     $("pd-sound").setAttribute("aria-pressed", String(G.sound.isOn()));
   }
 
-  function newGame() { score = 0; drops = 0; over = false; last = null; shown = null; ball = null; used = new Set(); say("Pick a pocket, then drop."); hud(); draw(); }
+  function newGame() { score = 0; drops = 0; over = false; last = null; shown = null; ball = null; used = new Set(); tick = 0; bounced = []; say("Pick a pocket, then drop."); hud(); draw(); }
 
-  function dropBall() { // One scored drop: roll it (rules.js), play it, add its points; the tenth ends the game.
-    const round = R.play(pick);
-    last = round; busy = true;
-    say("Dropping from pin " + round.trajectory[0].column + "…");
+  async function dropBall() { // One scored drop: the server rolls it and keeps the score, and this plays it back; the tenth ends the game.
+    busy = true;
+    say("Dropping…");
     hud();
+    let result;
+    try { result = await G.api("/api/media/games/prism-drop/drop", { pick: pick }); }
+    catch (err) {                                                  // nothing was rolled: the same pick can simply try again
+      busy = false;
+      say(err.status ? err.message : "Couldn't reach the server. Drop again to retry.");
+      hud();
+      return;
+    }
+    const round = result.round;
+    last = round;
+    say("Dropping from pin " + round.trajectory[0].column + "…");
     animate(round).then(function () {
       busy = false;
-      score += round.points; drops++;
+      score = result.score; drops = result.drops;                  // the server's count, even if another device played too
       const off = Math.abs(round.pick - round.landing);
       const head = ["Right on the prism!", "One pocket off.", "Two pockets off."][off] || "Missed the pocket.";
       say(head + " Pocket " + round.landing + ": +" + round.landingPoints + (round.bonus ? ", coin pegs +" + round.bonus : "") + " = " + round.points + ".", off === 0);
-      if (drops >= R.DROPS) {
+      if (result.over) {
         over = true;
         const record = score > best;
         if (record) { best = score; G.store.set("best", best); }
-        say((record ? "New best! " : "Game over. ") + score + " points. Enter (or New game) to play again.", record);
+        const pay = result.paid ? " +" + result.paid + " coins!" : result.earned ? " Today's coin limit is reached." : "";
+        say((record ? "New best! " : "Game over. ") + score + " points." + pay + " Enter (or New game) to play again.", record);
+        $("pd-coins").textContent = result.coins.toLocaleString();
       }
       hud();
     });
@@ -235,4 +286,11 @@
   newGame();
   fit();
   canvas.focus();
+  G.showCoins("pd-coins");
+  G.api("/api/media/games/prism-drop/run").then(function (run) { // A game left unfinished, here or on another device, carries on.
+    if (!run.drops || drops || busy) return;
+    score = run.score; drops = run.drops;
+    say("Picking up where you left off.");
+    hud();
+  }).catch(function () { /* a first drop will show whether the server is there */ });
 })();

@@ -43,6 +43,14 @@
     {% if tv is defined and tv and tv.box %}{% if not kiosk_back %}<a class="help-link kiosk-back" href="/media/screen" data-kiosk-back>📺 Back to TV</a>{% endif %}<span class="tv-history"><button type="button" data-tv-go="back" title="Back (Backspace)">‹</button><button type="button" data-tv-go="forward" title="Forward">›</button></span>{% endif %}
     <a class="help-link" href="/help" target="_blank" rel="noopener">Help</a>
     <form method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
+    {#- Phones only (erynne.css): each app installs separately. install.js shows what suits a browser tab or an installed app. -#}
+    {% if not (tv is defined and tv) %}
+    <div class="nav-install" id="install-box" hidden>
+      <button type="button" data-install="this">Install {{ product_name }}</button>
+      {% if has_screens %}<button type="button" data-install="remote">Install TV Remote</button>{% endif %}
+      <p class="muted small" id="install-hint" hidden></p>
+    </div>
+    {% endif %}
   </div>
 </header>
 <div class="notices" id="notices" aria-live="polite" hidden></div>

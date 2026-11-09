@@ -1,14 +1,15 @@
 <section class="casino-heading">
   <div><p class="gm-eyebrow">The velvet lounge · Multiplayer</p><h1 class="gm-title">{{ game.icon }} {{ game.name }}</h1></div>
-  <p>Free play chips · Up to 8 players · No cash value</p>
+  <p>Your coins online · Free credits on a shared TV · Up to 8 players · No cash value</p>
 </section>
 <p id="casino-error" class="casino-error" role="alert" hidden></p>
 <section id="casino-lobby" class="gm-panel">
   <div class="casino-section-head"><div><h2>Find your table</h2><p>Create a table, then have your friends choose its code here on their device.</p></div>
     <button type="button" id="casino-create" class="gm-primary">Create table</button></div>
+  <p>Your coins: <b id="casino-coins">—</b></p>
   <button type="button" id="casino-create-tv"{% if not tv_play %} hidden{% endif %}>One TV, multiple remotes</button>
-  <p>For one-TV play, pair each remote to the TV owner's account, open Games on that paired TV, and choose <b>One TV, multiple remotes</b>. Each remote presses Enter to join its own seat.</p>
-  <p>Use a signed-in account or a paired TV. Each account or signed-out paired TV has one seat per table.</p>
+  <p>For one-TV play, pair each remote to the TV owner's account, open Games on that paired TV, and choose <b>One TV, multiple remotes</b>. Each remote presses Enter to join its own seat. These tables use free credits, not your coins.</p>
+  <p>Use a signed-in account or a paired TV. Each account or signed-out paired TV has one seat per table, and a TV at an online table spends the coins of the account it's paired to.</p>
   <div id="casino-rooms" class="casino-rooms" aria-label="Available tables"></div>
   <p id="casino-empty">Looking for tables…</p>
 </section>
@@ -25,13 +26,13 @@
         <p id="casino-pick-label">Your pick</p><div class="casino-stepper" id="casino-pick-controls">
           <button type="button" id="casino-pick-prev" aria-label="Previous pick">◀</button><strong id="casino-pick"></strong><button type="button" id="casino-pick-next" aria-label="Next pick">▶</button>
         </div>
-        <p id="casino-stake-label">Chips to play</p><div class="casino-stepper">
-          <button type="button" id="casino-less" aria-label="Bet ten fewer chips">−</button><strong id="casino-amount">50</strong><button type="button" id="casino-more" aria-label="Bet ten more chips">+</button>
+        <p id="casino-stake-label">Coins to play</p><div class="casino-stepper">
+          <button type="button" id="casino-less" aria-label="Bet ten less">−</button><strong id="casino-amount">50</strong><button type="button" id="casino-more" aria-label="Bet ten more">+</button>
         </div>
         <p id="casino-cost" hidden></p>
         <button type="button" id="casino-bet" class="gm-primary">Place bet</button>
         <button type="button" id="casino-start">▶ Start round</button>
-        <button type="button" id="casino-refill" hidden>Refill free chips</button>
+        <button type="button" id="casino-refill" hidden>Refill free coins</button>
       </div>
       <div id="casino-hand" hidden><button type="button" id="casino-hit" class="gm-primary">Hit</button><button type="button" id="casino-stand">Stand</button></div>
       <p id="casino-hint" aria-live="polite"></p>
@@ -45,9 +46,9 @@
       <p>Up to eight players. Look for your remote's name on the board.</p>
       <p>◀ ▶ choose your pick<br>▲ ▼ change your stake<br>Enter sets your bet<br>Host's Play starts the round</p>
       <p>Blackjack: ◀ ▶ choose Hit/Stand, then Enter confirms.</p>
-      <p>Your draft stays on your card until you press Enter. With too few chips, Enter gives a free refill.</p>
+      <p>Everyone gets 1,000 free credits at this table. They don't touch anyone's coins. Your draft stays on your card until you press Enter. With too few credits, Enter gives a free refill.</p>
       <p>The first player is host. Joining during a round watches until the next betting window.</p>
-      <p>Keyboard/TV buttons can remove a seat or end the table; those chips and active wagers are forfeited. Back to Games keeps the table saved. Stop closes the game for everyone on this TV.</p>
+      <p>Keyboard/TV buttons can remove a seat or end the table; those credits and active wagers are forfeited. Back to Games keeps the table saved. Stop closes the game for everyone on this TV.</p>
       <h3>Table rules</h3><p id="casino-tv-rules"></p>
     </details>
   </div>

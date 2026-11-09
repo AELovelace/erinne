@@ -21,10 +21,14 @@
   {%- else %}
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌸</text></svg>">
   {%- endif %}
-  {#- Installable (Add to Home screen), and on Android a Share target: /manifest.webmanifest (web/app.py). -#}
+  {#- Installable (Add to Home screen), and on Android a Share target: /manifest.webmanifest (web/app.py).
+      A page that is its own app (the Remote, media_panel.html) replaces this block. -#}
+  {% block app_links %}
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="{% if brand.mark %}/theme/brand/mark-180.png?v={{ brand.mark_version }}{% else %}{{ static('icons/apple-touch-icon.png') }}{% endif %}">
   <meta name="theme-color" content="{{ look.page_light if look else '#12031f' }}">
+  <script src="{{ static('install.js') }}"></script>
+  {% endblock %}
   <link rel="stylesheet" href="{{ static('erynne.css') }}">
   <link rel="stylesheet" href="{{ static('theme-neon.css') }}">
   <link rel="stylesheet" href="{{ static('theme-plain.css') }}">

@@ -248,6 +248,7 @@ html .mc-viewer-nav { position: absolute; top: 50%; transform: translateY(-50%);
 .mc-sc-row .mc-track { flex: 1 1 auto; min-width: 0; }
 .mc-sc-out { color: var(--muted); text-decoration: none; padding: .4rem .6rem; }
 .mc-sc-out:hover { color: var(--rose); }
+.mc-coins { color: var(--rose); font-weight: 600; font-variant-numeric: tabular-nums; }
 html .mc-sc-station { flex: none; background: none; border: 0; box-shadow: none; color: var(--muted); padding: .4rem .6rem; font-size: 1rem; cursor: pointer; }
 html .mc-sc-station:hover, html .mc-sc-station:focus-visible { background: var(--petal-soft); box-shadow: inset 0 0 0 2px var(--rose); }
 .mc-sc-more { margin: 1rem 0; }
@@ -258,12 +259,16 @@ html .mc-sc-station:hover, html .mc-sc-station:focus-visible { background: var(-
 .mc-np-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mc-np-sub { color: var(--muted); font-size: .85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mc-np-seek { display: flex; align-items: center; gap: .5rem; margin-top: .2rem; }
+.mc-np-seek[hidden] { display: none; }   /* radio can't seek; the display above would otherwise beat [hidden] */
 .mc-np-seek input { flex: 1; accent-color: var(--rose); }
 .mc-np-buttons { display: flex; gap: .2rem; }
 html .mc-np-buttons button { background: none; border: 0; color: var(--ink); font-size: 1.3rem; cursor: pointer;
                         padding: .3rem .45rem; border-radius: 6px; }
 .mc-np-buttons button:hover, .mc-np-buttons button:focus-visible { color: var(--rose); background: var(--petal-soft); }
-.mc-has-np .mc-scroll { padding-bottom: calc(var(--dock, 5rem) + 1.5rem); }
+.mc-has-np .mc-scroll { padding-bottom: calc(var(--dock, 5rem) + 1.5rem); }   /* mc-has-np: music here OR a remote showing (media.js dockChanged) */
+html .mc-dock-handle { display: none; flex: none; min-width: 2.8rem; padding: .3rem .6rem; font-size: 1.2rem; line-height: 1.4;   /* desktop keeps the bottom bar, so no button */
+                       background: var(--petal-soft); color: var(--rose); border: 1px solid var(--rose);
+                       border-radius: calc(var(--radius) * .6); box-shadow: none; cursor: pointer; }
 
 @media (max-width: 760px) {
   .mc { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: .5rem; margin: .5rem;
@@ -289,6 +294,17 @@ html .mc-np-buttons button { background: none; border: 0; color: var(--ink); fon
   .mc-np { grid-template-columns: 3rem minmax(0, 1fr); gap: .5rem .7rem; }
   .mc-np-art { width: 3rem; height: 3rem; }
   .mc-np-buttons { grid-column: 1 / -1; justify-content: center; flex-wrap: wrap; }
+  /* Phones: the dock pops out from the right like the app's other drawers (picker.js drawer), so it never covers the list. */
+  html .mc-dock-handle { display: inline-flex; align-items: center; justify-content: center; margin: .2rem; }   /* sits beside the view dropdown */
+  .mc-dock.drawer { left: auto; right: 0; top: var(--chrome); bottom: auto; max-height: var(--page-h); transform: none;   /* undoes the centred bottom bar; only as tall as its buttons */
+                    width: min(18rem, 85vw); z-index: 25; padding: .5rem; gap: .5rem; pointer-events: auto; }
+  .mc-dock.drawer :is(.mc-np, .mc-remote) { padding: .5rem; gap: .4rem .6rem; background: none; box-shadow: none;   /* flat cards: the drawer is already the glass */
+                                            -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .mc-dock.drawer .mc-np { grid-template-columns: 2.6rem minmax(0, 1fr); }   /* small art leaves the seek slider some width */
+  .mc-dock.drawer .mc-np-art { width: 2.6rem; height: 2.6rem; font-size: 1.2rem; }
+  .mc-dock.drawer :is(.mc-np-title, .mc-np-sub) { white-space: normal; overflow-wrap: anywhere; }   /* the drawer has height to spare, so show whole titles */
+  .mc-dock.drawer .mc-np-buttons { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .1rem; }   /* tidy rows of five */
+  html .mc-dock.drawer .mc-np-buttons button { font-size: 1.15rem; padding: .4rem 0; }
   /* The player's bar: the seek row first, the buttons wrapped under it. */
   .mc-osd { padding: 1.6rem .7rem calc(.7rem + env(safe-area-inset-bottom, 0px)); }
   .mc-osd-top { padding: .7rem .9rem 1.5rem; }

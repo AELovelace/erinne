@@ -25,6 +25,7 @@
 .pd-block::before { background: repeating-linear-gradient(135deg, #b14bff 0 3px, #3a1258 3px 6px); }
 .pd-bomb::before { background: #ff5a3c; box-shadow: 0 0 8px #ff5a3c; border-radius: 50% !important; }
 .pd-coinpeg::before { background: #ffe14d; box-shadow: 0 0 8px #ffe14d; border-radius: 50% !important; }
+.pd-platform::before { background: #0b3a46; border: 1px solid #00f0ff; box-shadow: 0 0 8px #00f0ff; height: .4em !important; top: .55em !important; }
 
 .pd-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
 .pd-buttons .gm-primary { grid-column: 1 / -1; font-size: 1.15rem; padding: .8rem; }

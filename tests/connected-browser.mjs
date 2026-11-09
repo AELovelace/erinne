@@ -53,6 +53,26 @@ try {
     await checkSharedTV(alice, screen, base);
   } else {
   await checkLumiPet(browser, alice, base);
+  await alice.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]); // Skip the ball's animation: the server's drops are what's under test.
+  await alice.goto(base + "/media/games/prism-drop");
+  await alice.waitForFunction(() => /^[\d,]+$/.test(document.getElementById("pd-coins").textContent));
+  const prismCoins = async () => Number((await alice.$eval("#pd-coins", e => e.textContent)).replaceAll(",", ""));
+  const dropOnce = async n => { // Each drop comes from the server; wait for it to be scored before pressing again.
+    await alice.waitForSelector("#pd-drop-button:not([disabled])");
+    await alice.click("#pd-drop-button");
+    await alice.waitForFunction(count => document.getElementById("pd-drop").textContent === (count >= 10 ? "Done" : (count + 1) + " / 10"), {}, n);
+  };
+  for (let n = 1; n <= 3; n++) await dropOnce(n);
+  const scoreBefore = await alice.$eval("#pd-score", e => e.textContent);
+  await alice.reload();
+  await alice.waitForFunction(() => document.getElementById("pd-drop").textContent === "4 / 10"); // An unfinished game carries on after a reload.
+  assert.equal(await alice.$eval("#pd-score", e => e.textContent), scoreBefore);
+  const coinsBefore = await prismCoins();
+  for (let n = 4; n <= 10; n++) await dropOnce(n);
+  const finalScore = Number(await alice.$eval("#pd-score", e => e.textContent));
+  assert.equal(await prismCoins(), coinsBefore + Math.floor(finalScore / 10), "A finished game pays its score in coins");
+  await alice.emulateMediaFeatures([]);
+  console.log("prism-drop: server drops, resume after reload, coins paid passed");
   for (const game of ["blackjack", "roulette", "horse-racing", "slots"]) {
     await alice.goto(base + "/media/games/" + game);
     await alice.waitForSelector("#casino-create:not([disabled])");
@@ -79,7 +99,7 @@ try {
     await alice.keyboard.press("ArrowDown");
     assert.equal(await alice.$eval("#casino-amount", e => e.textContent), "50");
     if (game === "slots") {
-      assert.equal(await alice.$eval("#casino-cost", e => e.textContent), "3 lines × 50 = 150 chips total");
+      assert.equal(await alice.$eval("#casino-cost", e => e.textContent), "3 lines × 50 = 150 coins total");
       assert.equal(await alice.$$eval("#casino-stage .casino-slot-line", rows => rows.length), 3);
       assert.equal(await alice.$$eval("#casino-stage .casino-slot-symbol", cells => cells.length), 9);
     }
@@ -92,7 +112,7 @@ try {
     }
     await alice.keyboard.press("Enter");
     await alice.waitForFunction(() => document.getElementById("casino-bet").textContent === "Update bet");
-    if (game === "slots") assert.equal(await alice.$eval("#casino-balance", e => e.textContent), "850 chips");
+    if (game === "slots") assert.match(await alice.$eval("#casino-balance", e => e.textContent), /^[\d,]+ coins$/); // An account purse carries over from the earlier tables.
     await bob.waitForFunction(() => document.querySelector(".casino-player").textContent.includes("Bet 50"));
     await bob.click("#casino-bet");
     await bob.waitForFunction(() => document.getElementById("casino-bet").textContent === "Update bet");
@@ -175,7 +195,7 @@ try {
   await frame.waitForSelector("#casino-create");
   await alice.evaluate(() => document.getElementById("mc-game-frame").contentWindow.postMessage({ type: "mnemerynne-game-key", key: "Enter" }, location.origin));
   await frame.waitForFunction(() => !document.getElementById("casino-table").hidden);
-  await alice.waitForFunction(() => window.casinoTestReport.includes("chips"));
+  await alice.waitForFunction(() => window.casinoTestReport.includes("coins"));
   await frame.focus("#casino-leave");
   await alice.evaluate(() => document.getElementById("mc-game-frame").contentWindow.postMessage({ type: "mnemerynne-game-key", key: "ArrowUp" }, location.origin));
   await frame.waitForFunction(() => document.getElementById("casino-amount").textContent === "60");
