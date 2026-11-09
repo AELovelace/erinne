@@ -45,7 +45,7 @@ from mnemerynne.web import (admin, admin_apis, admin_notices, admin_remote, agen
                             bfgguf as bfgguf_pages, chat,
                             claude_links as claude_link_pages, editor as editor_pages, files, games as game_pages,
                             help as help_pages,
-                            kiosk as kiosk_pages,
+                            kiosk as kiosk_pages, soundcloud as soundcloud_pages,
                             m365 as m365_pages, media as media_pages, memories, messages as message_pages, oauth as oauth_pages, remote as remote_pages,
                             rooms as room_pages, scratchpad as scratchpad_pages, security,
                             settings as settings_pages, sync as sync_pages, theme as theme_pages, tokens, wiki as wiki_pages)
@@ -328,6 +328,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(media_pages.admin_router)
     app.include_router(media_pages.share_router)
     app.include_router(kiosk_pages.router)
+    app.include_router(soundcloud_pages.router)   # Media → SoundCloud
     app.include_router(admin_notices.router)
     app.include_router(remote_pages.router)
     app.include_router(admin_remote.router)

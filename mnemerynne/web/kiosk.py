@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from mnemerynne.db import transaction
-from mnemerynne.media import kiosk, screens
+from mnemerynne.media import kiosk, screens, soundcloud
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import _session_user, admin_user, get_db, is_admin
 from mnemerynne.web.media import _media_on, screen_device
@@ -124,17 +124,26 @@ def screen_settings(session=Depends(kiosk_session), conn: sqlite3.Connection = D
 
 
 class ScreenSettings(BaseModel):
-    top_bar: bool
+    top_bar: bool | None = None                           # each one optional: a box's helper may be older than the server
+    soundcloud_profile: str | None = Field(None, max_length=300)
 
 
 @router.put("/api/media/kiosk/screen")
 def change_screen(body: ScreenSettings, session=Depends(kiosk_session), conn: sqlite3.Connection = Depends(get_db)):
-    """What the box's settings page may change on the server: the top bar, for now."""
+    """What the box's settings page may change on the server: the top bar and the SoundCloud profile."""
     row = _screen_row(conn, session["screen"])
     admin = {"id": session["admin"]["id"], "username": session["admin"]["name"]}
+    try:
+        profile = None if body.soundcloud_profile is None else soundcloud.clean_profile(body.soundcloud_profile)
+    except soundcloud.SoundCloudError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
     with transaction(conn):
-        kiosk.set_top_bar(conn, row["id"], body.top_bar)
-        _log(conn, admin, "kiosk.top_bar", row["name"], "on" if body.top_bar else "off")
+        if body.top_bar is not None:
+            kiosk.set_top_bar(conn, row["id"], body.top_bar)
+            _log(conn, admin, "kiosk.top_bar", row["name"], "on" if body.top_bar else "off")
+        if profile is not None:
+            kiosk.set_soundcloud(conn, row["id"], profile)
+            _log(conn, admin, "kiosk.soundcloud", row["name"], profile or "cleared")
     return {"screen": kiosk.settings_of(_screen_row(conn, row["id"]))}
 
 

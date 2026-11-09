@@ -60,6 +60,7 @@ DEFAULTS = {"folder": LIBRARY_NAME, "hwaccel": "auto", "max_transcodes": 2, "onl
             "radio_directory_url": DEFAULT_RADIO_DIRECTORY, "media_group": "", "screens_group": "",
             "signage_folder": "Signage", "signage_effects": {}}
 GROUP_SETTINGS = ("media_group", "screens_group")
+_SECRETS = ("tmdb_key_enc", "soundcloud_id_enc", "soundcloud_secret_enc")     # kept encrypted, never in DEFAULTS or the API
 
 
 class MediaError(ValueError):
@@ -105,7 +106,7 @@ def load_settings(conn: sqlite3.Connection) -> dict:
     if row:
         try:
             stored = json.loads(row["value"])
-            cfg.update({k: v for k, v in stored.items() if k in DEFAULTS or k == "tmdb_key_enc"})
+            cfg.update({k: v for k, v in stored.items() if k in DEFAULTS or k in _SECRETS})
         except (ValueError, AttributeError):
             log.warning("The media settings are unreadable; using the defaults.")
     return cfg
@@ -116,8 +117,21 @@ def tmdb_key(settings: Settings, cfg: dict) -> str:
     return (apis.decrypt_secret(settings, base64.b64decode(enc)) or "") if enc else ""
 
 
-def save_settings(conn: sqlite3.Connection, settings: Settings, changes: dict, key: str | None = None) -> dict:
-    """changes: any of DEFAULTS' keys (others ignored). key: None keeps the TMDB key, '' removes it."""
+def soundcloud_credentials(settings: Settings, cfg: dict) -> tuple[str, str] | None:
+    """SoundCloud's client id and secret (media/soundcloud.py), or None until both are saved."""
+    found = []
+    for name in ("soundcloud_id_enc", "soundcloud_secret_enc"):
+        value = apis.decrypt_secret(settings, base64.b64decode(cfg[name])) if cfg.get(name) else None
+        if not value:
+            return None
+        found.append(value)
+    return found[0], found[1]
+
+
+def save_settings(conn: sqlite3.Connection, settings: Settings, changes: dict, key: str | None = None,
+                  soundcloud_id: str | None = None, soundcloud_secret: str | None = None) -> dict:
+    """changes: any of DEFAULTS' keys (others ignored). key, soundcloud_id, soundcloud_secret: None keeps what is saved,
+    '' removes it."""
     cfg = load_settings(conn)
     for name, value in changes.items():
         if value is None or name not in DEFAULTS:
@@ -131,11 +145,13 @@ def save_settings(conn: sqlite3.Connection, settings: Settings, changes: dict, k
         if name in ("folder", "signage_folder"):
             value = check_folder(value)
         cfg[name] = value
-    if key is not None:
-        if key.strip():
-            cfg["tmdb_key_enc"] = base64.b64encode(apis.encrypt_secret(settings, key.strip())).decode()
+    for name, secret in (("tmdb_key_enc", key), ("soundcloud_id_enc", soundcloud_id), ("soundcloud_secret_enc", soundcloud_secret)):
+        if secret is None:
+            continue
+        if secret.strip():
+            cfg[name] = base64.b64encode(apis.encrypt_secret(settings, secret.strip())).decode()
         else:
-            cfg.pop("tmdb_key_enc", None)
+            cfg.pop(name, None)
     conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (SETTINGS_KEY, json.dumps(cfg)))
     return cfg
 

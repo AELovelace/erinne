@@ -139,8 +139,13 @@ class Unlocks:
 
 # ------------------------------------------------------------- screen settings
 def settings_of(row: sqlite3.Row) -> dict:
-    return {"id": row["id"], "name": row["name"], "top_bar": bool(row["top_bar"])}
+    return {"id": row["id"], "name": row["name"], "top_bar": bool(row["top_bar"]), "soundcloud_profile": row["soundcloud_profile"]}
 
 
 def set_top_bar(conn: sqlite3.Connection, screen_id: int, on: bool) -> None:
     conn.execute("UPDATE media_screens SET top_bar = ? WHERE id = ?", (1 if on else 0, screen_id))
+
+
+def set_soundcloud(conn: sqlite3.Connection, screen_id: int, name: str) -> None:
+    """The profile this screen shows; name is already soundcloud.clean_profile()'d."""
+    conn.execute("UPDATE media_screens SET soundcloud_profile = ? WHERE id = ?", (name, screen_id))

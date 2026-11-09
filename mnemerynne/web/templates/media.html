@@ -17,6 +17,7 @@
     <button type="button" class="mc-menu-item" data-view="movies"><span class="mc-icon">🎬</span>Movies</button>
     <button type="button" class="mc-menu-item" data-view="tv"><span class="mc-icon">📺</span>TV Shows</button>
     <button type="button" class="mc-menu-item" data-view="music"><span class="mc-icon">♫</span>Music</button>
+    <button type="button" class="mc-menu-item" data-view="soundcloud"><span class="mc-icon">☁</span>SoundCloud</button>
     <button type="button" class="mc-menu-item" data-view="pictures"><span class="mc-icon">🖼</span>Pictures</button>
     <button type="button" class="mc-menu-item" data-view="live"><span class="mc-icon">📡</span>Live TV</button>
     <button type="button" class="mc-menu-item" data-view="radio"><span class="mc-icon">📻</span>Radio</button>
@@ -123,6 +124,8 @@
   <div class="mc-np-text">
     <div class="mc-np-title" id="mc-np-title"></div>
     <div class="mc-np-sub" id="mc-np-sub"></div>
+    {#- SoundCloud's terms: the uploader and SoundCloud credited, with a link back (media.js nowPlaying.credit). -#}
+    <div class="mc-np-credit" id="mc-np-credit" hidden></div>
     <div class="mc-np-seek" id="mc-np-seekrow">
       <span class="mc-time" id="mc-np-pos">0:00</span>
       <input type="range" id="mc-np-seek" min="0" max="0" step="1" value="0" aria-label="Position">

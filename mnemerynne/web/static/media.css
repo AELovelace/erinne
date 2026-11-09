@@ -238,6 +238,21 @@ html .mc-viewer-nav { position: absolute; top: 50%; transform: translateY(-50%);
 .mc-np-art { width: 3.6rem; height: 3.6rem; border-radius: calc(var(--radius) * .4); object-fit: cover;
              background: var(--petal-soft); display: grid; place-items: center; font-size: 1.6rem; }
 .mc-np-text { min-width: 0; }
+/* The player bar sits outside .mc, so this needs its own [hidden]. */
+.mc-np-credit { color: var(--muted); font-size: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-np-credit[hidden] { display: none; }
+.mc-np-credit a, .mc-sc-credit a { color: inherit; text-decoration: underline; }
+/* SoundCloud (media.js viewSoundCloud): who it's from, a way out to the track, and where a profile is typed. */
+.mc-sc-credit { color: var(--muted); margin: 0 0 .8rem; }
+.mc-sc-row { display: flex; align-items: center; gap: .3rem; }
+.mc-sc-row .mc-track { flex: 1 1 auto; min-width: 0; }
+.mc-sc-out { color: var(--muted); text-decoration: none; padding: .4rem .6rem; }
+.mc-sc-out:hover { color: var(--rose); }
+.mc-sc-more { margin: 1rem 0; }
+.mc-sc-form { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; max-width: 34rem; margin: 1rem 0; }
+.mc-sc-form input { flex: 1 1 14rem; min-width: 0; }
+.mc-sc-field { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; color: var(--muted); font-size: .9rem; }
+.mc-sc-field input { flex: 1 1 12rem; min-width: 0; max-width: 22rem; }
 .mc-np-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mc-np-sub { color: var(--muted); font-size: .85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mc-np-seek { display: flex; align-items: center; gap: .5rem; margin-top: .2rem; }

@@ -30,6 +30,29 @@ Not automated: the page was checked once in headless Chrome with a throwaway pre
 
 On the NAS, download a multi-gigabyte share folder through the public hostname. Check that it starts at once and finishes, and that 7-Zip and Windows' **Extract all** both open it.
 
+## SoundCloud in Media
+
+Run `.venv/Scripts/python.exe -m pytest tests/test_soundcloud.py -q -p no:cacheprovider`. It uses a stand-in for SoundCloud's API and covers:
+- profile names, including lookalike hosts and short links;
+- one token reused, shared under load, replaced once after a 401, and not retried with a bad key;
+- the token never leaving `api.soundcloud.com`, even from a hostile `next_href` or redirect, and never reaching a browser;
+- no stream lookups while listing, the daily stop, and a 429 stopping every call;
+- blocked tracks left out, previews flagged, albums told apart from playlists;
+- the key absent from the API answers and the log;
+- whose profile shows on a screen, a paired computer and a phone;
+- casting rebuilt on the server, and bad list keys refused;
+- a screen's saved status not keeping track names;
+- Kiosk settings changing one field at a time, so older box helpers keep working.
+
+`tests/test_screen_wifi.py` covers the box helper's field.
+
+Not automated: checked once in headless Chrome with a throwaway preview, Puppeteer and a real key:
+- the tabs, list layout, Load more and album pages;
+- real audio playing, seek, next track and the credit links;
+- the 390 px phone layout, the Screens row, and the TV page with arrow keys.
+
+On the NAS, add the key, then check a real TV box with its remote, **Play on** from a phone, an iPhone (Safari plays the stream without hls.js) and the Kiosk settings field after a box update.
+
 ## Game checks
 
 Run the server and Media regression tests from the repository root:

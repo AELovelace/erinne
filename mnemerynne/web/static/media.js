@@ -216,6 +216,15 @@
     nowPlaying.playQueue(shuffle ? shuffled(a.tracks) : a.tracks, shuffle ? 0 : index, a.art);
   }
 
+  /* A SoundCloud list ({key, tracks}) from one track, here or on the chosen screen (which is sent the list by its key). */
+  function playSoundCloud(list, index, shuffle) {
+    if (cast.active()) {
+      cast.send({ action: "play_soundcloud", key: list.key, track: shuffle ? null : list.tracks[index].id, shuffle: !!shuffle });
+      return;
+    }
+    nowPlaying.playQueue(shuffle ? shuffled(list.tracks) : list.tracks, shuffle ? 0 : index, null);
+  }
+
   // ------------------------------------------------------------- routing
   function go(hash) {
     if (location.hash === "#" + hash) render(); else location.hash = hash;
@@ -240,7 +249,7 @@
 
   const SECTION_OF = { screens: "screens", cast: "screens", pair: "screens", home: "home", movies: "movies", movie: "movies", music: "music", album: "music",
                        artist: "music", pictures: "pictures", live: "live", radio: "radio", tv: "tv", tvshow: "tv",
-                       games: "games" };
+                       games: "games", soundcloud: "soundcloud", scset: "soundcloud" };
 
   async function render() {
     const r = route();
@@ -254,6 +263,7 @@
     showError("");
     backdrop(null);
     const views = { home: viewHome, movies: viewMovies, movie: viewMovie, tv: viewTv, tvshow: viewTvShow, music: viewMusic, album: viewAlbum,
+                    soundcloud: viewSoundCloud, scset: viewScSet,
                     artist: viewArtist, pictures: viewPictures, live: viewLive, radio: viewRadio, games: viewGames,
                     screens: viewScreens, cast: viewScreens, pair: function (code) { return viewScreens("", code); } };
     try {
@@ -578,6 +588,199 @@
     text.appendChild(list);
     box.append(art, text);
     nowPlaying.markTracks(list);
+    return [box];
+  }
+
+  // ---------------------------------------------------------- SoundCloud
+  // The lists come from web/soundcloud.py, already checked; a track plays through nowPlaying like any other, its
+  // address asked for only as it starts. SoundCloud's terms want the uploader and SoundCloud credited with links back.
+  const SC_TABS = [["tracks", "Tracks"], ["albums", "Albums"], ["playlists", "Playlists"], ["likes", "Likes"],
+                   ["liked_sets", "Liked sets"], ["reposts", "Reposts"]];
+  const scScreen = screenId !== null ? "screen=1" : "";          // the TV page shows the screen's profile, not a person's
+
+  /* A link out; on a TV, where nothing can follow one, its text alone. */
+  function scLink(text, href, cls) {
+    if (!href || screenId !== null) return el("span", cls || null, text);
+    const a = el("a", cls || null, text);
+    a.href = href;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    return a;
+  }
+
+  /* "<name> on SoundCloud", linked; a TV spells the address out, since it can't be clicked. */
+  function scCredit(name, link) {
+    const box = el("p", "mc-sc-credit");
+    box.append(scLink(name, link), document.createTextNode(" on "), scLink("SoundCloud", link));
+    if (screenId !== null && link) box.append(document.createTextNode(" · " + link.replace(/^https:\/\//, "")));
+    return box;
+  }
+
+  function scForm(current) {
+    const form = el("form", "mc-sc-form");
+    const input = el("input");
+    input.type = "text";
+    input.value = current || "";
+    input.placeholder = "soundcloud.com/name";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.maxLength = 300;
+    input.setAttribute("aria-label", "SoundCloud profile");
+    const save = el("button", null, "Show this profile");
+    save.type = "submit";
+    form.append(input, save);
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      try {
+        await api("PUT", "/api/media/soundcloud/profile", { profile: input.value });
+        go("soundcloud");
+      } catch (err) { showError(err.message); }
+    });
+    return form;
+  }
+
+  /* Rows for list.tracks from `from` on. The ↗ is a link beside the row, so a remote's focus stays on the rows. */
+  function scRows(box, list, from) {
+    list.tracks.slice(from).forEach(function (t, k) {
+      const i = from + k;
+      const li = el("li", "mc-sc-row");
+      const row = el("button", "mc-track");
+      row.type = "button";
+      row.dataset.nav = "";
+      row.dataset.id = t.id;
+      const name = el("span", null, t.title);
+      if (t.artist) name.appendChild(el("span", "mc-sub", " — " + t.artist));
+      if (t.preview) name.appendChild(el("span", "mc-sub", " · Preview only"));
+      row.append(el("span", "n", String(i + 1)), name, el("span", "t", clock(t.duration)));
+      row.addEventListener("click", function () { playSoundCloud(list, i, false); });
+      li.appendChild(row);
+      if (t.link && screenId === null) {
+        const out = scLink("↗", t.link, "mc-sc-out");
+        out.title = "Open on SoundCloud";
+        li.appendChild(out);
+      }
+      box.appendChild(li);
+    });
+    nowPlaying.markTracks(box);
+  }
+
+  function scPlayButtons(list) {
+    const actions = el("div", "mc-actions");
+    const all = button("▶ Play", "", function () { playSoundCloud(list, 0, false); });
+    const mix = button("⤮ Shuffle", "secondary", function () { playSoundCloud(list, 0, true); });
+    all.dataset.nav = ""; mix.dataset.nav = "";
+    actions.append(all, mix);
+    return actions;
+  }
+
+  /* Load more: asks for the next page and hands it to add(page), then steps focus onto what arrived. */
+  function scMore(tab, nextOffset, add) {
+    let next = nextOffset;
+    const more = button("Load more", "secondary mc-sc-more", async function () {
+      more.disabled = true;
+      showError("");
+      try {
+        const page = await api("GET", "/api/media/soundcloud/list/" + tab + "?offset=" + next + (scScreen ? "&" + scScreen : ""));
+        const first = add(page);
+        next = page.next_offset;
+        if (next === null) more.remove(); else more.disabled = false;
+        if (first) first.focus();
+      } catch (err) { showError(err.message); more.disabled = false; }
+    });
+    more.dataset.nav = "";
+    return more;
+  }
+
+  function scSetCard(s) {
+    return card({ title: s.title, sub: [s.artist, s.count ? s.count + (s.count === 1 ? " track" : " tracks") : ""].filter(Boolean).join(" · "),
+                  art: s.art, shape: "square", glyph: "☁", onClick: function () { go("scset/" + encodeURIComponent(s.id)); } });
+  }
+
+  async function viewSoundCloud(arg) {
+    const tab = SC_TABS.some(function (t) { return t[0] === arg; }) ? arg : "tracks";
+    const me = await api("GET", "/api/media/soundcloud/profile" + (scScreen ? "?" + scScreen : ""));
+    if (!me.configured) {
+      setHead("SoundCloud", []);
+      return [empty("An admin adds SoundCloud's key in Settings → Entertainment → Media.", "SoundCloud isn't set up yet.")];
+    }
+    if (!me.user || arg === "change") {
+      setHead("SoundCloud", me.user ? [button("‹ Back", "", function () { go("soundcloud"); })] : []);
+      const out = [];
+      if (me.error) out.push(empty(me.error));
+      if (me.editable) {
+        if (!me.error) out.push(empty("Type the name after soundcloud.com/, or paste the address of the profile.", "Whose SoundCloud should this show?"));
+        out.push(scForm(me.profile));
+      } else {
+        out.push(empty("Set one for this TV in Kiosk settings, or in Media → Screens on a phone.", "No SoundCloud profile here yet."));
+      }
+      return out;
+    }
+    const tabs = SC_TABS.map(function (t) {
+      return button(t[1], t[0] === tab ? "" : "secondary", function () { go("soundcloud/" + t[0]); });
+    });
+    if (me.editable) tabs.push(button("Change profile", "link small", function () { go("soundcloud/change"); }));
+    setHead("SoundCloud", [], tabs);
+    const page = await api("GET", "/api/media/soundcloud/list/" + tab + (scScreen ? "?" + scScreen : ""));
+    const out = [scCredit(me.user.name, me.user.link)];
+    if (!page.items.length) {
+      out.push(empty("Nothing here for this profile."));
+      return out;
+    }
+    if (page.kind === "sets") {
+      const grid = shelf(null, page.items.map(scSetCard), "square", "grid");
+      out.push(grid);
+      if (page.next_offset !== null) {
+        out.push(scMore(tab, page.next_offset, function (next) {
+          const cards = next.items.map(scSetCard);
+          cards.forEach(function (c) { grid.lastChild.appendChild(c); });
+          return cards[0];
+        }));
+      }
+      return out;
+    }
+    const list = { key: page.key, tracks: page.items };
+    const rows = el("ol", "mc-tracks");
+    scRows(rows, list, 0);
+    out.push(scPlayButtons(list), rows);
+    if (page.blocked) out.push(el("p", "mc-sub", page.blocked + (page.blocked === 1 ? " track" : " tracks") + " in this list can't be played here."));
+    if (page.next_offset !== null) {
+      out.push(scMore(tab, page.next_offset, function (next) {
+        const from = list.tracks.length;
+        list.tracks = list.tracks.concat(next.items);
+        scRows(rows, list, from);
+        const added = rows.children[from];
+        return added ? added.querySelector("button") : null;
+      }));
+    }
+    return out;
+  }
+
+  async function viewScSet(arg) {
+    const s = await api("GET", "/api/media/soundcloud/set/" + encodeURIComponent(decodeURIComponent(arg)));
+    setHead("SoundCloud", [button("‹ Back", "", function () { history.length > 1 ? history.back() : go("soundcloud"); })]);
+    backdrop(s.art);
+    const box = el("div", "mc-detail");
+    const art = el("div", "mc-art square");
+    if (s.art) { const img = el("img"); img.src = s.art; img.alt = ""; art.appendChild(img); }
+    else { const f = el("div", "mc-fallback"); f.append(el("span", "mc-glyph", "☁")); art.appendChild(f); }
+    const text = el("div");
+    text.appendChild(el("h2", null, s.title));
+    const total = s.tracks.reduce(function (sum, t) { return sum + (t.duration || 0); }, 0);
+    const facts = el("div", "mc-facts");
+    [s.album ? "Album" : "Playlist", s.tracks.length + (s.tracks.length === 1 ? " track" : " tracks"), runtime(total)]
+      .filter(Boolean).forEach(function (f) { facts.appendChild(el("span", null, String(f))); });
+    text.append(facts, scCredit(s.artist || s.title, s.artist_link || s.link));
+    if (s.link) text.appendChild(scCredit(s.title, s.link));
+    if (s.tracks.length) {
+      const list = { key: s.key, tracks: s.tracks };
+      const rows = el("ol", "mc-tracks");
+      scRows(rows, list, 0);
+      text.append(scPlayButtons(list), rows);
+    } else {
+      text.appendChild(empty("None of this can be played here."));
+    }
+    box.append(art, text);
     return [box];
   }
 
@@ -1354,7 +1557,7 @@
     }).observe(dock);
   }
   const nowPlaying = {
-    queue: [], i: -1, art: null, hls: null, session: null, offset: 0, station: null,
+    queue: [], i: -1, art: null, hls: null, session: null, offset: 0, station: null, skips: 0, retried: null,
 
     show: function (title, sub, art, seekable) {
       $("mc-np").hidden = false;
@@ -1382,27 +1585,63 @@
       if (!t) { this.stop(); return; }
       this.detach();
       this.show(t.title, [t.artist, t.album].filter(Boolean).join(" — "), t.art || this.art, true);
+      this.credit(t);
       this.markTracks(document);
+      const self = this;
+      const soundcloud = t.source === "soundcloud";     // its address comes from SoundCloud, one track at a time
       let r;
       try {
-        r = await api("POST", "/api/media/play/" + t.id, { start: start || 0, slot: "audio", caps: caps() });
-      } catch (err) { $("mc-np-sub").textContent = err.message; return; }
+        r = await (soundcloud ? api("POST", "/api/media/soundcloud/stream", { id: t.id })
+                              : api("POST", "/api/media/play/" + t.id, { start: start || 0, slot: "audio", caps: caps() }));
+      } catch (err) {
+        if (this.queue[this.i] !== t) return;
+        // A track SoundCloud won't play is stepped over, but only a few in a row; at its limit the queue stops at once.
+        if (soundcloud && err.status === 403 && this.skips < 3 && this.i < this.queue.length - 1) {
+          this.skips++; this.i++; this.load(0); return;
+        }
+        $("mc-np-sub").textContent = err.message;
+        return;
+      }
       if (this.queue[this.i] !== t) return;
+      this.skips = 0;
       this.duration = r.duration || t.duration || 0;
+      if (r.preview || t.preview) $("mc-np-sub").textContent = [t.artist, "Preview only"].filter(Boolean).join(" · ");
       if (r.mode === "direct") {
         this.session = null; this.offset = 0;
         audio.src = r.url;
-        if (start) audio.addEventListener("loadedmetadata", function once() { audio.currentTime = start; audio.removeEventListener("loadedmetadata", once); });
       } else {
         this.session = r.session; this.offset = r.start;
-        this.hls = attachHls(audio, r.url, function (d) { $("mc-np-sub").textContent = "Playback stopped: " + d; });
+        this.hls = attachHls(audio, r.url, function (d) {
+          // A signed link can run out during a long pause: ask for a new one once, from where it stopped.
+          if (soundcloud && self.retried !== t.id && self.queue[self.i] === t) { self.retried = t.id; self.load(self.position()); return; }
+          $("mc-np-sub").textContent = "Playback stopped: " + d;
+        });
+      }
+      if (!this.session) {                               // a session seeks on the server; these are seeked here
+        audio.addEventListener("loadedmetadata", function once() {
+          audio.removeEventListener("loadedmetadata", once);
+          if (start) audio.currentTime = start;
+          if (r.preview) self.duration = audio.duration || self.duration;     // a preview is shorter than the track
+        });
       }
       audio.play().catch(function () {});
+    },
+
+    /* Who a SoundCloud track is by, and where it lives there. Hidden for anything else. */
+    credit: function (t) {
+      const box = $("mc-np-credit");
+      const soundcloud = !!t && t.source === "soundcloud";
+      box.hidden = !soundcloud;
+      box.replaceChildren();
+      if (!soundcloud) return;
+      box.append(scLink(t.artist || "SoundCloud", t.artist_link), document.createTextNode(" on "), scLink("SoundCloud", t.link));
+      if (screenId !== null && t.link) box.append(document.createTextNode(" · " + t.link.replace(/^https:\/\//, "")));
     },
 
     playStation: function (s) {
       this.detach();
       this.queue = []; this.i = -1; this.station = s;
+      this.credit(null);
       this.show(s.name, "Radio · connecting…", null, false);
       audio.src = s.play;
       audio.play().catch(function (err) { $("mc-np-sub").textContent = "Radio · " + (err.message || "can't play"); });
@@ -1439,6 +1678,7 @@
     stop: function () {
       this.detach();
       this.queue = []; this.i = -1; this.station = null;
+      this.credit(null);
       $("mc-np").hidden = true;
       main.classList.remove("mc-has-np");
       this.markTracks(document);
@@ -1448,7 +1688,7 @@
     markTracks: function (scope) {
       const t = this.queue[this.i];
       scope.querySelectorAll(".mc-track").forEach(function (b) {
-        b.classList.toggle("playing", !!t && Number(b.dataset.id) === t.id);
+        b.classList.toggle("playing", !!t && b.dataset.id === String(t.id));   // SoundCloud's ids aren't numbers
       });
     },
   };
@@ -1720,7 +1960,7 @@
     const typing = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
     const dirs = { ArrowRight: "right", ArrowLeft: "left", ArrowDown: "down", ArrowUp: "up" };
     if (dirs[e.key] && !typing) { e.preventDefault(); move(dirs[e.key], !e.isTrusted); return; }   // untrusted: a remote
-    if ((e.key === "Escape" || (e.key === "Backspace" && !typing)) && ["movie", "tvshow", "album", "artist"].indexOf(route().view) >= 0) {
+    if ((e.key === "Escape" || (e.key === "Backspace" && !typing)) && ["movie", "tvshow", "album", "artist", "scset"].indexOf(route().view) >= 0) {
       e.preventDefault(); history.back(); return;
     }
     if (e.key === "MediaPlayPause" || (e.key === " " && !typing && document.activeElement === document.body)) {
@@ -1931,6 +2171,24 @@
       });
       if (!s.owner) actions.appendChild(drop);      // only its owner removes a screen
       row.append(name, what, actions);
+      if (!s.speaker && cast.allowed) {               // saved even while the screen is off
+        const field = el("label", "mc-sc-field", "SoundCloud profile");
+        const input = el("input");
+        input.type = "text";
+        input.value = s.soundcloud || "";
+        input.placeholder = "soundcloud.com/name";
+        input.maxLength = 300;
+        input.addEventListener("change", async function () {
+          showError("");
+          try {
+            const saved = await api("PUT", "/api/media/screens/" + s.id + "/soundcloud", { profile: input.value });
+            input.value = saved.profile;
+            s.soundcloud = saved.profile;
+          } catch (err) { showError(err.message); input.value = s.soundcloud || ""; }
+        });
+        field.appendChild(input);
+        row.appendChild(field);
+      }
       list.appendChild(row);
       if (calibrating === s.id && s.online) {
         const pad = el("div", "mc-cal-remote");
@@ -2205,6 +2463,8 @@
         let tracks = cmd.album.tracks, index = cmd.index;
         if (cmd.shuffle) { tracks = shuffled(tracks); index = 0; }
         nowPlaying.playQueue(tracks, index, cmd.album.art);
+      } else if (a === "play_soundcloud") {
+        nowPlaying.playQueue(cmd.shuffle ? shuffled(cmd.tracks) : cmd.tracks, cmd.index, null);
       } else if (a === "play_youtube") {
         player.openYouTube(cmd.source);
       } else if (a === "play_source") {
@@ -2266,10 +2526,13 @@
                  paused: video.paused, volume: video.volume, has_queue: episodes.list.length > 1 };
       }
       if (!$("mc-np").hidden) {
+        const playing = nowPlaying.queue[nowPlaying.i];
+        const external = !!playing && playing.source === "soundcloud";   // the server doesn't keep these titles
         return { kind: nowPlaying.station ? "radio" : "audio", title: $("mc-np-title").textContent,
-                 sub: $("mc-np-sub").textContent, position: nowPlaying.station ? null : nowPlaying.position(),
+                 sub: [$("mc-np-sub").textContent, external ? "SoundCloud" : ""].filter(Boolean).join(" · "),
+                 position: nowPlaying.station ? null : nowPlaying.position(),
                  duration: nowPlaying.duration || null, paused: audio.paused, volume: audio.volume,
-                 has_queue: nowPlaying.queue.length > 1 };
+                 has_queue: nowPlaying.queue.length > 1, external: external };
       }
       if (!$("mc-viewer").hidden) return { kind: "pictures", title: $("mc-viewer-title").textContent };
       return { kind: "idle" };

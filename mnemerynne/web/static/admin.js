@@ -1741,6 +1741,15 @@
     agentField(grid, "Transcodes at once", slots).title = "0 turns transcoding off; copying into HLS (remux) doesn't count";
     agentField(grid, "Look up artwork online", online).title = "TMDB for films, MusicBrainz and the Cover Art Archive for albums";
     agentField(grid, "TMDB key", tmdb).title = "themoviedb.org → Settings → API; only film titles and years are sent";
+    // SoundCloud's client id and secret: stored encrypted, and only ever shown as saved or not.
+    const scId = agentInput("password", "");
+    scId.placeholder = data.soundcloud_set ? "Saved — type to replace" : "Client ID";
+    scId.autocomplete = "off";
+    const scSecret = agentInput("password", "");
+    scSecret.placeholder = data.soundcloud_set ? "Saved — type to replace" : "Client secret";
+    scSecret.autocomplete = "off";
+    agentField(grid, "SoundCloud client ID", scId).title = "soundcloud.com/you/apps; turns on the SoundCloud page in Media";
+    agentField(grid, "SoundCloud client secret", scSecret).title = "Stays on this server; browsers never get it";
     form.appendChild(grid);
     const actions = el("div", "ax-new");
     const saveOpts = el("button", "small", "Save");
@@ -1752,12 +1761,20 @@
       drop.addEventListener("click", function () { save({ tmdb_key: "" }); });
       actions.appendChild(drop);
     }
+    if (data.soundcloud_set) {
+      const dropSc = el("button", "link small", "Remove SoundCloud key");
+      dropSc.type = "button";
+      dropSc.addEventListener("click", function () { save({ soundcloud_id: "", soundcloud_secret: "" }); });
+      actions.appendChild(dropSc);
+    }
     actions.appendChild(el("span", "small muted", "Online lookups send only film titles and years, and album and artist names."));
     form.appendChild(actions);
     form.addEventListener("submit", function (e) {
       e.preventDefault();
       const body = { hwaccel: hw.value, max_transcodes: Number(slots.value), online_metadata: online.checked };
       if (tmdb.value.trim()) body.tmdb_key = tmdb.value.trim();   // empty box: keep the saved key
+      if (scId.value.trim()) body.soundcloud_id = scId.value.trim();
+      if (scSecret.value.trim()) body.soundcloud_secret = scSecret.value.trim();
       save(body);
     });
     playback.appendChild(form);

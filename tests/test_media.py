@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from fakes import FakeDirectory, FakeEmbedder, FakeShareChecker
 from mnemerynne import accounts, db, media, share, users
 from mnemerynne.config import Settings
-from mnemerynne.media import catalog, live, probe, scrape, transcode
+from mnemerynne.media import catalog, live, probe, scrape, soundcloud, transcode
 from mnemerynne.web.app import Services, create_app
 
 HAVE_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
@@ -71,10 +71,13 @@ def client(settings, conn, directory, checker):
 @pytest.fixture(autouse=True)
 def _no_network():
     live._cache.clear()
+    soundcloud.reset()
     yield
     live.TRANSPORT = None
     scrape.TRANSPORT = None
+    soundcloud.TRANSPORT = None
     live._cache.clear()
+    soundcloud.reset()
 
 
 def _login(client, conn, directory, name="boss", account="boss"):

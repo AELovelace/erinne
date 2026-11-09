@@ -735,6 +735,18 @@ class Kiosk:
             raise KioskError(body.get("detail") or "The server didn't take the change.", 409)
         return body["screen"]
 
+    def set_soundcloud(self, token: str | None, profile: str) -> dict:
+        """The SoundCloud profile this screen shows in Media; the server checks it."""
+        found = self.need(token)
+        if not found["server"]:
+            raise KioskError("The SoundCloud profile is kept on the server: open Kiosk settings from the TV's menu and "
+                             "approve from an admin's phone to change it.", 403)
+        status, body = self.http("PUT", self.setup.server + "/api/media/kiosk/screen", {"soundcloud_profile": profile[:300]},
+                                 {"X-Kiosk-Session": found["server"]})
+        if status != 200:
+            raise KioskError(body.get("detail") or "The server didn't take the change.", 409)
+        return body["screen"]
+
     # -- releases and updates
     def _git(self, *args: str, timeout: int = 30) -> tuple[int, str]:
         code, out, _ = self.run(["git", "-C", self.source(), *args], timeout)
@@ -1041,6 +1053,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._json(200, {"scale": k.set_display_scale(token, body.get("scale"))})
             elif path == "/api/kiosk/top-bar":
                 self._json(200, {"screen": k.set_top_bar(token, bool(body.get("on")))})
+            elif path == "/api/kiosk/soundcloud":
+                self._json(200, {"screen": k.set_soundcloud(token, str(body.get("profile", "")))})
             elif path == "/api/kiosk/update":
                 k.update(token, str(body.get("tag", "")))
                 self._json(202, {"job": "update"})
@@ -1327,6 +1341,12 @@ label.switch input { width: 1.5rem; height: 1.5rem; accent-color: #ff2e97; }
         <h2>Screen</h2>
         <label class="switch"><input type="checkbox" id="top-bar"> Show the top bar (Ask, Files, the Wiki…)</label>
         <p class="muted" id="top-bar-note">Whoever signs in on the TV is signed out when they go back to the TV, or after ten minutes untouched.</p>
+        <form id="sc-form" hidden>
+          <label for="sc-profile">SoundCloud profile</label>
+          <input id="sc-profile" autocomplete="off" spellcheck="false" maxlength="300" placeholder="soundcloud.com/name">
+          <button type="submit">Save</button>
+          <p class="muted">Whose tracks, albums and likes the SoundCloud page in Media shows on this TV.</p>
+        </form>
         <div class="row"><label for="audio">Sound output</label>
           <select id="audio" aria-label="Sound output"></select></div>
         <div class="row"><label for="volume">System volume</label>
@@ -1421,6 +1441,10 @@ async function load() {
   $("top-bar").disabled = !scr;
   $("top-bar").checked = !!(scr && scr.top_bar);
   if (!scr) $("top-bar-note").textContent = "Approve from an admin's phone (Kiosk settings in the TV's menu) to change this.";
+  // Only when the server knows about it: a box's helper can be newer than the server it talks to.
+  const hasSoundCloud = !!scr && "soundcloud_profile" in scr;
+  $("sc-form").hidden = !hasSoundCloud;
+  if (hasSoundCloud && document.activeElement !== $("sc-profile")) $("sc-profile").value = scr.soundcloud_profile;
   $("volume").value = state.volume; $("volume-value").textContent = state.volume + "%";
   $("pin-state").textContent = state.pin_set ? "Set. The \\u201ccan't connect\\u201d page asks for it before the address can change."
     : "Not set. Without one, anyone at the TV can change the address while the screen can't connect.";
@@ -1511,6 +1535,13 @@ $("address-form").addEventListener("submit", async function (e) {
   say("Checking " + $("address").value + "…");
   try { const r = await call("POST", "/api/kiosk/address", { url: $("address").value });
         say("Changing to " + r.address + ". The screen restarts in a moment."); }
+  catch (err) { say(err.message, true); }
+});
+$("sc-form").addEventListener("submit", async function (e) {
+  e.preventDefault();
+  try { const r = await call("POST", "/api/kiosk/soundcloud", { profile: $("sc-profile").value });
+        $("sc-profile").value = r.screen.soundcloud_profile;
+        say(r.screen.soundcloud_profile ? "SoundCloud shows " + r.screen.soundcloud_profile + " on this TV." : "SoundCloud shows the screen owner's profile."); }
   catch (err) { say(err.message, true); }
 });
 $("top-bar").addEventListener("change", async function () {

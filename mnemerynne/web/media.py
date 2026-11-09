@@ -29,7 +29,7 @@ from mnemerynne import group_refs, media, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
-from mnemerynne.media import artwork, browse, catalog, live, probe, remotes, screens, signage, speakers, transcode
+from mnemerynne.media import artwork, browse, catalog, live, probe, remotes, screens, signage, soundcloud, speakers, transcode
 from mnemerynne.web import security
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import _session_user, admin_user, api_user, get_db, get_settings, is_admin, page_user
@@ -583,7 +583,7 @@ def list_screens(request: Request, user=Depends(api_user), conn: sqlite3.Connect
         return {"id": s["id"], "name": s["name"], "online": h.online(s["id"]), "state": h.state(s["id"]),
                 "last_seen": s["last_seen_at"], "this": mine is not None and mine["id"] == s["id"],
                 "safe": {"x": s["safe_x"], "y": s["safe_y"]}, "scale": s["ui_scale"], "owner": owner,
-                "speaker": bool(s["speaker"])}
+                "speaker": bool(s["speaker"]), "soundcloud": s["soundcloud_profile"]}
     # Out of the group: only their screens, to remove them (and casting refused). Admins: everyone's too.
     out = [row(s, None) for s in screens.of_user(conn, user["id"])]
     if admin:
@@ -606,11 +606,12 @@ async def remove_screen(screen_id: int, request: Request, user=Depends(api_user)
 
 
 class Command(BaseModel):
-    action: Literal["play_item", "play_album", "play_youtube", "play_source", "play_station", "toggle", "seek",
+    action: Literal["play_item", "play_album", "play_youtube", "play_source", "play_station", "play_soundcloud", "toggle", "seek",
                     "skip", "volume", "mute", "night", "next", "prev", "stop", "press", "calibrate",
                     "text_size", "audio_track", "subtitles"]   # the last two: the film's next sound / subtitle
     file_id: int | None = None
-    key: str | None = Field(None, max_length=2000)       # album key or station key
+    key: str | None = Field(None, max_length=2000)       # album key, station key or SoundCloud list key
+    track: str | None = Field(None, max_length=100)      # play_soundcloud: the track to start from
     index: int = Field(0, ge=0)
     shuffle: bool = False
     url: str | None = Field(None, max_length=1000)       # play_youtube
@@ -629,7 +630,7 @@ _CALIBRATE_STEPS = ("open", "wider", "narrower", "taller", "shorter", "reset", "
 _TEXT_SIZE_STEPS = ("open", "bigger", "smaller", "auto", "save", "cancel")
 
 
-def _command(conn: sqlite3.Connection, user, body: Command) -> dict:
+def _command(conn: sqlite3.Connection, user, body: Command, settings: Settings) -> dict:
     """What the screen is sent: plays carry what to play, checked against what the person may read."""
     view = _view(conn, user)
     if body.action == "play_item":
@@ -662,6 +663,12 @@ def _command(conn: sqlite3.Connection, user, body: Command) -> dict:
         if found is None:
             raise _not_found()
         return {"action": "play_station", "station": found}
+    if body.action == "play_soundcloud":                  # the queue is rebuilt here: the phone only names a list
+        try:
+            tracks = soundcloud.queue(soundcloud.need_credentials(conn, settings), body.key or "", body.track)
+        except soundcloud.SoundCloudError as exc:
+            raise HTTPException(exc.status, str(exc)) from None
+        return {"action": "play_soundcloud", "tracks": tracks, "index": 0, "shuffle": body.shuffle}
     if body.action in ("calibrate", "text_size"):
         steps = _CALIBRATE_STEPS if body.action == "calibrate" else _TEXT_SIZE_STEPS
         if body.step is not None and body.step not in steps:
@@ -710,7 +717,7 @@ def _for_speaker(request: Request, conn: sqlite3.Connection, user, screen: sqlit
     if action == "play_station":
         station = command["station"]
         return {"action": "play_station", "station": {"name": station["name"], "url": station["url"]}}
-    if action in ("play_source", "play_youtube", "calibrate", "text_size"):
+    if action in ("play_source", "play_youtube", "play_soundcloud", "calibrate", "text_size"):
         raise HTTPException(speakers.SpeakerError.status, f"{screen['name']} is a speaker: it plays music and radio only.")
     return command
 
@@ -723,7 +730,7 @@ async def cast(screen_id: int, body: Command, request: Request, user=Depends(scr
     screen = _castable(request, conn, user, screen_id)
     if body.override and not is_admin(request, conn, user):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only admins can override someone using the TV.")
-    command = await anyio.to_thread.run_sync(_command, conn, user, body)
+    command = await anyio.to_thread.run_sync(_command, conn, user, body, request.app.state.settings)
     if screen["speaker"]:
         command = await anyio.to_thread.run_sync(_for_speaker, request, conn, user, screen, command)
     command.update(sender=user["username"], override=body.override)
@@ -824,6 +831,7 @@ class ScreenState(BaseModel):
     volume: float | None = Field(None, ge=0, le=1)
     muted: bool = False
     has_queue: bool = False
+    external: bool = False                               # SoundCloud: its track names aren't ours to keep
     night: float | None = Field(None, ge=0, le=1)        # the night filter's level
     version: str | None = Field(None, max_length=40)     # the player's version (signage shows it per screen)
     errors: list[str] = Field(default_factory=list, max_length=10)   # slides that wouldn't load, lately
@@ -864,9 +872,11 @@ async def screen_state(body: ScreenState, request: Request, screen=Depends(scree
 
 def _record_state(request: Request, conn: sqlite3.Connection, screen: sqlite3.Row, body: ScreenState) -> dict:
     state = body.model_dump(exclude={"version"})
-    hub(request).set_state(screen["id"], state)
+    hub(request).set_state(screen["id"], state)          # in memory: the phone's remote shows what's on
+    # SoundCloud's Terms allow no stored copy of its titles, so what is written down says only where the sound came from.
+    kept = {**state, "title": "SoundCloud", "sub": "", "art": None} if body.external else state
     with transaction(conn):
-        signage.record_state(conn, screen["id"], state, body.version)
+        signage.record_state(conn, screen["id"], kept, body.version)
     return {"status": "ok"}
 
 
@@ -992,7 +1002,7 @@ async def remote_command(screen_id: int, body: RemoteCommand, request: Request, 
     if screen is None:
         raise _not_found()
     owner = users.get_user_by_id(conn, remote["user_id"])
-    command = await anyio.to_thread.run_sync(_command, conn, owner, Command(**body.model_dump()))
+    command = await anyio.to_thread.run_sync(_command, conn, owner, Command(**body.model_dump()), request.app.state.settings)
     if screen["speaker"]:
         command = await anyio.to_thread.run_sync(_for_speaker, request, conn, owner, screen, command)
     command.update(sender=owner["username"], override=False)
@@ -1101,6 +1111,7 @@ def _admin_status(request: Request, conn: sqlite3.Connection) -> dict:
             "settings": {k: cfg[k] for k in media.DEFAULTS}
                         | {g: group_refs.label(conn, cfg[g]) for g in media.GROUP_SETTINGS},
             "tmdb_key_set": bool(cfg.get("tmdb_key_enc")),
+            "soundcloud_set": bool(cfg.get("soundcloud_id_enc") and cfg.get("soundcloud_secret_enc")),
             "sources": live.sources(conn, enabled_only=False), "catalog": catalog.status(conn, lib),
             "sessions": sessions(request).running(),
             # Top-level folders of the share, to pick the Media folder from (inboxes aren't libraries).
@@ -1124,6 +1135,8 @@ class MediaSettingsBody(BaseModel):
     online_metadata: bool | None = None
     radio_directory_url: str | None = Field(None, max_length=1000)
     tmdb_key: str | None = Field(None, max_length=1000)   # None: keep; "": remove
+    soundcloud_id: str | None = Field(None, max_length=1000)       # None: keep; "": remove
+    soundcloud_secret: str | None = Field(None, max_length=1000)   # None: keep; "": remove
     signage_folder: str | None = Field(None, max_length=120)   # the Signage folder at the top of the share
     signage_effects: dict | None = None                        # CRT effects for newly paired screens
 
@@ -1151,7 +1164,8 @@ def admin_settings(body: MediaSettingsBody, request: Request, user=Depends(admin
                 _log(conn, user, "settings.signage_folder", media.check_folder(body.signage_folder))
                 if media.enabled(conn) and body.enabled is not False:
                     media.ensure_signage_library(conn)
-            changes = body.model_dump(exclude={"enabled", "folder", "tmdb_key", "signage_folder"}, exclude_none=True)
+            changes = body.model_dump(exclude={"enabled", "folder", "tmdb_key", "soundcloud_id", "soundcloud_secret", "signage_folder"},
+                                      exclude_none=True)
             if changes.get("signage_effects") is not None:
                 try:
                     changes["signage_effects"] = signage.clean_effects(changes["signage_effects"])
@@ -1165,11 +1179,14 @@ def admin_settings(body: MediaSettingsBody, request: Request, user=Depends(admin
                         changes[name] = group_refs.resolve(conn, changes[name], known)
                     except group_refs.GroupRefError as exc:
                         raise media.MediaError(str(exc)) from None
-            if changes or body.tmdb_key is not None:
-                media.save_settings(conn, settings, changes, body.tmdb_key)
+            soundcloud_changed = body.soundcloud_id is not None or body.soundcloud_secret is not None
+            if changes or body.tmdb_key is not None or soundcloud_changed:
+                media.save_settings(conn, settings, changes, body.tmdb_key, body.soundcloud_id, body.soundcloud_secret)
                 detail = ", ".join(f"{k}={v}" for k, v in changes.items())
                 if body.tmdb_key is not None:
                     detail = (detail + ", " if detail else "") + ("TMDB key set" if body.tmdb_key else "TMDB key removed")
+                if soundcloud_changed:                    # that it changed, never what to
+                    detail = (detail + ", " if detail else "") + "SoundCloud key changed"
                 _log(conn, user, "settings.media_options", detail)
     except (media.MediaError, OSError) as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None

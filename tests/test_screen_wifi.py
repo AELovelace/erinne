@@ -301,6 +301,7 @@ class FakeServer:
     def __init__(self):
         self.calls = []
         self.top_bar = False
+        self.soundcloud = ""
         self.healthy = True
 
     def __call__(self, method, url, body=None, headers=None, timeout=10):
@@ -314,9 +315,11 @@ class FakeServer:
                          "screen": {"id": 3, "name": "Lobby", "top_bar": self.top_bar}}
         if url.endswith("/api/media/kiosk/screen"):
             assert headers == {"X-Kiosk-Session": "srv-session"}
-            if method == "PUT":
+            if method == "PUT" and "soundcloud_profile" in body:
+                self.soundcloud = body["soundcloud_profile"]
+            elif method == "PUT":
                 self.top_bar = body["top_bar"]
-            return 200, {"screen": {"id": 3, "name": "Lobby", "top_bar": self.top_bar}}
+            return 200, {"screen": {"id": 3, "name": "Lobby", "top_bar": self.top_bar, "soundcloud_profile": self.soundcloud}}
         return 204, {}
 
 
@@ -390,6 +393,13 @@ def test_the_address_changes_through_the_installer_after_a_check(kiosk):
     with pytest.raises(ws.KioskError) as exc:
         k.set_address(token, "https://new.example.com")
     assert "busy" in str(exc.value)
+
+
+def test_a_phone_approval_sets_the_soundcloud_profile(kiosk):
+    k, run, server, clock, setup, conf = kiosk
+    token = k.unlock_grant("good-grant")
+    assert k.set_soundcloud(token, "aedith")["soundcloud_profile"] == "aedith" and server.soundcloud == "aedith"
+    assert server.top_bar is False                                 # only what was asked for changes
 
 
 def test_a_phone_approval_opens_the_top_bar_and_the_volume(kiosk):

@@ -103,7 +103,7 @@ def test_an_admin_opens_a_tvs_kiosk_settings_and_turns_on_its_top_bar(client, co
     r = box.post("/api/media/kiosk/redeem", json={"grant": approved["grant"]})
     assert r.status_code == 200, r.text
     session = r.json()
-    assert session["admin"] == "boss" and session["screen"] == {"id": screen_id, "name": "Living room", "top_bar": False}
+    assert session["admin"] == "boss" and session["screen"] == {"id": screen_id, "name": "Living room", "top_bar": False, "soundcloud_profile": ""}
     assert box.post("/api/media/kiosk/redeem", json={"grant": approved["grant"]}).status_code == 403
     headers = {"X-Kiosk-Session": session["session"]}
     assert box.get("/api/media/kiosk/screen").status_code == 401

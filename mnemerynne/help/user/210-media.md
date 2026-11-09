@@ -52,6 +52,18 @@ You only see what you may open in that folder on the share. Who may open it is s
 - Open an album and press **Play** or **Shuffle**, or choose a track. Music plays in the bar at the bottom while you keep browsing.
 - **Radio** lists the stations. **On air** means someone is already listening. Other stations start when you tune in, which can take a few seconds.
 
+## SoundCloud
+
+**SoundCloud** in the menu shows someone's profile: **Tracks**, **Albums**, **Playlists**, **Likes**, **Liked sets** and **Reposts**.
+
+- The first time, type the name after `soundcloud.com/` or paste the profile's address. **Change profile** switches to another. It's saved for you, and it's your own: other people pick theirs.
+- Press **Play** or **Shuffle**, or choose a track. It plays in the bar at the bottom while you keep browsing, like your music.
+- **Load more** at the bottom of a long list brings the next tracks. **↗** opens a track on SoundCloud.
+- With **Play on** set to a TV, it plays there. Speakers can't play SoundCloud.
+- On a TV, the profile is set for that screen, in **Screens** on your phone or in **Kiosk settings**. With none set, it shows the screen owner's.
+
+A few tracks only have a 30-second **Preview only**, and some can't be played here at all (the list says how many). If SoundCloud's daily limit for the server is reached, the page says when to try again.
+
 ## Live TV
 
 **Live TV** lists the streams your admin has added. Choose one to watch it live. YouTube ones play in YouTube's own player, with its controls; press **✕** to close it.

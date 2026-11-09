@@ -136,6 +136,7 @@ They lock again after ten minutes untouched, or with **Lock**.
 | --- | --- |
 | **Mnemerynne address** | The server the TV shows. The box checks the new one answers like Mnemerynne, then runs `install.sh --reconfigure` with it and restarts. The TV shows the new server's pairing code. |
 | **Show the top bar** | The TV page gets a short top bar: Ask, Files and the Wiki, and **Sign in**. Whoever signs in on the TV is signed out when they go back to the TV (**📺 Back to TV**), or after ten minutes untouched. Kept on the server for this screen, so it needs a phone approval to change. |
+| **SoundCloud profile** | Whose tracks, albums and likes the SoundCloud page in Media shows on this TV: the name after `soundcloud.com/`, or the profile's address. Empty shows the screen owner's. Needs a phone approval, like the top bar. It can also be set on the screen's row in Media → Screens. |
 | **Sound output** | **HDMI to the TV** (the default: it switches over as soon as the TV is on), **Automatic**, or any output the box's sound cards have, such as headphones or USB speakers. Applied at once and kept (`AUDIO_OUTPUT`). |
 | **System volume** | The sound card's level, kept across restarts. Media's own volume (− and +) is on top of it. |
 | **Display scaling** | **100%**, **150%**, **200%** or **300%** of everything on the TV, these settings and the start page too, like Windows' display scaling. Applied at once and kept (`DISPLAY_SCALE`). 200% on a 4K TV is the size of 1080p, drawn at 4K; the line under it says what the TV is at now. |

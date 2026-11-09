@@ -46,6 +46,23 @@ Media is a Kodi-style media centre for films, TV shows, music and pictures from 
 - **Read every file again** and **Look everything up online again** redo the catalog on the next passes. Use them after changing tags or posters in bulk.
 - **Files that couldn't be read** lists what the catalog gave up on. A file is tried again when it changes.
 
+## SoundCloud
+
+**Media → SoundCloud** shows a SoundCloud profile's tracks, albums, playlists, likes and reposts, and plays them in the bar at the bottom. It needs a SoundCloud API key, which needs an Artist Pro subscription: get one at [soundcloud.com/you/apps](https://soundcloud.com/you/apps), then put the **client ID** and **client secret** in **Settings → Entertainment → Media**. Both are stored encrypted, browsers never get them, and neither appears in the log. Until they're saved, the tab says SoundCloud isn't set up.
+
+**Whose profile shows:**
+- On a phone or a computer, each person types their own on the tab.
+- On a TV, the one set for that screen: in its row in **Media → Screens** (any screen, even while it's off), or in **Kiosk settings** on a screen box. A screen with none shows its owner's. Speakers can't play SoundCloud.
+
+**Limits, all SoundCloud's:**
+- About 1,500 track starts a day for the whole server. Mnemerynne stops at 1,400 and says when to try again, and a track started again within its link's lifetime doesn't count twice.
+- 500 Likes requests a day. Lists are read 200 items at a time and reused for ten minutes, so normal use is far below this.
+- If SoundCloud answers "too many", every SoundCloud call waits until the time it gives.
+
+**What SoundCloud's API terms mean here:** nothing is stored. Lists and links stay in memory for minutes, audio goes straight from SoundCloud to the browser, and a screen's saved status says only "SoundCloud", not the track. Every track shows its uploader and a link back to SoundCloud. The terms limit commercial use and ban ads or sponsorship around tracks. If it plays in a public space, the public-performance licences are yours to hold.
+
+Some tracks are blocked in the server's country or preview-only. Blocked ones are left out and counted under the list; previews say **Preview only**.
+
 ## Live streams and stations
 
 - **HLS stream** or **RTMP stream:** an address the server pulls, for example `http://10.1.1.21/stream/hls/live.m3u8` or `rtmp://10.1.1.21/live/stream`. The server repackages it for the browser, so streams only reachable on the LAN still play for people outside. The picture is copied, not converted, so it should be H.264.
