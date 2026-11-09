@@ -1,4 +1,5 @@
-"""SoundCloud in Media: a profile's tracks, albums, playlists, likes and reposts, read with the server's API key.
+"""SoundCloud in Media: a profile's tracks, albums, playlists, likes and reposts, search, and stations built from a
+track's related tracks, all read with the server's API key.
 
 The key (Settings → Entertainment → Media) and its token stay on the server. A track's audio is signed for by the
 server when it is played, then the browser streams it straight from SoundCloud's CDN: the signed links need no
@@ -42,7 +43,9 @@ MAX_ITEMS = 1000             # the most of any one list kept in memory
 QUEUE_MAX = 200              # the most tracks sent to a screen at once
 LIST_SECONDS = 600           # how long a list is reused
 STALE_SECONDS = 1800         # how long an old list stands in when SoundCloud is limiting or down
-MAX_LISTS = 32
+MAX_LISTS = 64               # searches and stations each take one, so profile lists aren't pushed out at once
+QUERY_MAX = 100              # the longest search kept
+STATION_SIZE = 50            # how many related tracks one station top-up asks for
 PROFILE_SECONDS = 3600       # a name's account
 UNKNOWN_SECONDS = 60         # a name SoundCloud doesn't know: soon asked again, it may be a typo being fixed
 MAX_PROFILES = 256
@@ -59,6 +62,7 @@ ALBUM_TYPES = {"album", "ep", "single", "compilation"}     # playlist_type; ever
 _ACCESS = "playable,preview,blocked"                        # blocked ones are counted, then left out
 _TRACK_PARAMS = {"limit": UPSTREAM_PAGE, "linked_partitioning": "true", "access": _ACCESS}
 _SET_PARAMS = {"limit": UPSTREAM_PAGE, "linked_partitioning": "true"}
+_RELATED_PARAMS = {"limit": STATION_SIZE, "linked_partitioning": "true", "access": "playable"}   # no 30-second previews on a station
 _TAB_PATHS = {"tracks": "tracks", "likes": "likes/tracks", "reposts": "reposts/tracks",
               "albums": "playlists", "playlists": "playlists", "liked_sets": "likes/playlists"}
 
@@ -67,7 +71,9 @@ USER_URN = re.compile(rf"^soundcloud:users:{_URN_PART}$")
 TRACK_URN = re.compile(rf"^soundcloud:tracks:{_URN_PART}$")
 SET_URN = re.compile(rf"^soundcloud:(?:playlists|system-playlists):{_URN_PART}$")
 _KEY = re.compile(rf"^(?:user:(soundcloud:users:{_URN_PART}):(tracks|likes|reposts)"
-                  rf"|set:(soundcloud:(?:playlists|system-playlists):{_URN_PART}))$")
+                  rf"|set:(soundcloud:(?:playlists|system-playlists):{_URN_PART})"
+                  rf"|search:(.{{1,{QUERY_MAX}}})"                      # a search's words: only ever sent as a query value
+                  rf"|related:(soundcloud:tracks:{_URN_PART}))$")       # a station, named by the track it started from
 
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _PROFILE_HOSTS = {"soundcloud.com", "www.soundcloud.com", "m.soundcloud.com"}
@@ -137,6 +143,14 @@ def clean_profile(text: str) -> str:
     if not _NAME.fullmatch(name) or name.lower() in _RESERVED:
         raise SoundCloudError(422, "That isn't a SoundCloud profile name. Use the part after soundcloud.com/.")
     return name
+
+
+def clean_query(text: str) -> str:
+    """Search words as one tidy line, or a refusal when there are none."""
+    query = " ".join((text or "").split())[:QUERY_MAX].strip()     # collapses tabs and newlines, and caps the length
+    if not query:
+        raise SoundCloudError(422, "Type something to search for.")
+    return query                                                   # safe to put in a list's key and a query value
 
 
 # ------------------------------------------------------------------ the key
@@ -342,7 +356,35 @@ def _set(raw: dict) -> dict | None:
             "artist_link": _link(person.get("permalink_url"))}
 
 
+def _person(raw: dict) -> dict | None:
+    """A profile in search results. None: not one we can name."""
+    urn = _urn(raw, "users", USER_URN)
+    if urn is None:
+        return None
+    return {"id": urn, "name": raw.get("username") or "Unknown", "art": _art(raw.get("avatar_url")),
+            "followers": raw.get("followers_count"), "link": _link(raw.get("permalink_url"))}   # what the page's card shows
+
+
 # ---------------------------------------------------------------- profiles
+def _account(body: dict, name: str, link: str | None) -> dict | None:
+    """An account as the page wants it, or None if the answer isn't a user. name and link: used when it leaves them out."""
+    urn = _urn(body, "users", USER_URN) if body.get("kind") == "user" else None
+    if urn is None:
+        return None
+    return {"urn": urn, "name": body.get("username") or name, "art": _art(body.get("avatar_url")),
+            "link": _link(body.get("permalink_url")) or link}
+
+
+def _remember(key: str, found: dict | None, now: float) -> tuple[float, dict | None]:
+    """Keep an account for a while (one that wasn't found, only briefly), oldest pushed out first."""
+    cached = (now + (PROFILE_SECONDS if found else UNKNOWN_SECONDS), found)
+    _profiles[key] = cached
+    _profiles.move_to_end(key)
+    while len(_profiles) > MAX_PROFILES:
+        _profiles.popitem(last=False)
+    return cached                                                  # the same shape _profiles holds
+
+
 def profile(creds: tuple[str, str], name: str) -> dict:
     """The account behind a clean_profile() name."""
     key = name.lower()
@@ -350,20 +392,21 @@ def profile(creds: tuple[str, str], name: str) -> dict:
     cached = _profiles.get(key)
     if cached is None or cached[0] <= now:
         r = _get(creds, f"{API}/resolve", {"url": f"https://soundcloud.com/{name}"})
-        found = None
-        if r.status_code != 404:
-            body = _json(r)
-            urn = _urn(body, "users", USER_URN) if body.get("kind") == "user" else None
-            if urn is not None:
-                found = {"urn": urn, "name": body.get("username") or name, "art": _art(body.get("avatar_url")),
-                         "link": _link(body.get("permalink_url")) or f"https://soundcloud.com/{name}"}
-        cached = (now + (PROFILE_SECONDS if found else UNKNOWN_SECONDS), found)
-        _profiles[key] = cached
-        _profiles.move_to_end(key)
-        while len(_profiles) > MAX_PROFILES:
-            _profiles.popitem(last=False)
+        found = None if r.status_code == 404 else _account(_json(r), name, f"https://soundcloud.com/{name}")
+        cached = _remember(key, found, now)
     if cached[1] is None:
         raise SoundCloudError(422, f"SoundCloud doesn't know a profile called {name}. Check the address.")
+    return cached[1]
+
+
+def person(creds: tuple[str, str], urn: str) -> dict:
+    """The account behind a USER_URN, for a profile opened from search."""
+    now = time.time()
+    cached = _profiles.get(urn)                                    # a urn has colons, so it can't collide with a name
+    if cached is None or cached[0] <= now:
+        cached = _remember(urn, _account(_json(_get(creds, f"{API}/users/{urn}")), "Unknown", None), now)
+    if cached[1] is None:
+        raise SoundCloudError(404, "SoundCloud doesn't have that any more.")
     return cached[1]
 
 
@@ -455,14 +498,59 @@ def set_detail(creds: tuple[str, str], urn: str) -> dict:
     return {**entry.head, "key": f"set:{urn}", "tracks": entry.items, "blocked": entry.blocked}
 
 
+# ------------------------------------------------------------------ search
+_SEARCHES = {"tracks": ("tracks", _TRACK_PARAMS, _track), "playlists": ("playlists", {**_SET_PARAMS, "show_tracks": "false"}, _set),
+             "users": ("users", _SET_PARAMS, _person)}
+_SEARCH_KINDS = {"tracks": "tracks", "playlists": "sets", "users": "users"}   # what the page draws for each
+
+
+def _search(creds: tuple[str, str], kind: str, query: str, want: int) -> _List:
+    path, params, shape = _SEARCHES[kind]
+    return _list(creds, ("search", kind, query.lower()), f"{API}/{path}", {**params, "q": query}, shape, want)   # one list per wording
+
+
+def search(creds: tuple[str, str], kind: str, text: str, offset: int = 0) -> dict:
+    """One page of a search, in the shape of listing(). Like every list, it never looks up a stream."""
+    query = clean_query(text)
+    entry = _search(creds, kind, query, offset + PAGE)
+    page = entry.items[offset:offset + PAGE]
+    more = offset + PAGE < len(entry.items) or (bool(entry.next) and len(entry.items) < MAX_ITEMS)
+    tracks = kind == "tracks"
+    return {"tab": kind, "kind": _SEARCH_KINDS[kind], "key": f"search:{query}" if tracks else None, "items": page,
+            "next_offset": offset + len(page) if more and page else None, "blocked": entry.blocked if tracks else 0}
+
+
+# ---------------------------------------------------------------- stations
+def _related(creds: tuple[str, str], urn: str) -> _List:
+    return _list(creds, ("related", urn), f"{API}/tracks/{urn}/related", dict(_RELATED_PARAMS), _track, STATION_SIZE)
+
+
+def related(creds: tuple[str, str], urn: str) -> dict:
+    """What a station can play after `urn`: lists cost no stream lookups, and each track looks up its own as it starts."""
+    return {"key": f"related:{urn}", "tracks": [t for t in _related(creds, urn).items if t["id"] != urn]}   # never the track itself
+
+
+def _station(creds: tuple[str, str], urn: str) -> list[dict]:
+    """A whole station for a screen, which only has the key: the track it started from, then its relatives."""
+    entry = _related(creds, urn)
+    if entry.head is None:
+        entry.head = _track(_json(_get(creds, f"{API}/tracks/{urn}"))) or {}    # {}: can't be played here, so left off
+    return ([entry.head] if entry.head else []) + [t for t in entry.items if t["id"] != urn]
+
+
+# ---------------------------------------------------------------- a screen
 def queue(creds: tuple[str, str], key: str, track: str | None) -> list[dict]:
     """What a screen is sent: rebuilt here from a list's key, never taken from the phone. Starts at `track`."""
     found = _KEY.fullmatch(key or "")
     if found is None:
         raise SoundCloudError(422, "That isn't a SoundCloud list.")
-    user, tab, playlist = found.groups()
+    user, tab, playlist, words, seed = found.groups()
     if playlist:
         items = _set_tracks(creds, playlist).items
+    elif words:
+        items = _search(creds, "tracks", clean_query(words), QUEUE_MAX).items
+    elif seed:
+        items = _station(creds, seed)
     else:
         path = _TAB_PATHS[tab]
         items = _list(creds, ("user", user, path), f"{API}/users/{user}/{path}", dict(_TRACK_PARAMS), _track, MAX_ITEMS).items
@@ -519,12 +607,13 @@ def _count_lookup() -> None:
 _FORMATS = (("hls_aac_160_url", "hls", False), ("hls_mp3_128_url", "hls", False), ("preview_mp3_128_url", "direct", True))
 
 
-def stream(creds: tuple[str, str], urn: str) -> dict:
-    """Where the browser plays a track from, in the shape of POST /api/media/play. Called only as a track starts."""
+def stream(creds: tuple[str, str], urn: str, fresh: bool = False) -> dict:
+    """Where the browser plays a track from, in the shape of POST /api/media/play. Called only as a track starts.
+    fresh: the browser just failed on the link kept here, so that one is skipped and a new lookup is made (and counted)."""
     now = time.time()
     with _streams_lock:
         cached = _streams.get(urn)
-    if cached is not None and cached[0] > now:
+    if cached is not None and cached[0] > now and not fresh:
         return dict(cached[1])
     _check_blocked()
     _count_lookup()

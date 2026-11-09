@@ -225,6 +225,19 @@
     nowPlaying.playQueue(shuffle ? shuffled(list.tracks) : list.tracks, shuffle ? 0 : index, null);
   }
 
+  /* A station from one track, here or on the chosen screen: that track, then what SoundCloud says is like it. */
+  async function playScStation(t) {
+    if (cast.active()) {                                  // the screen is sent the station by its key, like any list
+      cast.send({ action: "play_soundcloud", key: "related:" + t.id, track: null, shuffle: false });
+      return;
+    }
+    showError("");
+    try {
+      const found = await api("GET", "/api/media/soundcloud/station/" + encodeURIComponent(t.id));
+      nowPlaying.playQueue([t].concat(found.tracks), 0, null, true);   // true: keeps topping itself up
+    } catch (err) { showError(err.message); }
+  }
+
   // ------------------------------------------------------------- routing
   function go(hash) {
     if (location.hash === "#" + hash) render(); else location.hash = hash;
@@ -249,7 +262,7 @@
 
   const SECTION_OF = { screens: "screens", cast: "screens", pair: "screens", home: "home", movies: "movies", movie: "movies", music: "music", album: "music",
                        artist: "music", pictures: "pictures", live: "live", radio: "radio", tv: "tv", tvshow: "tv",
-                       games: "games", soundcloud: "soundcloud", scset: "soundcloud" };
+                       games: "games", soundcloud: "soundcloud", scset: "soundcloud", scsearch: "soundcloud", scuser: "soundcloud" };
 
   async function render() {
     const r = route();
@@ -263,7 +276,7 @@
     showError("");
     backdrop(null);
     const views = { home: viewHome, movies: viewMovies, movie: viewMovie, tv: viewTv, tvshow: viewTvShow, music: viewMusic, album: viewAlbum,
-                    soundcloud: viewSoundCloud, scset: viewScSet,
+                    soundcloud: viewSoundCloud, scset: viewScSet, scsearch: viewScSearch, scuser: viewScUser,
                     artist: viewArtist, pictures: viewPictures, live: viewLive, radio: viewRadio, games: viewGames,
                     screens: viewScreens, cast: viewScreens, pair: function (code) { return viewScreens("", code); } };
     try {
@@ -596,7 +609,8 @@
   // address asked for only as it starts. SoundCloud's terms want the uploader and SoundCloud credited with links back.
   const SC_TABS = [["tracks", "Tracks"], ["albums", "Albums"], ["playlists", "Playlists"], ["likes", "Likes"],
                    ["liked_sets", "Liked sets"], ["reposts", "Reposts"]];
-  const scScreen = screenId !== null ? "screen=1" : "";          // the TV page shows the screen's profile, not a person's
+  const SC_SEARCH = [["tracks", "Tracks"], ["playlists", "Playlists"], ["users", "Profiles"]];
+  const scScreen =screenId !== null ? "screen=1" : "";          // the TV page shows the screen's profile, not a person's
 
   /* A link out; on a TV, where nothing can follow one, its text alone. */
   function scLink(text, href, cls) {
@@ -640,6 +654,28 @@
     return form;
   }
 
+  /* The search box, as a list to put at the top of a view. Empty on a TV: its remote can't type, so search from a phone with Play on. */
+  function scSearch(query) {
+    if (screenId !== null) return [];
+    const form = el("form", "mc-sc-form");
+    const input = el("input");
+    input.type = "search";
+    input.value = query || "";
+    input.placeholder = "Search SoundCloud";
+    input.autocomplete = "off";
+    input.maxLength = 100;
+    input.setAttribute("aria-label", "Search SoundCloud");
+    const submit = el("button", null, "Search");
+    submit.type = "submit";
+    form.append(input, submit);
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      const words = input.value.trim();
+      if (words) go("scsearch/tracks/" + encodeURIComponent(words));   // a new search always opens on its tracks
+    });
+    return [form];
+  }
+
   /* Rows for list.tracks from `from` on. The ↗ is a link beside the row, so a remote's focus stays on the rows. */
   function scRows(box, list, from) {
     list.tracks.slice(from).forEach(function (t, k) {
@@ -655,6 +691,13 @@
       row.append(el("span", "n", String(i + 1)), name, el("span", "t", clock(t.duration)));
       row.addEventListener("click", function () { playSoundCloud(list, i, false); });
       li.appendChild(row);
+      const station = el("button", "mc-sc-station", "📻");   // data-nav: a remote's arrows reach it from the row
+      station.type = "button";
+      station.dataset.nav = "";
+      station.title = "Start a station from this track";
+      station.setAttribute("aria-label", "Start a station from " + t.title);
+      station.addEventListener("click", function () { playScStation(t); });
+      li.appendChild(station);
       if (t.link && screenId === null) {
         const out = scLink("↗", t.link, "mc-sc-out");
         out.title = "Open on SoundCloud";
@@ -674,14 +717,14 @@
     return actions;
   }
 
-  /* Load more: asks for the next page and hands it to add(page), then steps focus onto what arrived. */
-  function scMore(tab, nextOffset, add) {
+  /* Load more: asks `url` for the next page and hands it to add(page), then steps focus onto what arrived. */
+  function scMore(url, nextOffset, add) {
     let next = nextOffset;
     const more = button("Load more", "secondary mc-sc-more", async function () {
       more.disabled = true;
       showError("");
       try {
-        const page = await api("GET", "/api/media/soundcloud/list/" + tab + "?offset=" + next + (scScreen ? "&" + scScreen : ""));
+        const page = await api("GET", url + (url.indexOf("?") < 0 ? "?" : "&") + "offset=" + next);
         const first = add(page);
         next = page.next_offset;
         if (next === null) more.remove(); else more.disabled = false;
@@ -697,6 +740,81 @@
                   art: s.art, shape: "square", glyph: "☁", onClick: function () { go("scset/" + encodeURIComponent(s.id)); } });
   }
 
+  /* A profile in search results: opens that person's own tabs. */
+  function scPersonCard(p) {
+    const sub = typeof p.followers === "number" ? p.followers.toLocaleString() + (p.followers === 1 ? " follower" : " followers") : "";
+    return card({ title: p.name, sub: sub, art: p.art, shape: "square", glyph: "☁",
+                  onClick: function () { go("scuser/" + encodeURIComponent(p.id)); } });
+  }
+
+  /* One page from the server, added to `out`: tracks as rows with Play and Shuffle, sets and profiles as cards.
+     url: where it came from, for Load more. nothing: what to say when it's empty. */
+  function scListing(page, url, out, nothing) {
+    if (!page.items.length) {
+      out.push(empty(nothing));
+      return out;
+    }
+    if (page.kind !== "tracks") {
+      const toCard = page.kind === "users" ? scPersonCard : scSetCard;
+      const grid = shelf(null, page.items.map(toCard), "square", "grid");
+      out.push(grid);
+      if (page.next_offset !== null) {
+        out.push(scMore(url, page.next_offset, function (next) {
+          const cards = next.items.map(toCard);
+          cards.forEach(function (c) { grid.lastChild.appendChild(c); });
+          return cards[0];
+        }));
+      }
+      return out;
+    }
+    const list = { key: page.key, tracks: page.items };
+    const rows = el("ol", "mc-tracks");
+    scRows(rows, list, 0);
+    out.push(scPlayButtons(list), rows);
+    if (page.blocked) out.push(el("p", "mc-sub", page.blocked + (page.blocked === 1 ? " track" : " tracks") + " in this list can't be played here."));
+    if (page.next_offset !== null) {
+      out.push(scMore(url, page.next_offset, function (next) {
+        const from = list.tracks.length;
+        list.tracks = list.tracks.concat(next.items);
+        scRows(rows, list, from);
+        const added = rows.children[from];
+        return added ? added.querySelector("button") : null;
+      }));
+    }
+    return out;
+  }
+
+  /* #scsearch/<tracks|playlists|users>/<words>: one search, with a tab for each kind of result. */
+  async function viewScSearch(arg) {
+    const slash = arg.indexOf("/");
+    const asked = slash < 0 ? "" : arg.slice(0, slash);
+    const kind = SC_SEARCH.some(function (t) { return t[0] === asked; }) ? asked : "tracks";
+    const query = decodeURIComponent(arg.slice(slash + 1));
+    const tabs = SC_SEARCH.map(function (t) {
+      return button(t[1], t[0] === kind ? "" : "secondary", function () { go("scsearch/" + t[0] + "/" + encodeURIComponent(query)); });
+    });
+    setHead("SoundCloud", [button("‹ Back", "", function () { go("soundcloud"); })], tabs);
+    const url = "/api/media/soundcloud/search/" + kind + "?q=" + encodeURIComponent(query);
+    const page = await api("GET", url);
+    return scListing(page, url, scSearch(query), "Nothing on SoundCloud matches that.");
+  }
+
+  /* #scuser/<urn>[/<tab>]: someone else's profile, opened from search. Doesn't change whose profile the tab shows. */
+  async function viewScUser(arg) {
+    const slash = arg.indexOf("/");
+    const urn = decodeURIComponent(slash < 0 ? arg : arg.slice(0, slash));
+    const asked = slash < 0 ? "" : arg.slice(slash + 1);
+    const tab = SC_TABS.some(function (t) { return t[0] === asked; }) ? asked : "tracks";
+    const who = await api("GET", "/api/media/soundcloud/user/" + encodeURIComponent(urn));
+    const tabs = SC_TABS.map(function (t) {
+      return button(t[1], t[0] === tab ? "" : "secondary", function () { go("scuser/" + encodeURIComponent(urn) + "/" + t[0]); });
+    });
+    setHead("SoundCloud", [button("‹ Back", "", function () { history.length > 1 ? history.back() : go("soundcloud"); })], tabs);
+    const url = "/api/media/soundcloud/list/" + tab + "?account=" + encodeURIComponent(urn);
+    const page = await api("GET", url);
+    return scListing(page, url, [scCredit(who.name, who.link)], "Nothing here for this profile.");
+  }
+
   async function viewSoundCloud(arg) {
     const tab = SC_TABS.some(function (t) { return t[0] === arg; }) ? arg : "tracks";
     const me = await api("GET", "/api/media/soundcloud/profile" + (scScreen ? "?" + scScreen : ""));
@@ -706,7 +824,7 @@
     }
     if (!me.user || arg === "change") {
       setHead("SoundCloud", me.user ? [button("‹ Back", "", function () { go("soundcloud"); })] : []);
-      const out = [];
+      const out = scSearch("");                              // search needs no saved profile
       if (me.error) out.push(empty(me.error));
       if (me.editable) {
         if (!me.error) out.push(empty("Type the name after soundcloud.com/, or paste the address of the profile.", "Whose SoundCloud should this show?"));
@@ -721,39 +839,9 @@
     });
     if (me.editable) tabs.push(button("Change profile", "link small", function () { go("soundcloud/change"); }));
     setHead("SoundCloud", [], tabs);
-    const page = await api("GET", "/api/media/soundcloud/list/" + tab + (scScreen ? "?" + scScreen : ""));
-    const out = [scCredit(me.user.name, me.user.link)];
-    if (!page.items.length) {
-      out.push(empty("Nothing here for this profile."));
-      return out;
-    }
-    if (page.kind === "sets") {
-      const grid = shelf(null, page.items.map(scSetCard), "square", "grid");
-      out.push(grid);
-      if (page.next_offset !== null) {
-        out.push(scMore(tab, page.next_offset, function (next) {
-          const cards = next.items.map(scSetCard);
-          cards.forEach(function (c) { grid.lastChild.appendChild(c); });
-          return cards[0];
-        }));
-      }
-      return out;
-    }
-    const list = { key: page.key, tracks: page.items };
-    const rows = el("ol", "mc-tracks");
-    scRows(rows, list, 0);
-    out.push(scPlayButtons(list), rows);
-    if (page.blocked) out.push(el("p", "mc-sub", page.blocked + (page.blocked === 1 ? " track" : " tracks") + " in this list can't be played here."));
-    if (page.next_offset !== null) {
-      out.push(scMore(tab, page.next_offset, function (next) {
-        const from = list.tracks.length;
-        list.tracks = list.tracks.concat(next.items);
-        scRows(rows, list, from);
-        const added = rows.children[from];
-        return added ? added.querySelector("button") : null;
-      }));
-    }
-    return out;
+    const url = "/api/media/soundcloud/list/" + tab + (scScreen ? "?" + scScreen : "");
+    const page = await api("GET", url);
+    return scListing(page, url, scSearch("").concat([scCredit(me.user.name, me.user.link)]), "Nothing here for this profile.");
   }
 
   async function viewScSet(arg) {
@@ -1558,6 +1646,7 @@
   }
   const nowPlaying = {
     queue: [], i: -1, art: null, hls: null, session: null, offset: 0, station: null, skips: 0, retried: null,
+    scStation: null,                                     // a SoundCloud station: { seen, growing } (station above is the radio)
 
     show: function (title, sub, art, seekable) {
       $("mc-np").hidden = false;
@@ -1572,17 +1661,44 @@
       $("mc-np-prev").hidden = $("mc-np-next").hidden = !seekable;
     },
 
-    playQueue: function (tracks, index, art) {
+    playQueue: function (tracks, index, art, asStation) {
       this.station = null;
       this.queue = tracks.slice();
+      this.scStation = asStation ? { seen: new Set(tracks.map(function (t) { return t.id; })), growing: null } : null;
       this.art = art || null;
       this.i = index;
       this.load(0);
     },
 
-    load: async function (start) {
+    /* Add tracks related to the end of a station's queue, leaving out any it has already had. Never rejects: if
+       nothing new comes back, the station simply ends. Only lists are read here, so it costs no stream lookups. */
+    growStation: function () {
+      const st = this.scStation;
+      if (!st) return Promise.resolve();
+      if (st.growing) return st.growing;                 // one top-up at a time
+      const queue = this.queue;
+      const seeds = queue.slice(-3).reverse();           // the newest first; older ones when it has run dry
+      st.growing = (async function () {
+        for (const seed of seeds) {
+          try {
+            const found = await api("GET", "/api/media/soundcloud/station/" + encodeURIComponent(seed.id));
+            const fresh = found.tracks.filter(function (t) { return !st.seen.has(t.id); });
+            if (fresh.length) {
+              fresh.forEach(function (t) { st.seen.add(t.id); queue.push(t); });
+              return;
+            }
+          } catch (err) {
+            if (err.status === 429) return;              // at SoundCloud's limit: asking again won't help
+          }
+        }
+      })().finally(function () { st.growing = null; });
+      return st.growing;
+    },
+
+    load: async function (start, fresh) {                // fresh: the last SoundCloud link failed, so ask for a new one
       const t = this.queue[this.i];
       if (!t) { this.stop(); return; }
+      if (this.scStation && this.i >= this.queue.length - 2) this.growStation();   // ahead of time, so the next track is ready
       this.detach();
       this.show(t.title, [t.artist, t.album].filter(Boolean).join(" — "), t.art || this.art, true);
       this.credit(t);
@@ -1591,7 +1707,7 @@
       const soundcloud = t.source === "soundcloud";     // its address comes from SoundCloud, one track at a time
       let r;
       try {
-        r = await (soundcloud ? api("POST", "/api/media/soundcloud/stream", { id: t.id })
+        r = await (soundcloud ? api("POST", "/api/media/soundcloud/stream", { id: t.id, fresh: !!fresh })
                               : api("POST", "/api/media/play/" + t.id, { start: start || 0, slot: "audio", caps: caps() }));
       } catch (err) {
         if (this.queue[this.i] !== t) return;
@@ -1613,7 +1729,7 @@
         this.session = r.session; this.offset = r.start;
         this.hls = attachHls(audio, r.url, function (d) {
           // A signed link can run out during a long pause: ask for a new one once, from where it stopped.
-          if (soundcloud && self.retried !== t.id && self.queue[self.i] === t) { self.retried = t.id; self.load(self.position()); return; }
+          if (soundcloud && self.retried !== t.id && self.queue[self.i] === t) { self.retried = t.id; self.load(self.position(), true); return; }
           $("mc-np-sub").textContent = "Playback stopped: " + d;
         });
       }
@@ -1640,7 +1756,7 @@
 
     playStation: function (s) {
       this.detach();
-      this.queue = []; this.i = -1; this.station = s;
+      this.queue = []; this.i = -1; this.station = s; this.scStation = null;
       this.credit(null);
       this.show(s.name, "Radio · connecting…", null, false);
       audio.src = s.play;
@@ -1665,7 +1781,14 @@
       if (rel >= 0 && rel <= end - 1) audio.currentTime = rel; else this.load(t);
     },
 
-    next: function () { if (this.i < this.queue.length - 1) { this.i++; this.load(0); } else this.stop(); },
+    next: async function () {
+      const queue = this.queue, at = this.i;
+      if (at >= queue.length - 1 && this.scStation) {    // a station at its end waits for the top-up before stopping
+        await this.growStation();
+        if (this.queue !== queue || this.i !== at) return;   // something else started while it asked
+      }
+      if (this.i < this.queue.length - 1) { this.i++; this.load(0); } else this.stop();
+    },
     prev: function () {
       if (this.position() > 5) { this.seekTo(0); return; }
       if (this.i > 0) { this.i--; this.load(0); }
@@ -1677,7 +1800,7 @@
     },
     stop: function () {
       this.detach();
-      this.queue = []; this.i = -1; this.station = null;
+      this.queue = []; this.i = -1; this.station = null; this.scStation = null;
       this.credit(null);
       $("mc-np").hidden = true;
       main.classList.remove("mc-has-np");
@@ -1706,6 +1829,7 @@
     if (nowPlaying.station) $("mc-np-sub").textContent = "Radio · on air";
   });
   audio.addEventListener("ended", function () { nowPlaying.next(); });
+  audio.addEventListener("playing", function () { nowPlaying.retried = null; });   // it recovered: a later long pause may retry too
   audio.addEventListener("error", function () {
     if (nowPlaying.station) $("mc-np-sub").textContent = "Radio · the station isn't answering";
   });
@@ -2464,7 +2588,7 @@
         if (cmd.shuffle) { tracks = shuffled(tracks); index = 0; }
         nowPlaying.playQueue(tracks, index, cmd.album.art);
       } else if (a === "play_soundcloud") {
-        nowPlaying.playQueue(cmd.shuffle ? shuffled(cmd.tracks) : cmd.tracks, cmd.index, null);
+        nowPlaying.playQueue(cmd.shuffle ? shuffled(cmd.tracks) : cmd.tracks, cmd.index, null, !!cmd.station);
       } else if (a === "play_youtube") {
         player.openYouTube(cmd.source);
       } else if (a === "play_source") {

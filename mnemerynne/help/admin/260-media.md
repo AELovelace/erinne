@@ -57,6 +57,7 @@ Media is a Kodi-style media centre for films, TV shows, music and pictures from 
 **Limits, all SoundCloud's:**
 - About 1,500 track starts a day for the whole server. Mnemerynne stops at 1,400 and says when to try again, and a track started again within its link's lifetime doesn't count twice.
 - 500 Likes requests a day. Lists are read 200 items at a time and reused for ten minutes, so normal use is far below this.
+- 3,000 searches an hour. Searches and a station's related tracks are lists, so neither counts as a track start; each song a station plays counts once, like any other. A station left playing keeps going until someone stops it, so it can use up the day's track starts on its own only if several screens run one nonstop.
 - If SoundCloud answers "too many", every SoundCloud call waits until the time it gives.
 
 **What SoundCloud's API terms mean here:** nothing is stored. Lists and links stay in memory for minutes, audio goes straight from SoundCloud to the browser, and a screen's saved status says only "SoundCloud", not the track. Every track shows its uploader and a link back to SoundCloud. The terms limit commercial use and ban ads or sponsorship around tracks. If it plays in a public space, the public-performance licences are yours to hold.

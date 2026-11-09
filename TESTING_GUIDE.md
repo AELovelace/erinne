@@ -41,6 +41,8 @@ Run `.venv/Scripts/python.exe -m pytest tests/test_soundcloud.py -q -p no:cachep
 - the key absent from the API answers and the log;
 - whose profile shows on a screen, a paired computer and a phone;
 - casting rebuilt on the server, and bad list keys refused;
+- search of tracks, playlists and profiles, its words staying a query value, and no stream lookups;
+- stations leaving out their own track and previews, and starting with that track when cast;
 - a screen's saved status not keeping track names;
 - Kiosk settings changing one field at a time, so older box helpers keep working.
 
@@ -51,7 +53,12 @@ Not automated: checked once in headless Chrome with a throwaway preview, Puppete
 - real audio playing, seek, next track and the credit links;
 - the 390 px phone layout, the Screens row, and the TV page with arrow keys.
 
-On the NAS, add the key, then check a real TV box with its remote, **Play on** from a phone, an iPhone (Safari plays the stream without hls.js) and the Kiosk settings field after a box update.
+Also not automated: checked once in headless Chrome against a stand-in SoundCloud with one-second clips:
+- search and its Tracks, Playlists and Profiles tabs, and opening a profile from the results;
+- a station running well past its first batch without repeating a song, Next pressed quickly, and a plain list ending at its end;
+- the search box and station button at 390 px.
+
+On the NAS, add the key, then check a real TV box with its remote, **Play on** from a phone, an iPhone (Safari plays the stream without hls.js) and the Kiosk settings field after a box update. Start a station with the real key too: SoundCloud's reference doesn't say whether related tracks work with a server key.
 
 ## Game checks
 

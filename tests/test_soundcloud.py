@@ -14,6 +14,7 @@ from test_media import (_hub, _login, _pair, _turn_on, checker, client, conn,  #
 
 CREDS = ("the-id", "the-secret")
 USER = "soundcloud:users:1"
+OTHER = "soundcloud:users:2"
 ALBUM = "soundcloud:playlists:7"
 PLAYLIST = "soundcloud:playlists:8"
 CDN = "https://playback.media-streaming.soundcloud.cloud/abc/aac_160k/x/playlist.m3u8"
@@ -44,6 +45,7 @@ class Fake:
         self.headers = {}
         self.expires_in = 3600
         self.expires = str(int(time.time()) + 7200)
+        self.params = {}                                     # path -> the query it was last asked with
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         host, path = request.url.host, request.url.path
@@ -58,8 +60,25 @@ class Fake:
         if host != sc.API_HOST:
             return httpx.Response(200, json={"collection": [track(99)]})
         self.calls.append(path)
+        self.params[path] = dict(request.url.params)
         if path in self.status:
             return httpx.Response(self.status[path], json={}, headers=self.headers)
+        if path == "/tracks":                                # search
+            return httpx.Response(200, json={"collection": [track(21), track(22, "blocked")]})
+        if path == "/playlists":
+            return httpx.Response(200, json={"collection": [a_set(ALBUM, "album")]})
+        if path == "/users":
+            return httpx.Response(200, json={"collection": [{"kind": "user", "urn": OTHER, "username": "Other", "followers_count": 12,
+                                                             "avatar_url": "https://i1.sndcdn.com/avatars-2-large.jpg",
+                                                             "permalink_url": "https://soundcloud.com/other"}]})
+        if path == f"/users/{OTHER}":
+            return httpx.Response(200, json={"kind": "user", "urn": OTHER, "username": "Other", "permalink_url": "https://soundcloud.com/other"})
+        if path == f"/users/{OTHER}/tracks":
+            return httpx.Response(200, json={"collection": [track(31)]})
+        if path == "/tracks/soundcloud:tracks:1/related":    # names the track itself too, which a station leaves out
+            return httpx.Response(200, json={"collection": [track(1), track(41), track(42)]})
+        if path == "/tracks/soundcloud:tracks:1":
+            return httpx.Response(200, json=track(1))
         if path == "/resolve":
             if request.url.params["url"].endswith("/aedith"):
                 return httpx.Response(302, headers={"location": f"{sc.API}/users/{USER}"})
@@ -220,6 +239,15 @@ def test_a_track_signs_once_and_hands_the_browser_the_cdn(fake):
     assert set(fake.authorized) == {sc.API_HOST}                 # the CDN's address goes to the browser, unfetched
 
 
+def test_a_link_that_failed_in_the_browser_isnt_handed_back(on, fake):
+    body = {"id": "soundcloud:tracks:1"}
+    on.post("/api/media/soundcloud/stream", json=body)
+    on.post("/api/media/soundcloud/stream", json=body)
+    assert len(_lookups(fake)) == 1                              # an ordinary repeat still reuses it
+    assert on.post("/api/media/soundcloud/stream", json={**body, "fresh": True}).status_code == 200
+    assert len(_lookups(fake)) == 2
+
+
 def test_a_link_about_to_run_out_isnt_reused(fake):
     fake.expires = str(int(time.time()) + sc.STREAM_MARGIN - 5)
     sc.stream(CREDS, "soundcloud:tracks:1")
@@ -307,6 +335,73 @@ def test_the_token_never_reaches_a_browser(on, fake):
     assert "token-1" not in on.post("/api/media/soundcloud/stream", json={"id": "soundcloud:tracks:1"}).text
 
 
+# ------------------------------------------------------------------ search
+def test_a_search_finds_tracks_without_looking_up_streams(fake):
+    out = sc.search(CREDS, "tracks", "  some   song ")
+    assert out["kind"] == "tracks" and out["key"] == "search:some song" and out["blocked"] == 1 and _lookups(fake) == []
+    assert [t["id"] for t in out["items"]] == ["soundcloud:tracks:21"]
+    assert fake.params["/tracks"]["q"] == "some song" and fake.params["/tracks"]["linked_partitioning"] == "true"
+
+
+def test_a_search_is_reused_whatever_its_case(fake):
+    sc.search(CREDS, "tracks", "Song")
+    sc.search(CREDS, "tracks", "sONG")
+    assert fake.calls.count("/tracks") == 1
+
+
+def test_a_search_finds_playlists_and_profiles(fake):
+    sets = sc.search(CREDS, "playlists", "x")
+    assert sets["kind"] == "sets" and sets["key"] is None and [s["id"] for s in sets["items"]] == [ALBUM]
+    assert fake.params["/playlists"]["show_tracks"] == "false"
+    people = sc.search(CREDS, "users", "x")
+    assert people["kind"] == "users" and people["key"] is None
+    assert people["items"] == [{"id": OTHER, "name": "Other", "art": "https://i1.sndcdn.com/avatars-2-t500x500.jpg", "followers": 12,
+                                "link": "https://soundcloud.com/other"}]
+
+
+def test_a_searchs_words_stay_a_query_value(fake):
+    sc.search(CREDS, "tracks", "../../me?x=1&y=2")
+    assert "/tracks" in fake.calls and fake.params["/tracks"]["q"] == "../../me?x=1&y=2" and set(fake.authorized) == {sc.API_HOST}
+
+
+@pytest.mark.parametrize("typed", ["", "    ", "\n\t"])
+def test_an_empty_search_is_refused_without_asking(fake, typed):
+    with pytest.raises(sc.SoundCloudError) as exc:
+        sc.search(CREDS, "tracks", typed)
+    assert exc.value.status == 422 and fake.calls == [] and fake.tokens == 0
+
+
+def test_the_page_searches_and_opens_a_profile(on, fake):
+    found = on.get("/api/media/soundcloud/search/tracks", params={"q": "song"})
+    assert found.status_code == 200 and found.json()["key"] == "search:song"
+    assert on.get("/api/media/soundcloud/search/tracks", params={"q": ""}).status_code == 422
+    assert on.get("/api/media/soundcloud/search/albums", params={"q": "x"}).status_code == 422
+    assert on.get(f"/api/media/soundcloud/user/{OTHER}").json()["name"] == "Other"
+    assert on.get("/api/media/soundcloud/user/..%2F..%2Fme").status_code == 404
+    tab = on.get("/api/media/soundcloud/list/tracks", params={"account": OTHER}).json()
+    assert tab["key"] == f"user:{OTHER}:tracks" and [t["title"] for t in tab["items"]] == ["Song 31"]
+    assert on.get("/api/media/soundcloud/list/tracks", params={"account": "../../me"}).status_code == 404
+    assert on.get("/api/media/soundcloud/profile").json()["profile"] == "aedith"        # opening someone else's changes nothing
+
+
+def test_search_works_with_no_saved_profile(on, fake):
+    on.put("/api/media/soundcloud/profile", json={"profile": ""})
+    assert on.get("/api/media/soundcloud/search/tracks", params={"q": "song"}).status_code == 200
+
+
+# ---------------------------------------------------------------- stations
+def test_a_station_is_a_tracks_relatives_without_it_or_any_stream_lookup(fake):
+    out = sc.related(CREDS, "soundcloud:tracks:1")
+    assert out["key"] == "related:soundcloud:tracks:1" and [t["id"] for t in out["tracks"]] == ["soundcloud:tracks:41", "soundcloud:tracks:42"]
+    assert fake.params["/tracks/soundcloud:tracks:1/related"]["access"] == "playable" and _lookups(fake) == []   # no 30-second previews
+
+
+def test_the_page_starts_a_station(on, fake):
+    got = on.get("/api/media/soundcloud/station/soundcloud:tracks:1")
+    assert got.status_code == 200 and len(got.json()["tracks"]) == 2
+    assert on.get("/api/media/soundcloud/station/..%2F..%2Fme").status_code == 404
+
+
 # ------------------------------------------------------------- whose profile
 def _tv(client, key):
     tv = TestClient(client.app)
@@ -355,6 +450,29 @@ def test_casting_rebuilds_the_list_on_the_server(on, fake):
     gone = on.post(f"/api/media/screens/{screen_id}/command",
                    json={"action": "play_soundcloud", "key": f"user:{USER}:likes", "track": "soundcloud:tracks:404"})
     assert gone.status_code == 404
+
+
+def test_a_station_cast_to_a_screen_starts_with_its_track_and_says_so(on, fake):
+    screen_id, _ = _pair(on)
+    queue = _hub(on).listen(screen_id)
+    r = on.post(f"/api/media/screens/{screen_id}/command", json={"action": "play_soundcloud", "key": "related:soundcloud:tracks:1"})
+    assert r.status_code == 200, r.text
+    sent = queue.get_nowait()
+    assert sent["station"] is True and [t["id"] for t in sent["tracks"]] == ["soundcloud:tracks:1", "soundcloud:tracks:41", "soundcloud:tracks:42"]
+    assert _lookups(fake) == []
+
+
+def test_a_search_cast_to_a_screen_is_rebuilt_from_its_words(on, fake):
+    screen_id, _ = _pair(on)
+    queue = _hub(on).listen(screen_id)
+    r = on.post(f"/api/media/screens/{screen_id}/command",
+                json={"action": "play_soundcloud", "key": "search:some song", "track": "soundcloud:tracks:21"})
+    assert r.status_code == 200, r.text
+    sent = queue.get_nowait()
+    assert sent["station"] is False and [t["id"] for t in sent["tracks"]] == ["soundcloud:tracks:21"]
+    assert fake.params["/tracks"]["q"] == "some song"
+    for bad in ("related:../../me", "related:soundcloud:users:1", "search:", "search:   ", "search:" + "x" * 101):
+        assert on.post(f"/api/media/screens/{screen_id}/command", json={"action": "play_soundcloud", "key": bad}).status_code == 422, bad
 
 
 def test_what_a_screen_reports_about_soundcloud_isnt_written_down(on, conn, fake):

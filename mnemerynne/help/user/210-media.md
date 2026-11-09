@@ -59,6 +59,8 @@ You only see what you may open in that folder on the share. Who may open it is s
 - The first time, type the name after `soundcloud.com/` or paste the profile's address. **Change profile** switches to another. It's saved for you, and it's your own: other people pick theirs.
 - Press **Play** or **Shuffle**, or choose a track. It plays in the bar at the bottom while you keep browsing, like your music.
 - **Load more** at the bottom of a long list brings the next tracks. **↗** opens a track on SoundCloud.
+- **Search SoundCloud** at the top finds **Tracks**, **Playlists** and **Profiles**, and works before you've picked a profile. Opening a profile from the results doesn't change the one saved for you. A TV's remote can't type, so search on your phone with **Play on** set to the TV.
+- **📻** beside a track starts a station: that track, then ones like it, topping itself up for as long as it plays. On a TV, press right on a track to reach it.
 - With **Play on** set to a TV, it plays there. Speakers can't play SoundCloud.
 - On a TV, the profile is set for that screen, in **Screens** on your phone or in **Kiosk settings**. With none set, it shows the screen owner's.
 

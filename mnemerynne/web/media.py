@@ -668,7 +668,8 @@ def _command(conn: sqlite3.Connection, user, body: Command, settings: Settings) 
             tracks = soundcloud.queue(soundcloud.need_credentials(conn, settings), body.key or "", body.track)
         except soundcloud.SoundCloudError as exc:
             raise HTTPException(exc.status, str(exc)) from None
-        return {"action": "play_soundcloud", "tracks": tracks, "index": 0, "shuffle": body.shuffle}
+        return {"action": "play_soundcloud", "tracks": tracks, "index": 0, "shuffle": body.shuffle,
+                "station": (body.key or "").startswith("related:")}   # a station: the screen tops it up as it plays
     if body.action in ("calibrate", "text_size"):
         steps = _CALIBRATE_STEPS if body.action == "calibrate" else _TEXT_SIZE_STEPS
         if body.step is not None and body.step not in steps:

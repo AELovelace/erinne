@@ -23,6 +23,7 @@ from mnemerynne.web.media import _castable, _media_on, _screen, media_user, scre
 router = APIRouter(dependencies=[Depends(_media_on)])
 
 Tab = Literal["tracks", "albums", "playlists", "likes", "liked_sets", "reposts"]
+SearchKind = Literal["tracks", "playlists", "users"]
 
 
 def _refused(exc: soundcloud.SoundCloudError) -> HTTPException:
@@ -80,13 +81,51 @@ def save_profile(body: ProfileBody, user=Depends(api_user), conn: sqlite3.Connec
 
 @router.get("/api/media/soundcloud/list/{tab}")
 def list_tab(tab: Tab, request: Request, offset: int = Query(0, ge=0, le=soundcloud.MAX_ITEMS), screen: bool = False,
-             user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
-    name = _which(request, conn, user, screen)[0]
-    if not name:
+             account: str | None = Query(None, max_length=100), user=Depends(media_user),
+             conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
+    """A tab of the profile this browser shows, or of `account`, a profile opened from search."""
+    if account is not None and not soundcloud.USER_URN.fullmatch(account):    # goes into an API path
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    name = "" if account is not None else _which(request, conn, user, screen)[0]
+    if account is None and not name:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "No SoundCloud profile is set here yet.")
     try:
         creds = soundcloud.need_credentials(conn, settings)
-        return soundcloud.listing(creds, soundcloud.profile(creds, name)["urn"], tab, offset)
+        return soundcloud.listing(creds, account or soundcloud.profile(creds, name)["urn"], tab, offset)
+    except soundcloud.SoundCloudError as exc:
+        raise _refused(exc) from None
+
+
+@router.get("/api/media/soundcloud/search/{kind}")
+def search(kind: SearchKind, q: str = Query("", max_length=300), offset: int = Query(0, ge=0, le=soundcloud.MAX_ITEMS),
+           user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
+    """Tracks, playlists or profiles matching what someone typed; needs no saved profile."""
+    try:
+        return soundcloud.search(soundcloud.need_credentials(conn, settings), kind, q, offset)
+    except soundcloud.SoundCloudError as exc:
+        raise _refused(exc) from None
+
+
+@router.get("/api/media/soundcloud/user/{urn}")
+def get_user(urn: str, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db),
+             settings: Settings = Depends(get_settings)):
+    """The name and link of a profile opened from search."""
+    if not soundcloud.USER_URN.fullmatch(urn):                 # goes into an API path
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    try:
+        return soundcloud.person(soundcloud.need_credentials(conn, settings), urn)
+    except soundcloud.SoundCloudError as exc:
+        raise _refused(exc) from None
+
+
+@router.get("/api/media/soundcloud/station/{urn}")
+def get_station(urn: str, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db),
+                settings: Settings = Depends(get_settings)):
+    """Tracks related to one track: where a station starts, and how it tops itself up as it plays."""
+    if not soundcloud.TRACK_URN.fullmatch(urn):                # goes into an API path
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    try:
+        return soundcloud.related(soundcloud.need_credentials(conn, settings), urn)
     except soundcloud.SoundCloudError as exc:
         raise _refused(exc) from None
 
@@ -104,6 +143,7 @@ def get_set(urn: str, user=Depends(media_user), conn: sqlite3.Connection = Depen
 
 class StreamBody(BaseModel):
     id: str = Field(..., max_length=100, pattern=soundcloud.TRACK_URN.pattern)
+    fresh: bool = False                                  # the last link failed in the browser: don't hand it back
 
 
 @router.post("/api/media/soundcloud/stream")
@@ -111,7 +151,7 @@ def track_stream(body: StreamBody, user=Depends(media_user), conn: sqlite3.Conne
                  settings: Settings = Depends(get_settings)):
     """Where a track plays from. Only asked as it starts, since SoundCloud limits these per day."""
     try:
-        return soundcloud.stream(soundcloud.need_credentials(conn, settings), body.id)
+        return soundcloud.stream(soundcloud.need_credentials(conn, settings), body.id, body.fresh)
     except soundcloud.SoundCloudError as exc:
         raise _refused(exc) from None
 

@@ -248,6 +248,8 @@ html .mc-viewer-nav { position: absolute; top: 50%; transform: translateY(-50%);
 .mc-sc-row .mc-track { flex: 1 1 auto; min-width: 0; }
 .mc-sc-out { color: var(--muted); text-decoration: none; padding: .4rem .6rem; }
 .mc-sc-out:hover { color: var(--rose); }
+html .mc-sc-station { flex: none; background: none; border: 0; box-shadow: none; color: var(--muted); padding: .4rem .6rem; font-size: 1rem; cursor: pointer; }
+html .mc-sc-station:hover, html .mc-sc-station:focus-visible { background: var(--petal-soft); box-shadow: inset 0 0 0 2px var(--rose); }
 .mc-sc-more { margin: 1rem 0; }
 .mc-sc-form { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; max-width: 34rem; margin: 1rem 0; }
 .mc-sc-form input { flex: 1 1 14rem; min-width: 0; }
