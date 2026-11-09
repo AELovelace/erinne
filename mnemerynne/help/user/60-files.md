@@ -13,6 +13,8 @@ Files is a full file manager for your **File box** and every **library** you can
 
 Click to select, Ctrl-click to add, Shift-click for a range, Ctrl-A for all, Escape to clear. Right-click opens a menu with the same actions as the toolbar. Double-click opens a folder or a file.
 
+**Select all** on the toolbar ticks everything listed here, on a phone too; once everything is ticked it reads **Select none**. Right-clicking an empty part of the list offers it as well.
+
 ## Uploading
 
 - **Upload ▾ → Files…** or **Folder…**: a folder upload keeps its subfolders.
@@ -30,7 +32,7 @@ You can upload only where you can change files: your File box, and libraries or 
 | **New folder** | A folder here. |
 | **Open** | Preview the file in a new tab, or open the folder. |
 | **Edit** | Text and Markdown files you can change: the browser editor ([The organisation wiki](wiki.md#the-editor)). |
-| **Download** | The original file(s). |
+| **Download** | One file downloads as it is. Several files, or a folder, come down as **one zip** with the folders inside kept as they are. See [Downloading folders and many files](#downloading-folders-and-many-files). |
 | **Rename** | Rename a file or folder (a file keeps its extension). Names must suit Windows too: no `\ / : * ? " < > \|`, no trailing dot or space. |
 | **Move to…** / **Copy to…** | Pick a destination in any location you can write to. A copy of a file keeps its search index. |
 | **Delete** | To the [recycle bin](recycle-bin.md). |
@@ -39,6 +41,18 @@ You can upload only where you can change files: your File box, and libraries or 
 | **Restore**, **Delete forever**, **Empty bin** | In a recycle bin. |
 
 Actions you can't use here are greyed out.
+
+## Downloading folders and many files
+
+Select a folder, several files, or everything (**Select all**), then **Download** (or right-click → **Download as zip**). A folder's details (ⓘ) have **Download as zip** too, and right-clicking an empty part of the list offers **Download everything here as zip**.
+
+- The zip is named after the folder, or the folder the items are in. A message says how many files it holds and how big it is.
+- It starts at once: the server makes the zip while it sends it, so a big folder doesn't make you wait first. The browser shows how much has arrived, but not the total, because that is only known at the end.
+- Only what you may open goes in: folders you can't see, files in folders you may only pass through, and anything in the recycle bin are left out.
+- Pictures, films, PDFs and Office files go in as they are, since they don't shrink. Text files are compressed.
+- If a file can't be read while the zip is made (say it was moved on the share that moment), the zip has a **Not included.txt** naming it.
+- Up to 20,000 files at a time. For more, download a few folders at a time.
+- The download link works for an hour, for you only. If a download stops halfway, download it again from Files.
 
 ## Searching file names
 

@@ -21,7 +21,9 @@
       <button type="button" class="tool fm-desk" data-act="open" data-mode="browse search" data-needs="one">Open</button>
       <button type="button" class="tool fm-desk" data-act="edit" data-mode="browse search" data-needs="one editable"
               title="Edit a text or Markdown file in the browser">Edit</button>
-      <button type="button" class="tool fm-desk" data-act="download" data-mode="browse search" data-needs="files">Download</button>
+      {#- One file downloads as it is; several, or a folder, come down as one zip (downloads.py). -#}
+      <button type="button" class="tool fm-desk" data-act="download" data-mode="browse search" data-needs="some"
+              title="One file downloads as it is; several files or a folder come as one zip">Download</button>
       <button type="button" class="tool fm-desk" data-act="rename" data-mode="browse search" data-needs="one write">Rename</button>
       <button type="button" class="tool fm-desk" data-act="move" data-mode="browse search" data-needs="some write">Move to…</button>
       <button type="button" class="tool fm-desk" data-act="copy" data-mode="browse search" data-needs="some">Copy to…</button>
@@ -35,6 +37,9 @@
       {#- Phones (erynne.css .fm-phone): Select turns taps into ticks; Actions opens the menu for what's ticked. -#}
       <button type="button" class="tool fm-phone" id="btn-select" aria-pressed="false">Select</button>
       <button type="button" class="tool fm-phone" id="btn-actions" aria-haspopup="menu">Actions ▾</button>
+      {#- On every screen: ticks everything listed here (Ctrl+A with a keyboard), or clears it again. -#}
+      <button type="button" class="tool" id="btn-select-all" data-act="select-all" data-mode="browse search trash"
+              title="Select everything here (Ctrl+A)">Select all</button>
       <span class="grow"></span>
       <input type="search" id="fm-search" placeholder="Search file names" aria-label="Search file names" autocomplete="off">
       <select id="fm-sort" aria-label="Sort by">

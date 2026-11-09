@@ -22,6 +22,15 @@ In a share library people see exactly the folders their **linked domain account*
 
 The service user `mnemerynne` must be able to read and write everything; in Windows' Security tab it shows as *Unix User\mnemerynne*. Keep it (Modify) on every folder, or Mnemerynne can't see or change that folder.
 
+## Downloading folders as a zip
+
+On the Files page, people can download a folder, several files, or everything in a place as one zip (in any library, not only share ones). It follows the same rules as browsing: only folders they may see, files only from folders they may read, nothing from the bin.
+- **No cache:** the zip is made while it is sent, so it needs no disk or memory however big it is. It does read every file from the share, though, so a large zip is a large share read.
+- **Compression:** only text-like files are compressed; pictures, films, PDFs and Office files go in as they are, to spare the CPU.
+- **Limits:** at most 20,000 files per zip (`downloads.MAX_FILES`). A download link works for an hour and only for the person who asked for it.
+- **Log:** each zip is logged by the web service (`zip download: <name>, <files>, <bytes>, by <user>`).
+- **Behind nginx:** the response carries `X-Accel-Buffering: no`, so nginx passes it straight on instead of spooling it to disk first. Caddy streams it as it is.
+
 ## Setting it up
 
 ```sh

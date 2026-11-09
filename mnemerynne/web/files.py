@@ -2,22 +2,26 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from html import escape
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from itsdangerous import BadData, URLSafeTimedSerializer
 from pydantic import BaseModel, Field
 
-from mnemerynne import api_tokens, comments, editing, fs, jobs, permissions, share
+from mnemerynne import api_tokens, comments, downloads, editing, fs, jobs, permissions, share
 from mnemerynne.config import Settings
 from mnemerynne.ingest import markdown, store
 from mnemerynne.media import screens as media_screens
 from mnemerynne.web.deps import api_user, get_db, get_settings, is_admin, page_user
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 # The Markdown view renders user-supplied content: no scripts, no remote
 # resources, no framing by other sites.
@@ -695,3 +699,77 @@ def download_raw(file_id: int, user=Depends(page_user), conn: sqlite3.Connection
     return FileResponse(_blob_file(settings, row, prefer_ocr=False, conn=conn), media_type=media,
                         filename=row["display_name"], content_disposition_type="attachment",
                         headers={"X-Content-Type-Options": "nosniff"})
+
+
+# ------------------------------------------------------------ zip downloads
+# Several things at once come down as one zip (downloads.py). The page asks first, so it can say what's
+# coming and show a refusal as a message; the answer's link carries the choice, signed, for a while.
+ZIP_LINK_SECONDS = 60 * 60          # long enough for a download manager to try again, short enough to forget
+_ZIP_SALT = "files-zip-v1"
+
+
+class Place(BaseModel):
+    collection_id: int
+    folder_id: int | None = None
+
+
+class ZipRequest(BaseModel):
+    items: list[ItemRef] = Field(default_factory=list, max_length=1000)   # the chosen files and folders
+    place: Place | None = None                                            # or: everything in this place
+
+
+def _zip_signer(settings: Settings) -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(settings.secret_key, salt=_ZIP_SALT)
+
+
+def _zip_plan(conn: sqlite3.Connection, user, items: list[fs.Item], place: tuple[int, int | None] | None):
+    """downloads.plan() with this person's access; refusals become HTTP errors."""
+    access = fs.Access.of(conn, user["id"])
+    if place is not None and place[0] not in access.reaches:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Folder not found")
+    found = _fs_errors(lambda: downloads.plan(conn, access, items, place))
+    if not found.entries:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "There's nothing here you can download.")
+    return found
+
+
+@router.post("/api/downloads")
+def zip_request(body: ZipRequest, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db),
+                settings: Settings = Depends(get_settings)):
+    """What a zip of the chosen items (or everything in a place) would hold, and the link that downloads it."""
+    if not body.items and body.place is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Choose what to download.")
+    items = [fs.Item(i.type, i.id) for i in body.items]
+    place = (body.place.collection_id, body.place.folder_id) if body.place else None
+    found = _zip_plan(conn, user, items, place)
+    # Compact and signed: "f12,d3" (file 12, folder 3), or the place; the user it's for, so it's no use to others.
+    token = _zip_signer(settings).dumps({"u": user["id"], "p": list(place) if place else None,
+                                         "i": ",".join(("f" if i.type == "file" else "d") + str(i.id) for i in items)})
+    return {**found.json(), "url": f"/files/zip/{token}"}
+
+
+@router.get("/files/zip/{token}")
+def zip_download(token: str, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db),
+                 settings: Settings = Depends(get_settings)):
+    """The zip itself, sent while it's made. What goes in is worked out again now, with the access the
+    person has now; the link only remembers what was chosen."""
+    try:
+        data = _zip_signer(settings).loads(token, max_age=ZIP_LINK_SECONDS)
+    except BadData:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "This download link has expired. Download again from Files.") from None
+    if data.get("u") != user["id"]:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "This download link has expired. Download again from Files.")
+    items = [fs.Item("file" if part[0] == "f" else "folder", int(part[1:]))
+             for part in (data.get("i") or "").split(",") if part]
+    place = tuple(data["p"]) if data.get("p") else None
+    found = _zip_plan(conn, user, items, place)
+    paths = downloads.source_paths(conn, settings, found)   # the database's part, done before sending starts
+    log.info("zip download: %s, %d files, %d bytes, by %s", found.name, found.files, found.bytes, user["username"])
+    name = found.name + ".zip"
+    ascii_name = name.encode("ascii", "replace").decode().replace("?", "_").replace('"', "_")
+    return StreamingResponse(
+        downloads.stream(found, paths), media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}",
+                 "X-Content-Type-Options": "nosniff",
+                 "X-Accel-Buffering": "no",          # nginx: pass it on as it comes, don't spool it to disk first
+                 "Cache-Control": "no-store"})

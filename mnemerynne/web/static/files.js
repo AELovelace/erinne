@@ -643,6 +643,10 @@
     document.querySelectorAll("[data-view]").forEach(function (b) {
       b.setAttribute("aria-pressed", String(b.dataset.view === state.view));
     });
+    const all = $("btn-select-all");                       // Select all, or Select none once everything is ticked
+    const everything = state.items.length > 0 && items.length === state.items.length;
+    all.textContent = everything ? "Select none" : "Select all";
+    all.disabled = state.items.length === 0;
     $("btn-info").setAttribute("aria-pressed", String(state.info));
     const sel = $("btn-select");
     sel.setAttribute("aria-pressed", String(state.selecting));
@@ -662,6 +666,37 @@
 
   function refs(items) { return items.map(function (i) { return { type: i.type, id: i.id }; }); }
 
+  /* Tick everything listed here, or untick it all when it's already all ticked. On a touch screen it also
+     starts Select mode, so the next tap ticks instead of opening. */
+  function selectAll() {
+    const everything = state.items.length > 0 && state.selected.size === state.items.length;
+    state.selected = everything ? new Set() : new Set(state.items.map(key));
+    state.anchor = null;
+    if (coarse && !everything && !state.selecting) { state.selecting = true; $("list").classList.add("selecting"); }
+    paintSelection();
+  }
+
+  /* Download: one file as it is; several things, or any folder, as one zip the server makes while it sends
+     it (downloads.py). Everything ticked in a folder asks for the folder's contents, so it isn't held to
+     the 1,000 items one request can name. */
+  async function download(items) {
+    if (!items.length) return;
+    if (items.length === 1 && items[0].type === "file") {
+      const a = el("a"); a.href = items[0].download_url; a.download = ""; document.body.appendChild(a); a.click(); a.remove();
+      return;
+    }
+    const all = state.mode === "browse" && items.length === state.items.length;
+    await downloadZip(all ? { place: { collection_id: state.cid, folder_id: state.fid } } : { items: refs(items) });
+  }
+
+  // Asks the server what the zip will hold (refusals come back as a message), then opens its link.
+  async function downloadZip(body) {
+    const z = await api("POST", "/api/downloads", body);
+    toast("Downloading " + z.name + ": " + z.files + (z.files === 1 ? " file, " : " files, ") + sizeLabel(z.bytes)
+      + (z.missing ? ". " + z.missing + " of the chosen items couldn't be included." : "."));
+    const a = el("a"); a.href = z.url; a.download = z.name; document.body.appendChild(a); a.click(); a.remove();
+  }
+
   async function act(name) {
     const items = selectedItems();
     try {
@@ -671,11 +706,9 @@
         case "new-folder": await newFolder(); break;
         case "open": if (items[0]) openItem(items[0]); break;
         case "edit": if (items[0] && items[0].edit_url) window.open(items[0].edit_url, "_blank"); break;
-        case "download": items.forEach(function (i, n) {
-          setTimeout(function () {
-            const a = el("a"); a.href = i.download_url; a.download = ""; document.body.appendChild(a); a.click(); a.remove();
-          }, n * 300);
-        }); break;
+        case "download": await download(items); break;
+        case "download-here": await downloadZip({ place: { collection_id: state.cid, folder_id: state.fid } }); break;
+        case "select-all": selectAll(); break;
         case "rename": await renameItem(items[0]); break;
         case "move": await moveOrCopy(items, "move"); break;
         case "copy": await moveOrCopy(items, "copy"); break;
@@ -958,7 +991,7 @@
     } else if (items.length) {
       add("Open", "open", items.length === 1);
       if (items.length === 1 && items[0].edit_url) add("Edit", "edit");
-      add("Download", "download", items.every(function (i) { return i.type === "file"; }));
+      add(items.length === 1 && items[0].type === "file" ? "Download" : "Download as zip", "download");
       if (items.length === 1 && items[0].type === "file" && items[0].status === "failed" && write) add("Retry indexing", "retry");
       if (state.mode === "browse" && state.canReembed) add("Re-embed", "reembed");
       menu.appendChild(el("hr"));
@@ -973,6 +1006,9 @@
       add("New folder", "new-folder", state.mode === "browse" && state.canWrite);
       add("Upload files…", "upload-files", state.mode === "browse" && state.canWrite);
       add("Upload a folder…", "upload-folder", state.mode === "browse" && state.canWrite);
+      menu.appendChild(el("hr"));
+      add("Select all", "select-all", state.items.length > 0);
+      if (state.mode === "browse") add("Download everything here as zip", "download-here", state.items.length > 0);
       if (state.mode === "browse" && state.canReembed) {
         menu.appendChild(el("hr"));
         add("Re-embed everything here", "reembed");
@@ -1025,6 +1061,14 @@
       }
       if (item.items !== undefined) addRow(dl, "Contains", item.items + (item.items === 1 ? " item" : " items"));
       if (item.deleted_at) addRow(dl, "Deleted", dateLabel(item.deleted_at) + (item.deleted_by ? " by " + item.deleted_by : ""));
+      if (state.mode !== "trash") {                         // the whole folder, as one zip
+        const actions = el("div", "info-actions");
+        const zip = el("button", "button-like soft", "Download as zip");
+        zip.type = "button";
+        zip.addEventListener("click", function () { download([item]).catch(function (e) { toast(e.message, true); }); });
+        actions.appendChild(zip);
+        pane.appendChild(actions);
+      }
       pane.appendChild(dl);
       return;
     }
