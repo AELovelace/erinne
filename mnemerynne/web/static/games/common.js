@@ -43,6 +43,11 @@
     if (e.origin !== location.origin || e.source !== window.parent) return;
     const data = e.data || {};
     if (data.type === "mnemerynne-game-key" && KEYS[data.key]) act(KEYS[data.key], typeof data.controller === "string" ? data.controller : undefined);
+    if (data.type === "mnemerynne-game-scale" && document.documentElement.classList.contains("tv") &&
+        Number.isFinite(data.scale) && data.scale >= .75 && data.scale <= 3) {
+      document.documentElement.style.setProperty("--ui-scale", String(data.scale)); // Reuse the UI's rem scale, never multiply it twice.
+      window.dispatchEvent(new Event("resize")); // Canvas games redraw at the new CSS size, retaining device-pixel sharpness.
+    }
   });
 
   function colors() { // The theme's tokens (theme-neon.css by default), so the game matches whatever look is on.

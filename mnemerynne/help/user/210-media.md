@@ -71,6 +71,8 @@ You only see what you may open in that folder on the share. Who may open it is s
 - Each drop gets a fresh field of special pegs: **blocks** shove the ball two columns sideways, **bombs** blast it two or three spaces in any direction (each fires once), and **coin pegs** add 1–5 bonus points (once each), even if the landing misses.
 - The ball enters at pin 4, 5, 6 or 7 (marked in cyan) at random.
 
+All built-in games on a paired TV follow **Screens → Text size**, just like the Media UI. Automatic keeps the 1080p size and enlarges games at higher resolutions (1.5× at 2560×1440, 2× at 3840×2160, using the browser's CSS viewport). A saved custom size takes precedence. Changes apply to an open game without restarting it.
+
 ### Lumi Pet
 
 Visit a little glowing fairy cat in **Games → Lumi Pet**. **Left/Right** selects Cuddle, Snack, Play or Nap/Wake gently; **Enter** interacts. You can also tap the activity buttons. **Up** changes the glow colour; **Down** toggles sound. Keyboard Tab reaches individual controls, and Escape/Back returns to Games.

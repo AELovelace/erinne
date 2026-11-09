@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import net from "node:net";
 import { checkLumiPet, checkLumiPetFrame } from "./lumi-pet-browser.mjs";
 import { checkSharedTV } from "./casino-tv-browser.mjs";
+import { checkGameScaling } from "./game-scaling-browser.mjs";
 
 const modulePath = process.env.PUPPETEER_MODULE;
 const { default: puppeteer } = await import(modulePath ? pathToFileURL(modulePath).href : "puppeteer");
@@ -41,7 +42,9 @@ try {
     await page.evaluateOnNewDocument(() => { Object.defineProperty(document, "hidden", { get: () => false }); }); // Both test tabs act like visible TV screens.
   }
   await mkdir("runs/casino-browser", { recursive: true });
-  if (process.env.CASINO_TV_ONLY === "1") { // Focused iteration for controller routing without replaying unrelated casino rounds.
+  if (process.env.GAME_SCALING_ONLY === "1") {
+    await checkGameScaling(alice, bob, base);
+  } else if (process.env.CASINO_TV_ONLY === "1") { // Focused iteration for controller routing without replaying unrelated casino rounds.
     const screen = await alice.evaluate(async () => (await fetch("/api/media/screens", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Shared TV test" }) })).json());
     await alice.goto(base + "/media/screen#games");
     await alice.waitForFunction(async () => (await (await fetch("/api/media/screens")).json()).screens.some(s => s.online));

@@ -1,10 +1,34 @@
 # Built-in games testing
 
+## H.265 playback regression
+
+Run `.venv/Scripts/python.exe -m pytest tests/test_media.py -q -k hevc_sessions -p no:cacheprovider` with ffmpeg/ffprobe and the libx265 encoder installed. This generates a disposable 72-second HEVC/AAC sample and checks both repackaging and software H.264 conversion: a complete playlist, retained segments, and at least 400 decoded frames between 32 and 67 seconds. It checks the server output beyond the initial buffer; it does not establish that a particular TV/browser, source file, network or hardware decoder plays correctly.
+
 ## Sound and subtitle tracks
 
 Run `.venv/Scripts/python.exe -m pytest tests/test_media.py -q -k track -p no:cacheprovider`. The unit tests cover ffprobe track listing (ffmpeg's own `0:s:n` numbers survive skipped teletext), the sound-track choice (pick, then remembered language, then default), and the ffmpeg commands for a picked sound track and for burned-in picture subtitles on each backend. With ffmpeg installed, `test_films_offer_their_sound_and_subtitle_tracks` builds a two-sound-track MP4 with a text subtitle. It checks direct play of the first track, a remuxed session that really carries the second (mono) track, and the WebVTT conversion and its cache.
 
 Not automated: burned-in PGS was checked once by hand. It was a hand-made `.sup` muxed into an MKV and sent through the software burn-in command, with the pixels checked: the box shows from 1 s to 3 s, and a session started at 1.5 s skips the line already on screen, as documented. The player UI was checked once in headless Chrome with a throwaway preview and Puppeteer. It covered the lists, cue alignment in direct and remuxed sessions, the A and C keys, and the remembered languages. On a real TV, check that 🗣 and CC appear, and that the phone remote's 🗣 and 💬 switch tracks.
+
+## Files: Select all and zip downloads
+
+Run `.venv/Scripts/python.exe -m pytest tests/test_zip_downloads.py -q -p no:cacheprovider`. It covers:
+- a folder's zip: structure, empty folders, CRCs, deflated text and stored pictures;
+- several items: shared top level, same names kept apart as "name (2)", zip naming;
+- everything in a place, with nothing from the recycle bin;
+- refusals to other people, tampered links and signed-out requests;
+- a folder that is only on the way down to a granted one (no files of its own);
+- the 20,000-file cap;
+- a file vanishing while zipping (named in `Not included.txt`);
+- zip names that can't climb out of the folder they unzip into.
+
+Not automated: the page was checked once in headless Chrome with a throwaway preview and Puppeteer:
+- **Select all** ↔ **Select none**;
+- Download of everything here and of one folder (right-click → **Download as zip**), with both zips' contents checked;
+- the folder details' **Download as zip**;
+- the 390 px phone layout with no overflow.
+
+On the NAS, download a multi-gigabyte share folder through the public hostname. Check that it starts at once and finishes, and that 7-Zip and Windows' **Extract all** both open it.
 
 ## Game checks
 
@@ -41,3 +65,9 @@ The connected browser runner also checks Lumi's activities, direct Enter after s
 The same browser check also removes the roulette session pointer to verify **Resume on this TV**, then fills slots with eight remotes and checks that all eight player cards fit the TV viewport without scrolling.
 
 Set `CASINO_TV_ONLY=1` when running `node tests/connected-browser.mjs` to run only the shared-TV browser scenarios against the same isolated preview. Omit it for the complete pet/casino/Media browser suite. A failed browser run captures the visible game and its error copy under `runs/casino-browser/failure.png`.
+
+## 1080p and 4K game sizing
+
+Set `GAME_SCALING_ONLY=1` for the isolated browser scaling checks in `tests/game-scaling-browser.mjs`. They open all six games in the actual Media iframe on a paired TV, compare 1920×1080, 2560×1440 and 3840×2160 root fonts and board/control geometry, and resize back to verify no accumulated scaling. They also check saved manual size, live Bigger/Automatic/Cancel through the TV command stream, table preservation, canvas pixel density, horizontal overflow and unchanged unpaired desktop sizing. Screenshots include `slots-1080p.png`, `slots-4k.png`, `lumi-pet-1080p.png` and `lumi-pet-4k.png` in `runs/casino-browser/`.
+
+The shared-TV browser check also verifies eight active slot-player cards at 4K, with a `slots-eight-remotes-4k.png` capture. The Media pytest suite sends the real `Sec-Fetch-Dest: iframe` header to all game routes and checks inherited scale, no duplicated kiosk chrome/underscan, saved settings and unchanged non-game frames. Physically compare 1080p and 4K TVs after release; OS scaling and browser zoom change the CSS viewport that Automatic uses.

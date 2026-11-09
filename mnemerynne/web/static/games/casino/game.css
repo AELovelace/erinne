@@ -1,5 +1,5 @@
 /* One responsive lounge for all four shared tables, using the active app theme. */
-.gm { display: block; max-width: 1600px; margin: auto; }
+.gm { display: block; max-width: 100rem; margin: auto; } /* 1600px at normal size; grows with the TV's root text scale. */
 .casino-heading, .casino-section-head, .casino-table-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .casino-heading { padding: .5rem 0 1rem; }
 .casino-heading .gm-title { margin-bottom: .3rem; }

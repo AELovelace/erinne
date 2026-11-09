@@ -11,3 +11,5 @@ Three-line slots settle once per player per round. Their three line returns are 
 Lumi Pet has no quests, streaks, fail state or currency rewards. Its happy moments are a local keepsake counter, not trusted progress. Cuddles, snacks, star play and rest must stay optional; do not add missed-visit penalties. The digital ASCII neon fireplace is a planned ambient toy, with no objectives or reward hooks.
 
 In shared-TV casino mode, a remote is a separate seat, not a separate account or reward recipient. Signed input receipts prevent duplicate controls; they are not quest events. All players still share one authoritative round, and settlement remains the only potential future reward boundary. Pairing, joining, draft changes and player removal must not award anything.
+
+TV text-size changes and canvas resize/redraw events are presentation-only. They must preserve active rounds, seat identities and pet memories and must never count as interactions, quest progress or rewards.

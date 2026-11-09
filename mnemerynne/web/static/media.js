@@ -702,6 +702,12 @@
       if (gameFrame.contentWindow) gameFrame.contentWindow.postMessage({ type: "mnemerynne-game-key", key: key, controller: controller }, location.origin);
     },
 
+    syncScale: function () { // Frames do not inherit root CSS; send the TV's actual scale after loading, resizing or text-size changes.
+      if (!this.isOpen() || !document.documentElement.classList.contains("tv") || !gameFrame.contentWindow) return;
+      const scale = Number(getComputedStyle(document.documentElement).getPropertyValue("--ui-scale")) || 1;
+      gameFrame.contentWindow.postMessage({ type: "mnemerynne-game-scale", scale: scale }, location.origin);
+    },
+
     full: function () {
       const box = $("mc-game");
       if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
@@ -717,6 +723,8 @@
     },
   };
   $("mc-game-back").addEventListener("click", function () { games.close(); });
+  gameFrame.addEventListener("load", function () { games.syncScale(); });
+  window.addEventListener("resize", function () { games.syncScale(); });
   $("mc-game-full").addEventListener("click", function () { games.full(); });
   $("mc-game-tab").addEventListener("click", function () { games.tab(); });
   window.addEventListener("message", function (e) {
@@ -2441,6 +2449,7 @@
         root.style.setProperty("--ui-scale", String(this.scale));
       }
       if (this.box) $("mc-text-values").textContent = this.label();
+      games.syncScale(); // Preview a text-size adjustment inside an already-open game without resetting its round.
     },
 
     adjust: function (by) {

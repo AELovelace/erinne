@@ -1,5 +1,5 @@
 /* Lumi's room fits a TV, keyboard and narrow touchscreen; the character is native vector art. */
-.gm[data-game="lumi-pet"] { grid-template-columns: minmax(12rem, .85fr) minmax(0, 1.65fr) minmax(14rem, 1fr); max-width: 1800px; margin: auto; }
+.gm[data-game="lumi-pet"] { grid-template-columns: minmax(12rem, .85fr) minmax(0, 1.65fr) minmax(14rem, 1fr); max-width: 112.5rem; margin: auto; } /* Keep the room proportional to the TV's text scale. */
 .lp-intro, .lp-controls { border-radius: 1rem; }
 .lp-intro p { line-height: 1.65; }
 .lp-intro .lp-lead { font-size: 1.2rem; color: var(--cyan); }
@@ -9,7 +9,7 @@
 .lp-stats dd { margin: .5rem 0 0; }
 #lp-moments { font-size: 2.6rem; color: var(--rose); font-variant-numeric: tabular-nums; }
 .lp-note, .lp-save { color: var(--muted); font-size: .8rem; }
-.lp-room { --pet-glow: #ff8ecb; --pet-body: #fce1f2; --pet-shadow: #b8569f; position: relative; isolation: isolate; min-width: 0; height: min(78vh, 760px); min-height: 430px; overflow: hidden; border: 1px solid var(--line); border-radius: 45% 45% 1.2rem 1.2rem / 20% 20% 1.2rem 1.2rem; background: radial-gradient(ellipse at 50% 65%, #562452 0, #20162e 48%, #0e1226 100%); color: #ffe9f5; box-shadow: inset 0 0 80px #0005, 0 0 60px rgba(var(--glow), .12); }
+.lp-room { --pet-glow: #ff8ecb; --pet-body: #fce1f2; --pet-shadow: #b8569f; position: relative; isolation: isolate; min-width: 0; height: min(78vh, 47.5rem); min-height: 26.875rem; overflow: hidden; border: 1px solid var(--line); border-radius: 45% 45% 1.2rem 1.2rem / 20% 20% 1.2rem 1.2rem; background: radial-gradient(ellipse at 50% 65%, #562452 0, #20162e 48%, #0e1226 100%); color: #ffe9f5; box-shadow: inset 0 0 80px #0005, 0 0 60px rgba(var(--glow), .12); }
 .lp-room[data-palette="lagoon"] { --pet-glow: #70ebea; --pet-body: #d2fcf6; --pet-shadow: #328b9d; }
 .lp-room[data-palette="starlight"] { --pet-glow: #ffdc83; --pet-body: #fff1cd; --pet-shadow: #b98b49; }
 .lp-room-top { position: absolute; top: 8%; left: 0; right: 0; text-align: center; font-size: .65rem; letter-spacing: .18em; line-height: 2; }
@@ -61,11 +61,11 @@
 @keyframes lp-snack { to { transform: rotate(-2deg) scale(1.025); } }
 @media (max-width: 1000px) {
   .gm[data-game="lumi-pet"] { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .lp-room { grid-column: 1 / -1; order: -1; width: min(100%, 600px); justify-self: center; height: 540px; }
+  .lp-room { grid-column: 1 / -1; order: -1; width: min(100%, 37.5rem); justify-self: center; height: 33.75rem; }
 }
 @media (max-width: 560px) {
   .gm[data-game="lumi-pet"] { grid-template-columns: minmax(0, 1fr); }
-  .lp-room { min-height: 360px; height: 420px; }
+  .lp-room { min-height: 22.5rem; height: 26.25rem; }
   .lp-controls { order: 0; }
   .lp-intro { order: 1; }
   .lp-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }

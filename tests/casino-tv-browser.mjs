@@ -90,6 +90,13 @@ export async function checkSharedTV(page, screen, base) {
       await Promise.all(controllers.map(token => press(token, "enter")));
       await frame.waitForFunction(() => [...document.querySelectorAll(".casino-controller")].every(p => p.textContent.includes("update bet")));
       assert.ok(await frame.$$eval(".casino-controller", cards => cards.every(card => card.getBoundingClientRect().bottom <= innerHeight)), "All eight players' betting controls must fit on the TV");
+      await page.setViewport({ width: 3840, height: 2160 });
+      await frame.waitForFunction(() => parseFloat(getComputedStyle(document.documentElement).fontSize) === 32);
+      assert.ok(await frame.$$eval(".casino-controller", cards => cards.every(card => card.getBoundingClientRect().bottom <= innerHeight)), "All eight scaled player cards fit the 4K TV");
+      assert.equal(await frame.$eval(".casino-player p", el => parseFloat(getComputedStyle(el).fontSize)), 27.2);
+      await page.screenshot({ path: "runs/casino-browser/slots-eight-remotes-4k.png", fullPage: true });
+      await page.setViewport({ width: 1440, height: 1000 });
+      await frame.waitForFunction(() => parseFloat(getComputedStyle(document.documentElement).fontSize) === 16);
     }
     await page.screenshot({ path: `runs/casino-browser/${slug}-one-tv.png`, fullPage: true });
     await page.setViewport({ width: 390, height: 844 });

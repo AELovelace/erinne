@@ -15,3 +15,5 @@ Slots label the selected amount as **Chips per line** and show the total for all
 ## Shared-TV casino messages
 
 The TV's guide must explain that the first Enter joins and a later Enter submits a bet. Player cards identify the remote by its paired name and show the draft separately from the submitted stake. Host-only Play errors and invalid wagers belong to that player's card, not another player's controls. Reconnection/expired-input messages ask the player to check the TV before pressing again. A late join is described as watching until the next round. Remote panels continue to show the shared table summary; their individual draft and hand prompts are on the TV. Keep removal copy explicit about forfeiting chips and the distinction between leaving the view and ending the table.
+
+Game dialogue, status copy and player-card prompts follow the TV's existing Text size setting, including inside game frames. Keep this text in scalable DOM/rem styles; 4K sizing must not require separate dialogue strings or truncate the player's betting/hand instructions.

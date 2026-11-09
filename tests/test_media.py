@@ -424,6 +424,39 @@ def test_films_the_browser_cant_play_are_transcoded_into_hls(client, conn, direc
     assert off.status_code == 503 and "turned off" in off.json()["detail"]
 
 
+@needs_ffmpeg
+@pytest.mark.parametrize("mode", ["remux", "transcode"])
+def test_hevc_sessions_produce_playable_video_beyond_initial_buffer(settings, tmp_path, mode):
+    """A long HEVC file must retain segments beyond 30 seconds in both supported playback paths."""
+    source = tmp_path / "hevc.mkv"
+    _ffmpeg("-f", "lavfi", "-i", "testsrc2=size=160x90:rate=12", "-f", "lavfi", "-i", "sine=duration=72",
+            "-t", "72", "-c:v", "libx265", "-preset", "ultrafast",
+            "-x265-params", "pools=2:frame-threads=1:log-level=error:keyint=48", "-c:a", "aac", str(source))
+    manager = transcode.Manager(settings)
+    manager.startup()
+    try:
+        session = manager.start_file(user_id=1, slot="video", file_id=1, path=source, kind="video",
+                                     video_codec="hevc", audio_codec="aac", mode=mode, start=0,
+                                     hwaccel="software", max_transcodes=1)
+        manager.wait_ready(session)
+        assert session.proc.wait(timeout=60) == 0, manager.log_tail(session)
+        playlist = (session.dir / "index.m3u8").read_text()
+        durations = [float(line.split(":")[1].rstrip(",")) for line in playlist.splitlines()
+                     if line.startswith("#EXTINF:")]
+        assert sum(durations) >= 71, playlist  # Verify the complete timeline, not merely a successful startup.
+        assert "#EXT-X-ENDLIST" in playlist
+        segments = [line for line in playlist.splitlines() if line.endswith(".m4s")]
+        assert len(segments) >= 15 and all(manager.file(session, name) for name in segments)
+        decoded = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-xerror",
+                                  "-i", str(session.dir / "index.m3u8"), "-ss", "32", "-t", "35",
+                                  "-progress", "pipe:1", "-f", "null", "-"],
+                                 capture_output=True, text=True, timeout=60, check=True)
+        frames = [int(line.split("=", 1)[1]) for line in decoded.stdout.splitlines() if line.startswith("frame=")]
+        assert frames and frames[-1] >= 400  # Require decoded frames beyond the reported stall, not an empty successful decode.
+    finally:
+        manager.shutdown()  # Stop ffmpeg and its reaper even when an assertion fails.
+
+
 def test_transcoding_slots_are_limited(settings, tmp_path):
     class Running:
         def poll(self):
@@ -923,6 +956,31 @@ def test_a_screen_keeps_its_text_size(client, conn, directory):
     tv.put("/media/screen/ui-scale", json={"scale": 2})
     _pair(client)
     assert conn.execute("SELECT ui_scale FROM media_screens WHERE id = ?", (screen_id,)).fetchone()[0] == 2.0
+
+
+def test_game_frames_inherit_tv_scale_without_kiosk_chrome_or_double_underscan(client, conn, directory):
+    """The real iframe fetch header must retain game text sizing, while ordinary embedded pages remain unchanged."""
+    from mnemerynne import games
+    _login(client, conn, directory)
+    _turn_on(client)
+    screen_id, key = _pair(client)
+    conn.execute("UPDATE media_screens SET is_box=1, safe_x=3, safe_y=2 WHERE id=?", (screen_id,))
+    tv = TestClient(client.app)
+    tv.cookies.set("mnemerynne_screen", key)
+    for game in games.GAMES:
+        page = tv.get("/media/games/" + game.slug, headers={"sec-fetch-dest": "iframe"}).text
+        assert 'class="tv tv-page"' in page and 'data-tv-scale="auto"' in page
+        assert "--safe-x: 0%" in page and "--safe-y: 0%" in page
+        assert 'class="tv-strip"' not in page and "screen_link.js" not in page
+    tv.put("/media/screen/ui-scale", json={"scale": 1.75})
+    page = tv.get("/media/games/roulette", headers={"sec-fetch-dest": "iframe"}).text
+    assert "--ui-scale: 1.75" in page and 'data-tv-scale="auto"' not in page
+    direct = tv.get("/media/games/roulette").text
+    assert 'class="tv tv-box"' in direct and "screen_link.js" in direct and "--safe-x: 3.0%" in direct
+    other_frame = tv.get("/media", headers={"sec-fetch-dest": "iframe"}).text
+    assert 'class="tv' not in other_frame and "--ui-scale:" not in other_frame
+    client.cookies.delete("mnemerynne_screen")  # An ordinary signed-in desktop keeps its original sizing.
+    assert 'class="tv' not in client.get("/media/games/roulette", headers={"sec-fetch-dest": "iframe"}).text
 
 
 def _tv_code(tv):

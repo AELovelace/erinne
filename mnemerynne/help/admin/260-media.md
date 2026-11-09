@@ -62,6 +62,8 @@ Media → Games includes Lumi Pet, a cozy companion using the existing Media per
 
 ## Built-in multiplayer games
 
+Embedded games inherit the paired TV's automatic/manual UI scale without duplicating the kiosk toolbar or screen margins. Casino layout limits and Lumi Pet's room size scale with the text. If a 4K TV still looks small, check **Screens → Text size** for a saved manual override; Automatic uses the CSS viewport after OS/browser scaling.
+
 Media's **Games** tab includes Blackjack, Roulette, Horse Racing and Slot Machines alongside Prism Drop. They use the existing Media group; paired TVs also require their owner's screens-group access. No additional service, API key, currency integration or external game site is needed.
 
 Migration **0061** creates `casino_rooms`. It stores server-authoritative round state and free play-chip balances; normal database backups include it. Rooms survive app restarts, expire after two idle hours, and are removed on the next table creation. At most 100 rooms exist at once, eight seats per room, and three joined rooms per identity per game may be held before creating another. A signed-out paired TV has its own seat; signed-in devices share their account's seat.

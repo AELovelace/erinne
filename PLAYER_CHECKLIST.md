@@ -30,3 +30,7 @@ Ordinary **Create table** keeps the original one-seat-per-account/TV behavior. T
 5. There are no hunger meters, streaks, chores or penalties for being away. Check narrow-screen layout, reduced motion and real TV controls before release.
 
 The digital ASCII neon fireplace is on the design list and is not playable yet.
+
+## TV sizing
+
+Games follow **Screens → Text size**, including while a game is already open. **Automatic** keeps the existing 1080p size, uses 1.5× at 2560×1440 and 2× at 3840×2160 (CSS viewport sizes). A saved manual size takes precedence; choose Automatic to restore resolution-based sizing. Bigger/Smaller and Cancel update the game without restarting the round or pet visit. Check readable stakes/cards on the 4K TV, all eight shared-TV player cards, and unchanged sizing on the 1080p TV. Game frames should have no duplicate TV toolbar or second screen margin.

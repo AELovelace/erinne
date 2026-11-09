@@ -242,14 +242,16 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
 
     def _tv(request: Request, conn: sqlite3.Connection) -> dict | None:
         """This browser is a screen (the TV, by its key): its underscan and text size on every page, and on a
-        screen box the small bar and the remote (base.html). Not inside a frame: the page around it has those."""
-        if request.headers.get("sec-fetch-dest") == "iframe":
+        screen box the small bar and the remote (base.html). A built-in game frame inherits text size only."""
+        framed = request.headers.get("sec-fetch-dest") == "iframe"
+        if framed and not request.url.path.startswith("/media/games/"):
             return None
         screen = media_screens.by_token(conn, request.cookies.get(media_screens.COOKIE))
         if screen is None:
             return None
-        return {"id": screen["id"], "name": screen["name"], "safe_x": screen["safe_x"], "safe_y": screen["safe_y"],
-                "ui_scale": screen["ui_scale"], "box": bool(screen["is_box"])}
+        return {"id": screen["id"], "name": screen["name"],
+                "safe_x": 0 if framed else screen["safe_x"], "safe_y": 0 if framed else screen["safe_y"],
+                "ui_scale": screen["ui_scale"], "box": bool(screen["is_box"]) and not framed, "framed": framed}
 
     def _nav_context(request: Request) -> dict:
         """What every page's top bar needs beyond its own context: the badge on the Messages button
