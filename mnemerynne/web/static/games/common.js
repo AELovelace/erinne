@@ -1,7 +1,8 @@
 /* Shared by the built-in games (mnemerynne/games.py): one set of actions however they arrive, the talk with
    Media's game layer (media.js games), the theme's colours, sound and the best score kept on this device.
 
-   Actions: "left", "right", "up", "down", "enter", "play". Keyboard Play is P or a media Play key; other actions use arrows, WASD, Enter, Space, or
+   Actions: "left", "right", "up", "down", "enter", "play", "prev", "next". Prev and Next are a remote's track buttons, or Page Up / Page Down
+   or [ and ] on a keyboard; a game that has no use for them ignores them. Keyboard Play is P or a media Play key; other actions use arrows, WASD, Enter, Space, or
    from the TV page, which forwards a remote panel's arrows and Enter here as messages ({type:
    "mnemerynne-game-key", key}). Escape or Backspace inside the frame asks the TV page to close the game.
 
@@ -13,7 +14,8 @@
   const framed = window.parent !== window;
   const KEYS = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", Enter: "enter", " ": "enter",
                  a: "left", d: "right", w: "up", s: "down", A: "left", D: "right", W: "up", S: "down",
-                 MediaPlay: "play", MediaPlayPause: "play", p: "play", P: "play" };
+                 MediaPlay: "play", MediaPlayPause: "play", p: "play", P: "play",
+                 MediaTrackNext: "next", MediaTrackPrevious: "prev", PageDown: "next", PageUp: "prev", "]": "next", "[": "prev" };
   let onAction = null, directEnter = null, tabNavigation = false;
 
   function toParent(kind, extra) { // A message to the TV page; nothing when opened on its own.

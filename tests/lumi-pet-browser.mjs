@@ -3,6 +3,13 @@ import assert from "node:assert/strict";
 
 const text = (page, id) => page.$eval(id, el => el.textContent);
 const row = key => `[data-lp-row="${key}"]`;
+async function moveTo(page, key) { // Move the list's cursor onto a row with the keyboard, without choosing it.
+  for (let i = 0; i < 60; i++) {
+    if (await page.$(`[data-lp-row="${key}"][aria-pressed="true"]`)) return;
+    await page.keyboard.press("ArrowDown");
+  }
+  throw new Error("The list's cursor never reached " + key);
+}
 const said = (page, words) => page.waitForFunction(w => document.getElementById("lp-message").textContent.includes(w), {}, words);
 
 export async function checkLumiPet(browser, page, base) { // Exercise real controls, the server save and graceful failures.
@@ -22,7 +29,7 @@ export async function checkLumiPet(browser, page, base) { // Exercise real contr
   assert.equal(await text(page, "#lp-moments"), "8");
 
   await page.focus(row("cuddle")); // Arrow navigation must supersede stale focus on a different control.
-  await page.keyboard.press("ArrowRight"); // Pantry
+  await page.keyboard.press("PageDown"); // Next category: Pantry. (On a remote this is the Next button.)
   await page.waitForSelector(row("apple"));
   await page.keyboard.press("Enter");
   await said(page, "Apple!");
@@ -86,14 +93,26 @@ export async function checkLumiPet(browser, page, base) { // Exercise real contr
   await page.waitForSelector(row("leave"));
   assert.equal(await page.$eval('[data-lp-tab="dungeon"]', el => el.getAttribute("aria-selected")), "true");
   assert.equal(await text(page, "#lp-message"), arrival);
-  await page.click('[data-lp-tab="toys"]'); // On another tab the trip is still under way and Lumi is still in view.
+  assert.equal(await page.$eval(".lp-tabs", el => getComputedStyle(el).display), "none", "Exploring, the right panel is the dungeon's own: the tabs fold away");
+  assert.match(await text(page, "#lp-keys"), /walk.*choose from this list.*drink a potion/);
+  assert.ok(await page.$('[data-lp-row="leave"][aria-pressed="true"]'));
+  await page.keyboard.press("PageDown"); // Next moves the list's cursor here, since the arrows are busy walking.
+  assert.equal(await page.$eval('[data-lp-row="leave"]', el => el.getAttribute("aria-pressed")), "false");
+  await page.keyboard.press("PageUp");
+  assert.ok(await page.$('[data-lp-row="leave"][aria-pressed="true"]'));
+  await page.keyboard.press("p"); // Play/Pause drinks a potion; at full health the server says so.
+  await said(page, "already at full health");
+  await page.click(row("tabs")); // "Look after Lumi": the other tabs, with the trip still under way and Lumi in view.
+  await page.waitForSelector(row("cuddle"));
   assert.equal(await page.$eval("#lp-room", el => el.dataset.dungeon + el.dataset.puzzle), "truefalse");
   assert.ok(await page.$eval(".lp-pet-wrap", el => getComputedStyle(el).opacity === "1"));
+  assert.notEqual(await page.$eval(".lp-tabs", el => getComputedStyle(el).display), "none");
   await page.click('[data-lp-tab="dungeon"]');
   await page.waitForSelector(row("leave"));
-  await page.keyboard.press("ArrowDown"); // From "Go home" to the first way out; Enter takes the step.
-  await page.keyboard.press("Enter");
-  await page.waitForFunction(was => document.getElementById("lp-message").textContent !== was, {}, arrival);
+  const way = await page.$eval('[data-lp-row^="go-"]', el => el.dataset.lpRow.slice(3)); // One arrow, one room.
+  const standing = await text(page, "#lp-message"); // What the room says now; the step is over when it says something else.
+  await page.keyboard.press({ n: "ArrowUp", e: "ArrowRight", s: "ArrowDown", w: "ArrowLeft" }[way]);
+  await page.waitForFunction(was => document.getElementById("lp-message").textContent !== was, {}, standing);
   for (let tries = 0; tries < 20 && (await page.$(row("run"))); tries++) { // A creature lived there: run until she is clear of it.
     await page.click(row("run"));
     await new Promise(done => setTimeout(done, 300));
@@ -123,22 +142,40 @@ export async function checkLumiPet(browser, page, base) { // Exercise real contr
   await said(page, "busy playing");
   await page.screenshot({ path: "runs/casino-browser/lumi-pet.png", fullPage: true });
 
-  await page.click('[data-lp-tab="closet"]'); // Dressing up: highlight to try on, Enter to buy and wear, Enter again to take off.
-  await page.waitForSelector(row("acc-bow"));
+  await page.click('[data-lp-tab="closet"]'); // Dressing up: ▲ ▼ pick a place on her, ◀ ▶ try things on, Enter buys or wears.
+  await page.waitForSelector(row("slot-head"));
   assert.equal(await page.$eval("#lp-acc-front", el => el.children.length), 0);
-  await page.keyboard.press("ArrowDown"); // From the Star Capsule to the bow: she tries it on before it's bought.
+  await moveTo(page, "slot-head");
+  await page.keyboard.press("ArrowRight"); // Nothing → Ribbon bow: she tries it on before it's bought.
   await page.waitForFunction(() => document.querySelector('#lp-acc-front [data-acc="head"]'));
+  assert.equal(await page.$eval('[data-lp-row="slot-head"] small', el => el.textContent), "◀ Ribbon bow ▶ · Common · 60 coins · Enter buys it");
   assert.equal(await text(page, "#lp-coins"), "1,017");
   await page.keyboard.press("Enter");
-  await said(page, "Bought: Head · Ribbon bow");
+  await said(page, "Bought: Ribbon bow");
   assert.equal(await text(page, "#lp-coins"), "957");
-  await page.click(row("acc-crown")); // Capsule-only: it says so, and nothing is spent.
+  for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowRight"); // On to the crown, which only the capsule gives.
+  assert.match(await page.$eval('[data-lp-row="slot-head"] small', el => el.textContent), /Starlight crown ▶ · Legendary · only from the Star Capsule/);
+  await page.keyboard.press("Enter");
   await said(page, "only comes from the Star Capsule");
-  await page.click(row("acc-cape"));
-  await said(page, "Bought: Back · Hero cape");
+  assert.equal(await text(page, "#lp-coins"), "957");
+  await page.keyboard.press("ArrowLeft"); // Left goes back the other way: the witch hat.
+  assert.match(await page.$eval('[data-lp-row="slot-head"] small', el => el.textContent), /Witch hat/);
+  await moveTo(page, "slot-back");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight"); // Backpack, then cape.
+  await page.keyboard.press("Enter");
+  await said(page, "Bought: Hero cape");
   assert.equal(await page.$eval("#lp-acc-back", el => el.children.length), 1);
-  await page.click(row("acc-cape"));
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft"); // Back round to Nothing: Enter takes the cape off.
+  assert.equal(await page.$eval('[data-lp-row="slot-back"] small', el => el.textContent), "◀ Nothing ▶ · Enter takes it off");
+  await page.keyboard.press("Enter");
   await said(page, "takes it off");
+  await page.click(row("slot-head")); // With nothing flipped, Enter (or a tap) opens that place's whole list.
+  await page.waitForSelector(row("acc-bow"));
+  assert.match(await page.$eval('[data-lp-row="acc-bow"] small', el => el.textContent), /wearing it/);
+  await page.click(row("back"));
+  await page.waitForSelector(row("slot-head"));
   await page.screenshot({ path: "runs/casino-browser/lumi-pet-closet.png", fullPage: true });
   await page.click('[data-lp-tab="care"]');
   assert.ok(await page.$('#lp-acc-front [data-acc="head"]'), "She keeps the bow on after leaving the tab");
@@ -153,25 +190,26 @@ export async function checkLumiPet(browser, page, base) { // Exercise real contr
   if (!scenery) assert.equal(await page.$eval('#lp-house [data-spot="view"] .lp-px-3', el => getComputedStyle(el).animationName), "lp-scroll");
   const lumi = await page.$eval("#lp-pet", el => { const box = el.getBoundingClientRect(); return (box.left + box.right) / 2 / innerWidth; });
   assert.ok(Math.abs(lumi - 0.5) < 0.02, "Lumi stands in the middle of the room");
-  await page.click(row("view")); // A bought view is painted into every window; the free one opens them again.
-  await page.waitForSelector(row("view-snow"));
-  await page.keyboard.press("ArrowDown"); await page.keyboard.press("ArrowDown"); await page.keyboard.press("ArrowDown"); // sea, forest, snow: a preview
+  await moveTo(page, "view"); // ◀ ▶ flip a spot's object in the room itself. A view other than the free one is painted into every window.
+  for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowRight"); // sea, forest, snow
   await page.waitForFunction(() => document.querySelectorAll('#lp-house [data-spot="view"] .lp-fall-snow').length === 3);
   assert.equal(await page.$eval('#lp-house [data-spot="view"] .lp-px-3', el => getComputedStyle(el).animationName), "lp-scroll");
-  await page.click(row("back"));
-  await page.waitForSelector(row("rug"));
-  await page.click(row("rug"));
-  await page.waitForSelector(row("rug-moon"));
+  assert.equal(await page.$eval('[data-lp-row="view"] small', el => el.textContent), "◀ Snowy hills ▶ · 300 coins · Enter buys it");
+  for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowLeft"); // Back to what is placed, with nothing bought.
+  assert.match(await page.$eval('[data-lp-row="view"] small', el => el.textContent), /The city outside ▶ · in the room/);
+  await moveTo(page, "rug");
   const plain = await page.$eval('#lp-house [data-spot="rug"]', el => el.innerHTML);
-  await page.keyboard.press("ArrowDown"); // From the placed oval to the moon rug: shown in the room before it's bought.
+  await page.keyboard.press("ArrowRight"); // The moon rug, shown in the room before it's bought.
   await page.waitForFunction(was => document.querySelector('#lp-house [data-spot="rug"]').innerHTML !== was, {}, plain);
   assert.equal(await text(page, "#lp-coins"), "777");
   await page.keyboard.press("Enter");
   await said(page, "Bought and put out: Moon rug");
   assert.equal(await text(page, "#lp-coins"), "677");
-  await page.waitForFunction(() => document.querySelector('[data-lp-row="rug-moon"] small').textContent === "In the room now");
+  await page.waitForFunction(() => document.querySelector('[data-lp-row="rug"] small').textContent === "◀ Moon rug ▶ · in the room");
+  await page.click(row("rug")); // Its whole list, for a mouse or a finger.
+  await page.waitForFunction(() => document.querySelector('[data-lp-row="rug-moon"] small') && document.querySelector('[data-lp-row="rug-moon"] small').textContent === "In the room now");
   await page.click(row("back"));
-  await page.waitForFunction(() => document.querySelector('[data-lp-row="rug"] small').textContent === "Moon rug");
+  await page.waitForSelector(row("rug"));
   await page.click('[data-lp-tab="care"]'); // Leaving the tab keeps what was placed and drops any preview.
   assert.notEqual(await page.$eval('#lp-house [data-spot="rug"]', el => el.innerHTML), plain);
   await page.screenshot({ path: "runs/casino-browser/lumi-pet-house.png", fullPage: true });
@@ -259,40 +297,48 @@ export async function checkLumiPetDoors(browser, page, base) { // Every kind of 
       assert.ok(await tab.$eval("#lp-dungeon", (el, title) => el.textContent.includes(title), made.title), made.name + " shows its panel");
       assert.ok(await tab.$eval(".lp-pet-wrap", el => getComputedStyle(el).opacity === "0"), made.name + ": Lumi steps aside for the panel");
       const before = await tab.$eval("#lp-dungeon", el => el.innerHTML);
-      if (made.name === "crates") { // Arrows push; Enter hands the remote to the list; Undo and Start over work from there.
+      if (made.name === "crates") { // Arrows push; Enter takes a step back; Next reaches the list.
         for (const key of ["ArrowUp", "ArrowLeft", "ArrowRight", "ArrowDown"]) await tab.keyboard.press(key);
         assert.notEqual(await tab.$eval("#lp-dungeon", el => el.innerHTML), before, "Lumi moved on the crate board");
+        const steps = () => tab.$eval('[data-lp-row="play"] small', el => Number(el.textContent.split(" ")[0]));
+        const taken = await steps();
+        assert.ok(taken >= 1 && taken <= 4);
         await tab.keyboard.press("Enter");
+        assert.equal(await steps(), taken - 1, "Enter on the board takes the last step back");
+        await tab.keyboard.press("PageDown");
         await tab.waitForFunction(() => document.getElementById("lp-dungeon").textContent.includes("PAUSED"));
-        assert.match(await tab.$eval('[data-lp-row="play"] small', el => el.textContent), /^[1-4] steps so far/);
-        await tab.click(row("undo"));
         await tab.click(row("reset"));
         await tab.waitForFunction(() => document.querySelector('[data-lp-row="play"] small').textContent.startsWith("0 steps"));
-        await tab.click(row("play"));
+        await tab.keyboard.press("ArrowUp"); // Any arrow goes straight back to the board.
         await tab.waitForFunction(() => document.getElementById("lp-dungeon").textContent.includes("PUSH THE CRATES"));
-      } else if (made.name === "lamps") { // Arrows move the ring, Enter flips lamps; off the bottom edge is the list.
+      } else if (made.name === "lamps") { // Arrows move the ring, Enter flips lamps; Next reaches the list.
         await tab.keyboard.press("ArrowRight");
         await tab.keyboard.press("Enter");
         assert.notEqual(await tab.$eval("#lp-dungeon", el => el.innerHTML), before, "A lamp was pressed");
-        for (let i = 0; i < 3; i++) await tab.keyboard.press("ArrowDown");
-        await tab.waitForFunction(() => document.getElementById("lp-dungeon").textContent.includes("PAUSED"));
         assert.equal(await tab.$eval('[data-lp-row="play"] small', el => el.textContent.slice(0, 9)), "1 presses");
-        await tab.keyboard.press("ArrowUp"); // From the top of the list, back onto the board.
+        for (let i = 0; i < 4; i++) await tab.keyboard.press("ArrowDown"); // The bottom edge is just an edge now.
+        assert.ok(await tab.$eval("#lp-dungeon", el => el.textContent.includes("PUT EVERY LAMP OUT")));
+        await tab.keyboard.press("PageDown");
+        await tab.waitForFunction(() => document.getElementById("lp-dungeon").textContent.includes("PAUSED"));
+        await tab.keyboard.press("ArrowUp");
         await tab.waitForFunction(() => document.getElementById("lp-dungeon").textContent.includes("PUT EVERY LAMP OUT"));
-      } else if (made.name === "runes") { // The code is built from the list.
+      } else if (made.name === "runes") { // The code is built from the list; ▲ ▼ move through it, since there is no board.
         for (const rune of ["sun", "moon", "star"]) await tab.click(row("rune-" + rune));
         await tab.click(row("erase"));
         await tab.click(row("rune-wave"));
         await tab.click(row("rune-leaf"));
         await tab.waitForFunction(() => document.querySelector('[data-lp-row="try"] small').textContent.startsWith("☀ ☾ ≈ ❧"));
-      } else if (made.name === "cards") { // Arrows move over the cards; off the bottom edge is the list.
+        const first = await tab.$eval('[aria-pressed="true"][data-lp-row]', el => el.dataset.lpRow);
+        await tab.keyboard.press("ArrowDown");
+        assert.notEqual(await tab.$eval('[aria-pressed="true"][data-lp-row]', el => el.dataset.lpRow), first);
+      } else if (made.name === "cards") { // Arrows move over the cards; Next reaches the list.
         await tab.keyboard.press("ArrowRight");
         assert.notEqual(await tab.$eval("#lp-dungeon", el => el.innerHTML), before, "The card cursor moved");
-        await tab.keyboard.press("ArrowDown");
-        await tab.keyboard.press("ArrowDown");
+        await tab.keyboard.press("PageDown");
         await tab.waitForFunction(() => document.getElementById("lp-dungeon").textContent.includes("PAUSED"));
       }
-      await tab.click('[data-lp-tab="care"]'); // Another tab: the room and Lumi show, without the panel.
+      assert.equal(await tab.$eval(".lp-tabs", el => getComputedStyle(el).display), "none", made.name + ": the tabs are folded away");
+      await tab.click(row("tabs")); // "Look after Lumi": another tab, where the room and Lumi show without the panel.
       assert.ok(await tab.$eval("#lp-dungeon", (el, title) => !el.textContent.includes(title), made.title), made.name + ": no panel on another tab");
       assert.ok(await tab.$(row("cuddle")));
       await tab.click('[data-lp-tab="dungeon"]');
@@ -315,9 +361,9 @@ export async function checkLumiPetFrame(page) { // Parent-origin remote messages
   });
   const frame = await (await page.waitForSelector("#mc-game-frame")).contentFrame();
   await frame.waitForSelector(row("cuddle"));
-  await page.evaluate(() => { // ▶ to Settings' neighbour and back would do; ◀ wraps straight to Settings, ▼ ▼ passes Storyteller to Sound.
+  await page.evaluate(() => { // ▶ to Settings' neighbour and back would do; Previous wraps straight to Settings, ▼ ▼ passes Storyteller to Sound.
     const target = document.getElementById("mc-game-frame").contentWindow;
-    for (const key of ["ArrowLeft", "ArrowDown", "ArrowDown"]) target.postMessage({ type: "mnemerynne-game-key", key }, location.origin);
+    for (const key of ["MediaTrackPrevious", "ArrowDown", "ArrowDown"]) target.postMessage({ type: "mnemerynne-game-key", key }, location.origin);
   });
   await page.waitForFunction(() => window.petReport.includes("Settings: Sound"));
   const before = await frame.$eval(row("sound"), el => el.textContent.includes("Sound: on"));

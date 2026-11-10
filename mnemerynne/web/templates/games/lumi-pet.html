@@ -85,5 +85,6 @@
     <button type="button" role="tab" data-lp-tab="settings" aria-selected="false">Settings</button>
   </div>
   <div class="lp-actions" id="lp-list" aria-label="Choices"></div>
-  <p class="gm-keys">◀ ▶ change tab · ▲ ▼ choose<br>Enter does it<br>Escape / Back returns to Games</p>
+  {#- game.js swaps these lines for the dungeon's own controls while Lumi is exploring. -#}
+  <p class="gm-keys" id="lp-keys">⏮ ⏭ change tab · ▲ ▼ choose<br>◀ ▶ flip a row's choices · Enter does it<br>Keyboard: Page Up / Page Down or [ ]<br>Escape / Back returns to Games</p>
 </section>

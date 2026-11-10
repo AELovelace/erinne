@@ -2106,6 +2106,8 @@
       const onBar = document.activeElement && document.activeElement.closest && document.activeElement.closest(".mc-game-bar");
       if (["MediaPlay", "MediaPlayPause", "p", "P"].indexOf(e.key) >= 0) {
         e.preventDefault(); games.key("MediaPlay"); // Play always reaches the open game, even with the bar focused.
+      } else if (["MediaTrackNext", "MediaTrackPrevious", "PageDown", "PageUp", "[", "]"].indexOf(e.key) >= 0 && games.current && games.current.track_keys) {
+        e.preventDefault(); games.key(e.key);   // the game's own previous and next
       } else if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Enter", " "].indexOf(e.key) >= 0 && !onBar) {
         e.preventDefault(); games.key(e.key === " " ? "Enter" : e.key);
       }
@@ -2646,6 +2648,8 @@
         volume.set(cmd.level);
       } else if (a === "mute") {
         volume.toggleMute();
+      } else if ((a === "next" || a === "prev") && games.isOpen() && games.current && games.current.track_keys) {
+        games.key(a === "next" ? "MediaTrackNext" : "MediaTrackPrevious", cmd.controller);   // a game that uses them (Lumi Pet's lists)
       } else if (a === "next" || a === "prev") {
         if (!$("mc-player").hidden && episodes.list.length) {   // a TV episode: the next or previous one
           if (a === "next" && episodes.counting()) episodes.playNext(); else episodes.step(a === "next" ? 1 : -1);

@@ -2,7 +2,7 @@
    what the person chose (which snack, which toy) and draws what the server answers. Her needs run down while away. */
 (function () {
   "use strict";
-  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt;
+  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Pk = window.LumiPetPicker, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt;
   const $ = function (id) { return document.getElementById(id); };
   const room = $("lp-room"), list = $("lp-list"), houseArt = $("lp-house"), tabButtons = Array.from(document.querySelectorAll("[data-lp-tab]"));
   const API = "/api/media/games/lumi-pet/", OLD_SAVE = "mnemerynne-game:lumi-pet:companion";
@@ -10,6 +10,8 @@
   const MEMORIES = { cuddle: "A warm little cuddle", snack: "A shared snack", play: "Playtime together", rest: "A quiet moment together" };
   const NEEDS = { hunger: "Tummy rumbling. A snack would help.", energy: "So sleepy. A nap would help.", joy: "A little lonely. Stay and play?" };
   const BUSY = { nap: "napping", play: "playing" };
+  const KEYS_HOME = "⏮ ⏭ change tab · ▲ ▼ choose<br>◀ ▶ flip a row's choices · Enter does it<br>Keyboard: Page Up / Page Down or [ ]<br>Escape / Back returns to Games";
+  const KEYS_DUNGEON = "▲ ▼ ◀ ▶ walk, or work a puzzle<br>⏮ ⏭ choose from this list · Enter does it<br>⏯ drink a potion<br>Keyboard: Page Up / Page Down, P";
   const CUDDLES = ["Lumi leans into your hand. A tiny purr, just for you.", "Soft wings wrap around your fingers. We can stay like this a while."];
   let snap = null, offset = 0, tab = 0, picks = TABS.map(function () { return 0; }), busy = false, visited = false;
   let battleView = null, finished = null, lastFoe = ""; // Which Battle list is open, the fight that just ended, and the enemy last drawn.
@@ -17,7 +19,9 @@
   // The dungeon: the puzzle being worked on here, whether arrows drive it ("board") or the list, the finished trip
   // already read, a row waiting for a second press, and what the dungeon scene last drew.
   let play = {}, focus = "list", dismissedRun = null, pendingConfirm = null, lastDungeon = "";
-  let homeSpot = null, lastHouse = ""; // The spot being decorated (null: the list of spots), and what the room last drew.
+  // Home and Closet: the spot or slot whose full list is open (null: one row each), the choice ◀ ▶ has flipped each
+  // row to, and what the room last drew.
+  let opened = { home: null, closet: null }, flip = {}, lastHouse = "";
   let effectUntil = 0, lastReport = "", lastList = "", lastDone = null, timer = null, polled = 0, reminders = "unsupported";
 
   function serverNow() { return Date.now() + offset; } // The server's clock, so timers agree across devices.
@@ -60,30 +64,11 @@
       return { key: toy.id, icon: toy.icon, name: toy.name, send: { action: "play", item: toy.id },
         hint: toy.minutes + " min · " + R.signed(toy.joy, "joy") + " · " + R.signed(toy.energy, "energy") };
     });
-    if (name === "closet") { // What she wears: the Star Capsule first, then every accessory, tried on as you move.
-      const capsule = snap.closet.capsule;
-      return [{ key: "capsule", icon: "🔮", name: "Star Capsule", hint: capsule.price + " coins · something new to wear, never a repeat", send: { action: "capsule" } }]
-        .concat(snap.closet.slots.reduce(function (all, slot) {
-          return all.concat(slot.items.map(function (piece) {
-            const owned = pet.closet.includes(piece.id), worn = pet.outfit[slot.id] === piece.id;
-            const row = { key: piece.id, icon: worn ? "✓" : owned ? "○" : piece.price ? "✧" : "🔒", name: slot.name + " · " + piece.name, wear: [slot.id, piece.id],
-              hint: piece.rarity[0].toUpperCase() + piece.rarity.slice(1) + " · " + (worn ? "wearing it · Enter takes it off" : owned ? "hers · Enter puts it on" : piece.price ? piece.price + " coins" : "only from the Star Capsule") };
-            if (owned || piece.price) row.send = { action: "wear", item: piece.id }; else row.note = piece.name + " only comes from the Star Capsule.";
-            return row;
-          }));
-        }, []));
-    }
-    if (name === "home") { // Decorating: first the spots, then (inside one) its objects, previewed as you move.
-      const spot = snap.house.spots.find(function (entry) { return entry.id === homeSpot; });
-      if (!spot) return snap.house.spots.map(function (entry) {
-        const now = entry.items.find(function (piece) { return piece.id === pet.house[entry.id]; });
-        return { key: entry.id, icon: "⌂", name: entry.name, hint: now ? now.name : "", local: function () { openSpot(entry); } };
-      });
-      return [{ key: "back", icon: "‹", name: "Back to the house", hint: spot.name, local: function () { homeSpot = null; picks[tab] = Math.max(0, snap.house.spots.indexOf(spot)); } }].concat(spot.items.map(function (piece) {
-        const owned = !piece.price || pet.decor.includes(piece.id), here = pet.house[spot.id] === piece.id;
-        return { key: piece.id, icon: here ? "✓" : owned ? "○" : "✧", name: piece.name, preview: piece.id, send: here ? null : { action: "decorate", item: piece.id },
-          hint: here ? "In the room now" : owned ? "Yours · Enter puts it out" : piece.price + " coins · Enter buys it" };
-      }));
+    if (name === "closet" || name === "home") { // One row per place on Lumi, or per spot in the house; ◀ ▶ flip its choices (picker-ui.js).
+      const ctx = { snap: snap, open: opened[name], flip: flip, go: function (change) {
+        if ("open" in change) { opened[name] = change.open; picks[tab] = change.open ? 1 : (change.pick || 0); }
+      } };
+      return name === "home" ? Pk.homeRows(ctx) : Pk.closetRows(ctx);
     }
     if (name === "battle") return battleRows();
     if (name === "dungeon") { // A dungeon fight and its result use the Battle lists; everything else is the dungeon's own.
@@ -96,13 +81,18 @@
         hint: thing.price + " coins" + (toy ? " · a toy to keep" : held ? " · have " + held : "") };
     });
     return [ // settings
-      { key: "glow", icon: "✦", name: "Glow: " + pet.glow[0].toUpperCase() + pet.glow.slice(1), hint: "Her colour, and her element in a fight: " + snap.battle.rules.glows[pet.glow], send: { action: "glow", glow: R.nextPalette(pet.glow) } },
+      { key: "glow", icon: "✦", name: "Glow: " + pet.glow[0].toUpperCase() + pet.glow.slice(1), hint: "◀ ▶ her colour, and her element in a fight: " + snap.battle.rules.glows[pet.glow], send: { action: "glow", glow: R.nextPalette(pet.glow) },
+        turn: function (by) { submit({ key: "glow", send: { action: "glow", glow: Pk.turn(R.PALETTES, pet.glow, by) } }); } },
       { key: "storyteller", icon: "✎", name: "Storyteller: " + (pet.storyteller === "live" ? "Live" : "Library"), hint: "Who writes the dungeon's lines: the game's library, or a model as you go", send: { action: "storyteller" } },
       { key: "sound", icon: "♪", name: "Sound: " + (G.sound.isOn() ? "on" : "off"), hint: "Little chimes", local: function () { G.sound.toggle(); } },
     ].concat(reminders === "unsupported" ? [] : [ // Phones and computers only: a TV has nobody's pocket to buzz.
       { key: "reminders", icon: "✉", name: "Reminders: " + reminders, local: toggleReminders,
         hint: reminders === "blocked" ? "Allow notifications for this site in your browser first" : "A nudge on this device when Lumi needs you" },
     ]);
+  }
+
+  function changeTab(to) { // Open a category afresh: its sub-lists closed, nothing half-chosen.
+    tab = to; opened = { home: null, closet: null }; flip = {}; battleView = null; pendingConfirm = null;
   }
 
   function battleRows() { // The Battle tab's lists (battle-ui.js); also used by the Dungeon tab while a fight is on.
@@ -128,6 +118,7 @@
     const lock = exploring() && exploring().facing ? exploring().facing.lock : null;
     if (change.focus) focus = change.focus;
     if (change.dismiss) { dismissedRun = change.dismiss; picks[tab] = 0; }
+    if (change.tabs) { changeTab(0); picks[tab] = 0; } // Off to the other tabs for a moment; the trip waits.
     if (change.undo) play.board = Dg.sokobanUndo(play.board);
     if (change.reset && lock) play.board = lock.kind === "sokoban" ? Dg.sokobanStart(lock.rows) : Dg.lightsStart(lock);
     if (change.rune && play.guess.length < lock.slots) play.guess = play.guess.concat([change.rune]);
@@ -135,32 +126,48 @@
     lastDungeon = "";
   }
 
-  function boardKey(action) { // Arrows and Enter while a puzzle or the cards have the remote. True if the key was used.
+  function boardKey(action) { // An arrow or Enter on a puzzle board or the cards.
     const run = exploring(), lock = run.facing ? run.facing.lock : null;
-    if (lock && lock.kind === "sokoban") {
-      if (action === "enter") { focus = "list"; return true; }
-      play.board = Dg.sokobanMove(play.board, { up: "u", down: "d", left: "l", right: "r" }[action]);
+    if (lock && lock.kind === "sokoban") { // Arrows push; Enter takes the last step back.
+      play.board = action === "enter" ? Dg.sokobanUndo(play.board) : Dg.sokobanMove(play.board, { up: "u", down: "d", left: "l", right: "r" }[action]);
       if (Dg.sokobanSolved(play.board)) submit({ key: "solved", url: "dungeon/act", send: { action: "sokoban", moves: play.board.moves } });
-      return true;
+      return;
     }
     const board = lock ? play.board : null, count = lock ? board.size * board.size : run.game.cards.length, width = lock ? board.size : 4;
     const at = lock ? board.cursor : play.cursor;
-    if (action === "enter") {
+    if (action === "enter") { // Press the lamp, or turn the card, under the cursor.
       if (lock) {
         play.board = Object.assign(Dg.lightsPress(board, at), { cursor: at });
         if (Dg.lightsSolved(play.board)) submit({ key: "solved", url: "dungeon/act", send: { action: "lights", picks: play.board.presses } });
       } else submit({ key: "flip", url: "dungeon/act", send: { action: "flip", picks: [at] } });
-      return true;
+      return;
     }
     const to = Dg.cursorMove(at, { up: "n", down: "s", left: "w", right: "e" }[action], width, count);
-    if (to === null) { if (action === "down") { focus = "list"; picks[tab] = 0; } return true; } // Off the bottom: the list takes over.
+    if (to === null) return; // The edge of the board.
     if (lock) play.board = Object.assign({}, board, { cursor: to }); else play.cursor = to;
-    return true;
+  }
+
+  function walking() { // In the dungeon with the Dungeon tab open and no fight on: the arrows are Lumi's feet.
+    return TABS[tab] === "dungeon" && exploring() && !(snap.fight && snap.fight.status === "active") && !finished;
+  }
+
+  function walk(action) { // One arrow, one room: up is north.
+    const way = { up: "n", right: "e", down: "s", left: "w" }[action], run = exploring();
+    if (run.room.exits.indexOf(way) < 0) { say("There's no way " + Dg.WAYS[way][0] + " from here."); return; }
+    submit({ key: "go-" + way, url: "dungeon/act", send: { action: "move", way: way } });
+  }
+
+  function drinkPotion() { // The Play/Pause button: a potion, in a fight or between rooms.
+    const fight = snap.fight && snap.fight.status === "active" ? snap.fight : null;
+    if (fight) submit({ key: "potion", url: "battle/act", send: { battle: fight.id, turn: fight.turn, action: "potion" } });
+    else if (exploring()) submit({ key: "potion", url: "dungeon/act", send: { action: "potion" } });
   }
 
   function drawDungeon() { // The dungeon scene over the house while she is out, and its line of health and satchel.
     const run = exploring(), art = $("lp-dungeon"), bar = $("lp-dhud");
     room.dataset.dungeon = String(Boolean(run));
+    $("gm").dataset.walking = String(Boolean(snap && walking())); // The dungeon's own, taller right panel (game.css).
+    $("lp-keys").innerHTML = snap && walking() ? KEYS_DUNGEON : KEYS_HOME; // Fixed text from this file.
     const here = TABS[tab] === "dungeon"; // A puzzle's panel covers the room (and Lumi) only while this tab can play it.
     room.dataset.puzzle = String(Boolean(here && run && (run.facing || (run.game && run.game.kind === "match" && !run.room.done))));
     art.style.display = run ? "" : "none"; bar.hidden = !run;
@@ -181,14 +188,9 @@
     }).catch(function () { /* the library line stays */ });
   }
 
-  function openSpot(spot) { // Step into a spot, with its current object selected (row 0 is Back).
-    homeSpot = spot.id;
-    picks[tab] = 1 + Math.max(0, spot.items.findIndex(function (piece) { return piece.id === snap.pet.house[spot.id]; }));
-  }
-
   function drawHouse(preview) { // Draw the room: what the server says is placed, with the highlighted object tried on.
     const house = Object.assign({}, snap.pet.house);
-    if (preview) house[homeSpot] = preview;
+    if (preview) house[preview[0]] = preview[1];
     const scenery = document.querySelector(".parallax"), backdrop = Boolean(scenery) && getComputedStyle(scenery).display !== "none"; // The neon theme's drifting cities.
     const signature = JSON.stringify(house) + backdrop;
     if (signature === lastHouse) return; // Redrawing would restart the window's scrolling, so only when it changed.
@@ -199,7 +201,7 @@
 
   function drawOutfit(preview) { // Dress her: what the server says she wears, with the highlighted accessory tried on.
     const outfit = Object.assign({}, snap.pet.outfit);
-    if (preview) outfit[preview[0]] = preview[1];
+    if (preview && preview[1]) outfit[preview[0]] = preview[1]; else if (preview) delete outfit[preview[0]]; // "Nothing" tries it off.
     const signature = JSON.stringify(outfit);
     if (signature === lastOutfit) return;
     lastOutfit = signature;
@@ -233,8 +235,9 @@
         return button;
       }));
     }
+    const boardHasIt = walking() && focus === "board" && (play.board || play.cursor !== undefined); // Enter would act on the puzzle, not the list.
     Array.from(list.children).forEach(function (button, index) {
-      const chosen = index === picks[tab];
+      const chosen = index === picks[tab] && !boardHasIt;
       if (chosen && button.getAttribute("aria-pressed") !== "true" && list.scrollHeight > list.clientHeight) button.scrollIntoView({ block: "nearest" }); // Long lists follow the remote.
       button.setAttribute("aria-pressed", String(chosen));
     });
@@ -320,6 +323,7 @@
     busy = true;
     G.api(API + (row.url || "act"), row.send).then(function (data) {
       take(data);
+      flip = {}; // What was being tried on is now either bought or put back.
       if (row.url && row.url.indexOf("dungeon") === 0) { // A step in the dungeon: the room's line, and a fight if she walked into one.
         const run = data.dungeon.run;
         lastList = ""; picks[tab] = 0;
@@ -347,9 +351,9 @@
       else if (send.action === "play") { say("Lumi pounces on the " + thing.name.toLowerCase() + ". " + thing.minutes + " minutes of play!"); effect("play", "✧ ✦"); }
       else if (send.action === "nap") { say("Lumi curls up on the cushion. Five minutes of little star dreams."); effect("rest", "z z z"); }
       else if (send.action === "wake") { say("A stretch, a blink, a happy little hello. Lumi settles beside you."); effect("rest", "☀"); }
-      else if (send.action === "decorate") { say(data.said ? "Bought and put out: " + row.name + ". " + data.said.paid + " coins well spent." : row.name + " is out. Lumi approves."); effect("cuddle", "✧"); }
+      else if (send.action === "decorate") { say(data.said ? "Bought and put out: " + row.label + ". " + data.said.paid + " coins well spent." : row.label + " is out. Lumi approves."); effect("cuddle", "✧"); }
       else if (send.action === "capsule") { say("The capsule pops open: " + data.said.name + "! (" + data.said.rarity + ")"); effect("play", "✧ ✦ ✧"); picks[tab] = Math.max(0, rows().findIndex(function (r) { return r.key === data.said.capsule; })); }
-      else if (send.action === "wear") { say(data.said ? "Bought: " + row.name + ". Lumi tries it on at once." : data.pet.outfit[row.wear[0]] === send.item ? "Lumi puts on the " + row.name.split(" · ")[1].toLowerCase() + "." : "Lumi takes it off."); effect("cuddle", "✧"); }
+      else if (send.action === "wear") { say(data.said ? "Bought: " + row.label + ". Lumi tries it on at once." : data.pet.outfit[row.wear[0]] === send.item ? "Lumi puts on the " + row.label.toLowerCase() + "." : "Lumi takes it off."); effect("cuddle", "✧"); }
       else if (send.action === "storyteller") {
         if (data.pet.storyteller !== "live") say("The storyteller is the library: the lines that came with the game.");
         else G.api(API + "dungeon/tale").then(function (found) { say(found.live ? "Live storytelling is on. Each dungeon moment gets a fresh line from " + (found.live === "claude" ? "Claude, with your own key." : "BFGguf.") : "Live storytelling needs your own Claude key (Preferences) or BFGguf. Until then the library tells the story."); }).catch(function () { /* the setting is saved either way */ });
@@ -365,13 +369,35 @@
     }).catch(function (refused) { say(refused.message); }).then(function () { busy = false; render(); });
   }
 
-  G.onAction(function (action) { // Keyboard, TV remote and buttons: ◀ ▶ change tab, ▲ ▼ move through the list, Enter chooses.
+  G.onAction(function (action) { // Keyboard and TV remote. Everywhere: ◀ ▶ change tab, ▲ ▼ or ⏮ ⏭ move through the list, Enter chooses.
+    // In the dungeon the arrows are Lumi's own: they walk her from room to room, or work the puzzle in front of her.
+    // The list is then reached with ⏮ ⏭ (Prev/Next, or Page Up/Down, or [ ]), and ⏯ drinks a potion.
     if (!snap) return;
-    if (TABS[tab] === "dungeon" && focus === "board" && exploring() && !(snap.fight && snap.fight.status === "active") && !finished && !busy) { boardKey(action); render(); return; } // A puzzle has the remote.
-    if (TABS[tab] === "dungeon" && action === "up" && picks[tab] === 0 && play.board && focus === "list" && exploring() && exploring().facing && exploring().facing.lock.kind === "lights") { focus = "board"; render(); return; }
-    if (TABS[tab] === "dungeon" && action === "up" && picks[tab] === 0 && play.cursor !== undefined && focus === "list") { focus = "board"; render(); return; }
-    if (action === "left" || action === "right") { tab = (tab + (action === "left" ? TABS.length - 1 : 1)) % TABS.length; homeSpot = null; battleView = null; pendingConfirm = null; }
-    else if (action === "up" || action === "down") {
+    const arrow = ["left", "right", "up", "down"].indexOf(action) >= 0;
+    if (action === "next" || action === "prev" || action === "play" || arrow) pendingConfirm = null; // Only a second Enter confirms.
+    if ((action === "next" || action === "prev") && walking()) { // Exploring: the list's cursor (the arrows are busy walking).
+      const count = rows().length;
+      if (count) picks[tab] = (picks[tab] + (action === "prev" ? count - 1 : 1)) % count;
+      focus = "list"; render(); return;
+    }
+    if (action === "next" || action === "prev") { changeTab((tab + (action === "prev" ? TABS.length - 1 : 1)) % TABS.length); render(); return; } // The next category.
+    if (action === "play") { drinkPotion(); return; }
+    if (walking()) {
+      if (busy) return;
+      const board = play.board || play.cursor !== undefined; // Crates, lamps or cards are in front of her.
+      if (arrow && board) { focus = "board"; boardKey(action); render(); return; }
+      if (arrow && exploring().facing) { // A key or rune door has no board: up and down just move through its list.
+        if (action === "up" || action === "down") { const count = rows().length; picks[tab] = (picks[tab] + (action === "up" ? count - 1 : 1)) % count; render(); }
+        return;
+      }
+      if (arrow) { walk(action); return; }
+      if (action === "enter" && board && focus === "board") { boardKey("enter"); render(); return; }
+    }
+    if (action === "left" || action === "right") { // A row's own options: its next choice, tried on before anything is bought.
+      const row = rows()[picks[tab]], by = action === "left" ? -1 : 1;
+      if (row && row.turn) { row.turn(by); return; }
+      if (row && row.options) flip[row.flipKey] = Pk.turn(row.options, row.shown, by);
+    } else if (action === "up" || action === "down") {
       const count = rows().length;
       if (count) picks[tab] = (picks[tab] + (action === "up" ? count - 1 : 1)) % count;
     } else if (action === "enter") { choose(); return; }
@@ -379,7 +405,7 @@
   }, { directEnter: function () { return true; } });
 
   tabButtons.forEach(function (button, index) { // Tabs can be tapped too.
-    button.addEventListener("click", function () { tab = index; homeSpot = null; battleView = null; render(); });
+    button.addEventListener("click", function () { changeTab(index); render(); });
   });
 
   function tick() { // Once a second: count timers down, collect a finished nap or play, and look in on her now and then.

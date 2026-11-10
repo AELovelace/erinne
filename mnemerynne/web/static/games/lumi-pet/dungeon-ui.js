@@ -112,11 +112,11 @@
       run.satchel.keys ? { key: "unlock", icon: "🗝", name: "Use the key", hint: "It fits!", url: "dungeon/act", send: { action: "unlock" } }
         : { key: "unlock", icon: "🗝", name: "Use a key", hint: "Lumi doesn't have one yet", note: "Lumi needs a key. There's one somewhere on this floor." }, back];
     if (lock.kind === "sokoban") return [
-      { key: "play", icon: "▣", name: "Back to the crates", hint: board.moves.length + " steps so far · arrows push, Enter comes back here", local: function () { go({ focus: "board" }); } },
+      { key: "play", icon: "▣", name: "The crates", hint: board.moves.length + " steps so far · arrows push · Enter takes a step back", local: function () { go({ focus: "board" }); } },
       { key: "undo", icon: "↶", name: "Undo a step", hint: "Take the last step back", local: function () { go({ undo: true }); } },
       { key: "reset", icon: "↺", name: "Start over", hint: "Put every crate back", local: function () { go({ reset: true }); } }, back];
     if (lock.kind === "lights") return [
-      { key: "play", icon: "▣", name: "Back to the lamps", hint: board.presses.length + " presses so far · put every lamp out", local: function () { go({ focus: "board" }); } },
+      { key: "play", icon: "▣", name: "The lamps", hint: board.presses.length + " presses so far · arrows move · Enter flips a lamp", local: function () { go({ focus: "board" }); } },
       { key: "reset", icon: "↺", name: "Start over", hint: "Light them as they were", local: function () { go({ reset: true }); } }, back];
     const guess = play.guess || [], full = guess.length === lock.slots; // runes
     const rows = lock.runes.map(function (rune) {
@@ -134,13 +134,14 @@
     const snap = ctx.snap, run = snap.dungeon.run, go = ctx.go;
     if (!run || (run.over && ctx.dismissed === run.id)) return places(snap);
     if (run.over) return [{ key: "continue", icon: "›", name: run.over === "home" ? "Home again!" : "Carry on", hint: summary(run), local: function () { go({ dismiss: run.id }); } }];
-    if (run.facing) return doorRows(run, ctx.play || {}, go);
+    const tabs = { key: "tabs", icon: "♡", name: "Look after Lumi", hint: "Care, pantry and the other tabs · the trip waits here", local: function () { go({ tabs: true }); } };
+    if (run.facing) return doorRows(run, ctx.play || {}, go).concat([tabs]);
     const list = [], room = run.room;
     if (run.game && !room.done) {
       if (run.game.kind === "cups") ["Left", "Middle", "Right"].forEach(function (name, cup) {
         list.push({ key: "cup-" + cup, icon: "🥤", name: name + " cup", hint: "Lift it and see", url: "dungeon/act", send: { action: "cup", picks: [cup] } });
       });
-      else list.push({ key: "play", icon: "▣", name: "Back to the cards", hint: run.game.left + " turns left · arrows choose, Enter turns a card", local: function () { go({ focus: "board" }); } });
+      else list.push({ key: "play", icon: "▣", name: "The cards", hint: run.game.left + " turns left · arrows move · Enter turns a card", local: function () { go({ focus: "board" }); } });
     }
     if (!room.done && (room.kind === "treasure" || room.kind === "vault")) list.push({ key: "take", icon: "✦", name: "Open the chest", hint: room.kind === "vault" ? "The vault's treasure, at last" : "See what's inside", url: "dungeon/act", send: { action: "take" } });
     if (!room.done && room.kind === "key") list.push({ key: "take", icon: "🗝", name: "Pick up the key", hint: "It opens the locked door on this floor", url: "dungeon/act", send: { action: "take" } });
@@ -157,6 +158,7 @@
       if (ready) { potion.url = "dungeon/act"; potion.send = { action: "potion" }; } else potion.note = "Lumi has no potions with her.";
       list.push(potion);
     }
+    list.push(tabs);
     list.push({ key: "abandon", icon: "✕", name: "Give up and go home", hint: "Leaves the satchel behind: " + carrying(run.satchel), confirm: "abandon", url: "dungeon/act", send: { action: "abandon" } });
     return list;
   }

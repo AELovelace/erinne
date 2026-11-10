@@ -123,6 +123,12 @@
 .lp-room[data-fight="true"] .lp-dhud { display: none; } /* A fight shows its own bars. */
 .lp-room[data-puzzle="true"] .lp-pet-wrap { opacity: 0; pointer-events: none; } /* She steps aside for a puzzle's panel. */
 .lp-room[data-fight="true"] .lp-pet-wrap { opacity: 1; }
+/* Exploring: the right panel becomes the dungeon's own. The tabs fold away (the list has "Look after Lumi" to reach
+   them) and the list gets the room, so every choice in a room is in view at once. */
+.gm[data-walking="true"] .lp-tabs { display: none; }
+.gm[data-walking="true"] .lp-actions { max-height: min(62vh, 38rem); }
+.gm[data-walking="true"] .lp-message { min-height: 6.6em; }
+.gm[data-walking="true"] .lp-controls { align-self: stretch; }
 /* On a TV or computer the room is the whole screen and the two panels float over its walls as glass. On a phone the
    panels stack under it, so there it stays a card (the rules above). Either way the windows are holes in the wall. */
 @media (min-width: 1001px) {

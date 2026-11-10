@@ -236,6 +236,25 @@ try {
   await command({ action: "toggle" });
   await tvFrame.waitForFunction(() => document.getElementById("casino-phase").textContent === "Round in progress");
   console.log("Paired TV: real remote arrows, Enter and Play/Pause reach the game through SSE");
+
+  // Lumi Pet takes the remote's Previous and Next itself (they change its category); other games leave them to the music.
+  await alice.goto(base + "/media/screen#games");
+  await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 6);
+  await alice.evaluate(() => [...document.querySelectorAll(".mc-card")].find(b => b.querySelector(".mc-label").textContent === "Lumi Pet").click());
+  const petFrame = await (await alice.waitForSelector("#mc-game-frame")).contentFrame();
+  await petFrame.waitForSelector('[data-lp-row="cuddle"]');
+  const category = () => petFrame.$eval('[data-lp-tab][aria-selected="true"]', el => el.dataset.lpTab);
+  await command({ action: "next" });
+  await petFrame.waitForFunction(() => document.querySelector('[data-lp-tab="pantry"]').getAttribute("aria-selected") === "true");
+  await command({ action: "next" });
+  await petFrame.waitForFunction(() => document.querySelector('[data-lp-tab="toys"]').getAttribute("aria-selected") === "true");
+  await command({ action: "prev" });
+  await petFrame.waitForFunction(() => document.querySelector('[data-lp-tab="pantry"]').getAttribute("aria-selected") === "true");
+  await command({ action: "press", button: "right" }); // Left and right no longer change category.
+  await command({ action: "press", button: "down" });
+  await petFrame.waitForFunction(() => document.querySelectorAll('#lp-list [aria-pressed="true"]').length === 1);
+  assert.equal(await category(), "pantry");
+  console.log("Paired TV: a remote's Previous and Next change Lumi Pet's category through SSE");
   await checkSharedTV(alice, screen, base);
 
   await bob.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]);

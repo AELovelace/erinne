@@ -58,7 +58,9 @@ test("a finished trip shows how it ended once, then the places again", () => {
 
 test("exploring offers each way out, saying what is known there, and only choices are sent", () => {
   const list = open(run());
-  assert.deepEqual(list.rows.map(r => r.key), ["go-e", "go-n", "potion", "abandon"]);
+  assert.deepEqual(list.rows.map(r => r.key), ["go-e", "go-n", "potion", "tabs", "abandon"]);
+  list.row("tabs").local();
+  assert.deepEqual(list.went, [{ tabs: true }], "The other tabs are one row away, since the arrows are busy walking");
   assert.deepEqual(list.row("go-n").send, { action: "move", way: "n" });
   assert.equal(list.row("go-n").hint, "somewhere new");
   assert.equal(list.row("go-e").hint, "a locked door");
@@ -98,7 +100,7 @@ test("a key door needs a key; a rune door builds a code four runes long", () => 
   assert.deepEqual(open(run({ facing: { at: "2,1", lock: { kind: "key" } }, satchel: { ...bag, keys: 1 } })).row("unlock").send, { action: "unlock" });
   const lock = { kind: "runes", runes: ["sun", "moon", "star", "leaf", "wave"], slots: 4, tries: [], left: 8 };
   const empty = open(facing(lock), { guess: [] });
-  assert.deepEqual(empty.rows.map(r => r.key), ["try", "rune-sun", "rune-moon", "rune-star", "rune-leaf", "rune-wave", "erase", "back"]);
+  assert.deepEqual(empty.rows.map(r => r.key), ["try", "rune-sun", "rune-moon", "rune-star", "rune-leaf", "rune-wave", "erase", "back", "tabs"]);
   assert.match(empty.row("try").note, /Choose 4 runes first/);
   empty.row("rune-moon").local();
   assert.deepEqual(empty.went, [{ rune: "moon" }]);
@@ -114,13 +116,13 @@ test("a crate door and a lamp door list their choices with the puzzle as the pag
   const facing = lock => run({ facing: { at: "2,1", lock } });
   const level = levels[0], crates = UI.sokobanMove(UI.sokobanMove(UI.sokobanStart(level.rows), "u"), "l");
   const atCrates = open(facing({ kind: "sokoban", rows: level.rows }), { id: "x", board: crates });
-  assert.deepEqual(atCrates.rows.map(r => r.key), ["play", "undo", "reset", "back"]);
+  assert.deepEqual(atCrates.rows.map(r => r.key), ["play", "undo", "reset", "back", "tabs"]);
   assert.match(atCrates.row("play").hint, new RegExp("^" + crates.moves.length + " steps so far"));
   atCrates.row("undo").local(); atCrates.row("reset").local(); atCrates.row("play").local();
   assert.deepEqual(atCrates.went, [{ undo: true }, { reset: true }, { focus: "board" }]);
   const lock = { kind: "lights", size: 3, board: Array(9).fill(true) }, lamps = UI.lightsPress(UI.lightsStart(lock), 4);
   const atLamps = open(facing(lock), { id: "y", board: lamps });
-  assert.deepEqual(atLamps.rows.map(r => r.key), ["play", "reset", "back"]);
+  assert.deepEqual(atLamps.rows.map(r => r.key), ["play", "reset", "back", "tabs"]);
   assert.match(atLamps.row("play").hint, /^1 presses so far/);
   for (const kind of ["sokoban", "lights"]) { // Before the page has started the puzzle, the list still draws.
     const early = open(facing(kind === "lights" ? lock : { kind, rows: level.rows }), {});

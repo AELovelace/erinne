@@ -26,12 +26,13 @@ class Game:
     description: str    # one line for its card
     controls: str       # how to play with the TV remote's arrows and Enter (or a keyboard)
     multiplayer: bool = False
+    track_keys: bool = False   # takes a remote's Previous and Next buttons itself (media.js); otherwise they stay the music's
 
 
 GAMES: tuple[Game, ...] = (
     Game(slug="lumi-pet", name="Lumi Pet", icon="✨",
          description="A little neon companion to feed, dress, fight beside and make a home for. She gets hungry, sleepy and lonely while you’re away. Your first visit each day pays coins.",
-         controls="◀ ▶ change tab · ▲ ▼ choose · Enter does it"),
+         controls="⏮ ⏭ change tab · ▲ ▼ choose · ◀ ▶ options · Enter does it · in the dungeon: arrows walk, ⏮ ⏭ choose, ⏯ potion", track_keys=True),
     Game(slug="prism-drop", name="Prism Drop", icon="🔮",
          description="Pick a pocket and drop a neon ball through blocks, bombs, bonus pegs and sliding platforms. Ten drops, and your score pays coins.",
          controls="◀ ▶ pick a pocket · Enter drops · ▲ replays the last drop · ▼ sound on or off"),
