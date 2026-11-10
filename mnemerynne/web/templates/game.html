@@ -13,6 +13,6 @@
 <script src="{{ static('games/common.js') }}"></script>
 {% if game.slug == 'roulette' %}<script src="{{ static('games/casino/roulette.js') }}"></script>{% endif %}
 {% if not game.multiplayer %}<script src="{{ static('games/' ~ asset ~ '/rules.js') }}"></script>{% endif %}
-{% if game.slug == 'lumi-pet' %}{% for part in ('house', 'closet', 'enemies', 'battle-ui') %}<script src="{{ static('games/lumi-pet/' ~ part ~ '.js') }}"></script>{% endfor %}{% endif %}
+{% if game.slug == 'lumi-pet' %}{% for part in ('house', 'closet', 'enemies', 'battle-ui', 'dungeon-ui', 'dungeon-art') %}<script src="{{ static('games/lumi-pet/' ~ part ~ '.js') }}"></script>{% endfor %}{% endif %}
 <script src="{{ static('games/' ~ asset ~ '/game.js') }}"></script>
 {% endblock %}

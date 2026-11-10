@@ -1,4 +1,6 @@
-"""A small editor for Lumi Pet's catalogs: snacks and toys, the house, the closet, and battles (enemies, skills, mods).
+"""A small editor for Lumi Pet's catalogs: snacks and toys, the house, the closet, battles (enemies, skills, mods)
+and the dungeon's environments. (The dungeon's dialogue is plain files of lines in lumipet_data/tales/: edit those in
+any text editor. Its Sokoban levels are made by python/make_lumi_sokoban.py.)
 
 Run it from the repository:   .venv/Scripts/python.exe python/lumi_pet_editor.py
 
@@ -23,7 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from mnemerynne import lumibattle, lumipet  # noqa: E402  (needs the path above)
+from mnemerynne import lumibattle, lumidungeon, lumipet  # noqa: E402  (needs the path above)
 
 DATA = ROOT / "mnemerynne" / "lumipet_data"
 # catalog name -> (its file, the server's own loader that checks it)
@@ -32,6 +34,7 @@ CATALOGS = {
     "House": (DATA / "house.json", lumipet.load_house),
     "Closet and Star Capsule": (DATA / "closet.json", lumipet.load_closet),
     "Battles: enemies, skills, mods": (DATA / "battle.json", lumibattle.load_catalog),
+    "Dungeon environments": (DATA / "dungeon.json", lumidungeon.load_catalog),
 }
 
 

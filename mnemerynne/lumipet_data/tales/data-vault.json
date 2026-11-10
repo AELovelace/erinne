@@ -1,0 +1,10 @@
+{
+ "enter": [
+  "Cold aisles of servers hum as Lumi pads into the vault, her breath a small cloud.",
+  "A firewall says welcome, please wipe your paws. Lumi wipes her paws."
+ ],
+ "empty": [
+  "Rows of little lights blink green, green, green. Lumi blinks back.",
+  "A cooling fan ruffles Lumi's fur. She leans into it."
+ ]
+}

@@ -66,7 +66,11 @@
     {"id": "servo-claws", "name": "Servo Claws", "tek": "cybertek", "price": 400, "bonus": {"attack": 6, "hp": 3}},
     {"id": "neural-whiskers", "name": "Neural Whiskers", "tek": "cybertek", "price": 400, "bonus": {"crit": 6, "hp": 3}},
     {"id": "overclock-wings", "name": "Overclock Wings", "tek": "cybertek", "price": 400, "bonus": {"speed": 10, "hp": 3}},
-    {"id": "nano-plating", "name": "Nano-Plating", "tek": "cybertek", "price": 400, "bonus": {"defense": 8, "hp": 3}}
+    {"id": "nano-plating", "name": "Nano-Plating", "tek": "cybertek", "price": 400, "bonus": {"defense": 8, "hp": 3}},
+    {"id": "moonstone-core", "name": "Moonstone Core", "tek": "magitek", "price": 0, "bonus": {"magic": 8, "ward": 4, "hp": 3}},
+    {"id": "echo-crystal", "name": "Echo Crystal", "tek": "magitek", "price": 0, "bonus": {"mp": 30, "magic": 4, "hp": 3}},
+    {"id": "glitch-fang", "name": "Glitch Fang", "tek": "cybertek", "price": 0, "bonus": {"attack": 8, "crit": 4, "hp": 3}},
+    {"id": "aegis-shell", "name": "Aegis Shell", "tek": "cybertek", "price": 0, "bonus": {"defense": 10, "hp": 5}}
   ],
   "enemies": [
     {"id": "dust-bunny", "name": "Dust Bunny", "tier": "common", "body": "blob", "colour": "#b9b0a8", "element": "none", "weak": ["wind"], "resist": [], "immune": [], "shape": {"hp": 0.9, "atk": 0.9, "def": 0.9, "res": 1.0, "spd": 1.2},

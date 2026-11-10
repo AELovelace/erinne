@@ -673,6 +673,34 @@ def cmd_router_data(args):
     print(f"Wrote {args.out}: {asyncio.run(run())}")
 
 
+def cmd_lumi_tales(args):
+    """Write more dungeon dialogue for Lumi Pet with Claude, into files to read before committing (lumitales.py)."""
+    import asyncio
+    from pathlib import Path
+
+    import anthropic
+
+    from mnemerynne import lumidungeon, lumitales
+
+    envs = list(lumidungeon._ENVS) if args.env == "all" else [args.env]
+    if any(env not in lumidungeon._ENVS for env in envs):
+        raise ValueError(f"No such environment. Choose one of: {', '.join(lumidungeon._ENVS)}, or all.")
+
+    async def run():
+        async with anthropic.AsyncAnthropic() as client:      # the key comes from ANTHROPIC_API_KEY, never the database
+            return await lumitales.generate(client, envs, args.lines, Path(args.out), args.model, args.concurrency)
+
+    try:
+        gained = asyncio.run(run())
+    except anthropic.AuthenticationError:
+        raise ValueError("Claude didn't accept the key. Set ANTHROPIC_API_KEY and try again.") from None
+    except anthropic.APIError as problem:
+        raise ValueError(f"Claude couldn't be reached: {problem}") from None
+    for env, count in gained.items():
+        print(f"{env}: {count} new lines")
+    print(f"Wrote {args.out}. Read the files, edit what you like, then restart the web service to use them.")
+
+
 def cmd_train_router(args):
     import json
     from pathlib import Path
@@ -765,6 +793,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--per-route", type=int, default=400)
     p.add_argument("--teacher-url", default=None)
     p.set_defaults(func=cmd_router_data)
+
+    p = sub.add_parser("lumi-tales", help="Write more dungeon dialogue for Lumi Pet with Claude (needs ANTHROPIC_API_KEY)")
+    p.add_argument("--env", default="all", help="an environment id from lumipet_data/dungeon.json, or all")
+    p.add_argument("--lines", type=int, default=8, help="lines to ask for per scenario")
+    p.add_argument("--out", default="mnemerynne/lumipet_data/tales", help="folder of <environment>.json files to add to")
+    p.add_argument("--model", default="claude-opus-5-5")
+    p.add_argument("--concurrency", type=int, default=3)
+    p.set_defaults(func=cmd_lumi_tales)
 
     p = sub.add_parser("train-router", help="Train the message router (search / smalltalk / general / ...)")
     p.add_argument("--data", default="data/router/messages.jsonl")

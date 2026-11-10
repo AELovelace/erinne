@@ -63,7 +63,7 @@
 .lp-actions small { display: block; font: .7rem/1.7 system-ui, sans-serif; letter-spacing: .02em; color: var(--muted); }
 .gm .lp-actions button[aria-pressed="true"] { border-color: var(--rose); background: rgba(var(--glow), .1); box-shadow: inset 3px 0 var(--rose); }
 .lp-actions { max-height: 24rem; overflow-y: auto; } /* A long pantry scrolls inside the panel, in step with the TV's text scale. */
-.lp-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .35rem; margin-bottom: .8rem; } /* Eight tabs: two tidy rows of four. */
+.lp-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; margin-bottom: .8rem; } /* Nine tabs: three tidy rows of three. */
 .gm .lp-tabs button { flex: 1; border-radius: .5rem; font-size: .68rem; padding: .55rem .3rem; }
 .gm .lp-tabs button[aria-selected="true"] { border-color: var(--cyan); color: var(--cyan); background: rgba(var(--glow), .08); }
 .lp-meters { display: grid; gap: .6rem; margin: 1.2rem 0 .4rem; }
@@ -97,7 +97,7 @@
 /* A fight: a veil dims the house, Lumi steps left and the enemy faces her from the right. */
 .lp-fight { position: absolute; inset: 0; background: #0b0818d9; }
 .lp-fight[hidden] { display: none; }
-.lp-fight-bars { position: absolute; top: 15%; left: max(4%, calc(50% - 200 * var(--u))); right: max(4%, calc(50% - 200 * var(--u))); display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; font-size: .68rem; letter-spacing: .04em; }
+.lp-fight-bars { position: absolute; top: 15%; left: max(3%, calc(50% - 168 * var(--u))); right: max(3%, calc(50% - 168 * var(--u))); display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; font-size: .68rem; letter-spacing: .04em; }
 .lp-fight-bars > div:last-child { text-align: right; }
 .lp-fight-bars span { display: block; margin-bottom: .35rem; }
 .lp-fight-bars .lp-bar { margin-bottom: .25rem; background: #0006; }
@@ -105,9 +105,24 @@
 .lp-fight-bars .lp-bar-mp { height: .35rem; }
 .lp-fight-bars .lp-bar-mp i { background: var(--pet-glow); }
 .lp-fight-bars .lp-bar-foe i { background: #ff7a8a; margin-left: auto; }
-.lp-foe { position: absolute; right: max(2%, calc(50% - 205 * var(--u))); bottom: calc(50% - 196 * var(--u)); width: calc(170 * var(--u)); overflow: visible; animation: lp-breathe 3s ease-in-out infinite; transform-origin: 50% 90%; transition: opacity .6s, filter .6s; }
+.lp-foe { position: absolute; right: max(2%, calc(50% - 168 * var(--u))); bottom: calc(50% - 196 * var(--u)); width: calc(150 * var(--u)); overflow: visible; animation: lp-breathe 3s ease-in-out infinite; transform-origin: 50% 90%; transition: opacity .6s, filter .6s; }
 .lp-foe[data-down="true"] { opacity: .25; filter: grayscale(1); animation: none; }
-.lp-room[data-fight="true"] .lp-pet-wrap { left: max(2%, calc(50% - 205 * var(--u))); transition: left .4s; }
+.lp-room[data-fight="true"] .lp-pet-wrap { left: max(2%, calc(50% - 168 * var(--u))); width: calc(165 * var(--u)); transition: left .4s, width .4s; } /* Both fighters stay between the side panels. */
+/* The dungeon: the room she is in, drawn over the house, with a line of her health and satchel across the top. */
+.lp-dungeon { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; }
+.lp-dungeon text { font-family: var(--serif, sans-serif); }
+.lp-dhud { position: absolute; top: 8%; left: max(3%, calc(50% - 168 * var(--u))); width: min(52%, calc(215 * var(--u))); font-size: .68rem; letter-spacing: .04em; padding: .45rem .6rem; border-radius: .5rem; background: #0e0b1acc; }
+.lp-dhud[hidden] { display: none; }
+.lp-dhud span { display: block; margin-bottom: .3rem; color: var(--cyan); text-transform: uppercase; letter-spacing: .12em; }
+.lp-dhud small { display: block; margin-top: .3rem; color: #c9aecf; line-height: 1.5; }
+.lp-dhud .lp-bar { margin-bottom: .2rem; background: #0006; }
+.lp-dhud .lp-bar i { background: #7fe08f; transition: width .4s ease; }
+.lp-dhud .lp-bar-mp { height: .35rem; }
+.lp-dhud .lp-bar-mp i { background: var(--pet-glow); }
+.lp-room[data-dungeon="true"] .lp-room-top { display: none; } /* The dungeon names the place itself. */
+.lp-room[data-fight="true"] .lp-dhud { display: none; } /* A fight shows its own bars. */
+.lp-room[data-puzzle="true"] .lp-pet-wrap { opacity: 0; pointer-events: none; } /* She steps aside for a puzzle's panel. */
+.lp-room[data-fight="true"] .lp-pet-wrap { opacity: 1; }
 /* On a TV or computer the room is the whole screen and the two panels float over its walls as glass. On a phone the
    panels stack under it, so there it stays a card (the rules above). Either way the windows are holes in the wall. */
 @media (min-width: 1001px) {

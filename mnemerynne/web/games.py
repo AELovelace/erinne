@@ -4,6 +4,7 @@ and the person (or the TV's owner) in the Media group."""
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -11,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from mnemerynne import casino, casino_remote, coins, games, lumipet, prism, push
+from mnemerynne import bfgguf, casino, casino_remote, claude_chat, coins, games, lumidungeon, lumipet, lumitales, prism, push
 from mnemerynne.db import transaction
 from mnemerynne.media import remotes, screens
 from mnemerynne.web.deps import _session_user, get_db
@@ -70,7 +71,7 @@ def pet_visit(user=Depends(media_user), conn=Depends(get_db)):
 class PetAction(BaseModel):
     """What the person chose to do with Lumi. Only choices: which thing and how many. The server decides every result."""
     model_config = ConfigDict(extra="forbid")
-    action: Literal["cuddle", "feed", "play", "nap", "wake", "buy", "decorate", "wear", "capsule", "glow", "import",
+    action: Literal["cuddle", "feed", "play", "nap", "wake", "buy", "decorate", "wear", "capsule", "glow", "import", "storyteller",
                     "learn", "respec", "equip", "mod", "potions", "heal"]
     item: str | None = Field(default=None, max_length=40)
     count: int = Field(default=1, ge=1, le=lumipet.MAX_HELD, strict=True)
@@ -129,6 +130,94 @@ def pet_fight_turn(body: FightTurn, user=Depends(media_user), conn=Depends(get_d
             return lumipet.fight_act(conn, user["id"], body.battle, body.turn, body.action)
     except lumipet.PetError as refused:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(refused)) from None
+
+
+class DungeonStart(BaseModel):
+    """Where to explore. The server makes the floor."""
+    model_config = ConfigDict(extra="forbid")
+    env: str = Field(min_length=1, max_length=40)
+
+
+class DungeonStep(BaseModel):
+    """One choice in the dungeon: which way, which cup or card or lamps, or the moves that solve a Sokoban door.
+    Never a room, a reward or a result: the server replays puzzle answers itself."""
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["move", "back", "unlock", "sokoban", "lights", "rune", "cup", "flip", "potion", "descend", "leave", "abandon"]
+    way: Literal["n", "e", "s", "w"] | None = None
+    moves: str = Field(default="", max_length=600, pattern="^[udlr]*$")
+    picks: list[int | str] = Field(default_factory=list, max_length=200)
+
+
+@router.post("/api/media/games/lumi-pet/dungeon")
+def pet_dungeon(body: DungeonStart, user=Depends(media_user), conn=Depends(get_db)):
+    """Set out on a dungeon trip. One at a time; it waits for as long as it takes."""
+    try:
+        with transaction(conn):
+            return lumipet.dungeon_start(conn, user["id"], body.env)
+    except lumipet.PetError as refused:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(refused)) from None
+
+
+@router.post("/api/media/games/lumi-pet/dungeon/act")
+def pet_dungeon_step(body: DungeonStep, user=Depends(media_user), conn=Depends(get_db)):
+    """Take one step, or make one choice, in the dungeon."""
+    try:
+        with transaction(conn):
+            return lumipet.dungeon_act(conn, user["id"], body.action, way=body.way, moves=body.moves, picks=body.picks)
+    except lumipet.PetError as refused:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(refused)) from None
+
+
+TALES_A_MINUTE = 12                     # live lines one person may ask for; a room is one line, so this is generous
+_tale_times: dict[int, list[float]] = {}
+
+
+def _storyteller(request: Request, conn, user) -> tuple[str, object] | None:
+    """Who can write live lines for this person: ("claude", (key, model)) with their own saved key, or
+    ("bfgguf", config) if they are in that group and it is set up. None: nobody, and the library carries on alone."""
+    own = claude_chat.credentials(conn, request.app.state.settings, user["id"])
+    if own:
+        return "claude", own
+    if bfgguf.available(conn, user, request.app.state.directory) == "ok":
+        return "bfgguf", bfgguf.load_config(conn)
+    return None
+
+
+@router.get("/api/media/games/lumi-pet/dungeon/tale")
+def pet_tale_source(request: Request, user=Depends(media_user), conn=Depends(get_db)):
+    """Whether a live storyteller is there for this person, and which, so Settings can say."""
+    found = _storyteller(request, conn, user)
+    return {"live": found[0] if found else None}
+
+
+@router.post("/api/media/games/lumi-pet/dungeon/tale")
+async def pet_tale(request: Request, user=Depends(media_user), conn=Depends(get_db)):
+    """A freshly written line for the moment Lumi is in, in live mode. Takes nothing from the page: the moment is the
+    run's own. Answers {"line": null} whenever there is nothing new to say (the library line simply stays)."""
+    run = lumidungeon.current(conn, user["id"])
+    found = _storyteller(request, conn, user)
+    if run is None or found is None or run.get("said_for") == run["id"]:
+        return {"line": None}
+    recent = [t for t in _tale_times.get(user["id"], []) if t > time.monotonic() - 60]
+    if len(recent) >= TALES_A_MINUTE:
+        return {"line": None}
+    _tale_times[user["id"]] = recent + [time.monotonic()]
+    moment = run["event"]
+    if found[0] == "claude":
+        told = await lumitales.live_line(run, claude=found[1])
+    else:
+        client = bfgguf.client(request.app.state.settings, found[1], request.app.state.balancer, getattr(request.app.state, "bfgguf_transport", None))
+        try:
+            told = await lumitales.live_line(run, bfgguf=client)
+        finally:
+            await client.aclose()
+    with transaction(conn):                               # the run may have moved on while the model was writing
+        now = lumidungeon.current(conn, user["id"])
+        if told is None or now is None or now["event"] != moment:
+            return {"line": None}
+        now["said_for"] = now["id"]
+        lumitales.remember(conn, user["id"], now, told)
+    return {"line": told}
 
 
 class PushDevice(BaseModel):

@@ -105,7 +105,7 @@ def load_catalog(path: Path | None = None) -> dict:
     for mod in data.get("mods") or [None]:
         fresh(mod, "mods")
         _check_bonus(mod.get("bonus"), mod["id"])
-        if mod.get("tek") not in ("magitek", "cybertek") or not isinstance(mod.get("price"), int) or not 1 <= mod["price"] <= 100_000:
+        if mod.get("tek") not in ("magitek", "cybertek") or not isinstance(mod.get("price"), int) or not 0 <= mod["price"] <= 100_000:   # 0: only found in the dungeon
             raise ValueError(f"Lumi Pet's battles: {mod['id']} needs a kind and a price.")
     for enemy in data.get("enemies") or [None]:
         fresh(enemy, "enemies")
@@ -190,8 +190,9 @@ def _defences(element: str) -> tuple[list[str], list[str]]:
     return ([a for a in ELEMENTS if WHEEL[a].get(element) == 1.5], [a for a in ELEMENTS if WHEEL[a].get(element) == 0.75])
 
 
-def _lumi(pet: dict) -> dict:
-    """Lumi as she walks into a fight: full health and MP, her equipped moves, her glow as her element."""
+def _lumi(pet: dict, carry: dict | None = None) -> dict:
+    """Lumi as she walks into a fight: her equipped moves, her glow as her element, and full health and MP unless
+    `carry` says what she has left (in the dungeon, one fight's bruises go into the next)."""
     numbers, element = stats(pet), GLOW_ELEMENT.get(pet["glow"], "fire")
     known = {move["id"]: move for move in known_moves(pet)}
     moves = [{k: v for k, v in known[m].items() if k not in ("tree", "index", "kind")} for m in pet["moves"] if m in known] or [dict(_BASICS["pounce"])]
@@ -199,8 +200,10 @@ def _lumi(pet: dict) -> dict:
         if move["element"] == "glow":                     # Glow Spark and Starfall take whatever colour she is
             move["element"] = element
     weak, resist = _defences(element)
-    return {"name": "Lumi", "side": "lumi", "level": pet["level"], "element": element, "hp": numbers["hp"], "hpMax": numbers["hp"],
-            "mp": numbers["mp"], "mpMax": numbers["mp"], "stats": numbers, "crit": numbers["crit"], "dodge": numbers["dodge"],
+    hp = max(1, min(numbers["hp"], carry["hp"])) if carry else numbers["hp"]
+    mp = max(0, min(numbers["mp"], carry["mp"])) if carry else numbers["mp"]
+    return {"name": "Lumi", "side": "lumi", "level": pet["level"], "element": element, "hp": hp, "hpMax": numbers["hp"],
+            "mp": mp, "mpMax": numbers["mp"], "stats": numbers, "crit": numbers["crit"], "dodge": numbers["dodge"],
             "moves": moves, "weak": weak, "resist": resist, "immune": [], "status": {}}
 
 
@@ -377,8 +380,10 @@ def current(conn: sqlite3.Connection, user_id: int) -> dict | None:
     return _view(row) if row else None
 
 
-def start(conn: sqlite3.Connection, user_id: int, pet: dict, tier: str, now: int, rng=None) -> dict:
+def start(conn: sqlite3.Connection, user_id: int, pet: dict, tier: str, now: int, rng=None, *, enemy: str | None = None,
+          level: int | None = None, carry: dict | None = None, dungeon: bool = False) -> dict:
     """Begin a fight against a random enemy of this tier (or any tier: "gamble", for a fifth more reward).
+    The dungeon names the enemy and its level itself, carries Lumi's health in, and keeps the coins for her satchel.
     Changes the pet (her waiting treat boost is used); the caller saves it. Call inside a transaction."""
     rng = rng or random.SystemRandom()
     if tier not in TIERS and tier != "gamble":
@@ -387,12 +392,12 @@ def start(conn: sqlite3.Connection, user_id: int, pet: dict, tier: str, now: int
         raise BattleError("Lumi is already in a fight. Finish it, or run.")
     if pet["faint_until"] > now:
         raise BattleError("Lumi is still napping off her last fight. Let her rest, or wake her for coins.")
-    pool = [enemy for enemy in CATALOG["enemies"] if tier == "gamble" or enemy["tier"] == tier]
-    entry = pool[rng.randrange(len(pool))]
-    level = max(1, min(MAX_LEVEL, pet["level"] + rng.randrange(5) - 2))
-    lumi = _lumi(pet)
+    pool = [e for e in CATALOG["enemies"] if tier == "gamble" or e["tier"] == tier]
+    entry = _ENEMIES[enemy] if enemy else pool[rng.randrange(len(pool))]
+    level = level if level is not None else max(1, min(MAX_LEVEL, pet["level"] + rng.randrange(5) - 2))
+    lumi = _lumi(pet, carry)
     state = {"player": lumi, "enemy": _enemy(entry, level, pet["level"], lumi["element"]), "choice": tier, "boost": pet["boost"],
-             "outcome": None, "reward": None, "log": [f"A wild {entry['name']} appears!"]}
+             "dungeon": dungeon, "outcome": None, "reward": None, "log": [f"A wild {entry['name']} appears!"]}
     pet["boost"] = None
     made = conn.execute("INSERT INTO lumi_battles(user_id, state, created_at) VALUES (?, ?, ?)", (user_id, json.dumps(state, separators=(",", ":")), now))
     return {**state, "id": made.lastrowid, "turn": 0, "status": "active"}
@@ -456,7 +461,8 @@ def _reward(conn: sqlite3.Connection, user_id: int, pet: dict, state: dict, batt
     if pet["level"] == MAX_LEVEL:
         pet["exp"] = 0
     pet["wins"] += 1
-    paid = coins.prize(conn, user_id, prize, GAME, f"lumi-battle:{battle_id}")
+    # In the dungeon the coins go into her satchel (lumidungeon.after_fight), hers only if she gets home with it.
+    paid = prize if state.get("dungeon") else coins.prize(conn, user_id, prize, GAME, f"lumi-battle:{battle_id}")
     state["reward"] = {"exp": gained, "coins": paid, "level": pet["level"], "levels": pet["level"] - before}
     state["log"].append(f"Victory! +{gained} EXP, +{paid} coins." + (f" Lumi is now level {pet['level']}!" if pet["level"] > before else ""))
 
@@ -511,6 +517,8 @@ def progress(conn: sqlite3.Connection, user_id: int, pet: dict, action: str, ite
             raise BattleError(f"That slot takes a {tek} mod.")
         note = None
         if item not in pet["mods_owned"]:
+            if not mod["price"]:
+                raise BattleError("That mod can't be bought. It turns up in dungeon vaults.")
             if not coins.spend(conn, user_id, mod["price"], GAME, "mod"):
                 raise BattleError("Not enough coins for that.")
             pet["mods_owned"].append(item)

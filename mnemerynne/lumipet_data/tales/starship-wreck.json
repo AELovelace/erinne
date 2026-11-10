@@ -1,0 +1,10 @@
+{
+ "enter": [
+  "The corridor tilts and the panels blink as Lumi hops aboard the wreck.",
+  "Stars shine through a crack in the hull. Lumi steps over it carefully."
+ ],
+ "empty": [
+  "A cabin with one floating boot. Lumi bats it and it drifts away, slowly.",
+  "Screens flicker with old weather reports for planets Lumi has never met."
+ ]
+}

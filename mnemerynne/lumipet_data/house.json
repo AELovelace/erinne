@@ -89,6 +89,32 @@
       {"id": "chest-pink", "name": "Pink toy box", "price": 100},
       {"id": "chest-yarn", "name": "Yarn basket", "price": 140},
       {"id": "chest-rocket", "name": "Rocket box", "price": 220},
-      {"id": "chest-treasure", "name": "Treasure chest", "price": 320}]}
+      {"id": "chest-treasure", "name": "Treasure chest", "price": 320}]},
+    {"id": "trophy", "name": "Trophy", "items": [
+      {"id": "trophy-none", "name": "Empty bracket", "price": 0},
+      {"id": "trophy-moon-bell", "name": "Moon bell", "price": 0, "found": "moonlit-shrine"},
+      {"id": "trophy-lantern-charm", "name": "Lantern charm", "price": 0, "found": "moonlit-shrine"},
+      {"id": "trophy-singing-crystal", "name": "Singing crystal", "price": 0, "found": "crystal-cavern"},
+      {"id": "trophy-geode-egg", "name": "Geode egg", "price": 0, "found": "crystal-cavern"},
+      {"id": "trophy-golden-toadstool", "name": "Golden toadstool", "price": 0, "found": "mushroom-hollow"},
+      {"id": "trophy-spore-jar", "name": "Spore jar", "price": 0, "found": "mushroom-hollow"},
+      {"id": "trophy-whispering-book", "name": "Whispering book", "price": 0, "found": "cloud-library"},
+      {"id": "trophy-bottled-cloud", "name": "Bottled cloud", "price": 0, "found": "cloud-library"},
+      {"id": "trophy-pearl-idol", "name": "Pearl idol", "price": 0, "found": "sunken-temple"},
+      {"id": "trophy-coral-crown", "name": "Coral crown", "price": 0, "found": "sunken-temple"},
+      {"id": "trophy-brass-cog", "name": "Brass cog", "price": 0, "found": "clockwork-tower"},
+      {"id": "trophy-cuckoo-clock", "name": "Tiny cuckoo clock", "price": 0, "found": "clockwork-tower"},
+      {"id": "trophy-lollipop", "name": "Everlasting lollipop", "price": 0, "found": "candy-catacombs"},
+      {"id": "trophy-gummy-skull", "name": "Gummy skull", "price": 0, "found": "candy-catacombs"},
+      {"id": "trophy-windup-mouse", "name": "Wind-up mouse", "price": 0, "found": "toy-attic"},
+      {"id": "trophy-ghost-teddy", "name": "Ghost teddy", "price": 0, "found": "toy-attic"},
+      {"id": "trophy-star-map", "name": "Star map shard", "price": 0, "found": "starship-wreck"},
+      {"id": "trophy-robot-head", "name": "Helper robot head", "price": 0, "found": "starship-wreck"},
+      {"id": "trophy-score-token", "name": "High-score token", "price": 0, "found": "neon-arcade"},
+      {"id": "trophy-neon-scrap", "name": "Neon sign scrap", "price": 0, "found": "neon-arcade"},
+      {"id": "trophy-data-cube", "name": "Glowing data cube", "price": 0, "found": "data-vault"},
+      {"id": "trophy-floppy", "name": "Old floppy disk", "price": 0, "found": "data-vault"},
+      {"id": "trophy-honey-jar", "name": "Rooftop honey", "price": 0, "found": "rooftop-garden"},
+      {"id": "trophy-snow-globe", "name": "Skyline snow globe", "price": 0, "found": "rooftop-garden"}]}
   ]
 }

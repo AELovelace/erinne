@@ -21,7 +21,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from mnemerynne import coins, lumibattle, push
+from mnemerynne import coins, lumibattle, lumidungeon, push
 from mnemerynne.db import transaction
 
 GAME = "lumi-pet"
@@ -163,7 +163,7 @@ def _fresh(now: int) -> dict:
     return {"version": 2, "hunger": START, "energy": START, "joy": START, "updated": now, "moments": 0, "memory": None,
             "glow": "rose", "rest": "auto", "restUntil": 0, "task": None, "done": None, "cooldowns": {},
             "inventory": {}, "toys": [], "boost": None, "imported": False, "low": {}, "seen": now, "house": {}, "decor": [],
-            "outfit": {}, "closet": [],
+            "outfit": {}, "closet": [], "storyteller": "library",
             **lumibattle.fresh_fields()}
 
 
@@ -228,7 +228,8 @@ def snapshot(conn: sqlite3.Connection, user_id: int, pet: dict, now: int) -> dic
     return {"pet": {**pet, **{meter: round(pet[meter], 1) for meter in DECAY}, "house": placed(pet), "outfit": worn}, "now": now,
             "coins": coins.peek(conn, user_id), "catalog": CATALOG, "house": HOUSE, "closet": CLOSET,
             "battle": {key: lumibattle.CATALOG[key] for key in ("basics", "trees", "mods")} | {"rules": lumibattle.RULES},
-            "progress": lumibattle.summary(pet), "fight": lumibattle.current(conn, user_id)}
+            "progress": lumibattle.summary(pet), "fight": lumibattle.current(conn, user_id),
+            "dungeon": {"environments": lumidungeon.open_environments(pet), "run": lumidungeon.view(lumidungeon.current(conn, user_id), pet)}}
 
 
 def placed(pet: dict) -> dict[str, str]:
@@ -326,6 +327,8 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
         piece = _DECOR.get(item) if item is not None else None
         if piece is None:
             raise PetError("That isn't something for Lumi's house.")
+        if piece.get("found") and item not in pet["decor"]:
+            raise PetError("That one can't be bought. It's waiting somewhere in the dungeon.")
         if piece["price"] and item not in pet["decor"]:
             if not coins.spend(conn, user_id, piece["price"], GAME, "decor"):
                 raise PetError("Not enough coins for that.")
@@ -371,6 +374,10 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
         pet["closet"].append(won["id"])
         pet["outfit"][won["slot"]] = won["id"]            # she wears it straight out of the capsule
         said = {"capsule": won["id"], "name": won["name"], "rarity": rarity, "paid": CLOSET["capsule"]["price"]}
+    elif action == "storyteller":
+        # Whose words the dungeon uses: the library that ships with the game, or (as well) a line written fresh for
+        # each moment by the person's own model. Only a preference; whether a model is there is checked when asked.
+        pet["storyteller"] = "library" if pet.get("storyteller") == "live" else "live"
     elif action == "glow":
         if glow not in GLOWS:
             raise PetError("Choose one of Lumi's glow colours.")
@@ -449,6 +456,9 @@ def fight_start(conn: sqlite3.Connection, user_id: int, tier: str, now: int | No
     pet = load(conn, user_id, now)
     if pet["task"]:
         raise PetError("Lumi is busy napping." if pet["task"]["kind"] == "nap" else "Lumi is busy playing.")
+    run = lumidungeon.current(conn, user_id)
+    if run and not run["over"]:
+        raise PetError("Lumi is out exploring. Her fights are in the dungeon until she comes home.")
     try:
         fight = lumibattle.start(conn, user_id, pet, tier, now, rng)
     except lumibattle.BattleError as refused:
@@ -467,5 +477,53 @@ def fight_act(conn: sqlite3.Connection, user_id: int, battle_id: int, turn: int,
         fight = lumibattle.act(conn, user_id, pet, battle_id, turn, action, now, rng)
     except lumibattle.BattleError as refused:
         raise PetError(str(refused)) from None
+    run = lumidungeon.current(conn, user_id)
+    if run and run["fight"] == battle_id and fight["status"] != "active":
+        lumidungeon.after_fight(conn, user_id, run, fight)       # a dungeon fight: clear the room, step back, or end the trip
+        _narrate(conn, user_id, rng)
     _save(conn, user_id, pet)
     return {**snapshot(conn, user_id, pet, now), "fight": fight}
+
+
+# --------------------------------------------------------------------------- the dungeon (lumidungeon.py does the exploring)
+def _narrate(conn: sqlite3.Connection, user_id: int, rng=None) -> None:
+    """Give the run's latest moment its line from the library (lumitales.py) and keep it with the run, so a reload
+    or another device reads the same words."""
+    from mnemerynne import lumitales                      # imported late: it reads the dungeon's catalogs
+
+    run = lumidungeon.current(conn, user_id)
+    run["say"] = lumitales.line(run, rng)
+    run["said_for"] = None                                # no live line has been written for this moment yet
+    lumidungeon._save(conn, user_id, run)
+
+
+def dungeon_start(conn: sqlite3.Connection, user_id: int, env: str, now: int | None = None, rng=None) -> dict:
+    """Set out for an environment. Call inside a transaction."""
+    now = now_ms() if now is None else now
+    pet = load(conn, user_id, now)
+    if pet["task"]:
+        raise PetError("Lumi is busy napping." if pet["task"]["kind"] == "nap" else "Lumi is busy playing.")
+    try:
+        lumidungeon.start(conn, user_id, pet, env, now, rng)
+    except lumidungeon.DungeonError as refused:
+        raise PetError(str(refused)) from None
+    _narrate(conn, user_id, rng)
+    pet["rest"], pet["restUntil"] = "awake", now + AWAKE_MS
+    _save(conn, user_id, pet)
+    return snapshot(conn, user_id, pet, now)
+
+
+def dungeon_act(conn: sqlite3.Connection, user_id: int, action: str, *, way: str | None = None, moves: str = "",
+                picks: list | None = None, now: int | None = None, rng=None) -> dict:
+    """One choice in the dungeon: a step, a door, a game, the way home. Call inside a transaction: the step, anything
+    picked up, and coins banked at the exit save together. The answer carries a fight if she walked into one."""
+    now = now_ms() if now is None else now
+    pet = load(conn, user_id, now)
+    try:
+        fight = lumidungeon.act(conn, user_id, pet, action, now, rng, way=way, moves=moves, picks=picks)
+    except (lumidungeon.DungeonError, lumibattle.BattleError) as refused:
+        raise PetError(str(refused)) from None
+    _narrate(conn, user_id, rng)
+    _save(conn, user_id, pet)
+    out = snapshot(conn, user_id, pet, now)
+    return {**out, "fight": fight or out["fight"]}

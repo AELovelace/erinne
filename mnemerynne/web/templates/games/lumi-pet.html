@@ -26,6 +26,14 @@
   {#- The house: game.js draws every spot's object here from static/games/lumi-pet/house.js. The room fills the screen and crops this wide
       drawing's sides to fit. Its windows are holes in the wall: the theme's scrolling backdrop, behind the page, shows through them. -#}
   <svg class="lp-house" id="lp-house" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
+  {#- The dungeon (mnemerynne/lumidungeon.py): while Lumi is out, game.js draws the room she is in over the house (dungeon-art.js),
+      in the same wide drawing, with a line of her health and satchel. -#}
+  <svg class="lp-dungeon" id="lp-dungeon" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style="display: none"></svg>
+  <div class="lp-dhud" id="lp-dhud" hidden>
+    <span id="lp-d-title"></span>
+    <div class="lp-bar"><i id="lp-d-hp"></i></div><div class="lp-bar lp-bar-mp"><i id="lp-d-mp"></i></div>
+    <small id="lp-d-label"></small>
+  </div>
   {#- A fight (mnemerynne/lumibattle.py): a veil over the room, both sides' bars, and the enemy (enemies.js) facing Lumi. -#}
   <div class="lp-fight" id="lp-fight" hidden>
     <div class="lp-fight-bars">
@@ -72,6 +80,7 @@
     <button type="button" role="tab" data-lp-tab="closet" aria-selected="false">Closet</button>
     <button type="button" role="tab" data-lp-tab="home" aria-selected="false">Home</button>
     <button type="button" role="tab" data-lp-tab="battle" aria-selected="false">Battle</button>
+    <button type="button" role="tab" data-lp-tab="dungeon" aria-selected="false">Dungeon</button>
     <button type="button" role="tab" data-lp-tab="shop" aria-selected="false">Shop</button>
     <button type="button" role="tab" data-lp-tab="settings" aria-selected="false">Settings</button>
   </div>
