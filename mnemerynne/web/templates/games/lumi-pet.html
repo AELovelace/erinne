@@ -10,6 +10,10 @@
       <div class="lp-bar" role="meter" aria-label="{{ label }}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="lp-{{ meter }}"></i></div>
       <b id="lp-{{ meter }}-n">–</b></div>
     {% endfor %}
+    {#- Her health: what she has left after a dungeon trip. It mends with time, a nap, bought food or a potion. -#}
+    <div class="lp-meter"><span>Health</span>
+      <div class="lp-bar" role="meter" aria-label="Health" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="lp-health"></i></div>
+      <b id="lp-health-n">–</b></div>
   </div>
   <dl class="lp-stats">
     <div><dt>Level</dt><dd id="lp-level">1</dd></div>

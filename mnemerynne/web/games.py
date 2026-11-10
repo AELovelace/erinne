@@ -72,7 +72,7 @@ class PetAction(BaseModel):
     """What the person chose to do with Lumi. Only choices: which thing and how many. The server decides every result."""
     model_config = ConfigDict(extra="forbid")
     action: Literal["cuddle", "feed", "play", "nap", "wake", "buy", "decorate", "wear", "capsule", "glow", "import", "storyteller",
-                    "learn", "respec", "equip", "mod", "potions", "heal"]
+                    "learn", "respec", "equip", "mod", "potions", "heal", "drink"]
     item: str | None = Field(default=None, max_length=40)
     count: int = Field(default=1, ge=1, le=lumipet.MAX_HELD, strict=True)
     moments: int = Field(default=0, ge=0, le=lumipet.MAX_MOMENTS, strict=True)   # only read by "import", once

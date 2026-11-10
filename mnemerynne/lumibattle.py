@@ -20,7 +20,7 @@ import json
 import random
 import re
 import sqlite3
-from math import floor
+from math import ceil, floor
 from pathlib import Path
 
 from mnemerynne import coins
@@ -33,6 +33,9 @@ RESPEC_PRICE = 100                      # coins to hand every skill point back
 POTION_PRICE, POTION_CAP = 20, 10
 HEAL_PRICE = 50                         # coins to wake her at once after a defeat
 FAINT_MS = 10 * 60_000                  # otherwise she naps this long, for free
+MEND_MS = FAINT_MS                      # waiting mends a whole health bar in this long, so half a bar takes half of it
+NAP_MEND = 2                            # a nap mends this many times faster than waiting
+POTION_MEND = 0.5                       # a potion gives back this share of her health
 MOVE_SLOTS = 4
 DEFEND_MP = 6                           # MP that Defend gives back
 STATUS_TURNS, STATUS_HURT = 3, 6        # poison and burn: this many turns, this percent of full health each
@@ -138,7 +141,30 @@ _ENEMIES = {enemy["id"]: enemy for enemy in CATALOG["enemies"]}
 def fresh_fields() -> dict:
     """What a pet needs for battles; lumipet merges these under any save, so older pets gain them."""
     return {"level": 1, "exp": 0, "skills": [], "moves": list(_BASICS), "mods": [None] * len(MOD_SLOTS), "mods_owned": [],
-            "potions": 0, "faint_until": 0, "wins": 0, "losses": 0}
+            "potions": 0, "faint_until": 0, "wins": 0, "losses": 0, "wound": 0.0}
+
+
+# --------------------------------------------------------------------------- her health between dungeon trips
+def health(pet: dict) -> int:
+    """Her health right now, outside the dungeon. `wound` is the share of it still missing (0: none, 1: all of it);
+    lumipet.advance mends it as time passes. Never below 1, and never shown as full while any is missing."""
+    full = stats(pet)["hp"]
+    return full if pet["wound"] <= 0 else max(1, min(full - 1, floor(full * (1 - pet["wound"]))))
+
+
+def hurt(pet: dict, hp: int) -> None:
+    """Remember the health she came home with, as the share of it that is missing."""
+    pet["wound"] = min(1.0, max(0.0, 1 - hp / stats(pet)["hp"]))
+
+
+def mend(pet: dict, share: float) -> None:
+    """Give back this share of her whole health (food, a potion, time passing)."""
+    pet["wound"] = max(0.0, pet["wound"] - share)
+
+
+def mends_in(pet: dict) -> int:
+    """Milliseconds of plain waiting until she is whole again."""
+    return ceil(pet["wound"] * MEND_MS)
 
 
 # --------------------------------------------------------------------------- Lumi's numbers
@@ -538,8 +564,15 @@ def progress(conn: sqlite3.Connection, user_id: int, pet: dict, action: str, ite
             raise BattleError("Lumi is already up and about.")
         if not coins.spend(conn, user_id, HEAL_PRICE, GAME, "heal"):
             raise BattleError("Not enough coins for that. She'll wake by herself soon.")
-        pet["faint_until"] = 0
+        pet["faint_until"], pet["wound"] = 0, 0.0         # woken and whole again
         return {"bought": "heal", "count": 1, "paid": HEAL_PRICE}
+    elif action == "drink":                               # a potion at home, between trips (lumipet.act refuses it on one)
+        if pet["wound"] <= 0:
+            raise BattleError("Lumi is already at full health.")
+        if pet["potions"] < 1:
+            raise BattleError("No potions left. The Battle tab sells them.")
+        pet["potions"] -= 1
+        mend(pet, POTION_MEND)
     else:
         raise BattleError("Lumi doesn't know that one.")
     return None
@@ -552,5 +585,5 @@ def summary(pet: dict) -> dict:
             "slots": [{"tek": tek, "opens": opens, "open": pet["level"] >= opens, "mod": pet["mods"][i]} for i, (tek, opens) in enumerate(MOD_SLOTS)]}
 
 
-RULES = {"costs": NODE_COSTS, "respec": RESPEC_PRICE, "potion": POTION_PRICE, "potion_cap": POTION_CAP, "heal": HEAL_PRICE,
+RULES = {"mend_ms": MEND_MS, "nap_mend": NAP_MEND, "costs": NODE_COSTS, "respec": RESPEC_PRICE, "potion": POTION_PRICE, "potion_cap": POTION_CAP, "heal": HEAL_PRICE,
          "moves": MOVE_SLOTS, "max_level": MAX_LEVEL, "tiers": list(TIERS), "glows": GLOW_ELEMENT}

@@ -45,6 +45,8 @@ export async function checkLumiPet(browser, page, base) { // Exercise real contr
 
   await page.click('[data-lp-tab="battle"]'); // A fight: find one, see the enemy, play a turn, then run (so no coins or EXP move).
   assert.equal(await text(page, "#lp-level"), "1 · 0/35 EXP");
+  assert.equal(await text(page, "#lp-health-n"), "58/58"); // Her health: full, so nothing to mend and no potion row in Care.
+  assert.equal(await page.$eval("#lp-health", el => el.parentNode.getAttribute("aria-valuenow")), "100");
   await page.click(row("skills"));
   await page.waitForSelector(row("tree-fighter"));
   await page.click(row("tree-fighter"));

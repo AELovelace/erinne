@@ -666,3 +666,100 @@ def test_a_trip_through_the_page(on, conn):
     assert home["dungeon"]["run"]["over"] == "home" and home["coins"] == 1000
     on.cookies.clear()
     assert on.post("/api/media/games/lumi-pet/dungeon", json={"env": "crystal-cavern"}).status_code == 401
+
+
+# --------------------------------------------------------------------------- her health between trips
+MIN = 60_000
+
+
+def _care(conn, uid, action, now=T0, **kwargs):
+    with transaction(conn):
+        return lumipet.act(conn, uid, action, now=now, **kwargs)
+
+
+def _home_hurt(conn, uid, hp):
+    """A trip that ends at once, with this much health left."""
+    _start(conn, uid)
+    run = _run(conn, uid)
+    run["hp"] = hp
+    _put(conn, uid, run)
+    return _do(conn, uid, "leave")
+
+
+def test_bruises_come_home_and_mend_in_their_share_of_ten_minutes(conn, alice):
+    full = lumibattle.stats(_pet())["hp"]
+    out = _home_hurt(conn, alice, full // 2)
+    assert out["health"] == {"hp": full // 2, "max": full, "mends_in": 5 * MIN, "out": False}       # half gone: half of ten minutes
+    with transaction(conn):
+        later = lumipet.state(conn, alice, T0 + 2 * MIN)
+    assert later["health"]["hp"] == int(full * 0.7) and later["health"]["mends_in"] == 3 * MIN
+    with transaction(conn):
+        run = lumipet.dungeon_start(conn, alice, "moonlit-shrine", T0 + 2 * MIN, random.Random(1))["dungeon"]["run"]
+    assert run["hp"] == int(full * 0.7) and run["hpMax"] == full                                    # she sets out as hurt as she is
+    with transaction(conn):
+        lumipet.dungeon_act(conn, alice, "abandon", now=T0 + 2 * MIN)
+        whole = lumipet.state(conn, alice, T0 + 6 * MIN)       # a whole number of HP rounds the wound up a little
+    assert whole["health"]["hp"] == full and whole["health"]["mends_in"] == 0 and whole["pet"]["wound"] == 0
+
+
+def test_giving_up_and_being_beaten_leave_their_mark_and_a_paid_wake_heals_it_all(conn, alice):
+    full = lumibattle.stats(_pet())["hp"]
+    _start(conn, alice)
+    run = _run(conn, alice)
+    run["hp"] = 10
+    _put(conn, alice, run)
+    assert _do(conn, alice, "abandon")["health"]["hp"] == 10
+    _set_pet(conn, alice, wound=0.0)
+    _start(conn, alice)
+    _only_one_enemy(conn, alice, hp=1)
+    fight = _walk_into_enemy(conn, alice)["fight"]
+    while fight["status"] == "active":
+        with transaction(conn):
+            out = lumipet.fight_act(conn, alice, fight["id"], fight["turn"], "defend", T0, Dice(chance=0.01))
+            fight = out["fight"]
+    assert out["pet"]["wound"] == 1 and out["health"] == {"hp": 1, "max": full, "mends_in": lumibattle.FAINT_MS, "out": False}
+    assert _care(conn, alice, "heal")["health"]["hp"] == full                    # 50 coins: awake and whole
+
+
+def test_a_nap_mends_twice_as_fast_as_waiting(conn, alice):
+    full = lumibattle.stats(_pet())["hp"]
+    _home_hurt(conn, alice, full // 2)
+    _care(conn, alice, "nap")
+    with transaction(conn):
+        napping = lumipet.state(conn, alice, T0 + MIN)
+    assert napping["pet"]["wound"] == pytest.approx(0.3)                         # a minute of nap: two minutes' mending
+    with transaction(conn):
+        assert lumipet.state(conn, alice, T0 + 5 * MIN)["health"]["hp"] == full  # the whole nap covers a whole bar
+
+
+def test_bought_food_mends_her_at_home_and_on_a_trip_but_the_free_bowl_does_not(conn, alice):
+    full = lumibattle.stats(_pet())["hp"]
+    _home_hurt(conn, alice, 1)
+    _set_pet(conn, alice, wound=0.9)
+    _care(conn, alice, "buy", item="lunch", count=2)
+    assert _care(conn, alice, "feed", item="apple")["pet"]["wound"] == 0.9       # free, so no mending
+    _set_pet(conn, alice, cooldowns={})
+    fed = _care(conn, alice, "feed", item="lunch", now=T0 + 1)
+    assert fed["pet"]["wound"] == pytest.approx(0.45, abs=1e-4)                  # lunch fills 45, and mends 45%
+    _set_pet(conn, alice, cooldowns={})
+    with transaction(conn):
+        lumipet.dungeon_start(conn, alice, "moonlit-shrine", T0 + 1, random.Random(1))
+    run = _run(conn, alice)
+    run["hp"] = 5
+    _put(conn, alice, run)
+    assert _care(conn, alice, "feed", item="lunch", now=T0 + 1)["health"] == {"hp": 5 + int(full * 0.45), "max": full, "mends_in": 0, "out": True}
+
+
+def test_a_potion_at_home_gives_back_half_and_only_when_it_helps(conn, alice):
+    full = lumibattle.stats(_pet())["hp"]
+    with pytest.raises(lumipet.PetError, match="already at full health"):
+        _care(conn, alice, "drink")
+    _home_hurt(conn, alice, 1)
+    with pytest.raises(lumipet.PetError, match="No potions left"):
+        _care(conn, alice, "drink")
+    _set_pet(conn, alice, potions=2, wound=0.8)
+    out = _care(conn, alice, "drink")
+    assert out["pet"]["potions"] == 1 and out["pet"]["wound"] == pytest.approx(0.3) and out["health"]["hp"] == int(full * 0.7)
+    _start(conn, alice)
+    with pytest.raises(lumipet.PetError, match="out exploring"):
+        _care(conn, alice, "drink")

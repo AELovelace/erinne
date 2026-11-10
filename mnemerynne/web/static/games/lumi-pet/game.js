@@ -49,16 +49,30 @@
     return R.scene({ rest: snap.pet.rest, restUntil: snap.pet.restUntil - offset }, Date.now());
   }
 
+  function mendsIn() { // Milliseconds until her health is full, counted down from the server's answer; a nap halves it.
+    const napping = snap.pet.task && snap.pet.task.kind === "nap";
+    return Math.max(0, snap.health.mends_in / (napping ? snap.battle.rules.nap_mend : 1) - (serverNow() - snap.now));
+  }
+
   function rows() { // What the selected tab offers, as plain rows: the list and the remote both read from here.
     const pet = snap.pet, c = snap.catalog, name = TABS[tab], asleep = sceneNow().asleep;
-    if (name === "care") return [
-      { key: "cuddle", icon: "♡", name: "Cuddle", hint: "A little closeness", send: { action: "cuddle" } },
-      asleep ? { key: "wake", icon: "☀", name: "Wake gently", hint: "A sleepy little hello", send: { action: "wake" } }
-        : { key: "nap", icon: "☾", name: "Nap", hint: "Five minutes of star dreams · +35 energy", send: { action: "nap" } },
-    ];
+    if (name === "care") {
+      const health = snap.health, sore = !health.out && health.hp < health.max; // Hurt, and at home to do something about it.
+      const list = [
+        { key: "cuddle", icon: "♡", name: "Cuddle", hint: "A little closeness", send: { action: "cuddle" } },
+        asleep ? { key: "wake", icon: "☀", name: "Wake gently", hint: "A sleepy little hello", send: { action: "wake" } }
+          : { key: "nap", icon: "☾", name: "Nap", hint: "Five minutes of star dreams · +35 energy" + (sore ? " · mends her twice as fast" : ""), send: { action: "nap" } },
+      ];
+      if (sore) { // A potion from her own pocket; bought food from the Pantry mends her too.
+        const potion = { key: "drink", icon: "🧪", name: "Drink a potion (" + pet.potions + ")", hint: health.hp + " of " + health.max + " HP · whole again in " + R.countdown(mendsIn()) + ", sooner with a nap or bought food" };
+        if (pet.potions) potion.send = { action: "drink" }; else potion.note = "No potions left. The Battle tab sells them.";
+        list.push(potion);
+      }
+      return list;
+    }
     if (name === "pantry") return c.snacks.concat(c.treats).filter(function (food) { return !food.price || pet.inventory[food.id]; }).map(function (food) {
       return { key: food.id, icon: food.icon, name: food.name, send: { action: "feed", item: food.id },
-        hint: R.signed(food.fullness, "hunger") + " · " + R.signed(food.joy, "joy") + " · " + (food.price ? pet.inventory[food.id] + " left" : "always in the bowl") };
+        hint: R.signed(food.fullness, "hunger") + " · " + R.signed(food.joy, "joy") + (food.price && food.fullness > 0 ? " · +" + food.fullness + "% health" : "") + " · " + (food.price ? pet.inventory[food.id] + " left" : "always in the bowl") };
     });
     if (name === "toys") return c.toys.filter(function (toy) { return !toy.price || pet.toys.includes(toy.id); }).map(function (toy) {
       return { key: toy.id, icon: toy.icon, name: toy.name, send: { action: "play", item: toy.id },
@@ -260,10 +274,15 @@
       bar.parentNode.dataset.low = String(pet[meter] < R.LOW);
       $("lp-" + meter + "-n").textContent = value;
     });
+    const health = snap.health, share = Math.round(100 * health.hp / health.max); // Her health: a bar, and "42/90".
+    $("lp-health").style.width = share + "%"; $("lp-health").parentNode.setAttribute("aria-valuenow", String(share));
+    $("lp-health").parentNode.dataset.low = String(share < R.LOW);
+    $("lp-health-n").textContent = health.hp + "/" + health.max;
     $("lp-clock").textContent = scene.night ? "Moonlight hours" : "A little daytime glow";
     const left = task ? R.countdown(task.finishesAt - serverNow()) : "";
     $("lp-state").textContent = task ? (task.kind === "nap" ? "Napping · " + left : "Playing · " + left)
       : snap.fight ? "In a fight!" : exploring() ? "Exploring · floor " + exploring().depth : resting ? "Napping off a fight · " + R.countdown(pet.faint_until - serverNow())
+      : !health.out && health.hp < health.max && mendsIn() > 0 ? "Mending · " + R.countdown(mendsIn())
       : scene.asleep ? "Dreaming in good company" : mood.need ? NEEDS[mood.need] : "Happy to be here with you";
     $("lp-pet-title").textContent = scene.asleep ? "Lumi, a glowing fairy cat, sleeping peacefully" : "Lumi, a glowing fairy cat, awake";
     if (task && task.kind === "play") room.dataset.action = "play"; // She keeps playing for as long as the toy lasts.
@@ -349,6 +368,7 @@
       if (send.action === "cuddle") { say(CUDDLES[data.pet.moments % CUDDLES.length]); effect("cuddle", "♡ ♡"); }
       else if (send.action === "feed") { say(thing.name + "! Lumi munches happily" + (thing.boost ? " and sparkles with a little " + thing.boost + " for her next adventure." : ".")); effect("snack", "✦"); }
       else if (send.action === "play") { say("Lumi pounces on the " + thing.name.toLowerCase() + ". " + thing.minutes + " minutes of play!"); effect("play", "✧ ✦"); }
+      else if (send.action === "drink") { say("Glug glug! Lumi has " + data.health.hp + " of " + data.health.max + " HP."); effect("snack", "✦"); }
       else if (send.action === "nap") { say("Lumi curls up on the cushion. Five minutes of little star dreams."); effect("rest", "z z z"); }
       else if (send.action === "wake") { say("A stretch, a blink, a happy little hello. Lumi settles beside you."); effect("rest", "☀"); }
       else if (send.action === "decorate") { say(data.said ? "Bought and put out: " + row.label + ". " + data.said.paid + " coins well spent." : row.label + " is out. Lumi approves."); effect("cuddle", "✧"); }

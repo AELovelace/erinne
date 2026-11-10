@@ -67,8 +67,8 @@
 .gm .lp-tabs button { flex: 1; border-radius: .5rem; font-size: .68rem; padding: .55rem .3rem; }
 .gm .lp-tabs button[aria-selected="true"] { border-color: var(--cyan); color: var(--cyan); background: rgba(var(--glow), .08); }
 .lp-meters { display: grid; gap: .6rem; margin: 1.2rem 0 .4rem; }
-.lp-meter { display: grid; grid-template-columns: 4.2rem minmax(0, 1fr) 2.2rem; gap: .6rem; align-items: center; font-size: .72rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
-.lp-meter b { text-align: right; color: var(--cyan); font-variant-numeric: tabular-nums; }
+.lp-meter { display: grid; grid-template-columns: 4.2rem minmax(0, 1fr) 3.6rem; gap: .6rem; align-items: center; font-size: .72rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+.lp-meter b { text-align: right; white-space: nowrap; color: var(--cyan); font-variant-numeric: tabular-nums; }
 .lp-bar { height: .6rem; border: 1px solid var(--line); border-radius: 1rem; overflow: hidden; }
 .lp-bar i { display: block; height: 100%; width: 0; background: var(--cyan); border-radius: 1rem; transition: width .6s ease; }
 .lp-bar[data-low="true"] i { background: var(--rose); } /* The last quarter: she'd like some care. */

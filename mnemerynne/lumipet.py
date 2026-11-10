@@ -14,6 +14,7 @@ rather than in the middle of someone's purchase. Times are whole milliseconds, l
 from __future__ import annotations
 
 import json
+from math import floor
 import math
 import random
 import re
@@ -176,6 +177,8 @@ def advance(pet: dict, now: int) -> None:
     def decay_until(moment: int) -> None:
         nonlocal start
         hours = max(0, moment - start) / HOUR
+        resting = lumibattle.NAP_MEND if pet["task"] and pet["task"]["kind"] == "nap" else 1    # a nap mends faster
+        lumibattle.mend(pet, resting * max(0, moment - start) / lumibattle.MEND_MS)      # her health comes back with time
         for meter, b in DECAY.items():
             pet[meter] = decayed(pet[meter], hours, b)
         start = max(start, moment)
@@ -230,7 +233,29 @@ def snapshot(conn: sqlite3.Connection, user_id: int, pet: dict, now: int) -> dic
             "battle": {key: lumibattle.CATALOG[key] for key in ("basics", "trees", "mods")} | {"rules": lumibattle.RULES},
             "progress": lumibattle.summary(pet), "fight": lumibattle.current(conn, user_id),
             "potions_ready": lumidungeon.potions_ready(lumidungeon.current(conn, user_id), pet),
+            "health": _health(lumidungeon.current(conn, user_id), pet),
             "dungeon": {"environments": lumidungeon.open_environments(pet), "run": lumidungeon.view(lumidungeon.current(conn, user_id), pet)}}
+
+
+def _health(run: dict | None, pet: dict) -> dict:
+    """Her health for the page: the trip's own count while she is out (nothing mends down there but potions and
+    food), else what she has at home and how long plain waiting takes to fill it (a nap takes half as long)."""
+    full = lumibattle.stats(pet)["hp"]
+    if run and not run["over"]:
+        return {"hp": min(full, run["hp"]), "max": full, "mends_in": 0, "out": True}
+    return {"hp": lumibattle.health(pet), "max": full, "mends_in": lumibattle.mends_in(pet), "out": False}
+
+
+def _eat(conn: sqlite3.Connection, user_id: int, pet: dict, share: float) -> None:
+    """Bought food gives back a share of her health: at home, or to the trip's count if she is out (not mid-fight)."""
+    run = lumidungeon.current(conn, user_id)
+    if run and not run["over"]:
+        if not run["fight"]:
+            full = lumibattle.stats(pet)["hp"]
+            run["hp"] = min(full, run["hp"] + floor(full * share))
+            lumidungeon._save(conn, user_id, run)
+    else:
+        lumibattle.mend(pet, share)
 
 
 def placed(pet: dict) -> dict[str, str]:
@@ -277,7 +302,8 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
         if thing["price"] and pet["inventory"].get(item, 0) < 1:
             raise PetError(f"There's no {thing['name'].lower()} left. The shop has more.")
         _cool(pet, "feed", now)
-        if thing["price"]:                                # free food never runs out
+        if thing["price"]:                                # free food never runs out, and only bought food mends her
+            _eat(conn, user_id, pet, max(0, thing["fullness"]) / 100)
             pet["inventory"][item] -= 1
             if pet["inventory"][item] <= 0:
                 del pet["inventory"][item]
@@ -383,7 +409,10 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
         if glow not in GLOWS:
             raise PetError("Choose one of Lumi's glow colours.")
         pet["glow"] = glow
-    elif action in ("learn", "respec", "equip", "mod", "potions", "heal"):
+    elif action in ("learn", "respec", "equip", "mod", "potions", "heal", "drink"):
+        run = lumidungeon.current(conn, user_id) if action == "drink" else None
+        if run and not run["over"]:
+            raise PetError("Lumi is out exploring. She can drink it there, from the Dungeon tab.")
         try:                                              # her skills, moves, mods and potions (lumibattle.py)
             said = lumibattle.progress(conn, user_id, pet, action, item, slot, count, now)
         except lumibattle.BattleError as refused:
@@ -486,7 +515,7 @@ def fight_act(conn: sqlite3.Connection, user_id: int, battle_id: int, turn: int,
         run["satchel"]["potions"] -= 1                    # the potion she drank was the found one
         lumidungeon._save(conn, user_id, run)
     if run and run["fight"] == battle_id and fight["status"] != "active":
-        lumidungeon.after_fight(conn, user_id, run, fight)       # a dungeon fight: clear the room, step back, or end the trip
+        lumidungeon.after_fight(conn, user_id, pet, run, fight)       # a dungeon fight: clear the room, step back, or end the trip
         _narrate(conn, user_id, rng)
     _save(conn, user_id, pet)
     return {**snapshot(conn, user_id, pet, now), "fight": fight}
