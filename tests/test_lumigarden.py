@@ -56,15 +56,21 @@ LADDER = [flower["id"] for flower in G.CATALOG["flowers"]]
 # --------------------------------------------------------------------------- the catalog
 def test_the_ladder_starts_free_runs_in_order_and_ends_in_perennials():
     flowers = G.CATALOG["flowers"]
-    assert len(flowers) >= 10 and flowers[0]["coins"] == flowers[0]["stardust"] == 0
+    assert len(flowers) == 42 and flowers[0]["coins"] == flowers[0]["stardust"] == 0
+    assert (min(f["minutes"] for f in flowers), max(f["minutes"] for f in flowers)) == (2, 24 * 60)       # two minutes to a whole day
     sorts = [flower["sort"] for flower in flowers]
-    assert sorts == sorted(sorts) and sorts[0] == "cut" and sorts[-1] == "perennial"       # every cut flower comes before every perennial
-    assert any(flower["stardust"] for flower in flowers) and any(flower["coins"] for flower in flowers)      # some for coins, boutique ones for powder
+    assert sorts == sorted(sorts) and sorts.count("cut") == 30 and sorts.count("perennial") == 12        # every cut flower comes before every perennial
+    assert sum(1 for f in flowers if f["stardust"]) == 10 and all(not (f["coins"] and f["stardust"]) for f in flowers)     # boutique ones for powder only
+    assert all(f["level"] == 1 for f in flowers)                                # the ladder is in order, so nothing on it may wait on fights
     best_cut = max(f["powder"] / f["minutes"] for f in flowers if f["sort"] == "cut")
-    assert all(f["powder"] / f["minutes"] < best_cut for f in flowers if f["sort"] == "perennial")           # tending pays more than leaving
-    tulip, fern = G._FLOWERS["dusk-tulip"], G._FLOWERS["moon-fern"]
-    assert tulip["minutes"] == fern["minutes"] and tulip["powder"] > fern["powder"]
-
+    assert all(f["powder"] / f["minutes"] < best_cut for f in flowers if f["sort"] == "perennial")       # tending pays more than leaving
+    for fern in (f for f in flowers if f["sort"] == "perennial"):               # and a cut flower of the same time always out-earns a perennial
+        same = [f for f in flowers if f["sort"] == "cut" and f["minutes"] == fern["minutes"]]
+        assert all(cut["powder"] > fern["powder"] for cut in same), fern["id"]
+    assert G._FLOWERS["dusk-tulip"]["minutes"] == G._FLOWERS["moon-fern"]["minutes"] == 60
+    looks = {(f["shape"], f["petals"], f["colour"]) for f in flowers}
+    assert len(looks) == 42 and {f["shape"] for f in flowers} == set(G.SHAPES)   # no two alike, and every shape is used
+    assert all(a["shape"] != b["shape"] for a, b in zip(flowers, flowers[1:]))  # neighbours on the ladder never share a shape
 
 def test_bad_garden_catalogs_are_refused(tmp_path):
     good = json.loads((G.Path(G.__file__).parent / "lumipet_data" / "garden.json").read_text(encoding="utf-8"))
@@ -81,6 +87,11 @@ def test_bad_garden_catalogs_are_refused(tmp_path):
     broken(lambda d: d["flowers"][3].update(coins=5, stardust=5))               # one price or the other
     broken(lambda d: d["flowers"][3].update(needs=0))                           # out of ladder order
     broken(lambda d: d["flowers"][2].update(colour="red"))
+    broken(lambda d: d["flowers"][2].update(shape="triangle"))                  # nothing garden-art.js could draw
+    broken(lambda d: d["flowers"][3].update(shape=d["flowers"][2]["shape"], petals=d["flowers"][2]["petals"], colour=d["flowers"][2]["colour"]))     # two alike
+    broken(lambda d: d["decor"]["capsule"]["odds"].update(common=50))           # odds must add up
+    broken(lambda d: d["decor"]["slots"][0]["items"][0].update(stardust=0))     # a sold thing needs a price
+    broken(lambda d: d["decor"]["slots"][0]["items"][9].update(stardust=5))     # and a capsule prize has none
     broken(lambda d: d["helpers"].pop())
     broken(lambda d: d["water"].update(rounds=12, share=20))                    # would skip a whole flower
     broken(lambda d: d["press"].update(band=0))
@@ -109,13 +120,14 @@ def test_a_cut_flower_is_ready_on_time_waits_and_then_overgrows_to_half(conn, al
 def test_a_perennial_grows_back_and_harvest_all_replants_cut_flowers(conn, alice):
     _look(conn, alice)
     _set(conn, alice, garden={"unlocked": LADDER})
+    tulip, fern = G._FLOWERS["dusk-tulip"]["powder"], G._FLOWERS["moon-fern"]["powder"]
     _g(conn, alice, "plant", plot=0, item="moon-fern")
     _g(conn, alice, "plant", plot=1, item="dusk-tulip")
     _g(conn, alice, "plant", plot=2, item="moondaisy")
     with pytest.raises(lumipet.PetError, match="already growing"):
         _g(conn, alice, "plant", plot=0, item="moondaisy")
     said = _g(conn, alice, "trim_all", T0 + HOUR)["said"]
-    assert said["trimmed"] == 3 and said["powder"] == 150 + 280 + 3      # the daisy has sat there overgrown for most of the hour
+    assert said["trimmed"] == 3 and said["powder"] == fern + tulip + 3          # the daisy has sat there overgrown for most of the hour
     plots = _look(conn, alice, T0 + HOUR)["plots"]
     assert [(p["flower"], p["stage"], p["ready_in"]) for p in plots[:3]] == [("moon-fern", "growing", HOUR), ("dusk-tulip", "growing", HOUR), ("moondaisy", "growing", 2 * MIN)]
     with pytest.raises(lumipet.PetError, match="Nothing is ready"):
@@ -123,28 +135,28 @@ def test_a_perennial_grows_back_and_harvest_all_replants_cut_flowers(conn, alice
     assert _g(conn, alice, "trim", T0 + HOUR + 2 * MIN, plot=2)["said"]["powder"] == 6
     assert _look(conn, alice, T0 + HOUR + 2 * MIN)["plots"][2]["flower"] is None  # trimmed one at a time, a cut flower leaves its plot
 
-
 def test_each_garden_climbs_the_ladder_itself_with_coins_or_starpowder(conn, alice):
     shown = _look(conn, alice)
     assert [f["id"] for f in shown["flowers"] if f["unlocked"]] == ["moondaisy"] and [f["id"] for f in shown["flowers"] if f["next"]] == ["glowbell"]
+    bell, rose = G._FLOWERS["glowbell"], G._FLOWERS["nebula-rose"]
     with pytest.raises(lumipet.PetError, match="given 40 starpowder"):
         _g(conn, alice, "unlock", item="glowbell")
     _set(conn, alice, garden={"given": 40})
     with pytest.raises(lumipet.PetError, match="before it first"):
         _g(conn, alice, "unlock", item="starpoppy")
-    assert _g(conn, alice, "unlock", item="glowbell")["coins"] == 970           # an ordinary flower: coins
+    assert _g(conn, alice, "unlock", item="glowbell")["coins"] == 1000 - bell["coins"]      # an ordinary flower: coins
     with pytest.raises(lumipet.PetError, match="can unlock"):
         _g(conn, alice, "unlock", item="glowbell")
-    _set(conn, alice, garden={"given": 3000, "unlocked": LADDER[:5]}, powder=799)
-    with pytest.raises(lumipet.PetError, match="level 5"):
-        _g(conn, alice, "unlock", item="nebula-rose")
-    _set_pet(conn, alice, level=5)
+    _set(conn, alice, garden={"given": rose["needs"], "unlocked": LADDER[:rose["rung"]]}, powder=rose["stardust"] - 1)
     with pytest.raises(lumipet.PetError, match="Not enough starpowder"):
         _g(conn, alice, "unlock", item="nebula-rose")
-    _set(conn, alice, powder=800)
+    _set(conn, alice, powder=rose["stardust"])
     out = _g(conn, alice, "unlock", item="nebula-rose")                         # a boutique flower: starpowder only
-    assert out["coins"] == 970 and out["garden"]["powder"] == 0 and out["garden"]["flowers"][5]["unlocked"]
-
+    assert out["coins"] == 1000 - bell["coins"] and out["garden"]["powder"] == 0 and out["garden"]["flowers"][rose["rung"]]["unlocked"]
+    # A garden saved under an older, shorter ladder: the flower it never had is simply next, and nothing it had is lost.
+    _set(conn, alice, garden={"given": 10 ** 6, "unlocked": ["moondaisy", "glowbell", "starpoppy", "comet-clover"]})
+    assert [f["id"] for f in _look(conn, alice)["flowers"] if f["next"]] == ["pixie-puff"]
+    assert _g(conn, alice, "unlock", item="pixie-puff")["garden"]["flowers"][2]["unlocked"]
 
 def test_plots_cost_more_each_time_and_a_garden_holds_sixteen(conn, alice):
     assert _look(conn, alice)["plot_price"] == 25 and len(_look(conn, alice)["plots"]) == 4
@@ -342,44 +354,104 @@ def test_a_harvest_sometimes_turns_up_a_gift(conn, alice):
 
 
 # --------------------------------------------------------------------------- cosmetics and moonrise
-def test_cosmetics_cost_starpowder_only(conn, alice):
-    assert not any(thing["owned"] for thing in _look(conn, alice)["cosmetics"])
-    with pytest.raises(lumipet.PetError, match="Not enough starpowder"):
-        _g(conn, alice, "cosmetic", item="picket-fence")
-    _set(conn, alice, powder=300)
-    out = _g(conn, alice, "cosmetic", item="picket-fence")
-    assert out["coins"] == 1000 and out["garden"]["powder"] == 0 and out["garden"]["cosmetics"][0]["owned"]
-    with pytest.raises(lumipet.PetError, match="something new"):
-        _g(conn, alice, "cosmetic", item="picket-fence")
+def test_fifteen_slots_hold_five_things_to_buy_and_ten_from_the_capsule():
+    slots = G.CATALOG["decor"]["slots"]
+    assert len(slots) == 15 and all(len(slot["items"]) == 15 for slot in slots)
+    for slot in slots:
+        sold = [item for item in slot["items"] if item["rarity"] == "shop"]
+        prizes = [item["rarity"] for item in slot["items"] if item["rarity"] != "shop"]
+        assert len(sold) == 5 and all(item["stardust"] > 0 for item in sold) and len(prizes) == 10
+        assert [prizes.count(rarity) for rarity in G.RARITIES] == [4, 3, 2, 1]
+        assert len({(item["thing"], item["a"], item["b"]) for item in slot["items"]}) == 15     # no two alike within a slot
+    assert set(G.LEGACY_DECOR.values()) <= set(G._DECOR)
 
+
+def test_decorations_are_bought_with_starpowder_put_out_put_away_and_sold(conn, alice):
+    shown = _look(conn, alice)
+    assert shown["decor"] == {"placed": {}, "owned": {}, "spare": {}}
+    with transaction(conn):
+        assert lumipet.state(conn, alice, T0)["garden_decor"]["capsule"]["name"] == "Seedling Capsule"
+    fence, gold = G._DECOR["fence-0-snowy"], G._DECOR["fence-0-golden"]
+    with pytest.raises(lumipet.PetError, match="Not enough starpowder"):
+        _g(conn, alice, "decor_buy", item="fence-0-snowy")
+    _set(conn, alice, powder=fence["stardust"] * 2 + gold["stardust"])
+    out = _g(conn, alice, "decor_buy", item="fence-0-snowy")                    # bought, and out at once
+    assert out["coins"] == 1000 and out["garden"]["decor"] == {"placed": {"fence": "fence-0-snowy"}, "owned": {"fence-0-snowy": 1}, "spare": {"fence-0-snowy": 0}}
+    out = _g(conn, alice, "decor_buy", item="fence-0-golden")                   # a second fence takes the slot; the first goes to the store
+    assert out["garden"]["decor"]["placed"] == {"fence": "fence-0-golden"} and out["garden"]["decor"]["spare"] == {"fence-0-snowy": 1, "fence-0-golden": 0}
+    with pytest.raises(lumipet.PetError, match="spare one of those to sell"):
+        _g(conn, alice, "decor_sell", item="fence-0-golden")                    # never one that is standing in a garden
+    assert _g(conn, alice, "decor_place", item="fence-0-golden")["said"] == {"stored": "fence-0-golden"}        # put away
+    assert _g(conn, alice, "decor_place", item="fence-0-snowy")["garden"]["decor"]["placed"] == {"fence": "fence-0-snowy"}
+    sold = _g(conn, alice, "decor_sell", item="fence-0-golden")
+    assert sold["said"] == {"sold": "fence-0-golden", "powder": gold["stardust"] // 2} and "fence-0-golden" not in sold["garden"]["decor"]["owned"]
+    assert sold["garden"]["powder"] == fence["stardust"] + gold["stardust"] // 2
+    with pytest.raises(lumipet.PetError, match="doesn't have that one yet"):
+        _g(conn, alice, "decor_place", item="fence-0-golden")
+    with pytest.raises(lumipet.PetError, match="only comes from the Seedling Capsule"):
+        _g(conn, alice, "decor_buy", item="fence-1-starry")
+    with pytest.raises(lumipet.PetError, match="isn't a decoration"):
+        _g(conn, alice, "decor_place", item="moondaisy")
+
+
+def test_the_seedling_capsule_gives_prizes_by_rarity_and_repeats_go_to_the_store(conn, alice):
+    rules = G.CATALOG["decor"]["capsule"]
+    _look(conn, alice)
+    with pytest.raises(lumipet.PetError, match="Not enough starpowder for a capsule"):
+        _g(conn, alice, "capsule")
+    _set(conn, alice, powder=rules["price"] * 4)
+    first = _g(conn, alice, "capsule", rng=Dice(0, 0))                          # roll 0: common; then the first common prize
+    prize = G._PRIZES["common"][0]
+    assert first["said"] == {"capsule": prize["id"], "rarity": "common", "copies": 1, "paid": rules["price"]} and first["coins"] == 1000
+    assert first["garden"]["decor"]["placed"] == {prize["slot"]: prize["id"]}   # an empty slot: straight into the garden
+    again = _g(conn, alice, "capsule", rng=Dice(0, 0))                          # the same again: a spare for another garden, or to sell
+    assert again["said"]["copies"] == 2 and again["garden"]["decor"]["spare"] == {prize["id"]: 1}
+    assert _g(conn, alice, "decor_sell", item=prize["id"])["said"]["powder"] == rules["sell"]["common"] < rules["price"]
+    legend = _g(conn, alice, "capsule", rng=Dice(99, 3))                        # roll 99: legendary
+    assert legend["said"]["rarity"] == "legendary" and legend["said"]["capsule"] == G._PRIZES["legendary"][3]["id"]
+    assert _g(conn, alice, "capsule", rng=Dice(60, 0))["said"]["rarity"] == "rare"
+    rolls = random.Random(7)
+    seen = [G.RARITIES[next(i for i, edge in enumerate((60, 87, 97, 100)) if rolls.randrange(100) < edge)] for _ in range(2000)]
+    assert seen.count("common") > seen.count("rare") > seen.count("epic") > seen.count("legendary") > 0
+
+
+def test_the_first_seven_cosmetics_become_decorations(conn, alice):
+    _look(conn, alice)
+    _set(conn, alice, cosmetics=["garden-gnome", "golden-press", "long-gone-thing"])
+    shown = _look(conn, alice)["decor"]
+    assert shown["owned"] == {"statue-0-rosy": 1, "press-0-golden": 1} and shown["placed"] == {"statue": "statue-0-rosy", "press": "press-0-golden"}
+    assert "cosmetics" not in _saved(conn, alice)
 
 def test_moonrise_replants_one_garden_for_an_upgrade_or_another_garden(conn, alice):
     _look(conn, alice)
     with pytest.raises(lumipet.PetError, match="isn't ready for a moonrise"):
         _g(conn, alice, "moonrise", item="strong-press")
-    full = {"plots": [G._empty() for _ in range(16)], "unlocked": LADDER, "given": 100_000}
-    _set(conn, alice, garden=full, powder=500, cosmetics=["garden-gnome"], helpers={**dict.fromkeys(G.TREES, 0), "monk": 3})
+    full = {"plots": [G._empty() for _ in range(16)], "unlocked": LADDER, "given": 100_000, "decor": {"statue": "statue-0-rosy"}}
+    _set(conn, alice, garden=full, powder=500, decor={"statue-0-rosy": 1}, helpers={**dict.fromkeys(G.TREES, 0), "monk": 3})
     assert _look(conn, alice)["moonrise"] == {"needs": 100_000, "ready": True, "count": 0}
     with pytest.raises(lumipet.PetError, match="Choose a permanent upgrade"):
         _g(conn, alice, "moonrise", item="moondaisy")
     out = _g(conn, alice, "moonrise", item="strong-press")["garden"]
     assert len(out["plots"]) == 4 and [f["id"] for f in out["flowers"] if f["unlocked"]] == ["moondaisy"] and out["given"] == 0     # the ladder starts over
-    assert out["upgrades"][0]["count"] == 1 and out["helpers"][2]["level"] == 3 and out["cosmetics"][3]["owned"] and out["powder"] == 500
+    assert out["upgrades"][0]["count"] == 1 and out["helpers"][2]["level"] == 3 and out["powder"] == 500
+    assert out["decor"] == {"placed": {}, "owned": {"statue-0-rosy": 1}, "spare": {"statue-0-rosy": 1}}      # her gnome is kept, back in the store
     assert out["moonrise"] == {"needs": 200_000, "ready": False, "count": 1} and out["gardens"] == 1
     _set(conn, alice, garden={**full, "given": 200_000})
     two = _g(conn, alice, "moonrise", item="garden")["garden"]
     assert two["gardens"] == 2 and two["at"] == 0 and len(two["plots"]) == 4
-    _set(conn, alice, garden={"unlocked": LADDER[:3]})                          # the first garden climbs again...
+    _set(conn, alice, garden={"unlocked": LADDER[:3]}, decor={"statue-0-rosy": 2})      # the first garden climbs again...
+    _g(conn, alice, "decor_place", item="statue-0-rosy")
     other = _g(conn, alice, "garden", count=1)["garden"]
     assert other["at"] == 1 and [f["id"] for f in other["flowers"] if f["unlocked"]] == ["moondaisy"]      # ...and the new one has to as well
+    assert other["decor"]["placed"] == {} and other["decor"]["spare"] == {"statue-0-rosy": 1}              # each garden is dressed by itself
+    assert _g(conn, alice, "decor_place", item="statue-0-rosy")["garden"]["decor"]["spare"] == {"statue-0-rosy": 0}     # a gnome for each
     with pytest.raises(lumipet.PetError, match="hasn't unlocked"):
         _g(conn, alice, "plant", plot=0, item="glowbell")
     with pytest.raises(lumipet.PetError, match="doesn't have that garden"):
         _g(conn, alice, "garden", count=2)
-    _set(conn, alice, upgrades={"rich-soil": 6}, garden={**full, "given": 10 ** 9})
+    _set(conn, alice, upgrades={"rich-soil": 6}, garden={**full, "decor": {}, "given": 10 ** 9})
     with pytest.raises(lumipet.PetError, match="Choose a permanent upgrade"):
         _g(conn, alice, "moonrise", item="rich-soil")                           # that one is as high as it goes
-
 
 def test_the_garden_waits_while_lumi_is_exploring(conn, alice):
     with transaction(conn):
@@ -452,9 +524,9 @@ def test_the_garden_through_the_page_takes_choices_and_never_amounts(on, conn):
 def test_the_numbers_keep_a_gentle_pace():
     rules, flowers = G.CATALOG["plots"], G.CATALOG["flowers"]
     plots = sum(round(rules["price"] * rules["growth"] ** n) for n in range(rules["max"] - rules["start"]))
-    assert plots + sum(flower["coins"] for flower in flowers) < 4000            # a whole garden's coin cost: a couple of weeks, not months
+    assert plots + sum(flower["coins"] for flower in flowers) < 6000            # a whole garden's coin cost: weeks of casual play, not months
     state = {"coins_today": 0}
-    powder, made = 8 * 280 * 4, 0                                               # a casual day: eight Dusk Tulips, trimmed four times
+    powder, made = 8 * G._FLOWERS["dusk-tulip"]["powder"] * 4, 0                # a casual day: eight Dusk Tulips, trimmed four times
     while powder >= G.price(state):
         powder -= G.price(state)
         state["coins_today"] += 1
@@ -463,3 +535,4 @@ def test_the_numbers_keep_a_gentle_pace():
     assert 4 * flowers[0]["powder"] * 5 >= flowers[1]["needs"]                  # ten minutes of daisies opens the second flower
     best = 16 * max(f["powder"] / f["minutes"] for f in flowers) * 60 * 24
     assert G.CATALOG["moonrise"]["needs"] < best * 3                            # a first moonrise is days of a full garden, not weeks
+    assert all(later["needs"] < earlier["powder"] * 16 * 40 for earlier, later in zip(flowers, flowers[1:]))    # no rung is a wall: forty full harvests at most

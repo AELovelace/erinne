@@ -19,12 +19,12 @@ function garden(extra = {}) { // A young garden: a daisy growing, a daisy ready,
     helpers: catalog.helpers.map(helper => ({ id: helper.id, name: helper.name, about: helper.about, level: 0, cost: helper.cost })),
     moves: [{ id: "pounce", move: "Pounce", tree: "fighter", name: "Frenzy", about: "presses count for much more", strength: 0.5, ready_in: 0 }],
     effects: {}, water: { ready_in: 0, rounds: 8, share: 5, show: null }, feed: { ready_in: 0, seconds: 10, per: 10, max: 10, until_in: null },
-    cosmetics: catalog.cosmetics.map(thing => ({ ...thing, owned: false })), upgrades: catalog.upgrades.map(thing => ({ ...thing, count: 0 })),
+    decor: { placed: {}, owned: {}, spare: {} }, upgrades: catalog.upgrades.map(thing => ({ ...thing, count: 0 })),
     moonrise: { needs: 100000, ready: false, count: 0 }, ...extra };
 }
 function open(view, ctx = {}) {
   const went = [];
-  const rows = UI.rows({ garden: view, drawer: null, seed: null, cursor: 0, mini: null, passed: 0, pending: 0, level: 1, go: change => went.push(change), ...ctx });
+  const rows = UI.rows({ garden: view, decor: catalog.decor, drawer: null, seed: null, cursor: 0, mini: null, passed: 0, pending: 0, level: 1, go: change => went.push(change), ...ctx });
   return { rows, went, row: key => rows.find(r => r.key === key) };
 }
 const names = svg => [...svg.matchAll(/data-click="([^"]+)"/g)].map(m => m[1]);
@@ -38,7 +38,7 @@ test("numbers stay short however big they get", () => {
 
 test("the garden's list offers the press, the harvest, both minigames, her moves, and the drawers", () => {
   const list = open(garden());
-  assert.deepEqual(list.rows.map(r => r.key), ["press", "trim-all", "seeds", "water", "feed", "move-pounce", "helpers", "shop", "moon", "leave"]);
+  assert.deepEqual(list.rows.map(r => r.key), ["press", "trim-all", "seeds", "water", "feed", "move-pounce", "helpers", "decor", "moon", "leave"]);
   list.row("press").local();
   list.row("seeds").local();
   list.row("leave").local();
@@ -68,30 +68,64 @@ test("the seed drawer climbs the ladder one flower at a time and only ever sends
   drawer.row("seed-moondaisy").local();
   assert.deepEqual(drawer.went, [{ seed: "moondaisy", drawer: null }]);
   assert.deepEqual(drawer.row("seed-glowbell").send, { action: "unlock", item: "glowbell" });
-  assert.match(drawer.row("seed-glowbell").hint, /^30 coins/);
+  assert.match(drawer.row("seed-glowbell").hint, /^25 coins/);
   assert.equal(drawer.row("seed-starpoppy").send, undefined, "The flower after next waits its turn");
   assert.match(open(garden(), { drawer: "seeds" }).row("seed-glowbell").note, /given 40 starpowder/);
-  const rose = garden({ given: 5000 });
-  rose.flowers.forEach((flower, i) => { flower.unlocked = i < 5; flower.next = i === 5; });
-  assert.match(open(rose, { drawer: "seeds", level: 1 }).row("seed-nebula-rose").note, /level 5/);
-  const ready = open(rose, { drawer: "seeds", level: 5 }).row("seed-nebula-rose");
-  assert.match(ready.hint, /^800 starpowder/, "A boutique flower is priced in starpowder");
+  const at = catalog.flowers.findIndex(flower => flower.id === "nebula-rose"), rose = garden({ given: 10 ** 6 });
+  rose.flowers.forEach((flower, i) => { flower.unlocked = i < at; flower.next = i === at; });
+  const ready = open(rose, { drawer: "seeds" }).row("seed-nebula-rose");
+  assert.deepEqual(ready.send, { action: "unlock", item: "nebula-rose" });
+  assert.match(ready.hint, /^\d+ starpowder/, "A boutique flower is priced in starpowder");
   assert.match(open(rose, { drawer: "seeds" }).row("seed-moon-fern").hint, /grows back/);
 });
 
-test("helpers, the shop and moonrise are drawers of their own", () => {
+test("helpers and moonrise are drawers of their own", () => {
   const helpers = open(garden(), { drawer: "helpers" });
   assert.deepEqual(helpers.rows.map(r => r.key), ["back", "helper-fighter", "helper-thief", "helper-monk", "helper-mage", "helper-cleric", "helper-paladin"]);
   assert.deepEqual(helpers.row("helper-monk").send, { action: "helper", item: "monk" });
   helpers.row("back").local();
   assert.deepEqual(helpers.went, [{ drawer: null }]);
-  const shop = open(garden({ cosmetics: catalog.cosmetics.map((thing, i) => ({ ...thing, owned: i === 0 })) }), { drawer: "shop" });
-  assert.equal(shop.row("look-picket-fence").send, undefined);
-  assert.deepEqual(shop.row("look-garden-gnome").send, { action: "cosmetic", item: "garden-gnome" });
   const moon = open(garden({ upgrades: catalog.upgrades.map((thing, i) => ({ ...thing, count: i === 1 ? thing.max : 0 })) }), { drawer: "moon" });
   assert.deepEqual(moon.row("moon-garden").send, { action: "moonrise", item: "garden" });
   assert.ok(moon.row("moon-garden").confirm && moon.row("moon-strong-press").confirm, "Replanting a garden asks twice");
   assert.equal(moon.row("moon-rich-soil").send, undefined, "An upgrade at its top can't be chosen");
+});
+
+test("decorations: fifteen slots, the capsule, and a store of spares to put out or sell", () => {
+  const mine = { placed: { fence: "fence-0-snowy" }, owned: { "fence-0-snowy": 1, "fence-1-starry": 2, "statue-0-rosy": 1 }, spare: { "fence-0-snowy": 0, "fence-1-starry": 2, "statue-0-rosy": 0 } };
+  const top = open(garden({ decor: mine, powder: 5000 }), { drawer: "decor" });
+  assert.deepEqual(top.rows.map(r => r.key), ["back", "capsule", "store"].concat(catalog.decor.slots.map(slot => "slot-" + slot.id)));
+  assert.deepEqual(top.row("capsule").send, { action: "capsule" });
+  assert.equal(open(garden({ decor: mine, powder: 10 }), { drawer: "decor" }).row("capsule").send, undefined, "No capsule without the powder for it");
+  assert.match(top.row("slot-fence").hint, /Snowy picket fence/);
+  assert.match(top.row("slot-arch").hint, /Nothing out · 15 to collect/);
+  top.row("slot-fence").local();
+  top.row("store").local();
+  assert.deepEqual(top.went, [{ drawer: "decor:fence" }, { drawer: "store" }]);
+
+  const fence = open(garden({ decor: mine }), { drawer: "decor:fence" });
+  assert.equal(fence.rows.length, 16);
+  fence.row("back").local();
+  assert.deepEqual(fence.went, [{ drawer: "decor" }], "Back from a slot returns to the slots, not all the way out");
+  assert.deepEqual([fence.row("decor-fence-0-snowy").icon, fence.row("decor-fence-0-snowy").send], ["✓", { action: "decor_place", item: "fence-0-snowy" }]);      // out here: Enter puts it away
+  assert.match(fence.row("decor-fence-1-starry").hint, /2 in the store · Enter puts one out here/);
+  assert.deepEqual(fence.row("decor-fence-0-rosy").send, { action: "decor_buy", item: "fence-0-rosy" });
+  assert.match(fence.row("decor-fence-0-rosy").hint, /^360 starpowder/);
+  assert.equal(fence.row("decor-fence-2-royal").send, undefined);
+  assert.match(fence.row("decor-fence-2-royal").hint, /Legendary · only from the Seedling Capsule/);
+  const statue = open(garden({ decor: { ...mine, placed: {} } }), { drawer: "decor:statue" });       // hers stands in another garden
+  assert.match(statue.row("decor-statue-0-rosy").hint, /yours is in another garden: Enter buys one for here/);
+
+  const store = open(garden({ decor: mine }), { drawer: "store" });
+  assert.deepEqual(store.rows.map(r => r.key), ["back", "sell-fence-1-starry"]);
+  assert.deepEqual([store.row("sell-fence-1-starry").send, store.row("sell-fence-1-starry").confirm], [{ action: "decor_sell", item: "fence-1-starry" }, true]);
+  assert.match(store.row("sell-fence-1-starry").name, /×2/);
+  assert.match(store.row("sell-fence-1-starry").hint, /sells one for 1\.2K starpowder/);
+  assert.deepEqual(open(garden(), { drawer: "store" }).rows.map(r => r.key), ["back", "empty"]);
+  const view = garden();
+  assert.match(UI.said({ action: "capsule" }, { capsule: "fence-1-starry", rarity: "epic", copies: 2, paid: 600 }, view, null, catalog.decor), /Starry bamboo fence! \(epic\) That makes 2: the spare is in the store/);
+  assert.match(UI.said({ action: "decor_sell", item: "fence-1-starry" }, { sold: "fence-1-starry", powder: 1200 }, view, null, catalog.decor), /Sold: Starry bamboo fence, for 1\.2K starpowder/);
+  assert.match(UI.said({ action: "decor_place", item: "fence-0-snowy" }, { stored: "fence-0-snowy" }, view, null, catalog.decor), /Snowy picket fence goes back in the store/);
 });
 
 test("Enter on a plot plants, trims, digs or says how long is left", () => {
@@ -145,30 +179,58 @@ test("a minigame takes over the list", () => {
   assert.match(feed.rows[0].name, /7 presses/);
 });
 
-test("every flower is drawn at every stage, and every plot and the press can be pressed", () => {
+test("every plot can be pressed, shows its stage, and has a timer under its flower", () => {
   const view = garden();
-  const svg = Art.scene(view, { cursor: 1, focused: true, passed: 0, pending: 0, mini: null });
+  const svg = Art.scene(view, { cursor: 1, focused: true, passed: 0, mini: null, decor: catalog.decor });
   assert.deepEqual(names(svg), ["press", "plot:0", "plot:1", "plot:2", "plot:3", "plot:4"]);
   assert.deepEqual([...svg.matchAll(/data-plot="(\w+)"/g)].map(m => m[1]), ["growing", "ready", "empty", "empty"]);
   assert.ok(svg.includes('data-cursor="1"') && svg.includes("25 coins") && svg.includes('data-near="25"'));
-  assert.ok(!Art.scene(view, { cursor: 1, focused: false, passed: 0, pending: 0, mini: null }).includes("data-cursor"));
-  const later = Art.scene(view, { cursor: 0, focused: false, passed: 61000, pending: 0, mini: null });
+  assert.ok(!Art.scene(view, { cursor: 1, focused: false, passed: 0 }).includes("data-cursor"));
+  assert.deepEqual([...svg.matchAll(/data-timer="(\d+)"[^>]*>([^<]+)</g)].map(m => [m[1], m[2]]), [["0", "1:00"], ["1", "ready ✦"]], "A countdown while it grows, and a word once it is ready");
+  assert.deepEqual(Art.timers(view, 15000), [[0, "0:45"]], "Only growing flowers tick");
+  assert.deepEqual(Art.timers(view, 61000), []);
+  const later = Art.scene(view, { cursor: 0, focused: false, passed: 61000 });
   assert.deepEqual([...later.matchAll(/data-plot="(\w+)"/g)].map(m => m[1]).slice(0, 2), ["ready", "ready"]);
-  const full = garden({ plot_price: null, plots: Array.from({ length: 16 }, (_, i) => ({ flower: catalog.flowers[i % 12].id, last: null, stage: ["growing", "ready", "overgrown"][i % 3], ready_in: i % 3 ? -1 : 30000, grow: 60000 })) });
-  const all = Art.scene(full, { cursor: 15, focused: true, passed: 0, pending: 0, mini: null });
-  assert.equal(names(all).length, 17);
-  for (const flower of catalog.flowers) assert.ok(all.includes(flower.colour), flower.id + " is drawn in its own colour");
-  assert.ok(Art.scene(garden({ plots: [{ flower: "moondaisy", last: null, stage: "growing", ready_in: 110000, grow: 120000 }] }), { cursor: 0 }).length <
-    Art.scene(garden({ plots: [{ flower: "moondaisy", last: null, stage: "ready", ready_in: -1, grow: 120000 }] }), { cursor: 0 }).length, "A sprout is a smaller drawing than a bloom");
+  const full = garden({ plot_price: null, plots: Array.from({ length: 16 }, (_, i) => ({ flower: catalog.flowers[i].id, last: null, stage: ["growing", "ready", "overgrown"][i % 3], ready_in: i % 3 ? -1 : 30000, grow: 60000 })) });
+  assert.equal(names(Art.scene(full, { cursor: 15, focused: true })).length, 17);
+  assert.ok(Art.spot(0).x < Art.spot(1).x && Art.spot(0).y < Art.spot(4).y && Art.PRESS.y < Art.spot(0).y, "Lumi has somewhere to stand beside every plot, and by the press");
 });
 
-test("everything bought for looks is drawn", () => {
-  assert.deepEqual(catalog.cosmetics.map(thing => thing.id).sort(), [...Art.COSMETICS].sort(), "garden-art.js draws exactly the catalog's cosmetics");
-  const bare = Art.scene(garden(), { cursor: 0 });
-  for (const thing of catalog.cosmetics) {
-    const owned = garden({ cosmetics: catalog.cosmetics.map(other => ({ ...other, owned: other.id === thing.id })) });
-    assert.notEqual(Art.scene(owned, { cursor: 0 }), bare, thing.id + " changes the picture");
+test("all forty-two flowers are drawn, and no two look alike", () => {
+  assert.equal(catalog.flowers.length, 42);
+  assert.deepEqual([...new Set(catalog.flowers.map(flower => flower.shape))].sort(), [...Art.SHAPES].sort(), "garden-art.js draws exactly the shapes the catalog uses");
+  const heads = catalog.flowers.map(flower => Art.head(flower, 100, 100, 1));
+  assert.ok(heads.every(svg => svg.length > 40 && !/NaN|undefined/.test(svg)));
+  assert.equal(new Set(heads).size, 42, "Every flower's head is its own drawing");
+  for (const flower of catalog.flowers) { // And each is itself at every stage, in its own colour.
+    const one = stage => Art.scene(garden({ plots: [{ flower: flower.id, last: null, stage, ready_in: stage === "growing" ? 20000 : -1, grow: 60000 }] }), { cursor: 0 });
+    assert.ok(one("ready").includes(flower.colour) && one("growing").includes(flower.colour) && one("overgrown").includes(flower.colour), flower.id);
+    assert.notEqual(one("ready"), one("overgrown"), flower.id + " droops when overgrown");
   }
+  const sprout = Art.scene(garden({ plots: [{ flower: "moondaisy", last: null, stage: "growing", ready_in: 110000, grow: 120000 }] }), { cursor: 0 });
+  assert.ok(!sprout.includes("rotate(36 "), "A new sprout is two leaves, not yet a flower");
+});
+
+test("every decoration is drawn, in two layers round the beds", () => {
+  assert.deepEqual(catalog.decor.slots.map(slot => slot.id).sort(), [...Art.DECOR].sort(), "garden-art.js draws exactly the catalog's slots");
+  const bare = Art.scene(garden(), { cursor: 0, decor: catalog.decor });
+  const seen = new Set([bare]);
+  for (const slot of catalog.decor.slots) {
+    for (const item of slot.items) {
+      const svg = Art.scene(garden({ decor: { placed: { [slot.id]: item.id }, owned: {}, spare: {} } }), { cursor: 0, decor: catalog.decor });
+      assert.ok(!/NaN|undefined/.test(svg), item.id);
+      assert.ok(!seen.has(svg), item.id + " looks different from everything before it");
+      seen.add(svg);
+    }
+  }
+  assert.equal(seen.size, 226, "All 225 decorations, and the bare garden");
+  assert.equal(Art.scene(garden({ decor: { placed: { fence: "no-such-thing" }, owned: {}, spare: {} } }), { cursor: 0, decor: catalog.decor }), bare, "Something since retired is simply not drawn");
+});
+
+test("the sky is left open for the theme's scenery, or painted when there is none", () => {
+  const open_ = Art.scene(garden(), { cursor: 0, sky: true }), painted = Art.scene(garden(), { cursor: 0, sky: false });
+  assert.ok(open_.includes('data-sky="open"') && painted.includes('data-sky="painted"'));
+  assert.ok(painted.includes("#15102e") && !open_.includes("#15102e"), "Only the painted sky covers what is behind the page");
 });
 
 test("the watering cans and the fertilizer button can be pressed only when it is time", () => {

@@ -244,7 +244,7 @@ def test_a_new_house_has_each_spots_free_first_object(conn, alice):
     house = _state(conn, alice, T0)
     assert house["pet"]["house"] == {spot["id"]: spot["items"][0]["id"] for spot in lumipet.HOUSE["spots"]}
     spots = house["house"]["spots"]
-    assert len(spots) == 16 and all(sum("rarity" not in item for item in spot["items"]) == 5 for spot in spots[:15])   # 75 pieces to buy or start with
+    assert len(spots) == 16 and all(sum("rarity" not in item and "found" not in item for item in spot["items"]) == 5 for spot in spots[:15])   # 75 pieces to buy or start with
     assert spots[15]["id"] == "trophy" and len(spots[15]["items"]) == 25 and house["pet"]["house"]["trophy"] == "trophy-none"
 
 

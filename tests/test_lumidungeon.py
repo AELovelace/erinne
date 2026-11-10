@@ -209,6 +209,39 @@ def test_a_vault_offers_a_trophy_she_doesnt_have_yet(conn):
     assert "trophy" not in none and "trophy" not in held
 
 
+def test_every_place_has_a_decor_set_with_a_piece_for_every_spot():
+    spots = sorted(spot["id"] for spot in lumipet.HOUSE["spots"] if spot["id"] != "trophy")
+    assert set(D.SETS) == set(ENVS)
+    for env, pieces in D.SETS.items():
+        assert sorted(piece["spot"] for piece in pieces) == spots, env
+        assert all(piece["price"] == 0 and piece["found"] == env and "rarity" not in piece for piece in pieces)
+    assert len(D.FOUND_NAMES) == 12 * (len(spots) + 2)                          # every set piece and trophy has a name to tell
+
+
+def test_set_pieces_are_rare_likelier_deeper_and_never_found_twice():
+    env = D._ENVS["moonlit-shrine"]
+
+    def rate(where, depth):                                                     # how often a chest or a creature holds one
+        return sum(D._set_piece(env, where, depth, random.Random(seed), set()) is not None for seed in range(3000)) / 3000
+    assert 0.05 < rate("treasure", 1) < 0.11 and 0.02 < rate("enemy", 1) < 0.06
+    assert rate("treasure", 4) > rate("treasure", 1) + 0.05 and rate("enemy", 4) > rate("enemy", 1) + 0.03
+    ids, owned = {piece["id"] for piece in D.SETS["moonlit-shrine"]}, set()
+    found = [D._set_piece(env, "treasure", 1, Dice(), owned) for _ in range(len(ids) + 1)]   # a dice that always hits
+    assert set(found[:-1]) == ids == owned and found[-1] is None                # each piece once, then none left
+
+
+def test_a_floor_hides_set_pieces_in_chests_and_creatures_but_never_one_she_has():
+    pieces = [piece["id"] for piece in D.SETS["candy-catacombs"]]
+    kinds = set()
+    for seed in range(300):
+        floor = D.generate("candy-catacombs", 3, random.Random(seed), _pet(decor=pieces[:10]), {"trophies": pieces[10:12], "mods": []})
+        hidden = [(room["kind"], room["loot"]["trophy"]) for room in floor["rooms"].values() if room["kind"] != "vault" and room.get("loot", {}).get("trophy")]
+        assert all(kind in ("treasure", "enemy") and piece in pieces[12:] for kind, piece in hidden)
+        assert len({piece for _, piece in hidden}) == len(hidden)                # never the same piece twice on a floor
+        kinds |= {kind for kind, _ in hidden}
+    assert kinds == {"treasure", "enemy"}
+
+
 # --------------------------------------------------------------------------- a trip
 def test_setting_out_needs_the_level_and_one_trip_at_a_time(conn, alice):
     with transaction(conn), pytest.raises(lumipet.PetError, match="opens at level 35"):
@@ -417,6 +450,28 @@ def test_a_dungeon_fight_carries_her_health_in_and_out_and_fills_the_satchel(con
     assert run["satchel"]["coins"] == fight["reward"]["coins"] > 0 and state["coins"] == 1000          # in the satchel, not the purse
     assert run["hp"] == fight["player"]["hp"] <= 300 and not run["fighting"] and run["room"]["done"] and run["event"]["scenario"] == "victory"
     assert state["pet"]["exp"] > 0 or state["pet"]["level"] > 40                # EXP is hers at once
+
+
+def test_a_beaten_creature_can_drop_a_piece_of_the_places_set(conn, alice):
+    _start(conn, alice)
+    _set_pet(conn, alice, level=40, skills=[node["id"] for node in lumibattle.CATALOG["trees"][0]["nodes"]], moves=["comet-cleave"])
+    _only_one_enemy(conn, alice, hp=300)
+    piece = D.SETS["moonlit-shrine"][0]
+    run = _run(conn, alice)
+    for room in run["rooms"].values():
+        if room["kind"] == "enemy":
+            room["loot"] = {"trophy": piece["id"]}                              # this creature is carrying one
+    _put(conn, alice, run)
+    fight = _walk_into_enemy(conn, alice)["fight"]
+    while fight["status"] == "active":
+        with transaction(conn):
+            fight = lumipet.fight_act(conn, alice, fight["id"], fight["turn"], "move0", T0, Dice(chance=0.01))["fight"]
+    with transaction(conn):
+        run = lumipet.state(conn, alice, T0)["dungeon"]["run"]
+    assert fight["status"] == "victory" and run["satchel"]["trophies"] == [piece["id"]] and run["event"]["dropped"] == piece["id"]
+    assert piece["name"] in run["say"] and "loot" not in _run(conn, alice)["rooms"][run["at"]]
+    with transaction(conn), pytest.raises(lumipet.PetError, match="waiting somewhere in the dungeon"):
+        lumipet.act(conn, alice, "decorate", item=piece["id"], now=T0)         # not hers until she walks out with it
 
 
 def test_being_beaten_ends_the_trip_and_empties_the_satchel_but_keeps_her_exp(conn, alice):

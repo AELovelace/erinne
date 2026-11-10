@@ -4,15 +4,17 @@ and the person (or the TV's owner) in the Media group."""
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from mnemerynne import runner
+from mnemerynne import arcade, lobby, runner, showdown
+from mnemerynne.rooms_bus import sse
 from mnemerynne import bfgguf, casino, casino_remote, claude_chat, coins, games,lumidungeon, lumipet, lumitales, prism, push
 from mnemerynne.db import transaction
 from mnemerynne.media import remotes, screens
@@ -185,7 +187,7 @@ class GardenStep(BaseModel):
     """One choice in the Stardust Garden: which plot, which flower or helper, how many presses, or a watering answer.
     Never an amount of powder or coins: the server works those out."""
     model_config = ConfigDict(extra="forbid")
-    action: Literal["look", "press", "plot", "plant", "trim", "trim_all", "unlock", "cosmetic", "helper", "ability", "water_start", "water_answer",
+    action: Literal["look", "press", "plot", "plant", "trim", "trim_all", "unlock", "decor_buy", "decor_place", "decor_sell", "capsule", "helper", "ability", "water_start", "water_answer",
                     "feed_start", "feed_end", "moonrise", "garden"]
     item: str | None = Field(default=None, max_length=40)
     plot: int | None = Field(default=None, ge=0, le=15, strict=True)
@@ -447,3 +449,199 @@ def tv_manage(slug: str, code: str, body: TVManage, request: Request, user=Depen
     _, actor = _tv_identity(request, conn, user)
     return _casino_call(casino.couch, conn, slug, code, actor, close=body.action == "close",
                         remove=body.seat if body.action == "remove" else None, revision=body.revision)
+
+
+# ------------------------------------------------------- Breakout and Snake
+# Ported from Doll's GameMaker arcade (arcade.py, showdown.py). A solo run costs arcade.ENTRY coins and pays its score
+# once the server has checked it; a showdown table seats two racers and up to five watchers, who see both boards live
+# through the table's stream. The stream is also how the server knows a player is still there (lobby.PRESENCE).
+
+def _arcade_game(slug):
+    """Keep these endpoints to the two arcade games."""
+    if slug not in arcade.GAMES:
+        raise HTTPException(404, "No such arcade game")
+
+
+def _arcade_call(fn, *args, **kwargs):
+    """A refusal becomes a small error the page can show; nothing was changed."""
+    try:
+        return fn(*args, **kwargs)
+    except arcade.Refused as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+
+
+class RunFinish(BaseModel):
+    """What a finished run claims. Snake sends the moves it turned on and the server plays the game again; Breakout
+    sends its score and level, which the server checks against the levels it builds from the run's seed."""
+    model_config = ConfigDict(extra="forbid")
+    run: int = Field(ge=1, strict=True)
+    moves: int = Field(default=0, ge=0, le=200_000, strict=True)                  # Snake: how many moves it made
+    turns: list[tuple[int, Annotated[int, Field(ge=0, le=3)]]] = Field(default_factory=list, max_length=50_000)
+    died: bool = False                                                            # Snake: the last move killed it
+    score: int = Field(default=0, ge=0, le=1_000_000, strict=True)                # Breakout: bricks broken
+    level: int = Field(default=1, ge=1, le=500, strict=True)                      # Breakout: the level it ended on
+
+
+@router.post("/api/media/games/{slug}/run")
+def arcade_run(slug: str, user=Depends(media_user), conn=Depends(get_db)):
+    """Start a solo run: it costs arcade.ENTRY coins, and hands back the seed the game is built from."""
+    _arcade_game(slug)
+    with transaction(conn):
+        started = _arcade_call(arcade.start, conn, user["id"], slug)
+        return {**started, "coins": coins.peek(conn, user["id"])}
+
+
+@router.post("/api/media/games/{slug}/run/finish")
+def arcade_finish(slug: str, body: RunFinish, user=Depends(media_user), conn=Depends(get_db)):
+    """A run ended: the server checks it and pays a solo run its score; a race's result goes to its table."""
+    _arcade_game(slug)
+    with transaction(conn):
+        result = _arcade_call(arcade.finish, conn, user["id"], slug, body.run, body.model_dump())
+        if result["room"]:
+            showdown.record(conn, slug, result["room"], body.run, result)
+        return result
+
+
+class ShowdownMove(BaseModel):
+    """Only what a player chose: sit down, get up, get ready, and which racer a bet is on. Never a score or a balance."""
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["join", "leave", "ready", "seat", "stand", "bet"]
+    target: Literal["", "p1", "p2"] = ""
+    amount: int = Field(default=0, ge=0, le=showdown.BET_LIMIT, strict=True)
+
+
+Unit = Annotated[float, Field(ge=0, le=1)]
+
+
+class Board(BaseModel):
+    """A racer's live board, for the others to watch. Only ever drawn, never scored: the result comes from the run."""
+    model_config = ConfigDict(extra="forbid")
+    score: int = Field(default=0, ge=0, le=1_000_000, strict=True)
+    level: int = Field(default=0, ge=0, le=500, strict=True)                      # Breakout
+    lives: int = Field(default=0, ge=0, le=9, strict=True)
+    bat: Unit = 0.5
+    wide: bool = False
+    balls: list[tuple[Unit, Unit]] = Field(default_factory=list, max_length=8)
+    bricks: str = Field(default="", max_length=108, pattern="^[0-6]*$")           # 18 x 6, colour codes
+    length: int = Field(default=0, ge=0, le=400, strict=True)                     # Snake
+    alive: bool = True
+    points: list[Unit] = Field(default_factory=list, max_length=600)              # body, head first, x and y pairs
+    food: list[Annotated[int, Field(ge=0, le=20)]] = Field(default_factory=list, max_length=3)   # column, row, kind
+
+
+@router.get("/api/media/games/{slug}/tables")
+def showdown_list(slug: str, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+    """This game's showdown tables."""
+    _arcade_game(slug)
+    actor, _ = _table_identity(request, conn, user)
+    return {"tables": showdown.tables(conn, slug, actor)}
+
+
+@router.post("/api/media/games/{slug}/tables")
+def showdown_create(slug: str, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+    """A new table, with whoever opened it in the P1 seat."""
+    _arcade_game(slug)
+    actor, name = _table_identity(request, conn, user)
+    return _arcade_call(showdown.create, conn, slug, actor, name, user["id"])
+
+
+@router.get("/api/media/games/{slug}/tables/{code}")
+def showdown_look(slug: str, code: str, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+    """A table as this player sees it."""
+    _arcade_game(slug)
+    actor, _ = _table_identity(request, conn, user)
+    return _arcade_call(showdown.look, conn, slug, code, actor)
+
+
+@router.post("/api/media/games/{slug}/tables/{code}")
+def showdown_move(slug: str, code: str, body: ShowdownMove, request: Request, user=Depends(media_user),
+                  conn=Depends(get_db)):
+    """One thing a player does at the table."""
+    _arcade_game(slug)
+    actor, name = _table_identity(request, conn, user)
+    return _arcade_call(showdown.act, conn, slug, code, actor, name, user["id"], body.action,
+                        target=body.target, amount=body.amount)
+
+
+@router.post("/api/media/games/{slug}/tables/{code}/board", status_code=status.HTTP_204_NO_CONTENT)
+def showdown_board(slug: str, code: str, body: Board, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+    """A racer's live board, a few times a second. Kept in memory only; refused once their race is over for them."""
+    _arcade_game(slug)
+    actor, _ = _table_identity(request, conn, user)
+    seat = showdown.racing_seat(conn, slug, code, actor)
+    if seat is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "You aren't racing at this table right now.")
+    lobby.PRESENCE.seen(("arcade", code), actor)
+    showdown.HUB.push(code, seat, body.model_dump())
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/api/media/games/{slug}/tables/{code}/stream")
+async def showdown_stream(slug: str, code: str, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+    """The table, live, for a seated player: "table" whenever it changes, "boards" as the racers play (at most about
+    eight times a second), a ping every 15 s, and "end" if the seat is gone. While it's open the player counts as
+    there; once it closes they have showdown.DROP_SECONDS to come back."""
+    _arcade_game(slug)
+    actor, _ = _table_identity(request, conn, user)
+    pool = request.app.state.db_pool
+
+    def look():
+        c = pool.get()
+        try:
+            return showdown.look(c, slug, code, actor)
+        finally:
+            pool.put(c)
+
+    try:
+        first = await asyncio.to_thread(look)
+    except arcade.Refused as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+    if first.get("you") is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Join this table first.")
+
+    async def events():
+        table = ("arcade", code)
+        lobby.PRESENCE.opened(table, actor)
+        wake = asyncio.Event()
+        showdown.HUB.listen(code, wake)
+        try:
+            yield sse("table", first)
+            shown = {k: v for k, v in first.items() if k != "server_time"}
+            seen_table, seen_boards = showdown.HUB.version(code)
+            looked = beat = time.monotonic()
+            while True:
+                try:
+                    await asyncio.wait_for(wake.wait(), timeout=2)
+                except TimeoutError:
+                    pass
+                wake.clear()
+                if await request.is_disconnected():
+                    return
+                table_v, boards_v = showdown.HUB.version(code)
+                if table_v != seen_table or time.monotonic() - looked >= 2:   # timers and away flags need a look too
+                    seen_table, looked = table_v, time.monotonic()
+                    try:
+                        now = await asyncio.to_thread(look)
+                    except arcade.Refused:
+                        yield sse("end", {"reason": "This table has closed."})
+                        return
+                    if now.get("you") is None:
+                        yield sse("end", {"reason": "Your seat was given up."})
+                        return
+                    view = {k: v for k, v in now.items() if k != "server_time"}
+                    if view != shown:
+                        shown = view
+                        yield sse("table", now)
+                if boards_v != seen_boards:
+                    seen_boards = boards_v
+                    yield sse("boards", showdown.HUB.snapshot(code))
+                    await asyncio.sleep(0.12)                                   # about eight board updates a second
+                if time.monotonic() - beat >= 15:
+                    beat = time.monotonic()
+                    yield b": ping\n\n"
+        finally:
+            showdown.HUB.unlisten(code, wake)
+            lobby.PRESENCE.closed(table, actor)
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

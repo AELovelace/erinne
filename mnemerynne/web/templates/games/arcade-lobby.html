@@ -1,0 +1,45 @@
+{#- The arcade shell Breakout and Snake share (static/games/arcade/arcade.js): the canvas the game draws on, and one
+    panel at a time over it (menu, showdown lobby, a table, game over). Every text that changes is set with
+    textContent by arcade.js; buttons it adds itself are made with createElement. -#}
+<section class="ar-stage">
+  <canvas id="ar-canvas" width="1366" height="768" role="img" aria-label="{{ game.name }}"></canvas>
+  <p class="ar-coins">Coins <b id="ar-coins">—</b></p>
+  <div class="ar-panel gm-panel" id="ar-panel">
+    <div id="ar-menu">
+      <p class="gm-eyebrow">// {{ game.name|upper }}</p>
+      <p class="ar-muted">{{ game.description }}</p>
+      <div class="ar-actions">
+        <button type="button" id="ar-solo" class="gm-primary">Play solo (25 coins)</button>
+        <button type="button" id="ar-showdown">Showdown tables</button>
+        <button type="button" id="ar-sound">Sound: on</button>
+      </div>
+      <p class="ar-muted">Best on this device: <b id="ar-best">0</b></p>
+      <p class="gm-keys">{{ game.controls }}</p>
+    </div>
+    <div id="ar-lobby" hidden>
+      <p class="gm-eyebrow">// SHOWDOWN TABLES</p>
+      <p class="ar-muted">Two racers play the same game side by side; the further run wins. Up to five can watch and bet. Each racer pays 25 coins and is paid their own score.</p>
+      <div class="ar-actions">
+        <button type="button" id="ar-create" class="gm-primary">Start a table</button>
+      </div>
+      <div class="ar-tables" id="ar-tables"></div>
+      <div class="ar-actions"><button type="button" id="ar-lobby-back">Back</button></div>
+    </div>
+    <div id="ar-table" hidden>
+      <p class="gm-eyebrow">// SHOWDOWN</p>
+      <h2 class="ar-title" id="ar-table-title"></h2>
+      <div id="ar-table-body"></div>
+      <p class="ar-muted">Close the game and your seat is kept for 30 seconds.</p>
+    </div>
+    <div id="ar-over" hidden>
+      <p class="gm-eyebrow">// GAME OVER</p>
+      <h2 class="ar-title" id="ar-over-title">Game over</h2>
+      <p id="ar-over-line"></p>
+      <div class="ar-actions">
+        <button type="button" id="ar-again" class="gm-primary">Play again (25 coins)</button>
+        <button type="button" id="ar-over-menu">Menu</button>
+      </div>
+    </div>
+    <p class="ar-status" id="ar-status" role="status" aria-live="polite"></p>
+  </div>
+</section>

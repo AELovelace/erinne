@@ -48,7 +48,7 @@ test("with no trip the list is the places to go, and locked ones say when they o
 test("a finished trip shows how it ended once, then the places again", () => {
   const home = run({ over: "home", ended: { coins: 80, potions: 1, trophies: ["trophy-geode-egg"], mods: [], depth: 3 } });
   const first = open(home);
-  assert.deepEqual(first.rows.map(r => [r.key, r.name, r.hint]), [["continue", "Home again!", "Home from floor 3 with 80 coins, 1 potion, a trophy for the house"]]);
+  assert.deepEqual(first.rows.map(r => [r.key, r.name, r.hint]), [["continue", "Home again!", "Home from floor 3 with 80 coins, 1 potion, something for the house"]]);
   first.rows[0].local();
   assert.deepEqual(first.went, [{ dismiss: 9 }]);
   assert.equal(open(home, {}, 9).rows.length, 12);
@@ -198,7 +198,7 @@ test("the scene draws the room's doors, what is in it, a map, and the puzzle on 
 
 test("the top line reads the place, the floor, her health and her satchel", () => {
   assert.deepEqual(UI.hud(run()), { title: "Crystal Cavern · floor 2", hp: 52, mp: 45, label: "30/58 HP · 10 MP · satchel: 24 coins · 1 potion" });
-  assert.equal(UI.carrying({ coins: 5, potions: 2, keys: 1, trophies: ["a", "b"], mods: ["m"] }), "5 coins · 2 potions · a key · 2 trophies · 1 mod");
+  assert.equal(UI.carrying({ coins: 5, potions: 2, keys: 1, trophies: ["a", "b"], mods: ["m"] }), "5 coins · 2 potions · a key · 2 things for the house · 1 mod");
 });
 
 test("looking after Lumi on a trip offers only snacks and a potion", () => {

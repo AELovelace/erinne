@@ -53,6 +53,21 @@ test("trophies appear among a spot's choices only once they are found", () => {
   assert.deepEqual(full.went, [{ open: null, pick: house.spots.findIndex(spot => spot.id === "trophy") }]);
 });
 
+test("a dungeon set piece stays out of the row until found, and its full list names the place it waits in", () => {
+  const piece = house.spots.find(spot => spot.id === "bed").items.find(item => item.found === "toy-attic");
+  const dungeon = { environments: data("dungeon.json").environments.map(env => ({ id: env.id, name: env.name })) };
+  const snap = { pet: { house: firsts, decor: [], outfit: {}, closet: [] }, house, closet, dungeon };
+  const go = () => {};
+  assert.ok(!Pk.homeRows({ snap, open: null, flip: {}, go }).find(r => r.key === "bed").options.includes(piece.id), "Not in the row before it is found");
+  const row = Pk.homeRows({ snap, open: "bed", flip: {}, go }).find(r => r.key === piece.id);
+  assert.deepEqual([row.icon, row.hint, row.send], ["🔒", "Found in the Haunted Toy Attic · a rare find", undefined]);
+  assert.equal(row.note, piece.name + " can't be bought. It's waiting somewhere in the Haunted Toy Attic.");
+  const trophy = Pk.homeRows({ snap, open: "trophy", flip: {}, go }).find(r => r.key === "trophy-moon-bell");
+  assert.equal(trophy.hint, "Found in the Moonlit Shrine's vault");
+  const found = { ...snap, pet: { ...snap.pet, decor: [piece.id] } };
+  assert.ok(Pk.homeRows({ snap: found, open: null, flip: {}, go }).find(r => r.key === "bed").options.includes(piece.id), "Once found it swaps in like any of hers");
+});
+
 test("Star Capsule decor stays out of a spot's row until she has it, and its full list says where it comes from", () => {
   const prize = "rug-braid";
   assert.ok(!lists().spot("rug").options.includes(prize), "A prize she hasn't won can't be flipped to, or bought from the row");
@@ -101,4 +116,12 @@ test("a place's full list offers every accessory, as before", () => {
   assert.match(head.slot("acc-bow").hint, /wearing it · Enter takes it off/);
   assert.match(head.slot("acc-crown").note, /capsule/);
   assert.deepEqual(head.slot("acc-star-clip").send, { action: "wear", item: "acc-star-clip" });
+});
+
+test("the capsules are also sold at the top of the Shop", () => {
+  const snap = { closet: { capsule: { name: "Star Capsule", price: 150 }, moon: { name: "Moon Capsule", price: 300 } } };
+  const rows = Pk.capsuleRows(snap);
+  assert.deepEqual(rows.map(r => [r.key, r.name, r.send]), [["capsule", "Star Capsule", { action: "capsule" }], ["capsule-moon", "Moon Capsule", { action: "capsule", item: "moon" }]]);
+  assert.match(rows[0].hint, /^150 coins/);
+  assert.match(rows[1].hint, /^300 coins · rare, epic or legendary only/);
 });

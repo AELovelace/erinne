@@ -455,6 +455,20 @@ export async function checkLumiPetGarden(browser, page, base) { // The Stardust 
     await said(tab, "Planted: Moondaisy");
     await tab.click('[data-click="plot:0"]'); // The mouse plants too.
     await tab.waitForFunction(() => document.querySelectorAll('#lp-dungeon [data-plot="growing"]').length === 2);
+    const timer = () => tab.$eval('#lp-dungeon [data-timer="1"]', el => el.textContent); // A timer under every flower, counting down where it stands.
+    const ticking = await timer();
+    assert.match(ticking, /^[0-2]:\d\d$/);
+    await tab.waitForFunction(was => document.querySelector('#lp-dungeon [data-timer="1"]').textContent !== was, { timeout: 5000 }, ticking);
+    assert.ok(await tab.$eval("#lp-dungeon", el => ["open", "painted"].includes(el.querySelector("[data-sky]").dataset.sky)), "The sky is the theme's scenery, or painted");
+    assert.equal(await tab.$eval("#lp-house", el => getComputedStyle(el).visibility), "hidden", "The garden is outdoors: the house is out of sight");
+    const beside = await tab.$eval("#lp-room", el => [el.style.getPropertyValue("--gx"), el.style.getPropertyValue("--gy")]); // Lumi has darted to the plot just planted.
+    assert.ok(Number(beside[0]) < 0 && Number(beside[1]) > 150, "Lumi stands beside the first plot: " + beside);
+    const lumi = await tab.$eval(".lp-pet-wrap", el => el.getBoundingClientRect().width), plot = await tab.$eval('[data-click="plot:0"]', el => el.getBoundingClientRect().width);
+    assert.ok(lumi < plot, "She is small enough to stand beside a flower");
+    await tab.keyboard.press("ArrowDown"); // Moving the cursor brings her along (down from plot 2 is the patch for a new plot).
+    assert.notDeepEqual(await tab.$eval("#lp-room", el => [el.style.getPropertyValue("--gx"), el.style.getPropertyValue("--gy")]), beside);
+    await tab.keyboard.press("ArrowUp");
+    await tab.screenshot({ path: "runs/casino-browser/lumi-pet-garden-flowers.png", fullPage: true });
     await tab.click('[data-click="plot:0"]');
     await said(tab, "Moondaisy: ready in"); // Pressing a growing flower only says how long is left.
 
@@ -509,6 +523,23 @@ export async function checkLumiPetGarden(browser, page, base) { // The Stardust 
     await tab.click(row("seeds"));
     assert.match(await tab.$eval(row("seed-glowbell"), el => el.textContent), /given 40 powder \(\d+ so far\)/);
     await tab.click(row("back"));
+    await tab.click(row("decor")); // Decorations: fifteen slots, the Seedling Capsule and the store.
+    await tab.waitForSelector(row("capsule"));
+    assert.equal((await tab.$$('[data-lp-row^="slot-"]')).length, 15);
+    await tab.click(row("capsule"));
+    await said(tab, "A capsule costs 600 starpowder");
+    await tab.click(row("slot-fence"));
+    await tab.waitForSelector(row("decor-fence-0-snowy"));
+    assert.equal((await tab.$$('[data-lp-row^="decor-fence-"]')).length, 15);
+    await tab.click(row("decor-fence-2-royal"));
+    await said(tab, "only comes from the Seedling Capsule");
+    await tab.click(row("back")); // Back from a slot is the slots, and back again is the beds.
+    await tab.waitForSelector(row("store"));
+    await tab.click(row("store"));
+    await tab.waitForSelector(row("empty"));
+    await tab.click(row("back"));
+    await tab.click(row("back"));
+    await tab.waitForSelector(row("press"));
     await tab.screenshot({ path: "runs/casino-browser/lumi-pet-garden.png", fullPage: true });
 
     await tab.goto(base + "/media/games/lumi-pet"); // A reload: the same garden, reached from its tab.

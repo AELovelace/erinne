@@ -262,7 +262,7 @@
       if ($("casino-error").dataset.network) { error(""); delete $("casino-error").dataset.network; }
     } catch (e) {
       if (code && [403, 404].includes(e.status) && (!state || state.code === code)) lobby();
-      error(e.status ? e.message : "Connection interrupted. Reconnecting… Your table stays saved.");
+      error(e.status ? e.message : "Connection interrupted. Reconnecting… Your seat is kept for two minutes.");
       if (!e.status) $("casino-error").dataset.network = "true";
     } finally { refreshing = false; }
   }

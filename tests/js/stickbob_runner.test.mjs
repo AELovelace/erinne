@@ -139,6 +139,63 @@ test("landing a few pixels short of a ledge keeps your speed", () => {
   assert.equal(R.boxOf(w, w.player.x, w.player.y, w.player.mask).b, 352);   // standing on it
 });
 
+/* A tall wall on a flat floor, with StickBob in mid-air against its left face (the wall is on his right). */
+function atWall() {
+  const room = { ...data.slices[0], w: 640, solids: [{ x: 0, y: 352, w: 640, h: 16, sprite: "spr_Wall" }, { x: 400, y: 100, w: 32, h: 252, sprite: "spr_Wall" }] };
+  const w = R.create({ ...data, slices: [room] }, seeded(1));
+  run(w, 60);                                                            // settle on the floor first
+  Object.assign(w.player, { x: 393, y: 250, vx: 0, vy: 0, canJump: false, prevX: 1, prevY: 0 });   // right edge (x + 7) touches the wall at 400
+  return w;
+}
+
+test("wall jump: press away from the wall, then jump, and StickBob kicks up and away", () => {
+  const w = atWall(), startY = w.player.y;
+  R.step(w, idle(w, { x: -1 }));                                         // press away: he holds on instead of drifting off
+  assert.equal(w.player.x, 393);
+  run(w, 4, { x: -1 });
+  assert.equal(w.player.x, 393);
+  R.step(w, idle(w, { x: -1, y: -1 }));                                  // then jump
+  assert.ok(w.events.includes("walljump"));
+  run(w, 15, { x: -1, y: -1 });
+  assert.ok(w.player.x < 393 - 60, `went ${393 - w.player.x}px away`);
+  assert.ok(w.player.y < startY - 40, `rose ${startY - w.player.y}px`);
+});
+
+test("wall jump: a jump pressed just before pressing away still counts", () => {
+  const w = atWall();
+  R.step(w, idle(w, { y: -1 }));                                         // jump first (nothing happens in mid-air)...
+  R.step(w, idle(w, { x: -1, y: -1 }));                                  // ...then away, one step later
+  assert.ok(w.events.includes("walljump"));
+});
+
+test("wall jump: jumping while pushing into the wall (the old way) does nothing", () => {
+  const w = atWall();
+  run(w, 3, { x: 1 });
+  R.step(w, idle(w, { x: 1, y: -1 }));
+  assert.ok(!w.events.includes("walljump"));
+  assert.ok(w.player.vy >= 0);
+});
+
+test("wall jump: the hold lets go after a moment, and a late jump does nothing", () => {
+  const w = atWall();
+  run(w, 25, { x: -1 });                                                 // press away and keep waiting
+  assert.ok(w.player.x < 393, "he let go and drifted away");
+  R.step(w, idle(w, { x: -1, y: -1 }));
+  assert.ok(!w.events.includes("walljump"));
+});
+
+test("wall jump: bouncing back and away climbs a single wall", () => {
+  const w = atWall(), startY = w.player.y;
+  let jumps = 0;
+  for (let i = 0; i < 4; i++) {
+    R.step(w, idle(w, { x: -1 })); R.step(w, idle(w, { x: -1, y: -1 }));   // away, jump
+    jumps += w.events.includes("walljump") ? 1 : 0;
+    for (let k = 0; k < 60 && !R.meets(w, w.player.x + 2, w.player.y, w.player.mask); k++) R.step(w, idle(w, { x: 1 }));   // back to the wall
+  }
+  assert.equal(jumps, 4);
+  assert.ok(w.player.y < startY - 30, `climbed ${startY - w.player.y}px`);
+});
+
 test("no chunk is ever chosen that's too high to jump to", () => {
   const w = R.create(data, seeded(7));
   for (let i = 0; i < 4000; i++) {

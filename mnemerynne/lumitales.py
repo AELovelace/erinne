@@ -127,9 +127,8 @@ def _item(loot: dict | None, coins: int | None) -> str:
         parts.append("a potion")
     if loot.get("keys"):
         parts.append("a key")
-    if loot.get("trophy"):
-        names = {t["id"]: t["name"] for found in lumidungeon.TROPHIES.values() for t in found}
-        parts.append("the " + names.get(loot["trophy"], "trophy"))
+    if loot.get("trophy"):                                # a trophy, or a piece of the place's decor set
+        parts.append("the " + lumidungeon.FOUND_NAMES.get(loot["trophy"], "trophy"))
     if loot.get("mod"):
         parts.append("a " + lumibattle._MODS[loot["mod"]]["name"] + " mod")
     return (", ".join(parts[:-1]) + " and " + parts[-1]) if len(parts) > 1 else (parts[0] if parts else "nothing much")
@@ -155,6 +154,12 @@ def scene(run: dict) -> str:
     return lines[at % len(lines)].format(**facts(run))
 
 
+def _dropped(run: dict) -> str:
+    """What a beaten creature left behind for the house, as words added after the moment's line ("" if nothing)."""
+    piece = run["event"].get("dropped")
+    return f" It leaves something behind: the {lumidungeon.FOUND_NAMES.get(piece, 'treasure')}!" if piece else ""
+
+
 def line(run: dict, rng=None) -> str:
     """The library's line for what just happened in a run: the environment's own if it has one, else the default."""
     rng = rng or random.SystemRandom()
@@ -167,7 +172,8 @@ def line(run: dict, rng=None) -> str:
     lines = LIBRARY.get(run["env"], {}).get(scenario) or LIBRARY["default"][scenario]
     told = lines[rng.randrange(len(lines))].format(**facts(run))
     won = _item(run["event"].get("loot"), run["event"].get("coins"))
-    return told if "{item}" in SCENARIOS[scenario] and won in told or "{item}" not in SCENARIOS[scenario] else f"{told} ({won}.)"
+    told = told if "{item}" in SCENARIOS[scenario] and won in told or "{item}" not in SCENARIOS[scenario] else f"{told} ({won}.)"
+    return told + _dropped(run)
 
 
 # --------------------------------------------------------------------------- writing new lines with a model
@@ -251,7 +257,7 @@ def _live_prompt(run: dict) -> str:
     """One moment, as facts. Nothing about the person playing ever goes in."""
     env, scenario, names = lumidungeon._ENVS[run["env"]], run["event"]["scenario"], facts(run)
     return (f"Place: {env['name']} ({env['family']}). {env['about']}\nFloor: {run['depth']}\n"
-            f"What just happened: {SCENARIOS[scenario].format(**names)}\n\nWrite one line for this moment.")
+            f"What just happened: {SCENARIOS[scenario].format(**names)}{_dropped(run)}\n\nWrite one line for this moment.")
 
 
 async def live_line(run: dict, *, claude: tuple[str, str] | None = None, bfgguf=None) -> str | None:
@@ -282,5 +288,6 @@ async def live_line(run: dict, *, claude: tuple[str, str] | None = None, bfgguf=
 
 def remember(conn: sqlite3.Connection, user_id: int, run: dict, told: str) -> None:
     """Keep a live line with the run, so the same moment never asks twice (a reload shows it again for free)."""
-    run["say"] = told
+    piece = run["event"].get("dropped")
+    run["say"] = told if not piece or lumidungeon.FOUND_NAMES.get(piece, "") in told else told + _dropped(run)   # the find is always told
     lumidungeon._save(conn, user_id, run)

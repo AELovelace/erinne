@@ -950,7 +950,13 @@
       return card({ title: g.name, sub: g.description, glyph: g.icon || "🎮", shape: "square",
                     onClick: function () { games.open(g); } });
     };
-    const out = [shelf(null, data.games.filter(function (g) { return !g.mouse_keyboard; }).map(tile), "square", "grid")];   // what any remote or touch screen can play
+    const out = [], named = {};                          // a shelf per kind of game (Lumi Pet, Arcade, Table games), in the order the server lists them
+    data.games.filter(function (g) { return !g.mouse_keyboard; }).forEach(function (g) {   // what any remote or touch screen can play
+      const title = g.shelf || "Games";
+      if (!named[title]) { named[title] = []; out.push(title); }
+      named[title].push(tile(g));
+    });
+    out.forEach(function (title, at) { out[at] = shelf(title, named[title], "square", "grid"); });
     const desk = data.games.filter(function (g) { return g.mouse_keyboard; });              // needs real keys and a pointer (mnemerynne/games.py)
     if (desk.length && !screenId && window.matchMedia("(any-pointer: fine)").matches) {     // a TV or a phone couldn't play these, so it doesn't offer them
       out.push(shelf("Mouse & keyboard", desk.map(tile), "square", "grid"));

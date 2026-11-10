@@ -20,6 +20,7 @@
   // already read, a row waiting for a second press, and what the dungeon scene last drew.
   const KEYS_GARDEN = "▲ ▼ ◀ ▶ move over the plots · Enter plants or trims<br>⏯ presses the powder · ⏮ ⏭ choose from this list<br>Keyboard: P presses, Page Up / Page Down<br>Mouse: press a plot, the press, or a watering can";
   const CAN_NOTES = [523.25, 659.25, 783.99, 440]; // One note per watering can.
+  let lumiMoved = 0, lumiActUntil = 0, lumiFlip = false; // Lumi in the garden: when she last darted somewhere, and the little move she is making.
   let drawer = null, seed = null, plotCursor = 0, gardenFocus = "list", pending = 0, mini = null, miniTimer = null, lastGarden = "", gardenOpen = false; // The garden: see drawGarden.
   let play = {}, focus = "list", lastStory = "", caring = false, dismissedRun = null, pendingConfirm = null, lastDungeon = "";
   // Home and Closet: the spot or slot whose full list is open (null: one row each), the choice ◀ ▶ has flipped each
@@ -88,16 +89,16 @@
       return name === "home" ? Pk.homeRows(ctx) : Pk.closetRows(ctx);
     }
     if (name === "battle") return battleRows();
-    if (name === "garden") return Gd.rows({ garden: snap.garden, drawer: drawer, seed: seed, cursor: plotCursor, mini: mini, passed: passed(), pending: pending, level: pet.level, go: gardenGo });
+    if (name === "garden") return Gd.rows({ garden: snap.garden, decor: snap.garden_decor, drawer: drawer, seed: seed, cursor: plotCursor, mini: mini, passed: passed(), pending: pending, level: pet.level, go: gardenGo });
     if (name === "dungeon") { // A dungeon fight and its result use the Battle lists; everything else is the dungeon's own.
       if ((snap.fight && snap.fight.status === "active") || finished) return battleRows();
       return Dg.rows({ snap: snap, play: play, dismissed: dismissedRun, care: caring, go: dungeonGo });
     }
-    if (name === "shop") return c.snacks.concat(c.treats, c.toys).filter(function (thing) { return thing.price && !pet.toys.includes(thing.id); }).map(function (thing) {
+    if (name === "shop") return Pk.capsuleRows(snap).concat(c.snacks.concat(c.treats, c.toys).filter(function (thing) { return thing.price && !pet.toys.includes(thing.id); }).map(function (thing) { // The capsules first: this is where people look to buy one.
       const held = pet.inventory[thing.id] || 0, toy = c.toys.includes(thing);
       return { key: thing.id, icon: thing.icon, name: thing.name, send: { action: "buy", item: thing.id },
         hint: thing.price + " coins" + (toy ? " · a toy to keep" : held ? " · have " + held : "") };
-    });
+    }));
     return [ // settings
       { key: "glow", icon: "✦", name: "Glow: " + pet.glow[0].toUpperCase() + pet.glow.slice(1), hint: "◀ ▶ her colour, and her element in a fight: " + snap.battle.rules.glows[pet.glow], send: { action: "glow", glow: R.nextPalette(pet.glow) },
         turn: function (by) { submit({ key: "glow", send: { action: "glow", glow: Pk.turn(R.PALETTES, pet.glow, by) } }); } },
@@ -172,8 +173,32 @@
   function gardening() { return TABS[tab] === "garden" && !exploring(); }
   function passed() { return serverNow() - snap.now; } // How long ago the server told us its times.
 
+  function lumiTo(spot, act) { // Lumi darts to a place in the garden (a plot, the press) and does a little something there.
+    room.style.setProperty("--gx", String(Math.round(spot.x - 500))); room.style.setProperty("--gy", String(Math.round(spot.y)));
+    lumiMoved = Date.now();
+    if (!act) return;
+    lumiFlip = !lumiFlip; // The same little move twice in a row still plays twice (game.css has each under two names).
+    room.dataset.gardenAct = act + (lumiFlip ? "" : "-again"); lumiActUntil = Date.now() + 800;
+    $("lp-effect").textContent = { dig: "❀", snip: "✂", bounce: "✦", sniff: "♡", cheer: "✧ ✦ ✧" }[act] || "♡"; effectUntil = Date.now() + 1200;
+  }
+
+  function lumiCheers(send, note) { // What Lumi does when the server answers a garden choice.
+    if (send.action === "plant" || send.action === "plot") lumiTo(Ga.spot(send.action === "plot" ? snap.garden.plots.length - 1 : send.plot), "dig");
+    else if (send.action === "trim") lumiTo(Ga.spot(send.plot), note && note.gift ? "cheer" : "snip");
+    else if (["trim_all", "capsule", "helper", "ability", "unlock", "moonrise", "decor_buy", "decor_place"].indexOf(send.action) >= 0 || (note && (note.water === "done" || note.feed === "done"))) lumiTo(Ga.spot(plotCursor), "cheer");
+  }
+
+  function lumiWanders() { // Left alone for a while, she trots to a flower and has a sniff: a ready one if there is one.
+    if (mini || Date.now() - lumiMoved < 6000) return;
+    const gone = passed(), planted = [], ready = [];
+    snap.garden.plots.forEach(function (plot, index) { if (plot.flower) { planted.push(index); if (Gd.stage(plot, gone) !== "growing") ready.push(index); } });
+    const among = ready.length ? ready : planted;
+    if (among.length) lumiTo(Ga.spot(among[Math.floor(Math.random() * among.length)]), "sniff"); else lumiMoved = Date.now();
+  }
+
   function pressOnce() { // One squeeze of the press: counted here, sent to the server in a batch a moment later.
     pending += 1;
+    lumiTo(Ga.PRESS, "bounce"); // She runs to the machine and jumps on it with every press.
     G.sound.unlock(); G.sound.tone(480 + (pending % 6) * 36, .05, 0, .05);
   }
 
@@ -196,8 +221,9 @@
       return G.api(API + "garden", send);
     }).then(function (data) {
       take(data); lastList = "";
-      const words = Gd.said(send, data.said, data.garden, function (id) { return item(id).name; });
+      const words = Gd.said(send, data.said, data.garden, function (id) { return item(id).name; }, data.garden_decor);
       if (words) say(words);
+      lumiCheers(send, data.said);
     }).catch(function (refused) {
       say(refused.message);
       if (mini && mini.kind === "water") mini.answer = []; // The answer never arrived: let it be given again.
@@ -214,7 +240,7 @@
 
   function plotEnter(index) { // Enter, or a press of the mouse, on a plot: plant, trim, dig, or say how long is left.
     const choice = Gd.plotChoice(snap.garden, index, seed, passed());
-    if (choice.say) { say(choice.say); return; }
+    if (choice.say) { say(choice.say); lumiTo(Ga.spot(index), "sniff"); return; }
     if (choice.confirm && pendingConfirm !== "plot") { pendingConfirm = "plot"; say(choice.confirm + " Press again to dig."); return; }
     gardenSend(choice.send);
   }
@@ -271,7 +297,7 @@
     else if (action === "next" || action === "prev" || (drawer && (action === "up" || action === "down"))) { // The list (a drawer has no plots to walk over).
       const many = rows().length, back = action === "prev" || action === "up";
       picks[tab] = (picks[tab] + (back ? many - 1 : 1)) % many; gardenFocus = "list";
-    } else if (moving && !drawer) { plotCursor = Gd.moveCursor(Math.min(plotCursor, count - 1), action, count); gardenFocus = "board"; }
+    } else if (moving && !drawer) { plotCursor = Gd.moveCursor(Math.min(plotCursor, count - 1), action, count); gardenFocus = "board"; lumiTo(Ga.spot(plotCursor)); } // She follows the cursor.
     render();
   }
 
@@ -287,9 +313,10 @@
   function drawGarden() { // The garden over the room while its tab is open: the plots, the press, and the lines about them.
     const on = Boolean(snap && gardening());
     room.dataset.garden = String(on);
-    if (!on) { lastGarden = ""; gardenOpen = false; if (mini) syncMini(); return; }
+    if (!on) { lastGarden = ""; gardenOpen = false; delete room.dataset.gardenAct; if (mini) syncMini(); return; }
     if (!gardenOpen) { // Just walked in: say what the press did meanwhile, and tell the server she has seen her flowers.
       gardenOpen = true; drawer = null; gardenFocus = "list";
+      lumiTo(Ga.spot(Math.min(plotCursor, snap.garden.plots.length - 1)));
       say(Gd.away(snap.garden) || "The Stardust Garden. Plant flowers, trim them when they're ready, and press their powder into coins.");
       gardenSend({ action: "look" });
     }
@@ -309,10 +336,15 @@
     }
     const steps = garden.plots.map(function (plot) { return Gd.stage(plot, gone) + (plot.grow ? Math.floor(10 * Math.max(0, 1 - (plot.ready_in - gone) / plot.grow)) : ""); }); // Redraw only when a flower visibly changes.
     const playing = !mini ? null : mini.kind === "water" ? [mini.phase, mini.lit, mini.answer.length, mini.show.length] : [mini.count, Math.ceil(mini.left / 250)];
-    const signature = JSON.stringify([garden.at, steps, garden.plot_price, garden.cosmetics, Math.round(garden.squeezed), garden.price, garden.powder > 0.5, plotCursor, gardenFocus, drawer, playing]);
-    if (signature === lastGarden) return;
+    const scenery = document.querySelector(".parallax"), sky = Boolean(scenery) && getComputedStyle(scenery).display !== "none"; // The theme's drifting scenery is the garden's sky, where there is some.
+    if (lumiActUntil && Date.now() > lumiActUntil) { delete room.dataset.gardenAct; lumiActUntil = 0; }
+    const signature = JSON.stringify([garden.at, steps, garden.plot_price, garden.decor.placed, Math.round(garden.squeezed), garden.price, garden.powder > 0.5, plotCursor, gardenFocus, drawer, playing, sky]);
+    if (signature === lastGarden) { // Nothing to redraw: just let every flower's timer tick, where it stands.
+      Ga.timers(garden, gone).forEach(function (timer) { const words = $("lp-dungeon").querySelector('[data-timer="' + timer[0] + '"]'); if (words && words.textContent !== timer[1]) words.textContent = timer[1]; });
+      return;
+    }
     lastGarden = signature; lastDungeon = "";
-    $("lp-dungeon").innerHTML = Ga.scene(garden, { cursor: plotCursor, focused: gardenFocus === "board" && !drawer, passed: gone, pending: 0, mini: mini }); // Markup authored in garden-art.js; colours are the server's checked #rrggbb.
+    $("lp-dungeon").innerHTML = Ga.scene(garden, { cursor: plotCursor, focused: gardenFocus === "board" && !drawer, passed: gone, mini: mini, decor: snap.garden_decor, sky: sky }); // Markup authored in garden-art.js; colours are the server's checked #rrggbb.
   }
 
   function walking() { // In the dungeon with the Dungeon tab open and no fight on: the arrows are Lumi's feet.
@@ -634,6 +666,7 @@
     const task = snap.pet.task;
     if ((task && serverNow() >= task.finishesAt) || Date.now() - polled > 15000) { polled = Date.now(); refresh(); }
     if (gardening()) { // The garden: send the presses made this second, and look in more often so the numbers move.
+      lumiWanders();
       flushPresses();
       if (!busy && !mini && Date.now() - polled > 5000) { polled = Date.now(); refresh(); }
     }

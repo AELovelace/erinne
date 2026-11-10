@@ -23,11 +23,11 @@
     return (xy[0] + WAYS[way][2]) + "," + (xy[1] + WAYS[way][3]);
   }
 
-  function carrying(bag) { // "24 coins · 1 potion · a key · 1 trophy"
+  function carrying(bag) { // "24 coins · 1 potion · a key · 1 thing for the house" (a trophy, or a piece of the place's set)
     const parts = [bag.coins + " coins"];
     if (bag.potions) parts.push(bag.potions + (bag.potions === 1 ? " potion" : " potions"));
     if (bag.keys) parts.push("a key");
-    if (bag.trophies.length) parts.push(bag.trophies.length + (bag.trophies.length === 1 ? " trophy" : " trophies"));
+    if (bag.trophies.length) parts.push(bag.trophies.length + (bag.trophies.length === 1 ? " thing for the house" : " things for the house"));
     if (bag.mods.length) parts.push(bag.mods.length + (bag.mods.length === 1 ? " mod" : " mods"));
     return parts.join(" · ");
   }
@@ -90,7 +90,7 @@
     if (run.over === "home") {
       const parts = [ended.coins + " coins"];
       if (ended.potions) parts.push(ended.potions + (ended.potions === 1 ? " potion" : " potions"));
-      if (ended.trophies.length) parts.push(ended.trophies.length === 1 ? "a trophy for the house" : ended.trophies.length + " trophies for the house");
+      if (ended.trophies.length) parts.push(ended.trophies.length === 1 ? "something for the house" : ended.trophies.length + " things for the house");
       if (ended.mods.length) parts.push(ended.mods.length === 1 ? "a new mod" : ended.mods.length + " new mods");
       return "Home from floor " + ended.depth + " with " + parts.join(", ");
     }

@@ -96,14 +96,22 @@
     return " And a puff of extra starpowder: +" + format(found.powder) + "!";
   }
 
-  function said(send, note, garden, name) { // What just happened, for the message line. Empty: say nothing new.
+  function said(send, note, garden, name, decor) { // What just happened, for the message line. Empty: say nothing new. `decor`: the decorations' catalog.
     note = note || {};
+    function thing(id) { // A decoration's name, from the catalog.
+      let found = null;
+      ((decor && decor.slots) || []).forEach(function (slot) { slot.items.forEach(function (item) { if (item.id === id) found = item.name; }); });
+      return found || "It";
+    }
     const flower = send.item ? flowerOf(garden, send.item) : null;
     if (send.action === "plant") return "Planted: " + flower.name + ". Ready in " + span(flower.minutes_now) + ".";
     if (send.action === "trim" || send.action === "trim_all") return "Snip! " + (note.trimmed === 1 ? "One flower" : note.trimmed + " flowers") + " trimmed: +" + format(note.powder) + " starpowder." + gift(note.gift, name);
     if (send.action === "plot") return "A new plot, dug and raked, for " + note.paid + " coins.";
     if (send.action === "unlock") return "Unlocked for this garden: " + flower.name + "! " + (flower.sort === "perennial" ? "It grows back after every trim." : "Plant it again after each harvest.");
-    if (send.action === "cosmetic") return "The garden has something new. Lumi walks round it twice, approving.";
+    if (send.action === "decor_buy") return "Bought and put out: " + thing(send.item) + ". Lumi walks round it twice, approving.";
+    if (send.action === "decor_place") return note.stored ? thing(send.item) + " goes back in the store." : thing(send.item) + " is out. Lumi approves.";
+    if (send.action === "decor_sell") return "Sold: " + thing(send.item) + ", for " + format(note.powder) + " starpowder.";
+    if (send.action === "capsule") return "The capsule sprouts open: " + thing(note.capsule) + "! (" + note.rarity + ")" + (note.copies > 1 ? " That makes " + note.copies + ": the spare is in the store." : "");
     if (send.action === "helper") return garden.helpers.find(function (helper) { return helper.id === note.helper; }).name + " is now level " + note.level + ".";
     if (send.action === "ability") {
       if (note.ability === "monk") return "Lumi breathes out. " + format(note.powder) + " starpowder squeezed at once" + (note.coins ? ": +" + note.coins + " coins." : ".");
@@ -133,11 +141,12 @@
 
   function cool(ms, passed) { return ms - passed > 0 ? "ready in " + clock(ms - passed) : ""; }
 
-  // ---- The lists. ctx: { garden, drawer (null, "seeds", "helpers", "shop", "moon"), seed, cursor, mini, passed, pending, level, go(change) }
+  // ---- The lists. ctx: { garden, decor (the decorations' catalog), drawer (null, "seeds", "helpers", "moon", "decor", "decor:<slot>", "store"),
+  //      seed, cursor, mini, passed, pending, level, go(change) }
   function rows(ctx) {
     const garden = ctx.garden, go = ctx.go, passed = ctx.passed || 0, mini = ctx.mini;
     function ask(key, icon, name, hint, send, more) { return Object.assign({ key: key, icon: icon, name: name, hint: hint, url: "garden", send: send }, more || {}); }
-    function back(name) { return { key: "back", icon: "‹", name: name || "Back to the garden", hint: "The plots and the press", local: function () { go({ drawer: null }); } }; }
+    function back(name, to) { return { key: "back", icon: "‹", name: name || "Back to the garden", hint: to ? "Slots, the capsule and the store" : "The plots and the press", local: function () { go({ drawer: to || null }); } }; }
     if (mini && mini.kind === "water") return [{ key: "watering", icon: "💧", name: mini.phase === "show" ? "Watch the cans…" : "Your turn: repeat them",
       hint: "Round " + mini.show.length + " of " + garden.water.rounds + " · ▲ ▶ ▼ ◀ or press a can", note: "Repeat the cans with the arrows, or press them." }];
     if (mini && mini.kind === "feed") return [{ key: "feeding", icon: "🌱", name: "Fertilize! " + mini.count + " presses", hint: "Enter, ⏯ or the big button, as fast as you can",
@@ -150,16 +159,41 @@
       if (!flower.next) return { key: "seed-" + flower.id, icon: "🔒", name: flower.name, hint: "Further up the ladder · " + what, note: "Unlock the flowers before " + flower.name + " first." };
       if (garden.given < flower.needs) return { key: "seed-" + flower.id, icon: "🔒", name: flower.name, hint: "When this garden has given " + format(flower.needs) + " powder (" + format(garden.given) + " so far) · then " + cost,
         note: flower.name + " opens when this garden has given " + format(flower.needs) + " starpowder." };
-      if (ctx.level < flower.level) return { key: "seed-" + flower.id, icon: "🔒", name: flower.name, hint: "Needs Lumi at level " + flower.level + " · then " + cost, note: flower.name + " needs Lumi to be level " + flower.level + "." };
+      if ((ctx.level || 1) < flower.level) return { key: "seed-" + flower.id, icon: "🔒", name: flower.name, hint: "Needs Lumi at level " + flower.level + " · then " + cost, note: flower.name + " needs Lumi to be level " + flower.level + "." };
       return ask("seed-" + flower.id, "✧", "Unlock " + flower.name, cost + " · " + what, { action: "unlock", item: flower.id });
     }));
     if (ctx.drawer === "helpers") return [back()].concat(garden.helpers.map(function (helper) {
       return ask("helper-" + helper.id, "✦", helper.name + " · level " + helper.level, format(helper.cost) + " starpowder · " + helper.about, { action: "helper", item: helper.id });
     }));
-    if (ctx.drawer === "shop") return [back()].concat(garden.cosmetics.map(function (thing) {
-      return thing.owned ? { key: "look-" + thing.id, icon: "✓", name: thing.name, hint: "In the garden · " + thing.about, note: thing.name + " is already in the garden." }
-        : ask("look-" + thing.id, "✧", thing.name, format(thing.stardust) + " starpowder · " + thing.about, { action: "cosmetic", item: thing.id });
-    }));
+    const decor = ctx.decor || { slots: [], capsule: { name: "Capsule", price: 0, sell: {} } }, mine = garden.decor || { placed: {}, owned: {}, spare: {} };
+    function worth(item) { return item.rarity === "shop" ? Math.floor(item.stardust / 2) : decor.capsule.sell[item.rarity]; }
+    function grand(rarity) { return rarity[0].toUpperCase() + rarity.slice(1); }
+    if (ctx.drawer === "decor") return [back(),
+      mine && garden.powder >= decor.capsule.price ? ask("capsule", "🌱", decor.capsule.name, format(decor.capsule.price) + " starpowder · a decoration you can't buy; a repeat goes to the store", { action: "capsule" })
+        : { key: "capsule", icon: "🌱", name: decor.capsule.name, hint: format(decor.capsule.price) + " starpowder · a decoration you can't buy", note: "A capsule costs " + format(decor.capsule.price) + " starpowder." },
+      { key: "store", icon: "▤", name: "The store", hint: Object.keys(mine.spare).filter(function (id) { return mine.spare[id] > 0; }).length + " kinds of spare decoration · put out or sell", local: function () { go({ drawer: "store" }); } }]
+      .concat(decor.slots.map(function (slot) {
+        const here = slot.items.find(function (item) { return item.id === mine.placed[slot.id]; });
+        return { key: "slot-" + slot.id, icon: here ? "✓" : "○", name: slot.name, hint: here ? here.name : "Nothing out · " + slot.items.length + " to collect", local: function () { go({ drawer: "decor:" + slot.id }); } };
+      }));
+    if (ctx.drawer === "store") {
+      const spares = [];
+      decor.slots.forEach(function (slot) { slot.items.forEach(function (item) { if (mine.spare[item.id] > 0) spares.push(item); }); });
+      return [back("Back to decorations", "decor")].concat(spares.length ? spares.map(function (item) {
+        return ask("sell-" + item.id, "▤", item.name + " ×" + mine.spare[item.id], "Enter sells one for " + format(worth(item)) + " starpowder · put it out from its own slot", { action: "decor_sell", item: item.id }, { confirm: true });
+      }) : [{ key: "empty", icon: "·", name: "Nothing spare", hint: "Repeats from the capsule, and things put away, wait here", note: "There is nothing spare in the store." }]);
+    }
+    if (ctx.drawer && ctx.drawer.indexOf("decor:") === 0) {
+      const slot = decor.slots.find(function (one) { return "decor:" + one.id === ctx.drawer; });
+      return [back("Back to decorations", "decor")].concat((slot ? slot.items : []).map(function (item) {
+        const owned = mine.owned[item.id] || 0, spare = mine.spare[item.id] || 0, here = mine.placed[slot.id] === item.id, key = "decor-" + item.id;
+        if (here) return ask(key, "✓", item.name, "In this garden · Enter puts it away", { action: "decor_place", item: item.id });
+        if (spare > 0) return ask(key, "○", item.name, spare + " in the store · Enter puts one out here", { action: "decor_place", item: item.id });
+        if (item.rarity === "shop") return ask(key, "✧", item.name, format(item.stardust) + " starpowder" + (owned ? " · yours is in another garden: Enter buys one for here" : " · Enter buys it"), { action: "decor_buy", item: item.id });
+        return { key: key, icon: "🔒", name: item.name, hint: grand(item.rarity) + " · " + (owned ? "yours is in another garden" : "only from the " + decor.capsule.name),
+          note: owned ? "Your " + item.name + " is out in another garden. Put it away there first, or win another." : item.name + " only comes from the " + decor.capsule.name + "." };
+      }));
+    }
     if (ctx.drawer === "moon") return [back()].concat(
       [ask("moon-garden", "☾", "Another garden", "A new starter garden beside this one, to fill from the first flower", { action: "moonrise", item: "garden" }, { confirm: true })],
       garden.upgrades.map(function (thing) {
@@ -185,7 +219,7 @@
         : ask("move-" + move.id, "✦", name, move.about, { action: "ability", item: move.id }));
     });
     list.push({ key: "helpers", icon: "♟", name: "Helpers", hint: "Six class helpers, levelled with starpowder", local: function () { go({ drawer: "helpers" }); } });
-    list.push({ key: "shop", icon: "✧", name: "Garden shop", hint: "Fences, gnomes and other fine things, for starpowder", local: function () { go({ drawer: "shop" }); } });
+    list.push({ key: "decor", icon: "✧", name: "Decorations", hint: "Fifteen places to dress, the Seedling Capsule, and the store", local: function () { go({ drawer: "decor" }); } });
     list.push(garden.moonrise.ready ? { key: "moon", icon: "☾", name: "Moonrise", hint: "Replant this garden for something that lasts", local: function () { go({ drawer: "moon" }); } }
       : { key: "moon", icon: "☾", name: "Moonrise", hint: "When this garden has all its plots and has given " + format(garden.moonrise.needs) + " powder",
         note: "A moonrise needs every plot dug and " + format(garden.moonrise.needs) + " starpowder given by this garden (" + format(garden.given) + " so far)." });

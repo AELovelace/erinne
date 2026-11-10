@@ -1,0 +1,28 @@
+/* The arcade shell Breakout and Snake share (templates/games/arcade-lobby.html): the canvas full screen, and the
+   menu or table panel floating over it. Colours come from the theme (common.css). */
+
+#gm[data-game="breakout"], #gm[data-game="snake"] { display: block; padding: 0; }    /* the canvas takes the whole frame */
+.ar-stage { position: relative; display: flex; align-items: center; justify-content: center; min-height: 100vh; background: rgb(5, 6, 10); }
+#ar-canvas { display: block; width: min(100vw, calc(100vh * 1366 / 768)); height: auto; aspect-ratio: 1366 / 768; touch-action: none; }
+.ar-coins { position: absolute; top: .6rem; right: 1rem; margin: 0; color: var(--muted); font-size: .9rem; letter-spacing: .12em; text-transform: uppercase; }
+.ar-coins b { color: #ffe14d; font-size: 1.2rem; margin-left: .3rem; }
+.ar-panel { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(30rem, 92vw);
+            max-height: 86vh; overflow-y: auto; background: rgba(7, 2, 13, .9); backdrop-filter: blur(6px); }
+.ar-panel[hidden] { display: none; }
+.ar-title { margin: .2rem 0 .6rem; font-family: var(--serif); color: var(--ink); text-shadow: 0 0 14px rgba(var(--glow), .5); }
+.ar-muted { color: var(--muted); font-size: .9rem; }
+.ar-actions { display: grid; gap: .5rem; margin: .8rem 0; }
+.ar-actions button { font-size: 1.05rem; padding: .65rem .8rem; }
+.ar-tables { display: grid; gap: .4rem; }
+.ar-table-row { text-align: left; }
+.ar-table-row small { color: var(--muted); }
+.ar-seats p, .ar-result p { margin: .25rem 0; }
+.ar-seat b { color: var(--cyan); }
+.ar-seat.you { color: var(--rose); }
+.ar-ready { color: #7dff3a; }
+.ar-result { border: 1px dashed var(--line); padding: .5rem .7rem; margin: .6rem 0; }
+.ar-win { color: var(--cyan); font-size: 1.15rem; text-shadow: 0 0 10px rgba(0, 240, 255, .5); }
+.ar-chips { display: grid; grid-template-columns: repeat(5, 1fr); gap: .35rem; }
+.ar-chips button { padding: .5rem 0; color: #ffe14d; }
+.ar-status { min-height: 1.3em; margin: .4rem 0 0; color: var(--rose); }
+.ar-panel button:focus-visible, .ar-panel button:focus { outline: 2px solid var(--cyan); outline-offset: 2px; }

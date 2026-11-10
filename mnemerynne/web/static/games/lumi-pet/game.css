@@ -154,8 +154,30 @@
 }
 
 /* The Stardust Garden: drawn over the room like the dungeon (garden-art.js). Lumi stands small beside the beds. */
-.lp-room[data-garden="true"] .lp-pet-wrap { width: calc(44 * var(--u)); left: calc(50% - 196 * var(--u)); bottom: calc(50% - 204 * var(--u)); pointer-events: none; transition: left .4s, width .4s; } /* Between the left panel and the first bed. */
+/* In the garden Lumi is small and quick: game.js gives her a place in the drawing (--gx from its centre, --gy from its top) and she darts there. */
+.lp-room[data-garden="true"] .lp-pet-wrap { width: calc(30 * var(--u)); left: calc(50% + (var(--gx, -118) - 15) * var(--u)); bottom: calc(50% + (250 - var(--gy, 222)) * var(--u)); pointer-events: none;
+  transition: left .3s cubic-bezier(.3, 1.5, .5, 1), bottom .3s cubic-bezier(.3, 1.5, .5, 1), width .3s; }
+.lp-room[data-garden="true"] .lp-house { visibility: hidden; } /* The garden is outdoors: its sky is the theme's own scenery, or painted (garden-art.js). */
+.lp-room[data-garden="true"] .lp-effect { font-size: calc(11 * var(--u)); top: -30%; right: -10%; }
+.lp-room[data-garden-act^="dig"] .lp-pet { animation: lp-g-dig .6s ease-in-out; }
+.lp-room[data-garden-act^="snip"] .lp-pet { animation: lp-g-hop .5s ease-out; }
+.lp-room[data-garden-act^="bounce"] .lp-pet { animation: lp-g-bounce .22s ease-out; }
+.lp-room[data-garden-act^="sniff"] .lp-pet { animation: lp-g-sniff .7s ease-in-out; }
+.lp-room[data-garden-act^="cheer"] .lp-pet { animation: lp-g-cheer .7s ease-in-out; }
+.lp-room[data-garden-act$="-again"] .lp-pet { animation-name: var(--again); }
+.lp-room[data-garden-act="dig-again"] { --again: lp-g-dig2; } .lp-room[data-garden-act="snip-again"] { --again: lp-g-hop2; } .lp-room[data-garden-act="bounce-again"] { --again: lp-g-bounce2; }
+.lp-room[data-garden-act="sniff-again"] { --again: lp-g-sniff2; } .lp-room[data-garden-act="cheer-again"] { --again: lp-g-cheer2; }
+@keyframes lp-g-dig { 20%, 60% { transform: rotate(-13deg) translateY(4%); } 40%, 80% { transform: rotate(13deg) translateY(4%); } }
+@keyframes lp-g-dig2 { 20%, 60% { transform: rotate(13deg) translateY(4%); } 40%, 80% { transform: rotate(-13deg) translateY(4%); } }
+@keyframes lp-g-hop { 40% { transform: translateY(-38%) scale(1.06, .96); } 80% { transform: translateY(0) scale(.96, 1.05); } }
+@keyframes lp-g-hop2 { 45% { transform: translateY(-38%) scale(1.06, .96); } 85% { transform: translateY(0) scale(.96, 1.05); } }
+@keyframes lp-g-bounce { 50% { transform: translateY(-22%) scale(.94, 1.08); } }
+@keyframes lp-g-bounce2 { 55% { transform: translateY(-22%) scale(.94, 1.08); } }
+@keyframes lp-g-sniff { 30%, 70% { transform: translateY(7%) rotate(6deg); } 50% { transform: translateY(3%) rotate(-4deg); } }
+@keyframes lp-g-sniff2 { 30%, 70% { transform: translateY(7%) rotate(-6deg); } 50% { transform: translateY(3%) rotate(4deg); } }
+@keyframes lp-g-cheer { 50% { transform: translateY(-30%) rotate(180deg); } 100% { transform: rotate(360deg); } }
+@keyframes lp-g-cheer2 { 50% { transform: translateY(-30%) rotate(-180deg); } 100% { transform: rotate(-360deg); } }
+@media (prefers-reduced-motion: reduce) { .lp-room[data-garden="true"] .lp-pet-wrap { transition: none; } .lp-room[data-garden-act] .lp-pet { animation: none; } }
 .lp-room[data-garden="true"] .lp-room-top { display: none; } /* The garden's own bar names the place. */
-.lp-room[data-garden="true"] .lp-effect { display: none; }
 .lp-room[data-garden="true"] .lp-dhud .lp-bar i { background: #ffdc83; }
 .lp-room[data-garden="true"] .lp-dhud .lp-bar-mp { display: none; }

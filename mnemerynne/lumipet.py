@@ -257,6 +257,7 @@ def snapshot(conn: sqlite3.Connection, user_id: int, pet: dict, now: int) -> dic
             "potions_ready": lumidungeon.potions_ready(lumidungeon.current(conn, user_id), pet),
             "health": _health(lumidungeon.current(conn, user_id), pet),
             "garden": lumigarden.view(_garden(conn, user_id, pet, now), pet, now),
+            "garden_decor": lumigarden.CATALOG["decor"],        # the decorations and the capsule: fixed, so not part of the view
             "dungeon": {"environments": lumidungeon.open_environments(pet), "run": lumidungeon.view(lumidungeon.current(conn, user_id), pet)}}
 
 

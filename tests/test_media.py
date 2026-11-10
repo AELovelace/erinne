@@ -1180,6 +1180,16 @@ def test_built_in_games_open_from_media_and_show_on_a_remote(client, conn, direc
     assert 'id="pd-field"' in page.text and "messages.js" not in page.text   # the game's partial, none of the app's scripts
     # StickBob Runner: only it is in the mouse-and-keyboard category, and its page brings its own art and levels.
     assert [g["slug"] for g in listed if g["mouse_keyboard"]] == ["stickbob-runner"]
+    shelves = {}                                         # Lumi Pet has a shelf of her own, and so do the table games
+    for g in listed:
+        shelves.setdefault(g["shelf"], []).append(g["slug"])
+    assert list(shelves) == ["Lumi Pet", "Arcade", "Table games"] and shelves["Lumi Pet"] == ["lumi-pet"]
+    assert shelves["Table games"] == ["blackjack", "roulette", "horse-racing", "slots"] and shelves["Arcade"] == ["prism-drop", "stickbob-runner", "breakout", "snake"]
+    for slug in ("breakout", "snake"):                   # the GameMaker ports: the shared arcade shell, then the game
+        page = client.get(f"/media/games/{slug}")
+        assert page.status_code == 200 and 'id="ar-canvas"' in page.text
+        assert page.text.index("games/arcade/arcade.js") < page.text.index(f"games/{slug}/game.js")
+        assert f"/static/games/{slug}/rules.js?v=" in page.text and "/static/games/arcade/arcade.css?v=" in page.text
     runner = client.get("/media/games/stickbob-runner")
     assert runner.status_code == 200 and 'id="sr-view"' in runner.text and "games/stickbob-runner/assets/world.json" in runner.text
     static_root = Path(__file__).parent.parent / "mnemerynne" / "web" / "static"

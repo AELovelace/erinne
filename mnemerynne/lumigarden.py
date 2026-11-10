@@ -13,6 +13,10 @@ minigames move every growing flower forward: watering (repeat a growing sequence
 Every garden climbs the flower ladder by its own harvests: kinds are unlocked per garden, in order. Moonrise
 replants a finished garden as a starter garden in exchange for a permanent upgrade or one more garden.
 
+Decorations are for looks only. Each garden has fifteen slots with one thing in each; the things themselves are
+owned in a shared store, as counts, because there may be several gardens to dress. Five per slot are sold for
+starpowder; ten more come only from the Seedling Capsule, which can give repeats. Spares can be sold back.
+
 Growing is only timestamps: a flower stores the moment it is ready, and boosts move that moment earlier. The page
 sends choices and a count of presses; every amount is worked out here. Like lumibattle, this module never loads or
 saves a pet: lumipet.py hands it the pet and saves it afterwards. `rng` is anything with random() and randrange(n).
@@ -38,6 +42,12 @@ PRESS_WINDOW = 10_000                   # presses are counted over at most this 
 PRESS_SPARE = 3                         # a few presses of slack, for a batch that arrives a moment early
 LUCKY_CAP, GIFT_CAP = 0.5, 0.25         # the Thief can only make so many presses lucky, and gifts so common
 MAX_GARDENS = 99
+MAX_COPIES = 99                         # of any one decoration in the store
+SHAPES = ("daisy", "bell", "puff", "star", "poppy", "spike", "clover", "trumpet", "mushroom", "tulip", "sun", "hearts", "cactus", "rose",
+          "lotus", "orchid", "cluster", "lily", "iris", "fern", "wisteria")      # how a flower is drawn (garden-art.js draws each)
+RARITIES = ("common", "rare", "epic", "legendary")
+LEGACY_DECOR = {"picket-fence": "fence-0-snowy", "stone-path": "path-0-snowy", "glow-borders": "edging-0-snowy", "garden-gnome": "statue-0-rosy",
+                "scarecrow-lumi": "scarecrow-0-golden", "golden-press": "press-0-golden", "firefly-lamps": "lamps-0-golden"}    # the first seven cosmetics
 _ID = re.compile(r"^[a-z0-9-]{1,40}$")
 _COLOUR = re.compile(r"^#[0-9a-f]{6}$")
 
@@ -83,7 +93,8 @@ def load_catalog(path: Path | None = None) -> dict:
         if flower.get("sort") not in ("cut", "perennial") or not _whole(flower.get("minutes"), 1, 2880) or not _whole(flower.get("powder"), 1, 10_000_000) \
                 or not _whole(flower.get("coins"), 0, 100_000) or not _whole(flower.get("stardust"), 0, 100_000_000) or (flower["coins"] and flower["stardust"]) \
                 or not _whole(flower.get("level"), 1, lumibattle.MAX_LEVEL) or not _whole(flower.get("needs"), 0, 10 ** 12) \
-                or not _COLOUR.match(str(flower.get("colour"))) or not _COLOUR.match(str(flower.get("heart"))) or not _whole(flower.get("petals"), 3, 12):
+                or not _COLOUR.match(str(flower.get("colour"))) or not _COLOUR.match(str(flower.get("heart"))) or not _whole(flower.get("petals"), 3, 16) \
+                or flower.get("shape") not in SHAPES or not 0.5 <= flower.get("size", 0) <= 2:
             raise bad(f"{flower['id']} is missing something, or has both a coin and a stardust price.")
     if flowers[0]["coins"] or flowers[0]["stardust"] or flowers[0]["needs"] or flowers[0]["level"] != 1:
         raise bad("the first flower must be free, so a new garden always has something to plant.")
@@ -102,13 +113,38 @@ def load_catalog(path: Path | None = None) -> dict:
             not isinstance(a, dict) or not a.get("name") or not a.get("about") or not _whole(a.get("seconds"), 0, 3600) or not _whole(a.get("cooldown"), 10, 86_400)
             for a in abilities.values()):
         raise bad("there must be one ability per class tree, with name, about, seconds and cooldown.")
-    for kind, price in (("cosmetics", "stardust"), ("upgrades", "max")):
-        if not isinstance(data.get(kind), list) or not data[kind]:
-            raise bad(f"there are no {kind}.")
-        for thing in data[kind]:
-            named(thing, kind[:-1])
-            if not thing.get("about") or not _whole(thing.get(price), 1, 10 ** 12):
-                raise bad(f"{thing['id']} needs words and a {price}.")
+    if len({(flower["shape"], flower["petals"], flower["colour"]) for flower in flowers}) != len(flowers):
+        raise bad("two flowers would look the same: each needs its own shape, petals or colour.")
+    if not isinstance(data.get("upgrades"), list) or not data["upgrades"]:
+        raise bad("there are no upgrades.")
+    for thing in data["upgrades"]:
+        named(thing, "upgrade")
+        if not thing.get("about") or not _whole(thing.get("max"), 1, 10 ** 12):
+            raise bad(f"{thing['id']} needs words and a max.")
+    decor = data.get("decor")
+    capsule = decor.get("capsule") if isinstance(decor, dict) else None
+    if not isinstance(capsule, dict) or not capsule.get("name") or not _whole(capsule.get("price"), 1, 10 ** 9) \
+            or not isinstance(capsule.get("odds"), dict) or tuple(capsule["odds"]) != RARITIES or sum(capsule["odds"].values()) != 100 \
+            or any(not _whole(v, 1, 100) for v in capsule["odds"].values()) \
+            or not isinstance(capsule.get("sell"), dict) or tuple(capsule["sell"]) != RARITIES or any(not _whole(v, 1, capsule["price"] * 100) for v in capsule["sell"].values()):
+        raise bad("the capsule needs a name, a price, odds that add up to 100 and a selling price for each rarity.")
+    if capsule["sell"]["common"] >= capsule["price"]:
+        raise bad("a common capsule prize must sell for less than a capsule costs.")
+    if not isinstance(decor.get("slots"), list) or not decor["slots"]:
+        raise bad("there are no decoration slots.")
+    for slot in decor["slots"]:
+        named(slot, "decoration slot")
+        things = slot.get("things")
+        if not isinstance(things, list) or not things or not isinstance(slot.get("items"), list) or not slot["items"]:
+            raise bad(f"slot {slot['id']} needs its things and its items.")
+        for item in slot["items"]:
+            named(item, "decoration")
+            sold = item.get("rarity") == "shop"
+            if not _whole(item.get("thing"), 0, len(things) - 1) or not _COLOUR.match(str(item.get("a"))) or not _COLOUR.match(str(item.get("b"))) \
+                    or (not sold and item.get("rarity") not in RARITIES) or not _whole(item.get("stardust"), 1 if sold else 0, 10 ** 12) or (item["stardust"] and not sold):
+                raise bad(f"decoration {item['id']} is missing something: sold ones have a price, capsule ones a rarity and none.")
+    if any(not any(item["rarity"] == rarity for slot in decor["slots"] for item in slot["items"]) for rarity in RARITIES):
+        raise bad("the capsule needs at least one prize of every rarity.")
     water, feed, moon, gifts = data.get("water"), data.get("feed"), data.get("moonrise"), data.get("gifts")
     if not isinstance(water, dict) or not _whole(water.get("rounds"), 1, 12) or not _whole(water.get("share"), 1, 20) or not _whole(water.get("cooldown"), 10, 86_400) \
             or water["rounds"] * water["share"] > 90:
@@ -126,7 +162,8 @@ def load_catalog(path: Path | None = None) -> dict:
 CATALOG = load_catalog()
 _FLOWERS = {flower["id"]: {**flower, "rung": rung} for rung, flower in enumerate(CATALOG["flowers"])}
 _HELPERS = {helper["id"]: helper for helper in CATALOG["helpers"]}
-_COSMETICS = {thing["id"]: thing for thing in CATALOG["cosmetics"]}
+_DECOR = {item["id"]: {**item, "slot": slot["id"]} for slot in CATALOG["decor"]["slots"] for item in slot["items"]}
+_PRIZES = {rarity: [item for item in _DECOR.values() if item["rarity"] == rarity] for rarity in RARITIES}      # what the capsule can give
 _UPGRADES = {thing["id"]: thing for thing in CATALOG["upgrades"]}
 
 
@@ -137,19 +174,29 @@ def _empty() -> dict:
 
 def _starter() -> dict:
     """A brand-new garden: a few empty plots, and only the first flower to plant."""
-    return {"plots": [_empty() for _ in range(CATALOG["plots"]["start"])], "unlocked": [CATALOG["flowers"][0]["id"]], "given": 0.0}
+    return {"plots": [_empty() for _ in range(CATALOG["plots"]["start"])], "unlocked": [CATALOG["flowers"][0]["id"]], "given": 0.0, "decor": {}}
 
 
 def fresh(now: int) -> dict:
     return {"gardens": [_starter()], "at": 0, "powder": 0.0, "squeezed": 0.0, "day": "", "coins_today": 0, "paid": 0, "earned": 0.0,
-            "helpers": dict.fromkeys(TREES, 0), "cosmetics": [], "upgrades": {}, "moonrises": 0, "cooldowns": {}, "effects": {},
+            "helpers": dict.fromkeys(TREES, 0), "decor": {}, "upgrades": {}, "moonrises": 0, "cooldowns": {}, "effects": {},
             "water": None, "feed": None, "tick": now, "press_at": now, "seen": now, "token_at": 0, "away": None}
 
 
 def current(conn: sqlite3.Connection, user_id: int, now: int) -> dict:
     """This person's garden as saved (a new one if they have never opened it). Not caught up: see advance."""
     row = conn.execute("SELECT state FROM lumi_gardens WHERE user_id = ?", (user_id,)).fetchone()
-    return {**fresh(now), **json.loads(row["state"])} if row else fresh(now)
+    state = {**fresh(now), **json.loads(row["state"])} if row else fresh(now)
+    for garden in state["gardens"]:                      # gardens saved before decorations had slots
+        garden.setdefault("decor", {})
+        garden["decor"] = {slot: item for slot, item in garden["decor"].items() if _DECOR.get(item, {}).get("slot") == slot}    # drop anything since retired
+    for old in state.pop("cosmetics", []):               # the first seven cosmetics became decorations: keep them, and put them out
+        new = LEGACY_DECOR.get(old)
+        if new:
+            state["decor"][new] = state["decor"].get(new, 0) + 1
+            state["gardens"][0]["decor"].setdefault(_DECOR[new]["slot"], new)
+    state["decor"] = {item: count for item, count in state["decor"].items() if item in _DECOR and count > 0}
+    return state
 
 
 def save(conn: sqlite3.Connection, user_id: int, state: dict) -> None:
@@ -303,6 +350,22 @@ def _skip(state: dict, now: int, by) -> int:
     return moved
 
 
+def spare(state: dict, item: str) -> int:
+    """How many of a decoration sit in the store: owned, less one for each garden it stands in."""
+    return state["decor"].get(item, 0) - sum(1 for garden in state["gardens"] if item in garden["decor"].values())
+
+
+def worth(item: dict) -> int:
+    """What a spare decoration sells for, in starpowder: half its price, or its rarity's price if it came from a capsule."""
+    return item["stardust"] // 2 if item["rarity"] == "shop" else CATALOG["decor"]["capsule"]["sell"][item["rarity"]]
+
+
+def next_flower(garden: dict) -> dict | None:
+    """The next kind this garden can unlock: the first on the ladder it doesn't have (so a flower added to the
+    ladder later is simply next for a garden already past it)."""
+    return next((flower for flower in CATALOG["flowers"] if flower["id"] not in garden["unlocked"]), None)
+
+
 def moonrise_needs(state: dict) -> float:
     return CATALOG["moonrise"]["needs"] * CATALOG["moonrise"]["growth"] ** state["moonrises"]
 
@@ -390,7 +453,7 @@ def act(conn: sqlite3.Connection, user_id: int, pet: dict, state: dict, action: 
         flower = _FLOWERS.get(item or "")
         if flower is None or item in garden["unlocked"]:
             raise GardenError("That isn't a flower this garden can unlock.")
-        if flower["rung"] != len(garden["unlocked"]):
+        if next_flower(garden)["id"] != item:
             raise GardenError("Unlock the flowers before it first.")
         if garden["given"] < flower["needs"]:
             raise GardenError(f"This garden needs to have given {flower['needs']:,} starpowder first.")
@@ -404,15 +467,57 @@ def act(conn: sqlite3.Connection, user_id: int, pet: dict, state: dict, action: 
             raise GardenError("Not enough coins for that.")
         garden["unlocked"].append(item)
         return {"unlocked": item}
-    if action == "cosmetic":
-        thing = _COSMETICS.get(item or "")
-        if thing is None or item in state["cosmetics"]:
-            raise GardenError("That isn't something new for the garden.")
-        if state["powder"] < thing["stardust"]:
-            raise GardenError("Not enough starpowder for that.")
-        state["powder"] -= thing["stardust"]
-        state["cosmetics"].append(item)
-        return {"bought": item}
+    if action in ("decor_buy", "decor_place", "decor_sell"):
+        thing = _DECOR.get(item or "")
+        if thing is None:
+            raise GardenError("That isn't a decoration.")
+        here = garden["decor"].get(thing["slot"]) == item
+        if action == "decor_buy":                          # one more of a thing the shop sells, put out at once
+            if thing["rarity"] != "shop":
+                raise GardenError(f"{thing['name']} only comes from the {CATALOG['decor']['capsule']['name']}.")
+            if state["decor"].get(item, 0) >= MAX_COPIES:
+                raise GardenError("The store can't hold any more of those.")
+            if state["powder"] < thing["stardust"]:
+                raise GardenError("Not enough starpowder for that.")
+            state["powder"] -= thing["stardust"]
+            state["decor"][item] = state["decor"].get(item, 0) + 1
+            garden["decor"][thing["slot"]] = item             # whatever stood there goes back to the store
+            return {"bought": item, "paid": thing["stardust"]}
+        if action == "decor_place":                        # put it out here, or put it away if it is already here
+            if here:
+                del garden["decor"][thing["slot"]]
+                return {"stored": item}
+            if spare(state, item) < 1:
+                raise GardenError("There isn't a spare one of those in the store." if state["decor"].get(item) else "Lumi doesn't have that one yet.")
+            garden["decor"][thing["slot"]] = item
+            return {"placed": item}
+        if spare(state, item) < 1:                         # sell: only a spare, never one standing in a garden
+            raise GardenError("There isn't a spare one of those to sell. Put it away first.")
+        state["decor"][item] -= 1
+        if state["decor"][item] <= 0:
+            del state["decor"][item]
+        state["powder"] += worth(thing)
+        return {"sold": item, "powder": worth(thing)}
+    if action == "capsule":
+        # The Seedling Capsule: roll a rarity, then pick equally among every prize of it, so the odds of a legendary
+        # never depend on how many commons exist. Repeats are fine: they go to the store, to dress another garden
+        # or to sell.
+        rules = CATALOG["decor"]["capsule"]
+        if state["powder"] < rules["price"]:
+            raise GardenError("Not enough starpowder for a capsule.")
+        state["powder"] -= rules["price"]
+        roll, rolled = rng.randrange(100), RARITIES[-1]
+        for rarity, chance in rules["odds"].items():
+            if roll < chance:
+                rolled = rarity
+                break
+            roll -= chance
+        pool = [prize for prize in _PRIZES[rolled] if state["decor"].get(prize["id"], 0) < MAX_COPIES] or _PRIZES[rolled]
+        won = pool[rng.randrange(len(pool))]
+        state["decor"][won["id"]] = min(MAX_COPIES, state["decor"].get(won["id"], 0) + 1)
+        if won["slot"] not in garden["decor"]:             # an empty slot: straight out of the capsule and into the garden
+            garden["decor"][won["slot"]] = won["id"]
+        return {"capsule": won["id"], "rarity": rolled, "copies": state["decor"][won["id"]], "paid": rules["price"]}
     if action == "helper":
         helper = _HELPERS.get(item or "")
         if helper is None:
@@ -532,10 +637,10 @@ def view(state: dict, pet: dict, now: int) -> dict:
     numbers, garden = rates(state, pet, now), state["gardens"][state["at"]]
     plots = [{"flower": plot["flower"], "last": plot["last"], "stage": _stage(plot, numbers, now), "ready_in": plot["ready_at"] - now if plot["flower"] else 0,
               "grow": plot["grow"]} for plot in garden["plots"]]
-    flowers = []
+    flowers, upcoming = [], next_flower(garden)
     for flower in CATALOG["flowers"]:
         unlocked = flower["id"] in garden["unlocked"]
-        flowers.append({**flower, "unlocked": unlocked, "next": not unlocked and _FLOWERS[flower["id"]]["rung"] == len(garden["unlocked"]),
+        flowers.append({**flower, "unlocked": unlocked, "next": not unlocked and upcoming is not None and upcoming["id"] == flower["id"],
                         "powder_now": flower["powder"] * numbers["yield"], "minutes_now": flower["minutes"] * numbers["growth"]})
     moves = []
     for move in pet["moves"]:
@@ -558,7 +663,7 @@ def view(state: dict, pet: dict, now: int) -> dict:
                   "show": water["seq"][:water["round"]] if water else None},
         "feed": {"ready_in": state["cooldowns"].get("feed", 0) - now, "seconds": CATALOG["feed"]["seconds"], "per": CATALOG["feed"]["per"], "max": CATALOG["feed"]["max"],
                  "until_in": feed["until"] - now if feed else None},
-        "cosmetics": [{**thing, "owned": thing["id"] in state["cosmetics"]} for thing in CATALOG["cosmetics"]],
+        "decor": {"placed": garden["decor"], "owned": state["decor"], "spare": {item: spare(state, item) for item in state["decor"]}},    # the catalog itself is sent once, beside this
         "upgrades": [{**thing, "count": state["upgrades"].get(thing["id"], 0)} for thing in CATALOG["upgrades"]],
         "moonrise": {"needs": moonrise_needs(state), "ready": full and garden["given"] >= moonrise_needs(state), "count": state["moonrises"]},
         "away": state["away"], "max_rate": CATALOG["press"]["max_rate"],

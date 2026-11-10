@@ -17,6 +17,8 @@
   // Falling onto a ledge a few pixels short used to count as hitting a wall and kill all speed. While falling, StickBob
   // steps up this far onto it instead (a change from GameMaker, for a smoother run).
   const LEDGE_CATCH = 16;
+  // The wall jump (wallJump below), in steps at 60 a second: the same numbers as the GameMaker game's WALLJUMP_ macros.
+  const WALLJUMP_HOLD = 12, WALLJUMP_BUFFER = 4, WALLJUMP_KICK = 3;   // kick 3: gentle enough to come back and climb one wall
   const DIE_SPRITE = "sprPlayerDie", IDLE = "sprPlayerIdle";
 
   const sign = n => (n > 0 ? 1 : n < 0 ? -1 : 0);                                   // -1, 0 or 1
@@ -29,7 +31,8 @@
                 best: 0, kills: 0, score: 0, far: 0, over: false, locked: false, events: [], nextChunkId: 1,
                 leftWall: { x: 0, y: 0, w: 16, h: 384, sprite: "spr_Wall", wall: true },   // the wall placed at the room's left edge
                 player: { x: PLAYER_START.x, y: PLAYER_START.y, vx: 0, vy: 0, health: MAX_HEALTH, sprite: IDLE, mask: IDLE, frame: 0,
-                          canJump: true, canSlide: false, crawling: false, wallJump: 0, cwjt: 0, wallAngle: 0, cooldown: 0, facing: 1,
+                          canJump: true, canSlide: false, crawling: false, cooldown: 0, facing: 1,
+                          wallHold: 0, wallHoldSide: 0, jumpBuffer: 0, prevX: 0, prevY: 0,   // the wall jump (wallJump below)
                           melee: 0, slash: 0, slashFrame: 0, angle: 0, flip: 1, moving: false } };
     resetStream(w, PLAYER_START.x);
     return w;
@@ -129,13 +132,13 @@
     return false;
   }
 
-  /* place_meeting against every solid near the box. onlyWalls limits it to the ones that can be wall-jumped off. */
-  function meets(w, x, y, mask, onlyWalls) {
+  /* place_meeting against every solid near the box. */
+  function meets(w, x, y, mask) {
     const box = boxOf(w, x, y, mask);
     if (touches(w, box, w.leftWall)) return true;
     for (const c of w.chunks) {
       if (box.r + 64 <= c.x || box.l - 64 >= c.x + c.w) continue;                   // nowhere near (64 px spare: some pieces poke past their chunk's edge)
-      for (const s of c.solids) if ((!onlyWalls || s.wall) && touches(w, box, s)) return true;
+      for (const s of c.solids) if (touches(w, box, s)) return true;
     }
     return false;
   }
@@ -174,33 +177,19 @@
     p.vy += grav;
     if (xi === 0) p.vx = p.vx > 0 ? Math.max(0, p.vx - accel) : Math.min(0, p.vx + accel);   // friction when no key is held
     if (yi === 0) p.vy = p.vy > 0 ? Math.max(0, p.vy - accel) : Math.min(0, p.vy + accel);
-    if (p.wallJump === 0 && p.canJump) p.cwjt = 20;                                 // on the ground the wall-jump window stays charged
     if (p.vy < 10) p.vy += grav;
-    if (p.cwjt > 0) p.wallJump = 1;
     const falling = p.vy > 1;                                                       // noted now: landing below sets vy to 0 (standing still is +0.5)
-
-    if (meets(w, p.x + p.vx, p.y + p.vy, mask)) {                                   // heading into a wall: remember which side
-      if (p.vx > 0) p.wallAngle = 180;
-      if (p.vx < 0) p.wallAngle = 0;
-      p.wallJump = 0;
-      if (!p.canJump && yi === -1 && meets(w, p.x + p.vx, p.y + p.vy, mask, true)) {
-        if (p.wallAngle === 0 && xi === -1 && p.vx <= 0.5) { p.vx += 15; p.vy -= 15; }      // kick off a wall on the left
-        else if (p.wallAngle === 180 && xi === 1 && p.vx <= 0.5) { p.vx = -15; p.vy -= 15; }  // kick off a wall on the right
-      }
-    }
+    wallJump(w, xi, yi);                                                            // may hold on to a wall, or kick off it
 
     if (meets(w, p.x, p.y + p.vy, mask)) {                                          // floor or ceiling
       p.canJump = true;
       const step = sign(p.vy);
-      for (let i = 0; step && i < GUARD && !meets(w, p.x, p.y + step, mask); i++) { p.y += step; p.wallJump = 0; }   // move right up to it
+      for (let i = 0; step && i < GUARD && !meets(w, p.x, p.y + step, mask); i++) p.y += step;   // move right up to it
       p.vy = 0;
       if (yi === -1 && meets(w, p.x, p.y + 1, mask) && p.canJump) {                 // standing on something and pressing up
         p.vy = -10; p.canJump = false; w.events.push("jump");
       }
     }
-
-    if (p.cwjt >= 0) p.cwjt -= 1;
-    if (p.cwjt <= 0) { p.cwjt = 0; p.wallJump = 0; }
 
     if (meets(w, p.x + p.vx, p.y, mask)) {                                          // sideways into something: maybe a slope
       const step = sign(p.vx);
@@ -225,6 +214,34 @@
     p.x += p.vx;
     p.y += p.vy;
     if (p.cooldown > 0) p.cooldown--;
+  }
+
+  /* The wall jump, Super Metroid style (the same as PlayerCharacter.gml since 2026-11-11). In the air against any wall,
+     press AWAY from it and StickBob holds on for WALLJUMP_HOLD steps; press jump during that time to kick up and away.
+     A jump pressed up to WALLJUMP_BUFFER steps before pressing away counts too. Pressing back toward the wall and away
+     again climbs a single wall. */
+  function wallJump(w, xi, yi) {
+    const p = w.player, mask = p.mask;
+    const jumpPressed = yi === -1 && p.prevY !== -1;                                // jump went down this step
+    p.jumpBuffer = jumpPressed ? WALLJUMP_BUFFER : Math.max(0, p.jumpBuffer - 1);
+    const airborne = !meets(w, p.x, p.y + 1, mask);
+    const side = meets(w, p.x + 2, p.y, mask) ? 1 : meets(w, p.x - 2, p.y, mask) ? -1 : 0;   // 1: wall on the right
+    if (airborne && side !== 0 && xi === -side && p.prevX !== -side) { p.wallHold = WALLJUMP_HOLD; p.wallHoldSide = side; }   // just pressed away: grab it
+    if (p.wallHold > 0) {
+      if (!airborne || !meets(w, p.x + p.wallHoldSide * 2, p.y, mask)) p.wallHold = 0;   // landed, or slid past the wall's end
+      else if (p.jumpBuffer > 0) {
+        p.vx = -p.wallHoldSide * WALLJUMP_KICK;                                     // kick away from the wall...
+        p.vy = -10;                                                                 // ...as high as a normal jump
+        p.canJump = false; p.wallHold = 0; p.jumpBuffer = 0;
+        w.events.push("jump", "walljump");
+      } else {
+        p.vx = 0;                                                                   // hold on: don't drift away yet
+        p.vy = Math.min(p.vy, 2);                                                   // and slide down slowly
+        p.wallHold--;
+      }
+    }
+    p.prevX = xi;                                                                   // for next step's "just pressed" checks
+    p.prevY = yi;
   }
 
   /* playerSpriteIndexer: which animation to show. Slides and crawls also change the hitbox. */

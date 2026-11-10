@@ -8,6 +8,8 @@ Who pays what:
 - Online casino tables bet and win from the seat's account (casino.py). A TV at an online table is the account it's paired to.
 - Local multiplayer (phone remotes around one TV) never touches a purse: those seats play on table-only credits.
 - Prism Drop and Lumi Pet pay rewards, and only for what the server saw itself, because a browser can claim anything.
+- Breakout and Snake (arcade.py) cost 25 coins a run and pay its score, after the server has replayed (Snake) or bounded
+  (Breakout) it. Showdown watchers bet on a racer; the winner's bets pay double (showdown.py).
 - StickBob Runner is the exception, by Doll's choice: it pays for what the browser reports, checked against the time the
   run took (runner.py), with an optional daily cap in Media settings.
 

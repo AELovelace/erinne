@@ -45,6 +45,9 @@ TIERS_BY_DEPTH = ({"common": 70, "uncommon": 30}, {"common": 30, "uncommon": 50,
                   {"rare": 20, "epic": 55, "legendary": 25})
 ENV_BIAS = 70                           # percent of a floor's enemies drawn from its environment's own elements
 MOD_CHANCE = (8, 4)                     # percent chance of a mod in a vault: the base, and more per floor down
+# Percent chance that a chest, or a beaten creature, holds a piece of the place's decor set: the base on the first
+# floor, and more per floor down. Each set is 15 pieces (one per house spot), so these keep a full set a long project.
+SET_CHANCE = {"treasure": (8, 3), "enemy": (4, 2)}
 _ID = re.compile(r"^[a-z0-9-]{1,40}$")
 _COLOUR = re.compile(r"^#[0-9a-f]{6}$")
 
@@ -136,25 +139,40 @@ def load_sokoban(path: Path | None = None) -> list[dict]:
     return levels
 
 
-def load_trophies(path: Path | None = None) -> dict[str, list[dict]]:
-    """Trophies by environment. They live in the house catalog (house.json, the trophy spot), because a trophy is a
-    thing for the house; each names the environment it is found in."""
+def _found(sets: bool, path: Path | None = None) -> dict[str, list[dict]]:
+    """The house objects found in the dungeon, by environment. They live in the house catalog (house.json), because
+    they are things for the house; each names the environment it is found in with "found". Those on the trophy
+    bracket are trophies (a vault's prize); the rest are the environment's decor set (rare drops)."""
     data = json.loads((path or Path(__file__).parent / "lumipet_data" / "house.json").read_text(encoding="utf-8"))
     found: dict[str, list[dict]] = {}
     for spot in data["spots"]:
-        for item in spot["items"]:
-            if item.get("found"):
-                found.setdefault(item["found"], []).append(item)
+        if (spot["id"] != "trophy") == sets:
+            for item in spot["items"]:
+                if item.get("found"):
+                    found.setdefault(item["found"], []).append({**item, "spot": spot["id"]})
     return found
+
+
+def load_trophies(path: Path | None = None) -> dict[str, list[dict]]:
+    """Trophies by environment: one waits in each vault until she has them all."""
+    return _found(False, path)
+
+
+def load_sets(path: Path | None = None) -> dict[str, list[dict]]:
+    """Each environment's decor set: a piece for every other spot in the house, dropped now and then by a chest or a
+    beaten creature there."""
+    return _found(True, path)
 
 
 CATALOG = load_catalog()
 SOKOBAN = load_sokoban()
 TROPHIES = load_trophies()
+SETS = load_sets()
 _ENVS = {env["id"]: env for env in CATALOG["environments"]}
-for _env in TROPHIES:
+for _env in [*TROPHIES, *SETS]:
     if _env not in _ENVS:
-        raise ValueError(f"A trophy is found in {_env}, which isn't an environment.")
+        raise ValueError(f"Something for the house is found in {_env}, which isn't an environment.")
+FOUND_NAMES = {item["id"]: item["name"] for found in (TROPHIES, SETS) for items in found.values() for item in items}
 _FOUND_MODS = [mod for mod in lumibattle.CATALOG["mods"] if not mod["price"]]      # mods that only the dungeon gives
 
 
@@ -259,6 +277,7 @@ def generate(env_id: str, depth: int, rng, pet: dict, held: dict | None = None) 
     stairs = max((cell for cell in cells if cell not in (start, vault)), key=lambda cell: (far[cell], cell))
 
     lock = _lock(depth, rng)
+    owned = set(pet["decor"]) | set(held["trophies"])          # set pieces she has, or carries: never dropped twice
     spare = _shuffle([cell for cell in cells if cell not in (start, vault, stairs)], rng)
     kinds = ["enemy"] * (3 + rng.randrange(2)) + ["game", "treasure", "treasure"] + (["key"] if lock["kind"] == "key" else [])
     rooms = {}
@@ -268,8 +287,14 @@ def generate(env_id: str, depth: int, rng, pet: dict, held: dict | None = None) 
         room = {"kind": kind, "exits": sorted(exits[cell]), "seen": cell == start, "done": kind in ("start", "empty", "stairs")}
         if kind == "enemy":
             room["enemy"] = _enemy(env, depth, rng)
+            piece = _set_piece(env, "enemy", depth, rng, owned)
+            if piece:
+                room["loot"] = {"trophy": piece}                 # dropped when the creature is beaten
         elif kind == "treasure":
             room["loot"] = {"coins": _coins(depth, rng), "potions": 1 if rng.randrange(100) < 30 else 0}
+            piece = _set_piece(env, "treasure", depth, rng, owned)
+            if piece:
+                room["loot"]["trophy"] = piece                 # "trophy" is anything found for the house; it banks the same way
         elif kind == "key":
             room["loot"] = {"keys": 1}
         elif kind == "game":
@@ -279,6 +304,20 @@ def generate(env_id: str, depth: int, rng, pet: dict, held: dict | None = None) 
             room["loot"] = _vault_loot(env, depth, rng, pet, held)
         rooms[f"{cell[0]},{cell[1]}"] = room
     return {"rooms": rooms, "start": f"{start[0]},{start[1]}"}
+
+
+def _set_piece(env: dict, where: str, depth: int, rng, owned: set) -> str | None:
+    """Now and then, a piece of this environment's decor set that she has neither got nor already found on this trip
+    (it is added to `owned`, so a floor never hides the same piece twice). None most of the time."""
+    base, more = SET_CHANCE[where]
+    if rng.randrange(100) >= base + more * (depth - 1):
+        return None
+    new = [item["id"] for item in SETS.get(env["id"], []) if item["id"] not in owned]
+    if not new:
+        return None
+    piece = new[rng.randrange(len(new))]
+    owned.add(piece)
+    return piece
 
 
 def _vault_loot(env: dict, depth: int, rng, pet: dict, held: dict) -> dict:
@@ -567,9 +606,12 @@ def after_fight(conn: sqlite3.Connection, user_id: int, pet: dict, run: dict, fi
     lumi = fight["player"]
     run["hp"], run["mp"] = max(1, lumi["hp"]), lumi["mp"]
     if fight["status"] == "victory":
-        _room(run)["done"] = True
+        room = _room(run)
+        room["done"] = True
         run["satchel"]["coins"] += fight["reward"]["coins"]
         run["event"] = {"scenario": "victory", "enemy": fight["enemy"]["name"], "coins": fight["reward"]["coins"]}
+        if room.get("loot"):                                            # it dropped a piece of the place's decor set
+            run["event"]["dropped"] = _take(run, room.pop("loot"))["trophy"]
     elif fight["status"] == "ran":
         run["at"], run["prev"] = run["prev"], run["at"]
         run["event"] = {"scenario": "fled", "enemy": fight["enemy"]["name"]}
