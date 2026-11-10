@@ -40,7 +40,7 @@ SCENARIOS = {
     "key": "Lumi finds a key.",
     "vault": "The locked vault is open and Lumi finds {item} inside.",
     "locked_key": "Lumi reaches a locked door that needs a key.",
-    "locked_puzzle": "Lumi reaches a door sealed by a puzzle.",
+    "locked_puzzle": "Lumi reaches a door sealed by a puzzle. It could be any kind of puzzle, so the line mustn't say which.",
     "game_cups": "Three cups are set out; something is hidden under one.",
     "game_match": "Cards lie face down, waiting to be matched in pairs.",
     "game_win": "Lumi wins the little game and gets {item}.",
@@ -174,6 +174,9 @@ def _brief(env: dict, count: int) -> str:
             "The braces are placeholders the game fills in. Use {enemy} and {item} exactly as written, and only in a "
             "scenario whose description mentions them; you may use {place} anywhere, or simply describe the place. "
             "Make the lines feel like this particular place, and make them differ from each other in more than a word.\n\n"
+            "The game decides the details, so a line must stay true whatever they turn out to be. Say only what the "
+            "scenario says happened: don't describe what a puzzle or a game looks like or how it is solved, what a door "
+            "or a key is made of beyond the place's own style, or which way anything lies.\n\n"
             f"{listed}")
 
 
