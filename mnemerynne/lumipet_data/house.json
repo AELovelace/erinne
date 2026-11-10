@@ -1,0 +1,64 @@
+{
+  "spots": [
+    {"id": "wallpaper", "name": "Wallpaper", "items": [
+      {"id": "wall-dusk", "name": "Dusk plum", "price": 0},
+      {"id": "wall-stars", "name": "Starry night", "price": 120},
+      {"id": "wall-stripes", "name": "Candy stripes", "price": 120},
+      {"id": "wall-clouds", "name": "Soft clouds", "price": 180},
+      {"id": "wall-grid", "name": "Neon grid", "price": 260}]},
+    {"id": "floor", "name": "Floor", "items": [
+      {"id": "floor-boards", "name": "Dark boards", "price": 0},
+      {"id": "floor-checker", "name": "Checker tiles", "price": 120},
+      {"id": "floor-honey", "name": "Honey boards", "price": 120},
+      {"id": "floor-moss", "name": "Moss carpet", "price": 180},
+      {"id": "floor-starglass", "name": "Starglass", "price": 260}]},
+    {"id": "wallart", "name": "Wall art", "items": [
+      {"id": "art-star", "name": "Star poster", "price": 0},
+      {"id": "art-moons", "name": "Moon phases", "price": 90},
+      {"id": "art-portrait", "name": "Cat portrait", "price": 140},
+      {"id": "art-heart", "name": "Neon heart", "price": 200},
+      {"id": "art-constellation", "name": "Constellation map", "price": 240}]},
+    {"id": "shelf", "name": "Shelf", "items": [
+      {"id": "shelf-books", "name": "Book shelf", "price": 0},
+      {"id": "shelf-plants", "name": "Plant shelf", "price": 110},
+      {"id": "shelf-trophies", "name": "Trophy shelf", "price": 160},
+      {"id": "shelf-crystals", "name": "Crystal shelf", "price": 220},
+      {"id": "shelf-plushies", "name": "Plushie shelf", "price": 220}]},
+    {"id": "view", "name": "Window view", "items": [
+      {"id": "view-city", "name": "Neon city", "price": 0},
+      {"id": "view-sea", "name": "Star sea", "price": 250},
+      {"id": "view-forest", "name": "Cozy forest", "price": 250},
+      {"id": "view-snow", "name": "Snowy hills", "price": 300},
+      {"id": "view-rain", "name": "Rainy rooftops", "price": 300}]},
+    {"id": "frame", "name": "Window frame", "items": [
+      {"id": "frame-arch", "name": "Arch", "price": 0},
+      {"id": "frame-round", "name": "Porthole", "price": 100},
+      {"id": "frame-panes", "name": "Four panes", "price": 100},
+      {"id": "frame-hex", "name": "Honeycomb", "price": 160},
+      {"id": "frame-ears", "name": "Cat ears", "price": 220}]},
+    {"id": "curtains", "name": "Curtains", "items": [
+      {"id": "curtain-none", "name": "No curtains", "price": 0},
+      {"id": "curtain-rose", "name": "Rose drapes", "price": 90},
+      {"id": "curtain-sheer", "name": "Lagoon sheers", "price": 90},
+      {"id": "curtain-valance", "name": "Star valance", "price": 140},
+      {"id": "curtain-beads", "name": "Bead strings", "price": 180}]},
+    {"id": "lamp", "name": "Lamp", "items": [
+      {"id": "lamp-floor", "name": "Floor lamp", "price": 0},
+      {"id": "lamp-lantern", "name": "Paper lantern", "price": 110},
+      {"id": "lamp-mushroom", "name": "Mushroom lamp", "price": 150},
+      {"id": "lamp-lava", "name": "Lava lamp", "price": 200},
+      {"id": "lamp-fairy", "name": "Fairy lights", "price": 240}]},
+    {"id": "rug", "name": "Rug", "items": [
+      {"id": "rug-oval", "name": "Plum oval", "price": 0},
+      {"id": "rug-moon", "name": "Moon rug", "price": 100},
+      {"id": "rug-star", "name": "Star rug", "price": 140},
+      {"id": "rug-rainbow", "name": "Rainbow runner", "price": 180},
+      {"id": "rug-paw", "name": "Paw print", "price": 220}]},
+    {"id": "bed", "name": "Lumi's bed", "items": [
+      {"id": "bed-cushion", "name": "Plum cushion", "price": 0},
+      {"id": "bed-basket", "name": "Wicker basket", "price": 130},
+      {"id": "bed-cloud", "name": "Cloud bed", "price": 200},
+      {"id": "bed-moon", "name": "Crescent cradle", "price": 280},
+      {"id": "bed-castle", "name": "Cardboard castle", "price": 350}]}
+  ]
+}

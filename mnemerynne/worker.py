@@ -7,8 +7,8 @@ import signal
 import sqlite3
 import time
 
-from mnemerynne import (db, directory, editing, fs, health, jobs, m365, proposals, retention, share, sharepoint,
-                        sync)
+from mnemerynne import (db, directory, editing, fs, health, jobs, lumipet, m365, proposals, retention, share,
+                        sharepoint, sync)
 from mnemerynne.clients.embed import Embedder
 from mnemerynne.config import Settings
 from mnemerynne.ingest import pipeline
@@ -79,6 +79,15 @@ def media_catalog(conn: sqlite3.Connection, settings: Settings) -> None:
         log.exception("Media catalog pass failed")
 
 
+def scan_asked(conn: sqlite3.Connection) -> bool:
+    """Whether an admin pressed Rescan media since the last look. A busy database just waits for the next loop."""
+    try:
+        return catalog.take_scan_request(conn)
+    except sqlite3.Error:
+        log.warning("Couldn't check for a media rescan request.", exc_info=True)
+        return False
+
+
 def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) -> None:
     conn = db.connect(settings.db_path)
     db.migrate(conn, settings.embed_dim)
@@ -108,6 +117,7 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
     last_purge = 0.0
     last_scan = 0.0
     last_m365 = 0.0
+    last_pets, pet_cursor = 0.0, 0
     try:
         while not stopping:
             did_work = run_one(conn, settings, embedder)
@@ -121,7 +131,7 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
                     health.beat(conn)
                 except sqlite3.Error:      # a busy database never stops ingestion; the next beat tries again
                     log.warning("Couldn't record the worker's heartbeat.", exc_info=True)
-            if rt is not None and time.monotonic() - last_scan > settings.share_scan_seconds:
+            if rt is not None and (scan_asked(conn) or time.monotonic() - last_scan > settings.share_scan_seconds):
                 last_scan = time.monotonic()
                 try:
                     share.sync(conn, settings)
@@ -133,6 +143,15 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
             if time.monotonic() - last_m365 > settings.m365_sync_seconds:
                 last_m365 = time.monotonic()
                 m365_sync(conn, settings)
+            if time.monotonic() - last_pets > 60:      # Lumi Pet reminders: a batch of pets a minute (lumipet.sweep)
+                last_pets = time.monotonic()
+                try:
+                    contact = settings.public_url if settings.public_url.startswith("https://") else "mailto:push@mnemerynne.invalid"
+                    pet_cursor = lumipet.sweep(conn, settings.data_dir, contact, pet_cursor)
+                except Exception:  # never let a reminder stop ingestion
+                    if conn.in_transaction:
+                        conn.execute("ROLLBACK")
+                    log.exception("Lumi Pet reminders failed")
             if time.monotonic() - last_recover > 300:
                 jobs.recover_stale(conn, settings.job_stale_minutes)
                 last_recover = time.monotonic()

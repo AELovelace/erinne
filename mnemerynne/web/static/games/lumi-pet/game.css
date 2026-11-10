@@ -9,22 +9,35 @@
 .lp-stats dd { margin: .5rem 0 0; }
 #lp-moments { font-size: 2.6rem; color: var(--rose); font-variant-numeric: tabular-nums; }
 .lp-note, .lp-save { color: var(--muted); font-size: .8rem; }
-.lp-room { --pet-glow: #ff8ecb; --pet-body: #fce1f2; --pet-shadow: #b8569f; position: relative; isolation: isolate; min-width: 0; height: min(78vh, 47.5rem); min-height: 26.875rem; overflow: hidden; border: 1px solid var(--line); border-radius: 45% 45% 1.2rem 1.2rem / 20% 20% 1.2rem 1.2rem; background: radial-gradient(ellipse at 50% 65%, #562452 0, #20162e 48%, #0e1226 100%); color: #ffe9f5; box-shadow: inset 0 0 80px #0005, 0 0 60px rgba(var(--glow), .12); }
+.lp-room { --pet-glow: #ff8ecb; --pet-body: #fce1f2; --pet-shadow: #b8569f; position: relative; isolation: isolate; min-width: 0; height: min(78vh, 47.5rem); min-height: 26.875rem; overflow: hidden; border: 1px solid var(--line); border-radius: 45% 45% 1.2rem 1.2rem / 20% 20% 1.2rem 1.2rem; background: #20162e; color: #ffe9f5; box-shadow: inset 0 0 80px #0005, 0 0 60px rgba(var(--glow), .12); }
 .lp-room[data-palette="lagoon"] { --pet-glow: #70ebea; --pet-body: #d2fcf6; --pet-shadow: #328b9d; }
 .lp-room[data-palette="starlight"] { --pet-glow: #ffdc83; --pet-body: #fff1cd; --pet-shadow: #b98b49; }
+.lp-room[data-palette="zephyr"] { --pet-glow: #8be9a8; --pet-body: #dcfbe6; --pet-shadow: #3f9a63; }
+.lp-room[data-palette="wisp"] { --pet-glow: #c9a8ff; --pet-body: #efe4ff; --pet-shadow: #7a55c0; }
+.lp-room[data-palette="umbra"] { --pet-glow: #8f9bff; --pet-body: #d9dcf7; --pet-shadow: #3d3f8f; }
 .lp-room-top { position: absolute; top: 8%; left: 0; right: 0; text-align: center; font-size: .65rem; letter-spacing: .18em; line-height: 2; }
 .lp-room-top span { display: block; }
 #lp-clock { color: #c9aecf; letter-spacing: .06em; }
-.lp-window { position: absolute; top: 21%; left: 36%; width: 28%; height: 26%; border: 4px solid #9c73b855; border-radius: 48% 48% 0 0; background: linear-gradient(#392562, #bd7591); box-shadow: 0 0 35px #bb82cb25; overflow: hidden; }
-.lp-window::after { content: ""; position: absolute; left: 48%; top: 0; width: 3px; height: 100%; background: #aa86bc66; }
-.lp-moon { position: absolute; top: 20%; right: 20%; width: 28%; aspect-ratio: 1; border-radius: 50%; background: #ffe3a9; box-shadow: 0 0 22px #ffdb9d66; }
-.lp-stars { display: none; white-space: pre; color: #e6d5ff; padding: 15%; line-height: 1.8; }
-.lp-room[data-night="true"] .lp-window { background: linear-gradient(#12132d, #3b2a57); }
-.lp-room[data-night="true"] .lp-moon { background: transparent; box-shadow: inset -8px -3px #f0deff; }
-.lp-room[data-night="true"] .lp-stars { display: block; }
-.lp-floor { position: absolute; inset: 70% 0 0; background: linear-gradient(#20152977, #0d0a1a); border-top: 1px solid #dc9bca22; }
-.lp-rug { position: absolute; left: 12%; bottom: 13%; width: 76%; height: 15%; border: 2px solid #e5b5d433; border-radius: 50%; background: radial-gradient(ellipse, #b67bb333, #2d1d3d); box-shadow: 0 0 0 12px #c18ab80a; }
-.lp-pet-wrap { position: absolute; width: 83%; left: 8.5%; bottom: 16%; }
+.lp-house { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; } /* The decorated room (house.js), behind Lumi. */
+.lp-sky-day, .lp-night-veil, .lp-sky-star { transition: opacity 2s; }
+.lp-night-veil, .lp-sky-star { opacity: 0; }
+.lp-room[data-night="true"] .lp-sky-day { opacity: 0; }
+.lp-room[data-night="true"] .lp-night-veil { opacity: .3; }
+.lp-room[data-night="true"] .lp-sky-star { opacity: .9; }
+.lp-room[data-night="true"] .lp-sun { fill: #f0deff; } /* The sun's place is the moon's at night. */
+.lp-px { animation: lp-scroll linear infinite; will-change: transform; } /* Parallax: the far strip is slowest. Transform only, to stay cheap on a TV box. */
+.lp-px-1 { animation-duration: 120s; }
+.lp-px-2 { animation-duration: 60s; }
+.lp-px-3 { animation-duration: 30s; }
+.lp-fall { animation: lp-fall linear infinite; will-change: transform; }
+.lp-fall-snow { animation-duration: 7s; }
+.lp-fall-rain { animation-duration: .9s; }
+.lp-neon { filter: drop-shadow(0 0 4px var(--pet-glow)); }
+.lp-twinkle { animation: lp-twinkle 2s ease-in-out infinite alternate; }
+@keyframes lp-scroll { to { transform: translateX(-240px); } } /* One tile of house.js's TILE; SVG units. */
+@keyframes lp-fall { to { transform: translateY(130px); } }
+@keyframes lp-twinkle { to { opacity: .35; } }
+.lp-pet-wrap { position: absolute; width: 50%; left: 25%; bottom: 12%; } /* Small enough to see her house around her. */
 .lp-pet { display: block; width: 100%; overflow: visible; filter: drop-shadow(0 0 15px var(--pet-shadow)); animation: lp-breathe 4s ease-in-out infinite; transform-origin: 50% 90%; }
 .lp-body, .lp-paw { fill: var(--pet-body); stroke: var(--pet-shadow); stroke-width: 2; }
 .lp-belly { fill: #fff8; }
@@ -39,10 +52,7 @@
 .lp-room[data-sleep="true"] .lp-eyes-closed { display: block; }
 .lp-room[data-sleep="true"] .lp-pet { animation-duration: 6s; }
 .lp-effect { position: absolute; z-index: 1; top: -8%; right: 14%; color: var(--pet-glow); font-size: 2.2rem; text-shadow: 0 0 14px var(--pet-shadow); }
-.lp-spark { position: absolute; color: #e0b7ec; font-size: 1.7rem; }
-.lp-spark-one { left: 14%; top: 37%; }
-.lp-spark-two { right: 13%; top: 49%; font-size: 1rem; }
-.lp-caption { position: absolute; bottom: 5%; width: 100%; text-align: center; font-size: .82rem; letter-spacing: .06em; }
+.lp-caption { position: absolute; bottom: 3%; left: 50%; transform: translateX(-50%); max-width: 92%; padding: .3rem .9rem; border-radius: 2rem; background: #0e0b1acc; white-space: nowrap; font-size: .82rem; letter-spacing: .06em; } /* A dark pill, so it reads over any rug. */
 .lp-dot { display: inline-block; width: 6px; height: 6px; margin-right: .7rem; border-radius: 50%; background: var(--pet-glow); box-shadow: 0 0 10px var(--pet-glow); }
 .lp-message { min-height: 5.3em; line-height: 1.65; }
 .lp-actions { display: grid; gap: .65rem; }
@@ -50,8 +60,18 @@
 .lp-actions button > span:first-child { font-size: 1.6rem; color: var(--cyan); width: 1.6rem; text-align: center; }
 .lp-actions small { display: block; font: .7rem/1.7 system-ui, sans-serif; letter-spacing: .02em; color: var(--muted); }
 .gm .lp-actions button[aria-pressed="true"] { border-color: var(--rose); background: rgba(var(--glow), .1); box-shadow: inset 3px 0 var(--rose); }
-.lp-options { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1.2rem; }
-.gm .lp-options button { flex: 1; border-radius: .5rem; font-size: .7rem; padding: .65rem .4rem; }
+.lp-actions { max-height: 24rem; overflow-y: auto; } /* A long pantry scrolls inside the panel, in step with the TV's text scale. */
+.lp-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .35rem; margin-bottom: .8rem; } /* Eight tabs: two tidy rows of four. */
+.gm .lp-tabs button { flex: 1; border-radius: .5rem; font-size: .68rem; padding: .55rem .3rem; }
+.gm .lp-tabs button[aria-selected="true"] { border-color: var(--cyan); color: var(--cyan); background: rgba(var(--glow), .08); }
+.lp-meters { display: grid; gap: .6rem; margin: 1.2rem 0 .4rem; }
+.lp-meter { display: grid; grid-template-columns: 4.2rem minmax(0, 1fr) 2.2rem; gap: .6rem; align-items: center; font-size: .72rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+.lp-meter b { text-align: right; color: var(--cyan); font-variant-numeric: tabular-nums; }
+.lp-bar { height: .6rem; border: 1px solid var(--line); border-radius: 1rem; overflow: hidden; }
+.lp-bar i { display: block; height: 100%; width: 0; background: var(--cyan); border-radius: 1rem; transition: width .6s ease; }
+.lp-bar[data-low="true"] i { background: var(--rose); } /* The last quarter: she'd like some care. */
+.lp-room[data-mood="sad"] .lp-pet { filter: drop-shadow(0 0 6px var(--pet-shadow)) saturate(.55); animation-duration: 7s; } /* At zero she droops; nothing is lost. */
+.lp-room[data-mood="sad"] .lp-wings { fill-opacity: .1; }
 .lp-room[data-action="play"] .lp-pet { animation: lp-play .7s ease-in-out infinite alternate; }
 .lp-room[data-action="cuddle"] .lp-cheek { opacity: .85; }
 .lp-room[data-action="snack"] .lp-pet { animation: lp-snack .5s ease-in-out infinite alternate; }
@@ -72,3 +92,17 @@
   .gm .lp-actions button { gap: .4rem; padding: .6rem; }
   .lp-message { min-height: 3.3em; }
 }
+/* A fight: a veil dims the house, Lumi steps left and the enemy faces her from the right. */
+.lp-fight { position: absolute; inset: 0; background: #0b0818d9; }
+.lp-fight[hidden] { display: none; }
+.lp-fight-bars { position: absolute; top: 15%; left: 5%; right: 5%; display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; font-size: .68rem; letter-spacing: .04em; }
+.lp-fight-bars > div:last-child { text-align: right; }
+.lp-fight-bars span { display: block; margin-bottom: .35rem; }
+.lp-fight-bars .lp-bar { margin-bottom: .25rem; background: #0006; }
+.lp-fight-bars .lp-bar i { background: #7fe08f; transition: width .4s ease; }
+.lp-fight-bars .lp-bar-mp { height: .35rem; }
+.lp-fight-bars .lp-bar-mp i { background: var(--pet-glow); }
+.lp-fight-bars .lp-bar-foe i { background: #ff7a8a; margin-left: auto; }
+.lp-foe { position: absolute; right: 4%; bottom: 14%; width: 42%; overflow: visible; animation: lp-breathe 3s ease-in-out infinite; transform-origin: 50% 90%; transition: opacity .6s, filter .6s; }
+.lp-foe[data-down="true"] { opacity: .25; filter: grayscale(1); animation: none; }
+.lp-room[data-fight="true"] .lp-pet-wrap { left: 3%; width: 46%; transition: left .4s, width .4s; }

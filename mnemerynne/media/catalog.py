@@ -144,6 +144,9 @@ def _failed(conn: sqlite3.Connection, file_id: int, mtime_ns: int | None, sectio
         (file_id, section, kind, Path(name).stem, probe.sort_title(Path(name).stem), mtime_ns, error[:500]))
 
 
+SCAN_REQUEST_KEY = "media_scan_requested"   # meta: an admin pressed Rescan media and the worker hasn't started yet
+
+
 def run_pass(conn: sqlite3.Connection, settings: Settings, budget_s: float = 20.0) -> Stats:
     """Catalog what's new or changed, for at most budget_s seconds. Does nothing while Media is off."""
     stats = Stats()
@@ -310,7 +313,22 @@ def status(conn: sqlite3.Connection, lib: sqlite3.Row | None) -> dict:
     errors = [dict(r) for r in conn.execute(
         "SELECT mi.file_id, f.display_name AS name, mi.error FROM media_items mi JOIN files f ON f.id = mi.file_id "
         "WHERE mi.error IS NOT NULL AND f.collection_id = ? ORDER BY mi.probed_at DESC LIMIT 20", (lib_id,))]
-    return {"last_pass": last, "counts": {s: counts.get(s, 0) for s in media.SECTIONS}, "errors": errors}
+    return {"last_pass": last, "counts": {s: counts.get(s, 0) for s in media.SECTIONS}, "errors": errors,
+            "scan_asked": conn.execute("SELECT 1 FROM meta WHERE key = ?", (SCAN_REQUEST_KEY,)).fetchone() is not None}
+
+
+def request_scan(conn: sqlite3.Connection) -> None:
+    """Rescan media (Settings): asks the worker, the one process that scans, to look at the share now."""
+    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, datetime('now'))", (SCAN_REQUEST_KEY,))
+
+
+def take_scan_request(conn: sqlite3.Connection) -> bool:
+    """Whether a rescan was asked for, clearing the request. The worker calls this every loop, so it only
+    writes when there is something to clear."""
+    if conn.execute("SELECT 1 FROM meta WHERE key = ?", (SCAN_REQUEST_KEY,)).fetchone() is None:
+        return False
+    conn.execute("DELETE FROM meta WHERE key = ?", (SCAN_REQUEST_KEY,))
+    return True
 
 
 def reset(conn: sqlite3.Connection, online: bool = False) -> int:

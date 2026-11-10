@@ -1355,6 +1355,42 @@ def test_a_phone_pairs_itself_as_a_remote_and_gets_a_panels_powers(client, conn,
     assert conn.execute("SELECT count(*) FROM media_remotes WHERE user_id = ?", (uid,)).fetchone()[0] == 1
 
 
+def test_rescan_media_asks_the_worker_to_scan_now(client, conn, directory, settings, monkeypatch):
+    from mnemerynne import worker
+    from mnemerynne.media import catalog
+    _login(client, conn, directory)
+    _turn_on(client)
+    assert client.get("/api/admin/settings/media").json()["catalog"]["scan_asked"] is False
+    assert client.post("/api/admin/media/scan").json() == {"status": "asked"}
+    assert client.get("/api/admin/settings/media").json()["catalog"]["scan_asked"] is True
+
+    # The worker, with its timed scan far away: only the request can make it scan.
+    scans, catalogs = [], []
+    monkeypatch.setattr(worker, "Embedder", lambda s: type("E", (), {"close": lambda self: None})())
+    monkeypatch.setattr(worker.share, "configure", lambda *a, **k: type("Share", (), {"root": "share"})())
+    monkeypatch.setattr(worker.share, "sync", lambda *a, **k: scans.append(1))
+    monkeypatch.setattr(worker, "media_catalog", lambda *a, **k: catalogs.append(1))
+    monkeypatch.setattr(worker, "m365_sync", lambda *a, **k: None)
+
+    def one_loop():                                  # one pass of the loop that reaches the scan, then stop
+        answers = iter((True, False))
+        monkeypatch.setattr(worker, "run_one", lambda *a, **k: next(answers))
+        worker.run(settings.model_copy(update={"share_scan_seconds": 10 ** 12}), once=True, poll_seconds=0)
+
+    one_loop()
+    assert scans == [1] and catalogs == [1]          # the share, then the catalog
+    assert client.get("/api/admin/settings/media").json()["catalog"]["scan_asked"] is False
+    one_loop()
+    assert scans == [1]                              # asked once, scanned once
+
+    # An ordinary person can't, and neither can anyone while Media is off.
+    assert catalog.take_scan_request(conn) is False
+    assert client.put("/api/admin/settings/media", json={"enabled": False}).status_code == 200
+    assert client.post("/api/admin/media/scan").status_code == 409
+    client.cookies.clear()
+    assert client.post("/api/admin/media/scan").status_code in (401, 403)
+
+
 def _speaker(client, name="Bedroom speaker"):
     """A remote panel with a speaker, paired from the phone as a speaker."""
     panel = TestClient(client.app)

@@ -23,11 +23,16 @@ Ordinary **Create table** keeps the original one-seat-per-account/TV behavior. T
 
 ## Lumi Pet
 
-1. Open **Media → Games → Lumi Pet** on a browser or paired TV. Left/Right selects Cuddle, Snack, Play or Nap/Wake gently; Enter interacts. Touch/click activates an activity directly. Tab reaches individual buttons.
-2. Up changes the glow between Rose, Lagoon and Starlight; Down toggles sound. Escape/Back returns to Games when embedded.
-3. Try each activity and check the response, happy-moment count and last memory. Lumi sleeps at night (22:00–07:00 on this device); a daytime nap lasts two minutes. Interacting gently wakes Lumi for fifteen minutes.
-4. Refresh to keep memories and colour. They belong to this browser profile, shared by its users, and do not sync to other devices. Clearing browser storage clears them. If saving is blocked, the page explains that this visit cannot be saved.
-5. There are no hunger meters, streaks, chores or penalties for being away. Check narrow-screen layout, reduced motion and real TV controls before release.
+1. Open **Media → Games → Lumi Pet** on a browser or paired TV. Left/Right changes tab (Care, Pantry, Toys, Closet, Home, Battle, Shop, Settings); Up/Down moves through the list; Enter does it. Touch/click acts directly. Tab reaches individual buttons.
+2. In **Settings**, step the glow through Rose, Lagoon, Starlight, Zephyr, Wisp and Umbra and toggle sound. On a phone or computer over https, switch **Reminders** on and allow notifications. Escape/Back returns to Games when embedded.
+3. Cuddle, feed the free apple, and play with the star ribbon: check the Tummy, Energy and Joy meters, the message, the happy-moment count and the countdown while she plays. A second cuddle within 30 seconds is politely refused. Buy a cookie in **Shop** and check the coins drop and the cookie appears in **Pantry**. Lumi sleeps at night (22:00–07:00 on this device); a nap lasts five minutes and gives energy when it ends.
+4. Refresh, then open her on another device signed in to the same account: meters, pantry, toys, coins and glow match. Leave her for some hours and check the meters have fallen, fastest when full.
+5. At zero she looks dim and sad but keeps her moments, toys and coins; a snack and a cuddle bring her back. Check narrow-screen layout, reduced motion and real TV controls before release.
+
+6. **Closet:** move down the list and watch her try each thing on; buy the ribbon bow, take it off and put it back; check a 🔒 item says it only comes from the Star Capsule; open a capsule and check she is wearing something new.
+7. **Home:** open Rug, move through the five rugs and watch the room change before buying; buy one, go Back, and check the spot shows its name. Try each window view and check it drifts sideways, snow and rain fall, and the sky darkens at night (22:00–07:00).
+8. **Battle:** Find a fight → Common. Check the enemy, both health bars and her MP bar. Use each move, Defend and Run; leave mid-fight and come back on another device to the same turn. Win one and check EXP and coins; lose one (try Legendary at level 1) and check the ten-minute nap and the 50-coin wake-up. After a level, spend the skill point, check the new move is in **Moves**, and that a fifth move asks you to take one off.
+9. On a real TV box, check the window scrolls smoothly and the eight tabs and long lists (Closet, a skill tree) follow the remote.
 
 The digital ASCII neon fireplace is on the design list and is not playable yet.
 

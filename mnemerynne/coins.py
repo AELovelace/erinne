@@ -73,6 +73,15 @@ def table(conn: sqlite3.Connection, user_id: int, delta: int, game: str, why: st
         _move(conn, HOUSE, account, delta, f"{game}_refund" if why == "refund" else f"{game}_win", game)
 
 
+def spend(conn: sqlite3.Connection, user_id: int, amount: int, game: str, what: str = "buy") -> bool:
+    """Pay the house for something a game sells (a snack, a toy). False: not enough coins, and nothing moved.
+    Checks the balance first, so a refusal never has to roll back the caller's transaction."""
+    balance = held(conn, user_id)                         # opens the purse on a first purchase
+    if amount <= 0 or balance is None or balance < amount:
+        return False
+    return _move(conn, _account(user_id), HOUSE, amount, f"{game}_{what}", game)
+
+
 def today(conn: sqlite3.Connection) -> str:
     """The server's date, the one every daily limit counts by."""
     return conn.execute("SELECT date('now', 'localtime')").fetchone()[0]
@@ -90,6 +99,14 @@ def reward(conn: sqlite3.Connection, user_id: int, amount: int, game: str, cap: 
     if paying <= 0:
         return 0
     return paying if _move(conn, None, account, paying, "reward", game, ref) else 0
+
+
+def prize(conn: sqlite3.Connection, user_id: int, amount: int, game: str, ref: str) -> int:
+    """New coins for something the server ran itself and that can only be won once, like a Lumi Pet fight: no daily
+    limit (Doll's call: coins are for fun), but `ref` is required, so the same win can never pay twice."""
+    if amount <= 0 or held(conn, user_id) is None:
+        return 0
+    return amount if _move(conn, None, _account(user_id), amount, "reward", game, ref) else 0
 
 
 def pet_visit(conn: sqlite3.Connection, user_id: int) -> int:

@@ -14,7 +14,7 @@ export async function checkGameScaling(page, desktop, base) { // Use one paired 
     return frame.evaluate(() => {
       const root = document.documentElement, main = document.getElementById("gm"), slug = main.dataset.game;
       const board = document.querySelector(slug === "prism-drop" ? "#pd-field" : slug === "lumi-pet" ? ".lp-room" : ".casino-board");
-      const button = document.querySelector(slug === "prism-drop" ? "#pd-drop-button" : slug === "lumi-pet" ? "[data-lp-action]" : "#casino-bet");
+      const button = document.querySelector(slug === "prism-drop" ? "#pd-drop-button" : slug === "lumi-pet" ? "[data-lp-row]" : "#casino-bet");
       const box = board.getBoundingClientRect(), buttonBox = button.getBoundingClientRect();
       return { font: parseFloat(getComputedStyle(root).fontSize), width: main.getBoundingClientRect().width,
         boardWidth: box.width, boardHeight: box.height, buttonHeight: buttonBox.height,
@@ -33,6 +33,7 @@ export async function checkGameScaling(page, desktop, base) { // Use one paired 
       await frame.click("#casino-create");
       await frame.waitForFunction(() => !document.getElementById("casino-table").hidden);
     }
+    if (slug === "lumi-pet") await frame.waitForSelector("[data-lp-row]"); // Her list arrives with her state from the server.
     const normal = await measure(frame);
     assert.equal(normal.font, 16, slug + " keeps 1080p sizing");
     assert.equal(normal.toolbar, false); assert.equal(normal.padding, "0px"); assert.equal(normal.overflow, false);

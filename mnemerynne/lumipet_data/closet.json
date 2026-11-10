@@ -1,0 +1,32 @@
+{
+  "capsule": {"price": 150, "odds": {"common": 55, "uncommon": 25, "rare": 14, "epic": 5, "legendary": 1}},
+  "slots": [
+    {"id": "head", "name": "Head", "items": [
+      {"id": "acc-bow", "name": "Ribbon bow", "rarity": "common", "price": 60},
+      {"id": "acc-star-clip", "name": "Star clip", "rarity": "common", "price": 60},
+      {"id": "acc-flower-crown", "name": "Flower crown", "rarity": "uncommon", "price": 120},
+      {"id": "acc-witch-hat", "name": "Witch hat", "rarity": "rare", "price": 180},
+      {"id": "acc-crown", "name": "Starlight crown", "rarity": "legendary", "price": 0}]},
+    {"id": "neck", "name": "Neck", "items": [
+      {"id": "acc-bell-collar", "name": "Bell collar", "rarity": "common", "price": 60},
+      {"id": "acc-bowtie", "name": "Bow tie", "rarity": "common", "price": 60},
+      {"id": "acc-scarf", "name": "Cosy scarf", "rarity": "uncommon", "price": 120},
+      {"id": "acc-star-pendant", "name": "Star pendant", "rarity": "rare", "price": 0}]},
+    {"id": "wings", "name": "Wings", "items": [
+      {"id": "acc-wing-ribbons", "name": "Wing ribbons", "rarity": "common", "price": 60},
+      {"id": "acc-wing-glitter", "name": "Wing glitter", "rarity": "uncommon", "price": 120},
+      {"id": "acc-wing-aurora", "name": "Aurora wings", "rarity": "epic", "price": 0}]},
+    {"id": "back", "name": "Back", "items": [
+      {"id": "acc-backpack", "name": "Little backpack", "rarity": "uncommon", "price": 120},
+      {"id": "acc-cape", "name": "Hero cape", "rarity": "rare", "price": 180},
+      {"id": "acc-jetpack", "name": "Comet jetpack", "rarity": "epic", "price": 0}]},
+    {"id": "paws", "name": "Paws", "items": [
+      {"id": "acc-socks", "name": "Stripy socks", "rarity": "common", "price": 60},
+      {"id": "acc-boots", "name": "Rain boots", "rarity": "uncommon", "price": 120},
+      {"id": "acc-star-mitts", "name": "Star mitts", "rarity": "rare", "price": 0}]},
+    {"id": "tail", "name": "Tail", "items": [
+      {"id": "acc-tail-bow", "name": "Tail bow", "rarity": "common", "price": 60},
+      {"id": "acc-tail-ring", "name": "Tail ring", "rarity": "uncommon", "price": 120},
+      {"id": "acc-comet-trail", "name": "Comet trail", "rarity": "epic", "price": 0}]}
+  ]
+}

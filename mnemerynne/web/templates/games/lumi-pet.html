@@ -3,23 +3,36 @@
   <p class="gm-eyebrow">// A LITTLE LIGHT, JUST FOR YOU</p>
   <h1 class="gm-title">LUMI<span>PET</span></h1>
   <p class="lp-lead">A soft place to land.</p>
-  <p>Stay for a snack, a little starlight, or a quiet moment together. Lumi is always happy to see you.</p>
+  {#- Her three needs, drawn by game.js from the server's numbers (mnemerynne/lumipet.py). They run down while you're away. -#}
+  <div class="lp-meters">
+    {% for meter, label in (("hunger", "Tummy"), ("energy", "Energy"), ("joy", "Joy")) %}
+    <div class="lp-meter"><span>{{ label }}</span>
+      <div class="lp-bar" role="meter" aria-label="{{ label }}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="lp-{{ meter }}"></i></div>
+      <b id="lp-{{ meter }}-n">–</b></div>
+    {% endfor %}
+  </div>
   <dl class="lp-stats">
+    <div><dt>Level</dt><dd id="lp-level">1</dd></div>
     <div><dt>Happy moments</dt><dd id="lp-moments">0</dd></div>
     <div><dt>Last little memory</dt><dd id="lp-memory">Our first hello</dd></div>
     <div><dt>Coins</dt><dd id="lp-coins">—</dd></div>
   </dl>
-  <p class="lp-note">No chores. No streaks. Nothing lost while you’re away.</p>
-  <p class="lp-save" id="lp-save">Memories stay in this browser, on this device.</p>
+  <p class="lp-note">Lumi gets hungry, sleepy and lonely while you’re away. She never loses anything, and a snack and a cuddle set her right.</p>
+  <p class="lp-save" id="lp-save">Lumi lives on your account: the same on your phone, computer and TV.</p>
 </section>
 
 <section class="lp-room" id="lp-room" data-palette="rose" data-sleep="false" aria-label="Lumi's room">
   <div class="lp-room-top"><span>THE STARLIGHT NOOK</span><span id="lp-clock">A quiet afternoon</span></div>
-  <div class="lp-window" aria-hidden="true"><span class="lp-moon"></span><span class="lp-stars">✦ · ˚<br> · ✧<br>✧ · ✦</span></div>
-  <span class="lp-spark lp-spark-one" aria-hidden="true">✧</span>
-  <span class="lp-spark lp-spark-two" aria-hidden="true">✦</span>
-  <div class="lp-floor" aria-hidden="true"></div>
-  <div class="lp-rug" aria-hidden="true"></div>
+  {#- The house: game.js draws every spot's object here from static/games/lumi-pet/house.js. The viewBox is fixed; the room scales it. -#}
+  <svg class="lp-house" id="lp-house" viewBox="0 0 400 500" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
+  {#- A fight (mnemerynne/lumibattle.py): a veil over the room, both sides' bars, and the enemy (enemies.js) facing Lumi. -#}
+  <div class="lp-fight" id="lp-fight" hidden>
+    <div class="lp-fight-bars">
+      <div><span id="lp-f-lumi">Lumi</span><div class="lp-bar"><i id="lp-f-hp"></i></div><div class="lp-bar lp-bar-mp"><i id="lp-f-mp"></i></div></div>
+      <div><span id="lp-f-foe"></span><div class="lp-bar lp-bar-foe"><i id="lp-f-foehp"></i></div></div>
+    </div>
+    <svg class="lp-foe" id="lp-foe" viewBox="0 0 200 200" role="img" aria-label="The enemy"></svg>
+  </div>
   <div class="lp-pet-wrap">
     <span class="lp-effect" id="lp-effect" aria-hidden="true">♡</span>
     <svg class="lp-pet" id="lp-pet" viewBox="0 0 320 300" role="img" aria-labelledby="lp-pet-title">
@@ -29,6 +42,7 @@
         <path d="M207 176 C312 187 295 74 241 108 C216 122 207 153 207 176Z"/>
         <path d="M109 182 C36 174 48 238 93 215Z M211 182 C284 174 272 238 227 215Z"/>
       </g>
+      <g id="lp-acc-back"></g>{# Accessories worn behind her (closet.js): capes, packs. #}
       <path class="lp-tail" d="M217 228 C279 254 286 188 256 193 C238 196 260 215 239 218"/>
       <ellipse class="lp-body" cx="160" cy="214" rx="62" ry="57"/>
       <ellipse class="lp-belly" cx="160" cy="230" rx="36" ry="31"/>
@@ -40,6 +54,7 @@
       <ellipse class="lp-cheek" cx="114" cy="169" rx="13" ry="6"/><ellipse class="lp-cheek" cx="206" cy="169" rx="13" ry="6"/>
       <path class="lp-mouth" d="M155 165 L160 169 L165 165 M160 169 Q151 184 145 173 M160 169 Q169 184 175 173"/>
       <ellipse class="lp-paw" cx="123" cy="259" rx="24" ry="13"/><ellipse class="lp-paw" cx="197" cy="259" rx="24" ry="13"/>
+      <g id="lp-acc-front"></g>{# Accessories worn over her: hats, collars, socks. #}
     </svg>
   </div>
   <div class="lp-caption"><span class="lp-dot" aria-hidden="true"></span><span id="lp-state">Settling in</span></div>
@@ -48,15 +63,17 @@
 <section class="lp-controls gm-panel" aria-label="Spend time with Lumi">
   <p class="gm-eyebrow">// MAKE A LITTLE MOMENT</p>
   <p id="lp-message" class="lp-message" role="status" aria-live="polite">Hello, you. There’s a place beside me.</p>
-  <div class="lp-actions" aria-label="Activities">
-    <button type="button" data-lp-action="cuddle" aria-pressed="true"><span aria-hidden="true">♡</span><span>Cuddle<small>A little closeness</small></span></button>
-    <button type="button" data-lp-action="snack" aria-pressed="false"><span aria-hidden="true">♧</span><span>Snack<small>Something sweet</small></span></button>
-    <button type="button" data-lp-action="play" aria-pressed="false"><span aria-hidden="true">✧</span><span>Play<small>Catch a falling star</small></span></button>
-    <button type="button" data-lp-action="rest" aria-pressed="false"><span aria-hidden="true">☾</span><span id="lp-rest-label">Nap<small>Dream a little dream</small></span></button>
+  {#- The tabs are fixed; game.js fills the list under them from the server's catalog and Lumi's own pantry and toy box. -#}
+  <div class="lp-tabs" role="tablist" aria-label="What to do">
+    <button type="button" role="tab" data-lp-tab="care" aria-selected="true">Care</button>
+    <button type="button" role="tab" data-lp-tab="pantry" aria-selected="false">Pantry</button>
+    <button type="button" role="tab" data-lp-tab="toys" aria-selected="false">Toys</button>
+    <button type="button" role="tab" data-lp-tab="closet" aria-selected="false">Closet</button>
+    <button type="button" role="tab" data-lp-tab="home" aria-selected="false">Home</button>
+    <button type="button" role="tab" data-lp-tab="battle" aria-selected="false">Battle</button>
+    <button type="button" role="tab" data-lp-tab="shop" aria-selected="false">Shop</button>
+    <button type="button" role="tab" data-lp-tab="settings" aria-selected="false">Settings</button>
   </div>
-  <div class="lp-options">
-    <button type="button" id="lp-palette">Glow: Rose</button>
-    <button type="button" id="lp-sound" aria-pressed="true">Sound: on</button>
-  </div>
-  <p class="gm-keys">◀ ▶ choose · Enter interact<br>▲ glow colour · ▼ sound<br>Escape / Back returns to Games</p>
+  <div class="lp-actions" id="lp-list" aria-label="Choices"></div>
+  <p class="gm-keys">◀ ▶ change tab · ▲ ▼ choose<br>Enter does it<br>Escape / Back returns to Games</p>
 </section>

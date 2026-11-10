@@ -9,7 +9,8 @@
 - Who may play: whoever may use Media, and a paired screen (the TV) as its owner, like the rest of Media.
 - Coins are one purse per account, shared by every game and kept on this server (coins.py). Online casino tables bet them,
   local multiplayer tables use free-to-play credits instead, and Prism Drop and Lumi Pet pay small rewards the server has
-  checked. Prism Drop's best score and Lumi Pet's memories stay on the device. Coins have no cash value.
+  checked. Prism Drop's best score stays on the device. Lumi Pet lives on the account (lumipet.py), where her shop
+  spends coins. Coins have no cash value.
 """
 
 from __future__ import annotations
@@ -29,8 +30,8 @@ class Game:
 
 GAMES: tuple[Game, ...] = (
     Game(slug="lumi-pet", name="Lumi Pet", icon="✨",
-         description="A little neon companion. Share a snack, play, cuddle or curl up for a nap. Your first visit each day pays coins.",
-         controls="◀ ▶ choose · Enter interact · ▲ glow colour · ▼ sound on or off"),
+         description="A little neon companion to feed, dress, fight beside and make a home for. She gets hungry, sleepy and lonely while you’re away. Your first visit each day pays coins.",
+         controls="◀ ▶ change tab · ▲ ▼ choose · Enter does it"),
     Game(slug="prism-drop", name="Prism Drop", icon="🔮",
          description="Pick a pocket and drop a neon ball through blocks, bombs, bonus pegs and sliding platforms. Ten drops, and your score pays coins.",
          controls="◀ ▶ pick a pocket · Enter drops · ▲ replays the last drop · ▼ sound on or off"),

@@ -1,6 +1,6 @@
 # Casino dialogue and status copy
 
-There are no branching NPC dialogue trees in the current Media games. The blackjack dealer is a rules-controlled hand, not a conversational character. Lumi Pet has authored companion responses, described below.
+There are no branching NPC dialogue trees in the current Media games. The blackjack dealer is a rules-controlled hand, not a conversational character. Lumi Pet has authored companion responses and a fight log, described below; her enemies do not speak.
 
 Current status copy lives in `mnemerynne/web/static/games/casino/game.js`: betting, playing, waiting, result returns, reconnect errors and next-round instructions. Roulette captions and accessible wheel descriptions live in `static/games/casino/roulette.js`. Static lobby copy lives in `templates/games/casino.html`; server refusal messages live in `mnemerynne/casino.py`. Keep these messages consistent with the actual phase and accessible through the existing live regions. Player names are rendered as text.
 
@@ -10,7 +10,11 @@ Status copy says **coins** at online tables and **credits** at local multiplayer
 
 ## Lumi Pet companion copy
 
-`static/games/lumi-pet/game.js` holds brief responses for cuddles, snacks, playing with stars, napping and gently waking. They are authored locally, not generated conversations. Alternate the activity lines without introducing obligations or guilt about absence. The live status region announces interactions; the remote gets the sleep state, happy-moment count and selected activity. `templates/games/lumi-pet.html` holds the greeting and controls. Clock-driven sleep is peaceful, never an illness or failure. The day's first activity adds a short "+25 coins" line to the status; keep it a small thank-you, never a reason to come back.
+`static/games/lumi-pet/game.js` holds brief responses for cuddles, snacks, playing with a toy, napping, waking, finishing a nap or a game, and buying something, plus three captions for a low need (`NEEDS`: hungry, sleepy, lonely). They are authored locally, not generated conversations. Refusals (too soon, not enough coins, busy playing) are the server's own words from `mnemerynne/lumipet.py`. Low-need lines ask kindly and never scold: she is glad to see you, however long it has been. The live status region announces interactions; the remote gets what she is doing, the open tab and the selected choice. `templates/games/lumi-pet.html` holds the greeting and tabs. Clock-driven sleep is peaceful, never an illness or failure. The day's first activity adds a short "+25 coins" line to the status.
+
+Reminder notifications have four fixed lines in `static/sw.js` (`LUMI`: hunger, energy, joy, nap). They invite and never scold, and each must still make sense read on a lock screen by someone else.
+
+A fight's log is written by the server (`mnemerynne/lumibattle.py`): "A wild Dust Bunny appears!", "Lumi used Pounce: 12 damage.", "super effective!", "resisted.", "Lumi is stunned and can't move!", "Victory! +18 EXP, +10 coins." The page shows the last three lines after each turn and keeps eight. Keep it light: enemies are "wild" creatures who are beaten, never killed, and a defeat is a nap ("Lumi curls up, worn out"). Enemy and move names live in `lumipet_data/battle.json` and must stay original; do not borrow names from other games.
 
 ## Shared-TV casino messages
 

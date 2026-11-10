@@ -6,6 +6,12 @@
 
 Every Media game now shares one purse per account, kept on this server (`mnemerynne/coins.py`, migration 0063). It's built the way LumiBot's SadGirlCoin is, but Doll decided each NAS has its own coins, so it isn't connected to SadGirlCoin and the tie-in ideas below are not what shipped. Online casino tables bet coins, and a TV at one spends the account it's paired to. Local multiplayer (remotes around one TV) stays on free credits. Prism Drop's rules moved to the server (`mnemerynne/prism.py`) so a finished game can pay; Lumi Pet pays for the day's first visit. Where this conflicts with older sections below, this section is current.
 
+## Status (2026-11-09): Lumi Pet overhaul, first steps
+
+Doll decided Lumi Pet should be a full pet game, upcycling MommyBot's Littlepottchi care engine and, later, Touhou Trader's battles. Built: Lumi lives on the account (`mnemerynne/lumipet.py`, migrations 0064–0066); her hunger, energy and joy decay along a logarithmic curve (the last quarter takes a day); a coin shop sells snacks, treats and toys; phone push reminders; a house of ten paperdoll spots with a parallax window (this absorbs **Doll Room** below); accessories and a Star Capsule; turn-based battles against 20 enemies with six skill trees and magitek/cybertek mods; and a catalog editor (`python/lumi_pet_editor.py`). This replaces the "no neglect, no decay, device-local" description in the 2026-11-02 section below. Still to build: five more house spots (plant, side table, toy chest, ceiling hanging, door), once Doll has seen the first ten. The full plan is "Lumi Pet Overhaul Plan (2026-11-09).md" in Doll's BeepDrive Agents folder.
+
+**Stretch: minigames for Lumi.** Constellation Match, Which Cup and Falling Star Catch. Only a game whose outcome the server decides may pay coins, as Prism Drop does, because a browser can claim any score; reflex games like Star Catch give joy only.
+
 ## Status (2026-11-02): Lumi Pet and the fireplace idea
 
 **Shared-TV casino mode** is also implemented: on a paired TV choose **One TV, multiple remotes**. Up to eight controllers/players have independent seats, credits, drafts and blackjack choices on one display. Each remote must be paired to the TV owner's account. First Enter joins, later Enter submits, and the first player's Play starts the round. Ordinary multi-device tables remain available. Signed panel inputs and server-side deduplication keep players separate and prevent duplicate moves; the player/testing guides cover setup and verification.

@@ -4,17 +4,21 @@ and the person (or the TV's owner) in the Media group."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from mnemerynne import casino, casino_remote, coins, games, prism
+from mnemerynne import casino, casino_remote, coins, games, lumipet, prism, push
 from mnemerynne.db import transaction
 from mnemerynne.media import remotes, screens
 from mnemerynne.web.deps import _session_user, get_db
 from mnemerynne.web.media import _media_on, _screen, media_user, screen_device
+
+STATIC = Path(__file__).parent / "static"
+
 
 def _uncached(response: Response):
     """A shared URL still represents this caller's seat and the current round, never a cached snapshot."""
@@ -61,6 +65,111 @@ def pet_visit(user=Depends(media_user), conn=Depends(get_db)):
     with transaction(conn):
         paid = coins.pet_visit(conn, user["id"])
         return {"paid": paid, "coins": coins.peek(conn, user["id"])}
+
+
+class PetAction(BaseModel):
+    """What the person chose to do with Lumi. Only choices: which thing and how many. The server decides every result."""
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["cuddle", "feed", "play", "nap", "wake", "buy", "decorate", "wear", "capsule", "glow", "import",
+                    "learn", "respec", "equip", "mod", "potions", "heal"]
+    item: str | None = Field(default=None, max_length=40)
+    count: int = Field(default=1, ge=1, le=lumipet.MAX_HELD, strict=True)
+    moments: int = Field(default=0, ge=0, le=lumipet.MAX_MOMENTS, strict=True)   # only read by "import", once
+    glow: str | None = Field(default=None, max_length=20)
+    slot: int | None = Field(default=None, ge=0, le=9, strict=True)             # which mod slot, for "mod"
+
+
+@router.get("/api/media/games/lumi-pet/state")
+def pet_state(user=Depends(media_user), conn=Depends(get_db)):
+    """Lumi as she is right now, caught up from the last time anyone looked. A paired TV shows its owner's pet."""
+    with transaction(conn):
+        return lumipet.state(conn, user["id"])
+
+
+@router.post("/api/media/games/lumi-pet/act")
+def pet_act(body: PetAction, user=Depends(media_user), conn=Depends(get_db)):
+    """One care action or purchase. A refusal (too soon, not enough coins) changes nothing and says why."""
+    try:
+        with transaction(conn):
+            return lumipet.act(conn, user["id"], body.action, item=body.item, count=body.count, moments=body.moments,
+                               glow=body.glow, slot=body.slot)
+    except lumipet.PetError as refused:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(refused)) from None
+
+
+class FightStart(BaseModel):
+    """Which kind of opponent to look for. The server picks the enemy and its level."""
+    model_config = ConfigDict(extra="forbid")
+    tier: Literal["common", "uncommon", "rare", "epic", "legendary", "gamble"]
+
+
+class FightTurn(BaseModel):
+    """One button in a fight: which fight, the turn the page was showing, and the button. Never a number of damage."""
+    model_config = ConfigDict(extra="forbid")
+    battle: int = Field(ge=1, strict=True)
+    turn: int = Field(ge=0, strict=True)
+    action: Literal["move0", "move1", "move2", "move3", "defend", "potion", "run"]
+
+
+@router.post("/api/media/games/lumi-pet/battle")
+def pet_fight(body: FightStart, user=Depends(media_user), conn=Depends(get_db)):
+    """Start a fight. One at a time; it waits for as long as it takes."""
+    try:
+        with transaction(conn):
+            return lumipet.fight_start(conn, user["id"], body.tier)
+    except lumipet.PetError as refused:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(refused)) from None
+
+
+@router.post("/api/media/games/lumi-pet/battle/act")
+def pet_fight_turn(body: FightTurn, user=Depends(media_user), conn=Depends(get_db)):
+    """Play one turn. A stale or repeated press is refused and changes nothing."""
+    try:
+        with transaction(conn):
+            return lumipet.fight_act(conn, user["id"], body.battle, body.turn, body.action)
+    except lumipet.PetError as refused:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(refused)) from None
+
+
+class PushDevice(BaseModel):
+    """A browser that said yes to notifications: where its push service is, and the keys to seal messages for it."""
+    model_config = ConfigDict(extra="forbid")
+    endpoint: str = Field(min_length=10, max_length=2000)
+    p256dh: str = Field(default="", max_length=200)
+    auth: str = Field(default="", max_length=100)
+    utc_offset: int = Field(default=0, ge=-14 * 60, le=14 * 60, strict=True)   # minutes east of UTC, for quiet hours
+
+
+@router.get("/api/media/games/lumi-pet/push")
+def pet_push_key(request: Request, user=Depends(media_user)):
+    """The key a browser needs to subscribe to this server's notifications."""
+    return {"key": push.public_key(request.app.state.settings.data_dir)}
+
+
+@router.post("/api/media/games/lumi-pet/push")
+def pet_push_on(body: PushDevice, user=Depends(media_user), conn=Depends(get_db)):
+    """Lumi may send this device reminders. Asking again from the same browser refreshes it."""
+    try:
+        with transaction(conn):
+            push.subscribe(conn, user["id"], body.endpoint, body.p256dh, body.auth, body.utc_offset)
+    except push.PushError as refused:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(refused)) from None
+    return {"on": True}
+
+
+@router.post("/api/media/games/lumi-pet/push/off")
+def pet_push_off(body: PushDevice, user=Depends(media_user), conn=Depends(get_db)):
+    """No more reminders on this device."""
+    with transaction(conn):
+        push.unsubscribe(conn, user["id"], body.endpoint)
+    return {"on": False}
+
+
+@router.get("/sw.js", include_in_schema=False)
+def service_worker():
+    """The service worker has to be served from the top of the site to receive pushes for it. It handles pushes only:
+    it has no fetch handler, so it can never change how a page loads."""
+    return FileResponse(STATIC / "sw.js", media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/media/games/{slug}", response_class=HTMLResponse)

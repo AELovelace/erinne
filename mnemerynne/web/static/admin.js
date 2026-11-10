@@ -1609,6 +1609,44 @@
     catch (e) { $("automations-settings").replaceChildren(el("p", "error", e.message)); }
   }
 
+  /* Rescan media: asks the worker to look for new files now, then watches for its pass to finish. It only
+     rewrites the line of counts, so a half-filled form on this page isn't lost. */
+  function rescanRow(catalog, factsLine, catalogFacts) {
+    const WAIT_MS = 120000, EVERY_MS = 3000;                       // how long to watch, and how often to ask
+    const row = el("div", "ax-new");
+    const scan = el("button", "small", "Rescan media");
+    scan.type = "button";
+    const note = el("span", "small muted", "Finds new and changed files now, instead of at the next automatic check.");
+    let lastAt = catalog.last_pass ? catalog.last_pass.at : null;  // the pass this page knows about
+    function finish(text) {                                        // the button is ready again
+      scan.disabled = false;
+      note.textContent = text;
+    }
+    scan.addEventListener("click", async function () {
+      scan.disabled = true;                                        // one rescan at a time
+      note.textContent = "Looking for new files…";
+      try { await api("POST", "/api/admin/media/scan"); }
+      catch (err) { finish(err.message); return; }
+      const giveUp = Date.now() + WAIT_MS;
+      async function check() {
+        if (!scan.isConnected) return;                             // the page was redrawn: nobody is watching
+        let now = null;
+        try { now = await api("GET", "/api/admin/settings/media"); } catch (err) { /* asks again next time */ }
+        const at = now && now.catalog.last_pass ? now.catalog.last_pass.at : null;
+        if (now && !now.catalog.scan_asked && at !== lastAt) {     // the worker took it, and a pass has finished
+          lastAt = at;
+          factsLine.textContent = catalogFacts(now);               // the new counts
+          finish(now.catalog.last_pass.pending ? "Scanned. The waiting files are read over the next few minutes." : "Scanned.");
+        } else if (Date.now() >= giveUp) {
+          finish("Still working, or the worker is busy. The counts update when you reload this page.");
+        } else setTimeout(check, EVERY_MS);
+      }
+      setTimeout(check, EVERY_MS);
+    });
+    row.append(scan, note);
+    return row;
+  }
+
   // ------------------------------------------------------------- Media (Settings → Entertainment)
   // Three boxes under Entertainment: Media (on or off, the folder, the catalog, who may use it), Playback and
   // artwork, and Live TV and radio. Each form sends only its own fields; the PUT keeps everything it isn't sent.
@@ -1675,13 +1713,17 @@
     }
 
     const c = data.catalog;
-    const facts = [];
-    if (data.library) facts.push("Folder: " + data.library.share_path);
-    facts.push(c.counts.movies + " films, " + (c.counts.tv || 0) + " episodes, " + c.counts.music + " tracks, " + c.counts.pictures + " pictures");
-    if (c.last_pass) {
-      facts.push("last catalog pass " + c.last_pass.at + " UTC" + (c.last_pass.pending ? ", " + c.last_pass.pending + " waiting" : ""));
+    function catalogFacts(d) {   // the line of counts under the folder, from a settings answer
+      const facts = [];
+      if (d.library) facts.push("Folder: " + d.library.share_path);
+      const n = d.catalog.counts, last = d.catalog.last_pass;
+      facts.push(n.movies + " films, " + (n.tv || 0) + " episodes, " + n.music + " tracks, " + n.pictures + " pictures");
+      if (last) facts.push("last catalog pass " + last.at + " UTC" + (last.pending ? ", " + last.pending + " waiting" : ""));
+      return facts.join(" · ");
     }
-    box.appendChild(el("p", "small", facts.join(" · ")));
+    const factsLine = el("p", "small", catalogFacts(data));
+    box.appendChild(factsLine);
+    if (data.enabled) box.appendChild(rescanRow(c, factsLine, catalogFacts));
     if (c.errors.length) {
       const details = el("details", "small");
       details.appendChild(el("summary", null, c.errors.length + " file(s) couldn't be read"));

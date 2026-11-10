@@ -1243,6 +1243,17 @@ def admin_rescan(body: RescanBody, request: Request, user=Depends(admin_user),
     return {"queued": n}
 
 
+@admin_router.post("/api/admin/media/scan")
+def admin_scan(user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Rescan media: the worker looks for new and changed files now, instead of at its next timed scan."""
+    if not media.enabled(conn):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Turn Media on first.")
+    with transaction(conn):
+        catalog.request_scan(conn)
+        _log(conn, user, "media.scan", "Rescan media")
+    return {"status": "asked"}
+
+
 @admin_router.post("/api/admin/media/hwtest")
 async def admin_hwtest(request: Request, user=Depends(admin_user)):
     """A two-second test encode with each backend, on this server."""
