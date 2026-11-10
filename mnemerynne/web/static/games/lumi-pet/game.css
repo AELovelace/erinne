@@ -63,7 +63,7 @@
 .lp-actions small { display: block; font: .7rem/1.7 system-ui, sans-serif; letter-spacing: .02em; color: var(--muted); }
 .gm .lp-actions button[aria-pressed="true"] { border-color: var(--rose); background: rgba(var(--glow), .1); box-shadow: inset 3px 0 var(--rose); }
 .lp-actions { max-height: 24rem; overflow-y: auto; } /* A long pantry scrolls inside the panel, in step with the TV's text scale. */
-.lp-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .3rem; margin-bottom: .8rem; } /* Ten tabs: two tidy rows of five. */
+.lp-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .3rem; margin-bottom: .8rem; } /* Twelve tabs: three tidy rows of four. */
 .gm .lp-tabs button { letter-spacing: .02em; overflow: hidden; text-overflow: clip; }
 .gm .lp-tabs button { flex: 1; border-radius: .5rem; font-size: .68rem; padding: .55rem .3rem; }
 .gm .lp-tabs button[aria-selected="true"] { border-color: var(--cyan); color: var(--cyan); background: rgba(var(--glow), .08); }
@@ -181,3 +181,8 @@
 .lp-room[data-garden="true"] .lp-room-top { display: none; } /* The garden's own bar names the place. */
 .lp-room[data-garden="true"] .lp-dhud .lp-bar i { background: #ffdc83; }
 .lp-room[data-garden="true"] .lp-dhud .lp-bar-mp { display: none; }
+
+/* The Skills tab draws its trees over the room, and the Collection tab a flower or decoration: Lumi steps aside for both. */
+.lp-room[data-skills="true"] .lp-pet-wrap, .lp-room[data-card="true"] .lp-pet-wrap { opacity: 0; pointer-events: none; }
+.lp-room[data-skills="true"] .lp-room-top, .lp-room[data-card="true"] .lp-room-top { display: none; }
+.lp-room[data-skills="true"] .lp-caption { display: none; }

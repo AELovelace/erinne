@@ -478,7 +478,7 @@ class RunFinish(BaseModel):
     moves: int = Field(default=0, ge=0, le=200_000, strict=True)                  # Snake: how many moves it made
     turns: list[tuple[int, Annotated[int, Field(ge=0, le=3)]]] = Field(default_factory=list, max_length=50_000)
     died: bool = False                                                            # Snake: the last move killed it
-    score: int = Field(default=0, ge=0, le=1_000_000, strict=True)                # Breakout: bricks broken
+    score: int = Field(default=0, ge=0, le=1_000_000, strict=True)                # Breakout: bricks; Teacup Tower: floor
     level: int = Field(default=1, ge=1, le=500, strict=True)                      # Breakout: the level it ended on
 
 
@@ -527,6 +527,8 @@ class Board(BaseModel):
     alive: bool = True
     points: list[Unit] = Field(default_factory=list, max_length=600)              # body, head first, x and y pairs
     food: list[Annotated[int, Field(ge=0, le=20)]] = Field(default_factory=list, max_length=3)   # column, row, kind
+    height: float = Field(default=0, ge=0, le=1e9)                                # Teacup Tower: how far up the view is
+    frame: int = Field(default=0, ge=0, le=100_000_000, strict=True)              # ...and its frame, for the sliding cups
 
 
 @router.get("/api/media/games/{slug}/tables")

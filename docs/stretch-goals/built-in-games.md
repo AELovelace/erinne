@@ -2,6 +2,15 @@
 
 *Written 2026-10-28 (late) by Lumi for Doll. A stretch goal. It lives in the repo on purpose, not in IT-OPS.*
 
+## Status (2026-11-10): Teacup Tower
+
+**Teacup Tower** is built, reworked at Doll's request from the stacking idea below into a tower climber with our own rules and art.
+- Lumi from Lumi Pet is the climber, drawn from Lumi Pet's own shapes.
+- She auto-bounces off teacups, and the faster she moves sideways, the higher she bounces.
+- Wall kicks, combo hops, sliding and cracked cups, and a landing saucer every 25 floors.
+- From floor 5 the tower rises, faster every 30 seconds.
+- It lives in the arcade shell with Breakout and Snake, so it has solo runs at 25 coins plus 1 coin a floor, and showdowns where racers climb the same tower.
+
 ## Status (2026-11-10): Breakout and Snake, and a cleaner table lobby
 
 **Breakout** and **Snake** are ports of Doll's own GameMaker arcade games, at Doll's request, so the "no remakes" rule below doesn't apply to them.
@@ -147,6 +156,7 @@ own. These are *our* code, reviewed like the rest of the app, so they can run on
 2. **Static Bloom.** Neon dodge-'em-up: WASD moves, the mouse aims a short pulse that turns glitch blocks into
    flowers. Waves get denser; a high score per person.
 3. **Teacup Tower.** Drop teacups (mouse) onto a wobbling saucer stack; light physics, one miss and it topples.
+   **Built 2026-11-10 as a tower climber instead** (Doll's call): see the status above.
 4. **Beep Bop.** A rhythm tapper on four keys (D F J K) to beats the game makes itself, so there's no music
    licensing; levels made as small JSON files.
 

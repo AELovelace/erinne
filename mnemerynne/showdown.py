@@ -1,4 +1,4 @@
-"""Breakout and Snake showdowns: two racers play the same seeded game side by side, and up to five watchers see both
+"""Breakout, Snake and Teacup Tower showdowns: two racers play the same seeded game side by side, and up to five watchers see both
 boards live and can bet on who wins. Ported from Doll's GameMaker arcade broker, with its lobby rebuilt cleanly.
 
 A table (arcade_rooms, one JSON document) goes waiting -> racing -> result -> waiting:
@@ -43,7 +43,7 @@ BET_CHIPS = (1, 5, 10, 25, 100)
 BET_LIMIT = 500                  # the most one watcher may have riding on one race
 MAX_TABLES = 50                  # per game
 IDLE_SECONDS = 7200              # a table nobody has changed in this long closes, whoever is still "there"
-NAMES = {"breakout": "Breakout", "snake": "Snake"}
+NAMES = {"breakout": "Breakout", "snake": "Snake", "teacup-tower": "Teacup Tower"}
 
 
 def _key(code: str) -> tuple:

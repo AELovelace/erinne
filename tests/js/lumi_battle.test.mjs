@@ -60,7 +60,8 @@ test("a tree offers only its next skill, and says why the others can't be chosen
   assert.match(tree.row("heavy-paw").note, /already knows/);
   assert.deepEqual(tree.row("armor-break").send, { action: "learn", item: "armor-break" });
   assert.match(tree.row("armor-break").hint, /Power 60 · physical · cuts through armour · 2 points/);
-  assert.match(tree.row("brawn").note, /above it first/);
+  assert.match(tree.row("brawn").note, /Brawn needs Armor Break first/);
+  assert.deepEqual(tree.row("parry").send, { action: "learn", item: "parry" }, "A skill on the other arm is open too: Parry only needs Tough Fur");
   assert.match(tree.row("brawn").hint, /\+10% attack · 2 points/);
   assert.equal(tree.rows.length, 9);
 });

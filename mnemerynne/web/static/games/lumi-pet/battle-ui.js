@@ -71,11 +71,13 @@
       const tree = battle.trees.find(function (entry) { return "tree:" + entry.id === view; });
       const known = tree.nodes.filter(function (node) { return pet.skills.includes(node.id); }).length;
       return [back("skills", 1 + battle.trees.indexOf(tree), tree.name + " · " + progress.points + " points to spend")].concat(tree.nodes.map(function (node, index) {
-        const learned = pet.skills.includes(node.id), next = index === known, cost = rules.costs[index];
+        const learned = pet.skills.includes(node.id), cost = rules.costs[index];
+        const missing = (node.needs || []).filter(function (need) { return !pet.skills.includes(need); }).map(function (need) { return tree.nodes.find(function (other) { return other.id === need; }).name; });
+        const next = !learned && !missing.length; // Every skill that leads to it is learned (the Skills tab draws the whole tree).
         const row = { key: node.id, icon: learned ? "✓" : next ? "✧" : "·", name: node.name,
           hint: (node.kind === "move" ? describeMove(node) : describeBonus(node.bonus)) + " · " + (learned ? "learned" : cost + (cost === 1 ? " point" : " points")) };
         if (learned) row.note = "Lumi already knows " + node.name + ".";
-        else if (!next) row.note = "Learn the skills above it first.";
+        else if (!next) row.note = node.name + " needs " + missing.join(" and ") + " first.";
         else row.send = { action: "learn", item: node.id };
         return row;
       }));

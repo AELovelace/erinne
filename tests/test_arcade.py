@@ -136,6 +136,27 @@ def test_the_page_and_the_server_build_the_same_games():
     assert (played["score"], played["length"], played["alive"]) == (snake["score"], snake["length"], snake["alive"])
 
 
+def test_teacup_tower_climbs_must_fit_the_time():
+    assert arcade.check_tower(30, 60) == {"score": 30, "distance": 30}
+    assert arcade.check_tower(5, 0) == {"score": 5, "distance": 5}       # the first few floors take no time to check
+    with pytest.raises(arcade.Refused):
+        arcade.check_tower(200, 10)                                     # twenty floors a second
+
+
+def test_a_teacup_tower_showdown_goes_to_the_higher_floor(conn, people, clock):
+    alice, bob = people["alice"], people["bob"]
+    table = showdown.create(conn, "teacup-tower", f"user:{alice}", "Alice", alice)
+    assert table["name"] == "Alice's Teacup Tower table"
+    showdown.act(conn, "teacup-tower", table["code"], f"user:{bob}", "Bob", bob, "join")
+    showdown.act(conn, "teacup-tower", table["code"], f"user:{alice}", "Alice", alice, "ready")
+    showdown.act(conn, "teacup-tower", table["code"], f"user:{bob}", "Bob", bob, "ready")
+    runs = {uid: showdown.look(conn, "teacup-tower", table["code"], f"user:{uid}")["race"]["run"] for uid in (alice, bob)}
+    _claim(conn, alice, "teacup-tower", runs[alice], score=3)
+    _claim(conn, bob, "teacup-tower", runs[bob], score=5)              # five floors: all a climb this quick can claim
+    done = showdown.look(conn, "teacup-tower", table["code"], f"user:{bob}")
+    assert done["last"]["winner"] == "Bob" and coins.peek(conn, bob) == 1000 - arcade.ENTRY + 5
+
+
 # ---------------------------------------------------------------- solo runs
 def test_a_solo_run_costs_its_entry_and_pays_its_score_once(conn, people):
     from mnemerynne.db import transaction

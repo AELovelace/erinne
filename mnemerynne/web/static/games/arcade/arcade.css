@@ -1,7 +1,8 @@
 /* The arcade shell Breakout and Snake share (templates/games/arcade-lobby.html): the canvas full screen, and the
    menu or table panel floating over it. Colours come from the theme (common.css). */
 
-#gm[data-game="breakout"], #gm[data-game="snake"] { display: block; padding: 0; }    /* the canvas takes the whole frame */
+/* The canvas takes the whole frame: every game on this shell (games.py, extras "arcade/arcade.css") is listed here. */
+#gm[data-game="breakout"], #gm[data-game="snake"], #gm[data-game="teacup-tower"] { display: block; padding: 0; }
 .ar-stage { position: relative; display: flex; align-items: center; justify-content: center; min-height: 100vh; background: rgb(5, 6, 10); }
 #ar-canvas { display: block; width: min(100vw, calc(100vh * 1366 / 768)); height: auto; aspect-ratio: 1366 / 768; touch-action: none; }
 .ar-coins { position: absolute; top: .6rem; right: 1rem; margin: 0; color: var(--muted); font-size: .9rem; letter-spacing: .12em; text-transform: uppercase; }

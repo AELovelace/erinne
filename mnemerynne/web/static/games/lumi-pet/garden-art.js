@@ -266,6 +266,20 @@
     return base + presses(garden);
   }
 
+  function card(what, garden, decor) { // For the Collection tab: one flower, or one decoration in a little garden of its own, shown large.
+    if (what.kind === "flower") {
+      const flower = ((garden && garden.flowers) || []).find(function (one) { return one.id === what.id; });
+      if (!flower) return "";
+      return panel(circle(500, 258, 92, safe(flower.colour), 'opacity=".08"') + line("M500 392 V262", STEM, 7) + oval(520, 336, 22, 9, STEM, 'transform="rotate(-25 520 336)"') + head(flower, 500, 250, 7.5 / (flower.size || 1)) +
+        text(500, 150, (flower.sort === "perennial" ? "GROWS BACK" : "CUT FLOWER"), 9, "#c9aecf", 'letter-spacing="2"'), "FLOWER");
+    }
+    const only = { plots: [], plot_price: null, flowers: [], squeezed: 0, price: 1, powder: 0, decor: { placed: {} } };
+    for (let i = 0; i < 8; i++) only.plots.push({ flower: null, last: null, stage: "empty", ready_in: 0, grow: 0 });
+    only.decor.placed[what.slot] = what.id;
+    const out = placed(only, decor), bottom = TOP + 2 * (TILE_H + GAP) - GAP; // A small garden with just this one thing in it.
+    return panel('<svg x="346" y="134" width="308" height="270" viewBox="334 36 332 360" data-card="' + what.id + '">' + backdrop(false) + decorations(out, bottom, true) + machine(only, out.press) + plots(only, 0, false, 0, out.edging) + decorations(out, bottom, false) + "</svg>", "DECORATION");
+  }
+
   function spot(index) { // Where Lumi stands beside a plot, as { x, y } in the drawing: its lower left corner.
     const at = tile(index);
     return { x: at.x + 6, y: at.y + TILE_H - 6 };
@@ -275,5 +289,5 @@
     return garden.plots.map(function (plot, index) { return plot.flower && plot.stage === "growing" && plot.ready_in - passed > 0 ? [index, clock(plot.ready_in - passed)] : null; }).filter(Boolean);
   }
 
-  return { scene: scene, spot: spot, timers: timers, head: head, SHAPES: Object.keys(BLOOMS), DECOR: Object.keys(DECOR), CANS: CANS, PRESS: { x: 444 + PRESS_X, y: 150 } }; // PRESS: where Lumi stands to work the machine.
+  return { scene: scene, card: card, spot: spot, timers: timers, head: head, SHAPES: Object.keys(BLOOMS), DECOR: Object.keys(DECOR), CANS: CANS, PRESS: { x: 444 + PRESS_X, y: 150 } }; // PRESS: where Lumi stands to work the machine.
 });

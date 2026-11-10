@@ -1,7 +1,10 @@
 """Breakout and Snake, ported from Doll's GameMaker arcade (C:/Users/langley/GameMakerProjects/Roulette): what the
 server needs to check a run before it pays.
 
-Both games run in the browser (static/games/breakout/, static/games/snake/). The server hands each run a seed, and the
+Teacup Tower is our own climber in the same shell (Doll's idea): Lumi bounces up an endless tower of teacups. Its
+runs are checked like Breakout's, by what's possible: no more floors than the time allows.
+
+All three run in the browser (static/games/breakout/, static/games/snake/, static/games/teacup-tower/). The server hands each run a seed, and the
 page builds its levels or places its food from that seed with the same arithmetic as here, so the server can check:
 - Snake exactly: the page sends the moves it turned on, and snake_replay plays the whole game again here. The score
   paid is the one this file worked out, never the page's.
@@ -22,7 +25,7 @@ import time
 
 from mnemerynne import coins
 
-GAMES = ("breakout", "snake")
+GAMES = ("breakout", "snake", "teacup-tower")
 ENTRY = 25                                # what a solo run or a showdown race costs
 MODULUS = 2147483647                      # 2**31 - 1: every seed and random number lives below it
 
@@ -197,6 +200,18 @@ def check_snake(seed: int, turns: list[tuple[int, int]], moves: int, died: bool,
             "distance": played["score"] + max(0, played["length"] - 3) * 5}
 
 
+# ------------------------------------------------------------ Teacup Tower
+FLOORS_PER_SECOND = 6                     # well above the fastest climb (wall kicks and combos, about 4.6 floors a second)
+
+
+def check_tower(floors: int, seconds: float) -> dict:
+    """A claimed Teacup Tower climb, if the time allows it. The tower is the same for everyone with the seed, and the
+    page only claims the highest floor Lumi landed on."""
+    if floors > seconds * FLOORS_PER_SECOND + 5:
+        raise Refused("That climb was faster than the game allows.", 422)
+    return {"score": floors, "distance": floors}
+
+
 # -------------------------------------------------------------------- runs
 def start(conn: sqlite3.Connection, user_id: int, game: str, *, room: str | None = None, seed: int | None = None) -> dict:
     """A ticket for one run. A solo run pays ENTRY here (and forgets this person's unfinished solo runs: closing the
@@ -226,6 +241,8 @@ def finish(conn: sqlite3.Connection, user_id: int, game: str, run_id: int, claim
     if game == "snake":
         result = check_snake(row["seed"], [tuple(t) for t in claim.get("turns") or []], claim.get("moves") or 0,
                              bool(claim.get("died")), seconds)
+    elif game == "teacup-tower":
+        result = check_tower(claim.get("score") or 0, seconds)
     else:
         result = check_breakout(row["seed"], claim.get("score") or 0, claim.get("level") or 1, seconds)
     conn.execute("UPDATE arcade_runs SET finished = 1 WHERE id = ?", (run_id,))

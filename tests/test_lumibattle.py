@@ -356,13 +356,15 @@ def test_spells_need_mp(conn, alice):
 # --------------------------------------------------------------------------- skills, moves and mods
 def test_skill_points_come_one_a_level_and_trees_are_learned_in_order(conn, alice):
     _set(conn, alice, level=5)                                                  # 4 points
-    with pytest.raises(lumipet.PetError, match="skills before it"):
+    with pytest.raises(lumipet.PetError, match="Armor Break needs Heavy Paw first"):
         _do(conn, alice, "learn", item="armor-break")
     first = _do(conn, alice, "learn", item="heavy-paw")
     assert first["progress"]["points"] == 3 and first["pet"]["moves"] == ["pounce", "glow-spark", "heavy-paw"]
+    out = _do(conn, alice, "learn", item="armor-break")                       # a branch: no need for Tough Fur on the other arm
+    assert out["progress"]["points"] == 1 and len(out["pet"]["moves"]) == 4
+    with pytest.raises(lumipet.PetError, match="Parry needs Tough Fur first"):
+        _do(conn, alice, "learn", item="parry")
     _do(conn, alice, "learn", item="tough-fur")
-    out = _do(conn, alice, "learn", item="armor-break")
-    assert out["progress"]["points"] == 0 and len(out["pet"]["moves"]) == 4
     for item, why in (("brawn", "Not enough skill points"), ("heavy-paw", "already knows"), ("apple", "isn't a skill")):
         with pytest.raises(lumipet.PetError, match=why):
             _do(conn, alice, "learn", item=item)
@@ -451,3 +453,38 @@ def test_a_fight_through_the_page(on):
         assert on.post(url, json=body).status_code == 422                       # the page can't name an enemy, a result or a number
     on.cookies.clear()
     assert on.post("/api/media/games/lumi-pet/battle", json={"tier": "common"}).status_code == 401
+
+
+def test_every_tree_branches_in_its_own_shape_and_old_builds_still_stand(conn, alice, tmp_path):
+    shapes = set()
+    for tree in B.CATALOG["trees"]:
+        nodes, seen = tree["nodes"], set()
+        assert nodes[0]["needs"] == [] and all(node["needs"] for node in nodes[1:])
+        for node in nodes:
+            assert set(node["needs"]) <= seen                                   # only skills listed before it: no loops
+            seen.add(node["id"])
+        assert any(len(node["needs"]) > 1 for node in nodes) or tree["id"] in ("thief", "monk")      # most trees have a skill that needs two
+        assert len({tuple(node["at"]) for node in nodes}) == 8
+        assert any(sum(1 for other in nodes if node["id"] in other["needs"]) > 1 for node in nodes), tree["id"]     # and every tree forks somewhere
+        shapes.add(tuple((tuple(nodes.index(next(n for n in nodes if n["id"] == need)) for need in node["needs"]), *node["at"]) for node in nodes))
+    assert len(shapes) == 6                                                     # no two classes share a shape
+    for tree in B.CATALOG["trees"]:                                             # a tree learned top to bottom under the old rule is still a build
+        _set(conn, alice, level=50, skills=[], moves=["pounce"])
+        for node in tree["nodes"]:
+            _do(conn, alice, "learn", item=node["id"])
+    cheap = ["ember", "frost-shard", "gust", "shadow-bolt", "spirit-lance", "starfall"]            # the Mage's last spell without the middle school
+    _set(conn, alice, level=50, skills=[], moves=["pounce"])
+    for item in cheap:
+        _do(conn, alice, "learn", item=item)
+    assert B.spent(_pet(50, cheap)) == 22 - 2 - 3                               # Deep Mind and Mana Well left for later
+    good = json.loads((B.Path(B.__file__).parent / "lumipet_data" / "battle.json").read_text(encoding="utf-8"))
+    for change in (lambda d: d["trees"][0]["nodes"][1].update(needs=["comet-cleave"]),          # a skill that comes later
+                   lambda d: d["trees"][0]["nodes"][1].update(needs=[]),                        # a second root
+                   lambda d: d["trees"][0]["nodes"][1].update(at=[1, 0]),                       # two skills in one place
+                   lambda d: d["trees"][0]["nodes"][1].update(at=[3, 9]),
+                   lambda d: d["trees"][0]["nodes"][1].update(at=[0, 0])):                      # beside what it needs, not below it
+        data = json.loads(json.dumps(good))
+        change(data)
+        (tmp_path / "battle.json").write_text(json.dumps(data), encoding="utf-8")
+        with pytest.raises(ValueError, match="Lumi Pet's battles"):
+            B.load_catalog(tmp_path / "battle.json")

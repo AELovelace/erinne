@@ -5,7 +5,7 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import net from "node:net";
-import { checkLumiPet, checkLumiPetCapsules, checkLumiPetDoors, checkLumiPetFrame, checkLumiPetGarden } from "./lumi-pet-browser.mjs";
+import { checkLumiPet, checkLumiPetCapsules, checkLumiPetDoors, checkLumiPetFrame, checkLumiPetGarden, checkLumiPetSkills } from "./lumi-pet-browser.mjs";
 import { checkSharedTV } from "./casino-tv-browser.mjs";
 import { checkGameScaling } from "./game-scaling-browser.mjs";
 
@@ -48,13 +48,14 @@ try {
     const screen = await alice.evaluate(async () => (await fetch("/api/media/screens", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Shared TV test" }) })).json());
     await alice.goto(base + "/media/screen#games");
     await alice.waitForFunction(async () => (await (await fetch("/api/media/screens")).json()).screens.some(s => s.online));
-    await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 8);
+    await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 9);
     await alice.evaluate(() => [...document.querySelectorAll(".mc-card")].find(b => b.querySelector(".mc-label").textContent === "Slot Machines").click());
     await checkSharedTV(alice, screen, base);
   } else {
   await checkLumiPet(browser, alice, base);
   await checkLumiPetDoors(browser, alice, base);
   await checkLumiPetGarden(browser, alice, base);
+  await checkLumiPetSkills(browser, alice, base);
   await checkLumiPetCapsules(bob, base);
   await alice.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]); // Skip the ball's animation: the server's drops are what's under test.
   await alice.goto(base + "/media/games/prism-drop");
@@ -187,7 +188,7 @@ try {
   // A shelf per kind of game: Lumi Pet alone, the arcade games a remote can play, the four tables. A computer also shows Mouse & keyboard.
   await alice.waitForFunction(() => document.querySelectorAll(".mc-shelf .mc-grid").length >= 3);
   assert.deepEqual(await alice.$$eval(".mc-shelf", shelves => shelves.map(shelf => [shelf.querySelector("h2, h3, .mc-shelf-title")?.textContent || "", shelf.querySelector(".mc-grid").children.length])),
-    [["Lumi Pet", 1], ["Arcade", 3], ["Table games", 4], ["Mouse & keyboard", 1]]);
+    [["Lumi Pet", 1], ["Arcade", 4], ["Table games", 4], ["Mouse & keyboard", 1]]);
   await checkLumiPetFrame(alice);
   await alice.evaluate(() => { // The top bar keeps controls; the remote consumes the iframe's status message.
     window.casinoTestReport = "";
@@ -221,7 +222,7 @@ try {
   });
   await alice.goto(base + "/media/screen#games");
   await alice.waitForFunction(async () => (await (await fetch("/api/media/screens")).json()).screens.some(s => s.online));
-  await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 8);
+  await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 9);
   await alice.evaluate(() => [...document.querySelectorAll(".mc-card")].find(b => b.querySelector(".mc-label").textContent === "Slot Machines").click());
   const tvFrame = await (await alice.$("#mc-game-frame")).contentFrame();
   await tvFrame.waitForSelector("#casino-create:not([disabled])");
@@ -244,7 +245,7 @@ try {
 
   // Lumi Pet takes the remote's Previous and Next itself (they change its category); other games leave them to the music.
   await alice.goto(base + "/media/screen#games");
-  await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 8);
+  await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 9);
   await alice.evaluate(() => [...document.querySelectorAll(".mc-card")].find(b => b.querySelector(".mc-label").textContent === "Lumi Pet").click());
   const petFrame = await (await alice.waitForSelector("#mc-game-frame")).contentFrame();
   await petFrame.waitForSelector('[data-lp-row="cuddle"]');

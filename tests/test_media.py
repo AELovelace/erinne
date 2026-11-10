@@ -1184,8 +1184,8 @@ def test_built_in_games_open_from_media_and_show_on_a_remote(client, conn, direc
     for g in listed:
         shelves.setdefault(g["shelf"], []).append(g["slug"])
     assert list(shelves) == ["Lumi Pet", "Arcade", "Table games"] and shelves["Lumi Pet"] == ["lumi-pet"]
-    assert shelves["Table games"] == ["blackjack", "roulette", "horse-racing", "slots"] and shelves["Arcade"] == ["prism-drop", "stickbob-runner", "breakout", "snake"]
-    for slug in ("breakout", "snake"):                   # the GameMaker ports: the shared arcade shell, then the game
+    assert shelves["Table games"] == ["blackjack", "roulette", "horse-racing", "slots"] and shelves["Arcade"] == ["prism-drop", "stickbob-runner", "breakout", "snake", "teacup-tower"]
+    for slug in ("breakout", "snake", "teacup-tower"):                   # the GameMaker ports: the shared arcade shell, then the game
         page = client.get(f"/media/games/{slug}")
         assert page.status_code == 200 and 'id="ar-canvas"' in page.text
         assert page.text.index("games/arcade/arcade.js") < page.text.index(f"games/{slug}/game.js")

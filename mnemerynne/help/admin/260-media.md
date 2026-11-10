@@ -89,7 +89,7 @@ Media → Games includes Lumi Pet, a companion using the existing Media permissi
 
 StickBob Runner (Media → Games → Mouse & keyboard) pays coins at the end of each run: 1 per 10 m plus 1 per kill, recorded in `coin_transactions` as type `reward`, game `stickbob-runner`, with a reference `stickbob-runner:<user>:<run>`. Unlike Prism Drop, the run happens in the browser, so the server can only check that a claim is possible: each run gets a ticket when it starts (table `runner_runs`, migration **0070**, at most one per person), and a distance faster than StickBob can run, or a ticket used twice, pays nothing. Someone could still script a believable claim. **Settings → Entertainment → Media → Games → StickBob Runner coins a day** caps what one person can earn from it per day, by the server's date. It is **0, no limit**, unless you set it. Changes are logged with the other Media settings.
 
-## Breakout and Snake
+## Breakout, Snake and Teacup Tower
 
 Breakout and Snake (Media → Games → Arcade) are ported from Doll's GameMaker arcade. `python/export_roulette_arcade.py` copies their power-up icons, banner and sounds from the GameMaker project, and they share one shell (`static/games/arcade/`). They need no setup. Migration **0071** adds two tables:
 - `arcade_runs`: one ticket per run, with the seed the server handed out.
@@ -103,6 +103,7 @@ Breakout and Snake (Media → Games → Arcade) are ported from Doll's GameMaker
 **Checking scores:** the server never takes a score from the page.
 - **Snake:** the page sends only the moves it turned on, and `arcade.py` plays the whole game again from the run's seed.
 - **Breakout:** the page sends its score and level. The server rebuilds every level from the seed and refuses a score that doesn't fit the levels played, or that came faster than 6 bricks a second.
+- **Teacup Tower** is our own climber in the same shell, with Lumi from Lumi Pet as the climber. The page sends the highest floor reached, and the server refuses more than 6 floors a second; the fastest real climb is about 4.6. It has no files of its own beyond its scripts, because every sound is synthesized.
 - Racers' live boards go through memory only, never the database.
 
 ## Built-in multiplayer games

@@ -56,6 +56,11 @@ GAMES: tuple[Game, ...] = (
          description="Eat and grow without hitting the walls or yourself. Red is 1, yellow 5, aqua 10. Race someone in a showdown while others bet. 25 coins a run; every point pays one.",
          controls="Arrows turn · the first arrow starts · P pauses · menus: arrows and Enter",
          extras=("arcade/arcade.css", "arcade/arcade.js")),
+    # Our own climber in the same shell (Doll's idea, 2026-11-10), with Lumi Pet as the climber.
+    Game(slug="teacup-tower", name="Teacup Tower", icon="🫖",
+         description="Lumi bounces up an endless tower of teacups: steer her, run at the walls to fly higher, string big hops into combos, and keep ahead as the tower rises. Race someone in a showdown. 25 coins a run; every floor pays one.",
+         controls="◀ ▶ steer · she bounces by herself · faster sideways jumps higher · P pauses · menus: arrows and Enter",
+         extras=("arcade/arcade.css", "arcade/arcade.js")),
 )
 
 # Casino tables share one renderer and server rules; each still has its own Games card.

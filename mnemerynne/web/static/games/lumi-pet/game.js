@@ -2,7 +2,7 @@
    what the person chose (which snack, which toy) and draws what the server answers. Her needs run down while away. */
 (function () {
   "use strict";
-  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Pk = window.LumiPetPicker, Gd = window.LumiPetGarden, Ga = window.LumiPetGardenArt, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt;
+  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Pk = window.LumiPetPicker, Gd = window.LumiPetGarden, Ga = window.LumiPetGardenArt, Sk = window.LumiPetSkills, Sa = window.LumiPetSkillsArt, Cl = window.LumiPetCollection, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt;
   const $ = function (id) { return document.getElementById(id); };
   const room = $("lp-room"), list = $("lp-list"), houseArt = $("lp-house"), tabButtons = Array.from(document.querySelectorAll("[data-lp-tab]"));
   const API = "/api/media/games/lumi-pet/", OLD_SAVE = "mnemerynne-game:lumi-pet:companion";
@@ -18,6 +18,8 @@
   let lastOutfit = "";
   // The dungeon: the puzzle being worked on here, whether arrows drive it ("board") or the list, the finished trip
   // already read, a row waiting for a second press, and what the dungeon scene last drew.
+  const KEYS_SKILLS = "▲ ▼ ◀ ▶ move over the skills · Enter learns one<br>Enter on a learned move carries it or puts it away<br>⏮ ⏭ choose from this list<br>Mouse: press a skill to look, again to learn";
+  let skillCursor = null, skillFocus = "board", lastSkills = "", album = null, lastCard = ""; // The Skills tab's cursor, and the Collection tab's open shelf.
   const KEYS_GARDEN = "▲ ▼ ◀ ▶ move over the plots · Enter plants or trims<br>⏯ presses the powder · ⏮ ⏭ choose from this list<br>Keyboard: P presses, Page Up / Page Down<br>Mouse: press a plot, the press, or a watering can";
   const CAN_NOTES = [523.25, 659.25, 783.99, 440]; // One note per watering can.
   let lumiMoved = 0, lumiActUntil = 0, lumiFlip = false; // Lumi in the garden: when she last darted somewhere, and the little move she is making.
@@ -89,6 +91,8 @@
       return name === "home" ? Pk.homeRows(ctx) : Pk.closetRows(ctx);
     }
     if (name === "battle") return battleRows();
+    if (name === "skills") return Sk.rows({ snap: snap, cursor: skillCursor || snap.battle.trees[0].nodes[0].id, go: skillsGo });
+    if (name === "collection") return Cl.rows({ snap: snap, open: album, go: function (change) { album = change.open; picks[tab] = change.open ? 0 : (change.pick || 0); } });
     if (name === "garden") return Gd.rows({ garden: snap.garden, decor: snap.garden_decor, drawer: drawer, seed: seed, cursor: plotCursor, mini: mini, passed: passed(), pending: pending, level: pet.level, go: gardenGo });
     if (name === "dungeon") { // A dungeon fight and its result use the Battle lists; everything else is the dungeon's own.
       if ((snap.fight && snap.fight.status === "active") || finished) return battleRows();
@@ -112,7 +116,7 @@
   }
 
   function changeTab(to) { // Open a category afresh: its sub-lists closed, nothing half-chosen.
-    tab = to; opened = { home: null, closet: null }; flip = {}; battleView = null; pendingConfirm = null;
+    tab = to; opened = { home: null, closet: null }; flip = {}; battleView = null; pendingConfirm = null; album = null; skillFocus = "board";
   }
 
   function battleRows() { // The Battle tab's lists (battle-ui.js); also used by the Dungeon tab while a fight is on.
@@ -170,6 +174,64 @@
   // ---- The Stardust Garden (mnemerynne/lumigarden.py; rows and words in garden-ui.js, drawing in garden-art.js).
   // Its tab works like a dungeon trip: the garden is drawn over the room and the right panel is the garden's own.
   // Arrows move over the plots, Enter plants or trims, Play/Pause presses the powder, Prev/Next move through the list.
+  // ---- The Skills tab (rules in mnemerynne/lumibattle.py; layout and words in skills-ui.js, drawing in skills-art.js).
+  // All six class trees on one page, drawn over the room. Like the garden: the arrows move over the skills, Enter
+  // learns one (or carries or puts away a move), and Prev/Next move through the list beside it.
+  function treeing() { return TABS[tab] === "skills" && !exploring(); }
+
+  function skillEnter() { // Enter, or a second press of the mouse, on the skill under the cursor.
+    const what = Sk.choice(snap, skillCursor);
+    if (what.say) { say(what.say); return; }
+    submit({ key: "act", name: what.name, label: what.name, send: what.send });
+  }
+
+  function skillsGo(change) { if (change.leave) { changeTab(0); picks[tab] = 0; } }
+
+  function skillsKey(action) { // The keyboard and remote on the skill tree.
+    const moving = action === "up" || action === "down" || action === "left" || action === "right";
+    if (moving) { skillCursor = Sk.move(snap.battle, skillCursor, action); skillFocus = "board"; picks[tab] = 0; }
+    else if (action === "next" || action === "prev") { const many = rows().length; picks[tab] = (picks[tab] + (action === "prev" ? many - 1 : 1)) % many; skillFocus = "list"; }
+    else if (action === "enter") { if (skillFocus === "board") skillEnter(); else choose(); return; }
+    render();
+  }
+
+  function skillClick(name) { // A press on a skill: the first press looks at it, a second press on the same one acts.
+    const id = name.split(":")[1];
+    if (name.indexOf("skill:") !== 0 || busy) return;
+    if (id === skillCursor && skillFocus === "board") skillEnter(); else { skillCursor = id; skillFocus = "board"; picks[tab] = 0; }
+    render();
+  }
+
+  function drawSkills() { // The skill trees over the room while their tab is open.
+    const on = Boolean(snap && treeing());
+    room.dataset.skills = String(on);
+    if (!on) { lastSkills = ""; return; }
+    if (!skillCursor || !Sk.find(snap.battle, skillCursor)) skillCursor = snap.battle.trees[0].nodes[0].id;
+    $("gm").dataset.walking = "true"; $("lp-keys").innerHTML = KEYS_SKILLS; // Fixed text from this file.
+    $("lp-dungeon").style.display = "";
+    const lines = Sk.lines(snap, skillCursor), told = "skills|" + lines.join("|");
+    if (told !== lastStory) {
+      lastStory = told;
+      const story = $("lp-story"); story.textContent = "";
+      lines.forEach(function (words, index) { const line = document.createElement("p"); line.textContent = words; if (index === 1) line.className = "lp-scene"; story.appendChild(line); });
+    }
+    const signature = JSON.stringify([snap.pet.skills, snap.pet.moves, snap.progress.points, skillCursor, skillFocus]);
+    if (signature === lastSkills) return;
+    lastSkills = signature; lastDungeon = ""; lastGarden = "";
+    $("lp-dungeon").innerHTML = Sa.scene(snap, { cursor: skillCursor, focused: skillFocus === "board" }); // Markup authored in skills-art.js; names are drawn as text by the list, not here.
+  }
+
+  function drawCard(pick) { // The Collection tab: a flower or a garden decoration shown large while its row is highlighted.
+    const card = TABS[tab] === "collection" && pick && pick.card ? pick.card : null;
+    room.dataset.card = String(Boolean(card));
+    if (!card) { lastCard = ""; return; }
+    $("lp-dungeon").style.display = "";
+    const signature = JSON.stringify(card);
+    if (signature === lastCard) return;
+    lastCard = signature; lastDungeon = ""; lastGarden = ""; lastSkills = "";
+    $("lp-dungeon").innerHTML = Ga.card(card, snap.garden, snap.garden_decor); // Markup authored in garden-art.js.
+  }
+
   function gardening() { return TABS[tab] === "garden" && !exploring(); }
   function passed() { return serverNow() - snap.now; } // How long ago the server told us its times.
 
@@ -374,7 +436,7 @@
     room.dataset.puzzle = String(Boolean(here && run && (run.facing || (run.game && run.game.kind === "match" && !run.room.done))));
     art.style.display = run ? "" : "none"; bar.hidden = !run;
     const told = run ? JSON.stringify([run.id, run.scene, run.story]) : "";
-    if (told !== lastStory && !(snap && gardening())) { // The story panel: what this room is like, then the tale so far (its newest line is the message under it).
+    if (told !== lastStory && !(snap && (gardening() || treeing()))) { // The story panel: what this room is like, then the tale so far (its newest line is the message under it).
       lastStory = told;
       const story = $("lp-story"); story.textContent = "";
       (run ? [run.scene].concat((run.story || []).slice(0, -1)) : []).forEach(function (words, index) {
@@ -455,7 +517,7 @@
         return button;
       }));
     }
-    const boardHasIt = (walking() && focus === "board" && (play.board || play.cursor !== undefined)) || (gardening() && gardenFocus === "board" && !drawer); // Enter would act on the puzzle or the plot, not the list.
+    const boardHasIt = (walking() && focus === "board" && (play.board || play.cursor !== undefined)) || (gardening() && gardenFocus === "board" && !drawer) || (treeing() && skillFocus === "board"); // Enter would act on the puzzle or the plot, not the list.
     Array.from(list.children).forEach(function (button, index) {
       const chosen = index === picks[tab] && !boardHasIt;
       if (chosen && button.getAttribute("aria-pressed") !== "true" && list.scrollHeight > list.clientHeight) button.scrollIntoView({ block: "nearest" }); // Long lists follow the remote.
@@ -501,10 +563,12 @@
     picks[tab] = Math.min(picks[tab], Math.max(0, current.length - 1)); // A list that shrank keeps a valid selection.
     drawList(current);
     const pick = current[picks[tab]];
-    drawHouse(TABS[tab] === "home" && pick && pick.preview);
-    drawOutfit(TABS[tab] === "closet" && pick && pick.wear);
+    drawHouse((TABS[tab] === "home" || TABS[tab] === "collection") && pick && pick.preview); // The Collection tab shows a house object in the room, and clothes on Lumi, as the Home and Closet tabs do.
+    drawOutfit((TABS[tab] === "closet" || TABS[tab] === "collection") && pick && pick.wear);
     drawDungeon();
     drawGarden();
+    drawSkills();
+    drawCard(pick);
     drawFight();
     const doing = snap.fight ? "fighting " + snap.fight.enemy.name : task ? BUSY[task.kind] : scene.asleep ? "dreaming" : mood.need ? "needs " + mood.need : "content";
     const report = "Lumi · " + doing + " · " + tabButtons[tab].textContent + ": " + (pick ? pick.name : "nothing yet") + " · Enter to choose";
@@ -588,8 +652,8 @@
         if (data.pet.storyteller !== "live") say("The storyteller is the library: the lines that came with the game.");
         else G.api(API + "dungeon/tale").then(function (found) { say(found.live ? "Live storytelling is on. Each dungeon moment gets a fresh line from " + (found.live === "claude" ? "Claude, with your own key." : "BFGguf.") : "Live storytelling needs your own Claude key (Preferences) or BFGguf. Until then the library tells the story."); }).catch(function () { /* the setting is saved either way */ });
       }
-      else if (send.action === "learn") { say("Lumi learned " + row.name + "!"); effect("play", "✧ ✦"); }
-      else if (send.action === "equip") { say(data.pet.moves.includes(send.item) ? row.name + " is ready for the next fight." : row.name + " is put away."); }
+      else if (send.action === "learn") { say("Lumi learned " + (row.label || row.name) + "!"); effect("play", "✧ ✦"); }
+      else if (send.action === "equip") { say(data.pet.moves.includes(send.item) ? (row.label || row.name) + " is ready for the next fight." : (row.label || row.name) + " is put away."); }
       else if (send.action === "mod") { say(send.item ? (data.said ? "Bought and fitted: " : "Fitted: ") + row.name + "." : "That slot is empty now."); effect("cuddle", "⚙"); }
       else if (send.action === "potions") { say("One potion, tucked away. Lumi carries " + data.pet.potions + "."); }
       else if (send.action === "heal") { say("A stretch and a shake. Lumi is up and ready."); effect("rest", "☀"); }
@@ -605,6 +669,7 @@
     if (!snap) return;
     const arrow = ["left", "right", "up", "down"].indexOf(action) >= 0;
     if (action === "next" || action === "prev" || action === "play" || arrow) pendingConfirm = null; // Only a second Enter confirms.
+    if (treeing()) { skillsKey(action); return; } // The skill tree has its own keys too: the arrows move over the skills.
     if (gardening()) { gardenKey(action); return; } // The garden has its own keys: the arrows walk the plots, Play is the press.
     if ((action === "next" || action === "prev") && exploring()) { // On a trip: the list's cursor (the arrows walk, and the other tabs wait at home).
       const count = rows().length;
@@ -655,6 +720,7 @@
   $("lp-dungeon").addEventListener("pointerdown", function (event) { // Mouse and touch in the garden. On the way down, not on the click: the drawing is
     const hit = event.target.closest("[data-click]"); // redrawn as flowers grow, and a click that began on a shape since replaced would be lost.
     if (hit && snap && gardening()) gardenClick(hit.dataset.click);
+    else if (hit && snap && treeing()) skillClick(hit.dataset.click);
   });
 
   tabButtons.forEach(function (button, index) { // Tabs can be tapped too.

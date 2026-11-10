@@ -293,6 +293,7 @@
     const wasRacing = table && table.phase === "racing";
     if (!table || table.revision !== snapshot.revision) G.showCoins("ar-coins");   // a bet, an entry or a win may have moved coins
     table = snapshot;
+    if (table.race) mod.raceSeed = table.race.seed;            // a game that redraws others' boards from the seed needs it
     if (table.phase === "racing") {
       const racing = table.role === "p1" || table.role === "p2";
       if (racing && table.race.run && raceRun !== table.race.run) {   // my race begins

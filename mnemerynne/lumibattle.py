@@ -97,8 +97,20 @@ def load_catalog(path: Path | None = None) -> dict:
         fresh(tree, "trees")
         if len(tree.get("nodes", [])) != len(NODE_COSTS):
             raise ValueError(f"Lumi Pet's battles: the {tree['id']} tree needs {len(NODE_COSTS)} skills.")
+        places, earlier = set(), {}                       # places taken, and each earlier skill's row
         for node in tree["nodes"]:
             fresh(node, f"{tree['id']} skills")
+            # Where it sits in its tree, and which skills lead to it. A skill may only need ones listed before it, so
+            # a tree can never loop, and anything learned under an older, simpler tree is still a valid build.
+            needs, at = node.get("needs"), node.get("at")
+            if not isinstance(needs, list) or any(need not in earlier for need in needs) or (not needs and earlier):
+                raise ValueError(f"Lumi Pet's battles: {node['id']} must need skills listed before it in its tree (only the first needs none).")
+            if not isinstance(at, list) or len(at) != 2 or not all(isinstance(n, int) for n in at) or not (0 <= at[0] <= 2 and 0 <= at[1] <= 5) or tuple(at) in places:
+                raise ValueError(f"Lumi Pet's battles: {node['id']} needs its own place in the tree: [column 0-2, row 0-5].")
+            if any(earlier[need] >= at[1] for need in needs):
+                raise ValueError(f"Lumi Pet's battles: {node['id']} must sit on a lower row than the skills it needs, so the tree reads downwards.")
+            places.add(tuple(at))
+            earlier[node["id"]] = at[1]
             if node.get("kind") == "move":
                 _check_move(node, node["id"])
             elif node.get("kind") == "passive":
@@ -503,9 +515,9 @@ def progress(conn: sqlite3.Connection, user_id: int, pet: dict, action: str, ite
             raise BattleError("That isn't a skill.")
         if item in pet["skills"]:
             raise BattleError("Lumi already knows that.")
-        tree = next(t for t in CATALOG["trees"] if t["id"] == node["tree"])
-        if any(earlier["id"] not in pet["skills"] for earlier in tree["nodes"][:node["index"]]):
-            raise BattleError("Learn the skills before it in that tree first.")
+        missing = [_NODES[need]["name"] for need in node["needs"] if need not in pet["skills"]]      # the skills that lead to it
+        if missing:
+            raise BattleError(f"{node['name']} needs {' and '.join(missing)} first.")
         if NODE_COSTS[node["index"]] > points(pet):
             raise BattleError("Not enough skill points yet. Each level brings one more.")
         pet["skills"].append(item)

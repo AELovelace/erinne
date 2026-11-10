@@ -399,7 +399,7 @@ export async function checkLumiPetDoors(browser, page, base) { // Every kind of 
       await tab.waitForSelector(row(made.rows[0]));
       assert.deepEqual(errors, [], made.name + ": nothing threw on the page");
       if (made.name === "lamps") await tab.screenshot({ path: "runs/casino-browser/lumi-pet-door.png", fullPage: true });
-    } finally { await tab.close(); }
+    } finally { if (errors.length) console.log("Page errors:", errors.join(" | ")); await tab.close(); }
   }
   console.log("Lumi Pet: crate, lamp, rune and key doors and the card game draw, take the keyboard and throw nothing");
 }
@@ -554,5 +554,74 @@ export async function checkLumiPetGarden(browser, page, base) { // The Stardust 
     assert.equal(await tab.$eval("#lp-dungeon", el => el.style.display), "none", "Back with Lumi, the garden's drawing is put away");
     assert.deepEqual(errors, [], "Nothing threw on the page");
     console.log("Lumi Pet garden: planting and trimming by keyboard and mouse, the press, fertilizing, watering, drawers and a reload passed");
-  } finally { await tab.close(); }
+  } finally { if (errors.length) console.log("Page errors:", errors.join(" | ")); await tab.close(); }
+}
+
+export async function checkLumiPetSkills(browser, page, base) { // The skill tree page and the collection, in a real browser.
+  const tab = await browser.newPage();
+  const errors = [];
+  tab.on("pageerror", error => errors.push(String(error)));
+  const cursor = () => tab.$eval("#lp-dungeon [data-cursor]", el => el.dataset.cursor);
+  try {
+    await tab.setCookie(...await page.cookies());
+    await tab.setViewport({ width: 1440, height: 1000 });
+    await tab.goto(base + "/media/games/lumi-pet");
+    await tab.waitForSelector(row("cuddle"));
+    assert.equal((await tab.$$("[data-lp-tab]")).length, 12);
+    await tab.click('[data-lp-tab="skills"]'); // All six trees on one page, with the panel to itself like the garden.
+    await tab.waitForSelector(row("act"));
+    assert.equal(await tab.$eval(".lp-tabs", el => getComputedStyle(el).display), "none");
+    assert.equal((await tab.$$("#lp-dungeon [data-skill]")).length, 48);
+    assert.equal((await tab.$$("#lp-dungeon [data-tree]")).length, 6);
+    assert.ok(await tab.$eval(".lp-pet-wrap", el => getComputedStyle(el).opacity === "0"), "Lumi steps aside for the trees");
+    assert.equal(await cursor(), "heavy-paw");
+    assert.match(await tab.$eval("#lp-story", el => el.textContent), /skill points? to spend.*Fighter: Heavy Paw/s);
+    await tab.keyboard.press("ArrowDown"); // The arrows walk the web.
+    assert.equal(await cursor(), "tough-fur");
+    await tab.keyboard.press("ArrowRight");
+    assert.equal(await cursor(), "armor-break");
+    await tab.keyboard.press("Enter"); // A skill behind another says what it needs (or, with points and its root learned, would be learned).
+    await tab.waitForFunction(() => /needs Heavy Paw first|costs \d skill points?|Lumi learned/.test(document.getElementById("lp-message").textContent));
+    await tab.click('[data-click="skill:starfall"]'); // The mouse: a press looks at a skill.
+    await tab.waitForFunction(() => document.querySelector("#lp-dungeon [data-cursor]").dataset.cursor === "starfall");
+    assert.match(await tab.$eval("#lp-story", el => el.textContent), /Mage: Starfall.*Costs 5 points · needs/s);
+    assert.match(await tab.$eval(row("act"), el => el.textContent), /Starfall/);
+    await tab.keyboard.press("PageDown"); // Previous and Next reach the list.
+    assert.ok(await tab.$(row("leave") + '[aria-pressed="true"]') || await tab.$(row("respec") + '[aria-pressed="true"]'));
+    await tab.screenshot({ path: "runs/casino-browser/lumi-pet-skills.png", fullPage: true });
+    await tab.click(row("leave"));
+    await tab.waitForSelector(row("cuddle"));
+    assert.equal(await tab.$eval("#lp-room", el => el.dataset.skills), "false");
+    assert.equal(await tab.$eval("#lp-dungeon", el => el.style.display), "none");
+
+    await tab.click('[data-lp-tab="collection"]'); // The album: shelves, counts, and a look at each thing.
+    await tab.waitForSelector(row("shelf-flowers"));
+    assert.match(await tab.$eval(row("all"), el => el.textContent), /Collected: \d+ of \d+/);
+    assert.notEqual(await tab.$eval(".lp-tabs", el => getComputedStyle(el).display), "none", "The collection is an ordinary tab");
+    await tab.click(row("shelf-flowers"));
+    await tab.waitForSelector(row("have-moondaisy"));
+    assert.equal((await tab.$$('[data-lp-row^="have-"]')).length, 42);
+    await tab.keyboard.press("ArrowDown"); // Highlighting a flower shows it large.
+    await tab.waitForFunction(() => document.getElementById("lp-room").dataset.card === "true" && document.getElementById("lp-dungeon").textContent.includes("FLOWER"));
+    await tab.screenshot({ path: "runs/casino-browser/lumi-pet-collection.png", fullPage: true });
+    await tab.click(row("back"));
+    await tab.waitForSelector(row("shelf-closet"));
+    assert.equal(await tab.$eval("#lp-room", el => el.dataset.card), "false");
+    await tab.click(row("shelf-garden"));
+    await tab.waitForSelector(row("have-fence-0-snowy"));
+    await tab.keyboard.press("ArrowDown");
+    await tab.waitForFunction(() => document.getElementById("lp-dungeon").textContent.includes("DECORATION"));
+    await tab.click(row("back"));
+    await tab.click(row("shelf-closet")); // Clothes are tried on Lumi as their rows are highlighted.
+    await tab.waitForSelector('[data-lp-row^="have-acc-"]');
+    const bare = await tab.$eval("#lp-acc-front", el => el.innerHTML + document.getElementById("lp-acc-back").innerHTML);
+    let tried = bare; // (She may already be wearing the first thing on the shelf, so walk down until her outfit changes.)
+    for (let i = 0; i < 6 && tried === bare; i++) {
+      await tab.keyboard.press("ArrowDown");
+      tried = await tab.$eval("#lp-acc-front", el => el.innerHTML + document.getElementById("lp-acc-back").innerHTML);
+    }
+    assert.notEqual(tried, bare, "A highlighted accessory is shown on Lumi");
+    assert.deepEqual(errors, [], "Nothing threw on the page");
+    console.log("Lumi Pet skills and collection: six trees drawn, walked by arrows and mouse; the album's shelves, cards and previews passed");
+  } finally { if (errors.length) console.log("Page errors:", errors.join(" | ")); await tab.close(); }
 }
