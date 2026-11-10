@@ -229,6 +229,7 @@ def snapshot(conn: sqlite3.Connection, user_id: int, pet: dict, now: int) -> dic
             "coins": coins.peek(conn, user_id), "catalog": CATALOG, "house": HOUSE, "closet": CLOSET,
             "battle": {key: lumibattle.CATALOG[key] for key in ("basics", "trees", "mods")} | {"rules": lumibattle.RULES},
             "progress": lumibattle.summary(pet), "fight": lumibattle.current(conn, user_id),
+            "potions_ready": lumidungeon.potions_ready(lumidungeon.current(conn, user_id), pet),
             "dungeon": {"environments": lumidungeon.open_environments(pet), "run": lumidungeon.view(lumidungeon.current(conn, user_id), pet)}}
 
 
@@ -473,11 +474,17 @@ def fight_act(conn: sqlite3.Connection, user_id: int, battle_id: int, turn: int,
     The answer carries the fight as it now stands, including one that just ended."""
     now = now_ms() if now is None else now
     pet = load(conn, user_id, now)
+    run = lumidungeon.current(conn, user_id)
+    found = action == "potion" and run is not None and run["fight"] == battle_id and run["satchel"]["potions"] > 0
+    if found:
+        pet["potions"] += 1                               # lend her one from the satchel for this turn; a refusal rolls it all back
     try:
         fight = lumibattle.act(conn, user_id, pet, battle_id, turn, action, now, rng)
     except lumibattle.BattleError as refused:
         raise PetError(str(refused)) from None
-    run = lumidungeon.current(conn, user_id)
+    if found:
+        run["satchel"]["potions"] -= 1                    # the potion she drank was the found one
+        lumidungeon._save(conn, user_id, run)
     if run and run["fight"] == battle_id and fight["status"] != "active":
         lumidungeon.after_fight(conn, user_id, run, fight)       # a dungeon fight: clear the room, step back, or end the trip
         _narrate(conn, user_id, rng)

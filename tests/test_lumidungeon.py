@@ -255,9 +255,14 @@ def test_walls_are_solid_and_treasure_goes_in_the_satchel_once(conn, alice):
             _do(conn, alice, "move", way=closed)
     path = _path(run, "treasure")
     for way in path:
-        out = _do(conn, alice, "move", way=way)["dungeon"]["run"]
-    loot = run["rooms"][out["at"]]["loot"]
-    assert out["satchel"]["coins"] == loot["coins"] > 0 and out["event"]["scenario"] == "treasure" and str(loot["coins"]) in out["say"]
+        seen = _do(conn, alice, "move", way=way)["dungeon"]["run"]
+    loot = run["rooms"][seen["at"]]["loot"]
+    assert seen["satchel"]["coins"] == 0 and seen["event"]["scenario"] == "see_treasure" and not seen["room"]["done"]     # it waits to be opened
+    assert seen["say"] == "There is a chest here, shut tight and waiting." and "loot" not in json.dumps(seen)
+    out = _do(conn, alice, "take")["dungeon"]["run"]
+    assert out["satchel"]["coins"] == loot["coins"] > 0 and out["event"]["scenario"] == "treasure" and str(loot["coins"]) in out["say"] and out["room"]["done"]
+    with pytest.raises(lumipet.PetError, match="nothing here to pick up"):
+        _do(conn, alice, "take")
     back = _do(conn, alice, "move", way=D.BACK[path[-1]])["dungeon"]["run"]
     again = _do(conn, alice, "move", way=path[-1])["dungeon"]["run"]
     assert again["satchel"]["coins"] == back["satchel"]["coins"] == loot["coins"] and again["event"]["scenario"] == "again"
@@ -288,6 +293,32 @@ def test_walking_home_banks_the_satchel_once(conn, alice):
         placed = lumipet.act(conn, alice, "decorate", item=trophy, now=T0)      # a found trophy goes on the bracket for nothing
     assert placed["pet"]["house"]["trophy"] == trophy and placed["coins"] == 1120
     assert _start(conn, alice, "crystal-cavern")["depth"] == 1                  # a finished trip makes way for the next
+
+
+def test_a_key_lies_where_it_is_until_she_picks_it_up_and_can_be_left_for_later(conn, alice):
+    _start(conn, alice)
+    run = _clear(_run(conn, alice))
+    spot = next(key for key, room in run["rooms"].items() if room["kind"] == "empty" and key != run["at"])
+    run["rooms"][spot].update(kind="key", done=False, loot={"keys": 1})
+    _put(conn, alice, run)
+    path = _path(run, "key")
+    for way in path:
+        seen = _do(conn, alice, "move", way=way)["dungeon"]["run"]
+    assert seen["event"]["scenario"] == "see_key" and seen["satchel"]["keys"] == 0
+    away = _do(conn, alice, "move", way=D.BACK[path[-1]])["dungeon"]["run"]     # walk off without it
+    assert away["satchel"]["keys"] == 0
+    back = _do(conn, alice, "move", way=path[-1])["dungeon"]["run"]
+    assert back["event"]["scenario"] == "see_key", "still lying there"
+    taken = _do(conn, alice, "take")["dungeon"]["run"]
+    assert taken["satchel"]["keys"] == 1 and taken["event"]["scenario"] == "key" and taken["room"]["done"]
+    with pytest.raises(lumipet.PetError, match="nothing here to pick up"):
+        _do(conn, alice, "take")
+
+
+def test_nothing_can_be_taken_from_a_room_with_nothing_in_it(conn, alice):
+    _start(conn, alice)
+    with pytest.raises(lumipet.PetError, match="nothing here to pick up"):
+        _do(conn, alice, "take")
 
 
 def test_trophies_and_dungeon_mods_cant_be_bought(conn, alice):
@@ -436,6 +467,43 @@ def test_a_potion_between_fights_uses_her_own_and_only_when_it_helps(conn, alice
     assert out["dungeon"]["run"]["hp"] == 5 + out["dungeon"]["run"]["hpMax"] // 2 and out["pet"]["potions"] == 1
 
 
+def test_a_potion_found_on_the_trip_counts_at_once_and_is_drunk_before_her_own(conn, alice):
+    _start(conn, alice)
+    _set_pet(conn, alice, potions=1)
+    run = _run(conn, alice)
+    run["hp"] = 5
+    run["satchel"]["potions"] = 1
+    _put(conn, alice, run)
+    with transaction(conn):
+        assert lumipet.state(conn, alice, T0)["potions_ready"] == 2            # one of hers, one found
+    first = _do(conn, alice, "potion")
+    assert first["dungeon"]["run"]["satchel"]["potions"] == 0 and first["pet"]["potions"] == 1 and first["potions_ready"] == 1
+    run = _run(conn, alice)
+    run["hp"] = 5
+    _put(conn, alice, run)
+    second = _do(conn, alice, "potion")
+    assert second["pet"]["potions"] == 0 and second["potions_ready"] == 0
+    conn.execute("DELETE FROM lumi_runs")
+    with transaction(conn):
+        assert lumipet.state(conn, alice, T0)["potions_ready"] == 0
+
+
+def test_a_found_potion_can_be_drunk_in_a_dungeon_fight(conn, alice):
+    _start(conn, alice)
+    _only_one_enemy(conn, alice, hp=20)
+    run = _run(conn, alice)
+    run["satchel"]["potions"] = 1
+    _put(conn, alice, run)
+    fight = _walk_into_enemy(conn, alice)["fight"]
+    with transaction(conn):
+        out = lumipet.fight_act(conn, alice, fight["id"], fight["turn"], "potion", T0, Dice(chance=0.999))     # the enemy's reply misses
+    assert out["fight"]["player"]["hp"] == 20 + out["fight"]["player"]["hpMax"] // 2
+    assert out["pet"]["potions"] == 0 and out["dungeon"]["run"]["satchel"]["potions"] == 0 and out["potions_ready"] == 0
+    with transaction(conn), pytest.raises(lumipet.PetError, match="No potions left"):
+        lumipet.fight_act(conn, alice, fight["id"], out["fight"]["turn"], "potion", T0, Dice(chance=0.999))
+    assert _run(conn, alice)["satchel"]["potions"] == 0 and _run(conn, alice)["fight"] == fight["id"]          # a refusal changed nothing
+
+
 # --------------------------------------------------------------------------- locks
 def _face_vault(conn, uid, lock):
     """Clear the floor, fit the vault with a given lock, and walk Lumi up to its door."""
@@ -462,8 +530,10 @@ def test_a_key_door_wants_a_key_from_this_floor(conn, alice):
     run["satchel"]["keys"] = 1
     run["facing"] = vault
     _put(conn, alice, run)
-    opened = _do(conn, alice, "unlock")["dungeon"]["run"]
-    assert opened["at"] == vault and opened["satchel"]["keys"] == 0 and opened["satchel"]["coins"] == 90
+    inside = _do(conn, alice, "unlock")["dungeon"]["run"]
+    assert inside["at"] == vault and inside["satchel"]["keys"] == 0 and inside["satchel"]["coins"] == 0 and inside["event"]["scenario"] == "see_vault"
+    opened = _do(conn, alice, "take")["dungeon"]["run"]
+    assert opened["satchel"]["coins"] == 90
     assert opened["satchel"]["trophies"] == [D.TROPHIES[opened["env"]["id"]][0]["id"]] and opened["event"]["scenario"] == "vault"
     assert "Moon bell" in opened["say"] or "Lantern charm" in opened["say"]
     with pytest.raises(lumipet.PetError, match="no locked door"):

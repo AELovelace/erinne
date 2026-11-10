@@ -315,6 +315,11 @@ def _save(conn: sqlite3.Connection, user_id: int, run: dict) -> None:
                  "updated_at = datetime('now')", (user_id, json.dumps(run, separators=(",", ":"))))
 
 
+def potions_ready(run: dict | None, pet: dict) -> int:
+    """How many potions Lumi can drink right now: her own, plus any found on a trip that is still under way."""
+    return pet["potions"] + (run["satchel"]["potions"] if run and not run["over"] else 0)
+
+
 def open_environments(pet: dict) -> list[dict]:
     """Every environment, each marked with whether Lumi's level has opened it yet."""
     return [{**{k: env[k] for k in ("id", "name", "family", "about", "opens", "palette")}, "open": pet["level"] >= env["opens"]}
@@ -381,9 +386,7 @@ def _enter(conn: sqlite3.Connection, user_id: int, pet: dict, run: dict, to: str
         run["event"] = {"scenario": "enemy", "enemy": entry["name"]}
         return fight
     if room["kind"] in ("treasure", "key", "vault") and not room["done"]:
-        room["done"] = True
-        taken = _take(run, room["loot"])
-        run["event"] = {"scenario": "key" if room["kind"] == "key" else room["kind"], "loot": taken}
+        run["event"] = {"scenario": "see_" + room["kind"]}      # it waits here until she chooses to take it
     elif room["kind"] == "game" and not room["done"]:
         run["event"] = {"scenario": "game_" + room["game"]["kind"]}
     else:
@@ -455,6 +458,11 @@ def act(conn: sqlite3.Connection, user_id: int, pet: dict, action: str, now: int
         if opened:
             door["lock"] = {"kind": lock["kind"]}                       # the puzzle is spent; forget its answer
             _enter(conn, user_id, pet, run, run["facing"], now, rng)
+    elif action == "take":
+        if room["kind"] not in ("treasure", "key", "vault") or room["done"]:
+            raise DungeonError("There's nothing here to pick up.")
+        room["done"] = True
+        run["event"] = {"scenario": room["kind"], "loot": _take(run, room["loot"])}
     elif action == "back":
         run["facing"] = None
         run["event"] = {"scenario": "again"}
@@ -489,9 +497,12 @@ def act(conn: sqlite3.Connection, user_id: int, pet: dict, action: str, now: int
         numbers = lumibattle.stats(pet)
         if run["hp"] >= numbers["hp"]:
             raise DungeonError("Lumi is already at full health.")
-        if pet["potions"] < 1:
+        if run["satchel"]["potions"] > 0:                             # one she found down here goes first: it isn't hers yet anyway
+            run["satchel"]["potions"] -= 1
+        elif pet["potions"] > 0:
+            pet["potions"] -= 1
+        else:
             raise DungeonError("Lumi has no potions with her.")
-        pet["potions"] -= 1
         run["hp"] = min(numbers["hp"], run["hp"] + max(1, numbers["hp"] // 2))
         run["event"] = {"scenario": "potion"}
     elif action == "descend":

@@ -86,6 +86,11 @@ export async function checkLumiPet(browser, page, base) { // Exercise real contr
   await page.waitForSelector(row("leave"));
   assert.equal(await page.$eval('[data-lp-tab="dungeon"]', el => el.getAttribute("aria-selected")), "true");
   assert.equal(await text(page, "#lp-message"), arrival);
+  await page.click('[data-lp-tab="toys"]'); // On another tab the trip is still under way and Lumi is still in view.
+  assert.equal(await page.$eval("#lp-room", el => el.dataset.dungeon + el.dataset.puzzle), "truefalse");
+  assert.ok(await page.$eval(".lp-pet-wrap", el => getComputedStyle(el).opacity === "1"));
+  await page.click('[data-lp-tab="dungeon"]');
+  await page.waitForSelector(row("leave"));
   await page.keyboard.press("ArrowDown"); // From "Go home" to the first way out; Enter takes the step.
   await page.keyboard.press("Enter");
   await page.waitForFunction(was => document.getElementById("lp-message").textContent !== was, {}, arrival);

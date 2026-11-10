@@ -45,7 +45,7 @@
         hint: describeMove(move) + (move.mp > lumi.mp ? " · not enough MP" : "") };
     }).concat([
       { key: "defend", icon: "🛡", name: "Defend", hint: "Halve the next hit · gather 6 MP", url: "battle/act", send: turn("defend") },
-      { key: "potion", icon: "🧪", name: "Potion (" + snap.pet.potions + ")", hint: "Restores half her health", url: "battle/act", send: turn("potion") },
+      { key: "potion", icon: "🧪", name: "Potion (" + (snap.potions_ready === undefined ? snap.pet.potions : snap.potions_ready) + ")", hint: "Restores half her health", url: "battle/act", send: turn("potion") },
       { key: "run", icon: "💨", name: "Run", hint: "Three times in four she gets away", url: "battle/act", send: turn("run") },
     ]);
   }

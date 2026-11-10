@@ -68,6 +68,19 @@ test("exploring offers each way out, saying what is known there, and only choice
   assert.ok(list.rows.every(r => !r.send || Object.keys(r.send).every(k => ["action", "way", "picks", "moves"].includes(k))));
   assert.match(open(run(), {}, null, { potions: 0 }).row("potion").note, /no potions/);
   assert.equal(open(run({ hp: 58 })).row("potion"), undefined);
+  const found = UI.rows({ snap: { pet: { potions: 0 }, potions_ready: 1, dungeon: { run: run(), environments: [] } }, play: {}, dismissed: null, go() {} }).find(r => r.key === "potion");
+  assert.deepEqual([found.name, found.send], ["Drink a potion (1)", { action: "potion" }], "A potion found on this trip counts and can be drunk");
+});
+
+test("a chest or a key is offered until it is taken, and never after", () => {
+  const chest = open(run({ room: { kind: "treasure", done: false, exits: ["n"] } }));
+  assert.deepEqual([chest.rows[0].key, chest.rows[0].name, chest.rows[0].send], ["take", "Open the chest", { action: "take" }]);
+  assert.equal(open(run({ room: { kind: "vault", done: false, exits: ["w"] } })).row("take").hint, "The vault's treasure, at last");
+  assert.equal(open(run({ room: { kind: "key", done: false, exits: ["n"] } })).row("take").name, "Pick up the key");
+  for (const kind of ["treasure", "vault", "key"]) assert.equal(open(run({ room: { kind, done: true, exits: ["n"] } })).row("take"), undefined, kind);
+  assert.equal(open(run()).row("take"), undefined);
+  const lying = Art.scene(run({ room: { kind: "key", done: false, exits: ["n"] } }), {}, "list"), gone = Art.scene(run({ room: { kind: "key", done: true, exits: ["n"] } }), {}, "list");
+  assert.ok(lying.length > gone.length, "The key is drawn while it lies there, and not once it is taken");
 });
 
 test("the entrance offers home and the stairs offer down", () => {
@@ -150,6 +163,8 @@ test("the scene draws the room's doors, what is in it, a map, and the puzzle on 
   const runes = Art.scene(run({ facing: { at: "2,1", lock: { kind: "runes", runes: [], slots: 4, tries: [{ guess: ["sun", "moon", "star", "leaf"], exact: 1, near: 2 }], left: 7 } } }), { guess: ["wave"] }, "list");
   assert.ok(runes.includes("FIND THE RUNE CODE") && runes.includes("☀") && runes.includes("≈"));
   assert.ok(Art.scene(run({ facing: { at: "2,1", lock: { kind: "key" } } }), {}, "list").includes("IT NEEDS A KEY"));
+  const away = Art.scene(run({ facing: { at: "2,1", lock: { kind: "sokoban", rows: level.rows } } }), { board }, "board", false);
+  assert.ok(!away.includes("PUSH THE CRATES") && !away.includes("NEEDS A KEY") && away.includes(">N<"), "On another tab the room shows without the puzzle over it");
   const cards = Art.scene(run({ room: { kind: "game", done: false, exits: ["n"] }, game: { kind: "match", cards: ["sun", null, null, null, null, null, null, null], found: [], open: 0, last: null, left: 13 } }), { cursor: 2 }, "board");
   assert.ok(cards.includes("FIND THE PAIRS · 13 TURNS LEFT") && cards.includes("☀"));
 });

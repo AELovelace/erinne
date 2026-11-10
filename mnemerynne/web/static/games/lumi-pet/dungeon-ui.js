@@ -141,6 +141,8 @@
       });
       else list.push({ key: "play", icon: "▣", name: "Back to the cards", hint: run.game.left + " turns left · arrows choose, Enter turns a card", local: function () { go({ focus: "board" }); } });
     }
+    if (!room.done && (room.kind === "treasure" || room.kind === "vault")) list.push({ key: "take", icon: "✦", name: "Open the chest", hint: room.kind === "vault" ? "The vault's treasure, at last" : "See what's inside", url: "dungeon/act", send: { action: "take" } });
+    if (!room.done && room.kind === "key") list.push({ key: "take", icon: "🗝", name: "Pick up the key", hint: "It opens the locked door on this floor", url: "dungeon/act", send: { action: "take" } });
     if (room.kind === "start") list.push({ key: "leave", icon: "⌂", name: "Go home", hint: "Keep everything in the satchel: " + carrying(run.satchel), url: "dungeon/act", send: { action: "leave" } });
     if (room.kind === "stairs") list.push({ key: "descend", icon: "⤓", name: "Go down the stairs", hint: "Floor " + (run.depth + 1) + ": tougher creatures, better treasure, no way back up", url: "dungeon/act", send: { action: "descend" } });
     room.exits.forEach(function (way) {
@@ -149,8 +151,9 @@
         hint: (to.kind === "vault" && !to.done ? "a locked door" : KINDS[to.kind]) + (to.kind === "enemy" && !to.done ? " · it's still there" : "") });
     });
     if (run.hp < run.hpMax) {
-      const potion = { key: "potion", icon: "🧪", name: "Drink a potion (" + snap.pet.potions + ")", hint: "Lumi has " + run.hp + " of " + run.hpMax + " HP" };
-      if (snap.pet.potions) { potion.url = "dungeon/act"; potion.send = { action: "potion" }; } else potion.note = "Lumi has no potions with her.";
+      const ready = snap.potions_ready === undefined ? snap.pet.potions : snap.potions_ready; // Her own, and any found on this trip.
+      const potion = { key: "potion", icon: "🧪", name: "Drink a potion (" + ready + ")", hint: "Lumi has " + run.hp + " of " + run.hpMax + " HP" };
+      if (ready) { potion.url = "dungeon/act"; potion.send = { action: "potion" }; } else potion.note = "Lumi has no potions with her.";
       list.push(potion);
     }
     list.push({ key: "abandon", icon: "✕", name: "Give up and go home", hint: "Leaves the satchel behind: " + carrying(run.satchel), confirm: "abandon", url: "dungeon/act", send: { action: "abandon" } });

@@ -161,15 +161,16 @@
   function drawDungeon() { // The dungeon scene over the house while she is out, and its line of health and satchel.
     const run = exploring(), art = $("lp-dungeon"), bar = $("lp-dhud");
     room.dataset.dungeon = String(Boolean(run));
-    room.dataset.puzzle = String(Boolean(run && (run.facing || (run.game && run.game.kind === "match" && !run.room.done))));
+    const here = TABS[tab] === "dungeon"; // A puzzle's panel covers the room (and Lumi) only while this tab can play it.
+    room.dataset.puzzle = String(Boolean(here && run && (run.facing || (run.game && run.game.kind === "match" && !run.room.done))));
     art.style.display = run ? "" : "none"; bar.hidden = !run;
     if (!run) { lastDungeon = ""; return; }
-    const hud = Dg.hud(run), signature = JSON.stringify([run.at, run.depth, run.rooms, run.facing, run.game, run.room, play, focus, run.satchel.keys]);
+    const hud = Dg.hud(run), signature = JSON.stringify([run.at, run.depth, run.rooms, run.facing, run.game, run.room, play, focus, run.satchel.keys, here]);
     $("lp-d-title").textContent = hud.title; $("lp-d-label").textContent = hud.label;
     $("lp-d-hp").style.width = hud.hp + "%"; $("lp-d-mp").style.width = hud.mp + "%";
     if (signature === lastDungeon) return;
     lastDungeon = signature;
-    art.innerHTML = Da.scene(run, play, focus); // Markup authored in dungeon-art.js; colours are the server's checked #rrggbb.
+    art.innerHTML = Da.scene(run, play, focus, here); // Markup authored in dungeon-art.js; colours are the server's checked #rrggbb.
   }
 
   function tellLive(moment) { // Live storyteller: the library's line is already showing; swap in a fresh one if it comes.

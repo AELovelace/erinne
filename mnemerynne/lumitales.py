@@ -55,13 +55,16 @@ SCENARIOS = {
     "abandon": "Lumi gives up the trip and goes home, leaving what she found.",
     "potion": "Lumi drinks a potion and feels better.",
 }
-# Plain reports of how a puzzle or game is going. These are facts, so they are never handed to a model.
+# Plain reports: how a puzzle or game is going, and what is waiting in a room. Facts, so never handed to a model.
 FACTS = {
     "runes_try": "{exact} in the right place, {near} right but in the wrong place.",
     "runes_reset": "The runes spin and settle on a new code. Try again from the start.",
     "match_flip": "One card turned. Now find its pair.",
     "match_pair": "A pair!",
     "match_miss": "Not a pair. They turn back over.",
+    "see_treasure": "There is a chest here, shut tight and waiting.",
+    "see_key": "Something small glints on the floor: a key.",
+    "see_vault": "Inside the vault stands a great chest, bound in gold.",
 }
 _BRACES = re.compile(r"\{(\w*)\}")
 TRANSPORT = None                        # tests put a stand-in here in place of the Anthropic client

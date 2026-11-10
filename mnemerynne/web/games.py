@@ -142,7 +142,7 @@ class DungeonStep(BaseModel):
     """One choice in the dungeon: which way, which cup or card or lamps, or the moves that solve a Sokoban door.
     Never a room, a reward or a result: the server replays puzzle answers itself."""
     model_config = ConfigDict(extra="forbid")
-    action: Literal["move", "back", "unlock", "sokoban", "lights", "rune", "cup", "flip", "potion", "descend", "leave", "abandon"]
+    action: Literal["move", "take", "back", "unlock", "sokoban", "lights", "rune", "cup", "flip", "potion", "descend", "leave", "abandon"]
     way: Literal["n", "e", "s", "w"] | None = None
     moves: str = Field(default="", max_length=600, pattern="^[udlr]*$")
     picks: list[int | str] = Field(default_factory=list, max_length=200)

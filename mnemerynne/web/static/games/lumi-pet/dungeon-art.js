@@ -99,7 +99,7 @@
     if (room.kind === "stairs") return path("M" + (x - 50) + " " + (y - 30) + " h100 v40 h-100 Z", INK, 'opacity=".8"') + [0, 1, 2, 3].map(function (i) { return rect(x - 44 + i * 10, y - 24 + i * 9, 88 - i * 20, 6, "#ff9d6b", 'opacity="' + (0.9 - i * .2) + '"'); }).join("") + text(x, y + 28, "DOWN", 11, "#ff9d6b", 'font-weight="700" letter-spacing="2"');
     if (room.kind === "treasure") return chest(x, y, room.done, false);
     if (room.kind === "vault") return chest(x, y, room.done, true) + path(star(x + 34, y - 46, 9), "#fff8dc", 'class="lp-twinkle"');
-    if (room.kind === "key") return path("M" + (x - 14) + " " + (y - 8) + " h22 M" + (x + 2) + " " + (y - 8) + " v7 M" + (x + 8) + " " + (y - 8) + " v5", "none", 'stroke="#ffdc83" stroke-width="3" stroke-linecap="round" opacity=".35"') + circle(x - 20, y - 8, 7, "none", 'stroke="#ffdc83" stroke-width="3" opacity=".35"');
+    if (room.kind === "key") return room.done ? "" : oval(x, y - 6, 26, 12, "#ffdc83", 'opacity=".18"') + circle(x - 14, y - 8, 8, "none", 'stroke="#ffdc83" stroke-width="4"') + path("M" + (x - 6) + " " + (y - 8) + " h26 M" + (x + 12) + " " + (y - 8) + " v8 M" + (x + 19) + " " + (y - 8) + " v6", "none", 'stroke="#ffdc83" stroke-width="4" stroke-linecap="round" class="lp-twinkle"'); // Waiting to be picked up; gone once it is.
     if (room.kind === "game" && run.game && run.game.kind === "cups") return [-40, 0, 40].map(function (dx) { return path("M" + (x + dx - 17) + " " + y + " L" + (x + dx - 11) + " " + (y - 36) + " H" + (x + dx + 11) + " L" + (x + dx + 17) + " " + y + " Z", room.done ? "#6a648a" : "#70ebea") + oval(x + dx, y, 17, 4, INK, 'opacity=".4"'); }).join("");
     return "";
   }
@@ -163,9 +163,11 @@
     return out;
   }
 
-  function scene(run, play, focus) { // Everything in the room, back to front. `play` is the puzzle in progress on the page, if any.
+  function scene(run, play, focus, showPuzzle) { // Everything in the room, back to front. `play` is the puzzle in progress on the page, if any.
+    // `showPuzzle` false: leave the puzzle or card panel out (the Dungeon tab isn't open, so nothing could be done with it).
     let middle = "";
-    if (run.facing) {
+    if (showPuzzle === false) middle = "";
+    else if (run.facing) {
       const lock = run.facing.lock;
       middle = lock.kind === "sokoban" && play.board ? sokoban(play.board, focus === "board") : lock.kind === "lights" && play.board ? lights(play.board, focus === "board")
         : lock.kind === "runes" ? runes(lock, play.guess || []) : keyDoor(run.satchel.keys > 0);
