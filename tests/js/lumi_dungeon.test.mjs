@@ -108,6 +108,26 @@ test("a key door needs a key; a rune door builds a code four runes long", () => 
   assert.deepEqual(full.row("back").send, { action: "back" });
 });
 
+test("a crate door and a lamp door list their choices with the puzzle as the page holds it", () => {
+  // The shapes here are the ones game.js keeps (syncPlay): { board } from sokobanStart or lightsStart. Listing these
+  // rows once crashed the whole Dungeon tab, because it read the step count from the wrong place.
+  const facing = lock => run({ facing: { at: "2,1", lock } });
+  const level = levels[0], crates = UI.sokobanMove(UI.sokobanMove(UI.sokobanStart(level.rows), "u"), "l");
+  const atCrates = open(facing({ kind: "sokoban", rows: level.rows }), { id: "x", board: crates });
+  assert.deepEqual(atCrates.rows.map(r => r.key), ["play", "undo", "reset", "back"]);
+  assert.match(atCrates.row("play").hint, new RegExp("^" + crates.moves.length + " steps so far"));
+  atCrates.row("undo").local(); atCrates.row("reset").local(); atCrates.row("play").local();
+  assert.deepEqual(atCrates.went, [{ undo: true }, { reset: true }, { focus: "board" }]);
+  const lock = { kind: "lights", size: 3, board: Array(9).fill(true) }, lamps = UI.lightsPress(UI.lightsStart(lock), 4);
+  const atLamps = open(facing(lock), { id: "y", board: lamps });
+  assert.deepEqual(atLamps.rows.map(r => r.key), ["play", "reset", "back"]);
+  assert.match(atLamps.row("play").hint, /^1 presses so far/);
+  for (const kind of ["sokoban", "lights"]) { // Before the page has started the puzzle, the list still draws.
+    const early = open(facing(kind === "lights" ? lock : { kind, rows: level.rows }), {});
+    assert.match(early.row("play").hint, /^0 (steps|presses) so far/);
+  }
+});
+
 test("the cup game is three rows, and the cards hand the remote to the board", () => {
   const cups = open(run({ room: { kind: "game", done: false, exits: ["n"] }, game: { kind: "cups", cups: 3 } }));
   assert.deepEqual(cups.rows.slice(0, 3).map(r => r.send), [0, 1, 2].map(cup => ({ action: "cup", picks: [cup] })));

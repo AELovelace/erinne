@@ -105,17 +105,18 @@
     });
   }
 
-  function doorRows(run, play, go) { // Standing at a locked door.
+  function doorRows(run, play, go) { // Standing at a locked door. `play` is the page's puzzle: { board } for crates and lamps, { guess } for runes.
+    const board = play.board || { moves: "", presses: [] }; // Not started yet: nothing done so far.
     const lock = run.facing.lock, back = { key: "back", icon: "‹", name: "Step back", hint: "Leave the door for now", url: "dungeon/act", send: { action: "back" } };
     if (lock.kind === "key") return [
       run.satchel.keys ? { key: "unlock", icon: "🗝", name: "Use the key", hint: "It fits!", url: "dungeon/act", send: { action: "unlock" } }
         : { key: "unlock", icon: "🗝", name: "Use a key", hint: "Lumi doesn't have one yet", note: "Lumi needs a key. There's one somewhere on this floor." }, back];
     if (lock.kind === "sokoban") return [
-      { key: "play", icon: "▣", name: "Back to the crates", hint: play.moves.length + " steps so far · arrows push, Enter comes back here", local: function () { go({ focus: "board" }); } },
+      { key: "play", icon: "▣", name: "Back to the crates", hint: board.moves.length + " steps so far · arrows push, Enter comes back here", local: function () { go({ focus: "board" }); } },
       { key: "undo", icon: "↶", name: "Undo a step", hint: "Take the last step back", local: function () { go({ undo: true }); } },
       { key: "reset", icon: "↺", name: "Start over", hint: "Put every crate back", local: function () { go({ reset: true }); } }, back];
     if (lock.kind === "lights") return [
-      { key: "play", icon: "▣", name: "Back to the lamps", hint: play.presses.length + " presses so far · put every lamp out", local: function () { go({ focus: "board" }); } },
+      { key: "play", icon: "▣", name: "Back to the lamps", hint: board.presses.length + " presses so far · put every lamp out", local: function () { go({ focus: "board" }); } },
       { key: "reset", icon: "↺", name: "Start over", hint: "Light them as they were", local: function () { go({ reset: true }); } }, back];
     const guess = play.guess || [], full = guess.length === lock.slots; // runes
     const rows = lock.runes.map(function (rune) {

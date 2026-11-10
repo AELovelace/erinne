@@ -218,6 +218,92 @@ export async function checkLumiPet(browser, page, base) { // Exercise real contr
   console.log("Lumi Pet: account save, old-save import, care, pantry, shop, a fight, a dungeon trip, toys, the closet, the house, settings, mobile, reduced motion and blocked storage passed");
 }
 
+export async function checkLumiPetDoors(browser, page, base) { // Every kind of locked door, and the card game, on the real page.
+  // A floor is random, so a test can't walk to a given door. Instead the page is shown the server's own state with a
+  // door put in front of Lumi, and is driven with the keyboard: the lists must draw, the board must take the arrows,
+  // and nothing may throw. (What the server then says about a door that isn't really there doesn't matter here.)
+  const levels = JSON.parse(await (await import("node:fs/promises")).readFile(new URL("../mnemerynne/lumipet_data/sokoban.json", import.meta.url), "utf8")).levels;
+  const cases = [
+    { name: "crates", facing: { kind: "sokoban", rows: levels[0].rows }, title: "PUSH THE CRATES", rows: ["play", "undo", "reset", "back"] },
+    { name: "lamps", facing: { kind: "lights", size: 3, board: [true, true, false, true, false, false, false, false, false] }, title: "PUT EVERY LAMP OUT", rows: ["play", "reset", "back"] },
+    { name: "runes", facing: { kind: "runes", runes: ["sun", "moon", "star", "leaf", "wave"], slots: 4, tries: [{ guess: ["sun", "sun", "moon", "leaf"], exact: 1, near: 1 }], left: 7 }, title: "FIND THE RUNE CODE", rows: ["try", "rune-sun", "rune-moon", "rune-star", "rune-leaf", "rune-wave", "erase", "back"] },
+    { name: "key", facing: { kind: "key" }, title: "IT NEEDS A KEY", rows: ["unlock", "back"] },
+    { name: "cards", game: { kind: "match", cards: [null, null, null, null, null, null, null, null], found: [], open: null, last: null, left: 14 }, title: "FIND THE PAIRS", rows: ["play"] },
+  ];
+  for (const made of cases) {
+    const tab = await browser.newPage();
+    const errors = [];
+    tab.on("pageerror", error => errors.push(String(error)));
+    try {
+      await tab.setCookie(...await page.cookies());
+      await tab.setViewport({ width: 1440, height: 1000 });
+      await tab.evaluateOnNewDocument(made => { // Hand the page a trip with this door (or game) in front of Lumi.
+        const real = window.fetch;
+        window.fetch = async function (url, options) {
+          const answer = await real(url, options);
+          if (!String(url).endsWith("/lumi-pet/state")) return answer;
+          const data = await answer.json(), env = data.dungeon.environments[0];
+          data.fight = null;
+          data.dungeon.run = { id: 77, env: { id: env.id, name: env.name, family: env.family, palette: env.palette }, depth: 1, at: "1,1", over: null, ended: null,
+            rooms: { "1,1": { kind: made.game ? "game" : "empty", done: !made.game, exits: ["e", "w"] }, "2,1": { kind: "vault", done: false, exits: ["w"] }, "0,1": { kind: "start", done: true, exits: ["e"] } },
+            room: { kind: made.game ? "game" : "empty", done: !made.game, exits: ["e", "w"] }, satchel: { coins: 12, potions: 0, keys: 0, trophies: [], mods: [] },
+            hp: 40, hpMax: 58, mp: 20, mpMax: 22, event: { scenario: "empty" }, say: "A door.", fighting: false,
+            facing: made.facing ? { at: "2,1", lock: made.facing } : null, game: made.game || null };
+          return new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
+        };
+      }, made);
+      await tab.goto(base + "/media/games/lumi-pet");
+      await tab.waitForSelector(row(made.rows[0]));
+      assert.equal(await tab.$eval('[data-lp-tab="dungeon"]', el => el.getAttribute("aria-selected")), "true", made.name + ": a trip under way opens on the Dungeon tab");
+      for (const key of made.rows) assert.ok(await tab.$(row(key)), made.name + " offers " + key);
+      assert.ok(await tab.$eval("#lp-dungeon", (el, title) => el.textContent.includes(title), made.title), made.name + " shows its panel");
+      assert.ok(await tab.$eval(".lp-pet-wrap", el => getComputedStyle(el).opacity === "0"), made.name + ": Lumi steps aside for the panel");
+      const before = await tab.$eval("#lp-dungeon", el => el.innerHTML);
+      if (made.name === "crates") { // Arrows push; Enter hands the remote to the list; Undo and Start over work from there.
+        for (const key of ["ArrowUp", "ArrowLeft", "ArrowRight", "ArrowDown"]) await tab.keyboard.press(key);
+        assert.notEqual(await tab.$eval("#lp-dungeon", el => el.innerHTML), before, "Lumi moved on the crate board");
+        await tab.keyboard.press("Enter");
+        await tab.waitForFunction(() => document.getElementById("lp-dungeon").textContent.includes("PAUSED"));
+        assert.match(await tab.$eval('[data-lp-row="play"] small', el => el.textContent), /^[1-4] steps so far/);
+        await tab.click(row("undo"));
+        await tab.click(row("reset"));
+        await tab.waitForFunction(() => document.querySelector('[data-lp-row="play"] small').textContent.startsWith("0 steps"));
+        await tab.click(row("play"));
+        await tab.waitForFunction(() => document.getElementById("lp-dungeon").textContent.includes("PUSH THE CRATES"));
+      } else if (made.name === "lamps") { // Arrows move the ring, Enter flips lamps; off the bottom edge is the list.
+        await tab.keyboard.press("ArrowRight");
+        await tab.keyboard.press("Enter");
+        assert.notEqual(await tab.$eval("#lp-dungeon", el => el.innerHTML), before, "A lamp was pressed");
+        for (let i = 0; i < 3; i++) await tab.keyboard.press("ArrowDown");
+        await tab.waitForFunction(() => document.getElementById("lp-dungeon").textContent.includes("PAUSED"));
+        assert.equal(await tab.$eval('[data-lp-row="play"] small', el => el.textContent.slice(0, 9)), "1 presses");
+        await tab.keyboard.press("ArrowUp"); // From the top of the list, back onto the board.
+        await tab.waitForFunction(() => document.getElementById("lp-dungeon").textContent.includes("PUT EVERY LAMP OUT"));
+      } else if (made.name === "runes") { // The code is built from the list.
+        for (const rune of ["sun", "moon", "star"]) await tab.click(row("rune-" + rune));
+        await tab.click(row("erase"));
+        await tab.click(row("rune-wave"));
+        await tab.click(row("rune-leaf"));
+        await tab.waitForFunction(() => document.querySelector('[data-lp-row="try"] small').textContent.startsWith("☀ ☾ ≈ ❧"));
+      } else if (made.name === "cards") { // Arrows move over the cards; off the bottom edge is the list.
+        await tab.keyboard.press("ArrowRight");
+        assert.notEqual(await tab.$eval("#lp-dungeon", el => el.innerHTML), before, "The card cursor moved");
+        await tab.keyboard.press("ArrowDown");
+        await tab.keyboard.press("ArrowDown");
+        await tab.waitForFunction(() => document.getElementById("lp-dungeon").textContent.includes("PAUSED"));
+      }
+      await tab.click('[data-lp-tab="care"]'); // Another tab: the room and Lumi show, without the panel.
+      assert.ok(await tab.$eval("#lp-dungeon", (el, title) => !el.textContent.includes(title), made.title), made.name + ": no panel on another tab");
+      assert.ok(await tab.$(row("cuddle")));
+      await tab.click('[data-lp-tab="dungeon"]');
+      await tab.waitForSelector(row(made.rows[0]));
+      assert.deepEqual(errors, [], made.name + ": nothing threw on the page");
+      if (made.name === "lamps") await tab.screenshot({ path: "runs/casino-browser/lumi-pet-door.png", fullPage: true });
+    } finally { await tab.close(); }
+  }
+  console.log("Lumi Pet: crate, lamp, rune and key doors and the card game draw, take the keyboard and throw nothing");
+}
+
 export async function checkLumiPetFrame(page) { // Parent-origin remote messages must reach Lumi and report status back.
   await page.evaluate(() => {
     window.petReport = "";
