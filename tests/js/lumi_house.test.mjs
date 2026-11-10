@@ -22,18 +22,42 @@ test("every window frame has an opening for the view to show through", () => {
   for (const item of catalog.spots.find(spot => spot.id === "frame").items) assert.match(H.CLIPS[item.id], /^M[\d .A-Za-z-]+Z$/);
 });
 
-test("the room draws back to front, clips the view to the frame, and balances its tags", () => {
-  const room = H.render({ ...firsts, frame: "frame-hex" });
+test("the room draws back to front in a wide canvas, repeating the wall, floor and windows across it", () => {
+  const room = H.render({ ...firsts, frame: "frame-hex", view: "view-sea" }, false);
   const order = H.LAYERS.map(spot => room.indexOf('data-spot="' + spot + '"'));
   assert.deepEqual(order, [...order].sort((a, b) => a - b));
   assert.ok(order.every(at => at >= 0));
-  assert.ok(room.includes(H.CLIPS["frame-hex"]) && room.includes('data-spot="view" clip-path="url(#lp-view-clip)"'));
+  const layer = spot => room.slice(room.indexOf('data-spot="' + spot + '"'), room.indexOf("data-spot=", room.indexOf('data-spot="' + spot + '"') + 10) >>> 0 || undefined);
+  for (const spot of ["wallpaper", "floor"]) assert.deepEqual(layer(spot).match(/<g transform="translate\((-?\d+) 0\)">/g).length, 3, spot);
+  assert.ok(layer("wallpaper").includes('translate(-100 0)') && layer("wallpaper").includes('translate(700 0)'), "The wall covers the whole 1000-wide room");
+  for (const x of H.WINDOWS) for (const spot of ["view", "frame"]) assert.ok(layer(spot).includes('<g transform="translate(' + x + ' 0)">'), spot + " at " + x);
+  assert.equal(layer("rug").match(/<g transform="translate\(300 0\)">/g).length, 1, "Furniture stands once, in the middle");
   assert.equal(room.match(/<g[ >]/g).length, room.match(/<\/g>/g).length);
   assert.equal(room.match(/<defs>/g).length, room.match(/<\/defs>/g).length);
 });
 
+test("the windows are holes in the wall, shaped like the frame", () => {
+  const room = H.render({ ...firsts, frame: "frame-hex" }, true);
+  const mask = room.slice(room.indexOf('<mask id="lp-wall-mask"'), room.indexOf("</mask>"));
+  assert.equal(mask.split(H.CLIPS["frame-hex"]).length - 1, 3, "One hole per window");
+  assert.ok(H.WINDOWS.every(x => mask.includes('transform="translate(' + x + ' 0)" fill="#000"')));
+  assert.ok(room.includes('data-spot="wallpaper" mask="url(#lp-wall-mask)"'));
+  assert.ok(!room.includes('data-spot="floor" mask'), "Only the wall is cut");
+});
+
+test("with scenery behind the page the free view leaves the windows open; otherwise a view is painted in", () => {
+  const open = H.render(firsts, true), painted = H.render(firsts, false), bought = H.render({ ...firsts, view: "view-snow" }, true);
+  assert.ok(open.includes('<g data-spot="view" data-open="true"></g>'), "Nothing is drawn in the holes: the backdrop shows through");
+  assert.ok(!open.includes("lp-px"));
+  for (const room of [painted, bought]) {
+    assert.ok(!room.includes("data-open") && room.includes('clip-path="url(#lp-view-clip)"'));
+    assert.equal(room.match(/class="lp-px lp-px-1"/g).length, 3, "The view shows in all three windows");
+  }
+  assert.ok(bought.includes("lp-fall-snow"));
+});
+
 test("an object the art doesn't know is left out rather than breaking the room", () => {
-  const room = H.render({ ...firsts, rug: "rug-from-the-future", bed: "__proto__", frame: "constructor" });
+  const room = H.render({ ...firsts, rug: "rug-from-the-future", bed: "__proto__", frame: "constructor" }, false);
   assert.ok(room.includes('<g data-spot="rug"></g>') && room.includes('<g data-spot="bed"></g>'));
   assert.ok(room.includes(H.CLIPS["frame-arch"]));
 });

@@ -1,4 +1,5 @@
-/* The art for Lumi's house: every object that can stand in a spot, drawn as plain SVG in a 400 x 500 room.
+/* The art for Lumi's house: every object that can stand in a spot, drawn as plain SVG in a 400 x 500 block that
+   render() sets into a 1000 x 500 room (see the end of this file).
    The server's catalog (mnemerynne/lumipet_data/house.json) says which objects exist, what they cost and which spot
    they belong to; this file only knows how each one looks. Every catalog id needs an entry in ART here
    (tests/js/lumi_house.test.mjs checks). It is paperdoll furniture: nothing is placed freely, each spot shows one
@@ -274,13 +275,31 @@
     "bed-castle": function () { return path("M298 448 V398 h12 v8 h12 v-8 h12 v8 h12 v-8 h12 v8 h12 v-8 h12 V448 Z", "#c79256") + path("M328 448 V428 a12 12 0 0 1 24 0 V448 Z", "#3a2147") + rect(306, 414, 9, 10, "#3a2147") + rect(365, 414, 9, 10, "#3a2147") + path("M298 420 H382", "none", 'stroke="#a8743f" stroke-width="1.2" stroke-dasharray="6 5"') + path("M340 398 V380 l14 5 l-14 5", "#ff8ecb", 'stroke="#8a5a2a" stroke-width="1.5"'); },
   };
 
-  function render(house) { // The whole room as SVG markup, back to front. `house` is {spot: object id} from the server.
-    return '<defs><clipPath id="lp-view-clip"><path d="' + CLIPS[Object.prototype.hasOwnProperty.call(CLIPS, house.frame) ? house.frame : "frame-arch"] + '"/></clipPath></defs>' + LAYERS.map(function (spot) {
+  // ---- The whole room. It is drawn 1000 wide and 500 tall and fills whatever it is given (the whole screen on a TV
+  // or computer, a card on a phone), cropping its sides rather than squashing. The furniture above is drawn in a
+  // 400-wide block in the middle; the wall and floor repeat across the full width; and there are three windows, the
+  // middle one and one out to each side.
+  const WIDE = 1000, MIDDLE = 300, TILES = [-100, 300, 700], WINDOWS = [-50, MIDDLE, 650]; // Where the 400-wide pieces sit.
+  const REPEATED = { wallpaper: TILES, floor: TILES, view: WINDOWS, frame: WINDOWS, curtains: WINDOWS };
+
+  function render(house, backdrop) { // The room as SVG markup, back to front. `house` is {spot: object id} from the server.
+    // `backdrop`: the page has its own scrolling scenery behind it (the neon theme's drifting pixel cities). The
+    // windows are real holes in the wall, so with the first, free view that scenery is what shows through them.
+    // Any other view, or a theme with nothing behind the page, paints a view of ours into the holes instead.
+    const frame = Object.prototype.hasOwnProperty.call(CLIPS, house.frame) ? house.frame : "frame-arch", opening = CLIPS[frame];
+    const open = Boolean(backdrop) && house.view === "view-city";
+    const defs = '<defs><clipPath id="lp-view-clip"><path d="' + opening + '"/></clipPath>' +
+      '<mask id="lp-wall-mask" maskUnits="userSpaceOnUse" x="-100" y="0" width="' + (WIDE + 200) + '" height="500"><rect x="-100" width="' + (WIDE + 200) + '" height="500" fill="#fff"/>' +
+      WINDOWS.map(function (x) { return '<path d="' + opening + '" transform="translate(' + x + ' 0)" fill="#000"/>'; }).join("") + "</mask></defs>";
+    return defs + LAYERS.map(function (spot) {
       const draw = Object.prototype.hasOwnProperty.call(ART, house[spot]) ? ART[house[spot]] : null;
-      const art = draw ? draw() : ""; // An object this file doesn't know simply isn't drawn.
-      return group(art, 'data-spot="' + spot + '"' + (spot === "view" ? ' clip-path="url(#lp-view-clip)"' : ""));
+      let art = draw && !(spot === "view" && open) ? draw() : ""; // An object this file doesn't know simply isn't drawn.
+      if (art && spot === "view") art = group(art, 'clip-path="url(#lp-view-clip)"');
+      const places = REPEATED[spot] || [MIDDLE];
+      return group(art ? places.map(function (x) { return group(art, 'transform="translate(' + x + ' 0)"'); }).join("") : "",
+        'data-spot="' + spot + '"' + (spot === "wallpaper" ? ' mask="url(#lp-wall-mask)"' : "") + (spot === "view" && open ? ' data-open="true"' : ""));
     }).join("");
   }
 
-  return { LAYERS: LAYERS, ART: ART, CLIPS: CLIPS, render: render };
+  return { LAYERS: LAYERS, ART: ART, CLIPS: CLIPS, WINDOWS: WINDOWS, WIDE: WIDE, render: render };
 });

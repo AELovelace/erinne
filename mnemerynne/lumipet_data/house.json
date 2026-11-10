@@ -25,7 +25,7 @@
       {"id": "shelf-crystals", "name": "Crystal shelf", "price": 220},
       {"id": "shelf-plushies", "name": "Plushie shelf", "price": 220}]},
     {"id": "view", "name": "Window view", "items": [
-      {"id": "view-city", "name": "Neon city", "price": 0},
+      {"id": "view-city", "name": "The city outside", "price": 0},
       {"id": "view-sea", "name": "Star sea", "price": 250},
       {"id": "view-forest", "name": "Cozy forest", "price": 250},
       {"id": "view-snow", "name": "Snowy hills", "price": 300},

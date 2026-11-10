@@ -9,7 +9,7 @@
 .lp-stats dd { margin: .5rem 0 0; }
 #lp-moments { font-size: 2.6rem; color: var(--rose); font-variant-numeric: tabular-nums; }
 .lp-note, .lp-save { color: var(--muted); font-size: .8rem; }
-.lp-room { --pet-glow: #ff8ecb; --pet-body: #fce1f2; --pet-shadow: #b8569f; position: relative; isolation: isolate; min-width: 0; height: min(78vh, 47.5rem); min-height: 26.875rem; overflow: hidden; border: 1px solid var(--line); border-radius: 45% 45% 1.2rem 1.2rem / 20% 20% 1.2rem 1.2rem; background: #20162e; color: #ffe9f5; box-shadow: inset 0 0 80px #0005, 0 0 60px rgba(var(--glow), .12); }
+.lp-room { --pet-glow: #ff8ecb; --pet-body: #fce1f2; --pet-shadow: #b8569f; position: relative; isolation: isolate; min-width: 0; height: min(78vh, 47.5rem); min-height: 26.875rem; overflow: hidden; border: 1px solid var(--line); border-radius: 45% 45% 1.2rem 1.2rem / 20% 20% 1.2rem 1.2rem; background: transparent; container-type: size; color: #ffe9f5; box-shadow: inset 0 0 80px #0005, 0 0 60px rgba(var(--glow), .12); }
 .lp-room[data-palette="lagoon"] { --pet-glow: #70ebea; --pet-body: #d2fcf6; --pet-shadow: #328b9d; }
 .lp-room[data-palette="starlight"] { --pet-glow: #ffdc83; --pet-body: #fff1cd; --pet-shadow: #b98b49; }
 .lp-room[data-palette="zephyr"] { --pet-glow: #8be9a8; --pet-body: #dcfbe6; --pet-shadow: #3f9a63; }
@@ -37,7 +37,9 @@
 @keyframes lp-scroll { to { transform: translateX(-240px); } } /* One tile of house.js's TILE; SVG units. */
 @keyframes lp-fall { to { transform: translateY(130px); } }
 @keyframes lp-twinkle { to { opacity: .35; } }
-.lp-pet-wrap { position: absolute; width: 50%; left: 25%; bottom: 12%; } /* Small enough to see her house around her. */
+/* One unit of the house drawing (1000 x 500, cropped to fill the room) in real pixels, so Lumi and the fight line up with the furniture at any size. */
+.lp-room > * { --u: max(.1cqw, .2cqh); }
+.lp-pet-wrap { position: absolute; width: calc(200 * var(--u)); left: calc(50% - 100 * var(--u)); bottom: calc(50% - 196 * var(--u)); } /* On the rug, in the middle of the room. */
 .lp-pet { display: block; width: 100%; overflow: visible; filter: drop-shadow(0 0 15px var(--pet-shadow)); animation: lp-breathe 4s ease-in-out infinite; transform-origin: 50% 90%; }
 .lp-body, .lp-paw { fill: var(--pet-body); stroke: var(--pet-shadow); stroke-width: 2; }
 .lp-belly { fill: #fff8; }
@@ -95,7 +97,7 @@
 /* A fight: a veil dims the house, Lumi steps left and the enemy faces her from the right. */
 .lp-fight { position: absolute; inset: 0; background: #0b0818d9; }
 .lp-fight[hidden] { display: none; }
-.lp-fight-bars { position: absolute; top: 15%; left: 5%; right: 5%; display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; font-size: .68rem; letter-spacing: .04em; }
+.lp-fight-bars { position: absolute; top: 15%; left: max(4%, calc(50% - 200 * var(--u))); right: max(4%, calc(50% - 200 * var(--u))); display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; font-size: .68rem; letter-spacing: .04em; }
 .lp-fight-bars > div:last-child { text-align: right; }
 .lp-fight-bars span { display: block; margin-bottom: .35rem; }
 .lp-fight-bars .lp-bar { margin-bottom: .25rem; background: #0006; }
@@ -103,6 +105,14 @@
 .lp-fight-bars .lp-bar-mp { height: .35rem; }
 .lp-fight-bars .lp-bar-mp i { background: var(--pet-glow); }
 .lp-fight-bars .lp-bar-foe i { background: #ff7a8a; margin-left: auto; }
-.lp-foe { position: absolute; right: 4%; bottom: 14%; width: 42%; overflow: visible; animation: lp-breathe 3s ease-in-out infinite; transform-origin: 50% 90%; transition: opacity .6s, filter .6s; }
+.lp-foe { position: absolute; right: max(2%, calc(50% - 205 * var(--u))); bottom: calc(50% - 196 * var(--u)); width: calc(170 * var(--u)); overflow: visible; animation: lp-breathe 3s ease-in-out infinite; transform-origin: 50% 90%; transition: opacity .6s, filter .6s; }
 .lp-foe[data-down="true"] { opacity: .25; filter: grayscale(1); animation: none; }
-.lp-room[data-fight="true"] .lp-pet-wrap { left: 3%; width: 46%; transition: left .4s, width .4s; }
+.lp-room[data-fight="true"] .lp-pet-wrap { left: max(2%, calc(50% - 205 * var(--u))); transition: left .4s; }
+/* On a TV or computer the room is the whole screen and the two panels float over its walls as glass. On a phone the
+   panels stack under it, so there it stays a card (the rules above). Either way the windows are holes in the wall. */
+@media (min-width: 1001px) {
+  .gm[data-game="lumi-pet"] .lp-room { position: fixed; inset: 0; width: auto; height: auto; min-height: 0; border: 0; border-radius: 0; box-shadow: none; z-index: 0; }
+  .gm[data-game="lumi-pet"] .lp-intro { grid-column: 1; position: relative; z-index: 1; }
+  .gm[data-game="lumi-pet"] .lp-controls { grid-column: 3; position: relative; z-index: 1; }
+  .gm[data-game="lumi-pet"] .lp-room-top { top: 4%; }
+}

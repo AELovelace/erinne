@@ -106,10 +106,12 @@
   function drawHouse(preview) { // Draw the room: what the server says is placed, with the highlighted object tried on.
     const house = Object.assign({}, snap.pet.house);
     if (preview) house[homeSpot] = preview;
-    const signature = JSON.stringify(house);
+    const scenery = document.querySelector(".parallax"), backdrop = Boolean(scenery) && getComputedStyle(scenery).display !== "none"; // The neon theme's drifting cities.
+    const signature = JSON.stringify(house) + backdrop;
     if (signature === lastHouse) return; // Redrawing would restart the window's scrolling, so only when it changed.
     lastHouse = signature;
-    houseArt.innerHTML = H.render(house); // Markup authored in house.js; nothing a person typed goes into it.
+    room.dataset.open = String(backdrop && house.view === "view-city"); // The windows are open onto the page's own scenery.
+    houseArt.innerHTML = H.render(house, backdrop); // Markup authored in house.js; nothing a person typed goes into it.
   }
 
   function drawOutfit(preview) { // Dress her: what the server says she wears, with the highlighted accessory tried on.

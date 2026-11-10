@@ -101,8 +101,21 @@ export async function checkLumiPet(browser, page, base) { // Exercise real contr
 
   await page.click('[data-lp-tab="home"]'); // Decorating: open a spot, preview by moving, buy and place with Enter.
   await page.waitForSelector(row("rug"));
-  assert.ok(await page.$eval('#lp-house [data-spot="view"]', el => el.querySelectorAll(".lp-px").length === 3), "The window scrolls three strips");
+  assert.equal(await page.$eval("#lp-room", el => getComputedStyle(el).position), "fixed", "On a wide screen the room is the whole screen");
+  assert.ok(await page.$eval("#lp-room", el => el.getBoundingClientRect().width >= innerWidth - 1 && el.getBoundingClientRect().height >= innerHeight - 1));
+  assert.equal(await page.$$eval("#lp-wall-mask path", holes => holes.length), 3, "Three windows are cut in the wall");
+  const scenery = await page.evaluate(() => getComputedStyle(document.querySelector(".parallax")).display !== "none");
+  assert.equal(await page.$eval('#lp-house [data-spot="view"]', el => el.dataset.open === "true"), scenery, "Open windows exactly when the page has scenery behind it");
+  if (!scenery) assert.equal(await page.$eval('#lp-house [data-spot="view"] .lp-px-3', el => getComputedStyle(el).animationName), "lp-scroll");
+  const lumi = await page.$eval("#lp-pet", el => { const box = el.getBoundingClientRect(); return (box.left + box.right) / 2 / innerWidth; });
+  assert.ok(Math.abs(lumi - 0.5) < 0.02, "Lumi stands in the middle of the room");
+  await page.click(row("view")); // A bought view is painted into every window; the free one opens them again.
+  await page.waitForSelector(row("view-snow"));
+  await page.keyboard.press("ArrowDown"); await page.keyboard.press("ArrowDown"); await page.keyboard.press("ArrowDown"); // sea, forest, snow: a preview
+  await page.waitForFunction(() => document.querySelectorAll('#lp-house [data-spot="view"] .lp-fall-snow').length === 3);
   assert.equal(await page.$eval('#lp-house [data-spot="view"] .lp-px-3', el => getComputedStyle(el).animationName), "lp-scroll");
+  await page.click(row("back"));
+  await page.waitForSelector(row("rug"));
   await page.click(row("rug"));
   await page.waitForSelector(row("rug-moon"));
   const plain = await page.$eval('#lp-house [data-spot="rug"]', el => el.innerHTML);

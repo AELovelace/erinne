@@ -23,8 +23,9 @@
 
 <section class="lp-room" id="lp-room" data-palette="rose" data-sleep="false" aria-label="Lumi's room">
   <div class="lp-room-top"><span>THE STARLIGHT NOOK</span><span id="lp-clock">A quiet afternoon</span></div>
-  {#- The house: game.js draws every spot's object here from static/games/lumi-pet/house.js. The viewBox is fixed; the room scales it. -#}
-  <svg class="lp-house" id="lp-house" viewBox="0 0 400 500" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
+  {#- The house: game.js draws every spot's object here from static/games/lumi-pet/house.js. The room fills the screen and crops this wide
+      drawing's sides to fit. Its windows are holes in the wall: the theme's scrolling backdrop, behind the page, shows through them. -#}
+  <svg class="lp-house" id="lp-house" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
   {#- A fight (mnemerynne/lumibattle.py): a veil over the room, both sides' bars, and the enemy (enemies.js) facing Lumi. -#}
   <div class="lp-fight" id="lp-fight" hidden>
     <div class="lp-fight-bars">
