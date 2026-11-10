@@ -45,7 +45,8 @@ Also in the database (Access → Settings): the **admin group** (default `Domain
 | `SHARE_ROOT` | unset | Libraries are `<root>/<Name>` and inboxes `<root>/<users folder>/<username>`. Unset: files live inside Mnemerynne. |
 | `SHARE_TRASH` | `<root's parent>/.mnemerynne-trash` | The recycle bin beside the share, hidden from SMB. |
 | `USERS_FOLDER` | `Users` | The folder holding inboxes. |
-| `SHARE_SCAN_SECONDS` | 60 | How often the worker scans the share. |
+| `SHARE_SCAN_SECONDS` | 60 | How long the worker waits after one share scan finishes before starting the next. |
+| `SHARE_RIGHTS_SECONDS` | 30 | How long lists and search may reuse one person's share permissions. Opening, playing or changing a file always checks that folder again. `0` reads them every time, which is slow on a big share. |
 | `SHARE_SETTLE_SECONDS` | 10 | Files changed within this many seconds wait for the next scan (still being copied). |
 
 ## Models

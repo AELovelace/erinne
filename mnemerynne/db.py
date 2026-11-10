@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -41,6 +42,44 @@ def connect(path: Path | str) -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA synchronous = NORMAL")
     return conn
+
+
+class Pool:
+    """Open connections for the web app's requests to reuse, so a page doesn't open the database (and lose its
+    cache of recently read pages) each time. It never makes anyone wait: with none spare, get() opens one
+    more, because event streams and downloads keep theirs for as long as they run."""
+
+    def __init__(self, path: Path | str, keep: int = 8) -> None:
+        self.path, self.keep = path, keep
+        self._idle: list[sqlite3.Connection] = []
+        self._lock = threading.Lock()
+        self._closed = False
+
+    def get(self) -> sqlite3.Connection:
+        with self._lock:
+            if self._idle:
+                return self._idle.pop()
+        return connect(self.path)
+
+    def put(self, conn: sqlite3.Connection) -> None:
+        """Back for the next request; closed instead if it is mid-transaction, surplus or the app is stopping."""
+        try:
+            reusable = not conn.in_transaction
+        except sqlite3.ProgrammingError:
+            return                                     # a handler closed it already
+        with self._lock:
+            if reusable and not self._closed and len(self._idle) < self.keep:
+                self._idle.append(conn)
+                return
+        conn.close()
+
+    def close(self) -> None:
+        """App shutdown: close the spares; ones still in use close as they come back."""
+        with self._lock:
+            self._closed = True
+            idle, self._idle = self._idle, []
+        for conn in idle:
+            conn.close()
 
 
 @contextmanager

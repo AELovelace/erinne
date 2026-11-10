@@ -572,8 +572,10 @@ def test_a_rune_door_answers_each_guess_never_shows_its_code_and_resets_when_tri
     shown, vault = _face_vault(conn, alice, {"kind": "runes", "code": code, "tries": []})
     assert shown["facing"]["lock"] == {"kind": "runes", "runes": list(D.RUNES), "slots": 4, "tries": [], "left": 8} and "code" not in json.dumps(shown)
     first = _do(conn, alice, "rune", picks=["sun", "sun", "moon", "leaf"])["dungeon"]["run"]
-    assert first["facing"]["lock"]["tries"] == [{"guess": ["sun", "sun", "moon", "leaf"], "exact": 1, "near": 2}] and first["facing"]["lock"]["left"] == 7
-    assert first["say"] == "1 in the right place, 2 right but in the wrong place."
+    assert first["facing"]["lock"]["tries"] == [{"guess": ["sun", "sun", "moon", "leaf"], "exact": 1, "near": 2,
+                                               "marks": ["right", "near", "near", "miss"]}] and first["facing"]["lock"]["left"] == 7
+    assert first["say"] == "1 in the right place (lit green), 2 right but in the wrong place (ringed gold)."
+    assert D.rune_marks(["sun", "sun", "sun", "moon"], ["moon", "sun", "leaf", "leaf"]) == ["miss", "right", "miss", "near"]   # one sun in the code: one light
     for bad in (["sun"], ["sun", "moon", "star", "gear"], [0, 1, 2, 3]):
         with pytest.raises(lumipet.PetError, match="Choose 4 runes"):
             _do(conn, alice, "rune", picks=bad)
@@ -763,3 +765,19 @@ def test_a_potion_at_home_gives_back_half_and_only_when_it_helps(conn, alice):
     _start(conn, alice)
     with pytest.raises(lumipet.PetError, match="out exploring"):
         _care(conn, alice, "drink")
+
+
+def test_looking_around_tells_more_of_the_room_and_the_story_is_kept(conn, alice):
+    from mnemerynne import lumitales
+
+    shown = _start(conn, alice)
+    looks = lumitales.LIBRARY["moonlit-shrine"]["look"]
+    assert shown["scene"] in looks and shown["story"] == [shown["say"]]         # what the room is like, and the tale so far
+    first = _do(conn, alice, "look")["dungeon"]["run"]
+    second = _do(conn, alice, "look")["dungeon"]["run"]
+    assert first["event"] == {"scenario": "look", "n": 1} and first["scene"] == shown["scene"]     # the room is still itself
+    assert len({shown["scene"], first["say"], second["say"]}) == 3 and {first["say"], second["say"]} <= set(looks)
+    assert second["story"] == [shown["say"], first["say"], second["say"]] and second["at"] == shown["at"]
+    for _ in range(20):
+        last = _do(conn, alice, "look")["dungeon"]["run"]
+    assert len(last["story"]) == D.LOG and last["story"][-1] == last["say"]     # only the last few lines are kept

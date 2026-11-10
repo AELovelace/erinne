@@ -7,7 +7,7 @@ from typing import Iterator
 
 from fastapi import Depends, HTTPException, Request, status
 
-from mnemerynne import accounts, db, users
+from mnemerynne import accounts, users
 from mnemerynne.config import Settings
 from mnemerynne.web import security
 
@@ -21,11 +21,12 @@ def get_settings(request: Request) -> Settings:
 
 
 def get_db(request: Request) -> Iterator[sqlite3.Connection]:
-    conn = db.connect(request.app.state.settings.db_path)
+    pool = request.app.state.db_pool
+    conn = pool.get()
     try:
         yield conn
     finally:
-        conn.close()
+        pool.put(conn)
 
 
 def _session_user(request: Request, conn: sqlite3.Connection) -> sqlite3.Row | None:

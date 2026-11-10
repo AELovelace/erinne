@@ -133,12 +133,17 @@
     let out = "";
     lock.tries.slice(-6).forEach(function (attempt, row) {
       const y = 152 + row * 30;
-      attempt.guess.forEach(function (rune, i) { out += text(404 + i * 34, y + 6, RUNE[rune], 20, "#f0deff"); });
+      attempt.guess.forEach(function (rune, i) { // Each rune lights up by how it did: green and filled, ringed gold, or left dim.
+        const mark = attempt.marks ? attempt.marks[i] : "", x = 404 + i * 34;
+        if (mark === "right") out += rect(x - 14, y - 13, 28, 26, "#8be9a8", 'rx="6" data-rune="right"');
+        if (mark === "near") out += rect(x - 14, y - 13, 28, 26, "none", 'rx="6" stroke="#ffdc83" stroke-width="2" data-rune="near"');
+        out += text(x, y + 6, RUNE[rune], 20, mark === "right" ? "#12301c" : mark === "miss" ? "#6f6a8c" : "#f0deff");
+      });
       for (let i = 0; i < attempt.exact; i++) out += circle(556 + i * 14, y, 5, "#8be9a8");
       for (let i = 0; i < attempt.near; i++) out += circle(556 + (attempt.exact + i) * 14, y, 5, "none", 'stroke="#ffdc83" stroke-width="2"');
     });
     for (let i = 0; i < lock.slots; i++) out += rect(388 + i * 58, 346, 48, 48, "#1c1830", 'rx="8" stroke="#70ebea" stroke-opacity=".6" stroke-width="2"') + (guess[i] ? text(412 + i * 58, 381, RUNE[guess[i]], 30, "#ffdc83") : "");
-    return panel(out + text(500, 338, "● right place   ○ right rune, wrong place", 10, "#8a86a8"), "FIND THE RUNE CODE");
+    return panel(out + text(500, 338, "green: right place   gold ring: wrong place   dim: not in the code", 10, "#8a86a8"), "FIND THE RUNE CODE");
   }
   function keyDoor(has) { return panel(path("M440 392 V230 A60 60 0 0 1 560 230 V392 Z", "#3d2450", 'stroke="#ffdc83" stroke-width="3"') + circle(500, 300, 14, INK) + path("M494 306 h12 l4 30 h-20 Z", INK) + (has ? path(star(540, 210, 12), "#ffdc83", 'class="lp-twinkle"') : ""), has ? "LUMI HAS THE KEY" : "LOCKED · IT NEEDS A KEY"); }
   function match(game, cursor, focused) {
@@ -163,6 +168,33 @@
     return out;
   }
 
+  // ---- Where a mouse or a finger can press: see-through shapes over the doors, the chest, the cups and each square of a
+  // board, each named in data-click for game.js ("way:n", "take", "cup:1", "card:5", "lamp:3", "cell:2,4").
+  function press(x, y, w, h, name) { return rect(x, y, w, h, "#000", 'fill-opacity="0" pointer-events="all" data-click="' + name + '"'); }
+  function presses(run, play) {
+    let out = "";
+    if (run.facing) {
+      const lock = run.facing.lock, board = play.board;
+      if (lock.kind === "sokoban" && board) {
+        const size = Math.min(34, Math.floor(250 / Math.max(board.width, board.height))), ox = 500 - board.width * size / 2, oy = 268 - board.height * size / 2;
+        for (let y = 0; y < board.height; y++) for (let x = 0; x < board.width; x++) out += press(ox + x * size, oy + y * size, size, size, "cell:" + x + "," + y);
+      } else if (lock.kind === "lights" && board) {
+        const size = board.size, cell = Math.floor(230 / size), ox = 500 - size * cell / 2, oy = 270 - size * cell / 2;
+        board.lamps.forEach(function (lit, i) { out += press(ox + (i % size) * cell, oy + Math.floor(i / size) * cell, cell, cell, "lamp:" + i); });
+      }
+      return out;
+    }
+    if (run.game && run.game.kind === "match" && !run.room.done) {
+      run.game.cards.forEach(function (card, i) { out += press(374 + (i % 4) * 66, 160 + Math.floor(i / 4) * 110, 54, 92, "card:" + i); });
+      return out;
+    }
+    run.room.exits.forEach(function (way) { out += way === "s" ? press(426, 458, 148, 40, "way:s") : press(DOOR_X[way] - 32, 184, 64, 168, "way:" + way); });
+    const room = run.room;
+    if (!room.done && (room.kind === "treasure" || room.kind === "vault" || room.kind === "key")) out += press(570, 362, 72, 74, "take");
+    if (!room.done && room.kind === "game" && run.game && run.game.kind === "cups") [-40, 0, 40].forEach(function (dx, cup) { out += press(606 + dx - 19, 384, 38, 46, "cup:" + cup); });
+    return out;
+  }
+
   function scene(run, play, focus, showPuzzle) { // Everything in the room, back to front. `play` is the puzzle in progress on the page, if any.
     // `showPuzzle` false: leave the puzzle or card panel out (the Dungeon tab isn't open, so nothing could be done with it).
     let middle = "";
@@ -172,7 +204,7 @@
       middle = lock.kind === "sokoban" && play.board ? sokoban(play.board, focus === "board") : lock.kind === "lights" && play.board ? lights(play.board, focus === "board")
         : lock.kind === "runes" ? runes(lock, play.guess || []) : keyDoor(run.satchel.keys > 0);
     } else if (run.game && run.game.kind === "match" && !run.room.done) middle = match(run.game, play.cursor || 0, focus === "board");
-    return backdrop(run.env) + doors(run, run.env.palette) + feature(run) + map(run) + middle;
+    return backdrop(run.env) + doors(run, run.env.palette) + feature(run) + map(run) + middle + (showPuzzle === false ? "" : presses(run, play));
   }
 
   return { MOTIF: MOTIF, backdrop: backdrop, scene: scene, map: map };

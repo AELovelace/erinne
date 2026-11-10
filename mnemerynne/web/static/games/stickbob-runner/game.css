@@ -1,0 +1,27 @@
+/* StickBob Runner's page (templates/games/stickbob-runner.html): the game fills the whole frame, with the score and the
+   start panel floating over it. Colours come from the theme (common.css); the world itself is drawn by game.js. */
+
+#gm[data-game="stickbob-runner"] { display: block; padding: 0; }   /* no side panels: the runner wants every pixel */
+.sr-stage { position: relative; width: 100%; height: 100vh; overflow: hidden; background: var(--blush); }
+#sr-view { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; image-rendering: pixelated; }
+
+.sr-hud { position: absolute; top: .6rem; display: grid; gap: .1rem; pointer-events: none; font-family: var(--serif);   /* never blocks the mouse */
+          color: var(--ink); text-shadow: 0 0 6px #000, 0 0 2px #000; }
+.sr-hud.left { left: .9rem; }
+.sr-hud.right { right: .9rem; text-align: right; }
+.sr-health { color: var(--rose); font-size: 1.5rem; letter-spacing: .1em; }
+.sr-line { font-size: 1.05rem; }
+.sr-line b { font-weight: 600; font-variant-numeric: tabular-nums; }                /* digits don't jiggle as the score climbs */
+.sr-line span { color: var(--muted); font-size: .8rem; letter-spacing: .14em; text-transform: uppercase; }
+.sr-sound { color: var(--muted); font-size: .75rem; letter-spacing: .08em; }
+
+.sr-panel { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(30rem, calc(100% - 2rem));
+            max-height: calc(100% - 2rem); overflow-y: auto; text-align: center; background: var(--glass-strong, var(--glass)); }
+.sr-panel[hidden] { display: none; }                                                /* the class's own display would otherwise win */
+.sr-heading { margin: 0 0 .5rem; color: var(--rose); font-family: var(--serif); font-size: 1.25rem; letter-spacing: .06em; }
+.sr-result { margin: 0 0 .8rem; color: var(--ink); font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+.sr-result:empty, .sr-earned:empty { display: none; }
+.sr-earned { margin: -.4rem 0 .9rem; color: var(--rose); font-weight: 600; }   /* the coins this run paid */
+.sr-keys { margin: 0 0 1rem; display: grid; grid-template-columns: auto auto; gap: .25rem .9rem; justify-content: center; text-align: left; font-size: .92rem; }
+.sr-keys dt { color: var(--cyan); }
+.sr-keys dd { margin: 0; color: var(--ink); }

@@ -58,9 +58,10 @@ test("a finished trip shows how it ended once, then the places again", () => {
 
 test("exploring offers each way out, saying what is known there, and only choices are sent", () => {
   const list = open(run());
-  assert.deepEqual(list.rows.map(r => r.key), ["go-e", "go-n", "potion", "tabs", "abandon"]);
-  list.row("tabs").local();
-  assert.deepEqual(list.went, [{ tabs: true }], "The other tabs are one row away, since the arrows are busy walking");
+  assert.deepEqual(list.rows.map(r => r.key), ["go-e", "go-n", "look", "potion", "care", "abandon"]);
+  assert.deepEqual(list.row("look").send, { action: "look" });
+  list.row("care").local();
+  assert.deepEqual(list.went, [{ care: true }], "Looking after her is one row away");
   assert.deepEqual(list.row("go-n").send, { action: "move", way: "n" });
   assert.equal(list.row("go-n").hint, "somewhere new");
   assert.equal(list.row("go-e").hint, "a locked door");
@@ -100,7 +101,7 @@ test("a key door needs a key; a rune door builds a code four runes long", () => 
   assert.deepEqual(open(run({ facing: { at: "2,1", lock: { kind: "key" } }, satchel: { ...bag, keys: 1 } })).row("unlock").send, { action: "unlock" });
   const lock = { kind: "runes", runes: ["sun", "moon", "star", "leaf", "wave"], slots: 4, tries: [], left: 8 };
   const empty = open(facing(lock), { guess: [] });
-  assert.deepEqual(empty.rows.map(r => r.key), ["try", "rune-sun", "rune-moon", "rune-star", "rune-leaf", "rune-wave", "erase", "back", "tabs"]);
+  assert.deepEqual(empty.rows.map(r => r.key), ["try", "rune-sun", "rune-moon", "rune-star", "rune-leaf", "rune-wave", "erase", "back", "care"]);
   assert.match(empty.row("try").note, /Choose 4 runes first/);
   empty.row("rune-moon").local();
   assert.deepEqual(empty.went, [{ rune: "moon" }]);
@@ -116,13 +117,13 @@ test("a crate door and a lamp door list their choices with the puzzle as the pag
   const facing = lock => run({ facing: { at: "2,1", lock } });
   const level = levels[0], crates = UI.sokobanMove(UI.sokobanMove(UI.sokobanStart(level.rows), "u"), "l");
   const atCrates = open(facing({ kind: "sokoban", rows: level.rows }), { id: "x", board: crates });
-  assert.deepEqual(atCrates.rows.map(r => r.key), ["play", "undo", "reset", "back", "tabs"]);
+  assert.deepEqual(atCrates.rows.map(r => r.key), ["play", "undo", "reset", "back", "care"]);
   assert.match(atCrates.row("play").hint, new RegExp("^" + crates.moves.length + " steps so far"));
   atCrates.row("undo").local(); atCrates.row("reset").local(); atCrates.row("play").local();
   assert.deepEqual(atCrates.went, [{ undo: true }, { reset: true }, { focus: "board" }]);
   const lock = { kind: "lights", size: 3, board: Array(9).fill(true) }, lamps = UI.lightsPress(UI.lightsStart(lock), 4);
   const atLamps = open(facing(lock), { id: "y", board: lamps });
-  assert.deepEqual(atLamps.rows.map(r => r.key), ["play", "reset", "back", "tabs"]);
+  assert.deepEqual(atLamps.rows.map(r => r.key), ["play", "reset", "back", "care"]);
   assert.match(atLamps.row("play").hint, /^1 presses so far/);
   for (const kind of ["sokoban", "lights"]) { // Before the page has started the puzzle, the list still draws.
     const early = open(facing(kind === "lights" ? lock : { kind, rows: level.rows }), {});
@@ -182,8 +183,12 @@ test("the scene draws the room's doors, what is in it, a map, and the puzzle on 
   assert.ok(Art.scene(run({ facing: { at: "2,1", lock: { kind: "sokoban", rows: level.rows } } }), { board }, "list").includes("PAUSED"));
   const lamps = Art.scene(run({ facing: { at: "2,1", lock: { kind: "lights", size: 3, board: Array(9).fill(true) } } }), { board: UI.lightsStart({ size: 3, board: Array(9).fill(true) }) }, "board");
   assert.ok(lamps.includes("PUT EVERY LAMP OUT"));
-  const runes = Art.scene(run({ facing: { at: "2,1", lock: { kind: "runes", runes: [], slots: 4, tries: [{ guess: ["sun", "moon", "star", "leaf"], exact: 1, near: 2 }], left: 7 } } }), { guess: ["wave"] }, "list");
+  const runes = Art.scene(run({ facing: { at: "2,1", lock: { kind: "runes", runes: [], slots: 4, tries: [{ guess: ["sun", "moon", "star", "leaf"], exact: 1, near: 2, marks: ["right", "near", "near", "miss"] }], left: 7 } } }), { guess: ["wave"] }, "list");
   assert.ok(runes.includes("FIND THE RUNE CODE") && runes.includes("☀") && runes.includes("≈"));
+  assert.equal(runes.split('data-rune="right"').length - 1, 1, "The rune in the right place lights up");
+  assert.equal(runes.split('data-rune="near"').length - 1, 2, "Runes in the wrong place are ringed");
+  const old = Art.scene(run({ facing: { at: "2,1", lock: { kind: "runes", runes: [], slots: 4, tries: [{ guess: ["sun", "moon", "star", "leaf"], exact: 1, near: 2 }], left: 7 } } }), { guess: [] }, "list");
+  assert.ok(!old.includes("data-rune"), "A try made before runes lit up still draws, with its counts only");
   assert.ok(Art.scene(run({ facing: { at: "2,1", lock: { kind: "key" } } }), {}, "list").includes("IT NEEDS A KEY"));
   const away = Art.scene(run({ facing: { at: "2,1", lock: { kind: "sokoban", rows: level.rows } } }), { board }, "board", false);
   assert.ok(!away.includes("PUSH THE CRATES") && !away.includes("NEEDS A KEY") && away.includes(">N<"), "On another tab the room shows without the puzzle over it");
@@ -194,4 +199,42 @@ test("the scene draws the room's doors, what is in it, a map, and the puzzle on 
 test("the top line reads the place, the floor, her health and her satchel", () => {
   assert.deepEqual(UI.hud(run()), { title: "Crystal Cavern · floor 2", hp: 52, mp: 45, label: "30/58 HP · 10 MP · satchel: 24 coins · 1 potion" });
   assert.equal(UI.carrying({ coins: 5, potions: 2, keys: 1, trophies: ["a", "b"], mods: ["m"] }), "5 coins · 2 potions · a key · 2 trophies · 1 mod");
+});
+
+test("looking after Lumi on a trip offers only snacks and a potion", () => {
+  const catalog = { snacks: [{ id: "apple", icon: "a", name: "Apple", price: 0, fullness: 30 }, { id: "lunch", icon: "l", name: "Lunch box", price: 12, fullness: 45 },
+    { id: "banana", icon: "b", name: "Banana", price: 5, fullness: 35 }], treats: [{ id: "jelly", icon: "j", name: "Jelly", price: 40, fullness: 5 }] };
+  const went = [], trip = run();
+  const care = hp => UI.rows({ snap: { pet: { potions: 1, inventory: { lunch: 2, jelly: 1 } }, catalog, dungeon: { run: Object.assign({}, trip, { hp }), environments: [] } },
+    play: {}, dismissed: null, care: true, go(change) { went.push(change); } });
+  const list = care(trip.hpMax - 1);
+  assert.deepEqual(list.map(r => r.key), ["explore", "apple", "lunch", "jelly", "potion"], "What she has to eat, a potion, and the way back: no cuddles, naps, shops or closets");
+  assert.deepEqual(list[2].send, { action: "feed", item: "lunch" });
+  assert.match(list[2].hint, /\+45% health · 2 left/);
+  assert.doesNotMatch(list[1].hint, /health/, "The free bowl fills her tummy and mends nothing");
+  assert.deepEqual(list[4].send, { action: "potion" });
+  assert.equal(care(trip.hpMax)[4].note, "Lumi is already at full health.");
+  list[0].local();
+  assert.deepEqual(went, [{ care: false }]);
+});
+
+test("the room and every board can be pressed with a mouse", () => {
+  const names = svg => [...svg.matchAll(/data-click="([^"]+)"/g)].map(m => m[1]);
+  const walkable = names(Art.scene(run(), {}, "list"));
+  assert.deepEqual(walkable, run().room.exits.map(way => "way:" + way), "Each way out is a door to press");
+  const chest = names(Art.scene(run({ room: { kind: "treasure", done: false, exits: ["n"] } }), {}, "list"));
+  assert.deepEqual(chest, ["way:n", "take"]);
+  assert.deepEqual(names(Art.scene(run({ room: { kind: "treasure", done: true, exits: ["n"] } }), {}, "list")), ["way:n"], "An opened chest has nothing left to press");
+  const cups = names(Art.scene(run({ room: { kind: "game", done: false, exits: [] }, game: { kind: "cups", cups: 3 } }), {}, "list"));
+  assert.deepEqual(cups, ["cup:0", "cup:1", "cup:2"]);
+  const cards = { kind: "match", cards: Array(8).fill(null), found: [], open: null, last: null, left: 10 };
+  const match = names(Art.scene(run({ room: { kind: "game", done: false, exits: ["n"] }, game: cards }), { cursor: 0 }, "board"));
+  assert.deepEqual(match, [0, 1, 2, 3, 4, 5, 6, 7].map(i => "card:" + i), "Every card, and no door behind the cards");
+  const lamps = { kind: "lights", size: 3, board: Array(9).fill(true) };
+  assert.equal(names(Art.scene(run({ facing: { at: "2,1", lock: lamps } }), { board: UI.lightsStart(lamps) }, "board")).filter(n => n.startsWith("lamp:")).length, 9);
+  const level = { rows: ["#####", "#@$.#", "#####"] };
+  const crates = names(Art.scene(run({ facing: { at: "2,1", lock: { kind: "sokoban", rows: level.rows } } }), { board: UI.sokobanStart(level.rows) }, "board"));
+  assert.equal(crates.length, 15);
+  assert.ok(crates.includes("cell:2,1"));
+  assert.deepEqual(names(Art.scene(run({ facing: { at: "2,1", lock: lamps } }), { board: UI.lightsStart(lamps) }, "board", false)), [], "Nothing to press when the board isn't showing");
 });

@@ -21,6 +21,7 @@ import json
 import logging
 import random
 import re
+import zlib
 import sqlite3
 from pathlib import Path
 
@@ -54,10 +55,11 @@ SCENARIOS = {
     "home": "Lumi walks out of {place} and home with everything she found.",
     "abandon": "Lumi gives up the trip and goes home, leaving what she found.",
     "potion": "Lumi drinks a potion and feels better.",
+    "look": "Lumi stops and looks closely at one small, charming detail of the room she is in. Any room: don't mention treasure, doors, enemies or puzzles.",
 }
 # Plain reports: how a puzzle or game is going, and what is waiting in a room. Facts, so never handed to a model.
 FACTS = {
-    "runes_try": "{exact} in the right place, {near} right but in the wrong place.",
+    "runes_try": "{exact} in the right place (lit green), {near} right but in the wrong place (ringed gold).",
     "runes_reset": "The runes spin and settle on a new code. Try again from the start.",
     "match_flip": "One card turned. Now find its pair.",
     "match_pair": "A pair!",
@@ -140,12 +142,28 @@ def facts(run: dict) -> dict[str, str]:
             "item": _item(event.get("loot"), event.get("coins"))}
 
 
+def _details(run: dict) -> tuple[list[str], int]:
+    """The environment's details to notice, and where this room starts among them: the same room always starts at
+    the same one, so a place stays itself however often she walks back through it."""
+    lines = LIBRARY.get(run["env"], {}).get("look") or LIBRARY["default"]["look"]
+    return lines, zlib.crc32(f"{run['id']}:{run['depth']}:{run['at']}".encode())
+
+
+def scene(run: dict) -> str:
+    """What this room is like: its own detail, shown for as long as she stands in it."""
+    lines, at = _details(run)
+    return lines[at % len(lines)].format(**facts(run))
+
+
 def line(run: dict, rng=None) -> str:
     """The library's line for what just happened in a run: the environment's own if it has one, else the default."""
     rng = rng or random.SystemRandom()
     scenario = run["event"]["scenario"]
     if scenario in FACTS:
         return FACTS[scenario].format(**{k: v for k, v in run["event"].items() if isinstance(v, int)})
+    if scenario == "look":                                # each look in a room notices the next detail along
+        lines, at = _details(run)
+        return lines[(at + run["event"]["n"]) % len(lines)].format(**facts(run))
     lines = LIBRARY.get(run["env"], {}).get(scenario) or LIBRARY["default"][scenario]
     told = lines[rng.randrange(len(lines))].format(**facts(run))
     won = _item(run["event"].get("loot"), run["event"].get("coins"))

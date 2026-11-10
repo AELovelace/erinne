@@ -39,7 +39,7 @@ def _refusal(_request):
 
 
 def _moment(scenario="treasure", env="toy-attic", **event):
-    return {"id": 5, "env": env, "depth": 2, "event": {"scenario": scenario, **event}}
+    return {"id": 5, "env": env, "depth": 2, "at": "1,2", "event": {"scenario": scenario, "n": 1, **event}}
 
 
 @pytest.fixture
@@ -116,7 +116,7 @@ def test_a_line_fills_in_names_prefers_the_environments_own_and_always_says_what
     found = T.line(_moment("vault", loot={"coins": 90, "potions": 1, "trophy": "trophy-ghost-teddy", "mod": "glitch-fang"}), rng)
     assert "90 coins, a potion, the Ghost teddy and a Glitch Fang mod" in found
     assert "Haunted Toy Attic" in T.line(_moment("home"), random.Random(0)) or "Home!" in T.line(_moment("home"), random.Random(0))
-    assert T.line(_moment("runes_try", exact=2, near=1)) == "2 in the right place, 1 right but in the wrong place."
+    assert T.line(_moment("runes_try", exact=2, near=1)) == "2 in the right place (lit green), 1 right but in the wrong place (ringed gold)."
     for scenario in T.SCENARIOS:                                                # every scenario reads cleanly in every environment
         for env in D._ENVS:
             told = T.line(_moment(scenario, env, enemy="Dust Bunny", loot={"coins": 5}), rng)
@@ -280,3 +280,15 @@ def test_live_lines_are_rate_limited_per_person(on, conn, settings):
         T.TRANSPORT = None
         web_games._tale_times.clear()
     assert len(claude.asked) == web_games.TALES_A_MINUTE
+
+
+def test_a_room_keeps_its_own_detail_and_each_look_notices_another():
+    here, there = _moment("look"), {**_moment("look"), "at": "3,0"}
+    looks = T.LIBRARY["toy-attic"]["look"]
+    assert T.scene(here) == T.scene(here) and T.scene(here) in looks            # the same room is always the same place
+    assert len({T.scene({**here, "at": f"{x},{y}"}) for x in range(5) for y in range(4)}) > 3      # and rooms differ
+    first = T.line(here)
+    second = T.line({**here, "event": {"scenario": "look", "n": 2}})
+    assert first in looks and second in looks and len({T.scene(here), first, second}) == 3         # a new detail each look
+    assert T.scene(there) in looks
+    assert all(len(T.LIBRARY[env]["look"]) >= 6 for env in D._ENVS)            # every environment has things to notice

@@ -946,10 +946,16 @@
     refreshCoins();
     const data = await api("GET", "/api/media/games");
     if (!data.games.length) return [empty("No games yet.")];
-    return [shelf(null, data.games.map(function (g) {
+    const tile = function (g) {                          // one game's card
       return card({ title: g.name, sub: g.description, glyph: g.icon || "🎮", shape: "square",
                     onClick: function () { games.open(g); } });
-    }), "square", "grid")];
+    };
+    const out = [shelf(null, data.games.filter(function (g) { return !g.mouse_keyboard; }).map(tile), "square", "grid")];   // what any remote or touch screen can play
+    const desk = data.games.filter(function (g) { return g.mouse_keyboard; });              // needs real keys and a pointer (mnemerynne/games.py)
+    if (desk.length && !screenId && window.matchMedia("(any-pointer: fine)").matches) {     // a TV or a phone couldn't play these, so it doesn't offer them
+      out.push(shelf("Mouse & keyboard", desk.map(tile), "square", "grid"));
+    }
+    return out;
   }
 
   /* This account's coins, in the Games header if it's showing (on a TV, its owner's). */

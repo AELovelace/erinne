@@ -1,0 +1,57 @@
+{
+ "plots": {"start": 4, "max": 16, "price": 25, "growth": 1.25},
+ "press": {"powder_per_coin": 40, "band": 100, "tap": 3, "max_rate": 12, "lucky": 5, "lucky_chance": 3, "away_hours": 8, "away_kept": 50, "present_seconds": 300},
+ "fresh": 2,
+ "reminder_minutes": 30,
+ "flowers": [
+  {"id": "moondaisy", "name": "Moondaisy", "sort": "cut", "minutes": 2, "powder": 6, "coins": 0, "stardust": 0, "level": 1, "needs": 0, "colour": "#f6f1ff", "heart": "#ffdc83", "petals": 8},
+  {"id": "glowbell", "name": "Glowbell", "sort": "cut", "minutes": 5, "powder": 18, "coins": 30, "stardust": 0, "level": 1, "needs": 40, "colour": "#70ebea", "heart": "#f0deff", "petals": 5},
+  {"id": "starpoppy", "name": "Starpoppy", "sort": "cut", "minutes": 15, "powder": 60, "coins": 60, "stardust": 0, "level": 1, "needs": 200, "colour": "#ff6b8b", "heart": "#3d2450", "petals": 6},
+  {"id": "comet-clover", "name": "Comet Clover", "sort": "cut", "minutes": 30, "powder": 130, "coins": 100, "stardust": 0, "level": 1, "needs": 600, "colour": "#8be9a8", "heart": "#fff8dc", "petals": 4},
+  {"id": "dusk-tulip", "name": "Dusk Tulip", "sort": "cut", "minutes": 60, "powder": 280, "coins": 180, "stardust": 0, "level": 1, "needs": 1500, "colour": "#b48cff", "heart": "#ffdc83", "petals": 3},
+  {"id": "nebula-rose", "name": "Nebula Rose", "sort": "cut", "minutes": 120, "powder": 650, "coins": 0, "stardust": 800, "level": 5, "needs": 3000, "colour": "#ff8fd6", "heart": "#70ebea", "petals": 10},
+  {"id": "lantern-lily", "name": "Lantern Lily", "sort": "cut", "minutes": 240, "powder": 1300, "coins": 350, "stardust": 0, "level": 1, "needs": 6000, "colour": "#ffb35c", "heart": "#fff8dc", "petals": 6},
+  {"id": "aurora-iris", "name": "Aurora Iris", "sort": "cut", "minutes": 360, "powder": 2200, "coins": 0, "stardust": 3000, "level": 10, "needs": 12000, "colour": "#7fe0c8", "heart": "#b48cff", "petals": 7},
+  {"id": "moon-fern", "name": "Moon Fern", "sort": "perennial", "minutes": 60, "powder": 150, "coins": 500, "stardust": 0, "level": 1, "needs": 20000, "colour": "#9fd8ff", "heart": "#f6f1ff", "petals": 9},
+  {"id": "prism-hydrangea", "name": "Prism Hydrangea", "sort": "perennial", "minutes": 180, "powder": 500, "coins": 0, "stardust": 8000, "level": 15, "needs": 35000, "colour": "#c9a0ff", "heart": "#70ebea", "petals": 12},
+  {"id": "star-wisteria", "name": "Star Wisteria", "sort": "perennial", "minutes": 360, "powder": 1100, "coins": 800, "stardust": 0, "level": 1, "needs": 55000, "colour": "#a98bff", "heart": "#ffdc83", "petals": 8},
+  {"id": "comet-orchid", "name": "Comet Orchid", "sort": "perennial", "minutes": 720, "powder": 2400, "coins": 0, "stardust": 20000, "level": 20, "needs": 80000, "colour": "#ffe9a8", "heart": "#ff6b8b", "petals": 5}
+ ],
+ "helpers": [
+  {"id": "fighter", "name": "Fighter's paws", "about": "more powder squeezed with every press", "cost": 30, "growth": 1.35, "mods": ["attack"]},
+  {"id": "thief", "name": "Thief's luck", "about": "lucky presses, and gifts turn up more often", "cost": 60, "growth": 1.35, "mods": ["crit", "coins"]},
+  {"id": "monk", "name": "Monk's patience", "about": "the press squeezes by itself", "cost": 50, "growth": 1.35, "mods": ["speed"]},
+  {"id": "mage", "name": "Mage's sunshine", "about": "flowers grow faster", "cost": 120, "growth": 1.4, "mods": ["magic", "mp"]},
+  {"id": "cleric", "name": "Cleric's care", "about": "flowers stay fresh longer, and more is squeezed while you are away", "cost": 100, "growth": 1.4, "mods": ["ward", "hp"]},
+  {"id": "paladin", "name": "Paladin's blessing", "about": "a little more of everything", "cost": 250, "growth": 1.45, "mods": ["defense"]}
+ ],
+ "abilities": {
+  "fighter": {"name": "Frenzy", "about": "presses count for much more", "seconds": 30, "cooldown": 180},
+  "thief": {"name": "Lucky streak", "about": "every press is lucky", "seconds": 10, "cooldown": 240},
+  "monk": {"name": "Meditate", "about": "a lump of squeezing, all at once", "seconds": 300, "cooldown": 300},
+  "mage": {"name": "Sunburst", "about": "every growing flower jumps ahead", "seconds": 0, "cooldown": 600},
+  "cleric": {"name": "Morning dew", "about": "overgrown flowers are fresh again", "seconds": 0, "cooldown": 1200},
+  "paladin": {"name": "Blessing", "about": "everything is doubled", "seconds": 30, "cooldown": 600}
+ },
+ "cosmetics": [
+  {"id": "picket-fence", "name": "Picket fence", "about": "A little white fence round the beds.", "stardust": 300},
+  {"id": "stone-path", "name": "Stepping stones", "about": "A path of pale stones between the plots.", "stardust": 600},
+  {"id": "glow-borders", "name": "Glowing borders", "about": "Every plot is edged in soft light.", "stardust": 1500},
+  {"id": "garden-gnome", "name": "Garden gnome", "about": "He guards the daisies. He takes it very seriously.", "stardust": 2500},
+  {"id": "scarecrow-lumi", "name": "Scarecrow Lumi", "about": "A straw Lumi with button eyes. The sparrows are not fooled.", "stardust": 5000},
+  {"id": "golden-press", "name": "Golden press", "about": "The press, but shinier. It squeezes exactly the same.", "stardust": 12000},
+  {"id": "firefly-lamps", "name": "Firefly lamps", "about": "Jars of fireflies on poles, for night gardening.", "stardust": 25000}
+ ],
+ "upgrades": [
+  {"id": "strong-press", "name": "Stronger press", "about": "+25% squeezing, by paw and by itself", "max": 20},
+  {"id": "rich-soil", "name": "Rich soil", "about": "flowers grow 5% faster", "max": 6},
+  {"id": "long-bloom", "name": "Long bloom", "about": "flowers stay fresh 25% longer", "max": 8},
+  {"id": "quick-paws", "name": "Quick paws", "about": "abilities and minigames come back 10% sooner", "max": 5},
+  {"id": "night-shift", "name": "Night shift", "about": "one more hour of squeezing while you are away", "max": 4},
+  {"id": "lucky-clover", "name": "Lucky clover", "about": "gifts turn up more often", "max": 5}
+ ],
+ "water": {"rounds": 8, "share": 5, "cooldown": 1800},
+ "feed": {"seconds": 10, "per": 10, "minutes": 1, "max": 10, "cooldown": 1800},
+ "moonrise": {"needs": 100000, "growth": 2},
+ "gifts": {"chance": 3, "burst": 60, "snack": 25, "potion": 12, "token": 3, "token_days": 7, "token_coins": 150}
+}

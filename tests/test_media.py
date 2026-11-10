@@ -336,6 +336,7 @@ def test_media_follows_share_permissions(client, conn, directory, root, settings
     assert home["movies"] == [] and len(home["pictures"]) == 1
 
     checker.rules = {"Media": (False, False)}
+    share.forget_rights()                                         # lists may lag by up to SHARE_RIGHTS_SECONDS
     assert client.get("/api/media/home").json()["library"] is False
     assert client.get(f"/media/art/{pic['artwork_id']}").status_code == 404
 
@@ -1177,6 +1178,15 @@ def test_built_in_games_open_from_media_and_show_on_a_remote(client, conn, direc
         assert f"/static/{name}?v=" in page.text
         assert (Path(__file__).parent.parent / "mnemerynne" / "web" / "static" / name).is_file()
     assert 'id="pd-field"' in page.text and "messages.js" not in page.text   # the game's partial, none of the app's scripts
+    # StickBob Runner: only it is in the mouse-and-keyboard category, and its page brings its own art and levels.
+    assert [g["slug"] for g in listed if g["mouse_keyboard"]] == ["stickbob-runner"]
+    runner = client.get("/media/games/stickbob-runner")
+    assert runner.status_code == 200 and 'id="sr-view"' in runner.text and "games/stickbob-runner/assets/world.json" in runner.text
+    static_root = Path(__file__).parent.parent / "mnemerynne" / "web" / "static"
+    for name in ("rules.js", "game.js", "game.css", "assets/world.json", "assets/atlas.png"):
+        assert (static_root / "games" / "stickbob-runner" / name).is_file(), name
+    script = (static_root / "media.js").read_text(encoding="utf-8")
+    assert '"Mouse & keyboard"' in script and "any-pointer: fine" in script   # the category, offered only where it can be played
     pet = client.get("/media/games/lumi-pet")
     assert pet.status_code == 200 and 'id="lp-pet"' in pet.text
     for name in ("rules.js", "game.js", "game.css"):
@@ -1688,6 +1698,7 @@ def test_tv_shows_follow_share_permissions(client, conn, directory, root, settin
     assert [s["label"] for s in seen["seasons"]] == ["Season 1", "Season 2", "Specials"]   # a closed season: hidden
 
     checker.rules = {"Media/TV/Bluey": (False, False)}
+    share.forget_rights()                                         # lists may lag by up to SHARE_RIGHTS_SECONDS
     assert client.get("/api/media/tv").json()["shows"] == []
     assert client.get(f"/api/media/tv/{show['id']}").status_code == 404
     assert client.get(f"/media/art/{poster}").status_code == 404
@@ -1864,3 +1875,36 @@ def test_the_track_picker_doesnt_restyle_the_episode_and_album_lists():
     assert len(rules) == 1 and "position" not in rules[0]
     assert ".mc-picker[hidden] { display: none; }" in css             # flex would otherwise keep the closed menu showing
     assert '<div class="mc-picker" id="mc-tracks"' in (static / "templates" / "media.html").read_text(encoding="utf-8")
+
+
+def _track(conn, file_id, album):
+    conn.execute("INSERT INTO media_items(file_id, section, media_type, title, sort_title, artist, album, album_key, "
+                 "disk_mtime_ns, playback) VALUES (?, 'music', 'audio', 't', 't', 'A', ?, ?, 1, 'direct')",
+                 (file_id, album, album.lower()))
+
+
+def test_music_lists_are_reused_until_the_catalog_or_someones_access_changes(client, conn, directory, root, settings,
+                                                                              checker, monkeypatch):
+    from mnemerynne.media import browse
+
+    _login(client, conn, directory)
+    _turn_on(client)
+    for album in ("One", "Two"):
+        _fake_video(root / "Media" / "Music" / album / "t.flac")
+    share.sync(conn, settings)
+    ids = {r["name"]: r["id"] for r in conn.execute(
+        "SELECT f.id, d.name FROM files f JOIN folders d ON d.id = f.folder_id WHERE f.display_name = 't.flac'")}
+    _track(conn, ids["One"], "One")
+    names = lambda: [a["album"] for a in client.get("/api/media/music/albums").json()["albums"]]
+    assert names() == ["One"]
+
+    with monkeypatch.context() as m:                              # served again without working it out
+        m.setattr(browse, "albums", lambda *a: pytest.fail("the list should have come from the cache"))
+        assert names() == ["One"]
+
+    _track(conn, ids["Two"], "Two")                               # the catalog grew: worked out again
+    assert names() == ["One", "Two"]
+
+    checker.rules = {"Media/Music/Two": (False, False)}           # and each person only ever gets their own view
+    share.forget_rights()
+    assert names() == ["One"]

@@ -1851,6 +1851,26 @@
     tools.append(test, reread, relook, result);
     playback.appendChild(tools);
 
+    // Games: the most coins StickBob Runner pays one person a day (mnemerynne/runner.py). 0 means no limit.
+    playback.appendChild(el("h3", "ax-h small", "Games"));
+    const gamesForm = el("form");
+    const gamesGrid = el("div", "agent-settings");
+    const runnerCap = agentInput("number", s.runner_daily_cap);
+    runnerCap.min = "0"; runnerCap.max = "1000000"; runnerCap.step = "1";
+    agentField(gamesGrid, "StickBob Runner coins a day", runnerCap).title =
+      "The most one person can earn from StickBob Runner in a day. 0 is no limit. Its scores come from the browser, so this is the guard against made-up runs.";
+    gamesForm.appendChild(gamesGrid);
+    const gamesActions = el("div", "ax-new");
+    const saveGames = el("button", "small", "Save");
+    saveGames.type = "submit";
+    gamesActions.append(saveGames, el("span", "small muted", "0 is no limit. A run pays 1 coin per 10 m plus 1 per kill."));
+    gamesForm.appendChild(gamesActions);
+    gamesForm.addEventListener("submit", function (e) {   // sends the cap only, as a whole number
+      e.preventDefault();
+      save({ runner_daily_cap: Math.max(0, Math.floor(Number(runnerCap.value) || 0)) });
+    });
+    playback.appendChild(gamesForm);
+
     // Live TV and radio: SGCRelay's station list, then the admin's own streams and stations.
     const radioForm = el("form");
     const radioGrid = el("div", "agent-settings");

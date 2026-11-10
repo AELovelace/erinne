@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
+from typing import Callable
 
 from mnemerynne.db import transaction
 
@@ -49,6 +50,25 @@ class Reach:
     # `claude` is this minus the hidden folders and everything under them.
     claude_shared: set[int] = field(default_factory=set)
     claude_hidden: set[int] = field(default_factory=set)              # folders hidden themselves
+    # Share libraries: asks the share about one folder right now, (read, write). None elsewhere.
+    live: Callable[[int | None], tuple[bool, bool]] | None = field(default=None, repr=False)
+    narrowed: bool = False                                            # Claude's view: a recheck may only take away
+
+    def recheck(self, folder_id: int | None) -> None:
+        """Bring this one place up to date with the share, for acting on it now (a list may be up to
+        share_rights_seconds old). Claude's view stays within what was shared with it."""
+        if self.live is None:
+            return
+        read, write = self.live(folder_id)
+        may_read = read and (self.can_read(folder_id) or not self.narrowed)
+        may_write = write and not self.narrowed
+        if folder_id is None:
+            self.root_read, self.root_write, self.root_claude = may_read, may_write, self.root_claude and read
+            return
+        for allowed, folders in ((may_read, self.read), (may_write, self.write)):
+            (folders.add if allowed else folders.discard)(folder_id)
+        if not read:
+            self.claude.discard(folder_id)
 
     def can_read(self, folder_id: int | None) -> bool:
         return self.root_read if folder_id is None else folder_id in self.read
@@ -79,7 +99,8 @@ class Reach:
         """The part of this reach that may be searched from Claude, read-only."""
         return Reach(self.collection_id, self.kind, self.name, root_read=self.root_claude,
                      root_claude=self.root_claude, read=set(self.claude), claude=set(self.claude),
-                     parents=self.parents, claude_shared=self.claude_shared, claude_hidden=self.claude_hidden)
+                     parents=self.parents, claude_shared=self.claude_shared, claude_hidden=self.claude_hidden,
+                     live=self.live, narrowed=True)
 
     def claude_state(self, folder_id: int | None, *, own: int | None = None) -> tuple[bool, bool]:
         """For the Claude checkbox of a folder (folder_id = itself) or of a file in folder_id (own = its

@@ -85,6 +85,12 @@ class Settings(BaseSettings):
     users_folder: str = "Users"
     share_scan_seconds: int = 60
     share_settle_seconds: int = 10
+    # How long lists and search may reuse one person's folder permissions read from the share. Opening a file,
+    # playing it or changing something always reads that one folder's permissions again. 0: read every time.
+    share_rights_seconds: int = 30
+    # How long lists and search may reuse one person's folder permissions read from the share. Opening a file,
+    # playing it or changing something always reads that one folder's permissions again. 0: read every time.
+    share_rights_seconds: int = 30
 
     # Inference (llama-server)
     llm_url: str = "http://127.0.0.1:8081"

@@ -117,6 +117,7 @@ def create_text(body: NewTextBody, user=Depends(api_user), conn: sqlite3.Connect
     if target is None or target not in access.writable:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't create files here")
     _fs_errors(lambda: fs.require_folder(conn, target, body.folder_id))
+    access.confirm(target, body.folder_id)         # creating a file: ask the share now
     if not access.can_write(target, body.folder_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't create files in this folder")
     name = store.clean_display_name(body.name)

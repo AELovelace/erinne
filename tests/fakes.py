@@ -114,6 +114,8 @@ class FakeShareChecker:
         self.default = default
 
     def rights(self, path, uid, gids):
+        if not path.is_dir():
+            return False, False                       # like the real checker: not a folder on disk, no way in
         if not path.is_relative_to(self.root):
             return self.rules.get(path.name, self.default)   # in the trash: by its trash name
         rel = path.relative_to(self.root).as_posix()

@@ -130,11 +130,29 @@
     return rows;
   }
 
-  function rows(ctx) { // ctx: { snap, play, dismissed, go(change) }
+  function potionRow(snap, run) { // A potion: her own, or one found on this trip.
+    const ready = snap.potions_ready === undefined ? snap.pet.potions : snap.potions_ready;
+    const potion = { key: "potion", icon: "🧪", name: "Drink a potion (" + ready + ")", hint: "Lumi has " + run.hp + " of " + run.hpMax + " HP" };
+    if (run.hp >= run.hpMax) potion.note = "Lumi is already at full health.";
+    else if (ready) { potion.url = "dungeon/act"; potion.send = { action: "potion" }; } else potion.note = "Lumi has no potions with her.";
+    return potion;
+  }
+
+  function careRows(snap, run, go) { // "Look after Lumi" on a trip: a snack or a potion, and nothing else until she is home.
+    const pet = snap.pet, foods = snap.catalog.snacks.concat(snap.catalog.treats).filter(function (food) { return !food.price || pet.inventory[food.id]; });
+    return [{ key: "explore", icon: "‹", name: "Back to exploring", hint: "Lumi has " + run.hp + " of " + run.hpMax + " HP", local: function () { go({ care: false }); } }]
+      .concat(foods.map(function (food) { // Bought food mends her by its tummy number; the free bowl only fills her tummy.
+        return { key: food.id, icon: food.icon, name: food.name, send: { action: "feed", item: food.id },
+          hint: "+" + food.fullness + " tummy" + (food.price && food.fullness > 0 ? " · +" + food.fullness + "% health" : "") + " · " + (food.price ? pet.inventory[food.id] + " left" : "always in the bowl") };
+      })).concat([potionRow(snap, run)]);
+  }
+
+  function rows(ctx) { // ctx: { snap, play, dismissed, care (the snack-and-potion list is open), go(change) }
     const snap = ctx.snap, run = snap.dungeon.run, go = ctx.go;
     if (!run || (run.over && ctx.dismissed === run.id)) return places(snap);
     if (run.over) return [{ key: "continue", icon: "›", name: run.over === "home" ? "Home again!" : "Carry on", hint: summary(run), local: function () { go({ dismiss: run.id }); } }];
-    const tabs = { key: "tabs", icon: "♡", name: "Look after Lumi", hint: "Care, pantry and the other tabs · the trip waits here", local: function () { go({ tabs: true }); } };
+    if (ctx.care) return careRows(snap, run, go);
+    const tabs = { key: "care", icon: "♡", name: "Look after Lumi", hint: "A snack or a potion · everything else waits until she's home", local: function () { go({ care: true }); } };
     if (run.facing) return doorRows(run, ctx.play || {}, go).concat([tabs]);
     const list = [], room = run.room;
     if (run.game && !room.done) {
@@ -152,12 +170,8 @@
       list.push({ key: "go-" + way, icon: WAYS[way][1], name: "Go " + WAYS[way][0], url: "dungeon/act", send: { action: "move", way: way },
         hint: (to.kind === "vault" && !to.done ? "a locked door" : KINDS[to.kind]) + (to.kind === "enemy" && !to.done ? " · it's still there" : "") });
     });
-    if (run.hp < run.hpMax) {
-      const ready = snap.potions_ready === undefined ? snap.pet.potions : snap.potions_ready; // Her own, and any found on this trip.
-      const potion = { key: "potion", icon: "🧪", name: "Drink a potion (" + ready + ")", hint: "Lumi has " + run.hp + " of " + run.hpMax + " HP" };
-      if (ready) { potion.url = "dungeon/act"; potion.send = { action: "potion" }; } else potion.note = "Lumi has no potions with her.";
-      list.push(potion);
-    }
+    list.push({ key: "look", icon: "◉", name: "Look around", hint: "Notice something about this room", url: "dungeon/act", send: { action: "look" } });
+    if (run.hp < run.hpMax) list.push(potionRow(snap, run));
     list.push(tabs);
     list.push({ key: "abandon", icon: "✕", name: "Give up and go home", hint: "Leaves the satchel behind: " + carrying(run.satchel), confirm: "abandon", url: "dungeon/act", send: { action: "abandon" } });
     return list;

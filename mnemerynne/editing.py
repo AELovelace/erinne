@@ -187,12 +187,18 @@ def check_edit(conn: sqlite3.Connection, user_id: int, token_can_edit: bool,
     item_flags=False leaves out the per-folder and per-file switches (to show them).
     ai, own: the assistant's and the person's Access, when the caller already has them (EditCheck)."""
     who = ASSISTANTS[via]
-    if not (ai or ai_access(conn, user_id, via)).can_read(collection_id, folder_id):
+    if ai is None:                                 # a real edit, not a listing's flags: ask the share now
+        ai = ai_access(conn, user_id, via)
+        ai.confirm(collection_id, folder_id)
+    if not ai.can_read(collection_id, folder_id):
         raise EditNotFound("No such place" + (" (or it isn't shared with Claude)." if via == "claude" else "."))
     if not token_can_edit:
         raise EditForbidden("This connection can only search. To let Claude change files, open Claude in "
                             "Mnemerynne and turn on “Let Claude edit files” for this token.")
-    if not (own or fs.Access.of(conn, user_id)).can_write(collection_id, folder_id):
+    if own is None:
+        own = fs.Access.of(conn, user_id)
+        own.confirm(collection_id, folder_id)
+    if not own.can_write(collection_id, folder_id):
         raise EditForbidden(f"You can't change files here yourself, so {who} can't either.")
     if item_flags:
         why = no_edit_reason(conn, folder_id, file_id)
@@ -236,16 +242,19 @@ class EditCheck:
 
 
 def edit_state(conn: sqlite3.Connection, user_id: int, collection_id: int, place: int | None,
-               above: int | None, own_edit: int, own_no_edit: int) -> dict:
+               above: int | None, own_edit: int, own_no_edit: int, *, access: fs.Access | None = None,
+               ai: fs.Access | None = None) -> dict:
     """The "AI can edit" switch of a file (place and above = its folder) or a folder (place = itself, above =
     its parent): {on, can_change, shared, why}. In their own inbox people can switch it on (like the Agents
-    folder); elsewhere only an admin allows AI edits and the switch can only make things read-only."""
-    access = fs.Access.of(conn, user_id)
+    folder); elsewhere only an admin allows AI edits and the switch can only make things read-only.
+    access, ai: the person's and Erynne's Access, when a listing already has them (one lookup, not three a row)."""
+    access = access or fs.Access.of(conn, user_id)
+    ai = ai or ai_access(conn, user_id, "erynne")
     coll = conn.execute("SELECT kind, owner_user_id FROM collections WHERE id = ?", (collection_id,)).fetchone()
     grantable = bool(coll) and coll["kind"] == "private" and coll["owner_user_id"] == user_id \
         and access.can_write(collection_id, place)
     try:
-        check_edit(conn, user_id, True, collection_id, place, via="erynne", item_flags=False)
+        check_edit(conn, user_id, True, collection_id, place, via="erynne", item_flags=False, ai=ai, own=access)
         base, why = True, None
     except EditForbidden as exc:
         base, why = False, str(exc)

@@ -20,19 +20,20 @@
 
   function homeRows(ctx) { // ctx: { snap, open (a spot id, or null for the list of spots), flip, go(change) }
     const snap = ctx.snap, pet = snap.pet, go = ctx.go;
-    function mine(piece) { return (!piece.price && !piece.found) || pet.decor.indexOf(piece.id) >= 0; } // Free with the house, or already hers.
+    function mine(piece) { return (!piece.price && !piece.found && !piece.rarity) || pet.decor.indexOf(piece.id) >= 0; } // Free with the house, or already hers.
+    function hidden(piece) { return (piece.found || piece.rarity) && !mine(piece); } // A dungeon trophy or Star Capsule prize she hasn't got: it can't be bought.
     const spot = snap.house.spots.find(function (entry) { return entry.id === ctx.open; });
     if (spot) return [{ key: "back", icon: "‹", name: "Back to the house", hint: spot.name, local: function () { go({ open: null, pick: snap.house.spots.indexOf(spot) }); } }]
       .concat(spot.items.map(function (piece) {
         const here = pet.house[spot.id] === piece.id, owned = mine(piece);
-        const row = { key: piece.id, icon: here ? "✓" : owned ? "○" : piece.found ? "🔒" : "✧", name: piece.name, label: piece.name, preview: [spot.id, piece.id],
-          hint: here ? "In the room now" : owned ? "Yours · Enter puts it out" : piece.found ? "Waiting somewhere in the dungeon" : piece.price + " coins · Enter buys it" };
-        if (here) row.note = piece.name + " is already in the room."; else if (owned || !piece.found) row.send = { action: "decorate", item: piece.id };
-        else row.note = piece.name + " can't be bought. It's waiting somewhere in the dungeon.";
+        const row = { key: piece.id, icon: here ? "✓" : owned ? "○" : hidden(piece) ? "🔒" : "✧", name: piece.name, label: piece.name, preview: [spot.id, piece.id],
+          hint: here ? "In the room now" : owned ? "Yours · Enter puts it out" : piece.found ? "Waiting somewhere in the dungeon" : piece.rarity ? capital(piece.rarity) + " · only from a capsule" : piece.price + " coins · Enter buys it" };
+        if (here) row.note = piece.name + " is already in the room."; else if (!hidden(piece)) row.send = { action: "decorate", item: piece.id };
+        else row.note = piece.found ? piece.name + " can't be bought. It's waiting somewhere in the dungeon." : piece.name + " only comes from a capsule.";
         return row;
       }));
     return snap.house.spots.map(function (entry) {
-      const choices = entry.items.filter(function (piece) { return !piece.found || mine(piece); }); // A trophy shows once it's found.
+      const choices = entry.items.filter(function (piece) { return !hidden(piece); }); // A trophy or Capsule prize joins the row once she has it.
       const ids = choices.map(function (piece) { return piece.id; }), placed = pet.house[entry.id];
       const shown = ids.indexOf(ctx.flip[entry.id]) >= 0 ? ctx.flip[entry.id] : placed;
       const piece = choices.find(function (found) { return found.id === shown; }) || choices[0];
@@ -44,20 +45,23 @@
   }
 
   function closetRows(ctx) { // ctx as for homeRows; `open` is a slot id, or null for the list of places on Lumi.
-    const snap = ctx.snap, pet = snap.pet, go = ctx.go, capsule = snap.closet.capsule;
+    const snap = ctx.snap, pet = snap.pet, go = ctx.go, capsule = snap.closet.capsule, moon = snap.closet.moon;
+    const REPEAT = " · a repeat pays back half its value";
+    const CAPSULES = 2; // The capsule rows come first, so a slot's place in the list is this many further down.
     function status(piece, worn) {
-      return worn ? "wearing it" : pet.closet.indexOf(piece.id) >= 0 ? "hers · Enter puts it on" : piece.price ? piece.price + " coins · Enter buys it" : "only from the Star Capsule";
+      return worn ? "wearing it" : pet.closet.indexOf(piece.id) >= 0 ? "hers · Enter puts it on" : piece.price ? piece.price + " coins · Enter buys it" : "only from a capsule";
     }
     const slot = snap.closet.slots.find(function (entry) { return entry.id === ctx.open; });
-    if (slot) return [{ key: "back", icon: "‹", name: "Back to the closet", hint: slot.name, local: function () { go({ open: null, pick: 1 + snap.closet.slots.indexOf(slot) }); } }]
+    if (slot) return [{ key: "back", icon: "‹", name: "Back to the closet", hint: slot.name, local: function () { go({ open: null, pick: CAPSULES + snap.closet.slots.indexOf(slot) }); } }]
       .concat(slot.items.map(function (piece) {
         const owned = pet.closet.indexOf(piece.id) >= 0, worn = pet.outfit[slot.id] === piece.id;
         const row = { key: piece.id, icon: worn ? "✓" : owned ? "○" : piece.price ? "✧" : "🔒", name: piece.name, label: piece.name, wear: [slot.id, piece.id],
           hint: capital(piece.rarity) + " · " + (worn ? "wearing it · Enter takes it off" : status(piece, false)) };
-        if (owned || piece.price) row.send = { action: "wear", item: piece.id }; else row.note = piece.name + " only comes from the Star Capsule.";
+        if (owned || piece.price) row.send = { action: "wear", item: piece.id }; else row.note = piece.name + " only comes from a capsule.";
         return row;
       }));
-    return [{ key: "capsule", icon: "🔮", name: "Star Capsule", hint: capsule.price + " coins · something new to wear, never a repeat", send: { action: "capsule" } }]
+    return [{ key: "capsule", icon: "🔮", name: capsule.name, hint: capsule.price + " coins · something to wear, a toy or something for the house" + REPEAT, send: { action: "capsule" } },
+      { key: "capsule-moon", icon: "🌙", name: moon.name, hint: moon.price + " coins · rare, epic or legendary only" + REPEAT, send: { action: "capsule", item: "moon" } }]
       .concat(snap.closet.slots.map(function (entry) {
         const ids = [null].concat(entry.items.map(function (piece) { return piece.id; })), worn = pet.outfit[entry.id] || null, key = "slot:" + entry.id;
         const shown = Object.prototype.hasOwnProperty.call(ctx.flip, key) && ids.indexOf(ctx.flip[key]) >= 0 ? ctx.flip[key] : worn;
@@ -67,7 +71,7 @@
         if (shown === worn) row.local = function () { go({ open: entry.id }); };       // Nothing to change: open the whole list instead.
         else if (!piece) row.send = { action: "wear", item: worn };                      // "Nothing": take off what she has on.
         else if (pet.closet.indexOf(piece.id) >= 0 || piece.price) row.send = { action: "wear", item: piece.id };
-        else row.note = piece.name + " only comes from the Star Capsule.";
+        else row.note = piece.name + " only comes from a capsule.";
         return row;
       }));
   }

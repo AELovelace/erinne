@@ -38,7 +38,7 @@ RUNE_SLOTS, RUNE_TRIES = 4, 8
 CUPS = 3
 PAIRS, FLIPS = 4, 14                    # Constellation Match: pairs to find, and card turns allowed
 MAX_MOVES = 600                         # the longest Sokoban answer the server will replay
-LOG = 6                                 # lines of what just happened that a run keeps
+LOG = 12                                # lines of the story so far that a run keeps, for the page's story panel
 # How tough the enemies of a floor are: depth -> {tier: weight}. Deeper than the last entry uses the last.
 TIERS_BY_DEPTH = ({"common": 70, "uncommon": 30}, {"common": 30, "uncommon": 50, "rare": 20},
                   {"uncommon": 35, "rare": 45, "epic": 20}, {"rare": 40, "epic": 50, "legendary": 10},
@@ -350,6 +350,23 @@ def start(conn: sqlite3.Connection, user_id: int, pet: dict, env_id: str, now: i
     return run
 
 
+def rune_marks(guess: list, code: list) -> list[str]:
+    """How each rune of a guess did: "right" (this rune, this place), "near" (in the code, but somewhere else) or
+    "miss". A rune is only "near" as many times as the code still has it to spare, so two suns guessed against a
+    code with one never both light up."""
+    spare = [answer for rune, answer in zip(guess, code) if rune != answer]      # the code's runes not yet matched
+    marks = []
+    for rune, answer in zip(guess, code):
+        if rune == answer:
+            marks.append("right")
+        elif rune in spare:
+            spare.remove(rune)
+            marks.append("near")
+        else:
+            marks.append("miss")
+    return marks
+
+
 def _room(run: dict) -> dict:
     return run["rooms"][run["at"]]
 
@@ -444,9 +461,9 @@ def act(conn: sqlite3.Connection, user_id: int, pet: dict, action: str, now: int
         elif action == "rune" and lock["kind"] == "runes":
             if len(picks) != RUNE_SLOTS or any(rune not in RUNES for rune in picks):
                 raise DungeonError(f"Choose {RUNE_SLOTS} runes.")
-            exact = sum(a == b for a, b in zip(picks, lock["code"]))
-            near = sum(min(picks.count(r), lock["code"].count(r)) for r in RUNES) - exact
-            lock["tries"].append({"guess": list(picks), "exact": exact, "near": near})
+            marks = rune_marks(picks, lock["code"])                    # each rune lights up: right, near or miss
+            exact, near = marks.count("right"), marks.count("near")
+            lock["tries"].append({"guess": list(picks), "exact": exact, "near": near, "marks": marks})
             opened = exact == RUNE_SLOTS
             if not opened and len(lock["tries"]) >= RUNE_TRIES:       # out of tries: the door thinks of a new code
                 lock["code"], lock["tries"] = [RUNES[rng.randrange(len(RUNES))] for _ in range(RUNE_SLOTS)], []
@@ -463,6 +480,9 @@ def act(conn: sqlite3.Connection, user_id: int, pet: dict, action: str, now: int
             raise DungeonError("There's nothing here to pick up.")
         room["done"] = True
         run["event"] = {"scenario": room["kind"], "loot": _take(run, room["loot"])}
+    elif action == "look":                                            # just looking: a detail of the room, a new one each time
+        room["looks"] = room.get("looks", 0) + 1
+        run["event"] = {"scenario": "look", "n": room["looks"]}
     elif action == "back":
         run["facing"] = None
         run["event"] = {"scenario": "again"}
@@ -597,7 +617,9 @@ def view(run: dict | None, pet: dict) -> dict | None:
            "rooms": {key: room for key, room in rooms.items() if run["rooms"][key]["seen"] or room["kind"] == "unknown"},
            "room": {"kind": here["kind"], "done": here["done"], "exits": here["exits"]},
            "satchel": run["satchel"], "hp": run["hp"], "hpMax": numbers["hp"], "mp": run["mp"], "mpMax": numbers["mp"],
-           "over": run["over"], "ended": run["ended"], "event": run["event"], "say": run.get("say", ""), "fighting": bool(run["fight"]), "facing": None, "game": None}
+           "over": run["over"], "ended": run["ended"], "event": run["event"], "say": run.get("say", ""),
+           "scene": run.get("scene", ""), "story": run["log"],         # what this room is like, and the tale so far
+           "fighting": bool(run["fight"]), "facing": None, "game": None}
     if run["facing"]:
         out["facing"] = {"at": run["facing"], "lock": _public_lock(run["rooms"][run["facing"]]["lock"])}
     if here["kind"] == "game":

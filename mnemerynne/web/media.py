@@ -22,7 +22,7 @@ import anyio
 import httpx
 import segno
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from mnemerynne import group_refs, media, users
@@ -147,14 +147,29 @@ def media_item(file_id: int, user=Depends(media_user), conn: sqlite3.Connection 
     return found
 
 
+def _cached_list(request: Request, view: browse.View, name: str, build) -> Response:
+    """A music list from browse.ListCache, or built, stored and sent. `build` returns what the page reads."""
+    state = request.app.state
+    if not hasattr(state, "media_lists"):
+        state.media_lists = browse.ListCache()
+    key = browse.list_key(view, name)
+    body = state.media_lists.get(key)
+    if body is None:
+        body = json.dumps(build(), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        state.media_lists.put(key, body)
+    return Response(body, media_type="application/json")
+
+
 @router.get("/api/media/music/artists")
-def artists(user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
-    return {"artists": browse.artists(_view(conn, user))}
+def artists(request: Request, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
+    view = _view(conn, user)
+    return _cached_list(request, view, "artists", lambda: {"artists": browse.artists(view)})
 
 
 @router.get("/api/media/music/albums")
-def albums(artist: str = "", user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
-    return {"albums": browse.albums(_view(conn, user), artist)}
+def albums(request: Request, artist: str = "", user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
+    view = _view(conn, user)
+    return _cached_list(request, view, f"albums:{artist.lower()}", lambda: {"albums": browse.albums(view, artist)})
 
 
 @router.get("/api/media/music/album")
@@ -208,6 +223,9 @@ def _readable_item(conn: sqlite3.Connection, user, file_id: int) -> sqlite3.Row:
     view = _view(conn, user)
     rows = view.rows("mi.file_id = ?", (file_id,))
     if not rows:
+        raise _not_found("File not found")
+    view.access.confirm(rows[0]["collection_id"], rows[0]["folder_id"])   # playing it: ask the share about this folder now
+    if not view.readable(rows[0]):
         raise _not_found("File not found")
     return rows[0]
 
@@ -1174,6 +1192,7 @@ class MediaSettingsBody(BaseModel):
     soundcloud_secret: str | None = Field(None, max_length=1000)   # None: keep; "": remove
     signage_folder: str | None = Field(None, max_length=120)   # the Signage folder at the top of the share
     signage_effects: dict | None = None                        # CRT effects for newly paired screens
+    runner_daily_cap: int | None = Field(None, ge=0, le=1_000_000, strict=True)   # StickBob Runner's coins a day per person; 0: no limit
 
 
 @admin_router.put("/api/admin/settings/media")

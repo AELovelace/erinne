@@ -107,7 +107,7 @@ def _readable_file(conn: sqlite3.Connection, access: fs.Access, file_id: int) ->
 
 
 def _writable_file(conn: sqlite3.Connection, access: fs.Access, file_id: int) -> sqlite3.Row:
-    row = _readable_file(conn, access, file_id)
+    row = _readable_file(conn, access, file_id)   # which also asked the share about this folder just now
     if not access.can_write(row["collection_id"], row["folder_id"]):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't change files here")
     return row
@@ -166,16 +166,17 @@ def browse(request: Request, collection_id: int, folder_id: int | None = None, u
             out["claude"] = _claude_json(reach.claude_state(row["folder_id"], own=row["claude_hidden"]),
                                          out["can_delete"])
     if ai and reach is not None:
+        erynne = editing.ai_access(conn, user["id"], "erynne")   # looked up once, for every row below
         flags = {r["id"]: r for r in conn.execute(
             f"SELECT id, ai_edit, ai_no_edit FROM folders WHERE id IN ({','.join('?' * len(folders)) or 'NULL'})",
             [f["id"] for f in folders])}
         for out in folders:
             f = flags[out["id"]]
             out["ai_edit"] = editing.edit_state(conn, user["id"], collection_id, out["id"], folder_id,
-                                                f["ai_edit"], f["ai_no_edit"])
+                                                f["ai_edit"], f["ai_no_edit"], access=access, ai=erynne)
         for out, row in zip(files, listing["files"]):
             out["ai_edit"] = editing.edit_state(conn, user["id"], collection_id, row["folder_id"], row["folder_id"],
-                                                row["ai_edit"], row["ai_no_edit"])
+                                                row["ai_edit"], row["ai_no_edit"], access=access, ai=erynne)
     return {"folders": folders, "files": files, "path": listing["path"], "can_write": listing["can_write"],
             "claude": claude, "ai": ai, "can_reembed": _can_reembed(request, conn, user, collection_id)}
 
@@ -442,6 +443,7 @@ def upload(
     if target not in access.writable:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't upload to this collection")
     _fs_errors(lambda: fs.require_folder(conn, target, folder_id))
+    access.confirm(target, folder_id)              # an upload changes something: ask the share now
     if not access.can_write(target, folder_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't upload to this folder")
     parts = fs.split_relative_path(relative_path) if relative_path else None

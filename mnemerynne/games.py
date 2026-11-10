@@ -27,6 +27,7 @@ class Game:
     controls: str       # how to play with the TV remote's arrows and Enter (or a keyboard)
     multiplayer: bool = False
     track_keys: bool = False   # takes a remote's Previous and Next buttons itself (media.js); otherwise they stay the music's
+    mouse_keyboard: bool = False   # can't be played with a remote or touch: listed under "Mouse & keyboard", and only where there's a mouse (media.js viewGames)
 
 
 GAMES: tuple[Game, ...] = (
@@ -36,6 +37,12 @@ GAMES: tuple[Game, ...] = (
     Game(slug="prism-drop", name="Prism Drop", icon="🔮",
          description="Pick a pocket and drop a neon ball through blocks, bombs, bonus pegs and sliding platforms. Ten drops, and your score pays coins.",
          controls="◀ ▶ pick a pocket · Enter drops · ▲ replays the last drop · ▼ sound on or off"),
+    # Ported from Doll's GameMaker game (python/export_stickbob.py makes its art and levels). It runs in the browser and
+    # pays coins for what the page reports, checked against the run's time (runner.py), with an optional daily cap.
+    Game(slug="stickbob-runner", name="StickBob Runner", icon="🏃",
+         description="Run, jump, slide and shoot through StickBob's world for as long as you can last. Every 10 m and every kill pays a coin.",
+         controls="A D run · W or Space jump · S slide · mouse aims · left click shoots · right click kicks · F knife · P pause · M sound",
+         mouse_keyboard=True),
 )
 
 # Casino tables share one renderer and server rules; each still has its own Games card.

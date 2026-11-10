@@ -17,7 +17,7 @@ test("every accessory has a drawing on a known layer, with no broken numbers, an
 });
 
 test("only what belongs behind her is drawn behind her", () => {
-  assert.deepEqual(all.filter(item => W.ART[item.id].layer === "back").map(item => item.slot), ["back", "back", "back"]);
+  for (const item of all) assert.equal(W.ART[item.id].layer === "back", item.slot === "back", item.id);
 });
 
 test("an outfit draws one group per slot on the right layer, and skips what it doesn't know", () => {

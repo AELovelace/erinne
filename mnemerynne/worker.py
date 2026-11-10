@@ -132,7 +132,6 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
                 except sqlite3.Error:      # a busy database never stops ingestion; the next beat tries again
                     log.warning("Couldn't record the worker's heartbeat.", exc_info=True)
             if rt is not None and (scan_asked(conn) or time.monotonic() - last_scan > settings.share_scan_seconds):
-                last_scan = time.monotonic()
                 try:
                     share.sync(conn, settings)
                 except Exception:  # never let a bad scan stop ingestion
@@ -140,6 +139,7 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
                         conn.execute("ROLLBACK")
                     log.exception("Share scan failed")
                 media_catalog(conn, settings)
+                last_scan = time.monotonic()   # counted from the end, so a slow scan on a big share can't run back to back
             if time.monotonic() - last_m365 > settings.m365_sync_seconds:
                 last_m365 = time.monotonic()
                 m365_sync(conn, settings)
@@ -188,6 +188,10 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
                                  ", ".join(f"{n} from {table}" for table, n in purged.items()))
                 except Exception:
                     log.exception("Log cleanup failed")
+                try:
+                    conn.execute("PRAGMA optimize")    # refreshes the statistics SQLite plans its queries with
+                except sqlite3.Error:
+                    log.warning("Couldn't refresh the database's statistics.", exc_info=True)
     finally:
         embedder.close()
         conn.close()

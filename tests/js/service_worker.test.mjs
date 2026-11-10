@@ -54,3 +54,18 @@ test("a tap opens Lumi, focusing her page if it's already open, and never a push
 test("there is no fetch handler, so pages always load as they would without it", () => {
   assert.deepEqual(Object.keys(worker().handlers).sort(), ["activate", "install", "notificationclick", "push"]);
 });
+
+test("the garden reminder has its own words and opens Lumi on her Garden tab", async () => {
+  const sw = worker();
+  await sw.push({ kind: "lumi-pet", need: "garden", page: "https://evil.example" });
+  assert.match(sw.shown[0][1].body, /flowers are ready to trim/);
+  assert.equal(sw.shown[0][1].data.page, "/media/games/lumi-pet#garden");
+  await sw.click(sw.shown[0][1].data);
+  assert.deepEqual(sw.opened, ["/media/games/lumi-pet#garden"]);
+  const already = worker(["https://nas.example/media/games/lumi-pet"]);
+  await already.click({ page: "/media/games/lumi-pet#garden" });
+  assert.deepEqual([already.focused.length, already.opened.length], [1, 0], "An open Lumi is brought forward, not opened twice");
+  const odd = worker();
+  await odd.click({ page: "/media/games/lumi-pet#elsewhere" });
+  assert.deepEqual(odd.opened, ["/"], "Only an address that shipped with the worker is ever opened");
+});

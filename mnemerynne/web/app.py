@@ -197,6 +197,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             await asyncio.gather(*app.state.background, return_exceptions=True)
             await saver_conn.close()
             await store_conn.close()
+            app.state.db_pool.close()
             await app.state.agent.aclose()
             await app.state.remote_proxy.aclose()
             await balancer.aclose()
@@ -209,6 +210,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
 
     app = FastAPI(title=ASSISTANT_NAME, lifespan=lifespan, docs_url=None, redoc_url=None)
     app.state.settings = settings
+    app.state.db_pool = db.Pool(settings.db_path)   # the connections requests reuse (web/deps.py get_db)
     app.state.directory = (services.directory if services and services.directory
                            else directory.from_settings(settings))
     share.configure(settings, app.state.directory, services.share_checker if services else None)
@@ -266,7 +268,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                "product_name": looks.brand.get("name") or ASSISTANT_NAME}
         if not user_id and not request.cookies.get(media_screens.COOKIE):
             return out
-        conn = db.connect(settings.db_path)
+        conn = app.state.db_pool.get()
         try:
             out["tv"] = _tv(request, conn)
             user = users.get_user_by_id(conn, user_id) if user_id else None
@@ -286,7 +288,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         except sqlite3.Error:
             return out
         finally:
-            conn.close()
+            app.state.db_pool.put(conn)
 
     templates = Jinja2Templates(directory=_HERE / "templates", context_processors=[_nav_context])
     templates.env.globals["assistant_name"] = ASSISTANT_NAME
@@ -415,13 +417,13 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         return screen if screen is not None and screen["top_bar"] else None
 
     def _login(request: Request, error: str | None = None, code: int = status.HTTP_200_OK):
-        conn = db.connect(settings.db_path)
+        conn = app.state.db_pool.get()
         try:
             back = _kiosk_screen(request, conn) is not None
         except sqlite3.Error:
             back = False
         finally:
-            conn.close()
+            app.state.db_pool.put(conn)
         return templates.TemplateResponse(request, "login.html", {"error": error, "kiosk_back": back},
                                           status_code=code)
 

@@ -233,6 +233,10 @@ def test_the_shipped_catalog_is_valid_and_bad_ones_are_refused(tmp_path):
     broken(lambda d: d["toys"][0].update(price=10))                             # no free toy left
     broken(lambda d: d["toys"][1].update(minutes=0))
     broken(lambda d: d.update(snacks=[]))
+    broken(lambda d: d["snacks"][1].update(rarity="rare"))                      # only toys can be capsule prizes
+    broken(lambda d: d["toys"][-1].update(price=50))                            # a capsule toy can't also be sold
+    broken(lambda d: d["toys"][-1].update(rarity="mythic"))
+    broken(lambda d: d.update(toys=[t for t in d["toys"] if t["price"] or "rarity" in t]))   # capsule toys don't count as the free one
 
 
 # --------------------------------------------------------------------------- the house
@@ -240,7 +244,7 @@ def test_a_new_house_has_each_spots_free_first_object(conn, alice):
     house = _state(conn, alice, T0)
     assert house["pet"]["house"] == {spot["id"]: spot["items"][0]["id"] for spot in lumipet.HOUSE["spots"]}
     spots = house["house"]["spots"]
-    assert len(spots) == 16 and all(len(spot["items"]) == 5 for spot in spots[:15])                    # 75 pieces to buy
+    assert len(spots) == 16 and all(sum("rarity" not in item for item in spot["items"]) == 5 for spot in spots[:15])   # 75 pieces to buy or start with
     assert spots[15]["id"] == "trophy" and len(spots[15]["items"]) == 25 and house["pet"]["house"]["trophy"] == "trophy-none"
 
 
@@ -292,6 +296,9 @@ def test_the_shipped_house_is_valid_and_bad_ones_are_refused(tmp_path):
     broken(lambda d: d["spots"][0].update(items=[]))
     broken(lambda d: d["spots"].append(dict(d["spots"][0])))
     broken(lambda d: d.update(spots=[]))
+    broken(lambda d: d["spots"][0]["items"][0].update(rarity="common"))         # a house's free first object can't be a prize
+    broken(lambda d: d["spots"][0]["items"][1].update(rarity="common"))         # this one is sold, and a prize can't be
+    broken(lambda d: d["spots"][0]["items"][-1].update(rarity="mythic"))
 
 
 # --------------------------------------------------------------------------- the closet and the Star Capsule
@@ -320,7 +327,7 @@ def test_accessories_are_bought_once_then_put_on_and_taken_off_freely(conn, alic
 
 
 def test_capsule_only_accessories_cant_be_bought_and_other_things_cant_be_worn(conn, alice):
-    with pytest.raises(lumipet.PetError, match="only comes from the Star Capsule"):
+    with pytest.raises(lumipet.PetError, match="only comes from a capsule"):
         _act(conn, alice, "wear", T0, item="acc-crown")
     for wrong in ("apple", "rug-moon", "head", "nothing", None):
         with pytest.raises(lumipet.PetError, match="isn't something Lumi can wear"):
@@ -342,20 +349,108 @@ def test_the_capsule_rolls_a_rarity_first_then_something_new_of_it(conn, alice):
         assert out["pet"]["closet"] == [won["capsule"]] and out["pet"]["outfit"] == {lumipet._WEAR[won["capsule"]]["slot"]: won["capsule"]}
 
 
-def test_the_capsule_never_repeats_and_stops_before_charging_when_she_has_it_all(conn, alice):
+def test_a_repeat_pays_back_half_its_value_and_changes_nothing_she_has(conn, alice):
     with transaction(conn):
         coins.reward(conn, alice, 9000, "x", 9000)
-    everything = sorted(lumipet._WEAR)
-    won = []
-    for _ in everything:
+    def open_one(roll):
         with transaction(conn):
-            won.append(lumipet.act(conn, alice, "capsule", now=T0, rng=Dice(99, 0))["said"])   # always rolls "legendary"
-    assert sorted(w["capsule"] for w in won) == everything                      # 21 capsules, 21 different things
-    assert [w["rarity"] for w in won][:2] == ["legendary", "epic"]              # then the nearest rarity with something new
+            return lumipet.act(conn, alice, "capsule", now=T0, rng=Dice(roll, 0))
+    first = open_one(99)                                                        # a legendary with no shop price: worth its rarity's value
+    assert first["said"] == {"capsule": "acc-crown", "name": "Starlight crown", "rarity": "legendary", "paid": 150}
+    again = open_one(99)
+    assert again["said"]["duplicate"] is True and again["said"]["buyback"] == 500
+    assert again["coins"] == first["coins"] - 150 + 500
+    assert again["pet"]["closet"] == ["acc-crown"] and again["pet"]["outfit"] == {"head": "acc-crown"}
+    _set(conn, alice, outfit={})
+    assert open_one(99)["pet"]["outfit"] == {}                                  # a repeat doesn't put anything on her
+    open_one(0)
+    assert open_one(0)["said"]["buyback"] == 30                                 # the ribbon bow is sold for 60, so its shop price is its value
+    assert conn.execute("SELECT COUNT(*) FROM coin_transactions WHERE type = 'lumi-pet_buyback'").fetchone()[0] == 3
+
+
+def test_a_capsule_stops_before_charging_only_when_all_it_could_give_is_hers(conn, alice):
+    _state(conn, alice, T0)
+    has = lambda rarities: {shelf: [p["id"] for p in lumipet._PRIZES if lumipet._shelf(p) == shelf and p["rarity"] in rarities]
+                            for shelf in ("closet", "toys", "decor")}
+    _set(conn, alice, **has(("rare", "epic", "legendary")))                     # all the Moon Capsule holds, but no commons
     before = coins.peek(conn, alice)
-    with pytest.raises(lumipet.PetError, match="already has everything"):
+    with pytest.raises(lumipet.PetError, match="everything the Moon Capsule holds"):
+        _act(conn, alice, "capsule", T0, item="moon")
+    assert coins.peek(conn, alice) == before
+    assert _act(conn, alice, "capsule", T0, rng=Dice(0, 0))["said"]["rarity"] == "common"   # the Star Capsule still has something new
+    _set(conn, alice, **has(lumipet.RARITIES))
+    with pytest.raises(lumipet.PetError, match="everything the Star Capsule holds"):
         _act(conn, alice, "capsule", T0)
-    assert coins.peek(conn, alice) == before == 10000 - 150 * len(everything)
+
+
+def test_the_moon_capsule_costs_more_and_only_holds_the_rare_end(conn, alice):
+    with transaction(conn):
+        coins.reward(conn, alice, 90000, "x", 90000)
+    assert lumipet.CLOSET["moon"]["price"] == 300
+    for roll in range(100):
+        conn.execute("DELETE FROM lumi_pets")
+        with transaction(conn):
+            said = lumipet.act(conn, alice, "capsule", now=T0, item="moon", rng=Dice(roll, 0))["said"]
+        assert said["paid"] == 300
+        assert said["rarity"] == ("rare" if roll < 70 else "epic" if roll < 95 else "legendary")
+    with pytest.raises(lumipet.PetError, match="doesn't know that capsule"):
+        _act(conn, alice, "capsule", T0, item="sun")
+
+
+def test_every_place_has_at_least_ten_capsule_prizes():
+    for slot in lumipet.CLOSET["slots"]:
+        assert len(slot["items"]) >= 10, slot["id"]
+    for spot in lumipet.HOUSE["spots"]:
+        if spot["id"] != "trophy":                                              # trophies are found in the dungeon instead
+            assert sum("rarity" in item for item in spot["items"]) >= 10, spot["id"]
+    assert sum("rarity" in toy for toy in lumipet.CATALOG["toys"]) >= 10
+
+
+def test_a_capsule_toy_cant_be_played_with_until_it_is_won_then_waits_in_her_toy_box(conn, alice):
+    toy = next(p for p in lumipet._PRIZES if lumipet._shelf(p) == "toys" and p["rarity"] == "legendary")
+    assert toy["id"] == "wishing-star"
+    with pytest.raises(lumipet.PetError, match="toy box"):
+        _act(conn, alice, "play", T0, item=toy["id"])
+    with pytest.raises(lumipet.PetError, match="doesn't sell"):
+        _act(conn, alice, "buy", T0, item=toy["id"])
+    with transaction(conn):
+        coins.reward(conn, alice, 9000, "x", 9000)
+    legendaries = [p for p in lumipet._PRIZES if p["rarity"] == "legendary"]
+    won = _act(conn, alice, "capsule", T0, rng=Dice(99, legendaries.index(toy)))
+    assert won["said"]["capsule"] == toy["id"] and won["pet"]["toys"] == [toy["id"]] and won["pet"]["outfit"] == {}
+    played = _act(conn, alice, "play", T0, item=toy["id"])
+    assert played["pet"]["task"]["kind"] == "play" and played["pet"]["task"]["item"] == toy["id"]
+    again = _act(conn, alice, "capsule", T0, rng=Dice(99, legendaries.index(toy)))
+    assert again["said"]["buyback"] == 500 and again["pet"]["toys"] == [toy["id"]]
+
+
+def test_capsule_decor_cant_be_bought_and_a_win_goes_straight_into_the_room(conn, alice):
+    locked = next(p for p in lumipet._PRIZES if "spot" in p)
+    with pytest.raises(lumipet.PetError, match="only comes from a capsule"):
+        _act(conn, alice, "decorate", T0, item=locked["id"])
+    assert _state(conn, alice, T0)["coins"] == 1000
+    out = _act(conn, alice, "capsule", T0, rng=Dice(0, 10_000))                 # a common, the last in the list: clothes come first, so it's decor
+    won = lumipet._DECOR[out["said"]["capsule"]]
+    assert out["pet"]["decor"] == [won["id"]] and out["pet"]["house"][won["spot"]] == won["id"] and out["pet"]["closet"] == []
+    free = next(spot for spot in lumipet.HOUSE["spots"] if spot["id"] == won["spot"])["items"][0]["id"]
+    assert _act(conn, alice, "decorate", T0, item=free)["pet"]["house"][won["spot"]] == free
+    back = _act(conn, alice, "decorate", T0, item=won["id"])
+    assert back["pet"]["house"][won["spot"]] == won["id"] and back["said"] is None and back["coins"] == out["coins"]   # hers now, so it swaps freely
+    _act(conn, alice, "decorate", T0, item=free)
+    repeat = _act(conn, alice, "capsule", T0, rng=Dice(0, 10_000))
+    assert repeat["said"]["duplicate"] is True and repeat["said"]["buyback"] == 30
+    assert repeat["pet"]["house"][won["spot"]] == free and repeat["pet"]["decor"] == [won["id"]]   # a repeat doesn't rearrange the room
+
+
+def test_repeats_never_pay_back_as_much_as_the_capsule_costs(conn):
+    # Even a player who owns everything must lose coins on average, or opening capsules would print money.
+    for kind in (lumipet.CLOSET["capsule"], lumipet.CLOSET["moon"]):
+        back = 0
+        for rarity, chance in kind["odds"].items():
+            prizes = [p for p in lumipet._PRIZES if p["rarity"] == rarity]
+            assert prizes, f"{kind['name']} would roll {rarity} with nothing to give"
+            back += chance / 100 * sum((p["price"] or lumipet.CLOSET["values"][rarity]) // 2 for p in prizes) / len(prizes)
+        assert back < kind["price"] * .6
 
 
 def test_the_capsule_needs_its_price(conn, alice):
@@ -387,6 +482,10 @@ def test_the_shipped_closet_is_valid_and_bad_ones_are_refused(tmp_path):
 
     broken(lambda d: d["capsule"]["odds"].update(common=50))                    # no longer adds up to 100
     broken(lambda d: d["capsule"].update(price=0))
+    broken(lambda d: d["moon"]["odds"].update(rare=60))                         # no longer adds up to 100
+    broken(lambda d: d["moon"].update(price=0))
+    broken(lambda d: d["moon"]["odds"].update(mythic=1))
+    broken(lambda d: d["values"].pop("epic"))
     broken(lambda d: d["slots"][0]["items"][0].update(rarity="mythic"))
     broken(lambda d: d["slots"][1]["items"].append(dict(d["slots"][0]["items"][0])))
     broken(lambda d: d["slots"][0].update(items=[]))

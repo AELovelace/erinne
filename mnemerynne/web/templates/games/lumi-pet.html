@@ -75,6 +75,8 @@
 
 <section class="lp-controls gm-panel" aria-label="Spend time with Lumi">
   <p class="gm-eyebrow">// MAKE A LITTLE MOMENT</p>
+  {#- On a dungeon trip: what the room is like, and the tale so far (game.js fills it; the newest line is the message below). -#}
+  <div class="lp-story" id="lp-story" aria-label="The story so far"></div>
   <p id="lp-message" class="lp-message" role="status" aria-live="polite">Hello, you. There’s a place beside me.</p>
   {#- The tabs are fixed; game.js fills the list under them from the server's catalog and Lumi's own pantry and toy box. -#}
   <div class="lp-tabs" role="tablist" aria-label="What to do">
@@ -85,6 +87,7 @@
     <button type="button" role="tab" data-lp-tab="home" aria-selected="false">Home</button>
     <button type="button" role="tab" data-lp-tab="battle" aria-selected="false">Battle</button>
     <button type="button" role="tab" data-lp-tab="dungeon" aria-selected="false">Dungeon</button>
+    <button type="button" role="tab" data-lp-tab="garden" aria-selected="false">Garden</button>
     <button type="button" role="tab" data-lp-tab="shop" aria-selected="false">Shop</button>
     <button type="button" role="tab" data-lp-tab="settings" aria-selected="false">Settings</button>
   </div>

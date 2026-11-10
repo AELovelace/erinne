@@ -63,7 +63,8 @@
 .lp-actions small { display: block; font: .7rem/1.7 system-ui, sans-serif; letter-spacing: .02em; color: var(--muted); }
 .gm .lp-actions button[aria-pressed="true"] { border-color: var(--rose); background: rgba(var(--glow), .1); box-shadow: inset 3px 0 var(--rose); }
 .lp-actions { max-height: 24rem; overflow-y: auto; } /* A long pantry scrolls inside the panel, in step with the TV's text scale. */
-.lp-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; margin-bottom: .8rem; } /* Nine tabs: three tidy rows of three. */
+.lp-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .3rem; margin-bottom: .8rem; } /* Ten tabs: two tidy rows of five. */
+.gm .lp-tabs button { letter-spacing: .02em; overflow: hidden; text-overflow: clip; }
 .gm .lp-tabs button { flex: 1; border-radius: .5rem; font-size: .68rem; padding: .55rem .3rem; }
 .gm .lp-tabs button[aria-selected="true"] { border-color: var(--cyan); color: var(--cyan); background: rgba(var(--glow), .08); }
 .lp-meters { display: grid; gap: .6rem; margin: 1.2rem 0 .4rem; }
@@ -126,14 +127,35 @@
 /* Exploring: the right panel becomes the dungeon's own. The tabs fold away (the list has "Look after Lumi" to reach
    them) and the list gets the room, so every choice in a room is in view at once. */
 .gm[data-walking="true"] .lp-tabs { display: none; }
-.gm[data-walking="true"] .lp-actions { max-height: min(62vh, 38rem); }
-.gm[data-walking="true"] .lp-message { min-height: 6.6em; }
+/* On a trip the panel is a column: the story takes whatever room there is, and the choices and the key legend sit at the bottom. */
+.gm[data-walking="true"] .lp-controls { display: flex; flex-direction: column; }
+.gm[data-walking="true"] .lp-story { display: block; flex: 1 1 5rem; min-height: 3.5rem; overflow-y: auto; margin-bottom: .5rem; }
+.gm[data-walking="true"] .lp-message { min-height: 0; flex: none; padding-top: .5rem; border-top: 1px solid var(--line); }
+.gm[data-walking="true"] .lp-actions { flex: none; max-height: min(44vh, 26rem); }
+.gm[data-walking="true"] .gm-keys { flex: none; }
+.lp-story { display: none; font-size: .82rem; line-height: 1.6; color: var(--muted); }
+.lp-story p { margin: 0 0 .45rem; }
+.lp-story .lp-scene { color: var(--cyan); font-style: italic; }
+.lp-dungeon [data-click] { cursor: pointer; }
+.lp-room[data-dungeon="true"] .lp-pet-wrap { pointer-events: none; } /* Lumi never hides a door from the mouse. */
 .gm[data-walking="true"] .lp-controls { align-self: stretch; }
 /* On a TV or computer the room is the whole screen and the two panels float over its walls as glass. On a phone the
    panels stack under it, so there it stays a card (the rules above). Either way the windows are holes in the wall. */
 @media (min-width: 1001px) {
+  /* The panels keep the width they always had (their share of the old, padded and capped layout, worked out here as
+     --lp-wide) but sit right out at the screen's edges, so the room between them is as wide as it can be. */
+  .gm[data-game="lumi-pet"] { --lp-wide: calc(min(100vw, 112.5rem) - 2 * clamp(.75rem, 3vw, 2.5rem) - 2 * clamp(.75rem, 2vw, 2rem)); max-width: none;
+    padding-left: clamp(.3rem, .5vw, .6rem); padding-right: clamp(.3rem, .5vw, .6rem);
+    grid-template-columns: max(12rem, calc(var(--lp-wide) * .85 / 3.5)) minmax(0, 1fr) max(14rem, calc(var(--lp-wide) / 3.5)); }
   .gm[data-game="lumi-pet"] .lp-room { position: fixed; inset: 0; width: auto; height: auto; min-height: 0; border: 0; border-radius: 0; box-shadow: none; z-index: 0; }
   .gm[data-game="lumi-pet"] .lp-intro { grid-column: 1; position: relative; z-index: 1; }
   .gm[data-game="lumi-pet"] .lp-controls { grid-column: 3; position: relative; z-index: 1; }
   .gm[data-game="lumi-pet"] .lp-room-top { top: 4%; }
 }
+
+/* The Stardust Garden: drawn over the room like the dungeon (garden-art.js). Lumi stands small beside the beds. */
+.lp-room[data-garden="true"] .lp-pet-wrap { width: calc(44 * var(--u)); left: calc(50% - 196 * var(--u)); bottom: calc(50% - 204 * var(--u)); pointer-events: none; transition: left .4s, width .4s; } /* Between the left panel and the first bed. */
+.lp-room[data-garden="true"] .lp-room-top { display: none; } /* The garden's own bar names the place. */
+.lp-room[data-garden="true"] .lp-effect { display: none; }
+.lp-room[data-garden="true"] .lp-dhud .lp-bar i { background: #ffdc83; }
+.lp-room[data-garden="true"] .lp-dhud .lp-bar-mp { display: none; }

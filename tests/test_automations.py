@@ -55,10 +55,13 @@ def _web(settings, name, directory, agent_llm=None):
 
 
 def _wait(c, run_id, done=("done", "quiet", "failed", "timed_out", "waiting")):
+    grace = 40                                     # a run says "done" a moment before its deliveries are saved
     for _ in range(200):
         run = c.get(f"/api/automations/runs/{run_id}").json()
         if run["status"] in done:
-            return run
+            if run["status"] != "done" or run["delivered"] or grace == 0:
+                return run
+            grace -= 1
         c.portal.call(asyncio.sleep, 0.05)
     raise AssertionError(f"run {run_id} stayed {run['status']}")
 

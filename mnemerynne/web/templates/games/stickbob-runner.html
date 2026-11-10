@@ -1,0 +1,34 @@
+{#- StickBob Runner (static/games/stickbob-runner/): the canvas fills the frame, with the score floating over it and a panel
+    for starting, pausing and game over. Every text that changes is set with textContent by game.js. -#}
+<section class="sr-stage" id="sr-stage" data-world="{{ static('games/stickbob-runner/assets/world.json') }}"
+         data-atlas="{{ static('games/stickbob-runner/assets/atlas.png') }}">
+  <canvas id="sr-view" role="img" aria-label="StickBob running through a neon city, past platforms and SlopBot enemies."></canvas>
+  <div class="sr-hud left">
+    <div class="sr-health" id="sr-health" aria-label="Health"></div>
+    <div class="sr-sound" id="sr-sound"></div>
+  </div>
+  <div class="sr-hud right">
+    <div class="sr-line"><span>Distance</span> <b id="sr-score">0 m</b></div>
+    <div class="sr-line"><span>Best</span> <b id="sr-best">0 m</b></div>
+    <div class="sr-line"><span>Kills</span> <b id="sr-kills">0</b></div>
+    <div class="sr-line"><span>Coins</span> <b id="sr-coins">—</b></div>
+  </div>
+  <div class="gm-panel sr-panel" id="sr-panel" hidden>
+    <p class="gm-eyebrow">// STICKBOB</p>
+    <h1 class="gm-title">STICKBOB<span>RUNNER</span></h1>
+    <p class="sr-heading" id="sr-heading" role="status" aria-live="polite"></p>
+    <p class="sr-result" id="sr-result"></p>
+    <p class="sr-earned" id="sr-earned" aria-live="polite"></p>
+    <dl class="sr-keys">
+      <dt>A D or ◀ ▶</dt><dd>Run</dd>
+      <dt>W, Space or ▲</dt><dd>Jump, off walls too</dd>
+      <dt>S or ▼</dt><dd>Slide, or crawl when still</dd>
+      <dt>Mouse</dt><dd>Aim, left button shoots</dd>
+      <dt>Right button or Shift</dt><dd>Kick</dd>
+      <dt>Middle button or F</dt><dd>Knife</dd>
+      <dt>P</dt><dd>Pause</dd>
+      <dt>Esc</dt><dd>Back to Games</dd>
+    </dl>
+    <button type="button" class="gm-primary" id="sr-start">Run</button>
+  </div>
+</section>

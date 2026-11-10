@@ -8,6 +8,8 @@ Who pays what:
 - Online casino tables bet and win from the seat's account (casino.py). A TV at an online table is the account it's paired to.
 - Local multiplayer (phone remotes around one TV) never touches a purse: those seats play on table-only credits.
 - Prism Drop and Lumi Pet pay rewards, and only for what the server saw itself, because a browser can claim anything.
+- StickBob Runner is the exception, by Doll's choice: it pays for what the browser reports, checked against the time the
+  run took (runner.py), with an optional daily cap in Media settings.
 
 Every function that changes money runs inside its caller's transaction (db.transaction), so a move and the game state
 that caused it are saved together or not at all.
@@ -80,6 +82,15 @@ def spend(conn: sqlite3.Connection, user_id: int, amount: int, game: str, what: 
     if amount <= 0 or balance is None or balance < amount:
         return False
     return _move(conn, _account(user_id), HOUSE, amount, f"{game}_{what}", game)
+
+
+def buyback(conn: sqlite3.Connection, user_id: int, amount: int, game: str) -> int:
+    """New coins for a prize she already owns, like a repeat from a Lumi Pet capsule. Not from the house, which may hold
+    less than a legendary's worth. The caller has just charged for the capsule, in the same transaction."""
+    if amount <= 0 or held(conn, user_id) is None:
+        return 0
+    _move(conn, None, _account(user_id), amount, f"{game}_buyback", game)
+    return amount
 
 
 def today(conn: sqlite3.Connection) -> str:

@@ -73,6 +73,7 @@ class Access:
     conn: sqlite3.Connection | None = field(default=None, repr=False)
     _sp_ok: dict[int, bool] = field(default_factory=dict, repr=False)
     _sp_ids: set[int] | None = field(default=None, repr=False)
+    _confirmed: set[tuple[int, int | None]] = field(default_factory=set, repr=False)
 
     @classmethod
     def of(cls, conn: sqlite3.Connection, user_id: int) -> "Access":
@@ -109,6 +110,16 @@ class Access:
         r = self._reach(collection_id, folder_id)
         return r is not None and r.can_write(folder_id)
 
+    def confirm(self, collection_id: int, folder_id: int | None) -> None:
+        """About to open or change something here: ask the share about this one folder now, because the
+        permissions lists use may be a few seconds old. Once per folder for this Access."""
+        if (collection_id, folder_id) in self._confirmed:
+            return
+        self._confirmed.add((collection_id, folder_id))
+        r = self._reach(collection_id, folder_id)
+        if r is not None and (folder_id is None or folder_id in r.parents):
+            r.recheck(folder_id)
+
     def can_reach_file(self, row) -> bool:
         """A file row (with collection_id, folder_id, claude_hidden): in a place readable here, and for Claude
         not taken out of its view. What Mnemerynne itself knows; a SharePoint file is only can_read_file when
@@ -119,6 +130,7 @@ class Access:
 
     def can_read_file(self, row) -> bool:
         """can_reach_file, and for a SharePoint file the person's own account can open it there."""
+        self.confirm(row["collection_id"], row["folder_id"])
         if not self.can_reach_file(row):
             return False
         if row["collection_id"] in self._sharepoint():
@@ -158,10 +170,12 @@ class Access:
             raise NotFound("Not found")
 
     def read(self, collection_id: int, folder_id: int | None) -> None:
+        self.confirm(collection_id, folder_id)
         if not self.can_read(collection_id, folder_id):
             raise NotFound("Not found")
 
     def write(self, collection_id: int, folder_id: int | None) -> None:
+        self.confirm(collection_id, folder_id)
         self.see(collection_id, folder_id)
         if not self.can_write(collection_id, folder_id):
             raise Forbidden("You can't change files here")

@@ -20,6 +20,8 @@ With `MNEMERYNNE_SHARE_ROOT` set, the organisation's file share becomes the home
 
 In a share library people see exactly the folders their **linked domain account** can open on the share, and change files where it may write. Mnemerynne's own grants don't apply; set permissions in Windows (folder → Properties → Security). Samba keeps POSIX ACLs in step with those, and Mnemerynne reads them (leave `acl_xattr:ignore system acls` at its default `no`). Permissions are checked **per folder**: a file with tighter permissions than its folder is still listed to everyone who can open the folder, so keep restricted files in their own folder. Unlinked users see only their File box.
 
+Permission changes reach file lists and search within `SHARE_RIGHTS_SECONDS` (30). Opening, playing or changing a file checks its folder on the share at that moment, so taking someone's access away stops them opening anything straight away, even if a list still shows it for a few seconds.
+
 The service user `mnemerynne` must be able to read and write everything; in Windows' Security tab it shows as *Unix User\mnemerynne*. Keep it (Modify) on every folder, or Mnemerynne can't see or change that folder.
 
 ## Downloading folders as a zip
@@ -48,7 +50,8 @@ sudo mnemerynne-admin share-scan     # first scan now (the worker repeats it eve
 
 ## How the scan works
 
-- The worker scans every `SHARE_SCAN_SECONDS` (60), only while the marker file exists, so an unmounted share is never mirrored as "everything deleted".
+- The worker waits `SHARE_SCAN_SECONDS` (60) after each scan finishes, and scans only while the marker file exists, so an unmounted share is never mirrored as "everything deleted".
+- A scan compares everything without locking the database, and takes the write lock only for a library where something changed, so a scan that finds nothing doesn't slow anyone down.
 - New top-level folders become libraries; `Users\<name>` folders attach to that person's empty File box.
 - Renames and moves are recognised (by inode), so a file keeps its search index. Files changed within `SHARE_SETTLE_SECONDS` wait for the next scan (still being copied).
 - Office lock files (`~$…`), `Thumbs.db`, `desktop.ini`, hidden files and partial downloads are ignored.

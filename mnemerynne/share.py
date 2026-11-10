@@ -22,7 +22,9 @@ import re
 import secrets
 import shutil
 import sqlite3
+import stat as stat_mode
 import struct
+import threading
 import time
 import unicodedata
 from dataclasses import dataclass, field
@@ -61,6 +63,8 @@ class Runtime:
     settings: Settings
     directory: object                       # mnemerynne.directory.Directory
     checker: Checker
+    rights: dict = field(default_factory=dict, repr=False)      # (library, uid, gids) -> _Rights, read from disk
+    rights_walks: dict = field(default_factory=dict, repr=False)   # the same key -> the lock its walk holds
 
     @property
     def root(self) -> Path:
@@ -346,6 +350,8 @@ class PosixChecker:
     def rights(self, path: Path, uid: int, gids: frozenset[int]) -> tuple[bool, bool]:
         try:
             st = path.stat()
+            if not stat_mode.S_ISDIR(st.st_mode):
+                return False, False   # not a folder (any more): nobody gets in until a scan sorts it out
             try:
                 acl = parse_acl(os.getxattr(path, _ACL_XATTR))
             except (OSError, AttributeError, ValueError):
@@ -376,9 +382,45 @@ def make_private(path: Path, uid: int | None) -> None:
 
 
 # ----------------------------------------------------------------- access
+@dataclass
+class _Rights:
+    """One person's permissions in one library, as last read from the share."""
+    at: float                                       # when the walk that filled it began (time.monotonic)
+    folders: dict[int | None, tuple[bool, bool]]    # folder id (None: the library's top) -> (read, write)
+
+
+def _fresh(rt: Runtime, key: tuple) -> _Rights | None:
+    """The cached permissions under `key`, if they are recent enough for lists and search to use."""
+    cached = rt.rights.get(key)
+    return cached if cached is not None and time.monotonic() - cached.at < rt.settings.share_rights_seconds else None
+
+
+def forget_rights() -> None:
+    """Forget every cached permission: the next list reads them from the share again."""
+    if _runtime is not None:
+        _runtime.rights.clear()
+
+
+def _read_rights(rt: Runtime, key: tuple, walk) -> _Rights:
+    """Recent permissions, or one walk of the library's folders to get them. Requests arriving during a walk
+    (a page of posters asks many times at once) wait for it instead of each doing their own."""
+    if (cached := _fresh(rt, key)) is not None:
+        return cached
+    with rt.rights_walks.setdefault(key, threading.Lock()):
+        if (cached := _fresh(rt, key)) is not None:
+            return cached
+        began = time.monotonic()
+        rights = _Rights(began, walk())
+        rt.rights[key] = rights
+        for old in [k for k, r in list(rt.rights.items()) if began - r.at > 600]:   # people who left: free the memory
+            rt.rights.pop(old, None)
+        return rights
+
+
 def library_reach(conn: sqlite3.Connection, row: sqlite3.Row, user: sqlite3.Row):
     """What `user` may do in a share library, from the share's permissions
-    (permissions.Reach), or None for nothing."""
+    (permissions.Reach), or None for nothing. Folder rows always come fresh from the database; what the
+    share allows comes from _read_rights, and only a folder it hasn't seen yet costs a look at the disk."""
     from mnemerynne.permissions import Reach
 
     rt = _runtime
@@ -406,16 +448,25 @@ def library_reach(conn: sqlite3.Connection, row: sqlite3.Row, user: sqlite3.Row)
                 paths[fid] = None if parent is None else parent / f["name"]
         return paths[fid]
 
-    root_read, root_write = rt.checker.rights(base, uid, gids)
+    def check(fid: int | None) -> tuple[bool, bool]:
+        """What the share says now about this one folder (None: the library's top)."""
+        path = base if fid is None else path_of(fid) if fid in info else None
+        return rt.checker.rights(path, uid, gids) if path is not None else (False, False)
+
+    rights = _read_rights(rt, (row["id"], uid, gids), lambda: {fid: check(fid) for fid in (None, *info)})
+
+    def live(fid: int | None) -> tuple[bool, bool]:
+        """Reach.recheck: reads the share now, and corrects the cache so the next list agrees."""
+        rights.folders[fid] = found = check(fid)
+        return found
+
+    root_read, root_write = rights.folders[None]
     claude_on = bool(row["claude_enabled"])
     reach = Reach(row["id"], "library", row["name"], root_read, root_write, claude_on and root_read,
-                  parents={f["id"]: f["parent_id"] for f in folders})
+                  parents={f["id"]: f["parent_id"] for f in folders}, live=live)
     for fid in info:
-        path = path_of(fid)
-        if path is None:
-            continue
-        # Not on disk (yet, or any more): nobody gets in until a scan sorts it out.
-        read, write = rt.checker.rights(path, uid, gids) if path.is_dir() else (False, False)
+        found = rights.folders.get(fid)
+        read, write = found if found is not None else live(fid)   # a folder made since the last walk
         if read:
             reach.read.add(fid)
             if claude_on:
@@ -644,10 +695,40 @@ def _same_place(conn: sqlite3.Connection, rt: Runtime, collection_id: int, base:
             and mounted(rt) and base.is_dir())
 
 
+@dataclass
+class _Plan:
+    """One collection in a scan: pass 1's view of it, and the little that needs changing."""
+    cid: int
+    base: Path
+    disk_folders: dict[tuple[str, ...], int]
+    disk_files: dict[tuple[str, ...], _DiskFile]
+    db_folders: dict[tuple[str, ...], int]
+    db_files: dict[tuple[str, ...], sqlite3.Row]
+    new_folders: list[tuple[str, ...]] = field(default_factory=list)   # on disk only, parents first
+    to_apply: list[tuple[str, ...]] = field(default_factory=list)      # files pass 2 has to look at
+
+
+def _new_folders(plan: _Plan, stats: Stats) -> list[tuple[str, ...]]:
+    """Folders on disk the database doesn't have, parents first; ones whose name can't be kept (and anything
+    inside them) are reported here and never reach the write lock."""
+    out: list[tuple[str, ...]] = []
+    kept: set[tuple[str, ...]] = set()
+    for path in sorted((p for p in plan.disk_folders if p not in plan.db_folders), key=len):
+        if len(path) > 1 and path[:-1] not in plan.db_folders and path[:-1] not in kept:
+            continue   # inside a folder that was skipped
+        if (problem := name_problem(path[-1])) is not None:
+            stats.skipped.append(f"{'/'.join(path)}: {problem}; rename it")
+            continue
+        kept.add(path)
+        out.append(path)
+    return out
+
+
 def sync(conn: sqlite3.Connection, settings: Settings | None = None) -> Stats:
     """Bring the database in line with the share. Safe to run while people use
-    the file manager: reading and hashing happen without a lock, and every
-    change is checked again under the write lock before it is applied."""
+    the file manager: reading, comparing and hashing happen without a lock, the
+    write lock is taken only for a collection where something differs, and every
+    change is checked again under it before it is applied."""
     from mnemerynne import fs, jobs
     from mnemerynne.db import transaction
     from mnemerynne.ingest import store
@@ -669,7 +750,7 @@ def sync(conn: sqlite3.Connection, settings: Settings | None = None) -> Stats:
     # from a machine whose clock is off, and the file is finished: waiting for it would hide it for hours.
     copied_stamp = now_ns + 60 * 1_000_000_000
 
-    # Pass 1, no lock: what is on disk and in the database.
+    # Pass 1, no lock: what is on disk and in the database, and which few things differ.
     plans = []
     for c in conn.execute("SELECT id, share_path FROM collections WHERE share_path IS NOT NULL").fetchall():
         base = rt.root / c["share_path"]
@@ -677,29 +758,37 @@ def sync(conn: sqlite3.Connection, settings: Settings | None = None) -> Stats:
             continue
         disk_folders, disk_files = _walk(base)
         db_folders, db_files = _db_tree(conn, c["id"])
-        plans.append((c["id"], base, disk_folders, disk_files, db_folders, db_files))
+        plans.append(_Plan(c["id"], base, disk_folders, disk_files, db_folders, db_files))
 
     gone: dict[int, tuple[int, tuple[str, ...], sqlite3.Row]] = {}   # inode -> (collection, path, row)
-    for cid, base, _, disk_files, _, db_files in plans:
-        for path, row in db_files.items():
-            if path not in disk_files and row["disk_inode"]:
-                gone[row["disk_inode"]] = (cid, path, row)
+    for plan in plans:
+        for path, row in plan.db_files.items():
+            if path not in plan.disk_files and row["disk_inode"]:
+                gone[row["disk_inode"]] = (plan.cid, path, row)
 
     # Still no lock: hash new and changed files, and inspect new content.
     reads: dict[tuple[int, tuple[str, ...]], _Read] = {}
-    for cid, base, _, disk_files, _, db_files in plans:
-        for path, f in disk_files.items():
+    for plan in plans:
+        cid, base = plan.cid, plan.base
+        plan.new_folders = _new_folders(plan, stats)
+        making = set(plan.new_folders)                               # folders pass 2 is going to add
+        for path, f in plan.disk_files.items():
+            row = plan.db_files.get(path)
+            if row is not None and (row["disk_size"], row["disk_mtime_ns"]) == (f.size, f.mtime_ns):
+                continue   # the usual case on a big share: known and unchanged
+            maybe_moved = row is None and f.inode in gone
+            if maybe_moved:
+                plan.to_apply.append(path)                           # pass 2 decides whether it really moved
             if settle_before < f.mtime_ns <= copied_stamp:
                 continue   # still being written: the next scan reads it
             if (problem := name_problem(path[-1])) is not None:
                 stats.skipped.append(f"{'/'.join(path)}: {problem}; rename it")
                 continue
-            row = db_files.get(path)
-            if row is not None and (row["disk_size"], row["disk_mtime_ns"]) == (f.size, f.mtime_ns):
-                continue
             old = gone.get(f.inode)
             if row is None and old and (old[2]["disk_size"], old[2]["disk_mtime_ns"]) == (f.size, f.mtime_ns):
                 continue   # a rename or move, content untouched: no need to read it
+            if len(path) > 1 and path[:-1] not in plan.db_folders and path[:-1] not in making:
+                continue   # its folder was skipped: reading it again every scan would change nothing
             full = base.joinpath(*path)
             try:
                 sha = hash_file(full)
@@ -709,6 +798,8 @@ def sync(conn: sqlite3.Connection, settings: Settings | None = None) -> Stats:
                 stats.skipped.append(f"{'/'.join(path)}: {exc}")
                 continue
             reads[(cid, path)] = _Read(sha, f.size, f.mtime_ns, inspected)
+            if not maybe_moved:
+                plan.to_apply.append(path)                           # new or changed content for pass 2
 
     def unchanged(full: Path, size: int, mtime_ns: int) -> bool:
         try:
@@ -716,29 +807,30 @@ def sync(conn: sqlite3.Connection, settings: Settings | None = None) -> Stats:
         except OSError:
             return False
 
-    # Pass 2, per collection under the write lock: re-check, then add, move, update.
-    for cid, base, disk_folders, disk_files, _, _ in plans:
+    # Pass 2, per collection under the write lock, only where pass 1 found something: re-check, then add, move, update.
+    for plan in plans:
+        if not (plan.new_folders or plan.to_apply):
+            continue   # nothing to do here: everyone else keeps the database to themselves
+        cid, base = plan.cid, plan.base
         with transaction(conn):
             if not _same_place(conn, rt, cid, base):
                 continue
             db_folders, db_files = _db_tree(conn, cid)
             folder_ids = dict(db_folders)
-            for path in sorted(disk_folders, key=len):
+            for path in plan.new_folders:
                 if path in folder_ids or not base.joinpath(*path).is_dir():
                     continue
                 parent = folder_ids.get(path[:-1]) if len(path) > 1 else None
                 if len(path) > 1 and parent is None:
                     continue   # its parent was skipped
-                if (problem := name_problem(path[-1])) is not None:
-                    stats.skipped.append(f"{'/'.join(path)}: {problem}; rename it")
-                    continue
                 if fs._taken(conn, cid, parent, path[-1], "folder"):
                     stats.skipped.append(f"{'/'.join(path)}: another folder differs only in upper/lower case")
                     continue
                 folder_ids[path] = fs.ensure_path(conn, cid, parent, [path[-1]], None)
                 stats.folders_added += 1
 
-            for path, f in disk_files.items():
+            for path in plan.to_apply:
+                f = plan.disk_files[path]
                 full = base.joinpath(*path)
                 folder_id = folder_ids.get(path[:-1]) if len(path) > 1 else None
                 if len(path) > 1 and folder_id is None:
@@ -805,18 +897,25 @@ def sync(conn: sqlite3.Connection, settings: Settings | None = None) -> Stats:
                 stats.added += 1
 
     # Pass 3, after every collection's additions (so moves between collections
-    # were recognised first): what is gone from disk, re-checked under the lock.
-    for cid, base, _, _, _, _ in plans:
+    # were recognised first): what is gone from disk, found without the lock and re-checked under it.
+    for plan in plans:
+        cid, base = plan.cid, plan.base
+        lost_files = [p for p in plan.db_files if p not in plan.disk_files and not base.joinpath(*p).exists()]
+        lost_folders = [p for p in plan.db_folders if p not in plan.disk_folders and not base.joinpath(*p).is_dir()]
+        if not (lost_files or lost_folders):
+            continue   # the usual case: nothing vanished from this collection
         with transaction(conn):
             if not _same_place(conn, rt, cid, base):
                 continue
             db_folders, db_files = _db_tree(conn, cid)
-            for path, row in db_files.items():
-                if not base.joinpath(*path).exists():
+            for path in lost_files:
+                row = db_files.get(path)                             # None: moved in pass 2, or already removed
+                if row is not None and not base.joinpath(*path).exists():
                     store.delete_record(conn, settings, row["id"])
                     stats.removed += 1
-            for path, fid in sorted(db_folders.items(), key=lambda kv: -len(kv[0])):
-                if not base.joinpath(*path).is_dir():
+            for path in sorted(lost_folders, key=lambda p: -len(p)):   # deepest first, so parents empty out
+                fid = db_folders.get(path)
+                if fid is not None and not base.joinpath(*path).is_dir():
                     if conn.execute("SELECT 1 FROM files WHERE folder_id = ? AND deleted_at IS NULL", (fid,)).fetchone():
                         continue
                     conn.execute("UPDATE files SET folder_id = NULL WHERE folder_id = ?", (fid,))  # binned ones
@@ -825,17 +924,19 @@ def sync(conn: sqlite3.Connection, settings: Settings | None = None) -> Stats:
                     conn.execute("DELETE FROM folders WHERE id = ?", (fid,))
                     stats.folders_removed += 1
 
-    # Libraries whose folder is gone from the (still mounted) share.
-    with transaction(conn):
-        if mounted(rt):
-            for c in conn.execute("SELECT id, name, share_path FROM collections WHERE kind = 'library' "
-                                  "AND share_path IS NOT NULL").fetchall():
-                if not (rt.root / c["share_path"]).is_dir():
-                    for f in conn.execute("SELECT id FROM files WHERE collection_id = ?", (c["id"],)).fetchall():
-                        store.delete_record(conn, settings, f["id"])
-                    conn.execute("DELETE FROM collections WHERE id = ?", (c["id"],))
-                    log.info("Share: library %s is gone from the share; removed.", c["name"])
-                    stats.libraries += 1
+    # Libraries whose folder is gone from the (still mounted) share; looked for before taking the lock.
+    shares = conn.execute("SELECT share_path FROM collections WHERE kind = 'library' AND share_path IS NOT NULL").fetchall()
+    if any(not (rt.root / c["share_path"]).is_dir() for c in shares):
+        with transaction(conn):
+            if mounted(rt):
+                for c in conn.execute("SELECT id, name, share_path FROM collections WHERE kind = 'library' "
+                                      "AND share_path IS NOT NULL").fetchall():
+                    if not (rt.root / c["share_path"]).is_dir():
+                        for f in conn.execute("SELECT id FROM files WHERE collection_id = ?", (c["id"],)).fetchall():
+                            store.delete_record(conn, settings, f["id"])
+                        conn.execute("DELETE FROM collections WHERE id = ?", (c["id"],))
+                        log.info("Share: library %s is gone from the share; removed.", c["name"])
+                        stats.libraries += 1
     if stats:
         log.info("Share sync: %s", stats)
     return stats

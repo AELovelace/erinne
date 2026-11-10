@@ -12,7 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from mnemerynne import bfgguf, casino, casino_remote, claude_chat, coins, games, lumidungeon, lumipet, lumitales, prism, push
+from mnemerynne import runner
+from mnemerynne import bfgguf, casino, casino_remote, claude_chat, coins, games,lumidungeon, lumipet, lumitales, prism, push
 from mnemerynne.db import transaction
 from mnemerynne.media import remotes, screens
 from mnemerynne.web.deps import _session_user, get_db
@@ -60,6 +61,28 @@ def prism_drop(body: PrismDrop, user=Depends(media_user), conn=Depends(get_db)):
     return prism.play(conn, user["id"], body.pick)
 
 
+class RunnerFinish(BaseModel):
+    """What the page says one StickBob Runner run did. runner.finish checks it against the run's start before paying."""
+    model_config = ConfigDict(extra="forbid")
+    run: int = Field(ge=1, strict=True)                     # the ticket from /start
+    meters: int = Field(ge=0, le=10_000_000, strict=True)
+    kills: int = Field(ge=0, le=1_000_000, strict=True)
+
+
+@router.post("/api/media/games/stickbob-runner/start")
+def runner_start(user=Depends(media_user), conn=Depends(get_db)):
+    """A ticket for the run that's starting; the server notes the time."""
+    with transaction(conn):
+        return {"run": runner.start(conn, user["id"])}
+
+
+@router.post("/api/media/games/stickbob-runner/finish")
+def runner_finish(body: RunnerFinish, user=Depends(media_user), conn=Depends(get_db)):
+    """Game over: pay the run's coins once, if its distance and kills fit the time it took."""
+    with transaction(conn):
+        return runner.finish(conn, user["id"], body.run, body.meters, body.kills)
+
+
 @router.post("/api/media/games/lumi-pet/visit")
 def pet_visit(user=Depends(media_user), conn=Depends(get_db)):
     """The first time someone spends a moment with Lumi today. Takes no numbers from the page, so there's nothing to fake."""
@@ -72,7 +95,7 @@ class PetAction(BaseModel):
     """What the person chose to do with Lumi. Only choices: which thing and how many. The server decides every result."""
     model_config = ConfigDict(extra="forbid")
     action: Literal["cuddle", "feed", "play", "nap", "wake", "buy", "decorate", "wear", "capsule", "glow", "import", "storyteller",
-                    "learn", "respec", "equip", "mod", "potions", "heal", "drink"]
+                    "learn", "respec", "equip", "mod", "potions", "heal", "drink", "garden_reminders"]
     item: str | None = Field(default=None, max_length=40)
     count: int = Field(default=1, ge=1, le=lumipet.MAX_HELD, strict=True)
     moments: int = Field(default=0, ge=0, le=lumipet.MAX_MOMENTS, strict=True)   # only read by "import", once
@@ -142,7 +165,7 @@ class DungeonStep(BaseModel):
     """One choice in the dungeon: which way, which cup or card or lamps, or the moves that solve a Sokoban door.
     Never a room, a reward or a result: the server replays puzzle answers itself."""
     model_config = ConfigDict(extra="forbid")
-    action: Literal["move", "take", "back", "unlock", "sokoban", "lights", "rune", "cup", "flip", "potion", "descend", "leave", "abandon"]
+    action: Literal["move", "look", "take", "back", "unlock", "sokoban", "lights", "rune", "cup", "flip", "potion", "descend", "leave", "abandon"]
     way: Literal["n", "e", "s", "w"] | None = None
     moves: str = Field(default="", max_length=600, pattern="^[udlr]*$")
     picks: list[int | str] = Field(default_factory=list, max_length=200)
@@ -154,6 +177,28 @@ def pet_dungeon(body: DungeonStart, user=Depends(media_user), conn=Depends(get_d
     try:
         with transaction(conn):
             return lumipet.dungeon_start(conn, user["id"], body.env)
+    except lumipet.PetError as refused:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(refused)) from None
+
+
+class GardenStep(BaseModel):
+    """One choice in the Stardust Garden: which plot, which flower or helper, how many presses, or a watering answer.
+    Never an amount of powder or coins: the server works those out."""
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["look", "press", "plot", "plant", "trim", "trim_all", "unlock", "cosmetic", "helper", "ability", "water_start", "water_answer",
+                    "feed_start", "feed_end", "moonrise", "garden"]
+    item: str | None = Field(default=None, max_length=40)
+    plot: int | None = Field(default=None, ge=0, le=15, strict=True)
+    count: int = Field(default=0, ge=0, le=2000, strict=True)                   # presses in this batch, or which garden to show
+    picks: list[Literal[0, 1, 2, 3]] = Field(default_factory=list, max_length=12)   # the watering cans, in order
+
+
+@router.post("/api/media/games/lumi-pet/garden")
+def pet_garden(body: GardenStep, user=Depends(media_user), conn=Depends(get_db)):
+    """Tend the garden or work the press."""
+    try:
+        with transaction(conn):
+            return lumipet.garden_act(conn, user["id"], body.action, item=body.item, plot=body.plot, count=body.count, picks=body.picks)
     except lumipet.PetError as refused:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(refused)) from None
 

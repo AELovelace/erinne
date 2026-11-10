@@ -5,7 +5,7 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import net from "node:net";
-import { checkLumiPet, checkLumiPetDoors, checkLumiPetFrame } from "./lumi-pet-browser.mjs";
+import { checkLumiPet, checkLumiPetCapsules, checkLumiPetDoors, checkLumiPetFrame, checkLumiPetGarden } from "./lumi-pet-browser.mjs";
 import { checkSharedTV } from "./casino-tv-browser.mjs";
 import { checkGameScaling } from "./game-scaling-browser.mjs";
 
@@ -54,6 +54,8 @@ try {
   } else {
   await checkLumiPet(browser, alice, base);
   await checkLumiPetDoors(browser, alice, base);
+  await checkLumiPetGarden(browser, alice, base);
+  await checkLumiPetCapsules(bob, base);
   await alice.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]); // Skip the ball's animation: the server's drops are what's under test.
   await alice.goto(base + "/media/games/prism-drop");
   await alice.waitForFunction(() => /^[\d,]+$/.test(document.getElementById("pd-coins").textContent));
@@ -182,7 +184,8 @@ try {
     console.log(`${game}: two accounts, shared settlement, refresh, mobile layout, remote input, host handoff passed`);
   }
   await alice.goto(base + "/media#games");
-  await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 6);
+  // The first shelf: games any remote can play. A computer also shows the Mouse & keyboard shelf below it.
+  await alice.waitForFunction(() => document.querySelector(".mc-shelf .mc-grid")?.children.length === 6);
   await checkLumiPetFrame(alice);
   await alice.evaluate(() => { // The top bar keeps controls; the remote consumes the iframe's status message.
     window.casinoTestReport = "";

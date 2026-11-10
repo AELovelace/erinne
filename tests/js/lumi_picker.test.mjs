@@ -53,11 +53,30 @@ test("trophies appear among a spot's choices only once they are found", () => {
   assert.deepEqual(full.went, [{ open: null, pick: house.spots.findIndex(spot => spot.id === "trophy") }]);
 });
 
+test("Star Capsule decor stays out of a spot's row until she has it, and its full list says where it comes from", () => {
+  const prize = "rug-braid";
+  assert.ok(!lists().spot("rug").options.includes(prize), "A prize she hasn't won can't be flipped to, or bought from the row");
+  const full = lists({}, "rug").spot(prize);
+  assert.deepEqual([full.icon, full.hint, full.send], ["🔒", "Common · only from a capsule", undefined]);
+  assert.match(full.note, /only comes from a capsule/);
+  assert.ok(lists({ decor: [prize] }).spot("rug").options.includes(prize));
+  assert.deepEqual(lists({ decor: [prize] }, "rug").spot(prize).send, { action: "decorate", item: prize });
+});
+
+test("backing out of a place on Lumi lands on its row, below both capsules", () => {
+  const view = lists({}, "tail");
+  view.slot("back").local();
+  assert.deepEqual(view.went, [{ open: null, pick: 7 }]);
+});
+
 test("the closet is the capsule and one row a place on Lumi, with nothing as a choice", () => {
   const view = lists();
-  assert.deepEqual(view.wear.map(r => r.key), ["capsule", "slot-head", "slot-neck", "slot-wings", "slot-back", "slot-paws", "slot-tail"]);
+  assert.deepEqual(view.wear.map(r => r.key), ["capsule", "capsule-moon", "slot-head", "slot-neck", "slot-wings", "slot-back", "slot-paws", "slot-tail"]);
+  assert.deepEqual(view.slot("capsule").send, { action: "capsule" });
+  assert.deepEqual(view.slot("capsule-moon").send, { action: "capsule", item: "moon" });
+  assert.match(view.slot("capsule-moon").hint, /^300 coins · rare, epic or legendary only · a repeat pays back half its value$/);
   const head = view.slot("slot-head");
-  assert.deepEqual([head.shown, head.hint, head.wear, head.options.length], [null, "◀ Nothing ▶ · nothing on", ["head", null], 6]);
+  assert.deepEqual([head.shown, head.hint, head.wear, head.options.length], [null, "◀ Nothing ▶ · nothing on", ["head", null], 11]);
   head.local();
   assert.deepEqual(view.went, [{ open: "head" }]);
 });
@@ -72,14 +91,14 @@ test("flipping a place on Lumi tries it on, and Enter buys, wears, takes off or 
   assert.deepEqual([off.hint, off.send, off.wear], ["◀ Nothing ▶ · Enter takes it off", { action: "wear", item: "acc-bow" }, ["head", null]]);
   const crown = lists({}, null, { "slot:head": "acc-crown" }).slot("slot-head");
   assert.equal(crown.send, undefined);
-  assert.match(crown.note, /only comes from the Star Capsule/);
+  assert.match(crown.note, /only comes from a capsule/);
   assert.deepEqual(lists({ closet: ["acc-crown"] }, null, { "slot:head": "acc-crown" }).slot("slot-head").send, { action: "wear", item: "acc-crown" });
 });
 
 test("a place's full list offers every accessory, as before", () => {
   const head = lists({ closet: ["acc-bow"], outfit: { head: "acc-bow" } }, "head");
-  assert.deepEqual(head.wear.map(r => r.key), ["back", "acc-bow", "acc-star-clip", "acc-flower-crown", "acc-witch-hat", "acc-crown"]);
+  assert.deepEqual(head.wear.map(r => r.key), ["back", "acc-bow", "acc-star-clip", "acc-flower-crown", "acc-witch-hat", "acc-crown", "acc-sprout", "acc-party-hat", "acc-ear-cosies", "acc-toadstool-cap", "acc-planet-topper"]);
   assert.match(head.slot("acc-bow").hint, /wearing it · Enter takes it off/);
-  assert.match(head.slot("acc-crown").note, /Star Capsule/);
+  assert.match(head.slot("acc-crown").note, /capsule/);
   assert.deepEqual(head.slot("acc-star-clip").send, { action: "wear", item: "acc-star-clip" });
 });

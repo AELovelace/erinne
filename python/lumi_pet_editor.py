@@ -25,7 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from mnemerynne import lumibattle, lumidungeon, lumipet  # noqa: E402  (needs the path above)
+from mnemerynne import lumibattle, lumidungeon, lumigarden, lumipet  # noqa: E402  (needs the path above)
 
 DATA = ROOT / "mnemerynne" / "lumipet_data"
 # catalog name -> (its file, the server's own loader that checks it)
@@ -35,6 +35,7 @@ CATALOGS = {
     "Closet and Star Capsule": (DATA / "closet.json", lumipet.load_closet),
     "Battles: enemies, skills, mods": (DATA / "battle.json", lumibattle.load_catalog),
     "Dungeon environments": (DATA / "dungeon.json", lumidungeon.load_catalog),
+    "Stardust Garden": (DATA / "garden.json", lumigarden.load_catalog),
 }
 
 

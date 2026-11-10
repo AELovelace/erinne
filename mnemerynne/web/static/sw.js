@@ -11,8 +11,9 @@ const LUMI = { // Lumi Pet's reminders (mnemerynne/lumipet.py sweep): one per ne
   energy: "Lumi is getting very sleepy. A nap would help.",
   joy: "Lumi misses you. Come and play for a minute?",
   nap: "Lumi is up from her nap and looking for you.",
+  garden: "Lumi's flowers are ready to trim.",
 };
-const LUMI_PAGE = "/media/games/lumi-pet";
+const LUMI_PAGE = "/media/games/lumi-pet", LUMI_GARDEN = LUMI_PAGE + "#garden"; // The garden reminder opens Lumi on her Garden tab.
 
 self.addEventListener("install", function () { self.skipWaiting(); }); // A newer copy of this file takes over at once.
 self.addEventListener("activate", function (event) { event.waitUntil(self.clients.claim()); });
@@ -23,15 +24,15 @@ self.addEventListener("push", function (event) { // Show the fixed words for a k
   if (!data || data.kind !== "lumi-pet" || !Object.prototype.hasOwnProperty.call(LUMI, data.need)) return;
   event.waitUntil(self.registration.showNotification("Lumi", {
     body: LUMI[data.need], tag: "lumi-pet", renotify: true, // One Lumi notification at a time: a newer one replaces it.
-    icon: "/static/icons/icon-192.png", badge: "/static/icons/icon-192.png", data: { page: LUMI_PAGE },
+    icon: "/static/icons/icon-192.png", badge: "/static/icons/icon-192.png", data: { page: data.need === "garden" ? LUMI_GARDEN : LUMI_PAGE },
   }));
 });
 
 self.addEventListener("notificationclick", function (event) { // Tapping it opens Lumi, in the app if it's already open.
   event.notification.close();
-  const page = event.notification.data && event.notification.data.page === LUMI_PAGE ? LUMI_PAGE : "/";
+  const asked = event.notification.data && event.notification.data.page, page = asked === LUMI_PAGE || asked === LUMI_GARDEN ? asked : "/"; // Only an address that shipped with this file.
   event.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(function (windows) {
-    const open = windows.find(function (client) { return new URL(client.url).pathname === page; });
+    const open = windows.find(function (client) { return new URL(client.url).pathname === page.split("#")[0]; });
     return open ? open.focus() : self.clients.openWindow(page);
   }));
 });

@@ -7,7 +7,10 @@ for the JSON API; art is referred to by URL (/media/art/<id>), files by /media/f
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import threading
+import time
 from collections import OrderedDict
 
 from mnemerynne import fs, media
@@ -112,6 +115,41 @@ def item_json(row, progress: dict | None = None, tv_show: dict | None = None) ->
     if progress:
         out["progress"] = progress
     return out
+
+
+class ListCache:
+    """Finished artist and album lists (as JSON), which take every track in the library to work out. An
+    entry is only reused while the same person can read the same folders and the catalog hasn't changed."""
+
+    SECONDS = 120.0   # the longest an edit the fingerprint can't see (a file put in the bin) stays listed
+
+    def __init__(self) -> None:
+        self._entries: dict[tuple, tuple[float, bytes]] = {}
+        self._lock = threading.Lock()
+
+    def get(self, key: tuple) -> bytes | None:
+        with self._lock:
+            hit = self._entries.get(key)
+        return hit[1] if hit is not None and time.monotonic() - hit[0] < self.SECONDS else None
+
+    def put(self, key: tuple, body: bytes) -> None:
+        now = time.monotonic()
+        with self._lock:
+            self._entries = {k: v for k, v in self._entries.items() if now - v[0] < self.SECONDS}   # drop the expired
+            self._entries[key] = (now, body)
+
+
+def list_key(view: View, name: str) -> tuple:
+    """What a cached music list depends on: who is asking, what they can read, and the state of the catalog."""
+    reach = view.access.reaches.get(view.lib["id"]) if view.lib is not None else None
+    readable = hash((reach.root_read, frozenset(reach.read))) if reach is not None else 0
+    tracks = tuple(view.conn.execute("SELECT count(*), max(file_id) FROM media_items WHERE section = 'music'").fetchone())
+    status = view.conn.execute("SELECT value FROM meta WHERE key = 'media_status'").fetchone()
+    try:
+        last = json.loads(status["value"]) if status else {}
+    except ValueError:
+        last = {}
+    return (view.user_id, name, readable, tracks, last.get("read"), last.get("failed"), last.get("scraped"))
 
 
 # ----------------------------------------------------------------- sections
