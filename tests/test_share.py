@@ -1,5 +1,6 @@
 import io
 import os
+import sqlite3
 import time
 
 import pytest
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 from fakes import FakeDirectory, FakeEmbedder, FakeShareChecker
 from mnemerynne import accounts, db, fs, permissions, share, users, worker
 from mnemerynne.config import Settings
+from mnemerynne.ingest import store
 from mnemerynne.web.app import Services, create_app
 
 
@@ -558,3 +560,142 @@ def test_inbox_permissions_keep_the_server_in(tmp_path, monkeypatch):
     assert acl == sorted(acl, key=lambda e: (e[0], e[2]))
     # Files the owner adds over SMB are theirs, yet the server can still read them.
     assert share.allowed(0o660, 2000123, 1, acl, 990, frozenset(), 4)
+
+
+# ----------------------------------------------------- big uploads and the database
+def _can_write(settings):
+    """Whether another connection could write right now, without waiting."""
+    other = db.connect(settings.db_path)
+    try:
+        other.execute("PRAGMA busy_timeout = 0")
+        other.execute("BEGIN IMMEDIATE")
+        other.execute("ROLLBACK")
+        return True
+    except sqlite3.OperationalError:
+        return False
+    finally:
+        other.close()
+
+
+def _oracle(conn, settings, root):
+    (root / "Oracle").mkdir(exist_ok=True)
+    share.sync(conn, settings)
+    return conn.execute("SELECT id FROM collections WHERE name = 'Oracle'").fetchone()["id"]
+
+
+def _hidden(root):
+    return [p.name for p in root.rglob(share.STAGE_PREFIX + "*")]
+
+
+def test_copying_a_file_onto_the_share_leaves_the_database_free(conn, settings, root, monkeypatch):
+    oracle, real, seen = _oracle(conn, settings, root), share._copy_new, []
+
+    def spy(src, dest):
+        real(src, dest)
+        seen.append((dest.parent, dest.name.startswith(share.STAGE_PREFIX), _can_write(settings)))
+
+    monkeypatch.setattr(share, "_copy_new", spy)
+    received = store.receive(io.BytesIO(b"a big file"), "big.txt", settings)
+    temp = received.tmp_path
+    file_id, created = store.add_file(conn, settings, received, oracle, None)
+    assert created and seen == [(root / "Oracle", True, True)]        # hidden, in its own folder, nothing locked
+    assert (root / "Oracle" / "big.txt").read_bytes() == b"a big file"
+    assert not temp.exists() and _hidden(root) == []
+    assert conn.execute("SELECT disk_inode FROM files WHERE id = ?", (file_id,)).fetchone()[0]
+
+
+def test_a_browser_upload_is_written_straight_into_its_folder(client, conn, directory, root, settings, monkeypatch):
+    oracle = _oracle(conn, settings, root)
+    _login(client, conn, directory)
+    real, seen = store.receive, []
+
+    def spy(stream, filename, cfg, into=None):
+        out = real(stream, filename, cfg, into)
+        seen.append((out.staged, out.tmp_path.parent, out.tmp_path.name.startswith(share.STAGE_PREFIX), _can_write(settings)))
+        return out
+
+    monkeypatch.setattr(store, "receive", spy)
+    monkeypatch.setattr(share, "stage", lambda *a: pytest.fail("a browser upload needs no second copy"))
+    r = client.post("/api/files", data={"collection_id": oracle}, files={"file": ("a.txt", io.BytesIO(b"hello"), "text/plain")})
+    assert r.status_code == 201, r.text
+    assert seen == [(True, root / "Oracle", True, True)]
+    assert (root / "Oracle" / "a.txt").read_bytes() == b"hello" and _hidden(root) == []
+    assert not list(settings.tmp_dir.glob("*.upload"))
+
+
+def test_a_folder_upload_lands_in_its_new_folders(client, conn, directory, root, settings):
+    oracle = _oracle(conn, settings, root)
+    _login(client, conn, directory)
+    r = client.post("/api/files", data={"collection_id": oracle, "relative_path": "Reports/2026/q1.txt"},
+                    files={"file": ("q1.txt", io.BytesIO(b"first"), "text/plain")})
+    assert r.status_code == 201, r.text
+    assert (root / "Oracle" / "Reports" / "2026" / "q1.txt").read_bytes() == b"first" and _hidden(root) == []
+
+
+def test_an_upload_refused_late_leaves_nothing_behind(client, conn, directory, root, settings):
+    oracle = _oracle(conn, settings, root)
+    _login(client, conn, directory)
+    (root / "Oracle" / "clash.txt").write_text("already here")        # on the disk, not yet scanned
+    r = client.post("/api/files", data={"collection_id": oracle}, files={"file": ("clash.txt", io.BytesIO(b"mine"), "text/plain")})
+    assert r.status_code == 503 and "already exists" in r.json()["detail"]
+    assert (root / "Oracle" / "clash.txt").read_text() == "already here" and _hidden(root) == []
+    assert conn.execute("SELECT count(*) FROM files WHERE display_name = 'clash.txt'").fetchone()[0] == 0
+
+
+def test_an_upload_over_the_limit_leaves_nothing_behind(client, conn, directory, root, settings, monkeypatch):
+    oracle = _oracle(conn, settings, root)
+    _login(client, conn, directory)
+    monkeypatch.setattr(settings, "max_file_bytes", 3)
+    r = client.post("/api/files", data={"collection_id": oracle}, files={"file": ("big.txt", io.BytesIO(b"too long"), "text/plain")})
+    assert r.status_code == 413 and _hidden(root) == []
+
+
+def test_the_same_file_again_leaves_nothing_behind(client, conn, directory, root, settings):
+    oracle = _oracle(conn, settings, root)
+    _login(client, conn, directory)
+    upload = {"file": ("a.txt", io.BytesIO(b"same"), "text/plain")}
+    assert client.post("/api/files", data={"collection_id": oracle}, files=upload).status_code == 201
+    again = {"file": ("a.txt", io.BytesIO(b"same"), "text/plain")}
+    assert client.post("/api/files", data={"collection_id": oracle}, files=again).status_code == 200
+    assert _hidden(root) == []
+
+
+def test_a_folder_renamed_during_the_copy_still_gets_the_file(conn, settings, root, monkeypatch):
+    oracle = _oracle(conn, settings, root)
+    (root / "Oracle" / "Old").mkdir()
+    share.sync(conn, settings)
+    folder = conn.execute("SELECT id FROM folders WHERE name = 'Old'").fetchone()["id"]
+    real = share._copy_new
+
+    def renamed_meanwhile(src, dest):
+        real(src, dest)
+        (root / "Oracle" / "Old").rename(root / "Oracle" / "New")
+        conn.execute("UPDATE folders SET name = 'New' WHERE id = ?", (folder,))
+
+    monkeypatch.setattr(share, "_copy_new", renamed_meanwhile)
+    store.add_file(conn, settings, store.receive(io.BytesIO(b"moved"), "a.txt", settings), oracle, None, folder_id=folder)
+    assert (root / "Oracle" / "New" / "a.txt").read_bytes() == b"moved" and _hidden(root) == []
+
+
+def test_the_scan_ignores_an_upload_in_progress_and_clears_an_abandoned_one(conn, settings, root, monkeypatch):
+    _oracle(conn, settings, root)
+    path, out = share.open_stage(root / "Oracle")
+    with out:
+        out.write(b"half a file")
+    (root / "Oracle" / ".keep").write_text("a dot-file of their own")
+    share.sync(conn, settings)
+    assert path.exists() and conn.execute("SELECT count(*) FROM files").fetchone()[0] == 0   # fresh: left alone, not listed
+    monkeypatch.setattr(share, "STAGE_MAX_AGE", -1)
+    share.sync(conn, settings)
+    assert not path.exists() and (root / "Oracle" / ".keep").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
+def test_a_staged_file_isnt_created_private(root):
+    old = os.umask(0o022)
+    try:
+        path, out = share.open_stage(root)
+        out.close()
+    finally:
+        os.umask(old)
+    assert path.stat().st_mode & 0o777 == 0o644                       # mkstemp's 0600 would mask the folder's ACLs away

@@ -355,18 +355,43 @@ def _write_file(conn, settings, root, parts, upload, sha, *, user_id, token_id, 
     if mtime is not None:
         os.utime(upload, (mtime, mtime))
     kind, mime, size, note = store.inspect(upload, name, settings)
+    with transaction(conn):                               # the quick refusals first: no point copying a file that won't be kept
+        folder = _folder_for(conn, root, dirs, user_id)
+        row = _target(conn, folder, name, if_match, if_none_match)
+        if row is not None and row["blob_sha256"] == sha:
+            touch(conn, root)
+            return {"version": sha, "changed": False}
+    # Before the real transaction: a big copy must not hold the database (share.py, "two steps").
+    staged = share.stage(upload, share.folder_dir(conn, root.collection_id, folder))
+    try:
+        return _commit_write(conn, settings, root, dirs, name, staged, sha, kind, mime, size, note,
+                             user_id=user_id, token_id=token_id, if_match=if_match, if_none_match=if_none_match)
+    finally:
+        staged.unlink(missing_ok=True)                    # gone already if it worked
+
+
+def _target(conn, folder, name, if_match, if_none_match):
+    """The file already at this name, if any, after refusing a write the app's preconditions don't allow."""
+    if conn.execute("SELECT 1 FROM folders WHERE parent_id = ? AND lower(name) = lower(?) AND deleted_at IS NULL",
+                    (folder, name)).fetchone():
+        raise SyncError(f"“{name}” is a folder on the server, not a file.", 409)
+    row = conn.execute("SELECT * FROM files WHERE folder_id = ? AND lower(display_name) = lower(?) "
+                       "AND deleted_at IS NULL", (folder, name)).fetchone()
+    current = row["blob_sha256"] if row else None
+    if row is None and if_match is not None:
+        raise Precondition(f"“{name}” isn't on the server any more.", None)
+    if row is not None and (if_none_match == "*" or if_match != current):
+        raise Precondition(f"“{name}” changed on the server since the app last saw it.", current)
+    return row
+
+
+def _commit_write(conn, settings, root, dirs, name, staged, sha, kind, mime, size, note, *,
+                  user_id, token_id, if_match, if_none_match):
+    """Give a staged file its name and record it. Checks everything again, since the copy may have taken minutes."""
     with transaction(conn):
         folder = _folder_for(conn, root, dirs, user_id)
-        if conn.execute("SELECT 1 FROM folders WHERE parent_id = ? AND lower(name) = lower(?) AND deleted_at IS NULL",
-                        (folder, name)).fetchone():
-            raise SyncError(f"“{name}” is a folder on the server, not a file.", 409)
-        row = conn.execute("SELECT * FROM files WHERE folder_id = ? AND lower(display_name) = lower(?) "
-                           "AND deleted_at IS NULL", (folder, name)).fetchone()
+        row = _target(conn, folder, name, if_match, if_none_match)
         current = row["blob_sha256"] if row else None
-        if row is None and if_match is not None:
-            raise Precondition(f"“{name}” isn't on the server any more.", None)
-        if row is not None and (if_none_match == "*" or if_match != current):
-            raise Precondition(f"“{name}” changed on the server since the app last saw it.", current)
         touch(conn, root)
         if row is not None and current == sha:
             return {"version": sha, "changed": False}
@@ -380,7 +405,7 @@ def _write_file(conn, settings, root, parts, upload, sha, *, user_id, token_id, 
                 "INSERT INTO files(collection_id, folder_id, blob_sha256, display_name, uploaded_by, status, notes) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)", (root.collection_id, folder, sha, name, user_id, status, note)).lastrowid
             dest = share.folder_dir(conn, root.collection_id, folder) / name
-            share.place(upload, dest)      # last: if it fails, the transaction rolls back
+            share.rename(dest.parent / staged.name, dest, "save the file")   # last: if it fails, the transaction rolls back
         else:
             file_id = row["id"]
             dest = share.file_path(conn, file_id)
@@ -389,7 +414,7 @@ def _write_file(conn, settings, root, parts, upload, sha, *, user_id, token_id, 
             # The old copy is kept as a version, unless it's too big for the versions folder.
             kept = editing.keep_version_file(settings, file_id, dest, ext) \
                 if old_size <= settings.sync_version_max_bytes else None
-            tmp = dest.parent / f".mnemerynne-{secrets.token_hex(6)}.tmp"
+            arrived = dest.parent / staged.name                # its folder may have been renamed during the copy
             try:
                 if kept:
                     conn.execute("INSERT INTO file_versions(file_id, sha256, size, rel_path, created_by, via, "
@@ -400,13 +425,12 @@ def _write_file(conn, settings, root, parts, upload, sha, *, user_id, token_id, 
                              "updated_at = datetime('now'), edited_via = ? WHERE id = ?",
                              (sha, status, note, f"sync:{root.computer}", file_id))
                 share._drop_unused_blob(conn, settings, current)
-                share.place(upload, tmp)
                 try:
-                    os.replace(tmp, dest)
+                    os.replace(arrived, dest)
                 except OSError as exc:
                     raise share._fail("save the file", exc) from exc
             except BaseException:
-                tmp.unlink(missing_ok=True)
+                arrived.unlink(missing_ok=True)
                 if kept:
                     editing.version_path(settings, kept).unlink(missing_ok=True)
                 raise

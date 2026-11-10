@@ -62,6 +62,8 @@ Deleting in Files moves the file out of the share into `.mnemerynne-trash`; rest
 
 Uploads, the browser editor, Claude's and Erynne's edits write to the share through a temporary dot-file next to the target and one rename, so nobody ever sees half a file, and a file open in Word or Excel (a `~$` lock file) is refused. The same `mnemerynne` ACL entry that lets the service read is what lets it write.
 
+An upload on its way in is a hidden `.mnemerynne-upload-…` file in the folder it will land in, so it picks up that folder's permissions. Erynne's database isn't held while the bytes are written, however big the file is. One left behind by a crash is removed by the share scan after a day.
+
 ## Backups
 
 Files on the share are **not** in Mnemerynne's backups; back the share up with the NAS. Mnemerynne's backup covers the database (the index, users, settings) and versions.

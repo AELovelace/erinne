@@ -218,7 +218,8 @@ wait_healthy
     assert result.returncode == 1, result.stdout + result.stderr
     assert "http://192.168.1.5:38200/healthz after 3s" in result.stderr
     arguments = (tmp_path / "curl-arguments").read_text().splitlines()
-    assert arguments[:6] == ["--noproxy", "*", "--connect-timeout", "2", "--max-time", "3"]
+    assert arguments[:5] == ["--noproxy", "*", "--connect-timeout", "2", "--max-time"]
+    assert arguments[5] in ("2", "3")   # bash's SECONDS is the real clock, so on a busy machine a second can pass first
     limits = [int(arguments[i + 1]) for i, arg in enumerate(arguments) if arg == "--max-time"]
     assert all(0 < limit <= 3 for limit in limits)  # No request gets a budget larger than the whole wait.
 

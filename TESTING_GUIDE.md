@@ -60,6 +60,16 @@ Also not automated: checked once in headless Chrome against a stand-in SoundClou
 
 On the NAS, add the key, then check a real TV box with its remote, **Play on** from a phone, an iPhone (Safari plays the stream without hls.js) and the Kiosk settings field after a box update. Start a station with the real key too: SoundCloud's reference doesn't say whether related tracks work with a server key.
 
+## Running everything quickly
+
+`PYTHONUTF8=1 .venv/Scripts/python.exe -m pytest tests -q -p no:cacheprovider -n logical` runs the whole suite on every CPU thread (`pytest-xdist`, a dev dependency). On a 16-core machine it takes about a minute instead of seven. Leave out `-n logical` to debug one test. `PYTHONUTF8=1` matters on Windows when the account name isn't plain ASCII.
+
+## Big uploads and the database
+
+`tests/test_share.py` and `tests/test_sync.py` check that a file's bytes reach the share with the database free, that browser uploads go straight into their folder under a hidden name, that refused or over-limit uploads leave nothing behind, that a folder renamed during the copy still gets the file, and that the scan ignores uploads in progress and clears abandoned ones.
+
+Not automated: on the NAS, upload a file of a few GB to a library while using Erynne elsewhere. Other pages should keep saving. In Windows, check that someone with access to that folder over SMB can open the finished file.
+
 ## Game checks
 
 Run the server and Media regression tests from the repository root:

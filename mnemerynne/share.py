@@ -19,6 +19,7 @@ import hashlib
 import logging
 import os
 import re
+import secrets
 import shutil
 import sqlite3
 import struct
@@ -26,13 +27,15 @@ import time
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Protocol
+from typing import BinaryIO, Iterable, Protocol
 
 from mnemerynne.config import Settings
 
 log = logging.getLogger("mnemerynne.share")
 
 MARKER = ".mnemerynne-share"   # present at the share root only while it is mounted
+STAGE_PREFIX = ".mnemerynne-upload-"   # an upload on its way in, hidden in the folder it will land in
+STAGE_MAX_AGE = 86400          # one untouched for this long was left by a crash, and the scan clears it
 _BAD_CHARS = set('\\/:*?"<>|')
 _RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
 # Never indexed: Office lock files, Explorer and macOS litter, partial downloads.
@@ -187,11 +190,12 @@ def _same(a: Path, b: Path) -> bool:
         return False
 
 
-def rename(src: Path, dest: Path) -> None:
+def rename(src: Path, dest: Path, action: str = "move it") -> None:
     """Move or rename within the share and trash (one filesystem). Never
     replaces anything: a file goes by link + unlink, which fails if the
     destination appeared meanwhile; only the same file under another case
-    (case-insensitive filesystems) is renamed in place."""
+    (case-insensitive filesystems) is renamed in place. action: how an error
+    describes this."""
     try:
         if dest.exists() and not _same(src, dest):
             raise FileExistsError(errno.EEXIST, "exists", str(dest))
@@ -210,7 +214,7 @@ def rename(src: Path, dest: Path) -> None:
             # appeared since the check above is all it could replace.
             os.rename(src, dest)
     except OSError as exc:
-        raise _fail("move it", exc) from exc
+        raise _fail(action, exc) from exc
 
 
 def copy_bytes(src: Path, dest: Path) -> None:
@@ -235,13 +239,49 @@ def copy_file(src: Path, dest: Path) -> None:
         raise _fail("copy it", exc) from exc
 
 
-def place(src: Path, dest: Path) -> None:
-    """Put a finished upload (a temp file on another disk) at its place on the share."""
+# Uploads reach the share in two steps, so that a huge file never holds the database. Its bytes are written first, with
+# no transaction open, to a hidden file in the folder it will land in; created there, it gets that folder's permissions
+# and SELinux label. Then, inside the transaction, rename() gives it its real name, which takes no time however big it
+# is. A temp file from elsewhere can't simply be renamed in: it would keep the private permissions it was made with.
+def _stage_path(folder: Path) -> Path:
+    return folder / f"{STAGE_PREFIX}{secrets.token_hex(8)}"
+
+
+def open_stage(folder: Path) -> tuple[Path, BinaryIO]:
+    """A new hidden file in `folder` to write an upload into: (its path, the open file)."""
+    path = _stage_path(folder)
     try:
-        _copy_new(src, dest)
+        folder.mkdir(parents=True, exist_ok=True)
+        return path, open(path, "xb")
     except OSError as exc:
         raise _fail("save the file", exc) from exc
+
+
+def stage(src: Path, folder: Path) -> Path:
+    """Copy a finished temp file to a hidden file in `folder`, and remove the temp file. Returns the hidden file's path.
+    Call this with no transaction open."""
+    path = _stage_path(folder)
+    try:
+        _copy_new(src, path)
+    except OSError as exc:
+        path.unlink(missing_ok=True)                      # never leave half a file behind
+        raise _fail("save the file", exc) from exc
     src.unlink(missing_ok=True)
+    return path
+
+
+def _clear_stale_stage(entry: os.DirEntry) -> None:
+    """Delete an upload a crash left hidden on the share. ctime as well as mtime, because a backed-up file carries the
+    laptop's old modified time from the moment it is staged."""
+    if not entry.name.startswith(STAGE_PREFIX):
+        return
+    try:
+        st = entry.stat(follow_symlinks=False)
+        if time.time() - max(st.st_mtime, st.st_ctime) > STAGE_MAX_AGE:
+            os.unlink(entry.path)
+            log.info("Share: removed an abandoned upload: %s", entry.path)
+    except OSError:                                       # gone already, or not ours to delete: the next scan looks again
+        pass
 
 
 def remove(path: Path) -> None:
@@ -458,6 +498,7 @@ def _walk(base: Path) -> tuple[dict[tuple[str, ...], int], dict[tuple[str, ...],
             continue
         for entry in entries:
             if is_junk(entry.name):
+                _clear_stale_stage(entry)
                 continue
             try:
                 if entry.is_symlink():

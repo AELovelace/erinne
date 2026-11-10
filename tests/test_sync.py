@@ -1,5 +1,6 @@
 import hashlib
 import os
+import sqlite3
 import time
 
 import pytest
@@ -457,3 +458,47 @@ def test_admins_see_every_backup(client, conn, directory, app_auth, capsys, monk
     cli.cmd_sync_status(type("A", (), {"user": "jane"})())
     out = capsys.readouterr().out
     assert "Backups are on" in out and "jane: DESKTOP-1\\Documents: 0 files" in out
+
+
+# ----------------------------------------------------- big uploads and the database
+def _watch_copies(monkeypatch, settings):
+    """Records, for each copy onto the share, whether it was hidden and whether another connection could write."""
+    real, seen = share._copy_new, []
+
+    def spy(src, dest):
+        real(src, dest)
+        other = db.connect(settings.db_path)
+        try:
+            other.execute("PRAGMA busy_timeout = 0")
+            other.execute("BEGIN IMMEDIATE")
+            other.execute("ROLLBACK")
+            free = True
+        except sqlite3.OperationalError:
+            free = False
+        finally:
+            other.close()
+        seen.append((dest.name.startswith(share.STAGE_PREFIX), free))
+
+    monkeypatch.setattr(share, "_copy_new", spy)
+    return seen
+
+
+def test_a_backed_up_file_is_copied_with_the_database_free(client, root, settings, app_auth, monkeypatch):
+    auth, root_id = app_auth
+    seen = _watch_copies(monkeypatch, settings)
+    first = _put(client, auth, root_id, "a.txt", b"one")
+    assert first.status_code == 200, first.text
+    second = _put(client, auth, root_id, "a.txt", b"two", match=first.json()["version"], new=False)
+    assert second.status_code == 200, second.text
+    assert seen == [(True, True), (True, True)]
+    assert (_backup_dir(root) / "a.txt").read_bytes() == b"two"
+    assert not list(root.rglob(share.STAGE_PREFIX + "*"))
+
+
+def test_a_backup_write_thats_refused_or_unchanged_isnt_copied(client, root, settings, app_auth, monkeypatch):
+    auth, root_id = app_auth
+    assert _put(client, auth, root_id, "a.txt", b"one").status_code == 200
+    seen = _watch_copies(monkeypatch, settings)
+    assert _put(client, auth, root_id, "a.txt", b"other").status_code == 412        # a file is there already
+    same = _put(client, auth, root_id, "a.txt", b"one", new=False, match=hashlib.sha256(b"one").hexdigest())
+    assert same.json()["changed"] is False and seen == []

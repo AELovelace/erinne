@@ -48,6 +48,7 @@ class Received:
     display_name: str
     mime: str = "application/octet-stream"
     note: str | None = None  # why an indexable-looking file is stored only
+    staged: bool = False     # tmp_path is already a hidden file in the share folder it will land in
 
 
 def clean_display_name(filename: str) -> str:
@@ -57,18 +58,34 @@ def clean_display_name(filename: str) -> str:
     return name[:200] or "untitled"
 
 
-def receive(stream: BinaryIO, filename: str, settings: Settings) -> Received:
-    """Copy an upload to a temp file while hashing and validating it."""
+def landing(conn: sqlite3.Connection, collection_id: int, folder_id: int | None, folder_parts: list[str] | None,
+            uploaded_by: int | None) -> tuple[int | None, Path | None]:
+    """Where an upload will land, before any of its bytes are written, creating the folders of a folder upload.
+    Returns (folder_id, the folder on the share to write it into, or None when this collection isn't on the share)."""
+    from mnemerynne import fs  # fs builds on this module
+
+    if folder_parts:
+        with transaction(conn):
+            folder_id = fs.ensure_path(conn, collection_id, folder_id, folder_parts, uploaded_by)
+    return folder_id, share.folder_dir(conn, collection_id, folder_id) if share.is_share(conn, collection_id) else None
+
+
+def receive(stream: BinaryIO, filename: str, settings: Settings, into: Path | None = None) -> Received:
+    """Copy an upload to a temp file while hashing and validating it. into: the share folder it will land in (landing()),
+    to write it there directly and save a second copy of a large file."""
     display_name = clean_display_name(filename)
-    settings.tmp_dir.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=settings.tmp_dir, suffix=".upload")
-    tmp_path = Path(tmp_name)
+    if into is not None:
+        tmp_path, out = share.open_stage(into)
+    else:
+        settings.tmp_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=settings.tmp_dir, suffix=".upload")
+        tmp_path, out = Path(tmp_name), os.fdopen(fd, "wb")
     sha = hashlib.sha256()
     size = 0
     kind = None
     limit = settings.max_file_bytes
     try:
-        with os.fdopen(fd, "wb") as out:
+        with out:
             while block := stream.read(_READ_SIZE):
                 if kind is None:
                     kind = _sniff(block, display_name)
@@ -85,7 +102,7 @@ def receive(stream: BinaryIO, filename: str, settings: Settings) -> Received:
         raise
     if note:
         kind = "other"
-    return Received(sha.hexdigest(), kind, size, tmp_path, display_name, _mime(kind, display_name), note)
+    return Received(sha.hexdigest(), kind, size, tmp_path, display_name, _mime(kind, display_name), note, into is not None)
 
 
 def inspect(path: Path, display_name: str, settings: Settings) -> tuple[str, str, int, str | None]:
@@ -227,11 +244,14 @@ def _add_file(
     """
     from mnemerynne import fs  # fs builds on this module
 
-    on_share = share.is_share(conn, collection_id)
+    folder_id, stage_folder = landing(conn, collection_id, folder_id, folder_parts, uploaded_by)
+    on_share = stage_folder is not None
+    if on_share and not received.staged:                  # before the transaction: a big copy must not hold the database
+        received.tmp_path = share.stage(received.tmp_path, stage_folder)
+        received.staged = True
     with transaction(conn):
-        if folder_parts:
-            folder_id = fs.ensure_path(conn, collection_id, folder_id, folder_parts, uploaded_by)
-        if on_share:
+        if on_share:                                      # its folder may have been renamed while the bytes were written
+            received.tmp_path = share.folder_dir(conn, collection_id, folder_id) / received.tmp_path.name
             conn.execute("INSERT OR IGNORE INTO blobs(sha256, kind, mime, size, rel_path) VALUES (?, ?, ?, ?, ?)",
                          (received.sha256, received.kind, received.mime, received.size,
                           blob_rel_path(received.sha256, received.kind)))
@@ -258,10 +278,11 @@ def _add_file(
              "stored" if stored_only else "queued", received.note),
         ).lastrowid
         if on_share:
-            # The bytes go to the share, not blob storage; last, so a failure
-            # leaves nothing behind (the transaction rolls back).
+            # The bytes are already in this folder under a hidden name, so this takes no time
+            # however big the file is. Last, so a failure leaves nothing behind (the
+            # transaction rolls back and add_file removes the hidden file).
             dest = share.folder_dir(conn, collection_id, folder_id) / name
-            share.place(received.tmp_path, dest)
+            share.rename(received.tmp_path, dest, "save the file")
             share.record_stat(conn, file_id, dest)
         if not stored_only:
             jobs.enqueue(conn, "ingest", file_id)

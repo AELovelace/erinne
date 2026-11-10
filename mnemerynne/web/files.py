@@ -444,14 +444,14 @@ def upload(
     _fs_errors(lambda: fs.require_folder(conn, target, folder_id))
     if not access.can_write(target, folder_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't upload to this folder")
+    parts = fs.split_relative_path(relative_path) if relative_path else None
+    landed, into = _fs_errors(lambda: store.landing(conn, target, folder_id, parts, user["id"]))   # written straight into its folder
     try:
-        received = store.receive(file.file, file.filename or "", settings)
+        received = _fs_errors(lambda: store.receive(file.file, file.filename or "", settings, into))
     except store.UploadError as exc:
         code = status.HTTP_413_CONTENT_TOO_LARGE if isinstance(exc, store.TooLarge) else status.HTTP_400_BAD_REQUEST
         raise HTTPException(code, str(exc)) from exc
-    parts = fs.split_relative_path(relative_path) if relative_path else None
-    file_id, created = _fs_errors(lambda: store.add_file(conn, settings, received, target, user["id"],
-                                                         folder_id=folder_id, folder_parts=parts))
+    file_id, created = _fs_errors(lambda: store.add_file(conn, settings, received, target, user["id"], folder_id=landed))
     return JSONResponse(_file_json(fs.file_row(conn, file_id), access),
                         status_code=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
