@@ -183,6 +183,60 @@
 .lp-room[data-garden="true"] .lp-dhud .lp-bar-mp { display: none; }
 
 /* The Skills tab draws its trees over the room, and the Collection tab a flower or decoration: Lumi steps aside for both. */
-.lp-room[data-skills="true"] .lp-pet-wrap, .lp-room[data-card="true"] .lp-pet-wrap { opacity: 0; pointer-events: none; }
-.lp-room[data-skills="true"] .lp-room-top, .lp-room[data-card="true"] .lp-room-top { display: none; }
-.lp-room[data-skills="true"] .lp-caption { display: none; }
+.lp-room[data-skills="true"] .lp-pet-wrap, .lp-room[data-album="true"] .lp-pet-wrap { opacity: 0; pointer-events: none; }
+.lp-room[data-skills="true"] .lp-room-top, .lp-room[data-album="true"] .lp-room-top { display: none; }
+.lp-room[data-skills="true"] .lp-caption, .lp-room[data-album="true"] .lp-caption { display: none; }
+.lp-dungeon .lp-unowned { filter: grayscale(1) brightness(.5); opacity: .55; } /* A thing she hasn't found yet: its shape, without its colours. */
+
+/* ---- Touch controls: an arrow pad for the dungeon and a press button for the garden (game.js shows them on touch screens). */
+.lp-pad { position: absolute; z-index: 3; left: max(.6rem, calc(50% - 168 * var(--u))); bottom: 10%; display: grid; grid-template: repeat(3, 2.9rem) / repeat(3, 2.9rem); gap: .2rem; touch-action: manipulation; }
+.gm .lp-pad[hidden], .gm .lp-squeeze[hidden], .gm .lp-pad button[hidden] { display: none; } /* As specific as the rules that lay them out, so hidden means gone. */
+.gm .lp-pad button { padding: 0; border-radius: 50%; font-size: 1.05rem; background: #0e0b1acc; border: 1px solid #70ebea88; color: #70ebea; -webkit-tap-highlight-color: transparent; }
+.gm .lp-pad button:disabled { opacity: .25; }
+.gm .lp-pad button:active { background: #70ebea33; }
+.lp-pad [data-pad="up"] { grid-area: 1 / 2; } .lp-pad [data-pad="left"] { grid-area: 2 / 1; } .lp-pad [data-pad="enter"] { grid-area: 2 / 2; } .lp-pad [data-pad="right"] { grid-area: 2 / 3; } .lp-pad [data-pad="down"] { grid-area: 3 / 2; }
+.gm .lp-squeeze { position: absolute; z-index: 3; right: max(.7rem, calc(50% - 168 * var(--u))); bottom: 10%; width: 5rem; height: 5rem; padding: 0; border-radius: 50%; display: grid; place-content: center; gap: 0;
+  background: #2a1d3fdd; border: 2px solid #ffdc83; color: #ffdc83; font-size: 1.6rem; line-height: 1; touch-action: manipulation; -webkit-tap-highlight-color: transparent; box-shadow: 0 0 18px #ffdc8355; }
+.gm .lp-squeeze small { font-size: .6rem; letter-spacing: .12em; text-transform: uppercase; }
+.gm .lp-squeeze:active { transform: scale(.93); background: #ffdc8333; }
+
+/* ---- A phone. One screen, no page scrolling: her needs in a strip along the top, the room under it, then the words and a
+   list of big buttons that scrolls by itself, and the tabs as a bar along the bottom to swipe through. In the dungeon,
+   garden, skill trees and collection the room gets more of the screen, since that is where the fingers go. */
+@media (max-width: 700px) {
+  .gm[data-game="lumi-pet"] { display: flex; flex-direction: column; gap: 0; padding: 0; height: 100vh; height: 100dvh; min-height: 0; max-width: none; overflow: hidden; }
+  .gm[data-game="lumi-pet"] .lp-intro { order: 0; flex: none; align-self: stretch; display: flex; align-items: center; gap: .6rem; padding: max(.35rem, env(safe-area-inset-top, 0px)) .6rem .35rem; border-radius: 0; border-width: 0 0 1px; box-shadow: none; }
+  .gm[data-game="lumi-pet"] .lp-intro :is(.gm-eyebrow, .gm-title, .lp-lead, .lp-note, .lp-save) { display: none; }
+  .gm[data-game="lumi-pet"] .lp-meters { flex: 1; min-width: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .45rem; margin: 0; }
+  .gm[data-game="lumi-pet"] .lp-meter { grid-template-columns: minmax(0, 1fr) auto; gap: .12rem .25rem; font-size: .55rem; letter-spacing: .03em; }
+  .gm[data-game="lumi-pet"] .lp-meter .lp-bar { grid-column: 1 / -1; grid-row: 2; }
+  .gm[data-game="lumi-pet"] .lp-meter b { font-size: .6rem; }
+  .gm[data-game="lumi-pet"] .lp-stats { margin: 0; flex: none; }
+  .gm[data-game="lumi-pet"] .lp-stats div { display: none; padding: 0; border: 0; }
+  .gm[data-game="lumi-pet"] .lp-stats div:last-child { display: block; text-align: right; } /* Only her coins: the rest is in the tabs. */
+  .gm[data-game="lumi-pet"] .lp-stats dt { font-size: .5rem; }
+  .gm[data-game="lumi-pet"] .lp-stats dd { margin: 0; font-size: .85rem; }
+  .gm[data-game="lumi-pet"] .lp-room { order: 1; flex: none; width: 100%; height: 38vh; height: 38dvh; min-height: 0; border-radius: 0; border-width: 0; box-shadow: none; }
+  .gm[data-game="lumi-pet"] .lp-room[data-dungeon="true"] { height: 46dvh; }
+  .gm[data-game="lumi-pet"] .lp-room[data-garden="true"] { height: 54dvh; } /* Tall enough that a plot is a comfortable tap. */
+  .gm[data-game="lumi-pet"] .lp-room:is([data-skills="true"], [data-album="true"]) { height: 56dvh; }
+  .gm[data-game="lumi-pet"] .lp-room-top { display: none; }
+  .gm[data-game="lumi-pet"] .lp-caption { bottom: auto; top: .4rem; font-size: .7rem; }
+  .gm[data-game="lumi-pet"] .lp-room:is([data-dungeon="true"], [data-garden="true"]) .lp-caption { display: none; } /* Their own bar says it. */
+  .gm[data-game="lumi-pet"] .lp-dhud { top: .4rem; left: .5rem; width: 62%; }
+  .gm[data-game="lumi-pet"] .lp-controls { order: 2; flex: 1 1 0; min-height: 0; align-self: stretch; display: flex; flex-direction: column; padding: .5rem .6rem max(.4rem, env(safe-area-inset-bottom, 0px)); border-radius: 0; border-width: 1px 0 0; box-shadow: none; }
+  .gm[data-game="lumi-pet"] .lp-controls :is(.gm-eyebrow, .gm-keys) { display: none; } /* No keys on a phone: everything is pressed. */
+  .gm[data-game="lumi-pet"] .lp-message { flex: none; min-height: 0; max-height: 4.3em; overflow-y: auto; margin: 0 0 .4rem; padding: 0; border: 0; font-size: .88rem; line-height: 1.4; }
+  .gm[data-game="lumi-pet"] .lp-story { flex: none; min-height: 0; max-height: 4.4em; margin-bottom: .3rem; font-size: .72rem; line-height: 1.45; }
+  .gm[data-game="lumi-pet"] .lp-story p { margin: 0 0 .15rem; }
+  .gm[data-game="lumi-pet"] .lp-actions { flex: 1 1 0; min-height: 0; max-height: none; overflow-y: auto; grid-template-columns: minmax(0, 1fr); gap: .4rem; align-content: start; overscroll-behavior: contain; }
+  .gm[data-game="lumi-pet"] .lp-actions button { min-height: 3.1rem; padding: .5rem .7rem; gap: .7rem; }
+  .gm[data-game="lumi-pet"] .lp-tabs { order: 9; flex: none; display: flex; overflow-x: auto; gap: .3rem; margin: .45rem 0 0; padding-bottom: .1rem; scrollbar-width: none; scroll-snap-type: x proximity; }
+  .gm[data-game="lumi-pet"] .lp-tabs::-webkit-scrollbar { display: none; }
+  /* On a phone a tab is always one tap away, in the garden, the trees and the collection too. Only a dungeon trip puts the bar
+     away: she can't be anywhere else until she is home. */
+  .gm[data-game="lumi-pet"]:has(.lp-room[data-dungeon="true"]) .lp-tabs { display: none; }
+  .gm[data-game="lumi-pet"] .lp-tabs button { flex: 0 0 auto; min-width: 4.7rem; min-height: 2.7rem; font-size: .68rem; scroll-snap-align: center; }
+  .gm[data-game="lumi-pet"] .lp-pad { left: .5rem; bottom: .5rem; }
+  .gm[data-game="lumi-pet"] .lp-squeeze { right: .6rem; bottom: .6rem; }
+}

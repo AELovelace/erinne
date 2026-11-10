@@ -91,7 +91,7 @@ test("the closet is the capsule and one row a place on Lumi, with nothing as a c
   assert.deepEqual(view.slot("capsule-moon").send, { action: "capsule", item: "moon" });
   assert.match(view.slot("capsule-moon").hint, /^300 coins · rare, epic or legendary only · a repeat pays back half its value$/);
   const head = view.slot("slot-head");
-  assert.deepEqual([head.shown, head.hint, head.wear, head.options.length], [null, "◀ Nothing ▶ · nothing on", ["head", null], 11]);
+  assert.deepEqual([head.shown, head.hint, head.wear, head.options.length], [null, "◀ Nothing ▶ · nothing on", ["head", null], 21]);   // nothing, then twenty hats
   head.local();
   assert.deepEqual(view.went, [{ open: "head" }]);
 });
@@ -112,7 +112,10 @@ test("flipping a place on Lumi tries it on, and Enter buys, wears, takes off or 
 
 test("a place's full list offers every accessory, as before", () => {
   const head = lists({ closet: ["acc-bow"], outfit: { head: "acc-bow" } }, "head");
-  assert.deepEqual(head.wear.map(r => r.key), ["back", "acc-bow", "acc-star-clip", "acc-flower-crown", "acc-witch-hat", "acc-crown", "acc-sprout", "acc-party-hat", "acc-ear-cosies", "acc-toadstool-cap", "acc-planet-topper"]);
+  const hats = closet.slots.find(slot => slot.id === "head").items.map(item => item.id);
+  assert.deepEqual(head.wear.map(r => r.key), ["back"].concat(hats));
+  assert.deepEqual(hats.slice(0, 10), ["acc-bow", "acc-star-clip", "acc-flower-crown", "acc-witch-hat", "acc-crown", "acc-sprout", "acc-party-hat", "acc-ear-cosies", "acc-toadstool-cap", "acc-planet-topper"]);
+  assert.equal(hats.length, 20);
   assert.match(head.slot("acc-bow").hint, /wearing it · Enter takes it off/);
   assert.match(head.slot("acc-crown").note, /capsule/);
   assert.deepEqual(head.slot("acc-star-clip").send, { action: "wear", item: "acc-star-clip" });

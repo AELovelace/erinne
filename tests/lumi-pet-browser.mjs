@@ -594,34 +594,157 @@ export async function checkLumiPetSkills(browser, page, base) { // The skill tre
     assert.equal(await tab.$eval("#lp-room", el => el.dataset.skills), "false");
     assert.equal(await tab.$eval("#lp-dungeon", el => el.style.display), "none");
 
-    await tab.click('[data-lp-tab="collection"]'); // The album: shelves, counts, and a look at each thing.
-    await tab.waitForSelector(row("shelf-flowers"));
-    assert.match(await tab.$eval(row("all"), el => el.textContent), /Collected: \d+ of \d+/);
-    assert.notEqual(await tab.$eval(".lp-tabs", el => getComputedStyle(el).display), "none", "The collection is an ordinary tab");
-    await tab.click(row("shelf-flowers"));
-    await tab.waitForSelector(row("have-moondaisy"));
-    assert.equal((await tab.$$('[data-lp-row^="have-"]')).length, 42);
-    await tab.keyboard.press("ArrowDown"); // Highlighting a flower shows it large.
-    await tab.waitForFunction(() => document.getElementById("lp-room").dataset.card === "true" && document.getElementById("lp-dungeon").textContent.includes("FLOWER"));
-    await tab.screenshot({ path: "runs/casino-browser/lumi-pet-collection.png", fullPage: true });
-    await tab.click(row("back"));
-    await tab.waitForSelector(row("shelf-closet"));
-    assert.equal(await tab.$eval("#lp-room", el => el.dataset.card), "false");
-    await tab.click(row("shelf-garden"));
-    await tab.waitForSelector(row("have-fence-0-snowy"));
+    await tab.click('[data-lp-tab="collection"]'); // The Collection: a gallery over the room, like the trees.
+    await tab.waitForSelector(row("look"));
+    assert.equal(await tab.$eval(".lp-tabs", el => getComputedStyle(el).display), "none");
+    assert.equal(await tab.$eval("#lp-room", el => el.dataset.album), "true");
+    assert.equal((await tab.$$('#lp-dungeon [data-click^="shelf:"]')).length, 7);
+    const cells = (await tab.$$('#lp-dungeon [data-click^="cell:"]')).length;
+    assert.ok(cells > 10 && cells <= 36, "A page of pictures: " + cells);
+    const fitted = await tab.$$eval("#lp-dungeon svg[data-thumb]", frames => frames.filter(frame => frame.getAttribute("viewBox") !== "0 0 400 500").length);
+    assert.ok(fitted >= cells - 2, "Each picture is framed round its own drawing: " + fitted + " of " + cells);
+    assert.ok(await tab.$$eval('#lp-dungeon [data-cell="have"]', owned => owned.length) >= 1, "What came with the house is hers");
+    assert.match(await tab.$eval("#lp-story", el => el.textContent), /Collected \d+ of \d+.*For the house: \d+ of \d+/s);
+    const gallery = () => tab.$eval("#lp-dungeon [data-cursor]", el => el.dataset.cursor);
+    assert.equal(await gallery(), "0");
+    await tab.keyboard.press("ArrowRight"); // The arrows move over the pictures.
     await tab.keyboard.press("ArrowDown");
-    await tab.waitForFunction(() => document.getElementById("lp-dungeon").textContent.includes("DECORATION"));
-    await tab.click(row("back"));
-    await tab.click(row("shelf-closet")); // Clothes are tried on Lumi as their rows are highlighted.
-    await tab.waitForSelector('[data-lp-row^="have-acc-"]');
-    const bare = await tab.$eval("#lp-acc-front", el => el.innerHTML + document.getElementById("lp-acc-back").innerHTML);
-    let tried = bare; // (She may already be wearing the first thing on the shelf, so walk down until her outfit changes.)
-    for (let i = 0; i < 6 && tried === bare; i++) {
-      await tab.keyboard.press("ArrowDown");
-      tried = await tab.$eval("#lp-acc-front", el => el.innerHTML + document.getElementById("lp-acc-back").innerHTML);
-    }
-    assert.notEqual(tried, bare, "A highlighted accessory is shown on Lumi");
+    assert.equal(await gallery(), "7");
+    await tab.keyboard.press("Enter"); // Enter looks at one large; Enter again goes back.
+    await tab.waitForSelector("#lp-dungeon [data-zoom]");
+    assert.match(await tab.$eval(row("look"), el => el.textContent), /Back to the shelf/);
+    await tab.keyboard.press("Enter");
+    await tab.waitForFunction(() => !document.querySelector("#lp-dungeon [data-zoom]"));
+    await tab.click('[data-click="shelf:garden"]'); // The mouse: a shelf, a page arrow, a picture.
+    await tab.waitForFunction(() => document.getElementById("lp-story").textContent.includes("Garden decorations: "));
+    await tab.click('[data-click="page:1"]');
+    await tab.waitForFunction(() => document.getElementById("lp-dungeon").textContent.includes("page 2 of 7"));
+    await tab.click('[data-click="cell:4"]');
+    await tab.waitForFunction(() => document.querySelector("#lp-dungeon [data-cursor]").dataset.cursor === "4");
+    await tab.click('[data-click="cell:4"]'); // A second press looks at it large; a press on the large picture puts it away.
+    await tab.waitForSelector("#lp-dungeon [data-zoom]");
+    await tab.screenshot({ path: "runs/casino-browser/lumi-pet-collection-zoom.png", fullPage: true });
+    await tab.click('[data-click="zoom"]');
+    await tab.waitForFunction(() => !document.querySelector("#lp-dungeon [data-zoom]"));
+    await tab.click(row("shelf-flowers")); // The list reaches every shelf too.
+    await tab.waitForFunction(() => document.querySelectorAll('#lp-dungeon [data-click^="cell:"]').length === 36);
+    await tab.screenshot({ path: "runs/casino-browser/lumi-pet-collection.png", fullPage: true });
+    await tab.click(row("leave"));
+    await tab.waitForSelector(row("cuddle"));
+    assert.equal(await tab.$eval("#lp-room", el => el.dataset.album), "false");
     assert.deepEqual(errors, [], "Nothing threw on the page");
-    console.log("Lumi Pet skills and collection: six trees drawn, walked by arrows and mouse; the album's shelves, cards and previews passed");
+    console.log("Lumi Pet skills and collection: six trees drawn, walked by arrows and mouse; the gallery's shelves, pages, pictures and close look passed");
+  } finally { if (errors.length) console.log("Page errors:", errors.join(" | ")); await tab.close(); }
+}
+
+export async function checkLumiPetPhone(browser, page, base) { // A phone: one screen, touch controls, and an app of her own.
+  const tab = await browser.newPage();
+  const errors = [];
+  tab.on("pageerror", error => errors.push(String(error)));
+  const shot = name => tab.screenshot({ path: "runs/casino-browser/lumi-pet-phone-" + name + ".png" });
+  const fits = async what => assert.ok(await tab.evaluate(() => document.scrollingElement.scrollHeight <= innerHeight + 2 && document.scrollingElement.scrollWidth <= innerWidth + 2), what + ": the page itself never scrolls");
+  const box = selector => tab.$eval(selector, el => { const b = el.getBoundingClientRect(); return { top: b.top, bottom: b.bottom, left: b.left, right: b.right, width: b.width, height: b.height }; });
+  try {
+    await tab.setCookie(...await page.cookies());
+    await tab.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+    await tab.goto(base + "/media/games/lumi-pet");
+    await tab.waitForSelector(row("cuddle"));
+    await fits("Care");
+    const strip = await box(".lp-intro"), room = await box("#lp-room"), panel = await box(".lp-controls"), tabs = await box(".lp-tabs"), list = await box("#lp-list");
+    assert.ok(strip.bottom <= room.top + 1 && room.bottom <= panel.top + 1 && tabs.bottom <= 844 + 1, "Her needs, then her room, then the list, with the tabs along the bottom");
+    assert.ok(strip.height < 80 && room.height > 250 && list.height > 150, "The strip is small; the room and the list get the screen: " + JSON.stringify([strip.height, room.height, list.height]));
+    assert.ok(room.width >= 388 && list.width > 350, "Edge to edge");
+    assert.equal(await tab.$eval("#lp-keys", el => getComputedStyle(el).display), "none", "No key legend on a phone");
+    assert.equal(await tab.$eval(".gm-title", el => getComputedStyle(el).display), "none");
+    assert.ok(await tab.$eval(".lp-tabs", el => el.scrollWidth > el.clientWidth + 50 && getComputedStyle(el).display === "flex"), "The tabs are a bar to swipe through");
+    assert.ok(await tab.$$eval("#lp-list button", buttons => buttons.every(button => button.getBoundingClientRect().height >= 44)), "Every row is big enough for a thumb");
+    assert.ok(await tab.$$eval("[data-lp-tab]", buttons => buttons.every(button => button.getBoundingClientRect().height >= 40 && button.getBoundingClientRect().width >= 60)));
+    assert.match(await text(tab, "#lp-coins"), /^\d+$/);
+    assert.deepEqual(await tab.$$eval("#lp-pad, #lp-squeeze", controls => controls.map(control => getComputedStyle(control).display)), ["none", "none"], "No touch controls where there is nothing for them to do");
+    await shot("care");
+
+    assert.match(await tab.$eval('link[rel="manifest"]', el => el.getAttribute("href")), /\/media\/games\/lumi-pet\/manifest\.webmanifest$/); // Her own app.
+    const manifest = await tab.evaluate(() => fetch(document.querySelector('link[rel="manifest"]').href).then(answer => answer.json()));
+    assert.deepEqual([manifest.name, manifest.start_url, manifest.scope, manifest.display, manifest.icons.length], ["Lumi Pet", "/media/games/lumi-pet", "/media/games/lumi-pet", "standalone", 3]);
+    for (const icon of manifest.icons) assert.equal(await tab.evaluate(src => fetch(src).then(answer => answer.status + ":" + answer.headers.get("content-type")), icon.src), "200:image/png");
+    await tab.tap('[data-lp-tab="settings"]');
+    await tab.waitForSelector(row("install"));
+    assert.match(await tab.$eval(row("install"), el => el.textContent), /Install Lumi Pet.*home screen/s);
+    // (Not pressed here: where the browser offers to install her, the row opens the browser's own dialog, which a test can't answer.)
+
+    await tab.tap('[data-lp-tab="garden"]'); // The garden: plots under the thumb, and a big button for the press.
+    await tab.waitForSelector(row("press"));
+    await fits("Garden");
+    await tab.waitForSelector("#lp-squeeze:not([hidden])");
+    assert.equal(await tab.$eval(".lp-tabs", el => getComputedStyle(el).display), "flex", "On a phone the tab bar stays out in the garden: another tab is one tap away");
+    const squeeze = await box("#lp-squeeze"), garden = await box("#lp-room");
+    assert.ok(squeeze.width >= 64 && squeeze.bottom <= garden.bottom && squeeze.right <= 390, "A thumb-sized press button in the corner of the garden");
+    const plot = await box('[data-click="plot:0"]');
+    assert.ok(plot.width >= 44 && plot.height >= 40, "A plot is big enough to tap: " + JSON.stringify([plot.width, plot.height]));
+    await tab.tap("#lp-squeeze");
+    await tab.waitForFunction(() => document.getElementById("lp-room").dataset.gardenAct && document.getElementById("lp-room").dataset.gardenAct.startsWith("bounce"));
+    await shot("garden");
+    await tab.tap(row("leave"));
+    await tab.waitForSelector(row("cuddle"));
+    assert.ok(await tab.$eval("#lp-squeeze", el => el.hidden));
+
+    await tab.tap('[data-lp-tab="skills"]'); // The skill trees and the collection get most of the screen.
+    await tab.waitForSelector(row("act"));
+    await fits("Skills");
+    const trees = await box("#lp-room"), node = await box('[data-click="skill:heavy-paw"]');
+    assert.ok(trees.height > 420 && node.width >= 24, "The trees are large enough to tap: " + JSON.stringify([trees.height, node.width]));
+    await tab.tap('[data-click="skill:ember"]');
+    await tab.waitForFunction(() => document.querySelector("#lp-dungeon [data-cursor]").dataset.cursor === "ember");
+    await shot("skills");
+    await tab.tap(row("leave"));
+    await tab.waitForSelector(row("cuddle"));
+    await tab.tap('[data-lp-tab="collection"]');
+    await tab.waitForSelector(row("look"));
+    await fits("Collection");
+    await tab.tap('[data-click="cell:8"]');
+    await tab.waitForFunction(() => document.querySelector("#lp-dungeon [data-cursor]").dataset.cursor === "8");
+    await shot("collection");
+    await tab.tap(row("leave"));
+    await tab.waitForSelector(row("cuddle"));
+
+    assert.ok(await tab.$eval("#lp-pad", el => el.hidden), "No arrow pad until she is out exploring");
+    // The dungeon: an arrow pad to walk with. (She may be busy playing from an earlier check and unable to set out, so, as
+    // in the door checks, a second page is shown the server's own state with a trip under way.)
+    const out = await browser.newPage();
+    out.on("pageerror", error => errors.push(String(error)));
+    try {
+      await out.setCookie(...await page.cookies());
+      await out.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+      await out.evaluateOnNewDocument(() => {
+        const real = window.fetch;
+        window.fetch = async function (url, options) {
+          const answer = await real(url, options);
+          if (!String(url).endsWith("/lumi-pet/state")) return answer;
+          const data = await answer.json(), env = data.dungeon.environments[0];
+          data.fight = null;
+          data.dungeon.run = { id: 78, env: { id: env.id, name: env.name, family: env.family, palette: env.palette }, depth: 1, at: "1,1", over: null, ended: null,
+            rooms: { "1,1": { kind: "empty", done: true, exits: ["e", "n"] }, "2,1": { kind: "unknown" }, "1,0": { kind: "unknown" } },
+            room: { kind: "empty", done: true, exits: ["e", "n"] }, satchel: { coins: 12, potions: 0, keys: 0, trophies: [], mods: [] },
+            hp: 40, hpMax: 58, mp: 20, mpMax: 22, event: { scenario: "empty" }, say: "A quiet room.", scene: "Moonlight on old stone.", story: ["Lumi set out.", "A quiet room."],
+            fighting: false, facing: null, game: null };
+          return new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
+        };
+      });
+      await out.goto(base + "/media/games/lumi-pet");
+      await out.waitForSelector(row("go-e"));
+      await out.waitForSelector("#lp-pad:not([hidden])");
+      assert.equal(await out.$eval(".lp-tabs", el => getComputedStyle(el).display), "none", "On a trip the tab bar is put away");
+      assert.equal(await out.$eval("#lp-squeeze", el => getComputedStyle(el).display), "none");
+      assert.ok(await out.evaluate(() => document.scrollingElement.scrollHeight <= innerHeight + 2), "Dungeon: the page itself never scrolls");
+      const open = await out.$$eval("#lp-pad [data-pad]:not([hidden]):not(:disabled)", buttons => buttons.map(button => button.dataset.pad));
+      assert.deepEqual([...open].sort(), ["right", "up"], "The pad offers exactly the ways there are: east and north");
+      assert.ok(await out.$eval('#lp-pad [data-pad="enter"]', el => el.hidden), "No middle button without a puzzle board");
+      const key = await out.$eval('#lp-pad [data-pad="up"]', el => { const b = el.getBoundingClientRect(); return [b.width, b.height, b.bottom <= document.getElementById("lp-room").getBoundingClientRect().bottom]; });
+      assert.ok(key[0] >= 44 && key[1] >= 44 && key[2], "Pad buttons are thumb-sized and inside the room: " + key);
+      await out.screenshot({ path: "runs/casino-browser/lumi-pet-phone-dungeon.png" });
+      await Promise.all([out.waitForRequest(request => request.url().endsWith("/dungeon/act") && (request.postData() || "").includes('"way":"n"')), out.tap('#lp-pad [data-pad="up"]')]); // A tap walks her north.
+    } finally { await out.close(); }
+    assert.deepEqual(errors, [], "Nothing threw on the page");
+    console.log("Lumi Pet on a phone: one screen with a tab bar, thumb-sized rows, the press button, the arrow pad, the trees and gallery by touch, and her own app manifest passed");
   } finally { if (errors.length) console.log("Page errors:", errors.join(" | ")); await tab.close(); }
 }

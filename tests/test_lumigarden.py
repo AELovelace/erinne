@@ -536,3 +536,26 @@ def test_the_numbers_keep_a_gentle_pace():
     best = 16 * max(f["powder"] / f["minutes"] for f in flowers) * 60 * 24
     assert G.CATALOG["moonrise"]["needs"] < best * 3                            # a first moonrise is days of a full garden, not weeks
     assert all(later["needs"] < earlier["powder"] * 16 * 40 for earlier, later in zip(flowers, flowers[1:]))    # no rung is a wall: forty full harvests at most
+
+
+# --------------------------------------------------------------------------- Lumi Pet as an app of her own
+def test_lumi_pet_installs_as_her_own_app_with_her_own_icon(on):
+    static = G.Path(G.__file__).parent / "web" / "static"
+    page = on.get("/media/games/lumi-pet").text
+    assert 'rel="manifest" href="/media/games/lumi-pet/manifest.webmanifest"' in page and "icons/lumi-180.png" in page
+    assert 'href="/manifest.webmanifest"' not in page                           # not the main site's app as well
+    assert 'id="lp-pad"' in page and 'id="lp-squeeze"' in page and 'data-lp-tab="collection"' in page      # the touch controls ship with the page
+    other = on.get("/media/games/prism-drop").text
+    assert 'href="/manifest.webmanifest"' in other and "lumi-pet/manifest" not in other     # every other game stays part of the main app
+    on.cookies.clear()                                                          # a browser fetches a manifest without the session
+    answer = on.get("/media/games/lumi-pet/manifest.webmanifest")
+    assert answer.status_code == 200 and answer.headers["content-type"].startswith("application/manifest+json")
+    manifest = answer.json()
+    assert (manifest["id"], manifest["name"], manifest["start_url"], manifest["scope"], manifest["display"]) == \
+        ("/media/games/lumi-pet", "Lumi Pet", "/media/games/lumi-pet", "/media/games/lumi-pet", "standalone")
+    assert [(icon["sizes"], icon["purpose"]) for icon in manifest["icons"]] == [("192x192", "any"), ("512x512", "any"), ("512x512", "maskable")]
+    for name in ("lumi-192.png", "lumi-512.png", "lumi-maskable-512.png", "lumi-180.png", "lumi.svg"):
+        assert (static / "icons" / name).stat().st_size > 1000, name
+    assert all(name.split("?")[0].endswith(file) for name, file in zip((icon["src"] for icon in manifest["icons"]), ("lumi-192.png", "lumi-512.png", "lumi-maskable-512.png")))
+    css = (static / "games" / "lumi-pet" / "game.css").read_text(encoding="utf-8")
+    assert "@media (max-width: 700px)" in css and "100dvh" in css                # the phone's own layout

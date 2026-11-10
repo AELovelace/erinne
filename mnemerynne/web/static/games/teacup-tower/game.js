@@ -23,6 +23,7 @@
   const GLOW = "#ff8ecb", BODY = "#fce1f2", SHADOW = "#b8569f";
 
   function screenY(y, worldY, camera) { return y + T.H - (worldY - camera); }
+  const remote = {};                                          // the smoothed view of each other racer's board, by screen side
 
   function drawLumi(ctx, x, y, size, squash, tilt, blink) {   // her feet at (x, y)
     ctx.save();
@@ -194,8 +195,14 @@
         ctx.fillText("Waiting for their climb…", x + T.W / 2, y + T.H / 2);
         return;
       }
-      tower(ctx, x, y, game.raceSeed, b.height, b.frame, null, t);
-      drawLumi(ctx, x + b.points[0] * T.W, y + T.H - b.points[1] * T.H, 0.22, 1, 0, !b.alive);
+      // Boards arrive five times a second: glide the view and Lumi toward each one instead of stepping (one record
+      // per side of the screen; a big change, like a new race, snaps).
+      const worldY = b.height + b.points[1] * T.H, s = remote[x] || (remote[x] = { cam: b.height, x: b.points[0] * T.W, y: worldY, frame: b.frame });
+      const glide = function (from, to) { return Math.abs(to - from) > 400 ? to : from + (to - from) * 0.2; };
+      s.cam = glide(s.cam, b.height); s.x = glide(s.x, b.points[0] * T.W); s.y = glide(s.y, worldY);
+      s.frame = b.frame > s.frame ? s.frame + Math.min(4, b.frame - s.frame) : b.frame;   // sliding cups keep moving smoothly
+      tower(ctx, x, y, game.raceSeed, s.cam, s.frame, null, t);
+      drawLumi(ctx, x + s.x, screenY(y, s.y, s.cam), 0.22, 1, 0, !b.alive);
       ctx.strokeStyle = "rgb(110,188,236)"; ctx.lineWidth = 2; ctx.strokeRect(x - 4, y - 4, T.W + 8, T.H + 8);
     },
 

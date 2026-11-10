@@ -1,5 +1,14 @@
 {% extends "base.html" %}
 {% block title %}{{ game.name }} · {{ product_name }}{% endblock %}
+{#- Lumi Pet is an app of her own: installed from this page she gets her own name and icon (web/app.py lumi_manifest). -#}
+{% block app_links %}{% if game.slug == 'lumi-pet' %}
+  <link rel="manifest" href="/media/games/lumi-pet/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="{{ static('icons/lumi-180.png') }}">
+  <meta name="theme-color" content="#1a0f2e">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Lumi Pet">
+{% else %}{{ super() }}{% endif %}{% endblock %}
 {% block body %}
 {#- A built-in game (mnemerynne/games.py, web/games.py), in the person's theme. Media's game layer frames this page;
     opened on its own it works the same. The game's markup is its partial (templates/games/<slug>.html); its scripts
@@ -14,7 +23,7 @@
 <script src="{{ static('games/common.js') }}"></script>
 {% if game.slug == 'roulette' %}<script src="{{ static('games/casino/roulette.js') }}"></script>{% endif %}
 {% if not game.multiplayer %}<script src="{{ static('games/' ~ asset ~ '/rules.js') }}"></script>{% endif %}
-{% if game.slug == 'lumi-pet' %}{% for part in ('house', 'closet', 'picker-ui', 'enemies', 'battle-ui', 'dungeon-ui', 'dungeon-art', 'garden-ui', 'garden-art', 'skills-ui', 'skills-art', 'collection-ui') %}<script src="{{ static('games/lumi-pet/' ~ part ~ '.js') }}"></script>{% endfor %}{% endif %}
+{% if game.slug == 'lumi-pet' %}{% for part in ('house', 'closet', 'picker-ui', 'enemies', 'battle-ui', 'dungeon-ui', 'dungeon-art', 'garden-ui', 'garden-art', 'skills-ui', 'skills-art', 'collection-ui', 'collection-art') %}<script src="{{ static('games/lumi-pet/' ~ part ~ '.js') }}"></script>{% endfor %}{% endif %}
 {% for part in game.extras if part.endswith('.js') %}<script src="{{ static('games/' ~ part) }}"></script>{% endfor %}
 <script src="{{ static('games/' ~ asset ~ '/game.js') }}"></script>
 {% endblock %}

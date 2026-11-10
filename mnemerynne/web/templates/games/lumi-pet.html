@@ -71,6 +71,16 @@
     </svg>
   </div>
   <div class="lp-caption"><span class="lp-dot" aria-hidden="true"></span><span id="lp-state">Settling in</span></div>
+  {#- Touch controls (game.js drawPad shows them only on a touch screen or a phone): arrows to walk the dungeon and work
+      its puzzles, and a big button for the garden's press. They do exactly what the keys do. -#}
+  <div class="lp-pad" id="lp-pad" role="group" aria-label="Move" hidden>
+    <button type="button" data-pad="up" aria-label="Up">▲</button>
+    <button type="button" data-pad="left" aria-label="Left">◀</button>
+    <button type="button" data-pad="enter" aria-label="Choose">●</button>
+    <button type="button" data-pad="right" aria-label="Right">▶</button>
+    <button type="button" data-pad="down" aria-label="Down">▼</button>
+  </div>
+  <button type="button" class="lp-squeeze" id="lp-squeeze" aria-label="Press the powder" hidden><span aria-hidden="true">◎</span><small>Press</small></button>
 </section>
 
 <section class="lp-controls gm-panel" aria-label="Spend time with Lumi">

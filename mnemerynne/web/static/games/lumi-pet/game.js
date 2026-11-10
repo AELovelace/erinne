@@ -2,7 +2,7 @@
    what the person chose (which snack, which toy) and draws what the server answers. Her needs run down while away. */
 (function () {
   "use strict";
-  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Pk = window.LumiPetPicker, Gd = window.LumiPetGarden, Ga = window.LumiPetGardenArt, Sk = window.LumiPetSkills, Sa = window.LumiPetSkillsArt, Cl = window.LumiPetCollection, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt;
+  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Pk = window.LumiPetPicker, Gd = window.LumiPetGarden, Ga = window.LumiPetGardenArt, Sk = window.LumiPetSkills, Sa = window.LumiPetSkillsArt, Cl = window.LumiPetCollection, Ca = window.LumiPetCollectionArt, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt;
   const $ = function (id) { return document.getElementById(id); };
   const room = $("lp-room"), list = $("lp-list"), houseArt = $("lp-house"), tabButtons = Array.from(document.querySelectorAll("[data-lp-tab]"));
   const API = "/api/media/games/lumi-pet/", OLD_SAVE = "mnemerynne-game:lumi-pet:companion";
@@ -19,7 +19,9 @@
   // The dungeon: the puzzle being worked on here, whether arrows drive it ("board") or the list, the finished trip
   // already read, a row waiting for a second press, and what the dungeon scene last drew.
   const KEYS_SKILLS = "▲ ▼ ◀ ▶ move over the skills · Enter learns one<br>Enter on a learned move carries it or puts it away<br>⏮ ⏭ choose from this list<br>Mouse: press a skill to look, again to learn";
-  let skillCursor = null, skillFocus = "board", lastSkills = "", album = null, lastCard = ""; // The Skills tab's cursor, and the Collection tab's open shelf.
+  const KEYS_ALBUM = "▲ ▼ ◀ ▶ move over the pictures · ◀ ▶ at an edge turn the page<br>Enter looks at one large<br>⏮ ⏭ choose from this list<br>Mouse: press a shelf, a picture, or a page arrow";
+  let skillCursor = null, skillFocus = "board", lastSkills = ""; // The Skills tab's cursor.
+  let album = { shelf: null, page: 0, cursor: 0 }, albumZoom = false, albumFocus = "board", lastAlbum = ""; // The Collection tab: which shelf, page and picture, and whether one is shown large.
   const KEYS_GARDEN = "▲ ▼ ◀ ▶ move over the plots · Enter plants or trims<br>⏯ presses the powder · ⏮ ⏭ choose from this list<br>Keyboard: P presses, Page Up / Page Down<br>Mouse: press a plot, the press, or a watering can";
   const CAN_NOTES = [523.25, 659.25, 783.99, 440]; // One note per watering can.
   let lumiMoved = 0, lumiActUntil = 0, lumiFlip = false; // Lumi in the garden: when she last darted somewhere, and the little move she is making.
@@ -92,7 +94,7 @@
     }
     if (name === "battle") return battleRows();
     if (name === "skills") return Sk.rows({ snap: snap, cursor: skillCursor || snap.battle.trees[0].nodes[0].id, go: skillsGo });
-    if (name === "collection") return Cl.rows({ snap: snap, open: album, go: function (change) { album = change.open; picks[tab] = change.open ? 0 : (change.pick || 0); } });
+    if (name === "collection") return Cl.rows({ snap: snap, at: album, zoom: albumZoom, go: albumGo });
     if (name === "garden") return Gd.rows({ garden: snap.garden, decor: snap.garden_decor, drawer: drawer, seed: seed, cursor: plotCursor, mini: mini, passed: passed(), pending: pending, level: pet.level, go: gardenGo });
     if (name === "dungeon") { // A dungeon fight and its result use the Battle lists; everything else is the dungeon's own.
       if ((snap.fight && snap.fight.status === "active") || finished) return battleRows();
@@ -108,7 +110,9 @@
         turn: function (by) { submit({ key: "glow", send: { action: "glow", glow: Pk.turn(R.PALETTES, pet.glow, by) } }); } },
       { key: "storyteller", icon: "✎", name: "Storyteller: " + (pet.storyteller === "live" ? "Live" : "Library"), hint: "Who writes the dungeon's lines: the game's library, or a model as you go", send: { action: "storyteller" } },
       { key: "sound", icon: "♪", name: "Sound: " + (G.sound.isOn() ? "on" : "off"), hint: "Little chimes", local: function () { G.sound.toggle(); } },
-    ].concat(reminders === "unsupported" ? [] : [ // Phones and computers only: a TV has nobody's pocket to buzz.
+    ].concat(inApp || framed ? [] : [ // In a browser tab: Lumi Pet can be an app of her own.
+      { key: "install", icon: "⬇", name: "Install Lumi Pet", hint: "Her own icon on your home screen, opening straight to her", local: installApp },
+    ]).concat(reminders === "unsupported" ? [] : [ // Phones and computers only: a TV has nobody's pocket to buzz.
       { key: "garden-reminders", icon: "❀", name: "Garden reminders: " + (pet.garden_reminders === false ? "off" : "on"), hint: "A nudge when slow flowers are ready to trim (needs Reminders on)", send: { action: "garden_reminders" } },
       { key: "reminders", icon: "✉", name: "Reminders: " + reminders, local: toggleReminders,
         hint: reminders === "blocked" ? "Allow notifications for this site in your browser first" : "A nudge on this device when Lumi needs you" },
@@ -116,7 +120,7 @@
   }
 
   function changeTab(to) { // Open a category afresh: its sub-lists closed, nothing half-chosen.
-    tab = to; opened = { home: null, closet: null }; flip = {}; battleView = null; pendingConfirm = null; album = null; skillFocus = "board";
+    tab = to; opened = { home: null, closet: null }; flip = {}; battleView = null; pendingConfirm = null; albumZoom = false; albumFocus = "board"; skillFocus = "board";
   }
 
   function battleRows() { // The Battle tab's lists (battle-ui.js); also used by the Dungeon tab while a fight is on.
@@ -217,19 +221,68 @@
     }
     const signature = JSON.stringify([snap.pet.skills, snap.pet.moves, snap.progress.points, skillCursor, skillFocus]);
     if (signature === lastSkills) return;
-    lastSkills = signature; lastDungeon = ""; lastGarden = "";
+    lastSkills = signature; lastDungeon = ""; lastGarden = ""; lastAlbum = "";
     $("lp-dungeon").innerHTML = Sa.scene(snap, { cursor: skillCursor, focused: skillFocus === "board" }); // Markup authored in skills-art.js; names are drawn as text by the list, not here.
   }
 
-  function drawCard(pick) { // The Collection tab: a flower or a garden decoration shown large while its row is highlighted.
-    const card = TABS[tab] === "collection" && pick && pick.card ? pick.card : null;
-    room.dataset.card = String(Boolean(card));
-    if (!card) { lastCard = ""; return; }
+  // ---- The Collection tab (shelves and words in collection-ui.js, drawing in collection-art.js): a gallery of
+  // everything there is to collect, drawn over the room like the skill trees. The arrows move over the pictures
+  // (off an edge turns the page), Enter looks at one large, and Prev/Next move through the list beside it.
+  function albuming() { return TABS[tab] === "collection" && !exploring(); }
+
+  function albumGo(change) { // What a row of the album's list (or a press on the page) can do.
+    if (change.leave) { changeTab(0); picks[tab] = 0; return; }
+    if (change.shelf) { album = { shelf: change.shelf, page: 0, cursor: 0 }; albumZoom = false; }
+    if ("page" in change) { album.page = change.page; album.cursor = 0; albumZoom = false; }
+    if ("zoom" in change) albumZoom = change.zoom;
+  }
+
+  function albumKey(action) { // The keyboard and remote in the gallery.
+    const moving = action === "up" || action === "down" || action === "left" || action === "right";
+    if (moving) { const to = Cl.move(Cl.view(snap, album), action); album.page = to.page; album.cursor = to.cursor; albumFocus = "board"; }
+    else if (action === "next" || action === "prev") { const many = rows().length; picks[tab] = (picks[tab] + (action === "prev" ? many - 1 : 1)) % many; albumFocus = "list"; }
+    else if (action === "enter") { if (albumFocus === "board") albumZoom = !albumZoom; else { choose(); return; } }
+    render();
+  }
+
+  function albumClick(name) { // A press on the gallery: a shelf, a page arrow, or a picture (a second press looks at it large).
+    const what = name.split(":"), seen = Cl.view(snap, album);
+    if (what[0] === "shelf") albumGo({ shelf: what[1] });
+    else if (what[0] === "page") { const to = seen.page + Number(what[1]); if (to >= 0 && to < seen.pages) albumGo({ page: to }); }
+    else if (what[0] === "zoom") albumZoom = false;
+    else if (what[0] === "cell") { const at = Number(what[1]); if (at === seen.cursor && albumFocus === "board") albumZoom = true; else { album.cursor = at; albumFocus = "board"; } }
+    render();
+  }
+
+  function fitThumbs() { // Each little picture is drawn wherever its own file puts it; frame it round what was actually drawn.
+    $("lp-dungeon").querySelectorAll("svg[data-thumb]").forEach(function (frame) {
+      let box = null;
+      try { box = frame.firstChild.getBBox(); } catch (_) { /* not on screen yet: the wide frame it was given will do */ }
+      if (!box || !box.width || !box.height) return;
+      const side = Math.max(box.width, box.height) * 1.08;
+      frame.setAttribute("viewBox", (box.x + box.width / 2 - side / 2) + " " + (box.y + box.height / 2 - side / 2) + " " + side + " " + side);
+    });
+  }
+
+  function drawAlbum() { // The gallery over the room while its tab is open.
+    const on = Boolean(snap && albuming());
+    room.dataset.album = String(on);
+    if (!on) { lastAlbum = ""; return; }
+    const seen = Cl.view(snap, album);
+    album = { shelf: seen.shelf.id, page: seen.page, cursor: seen.cursor }; // Kept within what there is.
+    $("gm").dataset.walking = "true"; $("lp-keys").innerHTML = KEYS_ALBUM; // Fixed text from this file.
     $("lp-dungeon").style.display = "";
-    const signature = JSON.stringify(card);
-    if (signature === lastCard) return;
-    lastCard = signature; lastDungeon = ""; lastGarden = ""; lastSkills = "";
-    $("lp-dungeon").innerHTML = Ga.card(card, snap.garden, snap.garden_decor); // Markup authored in garden-art.js.
+    const lines = Cl.lines(seen), told = "album|" + lines.join("|");
+    if (told !== lastStory) {
+      lastStory = told;
+      const story = $("lp-story"); story.textContent = "";
+      lines.forEach(function (words, index) { const line = document.createElement("p"); line.textContent = words; if (index === 2) line.className = "lp-scene"; story.appendChild(line); });
+    }
+    const signature = JSON.stringify([album, albumZoom, albumFocus, seen.cells.map(function (item) { return item.id + (item.owned ? item.count || 1 : 0); })]);
+    if (signature === lastAlbum) return;
+    lastAlbum = signature; lastDungeon = ""; lastGarden = ""; lastSkills = "";
+    $("lp-dungeon").innerHTML = Ca.scene(snap, { shelf: album.shelf, page: album.page, cursor: album.cursor, zoom: albumZoom, focused: albumFocus === "board" }); // Markup authored in collection-art.js and the art files it borrows from.
+    fitThumbs();
   }
 
   function gardening() { return TABS[tab] === "garden" && !exploring(); }
@@ -436,7 +489,7 @@
     room.dataset.puzzle = String(Boolean(here && run && (run.facing || (run.game && run.game.kind === "match" && !run.room.done))));
     art.style.display = run ? "" : "none"; bar.hidden = !run;
     const told = run ? JSON.stringify([run.id, run.scene, run.story]) : "";
-    if (told !== lastStory && !(snap && (gardening() || treeing()))) { // The story panel: what this room is like, then the tale so far (its newest line is the message under it).
+    if (told !== lastStory && !(snap && (gardening() || treeing() || albuming()))) { // The story panel: what this room is like, then the tale so far (its newest line is the message under it).
       lastStory = told;
       const story = $("lp-story"); story.textContent = "";
       (run ? [run.scene].concat((run.story || []).slice(0, -1)) : []).forEach(function (words, index) {
@@ -517,7 +570,7 @@
         return button;
       }));
     }
-    const boardHasIt = (walking() && focus === "board" && (play.board || play.cursor !== undefined)) || (gardening() && gardenFocus === "board" && !drawer) || (treeing() && skillFocus === "board"); // Enter would act on the puzzle or the plot, not the list.
+    const boardHasIt = (walking() && focus === "board" && (play.board || play.cursor !== undefined)) || (gardening() && gardenFocus === "board" && !drawer) || (treeing() && skillFocus === "board") || (albuming() && albumFocus === "board"); // Enter would act on the puzzle or the plot, not the list.
     Array.from(list.children).forEach(function (button, index) {
       const chosen = index === picks[tab] && !boardHasIt;
       if (chosen && button.getAttribute("aria-pressed") !== "true" && list.scrollHeight > list.clientHeight) button.scrollIntoView({ block: "nearest" }); // Long lists follow the remote.
@@ -563,12 +616,13 @@
     picks[tab] = Math.min(picks[tab], Math.max(0, current.length - 1)); // A list that shrank keeps a valid selection.
     drawList(current);
     const pick = current[picks[tab]];
-    drawHouse((TABS[tab] === "home" || TABS[tab] === "collection") && pick && pick.preview); // The Collection tab shows a house object in the room, and clothes on Lumi, as the Home and Closet tabs do.
-    drawOutfit((TABS[tab] === "closet" || TABS[tab] === "collection") && pick && pick.wear);
+    drawHouse(TABS[tab] === "home" && pick && pick.preview);
+    drawOutfit(TABS[tab] === "closet" && pick && pick.wear);
     drawDungeon();
     drawGarden();
     drawSkills();
-    drawCard(pick);
+    drawAlbum();
+    drawPad();
     drawFight();
     const doing = snap.fight ? "fighting " + snap.fight.enemy.name : task ? BUSY[task.kind] : scene.asleep ? "dreaming" : mood.need ? "needs " + mood.need : "content";
     const report = "Lumi · " + doing + " · " + tabButtons[tab].textContent + ": " + (pick ? pick.name : "nothing yet") + " · Enter to choose";
@@ -600,10 +654,11 @@
   }
 
   function choose() { // Act on the selected row: the server's words if it refuses.
-    if (!snap || busy) return;
+    if (!snap) return;
     const row = rows()[picks[tab]];
     if (!row) return;
-    if (row.local) { pendingConfirm = null; row.local(); lastList = ""; render(); return; }
+    if (row.local) { pendingConfirm = null; row.local(); lastList = ""; render(); return; } // Nothing to ask the server: it works at once, even while an answer is on its way.
+    if (busy) return; // One request at a time.
     if (!row.send) { say(row.note || "That's already in the room."); return; }
     if (row.confirm && pendingConfirm !== row.key) { pendingConfirm = row.key; say("Sure? Choose it once more to go. " + row.hint + "."); return; } // Nothing is lost to one stray press.
     submit(row);
@@ -663,12 +718,13 @@
     }).catch(function (refused) { say(refused.message); }).then(function () { busy = false; render(); });
   }
 
-  G.onAction(function (action) { // Keyboard and TV remote. Everywhere: ◀ ▶ change tab, ▲ ▼ or ⏮ ⏭ move through the list, Enter chooses.
+  function onKey(action) { // Keyboard, TV remote, and the on-screen arrow pad. Everywhere: ◀ ▶ change tab, ▲ ▼ or ⏮ ⏭ move through the list, Enter chooses.
     // In the dungeon the arrows are Lumi's own: they walk her from room to room, or work the puzzle in front of her.
     // The list is then reached with ⏮ ⏭ (Prev/Next, or Page Up/Down, or [ ]), and ⏯ drinks a potion.
     if (!snap) return;
     const arrow = ["left", "right", "up", "down"].indexOf(action) >= 0;
     if (action === "next" || action === "prev" || action === "play" || arrow) pendingConfirm = null; // Only a second Enter confirms.
+    if (albuming()) { albumKey(action); return; } // So has the Collection's gallery.
     if (treeing()) { skillsKey(action); return; } // The skill tree has its own keys too: the arrows move over the skills.
     if (gardening()) { gardenKey(action); return; } // The garden has its own keys: the arrows walk the plots, Play is the press.
     if ((action === "next" || action === "prev") && exploring()) { // On a trip: the list's cursor (the arrows walk, and the other tabs wait at home).
@@ -698,7 +754,53 @@
       if (count) picks[tab] = (picks[tab] + (action === "up" ? count - 1 : 1)) % count;
     } else if (action === "enter") { choose(); return; }
     render();
-  }, { directEnter: function () { return true; } });
+  }
+  G.onAction(onKey, { directEnter: function () { return true; } });
+
+  // ---- Touch: the arrow pad and the press button (templates/games/lumi-pet.html), and installing Lumi Pet as an app.
+  const touchy = window.matchMedia("(pointer: coarse), (max-width: 700px)"); // A touch screen, or a phone-sized window.
+  const framed = window.top !== window; // Inside Media's game layer: the frame around it is the app, not this page.
+  const inApp = window.matchMedia("(display-mode: standalone)").matches || window.matchMedia("(display-mode: fullscreen)").matches || window.navigator.standalone === true;
+  let installOffer = null; // The browser's install prompt, once it gives us one.
+
+  function drawPad() { // Show the touch controls where there are arrows to press: walking, and puzzle boards.
+    const pad = $("lp-pad"), squeeze = $("lp-squeeze"), on = Boolean(snap) && touchy.matches, out = on && walking() ? exploring() : null;
+    const board = Boolean(out) && Boolean(play.board || play.cursor !== undefined);
+    pad.hidden = !out || (Boolean(out.facing) && !board); // A key or rune door has nothing for arrows: its list does it all.
+    if (!pad.hidden) pad.querySelectorAll("[data-pad]").forEach(function (button) {
+      const way = { up: "n", right: "e", down: "s", left: "w" }[button.dataset.pad];
+      if (button.dataset.pad === "enter") button.hidden = !board; // The middle button turns a card, flips a lamp, or takes a crate step back.
+      else button.disabled = !board && out.room.exits.indexOf(way) < 0; // Walking: only the ways there are.
+    });
+    squeeze.hidden = !(on && gardening() && !mini && !drawer);
+  }
+
+  $("lp-pad").addEventListener("pointerdown", function (event) { // On the way down, so a quick thumb is never missed.
+    const button = event.target.closest("[data-pad]");
+    if (!button || button.disabled) return;
+    event.preventDefault();
+    onKey(button.dataset.pad);
+  });
+  $("lp-squeeze").addEventListener("pointerdown", function (event) { event.preventDefault(); if (snap && gardening()) { pressOnce(); render(); } });
+  touchy.addEventListener("change", function () { if (snap) render(); });
+
+  window.addEventListener("beforeinstallprompt", function (event) { // The browser can install this page as an app: keep its offer for the Settings row.
+    event.preventDefault(); installOffer = event; lastList = "";
+    if (snap) render();
+  });
+  window.addEventListener("appinstalled", function () { installOffer = null; say("Lumi Pet is on your home screen now."); });
+
+  function installApp() { // Settings → Install Lumi Pet: the browser's own prompt if it gave one, otherwise where to find it.
+    if (installOffer) {
+      const asked = installOffer;
+      installOffer = null; // A prompt can only be used once.
+      asked.prompt();
+      asked.userChoice.then(function (answer) { say(answer.outcome === "accepted" ? "Lumi Pet is on your home screen now." : "No hurry. The row stays in Settings."); });
+      return;
+    }
+    const iPhone = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    say(iPhone ? "Tap Share, then Add to Home Screen, and Lumi gets an icon of her own." : "Open your browser's menu and choose Install app (or Add to Home screen). If it isn't there, Lumi Pet is already installed.");
+  }
 
   $("lp-dungeon").addEventListener("click", function (event) { // Mouse and touch in the dungeon: the room and its boards answer a press (dungeon-art.js presses).
     const hit = event.target.closest("[data-click]");
@@ -721,6 +823,7 @@
     const hit = event.target.closest("[data-click]"); // redrawn as flowers grow, and a click that began on a shape since replaced would be lost.
     if (hit && snap && gardening()) gardenClick(hit.dataset.click);
     else if (hit && snap && treeing()) skillClick(hit.dataset.click);
+    else if (hit && snap && albuming()) albumClick(hit.dataset.click);
   });
 
   tabButtons.forEach(function (button, index) { // Tabs can be tapped too.
@@ -822,4 +925,5 @@
   });
   visibility();
   checkReminders();
+  if ("serviceWorker" in navigator && window.isSecureContext && !framed) navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(function () { /* she works without it; only installing and reminders need it */ });
 })();

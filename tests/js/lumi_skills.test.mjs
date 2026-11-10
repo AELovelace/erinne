@@ -101,6 +101,7 @@ test("the page draws every skill, lights the wires she has walked, and can be pr
 });
 
 // ---- The Collection tab
+const AlbumArt = require("../../mnemerynne/web/static/games/lumi-pet/collection-art.js");
 function album(pet = {}, mine = {}) {
   const flowers = garden.flowers.map((flower, i) => ({ ...flower, unlocked: i < 2 }));
   return { ...snap(pet), house, closet, catalog: items, garden: { flowers, decor: { owned: mine, placed: {}, spare: {} } }, garden_decor: garden.decor,
@@ -112,58 +113,84 @@ test("the collection counts everything there is, by shelf, and what she has of i
   assert.deepEqual(shelves.map(shelf => shelf.id), ["home", "finds", "closet", "toys", "mods", "flowers", "garden"]);
   const count = id => shelves.find(shelf => shelf.id === id).items.length;
   const all = house.spots.flatMap(spot => spot.items);
-  assert.equal(count("home") + count("finds"), all.length - all.filter(piece => /-none$/.test(piece.id)).length, "Every house object, but for the empty bracket");
+  assert.equal(count("home") + count("finds"), all.length - all.filter(piece => /-none$/.test(piece.id)).length, "Every house object, but for the empty spots");
   assert.equal(count("finds"), all.filter(piece => piece.found).length);
   assert.equal(count("closet"), closet.slots.flatMap(slot => slot.items).length);
   assert.equal(count("toys"), items.toys.length);
   assert.equal(count("mods"), battle.mods.length);
   assert.deepEqual([count("flowers"), count("garden")], [42, 225]);
   const owned = id => shelves.find(shelf => shelf.id === id).items.filter(item => item.owned).length;
-  assert.equal(owned("home"), house.spots.filter(spot => !/-none$/.test(spot.items[0].id)).length, "A new Lumi has what came with the house: the first thing in each spot (an empty spot is nothing to collect)");
+  assert.equal(owned("home"), house.spots.filter(spot => !/-none$/.test(spot.items[0].id)).length, "A new Lumi has what came with the house");
   assert.deepEqual([owned("finds"), owned("closet"), owned("mods"), owned("flowers"), owned("garden")], [0, 0, 0, 2, 0]);
   assert.equal(owned("toys"), items.toys.filter(toy => !toy.price && !toy.rarity).length);
+  const totals = Album.totals(shelves);
+  assert.equal(totals.total, shelves.reduce((sum, shelf) => sum + shelf.items.length, 0));
+  assert.ok(shelves.every(shelf => shelf.items.every(item => item.art && item.from && item.name)), "Every thing has a picture, a name and where it comes from");
 });
 
-test("the album's lists open a shelf, say where each thing comes from, and show it", () => {
-  const went = [], first = house.spots[0].items.find(piece => piece.rarity), bow = closet.slots[0].items[0];
-  const view = album({ decor: [first.id], closet: [bow.id] }, { "fence-1-starry": 2 });
-  const top = Album.rows({ snap: view, open: null, go: change => went.push(change) });
-  assert.deepEqual(top.map(r => r.key), ["all", "shelf-home", "shelf-finds", "shelf-closet", "shelf-toys", "shelf-mods", "shelf-flowers", "shelf-garden"]);
-  assert.match(top[0].name, /^Collected: \d+ of \d+$/);
-  assert.match(top[0].hint, /^\d+% of everything/);
-  assert.match(top.find(r => r.key === "shelf-flowers").hint, /^2 of 42/);
-  top.find(r => r.key === "shelf-garden").local();
-  assert.deepEqual(went, [{ open: "garden" }]);
-  assert.ok(top.every(r => !r.send), "An album: nothing in it can be bought or changed");
-
-  const home = Album.rows({ snap: view, open: "home", go: change => went.push(change) });
-  home[0].local();
-  assert.deepEqual(went.pop(), { open: null, pick: 1 }, "Back lands on the shelf it came from");
-  const won = home.find(r => r.key === "have-" + first.id);
-  assert.deepEqual([won.icon, won.preview], ["✓", [house.spots[0].id, first.id]], "A house object is shown in the room");
-  assert.match(won.hint, /from a capsule/);
-  const sold = home.find(r => r.hint.includes("coins") && r.icon === "·");
-  assert.match(sold.note, /isn't hers yet/);
-  const finds = Album.rows({ snap: view, open: "finds", go() {} });
-  assert.ok(finds.slice(1).every(r => /found in /.test(r.hint) && r.icon === "·"));
-  assert.ok(finds.some(r => r.hint.includes("Moonlit Shrine")), "A find names its place");
-  const wear = Album.rows({ snap: view, open: "closet", go() {} }).find(r => r.key === "have-" + bow.id);
-  assert.deepEqual([wear.icon, wear.wear], ["✓", [closet.slots[0].id, bow.id]], "Clothes are shown on Lumi");
-  const dressing = Album.rows({ snap: view, open: "garden", go() {} });
-  const fence = dressing.find(r => r.key === "have-fence-1-starry");
-  assert.deepEqual([fence.icon, fence.name, fence.card], ["✓", "Starry bamboo fence ×2", { kind: "decor", slot: "fence", id: "fence-1-starry" }]);
-  assert.match(dressing.find(r => r.key === "have-fence-0-snowy").hint, /Decorations, 300 starpowder/);
-  const flower = Album.rows({ snap: view, open: "flowers", go() {} }).find(r => r.key === "have-comet-orchid");
-  assert.deepEqual(flower.card, { kind: "flower", id: "comet-orchid" });
-});
-
-test("a flower or a garden decoration is shown large on a card", () => {
+test("the gallery shows a page of a shelf, and the arrows move over it and turn the page", () => {
   const view = album();
-  const flower = GardenArt.card({ kind: "flower", id: "comet-orchid" }, view.garden, garden.decor);
-  assert.ok(flower.includes("FLOWER") && flower.includes("GROWS BACK") && flower.includes(garden.flowers.find(f => f.id === "comet-orchid").colour));
-  assert.notEqual(flower, GardenArt.card({ kind: "flower", id: "moondaisy" }, view.garden, garden.decor));
-  const fence = GardenArt.card({ kind: "decor", slot: "fence", id: "fence-1-starry" }, view.garden, garden.decor);
-  assert.ok(fence.includes("DECORATION") && fence.includes('data-card="fence-1-starry"') && fence.includes('data-decor="fence"'));
-  assert.ok(!/NaN|undefined/.test(flower + fence));
-  assert.equal(GardenArt.card({ kind: "flower", id: "no-such" }, view.garden, garden.decor), "");
+  const seen = Album.view(view, { shelf: "garden", page: 0, cursor: 0 });
+  assert.deepEqual([seen.shelf.id, seen.pages, seen.cells.length, seen.item.id], ["garden", 7, 36, "fence-0-snowy"]);
+  assert.deepEqual(Album.view(view, { shelf: "no-such", page: 99, cursor: 99 }).shelf.id, "home", "Anything out of range is brought back in");
+  const last = Album.view(view, { shelf: "garden", page: 6, cursor: 99 });
+  assert.deepEqual([last.cells.length, last.cursor], [225 - 6 * 36, 225 - 6 * 36 - 1]);
+  assert.deepEqual(Album.move(seen, "right"), { page: 0, cursor: 1 });
+  assert.deepEqual(Album.move(seen, "down"), { page: 0, cursor: 6 });
+  assert.deepEqual(Album.move(seen, "left"), { page: 0, cursor: 0 }, "Nothing before the first page");
+  assert.deepEqual(Album.move(seen, "up"), { page: 0, cursor: 0 });
+  assert.deepEqual(Album.move(Album.view(view, { shelf: "garden", page: 0, cursor: 11 }), "right"), { page: 1, cursor: 6 }, "Off the right edge is the next page, on the same row");
+  assert.deepEqual(Album.move(Album.view(view, { shelf: "garden", page: 1, cursor: 12 }), "left"), { page: 0, cursor: 17 }, "And off the left edge is the page before");
+  assert.deepEqual(Album.move(last, "right"), { page: 6, cursor: last.cursor }, "Nothing after the last picture");
+  assert.deepEqual(Album.move(Album.view(view, { shelf: "garden", page: 6, cursor: 3 }), "down"), { page: 6, cursor: 8 }, "Down into a short last row lands on its last picture");
+});
+
+test("the list and the words beside the gallery", () => {
+  const went = [], first = house.spots[0].items.find(piece => piece.rarity);
+  const view = album({ decor: [first.id] }, { "fence-1-starry": 2 });
+  const list = Album.rows({ snap: view, at: { shelf: "garden", page: 0, cursor: 0 }, zoom: false, go: change => went.push(change) });
+  assert.deepEqual(list.map(r => r.key), ["look", "shelf-home", "shelf-finds", "shelf-closet", "shelf-toys", "shelf-mods", "shelf-flowers", "shelf-garden", "page-next", "page-prev", "leave"]);
+  assert.ok(list.every(r => !r.send), "An album: nothing in it can be bought or changed");
+  assert.match(list[0].name, /Look at Snowy picket fence/);
+  assert.match(list.find(r => r.key === "shelf-flowers").hint, /^2 of 42/);
+  assert.equal(list.find(r => r.key === "shelf-garden").icon, "▸", "The open shelf is marked");
+  list[0].local(); list.find(r => r.key === "shelf-toys").local(); list.find(r => r.key === "page-next").local(); list.find(r => r.key === "page-prev").local(); list.at(-1).local();
+  assert.deepEqual(went, [{ zoom: true }, { shelf: "toys" }, { page: 1 }, { page: 6 }, { leave: true }]);
+  assert.ok(!Album.rows({ snap: view, at: { shelf: "mods" }, zoom: false, go() {} }).some(r => r.key === "page-next"), "A shelf of one page has no page rows");
+  assert.equal(Album.rows({ snap: view, at: { shelf: "mods" }, zoom: true, go() {} })[0].name, "Back to the shelf");
+  const words = Album.lines(Album.view(view, { shelf: "garden", page: 0, cursor: 5 + 36 * 0 }));
+  assert.match(words[0], /^Collected \d+ of \d+ · \d+% of everything/);
+  assert.match(words[1], /Garden decorations: 1 of 225 · page 1 of 7/);
+  const starry = Album.view(view, { shelf: "garden", page: 0, cursor: 9 });
+  assert.deepEqual([starry.item.id, Album.lines(starry).slice(2, 4)], ["fence-1-starry", ["Starry bamboo fence ×2", "✓ In Lumi's collection"]]);
+  const finds = Album.view(view, { shelf: "finds", page: 0, cursor: 0 });
+  assert.ok(finds.shelf.items.some(item => item.from.includes("Moonlit Shrine")), "A find names its place");
+  assert.equal(Album.lines(finds)[3], "Not hers yet");
+});
+
+test("the gallery draws a picture for every thing, in colour if it is hers", () => {
+  const first = house.spots[0].items.find(piece => piece.rarity);
+  const view = album({ decor: [first.id] }, { "fence-1-starry": 2 });
+  const names = svg => [...svg.matchAll(/data-click="([^"]+)"/g)].map(m => m[1]);
+  const page = AlbumArt.scene(view, { shelf: "garden", page: 0, cursor: 9, zoom: false, focused: true });
+  assert.deepEqual(names(page).filter(n => n.startsWith("shelf:")), ["home", "finds", "closet", "toys", "mods", "flowers", "garden"].map(id => "shelf:" + id));
+  assert.equal(names(page).filter(n => n.startsWith("cell:")).length, 36);
+  assert.deepEqual(names(page).filter(n => n.startsWith("page:")), ["page:-1", "page:1"]);
+  assert.deepEqual([(page.match(/data-cell="have"/g) || []).length, (page.match(/data-cell="missing"/g) || []).length], [1, 35]);
+  assert.ok(page.includes('data-cursor="9"') && page.includes("×2") && page.includes("page 1 of 7") && page.includes('data-shelf="garden"'));
+  assert.equal((page.match(/class="lp-unowned"/g) || []).length, 35, "What she doesn't have is drawn without its colours");
+  assert.ok(!AlbumArt.scene(view, { shelf: "mods", page: 0, cursor: 0 }).includes("page:1"), "One page: no page arrows");
+  const big = AlbumArt.scene(view, { shelf: "garden", page: 0, cursor: 9, zoom: true, focused: true });
+  assert.ok(big.includes('data-zoom="fence-1-starry"') && big.includes("STARRY BAMBOO FENCE") && names(big).includes("zoom") && !big.includes("data-cursor"));
+  for (const shelf of Album.shelves(view)) { // Every thing on every shelf has a drawing of its own, from the file that draws it in the game.
+    for (const item of shelf.items) {
+      const one = AlbumArt.picture(item, view, 0, 0, 40);
+      assert.ok(one.length > 30 && !/NaN|undefined/.test(one), shelf.id + ": " + item.id);
+      if (item.art.kind !== "glyph") assert.ok(one.includes('data-thumb="' + item.id + '"'), shelf.id + ": " + item.id + " has no drawing");
+    }
+  }
+  const frames = [...AlbumArt.scene(view, { shelf: "flowers", page: 0, cursor: 0 }).matchAll(/data-thumb="([^"]+)"/g)].map(m => m[1]);
+  assert.deepEqual(frames.slice(0, 2), ["moondaisy", "glowbell"]);
+  assert.ok(GardenArt.piece("edging", "edging-0-snowy", garden.decor).includes("data-plot") && GardenArt.piece("press", "press-0-golden", garden.decor).includes("data-press"));
+  assert.equal(GardenArt.piece("fence", "no-such", garden.decor), "");
 });

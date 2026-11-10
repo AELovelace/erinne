@@ -5,7 +5,7 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import net from "node:net";
-import { checkLumiPet, checkLumiPetCapsules, checkLumiPetDoors, checkLumiPetFrame, checkLumiPetGarden, checkLumiPetSkills } from "./lumi-pet-browser.mjs";
+import { checkLumiPet, checkLumiPetCapsules, checkLumiPetDoors, checkLumiPetFrame, checkLumiPetGarden, checkLumiPetPhone, checkLumiPetSkills } from "./lumi-pet-browser.mjs";
 import { checkSharedTV } from "./casino-tv-browser.mjs";
 import { checkGameScaling } from "./game-scaling-browser.mjs";
 
@@ -56,6 +56,7 @@ try {
   await checkLumiPetDoors(browser, alice, base);
   await checkLumiPetGarden(browser, alice, base);
   await checkLumiPetSkills(browser, alice, base);
+  await checkLumiPetPhone(browser, alice, base);
   await checkLumiPetCapsules(bob, base);
   await alice.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]); // Skip the ball's animation: the server's drops are what's under test.
   await alice.goto(base + "/media/games/prism-drop");

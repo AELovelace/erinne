@@ -1,19 +1,22 @@
-/* The Collection tab: everything Lumi can collect, in one place, with what she has and where the rest comes from.
+/* The Collection tab: everything Lumi can collect, as a gallery that fills the room like the skill trees do.
    Pure: it reads the catalogs the server already sends (house, closet, toys, mods, garden flowers and decorations)
-   and what the pet owns, and makes plain rows for game.js. Nothing here can be bought or changed: it is an album.
+   and what the pet owns, and works out the shelves, the page of cells being shown, how the cursor moves over them,
+   and the list and words beside the page. collection-art.js draws it. Nothing here can be bought or changed: it is
+   an album.
 
-   A row is { key, icon, name, hint } with `local` (open a shelf) or `note` (words when chosen), and may carry
-   something for game.js to show while it is highlighted: `preview` ([house spot, object]), `wear` ([slot,
-   accessory]) or `card` ({ kind: "flower" | "decor", ... }, drawn by garden-art.js). */
+   A thing on a shelf is { id, name, owned, from, count?, art }, where `art` says how to draw its picture:
+   { kind: "house" | "closet" | "flower" | "decor" | "glyph", ... }. */
 (function (root, make) {
   const ui = make();
   if (typeof module === "object" && module.exports) module.exports = ui; else root.LumiPetCollection = ui;
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
+  const COLUMNS = 6, ROWS = 6, PER_PAGE = COLUMNS * ROWS; // The gallery's grid (collection-art.js draws the same).
+
   function grand(word) { return word ? word[0].toUpperCase() + word.slice(1) : ""; }
 
-  function shelves(snap) { // Every shelf of the album: [{ id, icon, name, about, items: [{ id, name, owned, from, count?, preview?, wear?, card? }] }]
+  function shelves(snap) { // Every shelf of the album: [{ id, icon, name, about, items }]
     const pet = snap.pet, places = ((snap.dungeon || {}).environments || []), capsule = ((snap.garden_decor || {}).capsule || {}).name || "Seedling Capsule";
     function place(id) { const env = places.find(function (entry) { return entry.id === id; }); return env ? env.name : "the dungeon"; }
     const home = [], finds = [];
@@ -21,7 +24,7 @@
       spot.items.forEach(function (piece) {
         if (!piece.price && !piece.found && !piece.rarity && spot.items.indexOf(piece) === 0 && /-none$/.test(piece.id)) return; // "Empty bracket": a way to show nothing, not a thing to collect.
         const owned = (!piece.price && !piece.found && !piece.rarity) || pet.decor.indexOf(piece.id) >= 0;
-        const item = { id: piece.id, name: piece.name, owned: owned, preview: [spot.id, piece.id],
+        const item = { id: piece.id, name: piece.name, owned: owned, art: { kind: "house", id: piece.id, spot: spot.id },
           from: spot.name + " · " + (piece.found ? "found in " + place(piece.found) : piece.rarity ? grand(piece.rarity) + " · from a capsule" : piece.price ? "the Home tab, " + piece.price + " coins" : "came with the house") };
         (piece.found ? finds : home).push(item);
       });
@@ -29,27 +32,28 @@
     const clothes = [];
     ((snap.closet || {}).slots || []).forEach(function (slot) {
       slot.items.forEach(function (piece) {
-        clothes.push({ id: piece.id, name: piece.name, owned: pet.closet.indexOf(piece.id) >= 0, wear: [slot.id, piece.id],
+        clothes.push({ id: piece.id, name: piece.name, owned: pet.closet.indexOf(piece.id) >= 0, art: { kind: "closet", id: piece.id },
           from: slot.name + " · " + grand(piece.rarity) + " · " + (piece.price ? "the Closet tab, " + piece.price + " coins" : "from a capsule") });
       });
     });
     const toys = ((snap.catalog || {}).toys || []).map(function (toy) {
-      return { id: toy.id, name: toy.icon + " " + toy.name, owned: (!toy.price && !toy.rarity) || pet.toys.indexOf(toy.id) >= 0,
+      return { id: toy.id, name: toy.name, owned: (!toy.price && !toy.rarity) || pet.toys.indexOf(toy.id) >= 0, art: { kind: "glyph", glyph: toy.icon },
         from: toy.rarity ? grand(toy.rarity) + " · from a capsule" : toy.price ? "the Shop, " + toy.price + " coins" : "came with Lumi" };
     });
     const mods = ((snap.battle || {}).mods || []).map(function (mod) {
-      return { id: mod.id, name: mod.name, owned: pet.mods_owned.indexOf(mod.id) >= 0, from: grand(mod.tek) + " mod · " + (mod.price ? "Battle → Mods, " + mod.price + " coins" : "found in dungeon vaults") };
+      return { id: mod.id, name: mod.name, owned: pet.mods_owned.indexOf(mod.id) >= 0, art: { kind: "glyph", glyph: mod.tek === "magitek" ? "✦" : "⚙", colour: mod.tek === "magitek" ? "#b48cff" : "#70ebea" },
+        from: grand(mod.tek) + " mod · " + (mod.price ? "Battle → Mods, " + mod.price + " coins" : "found in dungeon vaults") };
     });
     const garden = snap.garden || { flowers: [], decor: { owned: {} } };
     const flowers = garden.flowers.map(function (flower) {
-      return { id: flower.id, name: flower.name, owned: flower.unlocked, card: { kind: "flower", id: flower.id },
+      return { id: flower.id, name: flower.name, owned: flower.unlocked, art: { kind: "flower", id: flower.id },
         from: (flower.sort === "perennial" ? "Perennial" : "Cut flower") + " · " + (flower.stardust ? "boutique, for starpowder" : flower.coins ? flower.coins + " coins" : "every garden starts with it") + " · on the ladder of the garden you are in" };
     });
     const dressing = [];
     ((snap.garden_decor || {}).slots || []).forEach(function (slot) {
       slot.items.forEach(function (piece) {
         const count = (garden.decor.owned || {})[piece.id] || 0;
-        dressing.push({ id: piece.id, name: piece.name, owned: count > 0, count: count, card: { kind: "decor", slot: slot.id, id: piece.id },
+        dressing.push({ id: piece.id, name: piece.name, owned: count > 0, count: count, art: { kind: "decor", slot: slot.id, id: piece.id },
           from: slot.name + " · " + (piece.rarity === "shop" ? "Garden → Decorations, " + piece.stardust + " starpowder" : grand(piece.rarity) + " · from the " + capsule) });
       });
     });
@@ -66,23 +70,50 @@
 
   function tally(items) { return items.filter(function (item) { return item.owned; }).length; }
 
-  function rows(ctx) { // ctx: { snap, open (a shelf id, or null for the list of shelves), go(change) }
-    const all = shelves(ctx.snap), shelf = all.find(function (entry) { return entry.id === ctx.open; });
-    if (shelf) return [{ key: "back", icon: "‹", name: "Back to the collection", hint: shelf.name + " · " + tally(shelf.items) + " of " + shelf.items.length, local: function () { ctx.go({ open: null, pick: 1 + all.indexOf(shelf) }); } }]
-      .concat(shelf.items.map(function (item) {
-        const row = { key: "have-" + item.id, icon: item.owned ? "✓" : "·", name: item.name + (item.count > 1 ? " ×" + item.count : ""), hint: item.from,
-          note: item.owned ? item.name + " is in Lumi's collection." : item.name + " isn't hers yet: " + item.from + "." };
-        ["preview", "wear", "card"].forEach(function (show) { if (item[show]) row[show] = item[show]; });
-        return row;
-      }));
-    const have = all.reduce(function (sum, entry) { return sum + tally(entry.items); }, 0), total = all.reduce(function (sum, entry) { return sum + entry.items.length; }, 0);
-    return [{ key: "all", icon: "★", name: "Collected: " + have + " of " + total, hint: Math.floor(100 * have / Math.max(1, total)) + "% of everything there is to find",
-      note: "Lumi has " + have + " of the " + total + " things there are to collect." }]
-      .concat(all.map(function (entry) {
-        const got = tally(entry.items);
-        return { key: "shelf-" + entry.id, icon: got === entry.items.length ? "✓" : entry.icon, name: entry.name, hint: got + " of " + entry.items.length + " · " + entry.about, local: function () { ctx.go({ open: entry.id }); } };
-      }));
+  function totals(all) { // { have, total } over every shelf.
+    return { have: all.reduce(function (sum, shelf) { return sum + tally(shelf.items); }, 0), total: all.reduce(function (sum, shelf) { return sum + shelf.items.length; }, 0) };
   }
 
-  return { shelves: shelves, rows: rows };
+  function view(snap, at) { // What is on the page now. at: { shelf (id), page, cursor }. Out-of-range values are brought back in.
+    const all = shelves(snap), shelf = all.find(function (entry) { return entry.id === at.shelf; }) || all[0];
+    const pages = Math.max(1, Math.ceil(shelf.items.length / PER_PAGE)), page = Math.max(0, Math.min(pages - 1, at.page || 0));
+    const cells = shelf.items.slice(page * PER_PAGE, (page + 1) * PER_PAGE), cursor = Math.max(0, Math.min(cells.length - 1, at.cursor || 0));
+    return { all: all, shelf: shelf, pages: pages, page: page, cells: cells, cursor: cursor, item: cells[cursor], have: tally(shelf.items) };
+  }
+
+  function move(seen, action) { // One arrow over the cells. Off the left or right edge turns the page. Returns { page, cursor }.
+    const x = seen.cursor % COLUMNS, y = Math.floor(seen.cursor / COLUMNS), count = seen.cells.length;
+    if (action === "left") return x ? { page: seen.page, cursor: seen.cursor - 1 } : seen.page ? { page: seen.page - 1, cursor: y * COLUMNS + COLUMNS - 1 } : { page: seen.page, cursor: seen.cursor };
+    if (action === "right") {
+      if (x < COLUMNS - 1 && seen.cursor + 1 < count) return { page: seen.page, cursor: seen.cursor + 1 };
+      return seen.page < seen.pages - 1 ? { page: seen.page + 1, cursor: y * COLUMNS } : { page: seen.page, cursor: seen.cursor };
+    }
+    const to = seen.cursor + (action === "up" ? -COLUMNS : COLUMNS);
+    return { page: seen.page, cursor: to < 0 ? seen.cursor : Math.min(to, count - 1) };
+  }
+
+  function lines(seen) { // The words above the list: the whole collection, the shelf, then the thing under the cursor.
+    const all = totals(seen.all), item = seen.item;
+    const out = ["Collected " + all.have + " of " + all.total + " · " + Math.floor(100 * all.have / Math.max(1, all.total)) + "% of everything there is to find",
+      seen.shelf.name + ": " + seen.have + " of " + seen.shelf.items.length + (seen.pages > 1 ? " · page " + (seen.page + 1) + " of " + seen.pages : "")];
+    if (item) out.push(item.name + (item.count > 1 ? " ×" + item.count : ""), item.owned ? "✓ In Lumi's collection" : "Not hers yet", item.from);
+    return out;
+  }
+
+  function rows(ctx) { // ctx: { snap, at: { shelf, page, cursor }, zoom, go(change) }. The list beside the gallery.
+    const seen = view(ctx.snap, ctx.at), go = ctx.go, here = seen.all.indexOf(seen.shelf);
+    const list = [{ key: "look", icon: ctx.zoom ? "‹" : "🔍", name: ctx.zoom ? "Back to the shelf" : seen.item ? "Look at " + seen.item.name : "Nothing on this shelf yet",
+      hint: seen.item ? (seen.item.owned ? "Hers" : "Not hers yet") + " · " + seen.item.from : seen.shelf.about, local: function () { go({ zoom: !ctx.zoom }); } }];
+    seen.all.forEach(function (shelf, index) {
+      list.push({ key: "shelf-" + shelf.id, icon: index === here ? "▸" : shelf.icon, name: shelf.name, hint: tally(shelf.items) + " of " + shelf.items.length + " · " + shelf.about, local: function () { go({ shelf: shelf.id }); } });
+    });
+    if (seen.pages > 1) {
+      list.push({ key: "page-next", icon: "›", name: "Next page", hint: "Page " + (seen.page + 1) + " of " + seen.pages, local: function () { go({ page: (seen.page + 1) % seen.pages }); } });
+      list.push({ key: "page-prev", icon: "‹", name: "Previous page", hint: "Page " + (seen.page + 1) + " of " + seen.pages, local: function () { go({ page: (seen.page + seen.pages - 1) % seen.pages }); } });
+    }
+    list.push({ key: "leave", icon: "♡", name: "Back to Lumi", hint: "An album: nothing here is bought or changed", local: function () { go({ leave: true }); } });
+    return list;
+  }
+
+  return { COLUMNS: COLUMNS, ROWS: ROWS, PER_PAGE: PER_PAGE, shelves: shelves, totals: totals, view: view, move: move, lines: lines, rows: rows };
 });

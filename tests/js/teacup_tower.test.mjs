@@ -88,6 +88,22 @@ test("from floor 5 the tower rises, and falling below the view ends the run", ()
   assert.ok(events.some((e) => e.type === "over"));
 });
 
+test("the view glides up after a big hop instead of jumping", () => {
+  const g = started(1);
+  g.best = 20; g.landed = 20; g.camera = 20 * T.GAP - 120;
+  const f = T.floorAt(1, 24);                                // land four floors up in one go
+  g.x = T.platformX(f, g.frames) + f.w / 2; g.y = 24 * T.GAP + 1; g.vy = -2;
+  let biggest = 0;
+  for (let i = 0; i < 90 && !g.over; i++) {
+    const before = g.camera;
+    T.step(g, still, []);
+    biggest = Math.max(biggest, g.camera - before);
+  }
+  assert.equal(g.landed >= 24, true);
+  assert.ok(biggest < 50, "the view moved " + biggest + " px in one frame");
+  assert.ok(g.camera > 22 * T.GAP);                          // and it still got there
+});
+
 test("the live board others see stays in bounds", () => {
   const b = T.board(started(3));
   assert.equal(b.points.length, 2);

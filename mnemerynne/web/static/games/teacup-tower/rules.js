@@ -19,6 +19,7 @@
   const ACCEL = 0.55, MAX_VX = 8.5, FRICTION = 0.92, WALL_KICK = 1.12, WALL = 20;
   const RISE_FROM = 5, RISE_START = 0.6, RISE_STEP = 0.25, RISE_MAX = 3.5, RISE_EVERY = 1800;   // 1800 frames: 30 s
   const COMBO_FRAMES = 180, FEET = 18;                      // three seconds to keep a combo going; half Lumi's footprint
+  const CAMERA_EASE = 0.125;                                // how much of the way the view catches up each frame
 
   function mix(seed, index, salt) {                         // the arcade's per-index number (arcade.mix)
     const v = (Math.max(1, Math.abs(Math.trunc(seed))) * 1664525 + (Math.max(0, Math.trunc(index)) + 1) * 1013904223 +
@@ -88,8 +89,11 @@
     // Until floor RISE_FROM the view stays on the ground floor (a warm-up: a miss only drops her back down). After
     // that it follows where she last landed, with a floor and a half of room below so a missed hop can still land on
     // a cup, and never lets her go off the top of the screen.
-    if (g.best >= RISE_FROM) g.camera = Math.max(g.camera, g.landed * GAP - GAP * 1.5);
-    g.camera = Math.max(g.camera, g.y - (H - 60));
+    // The view glides toward where it should be (an eighth of the way each frame) rather than jumping there when she
+    // lands a few floors up; only near the very top of the screen does it keep up with her at once.
+    const target = Math.max(g.best >= RISE_FROM ? g.landed * GAP - GAP * 1.5 : 0, g.y - (H - 60));
+    if (target > g.camera) g.camera += (target - g.camera) * CAMERA_EASE;
+    g.camera = Math.max(g.camera, g.y - (H - 24));
     if (g.best >= RISE_FROM) {                              // and the tower rises by itself, faster every 30 s
       const rise = Math.min(RISE_MAX, RISE_START + RISE_STEP * Math.floor(g.riseFrames / RISE_EVERY));
       if (rise > g.rise && g.rise > 0) events.push({ type: "hurry" });

@@ -384,6 +384,21 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                              "params": {"title": "title", "text": "text", "url": "url"}},
         }, media_type="application/manifest+json", headers={"Cache-Control": "no-cache"})
 
+    @app.get("/media/games/lumi-pet/manifest.webmanifest", include_in_schema=False)
+    def lumi_manifest():
+        """Makes Lumi Pet an app of her own, installed beside Erynne with her own icon and opening straight to her:
+        its own id, and a scope covering only her page. Public, like the main manifest."""
+        icons = [{"src": static(f"icons/{file}"), "sizes": size, "type": "image/png", "purpose": purpose}
+                 for file, size, purpose in (("lumi-192.png", "192x192", "any"), ("lumi-512.png", "512x512", "any"),
+                                             ("lumi-maskable-512.png", "512x512", "maskable"))]
+        return JSONResponse({
+            "id": "/media/games/lumi-pet", "name": "Lumi Pet", "short_name": "Lumi Pet", "start_url": "/media/games/lumi-pet",
+            "scope": "/media/games/lumi-pet", "display": "standalone",
+            "description": "A little glowing fairy cat to care for, with a house, a dungeon and a garden.",
+            "background_color": "#0D0614", "theme_color": "#1a0f2e", "icons": icons,      # her room's night plum
+            "shortcuts": [{"name": "Garden", "url": "/media/games/lumi-pet#garden"}],
+        }, media_type="application/manifest+json", headers={"Cache-Control": "no-cache"})
+
     @app.get("/media/panel/manifest.webmanifest", include_in_schema=False)
     def remote_manifest():
         """Makes the phone's remote (/media/panel) an app of its own, installed beside Erynne with its own
