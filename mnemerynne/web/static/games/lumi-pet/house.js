@@ -12,7 +12,7 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  const LAYERS = ["wallpaper", "floor", "wallart", "shelf", "view", "frame", "curtains", "lamp", "rug", "bed"];
+  const LAYERS = ["wallpaper", "floor", "door", "wallart", "shelf", "view", "frame", "curtains", "ceiling", "lamp", "sidetable", "plant", "rug", "toychest", "bed"];
   const GLOW = "var(--pet-glow)"; // Accents follow Lumi's own glow colour, so the room always suits her.
 
   // ---- Small drawing helpers: each returns a piece of SVG markup.
@@ -273,6 +273,52 @@
     "bed-cloud": function () { return oval(340, 440, 50, 12, "#cfd8f7") + circle(312, 432, 14, "#eef2ff") + circle(334, 424, 18, "#fff") + circle(358, 428, 16, "#eef2ff") + circle(374, 436, 10, "#fff") + oval(340, 440, 42, 9, "#fff"); },
     "bed-moon": function () { return oval(340, 448, 30, 5, "#00000055") + path("M300 400 Q300 448 344 448 Q380 448 384 414 Q372 436 346 434 Q314 432 300 400 Z", "#ffdc83") + path(star(372, 398, 7), "#fff1cd") + path("M322 448 L340 458 L358 448", "none", 'stroke="#d9b24a" stroke-width="3" stroke-linecap="round"'); },
     "bed-castle": function () { return path("M298 448 V398 h12 v8 h12 v-8 h12 v8 h12 v-8 h12 v8 h12 v-8 h12 V448 Z", "#c79256") + path("M328 448 V428 a12 12 0 0 1 24 0 V448 Z", "#3a2147") + rect(306, 414, 9, 10, "#3a2147") + rect(365, 414, 9, 10, "#3a2147") + path("M298 420 H382", "none", 'stroke="#a8743f" stroke-width="1.2" stroke-dasharray="6 5"') + path("M340 398 V380 l14 5 l-14 5", "#ff8ecb", 'stroke="#8a5a2a" stroke-width="1.5"'); },
+
+    // Doors: on the wall to the left, between the side window and the wall art. They stand on the floor line (y = 352).
+    "door-plum": function () { return rect(-62, 196, 74, 158, "#3d2450", 'rx="3"') + rect(-56, 202, 62, 152, "#5a3570") + rect(-48, 212, 46, 56, "#6d4585", 'rx="2"') + rect(-48, 280, 46, 62, "#6d4585", 'rx="2"') + circle(-2, 278, 4, "#ffdc83"); },
+    "door-round": function () { return path("M-62 354 V232 A37 37 0 0 1 12 232 V354 Z", "#3a5a52") + path("M-56 354 V232 A31 31 0 0 1 6 232 V354 Z", "#4f7a70") + circle(-25, 236, 15, "#bfe8ff", 'stroke="#3a5a52" stroke-width="3"') + path("M-25 221 V251 M-40 236 H-10", "none", 'stroke="#3a5a52" stroke-width="2"') + circle(-4, 290, 4, "#ffdc83"); },
+    "door-catflap": function () { return rect(-62, 196, 74, 158, "#7a4a2a", 'rx="3"') + rect(-56, 202, 62, 152, "#a8743f") + rect(-48, 212, 46, 70, "#b98550", 'rx="2"') + circle(-2, 284, 4, "#ffdc83") + rect(-42, 306, 34, 40, "#54391f", 'rx="5"') + rect(-39, 309, 28, 34, "#2a1a3e", 'rx="4"') + path("M-34 322 l5 -8 l4 6 l4 -6 l5 8 q0 10 -9 10 q-9 0 -9 -10Z", "#fce1f2", 'opacity=".9"'); },
+    "door-beads": function () {
+      let out = rect(-62, 196, 74, 158, "#3d2450", 'rx="3"') + rect(-56, 202, 62, 152, "#120f2a");
+      for (let x = -52, i = 0; x <= 2; x += 9, i++) for (let y = 208; y < 344 - (i % 3) * 14; y += 9) out += circle(x, y, 2.6, ["#ff8ecb", "#70ebea", "#ffdc83", "#c9a8ff"][(i + Math.round(y / 9)) % 4], 'opacity=".9"');
+      return out;
+    },
+    "door-portal": function () { return oval(-25, 276, 44, 84, GLOW, 'opacity=".12"') + oval(-25, 276, 36, 76, "#120f2a", 'stroke="' + GLOW + '" stroke-width="4" class="lp-neon"') + oval(-25, 276, 24, 56, "none", 'stroke="' + GLOW + '" stroke-width="2" opacity=".5"') + oval(-25, 276, 12, 32, "none", 'stroke="' + GLOW + '" stroke-width="1.5" opacity=".35"') +
+      [[-36, 236, 5], [-12, 262, 4], [-32, 296, 6], [-16, 322, 4]].map(function (s, i) { return path(star(s[0], s[1], s[2]), "#fff8dc", 'class="lp-twinkle" style="animation-delay:' + (i * .5) + 's"'); }).join(""); },
+
+    // Ceiling hangings: from the top of the wall, above the shelf.
+    "hang-stars": function () { return path("M306 0 V46 M330 0 V70 M354 0 V52 M306 46 H354", "none", 'stroke="#8a7aa8" stroke-width="1.2"') + path(star(306, 56, 9), "#ffdc83") + path(star(330, 82, 12), "#fff1cd") + path(star(354, 62, 8), "#ff8ecb"); },
+    "hang-cranes": function () { return [[304, 50, "#ff8ecb"], [330, 78, "#70ebea"], [356, 44, "#ffdc83"]].map(function (c) {
+      return line(c[0], 0, c[0], c[1] - 8, "#8a7aa8", 1) + path("M" + (c[0] - 14) + " " + c[1] + " L" + c[0] + " " + (c[1] - 9) + " L" + (c[0] + 16) + " " + (c[1] - 4) + " L" + (c[0] + 2) + " " + (c[1] + 2) + " L" + (c[0] + 6) + " " + (c[1] + 10) + " L" + (c[0] - 4) + " " + (c[1] + 3) + " Z", c[2]) + path("M" + c[0] + " " + (c[1] - 9) + " L" + (c[0] + 2) + " " + (c[1] + 2), "none", 'stroke="#00000033" stroke-width="1"');
+    }).join(""); },
+    "hang-planets": function () { return line(304, 0, 304, 40, "#8a7aa8", 1) + line(332, 0, 332, 66, "#8a7aa8", 1) + line(358, 0, 358, 36, "#8a7aa8", 1) + circle(304, 50, 10, "#ff9d6b") + oval(304, 50, 17, 4, "none", 'stroke="#ffe0b0" stroke-width="2" transform="rotate(-18 304 50)"') + circle(332, 80, 14, "#70b8eb") + path("M322 76 q8 -6 14 0 q-4 6 -10 4 Z", "#7fc49a") + circle(358, 44, 8, "#c9a8ff") + circle(355, 41, 2, "#fff", 'opacity=".6"'); },
+    "hang-basket": function () { return path("M316 0 L310 58 M344 0 L350 58 M330 0 V56", "none", 'stroke="#c79256" stroke-width="1.5"') + path("M306 58 H354 L346 84 H314 Z", "#a8743f") + oval(330, 58, 24, 6, "#5fae86") + path("M312 58 Q300 84 306 104 M322 60 Q318 90 326 110 M340 60 Q346 86 338 102 M350 58 Q362 78 356 96", "none", 'stroke="#7fc49a" stroke-width="3" stroke-linecap="round"') + [[306, 104], [326, 110], [338, 102], [356, 96]].map(function (l) { return oval(l[0], l[1], 4, 6, "#9bd6ae"); }).join(""); },
+    "hang-disco": function () { return line(330, 0, 330, 44, "#8a7aa8", 1.5) + circle(330, 66, 34, "#fff", 'opacity=".07"') + circle(330, 66, 22, "#c8d2e8") + path("M308 66 H352 M311 56 H349 M311 76 H349 M318 48 H342 M318 84 H342 M330 44 V88 M320 46 V86 M340 46 V86", "none", 'stroke="#7a86a8" stroke-width="1"') + [[320, 58, "#ff8ecb"], [338, 62, "#70ebea"], [326, 74, "#ffdc83"], [340, 78, "#c9a8ff"]].map(function (t, i) { return rect(t[0] - 3, t[1] - 3, 6, 6, t[2], 'class="lp-twinkle" style="animation-delay:' + (i * .45) + 's"'); }).join(""); },
+
+    // Side tables: against the wall under the shelf.
+    "table-tea": function () { return ART.table("#7a5a8c") + path("M322 312 h18 q0 12 -9 12 q-9 0 -9 -12 Z", "#fff1e0") + path("M340 314 q7 0 6 5 q-1 4 -6 3", "none", 'stroke="#fff1e0" stroke-width="2"') + path("M327 308 q-3 -5 0 -9 M335 308 q3 -5 0 -9", "none", 'stroke="#fff" stroke-width="1.2" opacity=".5" stroke-linecap="round"') + oval(331, 324, 13, 3, "#e8dff0"); },
+    "table-books": function () { return [["#c85a8e", 350, 40], ["#70ebea", 342, 36], ["#ffdc83", 334, 42], ["#9c73b8", 326, 34], ["#7fc49a", 318, 38]].map(function (b, i) { return rect(335 - b[2] / 2 + (i % 2 ? 3 : -2), b[1], b[2], 8, b[0], 'rx="1.5"'); }).join("") + rect(316, 358, 38, 4, "#54391f") + path(star(335, 308, 6), "#ffe9a8"); },
+    "table-candle": function () { return ART.table("#5a4a70") + rect(328, 300, 8, 24, "#fff1e0", 'rx="2"') + oval(332, 286, 16, 18, "#ffb84a", 'opacity=".16"') + path("M332 282 q6 8 0 16 q-6 -8 0 -16 Z", "#ffb84a", 'class="lp-twinkle"') + oval(332, 324, 10, 3, "#d9b24a"); },
+    "table-radio": function () { return ART.table("#7a5a8c") + rect(314, 300, 42, 24, "#e8556a", 'rx="5"') + circle(326, 312, 7, "#3a2147") + circle(326, 312, 3, "#8a7aa8") + rect(338, 306, 13, 3, "#fff1e0") + rect(338, 312, 13, 3, "#fff1e0") + rect(338, 318, 8, 3, "#fff1e0") + line(350, 300, 360, 280, "#8a7aa8", 1.5) + circle(360, 280, 2, "#ffdc83"); },
+    "table-fishbowl": function () { return ART.table("#5a4a70") + circle(335, 304, 20, "#70b8eb", 'opacity=".35" stroke="#cfe8ff" stroke-width="2"') + path("M317 300 Q335 294 353 300 A20 20 0 0 1 317 300 Z", "#70b8eb", 'opacity=".55"') + path("M330 306 q8 -6 12 0 q-4 6 -12 0 Z M330 306 l-6 -4 v8 Z", "#ff9d6b") + circle(340, 305, 1, "#2a1a3e") + circle(345, 296, 1.6, "#fff", 'opacity=".7"') + circle(348, 290, 1, "#fff", 'opacity=".7"') + rect(323, 284, 24, 3, "#cfe8ff", 'rx="1.5"'); },
+    table: function (colour) { return rect(308, 324, 56, 6, colour, 'rx="2"') + rect(314, 330, 4, 32, colour) + rect(354, 330, 4, 32, colour) + rect(316, 344, 40, 3, colour, 'opacity=".7"'); },
+
+    // Plants: on the floor at the left. render() moves them right (NUDGE), to stand between the lamp and Lumi.
+    "plant-fern": function () { return [-58, -36, -16, 0, 16, 36, 58].map(function (a) { return oval(18, 348, 5, 26, a % 32 ? "#5fae86" : "#7fc49a", 'transform="rotate(' + a + ' 18 372)"'); }).join("") + ART.pot("#c0764f"); },
+    "plant-cactus": function () { return rect(11, 322, 14, 52, "#5fae86", 'rx="7"') + path("M11 350 h-8 q-5 0 -5 -6 v-8 M25 342 h8 q5 0 5 -6 v-6", "none", 'stroke="#5fae86" stroke-width="8" stroke-linecap="round"') + path("M18 328 v40 M14 334 v4 M22 344 v4 M14 356 v4", "none", 'stroke="#3f8a66" stroke-width="1.2"') + circle(18, 320, 4, "#ff8ecb") + ART.pot("#e8dff0"); },
+    "plant-sunflower": function () { return path("M18 374 V316", "none", 'stroke="#5fae86" stroke-width="4"') + oval(8, 350, 9, 4, "#7fc49a", 'transform="rotate(-25 8 350)"') + oval(28, 340, 9, 4, "#7fc49a", 'transform="rotate(25 28 340)"') + [0, 45, 90, 135, 180, 225, 270, 315].map(function (a) { return oval(18, 290, 5, 11, "#ffdc83", 'transform="rotate(' + a + ' 18 304)"'); }).join("") + circle(18, 304, 9, "#8a5a2a") + ART.pot("#70b8eb"); },
+    "plant-bonsai": function () { return path("M18 376 Q10 356 22 346 Q32 338 26 326", "none", 'stroke="#8a5a2a" stroke-width="6" stroke-linecap="round"') + path("M22 346 Q4 344 -2 334", "none", 'stroke="#8a5a2a" stroke-width="4" stroke-linecap="round"') + oval(28, 320, 20, 10, "#3f8a66") + oval(-2, 330, 14, 8, "#5fae86") + oval(20, 312, 12, 7, "#7fc49a") + rect(0, 376, 36, 10, "#3a5a52", 'rx="2"') + rect(4, 386, 5, 4, "#3a5a52") + rect(27, 386, 5, 4, "#3a5a52"); },
+    "plant-glowshroom": function () { return oval(18, 372, 34, 22, GLOW, 'opacity=".12"') + [[6, 366, 9, 20], [20, 352, 13, 34], [32, 370, 7, 14]].map(function (m, i) {
+      return rect(m[0] - 2.5, m[1], 5, m[3], "#fff1e0", 'rx="2"') + path("M" + (m[0] - m[2]) + " " + m[1] + " Q" + m[0] + " " + (m[1] - m[2] * 1.5) + " " + (m[0] + m[2]) + " " + m[1] + " Z", GLOW, 'class="lp-neon lp-twinkle" style="animation-delay:' + (i * .6) + 's"');
+    }).join("") + oval(18, 388, 22, 5, "#3a5a52"); },
+    pot: function (colour) { return path("M4 372 H32 L28 392 H8 Z", colour) + rect(2, 368, 32, 6, colour, 'rx="2"'); },
+
+    // Toy chests: at the front of the floor on the left.
+    "chest-wood": function () { return rect(58, 440, 68, 34, "#a8743f", 'rx="3"') + path("M58 440 Q92 418 126 440 Z", "#c79256") + rect(58, 438, 68, 5, "#7a4a2a") + rect(87, 440, 10, 12, "#ffdc83", 'rx="2"') + path("M72 446 V472 M112 446 V472", "none", 'stroke="#7a4a2a" stroke-width="3"'); },
+    "chest-pink": function () { return rect(58, 438, 68, 36, "#ff8ecb", 'rx="5"') + rect(58, 438, 68, 8, "#ffb3d1", 'rx="4"') + path(star(92, 460, 9), "#fff1cd") + circle(72, 432, 9, "#70ebea") + path("M100 438 l6 -16 l8 4 l-4 12 Z", "#ffdc83") + rect(82, 426, 10, 12, "#c9a8ff", 'rx="2"'); },
+    "chest-yarn": function () { return path("M56 442 Q92 456 128 442 L120 474 H64 Z", "#c79256") + oval(92, 442, 36, 9, "#a8743f") + path("M62 452 Q92 464 122 452 M64 462 Q92 472 120 462", "none", 'stroke="#8a5a2a" stroke-width="1.5"') + [[76, 434, 11, "#ff8ecb"], [98, 430, 13, "#70ebea"], [114, 438, 9, "#ffdc83"]].map(function (y) { return circle(y[0], y[1], y[2], y[3]) + path("M" + (y[0] - y[2] * .7) + " " + (y[1] - 2) + " Q" + y[0] + " " + (y[1] - y[2] * .8) + " " + (y[0] + y[2] * .7) + " " + (y[1] + 2) + " M" + (y[0] - y[2] * .5) + " " + (y[1] + 4) + " Q" + y[0] + " " + (y[1] - 2) + " " + (y[0] + y[2] * .6) + " " + (y[1] + 5), "none", 'stroke="#00000030" stroke-width="1.2"'); }).join(""); },
+    "chest-rocket": function () { return rect(58, 444, 68, 30, "#3d4675", 'rx="4"') + scatter(12, 7, function (roll) { return path(star(Math.round(roll(64, 120)), Math.round(roll(450, 468)), 3), "#ffe9a8"); }) + path("M92 400 Q104 414 102 444 H82 Q80 414 92 400 Z", "#e8dff0") + path("M92 400 Q98 407 100 416 H84 Q86 407 92 400 Z", "#e8556a") + circle(92, 426, 5, "#70b8eb") + path("M82 434 L72 446 H82 Z M102 434 L112 446 H102 Z", "#e8556a"); },
+    "chest-treasure": function () { return rect(58, 444, 68, 30, "#7a4a2a", 'rx="3"') + path("M58 444 Q60 414 92 414 Q124 414 126 444 Z", "#8a5a2a") + path("M60 444 Q92 428 124 444 Z", "#ffdc83") + [[72, 440], [84, 436], [98, 437], [110, 440], [91, 442]].map(function (c) { return oval(c[0], c[1], 6, 3, "#ffe9a8", 'stroke="#d9b24a" stroke-width="1"'); }).join("") + path("M58 444 H126 M72 444 V474 M112 444 V474", "none", 'stroke="#ffdc83" stroke-width="3"') + rect(87, 448, 10, 12, "#ffdc83", 'rx="2"') + path(star(104, 428, 5), "#fff", 'class="lp-twinkle"'); },
   };
 
   // ---- The whole room. It is drawn 1000 wide and 500 tall and fills whatever it is given (the whole screen on a TV
@@ -280,6 +326,7 @@
   // 400-wide block in the middle; the wall and floor repeat across the full width; and there are three windows, the
   // middle one and one out to each side.
   const WIDE = 1000, MIDDLE = 300, TILES = [-100, 300, 700], WINDOWS = [-50, MIDDLE, 650]; // Where the 400-wide pieces sit.
+  const NUDGE = { plant: 82 }; // Plants are drawn beside the door but stand between the lamp and Lumi, clear of both.
   const REPEATED = { wallpaper: TILES, floor: TILES, view: WINDOWS, frame: WINDOWS, curtains: WINDOWS };
 
   function render(house, backdrop) { // The room as SVG markup, back to front. `house` is {spot: object id} from the server.
@@ -295,7 +342,7 @@
       const draw = Object.prototype.hasOwnProperty.call(ART, house[spot]) ? ART[house[spot]] : null;
       let art = draw && !(spot === "view" && open) ? draw() : ""; // An object this file doesn't know simply isn't drawn.
       if (art && spot === "view") art = group(art, 'clip-path="url(#lp-view-clip)"');
-      const places = REPEATED[spot] || [MIDDLE];
+      const places = REPEATED[spot] || [MIDDLE + (NUDGE[spot] || 0)];
       return group(art ? places.map(function (x) { return group(art, 'transform="translate(' + x + ' 0)"'); }).join("") : "",
         'data-spot="' + spot + '"' + (spot === "wallpaper" ? ' mask="url(#lp-wall-mask)"' : "") + (spot === "view" && open ? ' data-open="true"' : ""));
     }).join("");

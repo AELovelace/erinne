@@ -59,6 +59,36 @@
       {"id": "bed-basket", "name": "Wicker basket", "price": 130},
       {"id": "bed-cloud", "name": "Cloud bed", "price": 200},
       {"id": "bed-moon", "name": "Crescent cradle", "price": 280},
-      {"id": "bed-castle", "name": "Cardboard castle", "price": 350}]}
+      {"id": "bed-castle", "name": "Cardboard castle", "price": 350}]},
+    {"id": "door", "name": "Door", "items": [
+      {"id": "door-plum", "name": "Plum door", "price": 0},
+      {"id": "door-round", "name": "Round-top door", "price": 140},
+      {"id": "door-catflap", "name": "Cat-flap door", "price": 180},
+      {"id": "door-beads", "name": "Bead doorway", "price": 220},
+      {"id": "door-portal", "name": "Star portal", "price": 350}]},
+    {"id": "ceiling", "name": "Ceiling hanging", "items": [
+      {"id": "hang-stars", "name": "Star mobile", "price": 0},
+      {"id": "hang-cranes", "name": "Paper cranes", "price": 110},
+      {"id": "hang-planets", "name": "Little planets", "price": 160},
+      {"id": "hang-basket", "name": "Hanging basket", "price": 160},
+      {"id": "hang-disco", "name": "Disco ball", "price": 260}]},
+    {"id": "sidetable", "name": "Side table", "items": [
+      {"id": "table-tea", "name": "Tea table", "price": 0},
+      {"id": "table-books", "name": "Book stack", "price": 100},
+      {"id": "table-candle", "name": "Candle stand", "price": 140},
+      {"id": "table-radio", "name": "Little radio", "price": 200},
+      {"id": "table-fishbowl", "name": "Fishbowl", "price": 260}]},
+    {"id": "plant", "name": "Plant", "items": [
+      {"id": "plant-fern", "name": "Fern", "price": 0},
+      {"id": "plant-cactus", "name": "Cactus", "price": 90},
+      {"id": "plant-sunflower", "name": "Sunflower", "price": 130},
+      {"id": "plant-bonsai", "name": "Bonsai", "price": 200},
+      {"id": "plant-glowshroom", "name": "Glowshrooms", "price": 260}]},
+    {"id": "toychest", "name": "Toy chest", "items": [
+      {"id": "chest-wood", "name": "Wooden chest", "price": 0},
+      {"id": "chest-pink", "name": "Pink toy box", "price": 100},
+      {"id": "chest-yarn", "name": "Yarn basket", "price": 140},
+      {"id": "chest-rocket", "name": "Rocket box", "price": 220},
+      {"id": "chest-treasure", "name": "Treasure chest", "price": 320}]}
   ]
 }

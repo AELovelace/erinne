@@ -32,6 +32,7 @@ test("the room draws back to front in a wide canvas, repeating the wall, floor a
   assert.ok(layer("wallpaper").includes('translate(-100 0)') && layer("wallpaper").includes('translate(700 0)'), "The wall covers the whole 1000-wide room");
   for (const x of H.WINDOWS) for (const spot of ["view", "frame"]) assert.ok(layer(spot).includes('<g transform="translate(' + x + ' 0)">'), spot + " at " + x);
   assert.equal(layer("rug").match(/<g transform="translate\(300 0\)">/g).length, 1, "Furniture stands once, in the middle");
+  assert.ok(layer("plant").includes('<g transform="translate(382 0)">'), "The plant stands clear of the lamp");
   assert.equal(room.match(/<g[ >]/g).length, room.match(/<\/g>/g).length);
   assert.equal(room.match(/<defs>/g).length, room.match(/<\/defs>/g).length);
 });

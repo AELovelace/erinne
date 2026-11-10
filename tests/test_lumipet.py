@@ -239,7 +239,7 @@ def test_the_shipped_catalog_is_valid_and_bad_ones_are_refused(tmp_path):
 def test_a_new_house_has_each_spots_free_first_object(conn, alice):
     house = _state(conn, alice, T0)
     assert house["pet"]["house"] == {spot["id"]: spot["items"][0]["id"] for spot in lumipet.HOUSE["spots"]}
-    assert len(house["house"]["spots"]) == 10 and all(len(spot["items"]) == 5 for spot in house["house"]["spots"])
+    assert len(house["house"]["spots"]) == 15 and all(len(spot["items"]) == 5 for spot in house["house"]["spots"])     # 75 pieces
 
 
 def test_decorating_buys_once_then_swaps_for_free_like_an_outfit(conn, alice):
