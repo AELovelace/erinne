@@ -319,7 +319,7 @@ def test_walking_home_banks_the_satchel_once(conn, alice):
     _do(conn, alice, "move", way=D.BACK[way])
     out = _do(conn, alice, "leave")
     ended = out["dungeon"]["run"]
-    assert ended["over"] == "home" and ended["ended"] == {"coins": 120, "potions": 1, "trophies": [trophy], "mods": [mod], "depth": 1}
+    assert ended["over"] == "home" and ended["ended"] == {"coins": 120, "potions": 1, "trophies": [trophy], "mods": [mod], "depth": 1, "at": T0}   # dated, for Lumi Pet's welcome home
     assert out["coins"] == 1120 and out["pet"]["potions"] == 10 and trophy in out["pet"]["decor"] and mod in out["pet"]["mods_owned"]
     assert conn.execute("SELECT ref FROM coin_transactions WHERE amount = 120").fetchone()[0] == f"lumi-run:{alice}:{ended['id']}"
     with pytest.raises(lumipet.PetError, match="isn't out exploring"):
@@ -373,6 +373,7 @@ def test_giving_up_leaves_everything_behind(conn, alice):
     _put(conn, alice, run)
     ended = _do(conn, alice, "abandon")["dungeon"]["run"]
     assert ended["over"] == "abandoned" and ended["ended"]["lost"]["coins"] == 80 and ended["satchel"]["coins"] == 0
+    assert ended["ended"]["at"] == T0                                           # dated, for Lumi Pet's welcome home
     assert coins.peek(conn, alice) == 1000
 
 
@@ -492,6 +493,7 @@ def test_being_beaten_ends_the_trip_and_empties_the_satchel_but_keeps_her_exp(co
         state = lumipet.state(conn, alice, T0)
     run = state["dungeon"]["run"]
     assert fight["status"] == "defeat" and run["over"] == "defeat" and run["ended"]["lost"]["coins"] == 200
+    assert run["ended"]["at"] == T0                                             # dated, for Lumi Pet's welcome home
     assert run["satchel"] == {"coins": 0, "potions": 0, "keys": 0, "trophies": [], "mods": []}
     assert state["coins"] == 1000 and "trophy-moon-bell" not in state["pet"]["decor"] and state["pet"]["exp"] == 7
     assert state["pet"]["faint_until"] == T0 + lumibattle.FAINT_MS

@@ -25,11 +25,18 @@
     return v > 0 ? v : v + M - 1;
   }
 
+  function scramble(v) {                                    // xorshift32: mix's numbers climb in even steps, so neighbouring
+    let u = v >>> 0;                                         // foods rolled almost alike (a whole game of +1 Lumis); this
+    u = (u ^ (u << 13)) >>> 0;                               // shuffles the bits so every roll is its own (arcade.scramble)
+    u = (u ^ (u >>> 17)) >>> 0;
+    return (u ^ (u << 5)) >>> 0;
+  }
+
   function food(seed, index, board) {                       // where the index-th food goes, and its kind; null on a full board
     const empty = [];
     for (let x = 0; x < W; x++) for (let y = 0; y < H; y++) if (board[x][y] === 0) empty.push([x, y]);
     if (!empty.length) return null;
-    const at = empty[mix(seed, index, 17) % empty.length], roll = mix(seed, index, 53) % 100;
+    const at = empty[mix(seed, index, 17) % empty.length], roll = scramble(mix(seed, index, 53)) % 100;   // scrambled since 2026-11-11
     return [at[0], at[1], roll < 70 ? 2 : roll < 92 ? 3 : 4];
   }
 
@@ -80,7 +87,7 @@
 
   function distance(g) { return g.score + Math.max(0, g.body.length - 3) * 5; }   // how a showdown ranks a run
 
-  const API = { M: M, W: W, H: H, STEPS: STEPS, POINTS: POINTS, FRAMES_PER_MOVE: FRAMES_PER_MOVE, mix: mix, food: food,
+  const API = { M: M, W: W, H: H, STEPS: STEPS, POINTS: POINTS, FRAMES_PER_MOVE: FRAMES_PER_MOVE, mix: mix, scramble: scramble, food: food,
                 newGame: newGame, step: step, board: board, distance: distance };
   if (typeof module !== "undefined" && module.exports) module.exports = API; else root.SnakeRules = API;
 })(this);

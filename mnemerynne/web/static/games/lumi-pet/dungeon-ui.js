@@ -85,16 +85,32 @@
   }
 
   // ---- The lists.
+  function brought(ended) { // What a trip that ended at home brought back: ["120 coins", "2 potions", "something for the house"].
+    const parts = [ended.coins + " coins"];
+    if (ended.potions) parts.push(ended.potions + (ended.potions === 1 ? " potion" : " potions"));
+    if (ended.trophies.length) parts.push(ended.trophies.length === 1 ? "something for the house" : ended.trophies.length + " things for the house");
+    if (ended.mods.length) parts.push(ended.mods.length === 1 ? "a new mod" : ended.mods.length + " new mods");
+    return parts;
+  }
+
+  function listed(parts) { return parts.length < 2 ? parts.join("") : parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1]; } // "a, b and c"
+
   function summary(run) { // How a finished trip ended, for its one "carry on" row.
     const ended = run.ended || {};
-    if (run.over === "home") {
-      const parts = [ended.coins + " coins"];
-      if (ended.potions) parts.push(ended.potions + (ended.potions === 1 ? " potion" : " potions"));
-      if (ended.trophies.length) parts.push(ended.trophies.length === 1 ? "something for the house" : ended.trophies.length + " things for the house");
-      if (ended.mods.length) parts.push(ended.mods.length === 1 ? "a new mod" : ended.mods.length + " new mods");
-      return "Home from floor " + ended.depth + " with " + parts.join(", ");
-    }
+    if (run.over === "home") return "Home from floor " + ended.depth + " with " + brought(ended).join(", ");
     return (run.over === "defeat" ? "Carried home from floor " : "Came home early from floor ") + ended.depth + " · left behind: " + carrying(ended.lost);
+  }
+
+  // Lumi Pet's welcome home: what she says back in her room after a trip, once per trip (game.js welcomeHome). Only an
+  // ending the server dated (ended.at, in ms) and that is under WELCOME_HOURS old counts: no "Home!" for a trip from days ago.
+  const WELCOME_HOURS = 12;
+  function welcome(run, now) { // Her line, or "" when there is nothing fresh to welcome.
+    const ended = run && run.over ? run.ended : null;
+    if (!ended || !ended.at || now - ended.at > WELCOME_HOURS * 3600000) return "";
+    const place = run.env && run.env.name ? run.env.name : "the dungeons";
+    if (run.over === "home") return "Home! " + place + ", floor " + ended.depth + ": she brought back " + listed(brought(ended)) + ".";
+    if (run.over === "defeat") return "Carried home from " + place + ", all worn out. A cuddle and a nap would help.";
+    return "Home early from " + place + ". Whatever she was carrying stayed down there, but she's safe and sound.";
   }
 
   function places(snap) { // Not out exploring: where to go.
@@ -147,10 +163,18 @@
       })).concat([potionRow(snap, run)]);
   }
 
-  function rows(ctx) { // ctx: { snap, play, dismissed, care (the snack-and-potion list is open), go(change) }
+  function homeRow(home) { // Lumi Dungeons' way back to her room in Lumi Pet (Doll's design, 2026-11-11). `home` opens Lumi Pet.
+    return { key: "go-home", icon: "✨", name: "Take her home", hint: "Back to her room in Lumi Pet", local: home };
+  }
+
+  function rows(ctx) { // ctx: { snap, play, dismissed, care (the snack-and-potion list is open), go(change), home (opens Lumi Pet, or null) }
     const snap = ctx.snap, run = snap.dungeon.run, go = ctx.go;
     if (!run || (run.over && ctx.dismissed === run.id)) return places(snap);
-    if (run.over) return [{ key: "continue", icon: "›", name: run.over === "home" ? "Home again!" : "Carry on", hint: summary(run), local: function () { go({ dismiss: run.id }); } }];
+    if (run.over) { // A trip just ended: its summary, and first the way home (which counts the ending as read on the way out).
+      const carry = { key: "continue", icon: "›", name: run.over === "home" ? "Home again!" : "Carry on", hint: summary(run), local: function () { go({ dismiss: run.id }); } };
+      if (!ctx.home) return [carry];
+      return [homeRow(function () { go({ dismiss: run.id }); ctx.home(); }), carry];
+    }
     if (ctx.care) return careRows(snap, run, go);
     const tabs = { key: "care", icon: "♡", name: "Look after Lumi", hint: "A snack or a potion · everything else waits until she's home", local: function () { go({ care: true }); } };
     if (run.facing) return doorRows(run, ctx.play || {}, go).concat([tabs]);
@@ -184,6 +208,7 @@
   }
 
   return { WAYS: WAYS, RUNE: RUNE, step: step, carrying: carrying, rows: rows, hud: hud, summary: summary, cursorMove: cursorMove,
+    homeRow: homeRow, welcome: welcome, WELCOME_HOURS: WELCOME_HOURS,
     sokobanStart: sokobanStart, sokobanMove: sokobanMove, sokobanUndo: sokobanUndo, sokobanSolved: sokobanSolved,
     lightsStart: lightsStart, lightsPress: lightsPress, lightsSolved: lightsSolved };
 });

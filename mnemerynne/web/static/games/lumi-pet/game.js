@@ -7,7 +7,7 @@
    They are one pet on one save, so all three talk to the same API. */
 (function () {
   "use strict";
-  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Pk = window.LumiPetPicker, Gd = window.LumiPetGarden, Ga = window.LumiPetGardenArt, Sk = window.LumiPetSkills, Sa = window.LumiPetSkillsArt, Cl = window.LumiPetCollection, Ca = window.LumiPetCollectionArt, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt, Pu = window.LumiPetParty;
+  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Pk = window.LumiPetPicker, Gd = window.LumiPetGarden, Ga = window.LumiPetGardenArt, Sk = window.LumiPetSkills, Sa = window.LumiPetSkillsArt, Cl = window.LumiPetCollection, Ca = window.LumiPetCollectionArt, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt, Pu = window.LumiPetParty, GT = window.LumiPetGardenTree, GTa = window.LumiPetGardenTreeArt;
   const $ = function (id) { return document.getElementById(id); };
   const room = $("lp-room"), list = $("lp-list"), houseArt = $("lp-house"), tabButtons = Array.from(document.querySelectorAll("[data-lp-tab]"));
   const API = "/api/media/games/lumi-pet/", OLD_SAVE = "mnemerynne-game:lumi-pet:companion";
@@ -39,7 +39,7 @@
   const MEMORIES = { cuddle: "A warm little cuddle", snack: "A shared snack", play: "Playtime together", rest: "A quiet moment together" };
   const NEEDS = { hunger: "Tummy rumbling. A snack would help.", energy: "So sleepy. A nap would help.", joy: "A little lonely. Stay and play?" };
   const BUSY = { nap: "napping", play: "playing" };
-  const KEYS_HOME = "⏮ ⏭ change tab · ▲ ▼ choose<br>◀ ▶ flip a row's choices · Enter does it<br>Keyboard: Page Up / Page Down or [ ]<br>Escape / Back returns to Games";
+  const KEYS_HOME = "⏮ ⏭ change tab · ▲ ▼ choose<br>◀ ▶ swap in what she owns · Enter opens the spot, to buy more<br>Keyboard: Page Up / Page Down or [ ]<br>Escape / Back returns to Games";
   const KEYS_DUNGEON = "▲ ▼ ◀ ▶ walk, or work a puzzle<br>⏮ ⏭ choose from this list · Enter does it<br>⏯ drink a potion<br>Keyboard: Page Up / Page Down, P<br>Mouse: press a door, a chest, a card, a lamp or a square";
   const CUDDLES = ["Lumi leans into your hand. A tiny purr, just for you.", "Soft wings wrap around your fingers. We can stay like this a while."];
   let snap = null, offset = 0, tab = 0, picks = TABS.map(function () { return 0; }), busy = false, visited = false;
@@ -55,6 +55,8 @@
   const CAN_NOTES = [523.25, 659.25, 783.99, 440]; // One note per watering can.
   let lumiMoved = 0, lumiActUntil = 0, lumiFlip = false; // Lumi in the garden: when she last darted somewhere, and the little move she is making.
   let drawer = null, seed = null, plotCursor = 0, gardenFocus = "list", pending = 0, mini = null, miniTimer = null, lastGarden = "", gardenOpen = false; // The garden: see drawGarden.
+  const KEYS_GARDEN_PAGE = "▲ ▼ ◀ ▶ move over the page · Enter unlocks, chooses or levels up<br>⏯ presses the powder · ⏮ ⏭ choose from this list<br>Mouse: press something to look, again to choose";
+  const pageCursor = {}; // The garden's pages (the Flower tree, Helpers, Moonrise): where each one's cursor was left.
   let play = {}, focus = "list", lastStory = "", caring = false, dismissedRun = G.store.get("read-run", null), pendingConfirm = null, lastDungeon = ""; // (The last trip's ending is read once per device: Lumi Dungeons opens on its Dungeon tab, and shouldn't open on old news.)
   // Home and Closet: the spot or slot whose full list is open (null: one row each), the choice ◀ ▶ has flipped each
   // row to, and what the room last drew.
@@ -88,6 +90,31 @@
   function openApp(slug) { // Go to another of Lumi's apps. Inside Media's game layer the layer swaps the game in its frame (media.js), so its bar and remote keys follow; on its own the page just goes there.
     if (framed) window.parent.postMessage({ type: "mnemerynne-game-open", slug: slug }, location.origin);
     else location.href = "/media/games/" + slug;
+  }
+
+  function adventure() { // Her room's door (Doll's design, 2026-11-11): she trots off through it, and Lumi Dungeons opens.
+    if (room.dataset.leaving === "true") return; // Already on her way: one press is enough.
+    room.dataset.leaving = "true"; // game.css: she trots towards the door and fades.
+    say("Off on an adventure! 🗝");
+    G.sound.unlock(); [523.25, 659.25, 783.99].forEach(function (f, i) { G.sound.tone(f, 0.14, i * 0.09, 0.18); }); // Three little steps up: off she goes.
+    setTimeout(function () { openApp("lumi-dungeons"); }, 700); // Long enough to see her go.
+    setTimeout(function () { delete room.dataset.leaving; }, 2500); // Back in place if this page is still showing (a refused swap, or the browser's Back).
+  }
+
+  function welcomeHome() { // Lumi Pet, after a dungeon trip: her welcome-home line, once per trip on this device (dungeon-ui.js welcome).
+    const run = snap && snap.dungeon ? snap.dungeon.run : null;
+    if (APP !== "lumi-pet" || !run || G.store.get("welcomed-run", null) === run.id) return;
+    const line = Dg.welcome(run, serverNow());
+    if (!line) return; // Not over, or too old to be news.
+    G.store.set("welcomed-run", run.id);
+    say(line); effect("cuddle", "✨ ♡");
+  }
+
+  function doorPress(event) { // Mouse and touch on her room's door (house.js marks it data-click="door").
+    const hit = event.target.closest("[data-click]");
+    if (!hit || hit.dataset.click !== "door" || !snap || APP !== "lumi-pet") return;
+    if (tint || opened.home || opened.closet) return; // Choosing a colour or trying pieces on: the room is a preview just now.
+    adventure();
   }
 
   function goHome() { // "Back" from a full-room view (the garden, the trees, the gallery): this app's first tab, or its Settings when that view is the first tab.
@@ -148,6 +175,7 @@
         if (pet.potions) potion.send = { action: "drink" }; else potion.note = "No potions left. Lumi Dungeons sells them, on its Battle tab.";
         list.push(potion);
       }
+      list.push({ key: "adventure", icon: "🗝", name: "Through the door", hint: "Off to Lumi Dungeons: trips, the arena, skills", local: adventure }); // Her room's door as a row, for remotes, keyboards and phones too narrow to show it.
       return list;
     }
     if (name === "pantry") return c.snacks.concat(c.treats).filter(function (food) { return !food.price || pet.inventory[food.id]; }).map(function (food) {
@@ -168,17 +196,19 @@
     if (name === "skills") return relabel(Sk.rows({ snap: snap, cursor: skillCursor || snap.battle.trees[0].nodes[0].id, go: skillsGo }));
     if (name === "collection") return relabel(Cl.rows({ snap: snap, at: album, zoom: albumZoom, go: albumGo }));
     if (name === "garden" && exploring()) return awayRows(); // Lumi's Garden during a dungeon trip: the garden grows without her until she is home (lumipet.garden_act).
+    if (name === "garden" && paging()) return relabel(GT.rows(drawer, pageCtx())); // The Flower tree, Helpers or Moonrise page.
     if (name === "garden") return relabel(Gd.rows({ garden: snap.garden, decor: snap.garden_decor, drawer: drawer, seed: seed, cursor: plotCursor, mini: mini, passed: passed(), pending: pending, level: pet.level, go: gardenGo }));
     if (name === "dungeon") { // A dungeon fight and its result use the Battle lists; everything else is the dungeon's own.
       if (couching()) return []; // The couch draws one menu per person instead (drawCouch).
       if ((snap.fight && snap.fight.status === "active") || finished) return battleRows();
-      const own = Dg.rows({ snap: snap, play: play, dismissed: dismissedRun, care: caring, go: dungeonGo });
+      const home = inParty() ? null : function () { openApp("lumi-pet"); }; // "Take her home" (not from a party: leaving the page would leave her friends).
+      const own = Dg.rows({ snap: snap, play: play, dismissed: dismissedRun, care: caring, go: dungeonGo, home: home });
       if (inParty() && party.phase === "lobby") return Pu.lobbyRows(party, partyAct);
       if (inParty() && party.run) return Pu.tripRows(party, own, serverNow(), fightCtx(aim, ally));
       if (!exploring() && !(snap.dungeon.run && snap.dungeon.run.over && dismissedRun !== snap.dungeon.run.id)) { // Choosing where to go: or going with friends.
         askParties();
         if (browsing) return Pu.browserRows(openParties, { at: browsing.at, back: function () { browsing = null; picks[tab] = 0; }, askCode: TV ? null : askCode });
-        return Pu.startRows({ open: openParties, tv: TV, askCode: askCode, browse: browse }).concat(own);
+        return (home ? [Dg.homeRow(home)] : []).concat(Pu.startRows({ open: openParties, tv: TV, askCode: askCode, browse: browse }), own); // The way home first, then friends, then places.
       }
       return own;
     }
@@ -482,8 +512,26 @@
     }).then(function () { busy = false; render(); });
   }
 
+  function paging() { return gardening() && GT.isPage(drawer) && !mini; } // One of the garden's pages is open (a minigame takes the screen back).
+
+  function pageCtx() { return { garden: snap.garden, cursor: pageAt(), seed: Gd.seedFor(snap.garden, null, seed), level: snap.pet.level, go: gardenGo }; }
+
+  function pageAt() { // The open page's cursor, put somewhere sensible if it isn't on anything.
+    if (!GT.find(drawer, snap.garden, pageCursor[drawer])) pageCursor[drawer] = GT.first(drawer, snap.garden, Gd.seedFor(snap.garden, null, seed));
+    return pageCursor[drawer];
+  }
+
+  function pageEnter() { // Enter, or a second press of the mouse, on what a page's cursor is on.
+    const what = GT.choice(drawer, pageCtx(), pageAt()), key = "page:" + drawer + ":" + pageAt();
+    if (what.say) { say(what.say); return; }
+    if (what.change) { gardenGo(what.change); return; }
+    if (busy) return;
+    if (what.confirm && pendingConfirm !== key) { pendingConfirm = key; say(what.confirm); return; } // A moonrise replants the garden: never on one stray press.
+    gardenSend(what.send);
+  }
+
   function gardenGo(change) { // What a garden row that doesn't ask the server can do.
-    if ("drawer" in change) { drawer = change.drawer; picks[tab] = 0; gardenFocus = "list"; }
+    if ("drawer" in change) { drawer = change.drawer; picks[tab] = 0; gardenFocus = GT.isPage(drawer) ? "board" : "list"; pendingConfirm = null; } // A page opens with the arrows on it, like Skills.
     if (change.seed) { seed = change.seed; say("Seed chosen. Enter on an empty plot plants it."); }
     if (change.press) pressOnce();
     if (change.feed) feedPress();
@@ -544,6 +592,13 @@
       render(); return;
     }
     const count = Gd.cells(snap.garden), moving = action === "up" || action === "down" || action === "left" || action === "right";
+    if (paging()) { // A page: the arrows move over it, Enter acts on what they are on (or on the list), Prev/Next walk the list.
+      if (moving) { pageCursor[drawer] = GT.move(drawer, snap.garden, pageAt(), action); gardenFocus = "board"; picks[tab] = 0; pendingConfirm = null; }
+      else if (action === "next" || action === "prev") { const many = rows().length; picks[tab] = (picks[tab] + (action === "prev" ? many - 1 : 1)) % many; gardenFocus = "list"; }
+      else if (action === "enter") { if (gardenFocus === "board") pageEnter(); else choose(); render(); return; }
+      else if (action === "play") pressOnce();
+      render(); return;
+    }
     if (action === "play") pressOnce();
     else if (action === "enter") { if (gardenFocus === "board" && !drawer) plotEnter(plotCursor); else choose(); return; }
     else if (action === "next" || action === "prev" || (drawer && (action === "up" || action === "down"))) { // The list (a drawer has no plots to walk over).
@@ -559,6 +614,9 @@
     else if (what[0] === "can") canPress(n);
     else if (what[0] === "feed") feedPress();
     else if (what[0] === "plot" && !mini) { plotCursor = n; gardenFocus = "board"; plotEnter(n); }
+    else if (what[0] === "tree" && paging()) { // A page: the first press looks, a second press on the same thing acts.
+      if (what[1] === pageAt() && gardenFocus === "board") pageEnter(); else { pageCursor[drawer] = what[1]; gardenFocus = "board"; picks[tab] = 0; pendingConfirm = null; }
+    }
     render();
   }
 
@@ -580,6 +638,8 @@
     $("lp-d-title").textContent = "Stardust Garden" + (garden.gardens > 1 ? " " + (garden.at + 1) + " of " + garden.gardens : "");
     $("lp-d-hp").style.width = Math.min(100, 100 * garden.squeezed / garden.price) + "%"; $("lp-d-mp").style.width = "0%"; // The bar is the next coin.
     $("lp-d-label").textContent = Gd.format(Math.max(0, garden.powder - pending * garden.rates.tap)) + " starpowder · " + garden.coins_today + " coins today";
+    room.dataset.gardenPage = paging() ? drawer : ""; // Lumi steps off the screen while a page is up (game.css).
+    if (paging()) { drawPage(garden); return; }
     const lines = Gd.status(garden, plotCursor, seed, gone, pending), told = "garden|" + lines.join("|");
     if (told !== lastStory) {
       lastStory = told;
@@ -597,6 +657,21 @@
     }
     lastGarden = signature; lastDungeon = "";
     $("lp-dungeon").innerHTML = Ga.scene(garden, { cursor: plotCursor, focused: gardenFocus === "board" && !drawer, passed: gone, mini: mini, decor: snap.garden_decor, sky: sky }); // Markup authored in garden-art.js; colours are the server's checked #rrggbb.
+  }
+
+  function drawPage(garden) { // The Flower tree, Helpers or Moonrise page over the garden, and the lines about what the cursor is on.
+    $("lp-keys").innerHTML = KEYS_GARDEN_PAGE; // Fixed text from this file.
+    const at = pageAt(), lines = GT.lines(drawer, pageCtx(), at), told = "gpage|" + lines.join("|");
+    if (told !== lastStory) {
+      lastStory = told;
+      const story = $("lp-story"); story.textContent = "";
+      lines.forEach(function (words, index) { const line = document.createElement("p"); line.textContent = words; if (index === 1) line.className = "lp-scene"; story.appendChild(line); });
+    }
+    const signature = JSON.stringify(["page", drawer, at, gardenFocus, pageCtx().seed, snap.pet.level, garden.flowers.map(function (f) { return f.unlocked ? 1 : f.next ? (garden.given >= f.needs ? 3 : 2) : 0; }).join(""),
+      Math.floor(garden.powder), garden.helpers.map(function (h) { return h.level; }), garden.upgrades.map(function (u) { return u.count; }), garden.moonrise, garden.given, garden.gardens]);
+    if (signature === lastGarden) return;
+    lastGarden = signature; lastDungeon = "";
+    $("lp-dungeon").innerHTML = GTa.scene(drawer, garden, { cursor: at, focused: gardenFocus === "board", seed: pageCtx().seed, level: snap.pet.level }); // Markup authored in garden-tree-art.js; text escaped there, colours the server's checked #rrggbb.
   }
 
   function walking() { // In the dungeon with the Dungeon tab open and no fight on: the arrows are Lumi's feet.
@@ -808,7 +883,7 @@
         return button;
       }));
     }
-    const boardHasIt = (walking() && focus === "board" && (play.board || play.cursor !== undefined)) || (gardening() && gardenFocus === "board" && !drawer) || (treeing() && skillFocus === "board") || (albuming() && albumFocus === "board"); // Enter would act on the puzzle or the plot, not the list.
+    const boardHasIt = (walking() && focus === "board" && (play.board || play.cursor !== undefined)) || (gardening() && gardenFocus === "board" && (!drawer || paging())) || (treeing() && skillFocus === "board") || (albuming() && albumFocus === "board"); // Enter would act on the puzzle or the plot, not the list.
     Array.from(list.children).forEach(function (button, index) {
       const chosen = index === picks[tab] && !boardHasIt;
       if (chosen && button.getAttribute("aria-pressed") !== "true" && list.scrollHeight > list.clientHeight) button.scrollIntoView({ block: "nearest" }); // Long lists follow the remote.
@@ -883,7 +958,7 @@
 
   function refresh() { // Ask the server how Lumi is; a failure keeps the last picture and tries again later.
     if (picking) return Promise.resolve(); // Nobody's Lumi is chosen yet: nothing to ask about.
-    return G.api(API + "state").then(function (data) { take(data); announceDone(); render(); }).catch(function () {
+    return G.api(API + "state").then(function (data) { take(data); announceDone(); welcomeHome(); render(); }).catch(function () {
       if (!snap) say("Lumi can't be reached just now. She'll be here when the connection is back.");
     });
   }
@@ -1089,6 +1164,8 @@
     render();
   });
 
+  houseArt.addEventListener("click", doorPress); // Her room's door, in Lumi Pet: through it to Lumi Dungeons.
+
   $("lp-team").addEventListener("click", function (event) { // Mouse and touch on a creature in the co-op fight: aim at it.
     const hit = event.target.closest("[data-click]");
     if (!hit || couching()) return;
@@ -1204,7 +1281,7 @@
     else if (snap.fight && has("battle")) { tab = TABS.indexOf("battle"); say(snap.fight.log.slice(-3).join(" ")); } // A fight was waiting: pick it up where it stopped.
     else if (awayRows().length) say(exploring() ? "Lumi is out exploring. Lumi Dungeons is where she is." : "Lumi is in the middle of a fight, over in Lumi Dungeons."); // She is busy in another of her apps.
     else if (APP === "lumi-dungeons") say("Where shall we go? Pick a place to explore, or find a fight in the arena.");
-    announceDone(); render();
+    announceDone(); welcomeHome(); render(); // (A fresh trip home outranks a finished nap: it is said last.)
   }).catch(function () {
     say("Lumi can't be reached just now. She'll be here when the connection is back.");
   }); }

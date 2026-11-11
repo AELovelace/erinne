@@ -28,17 +28,19 @@ test("the house is one row a spot, showing what is placed; Enter there opens the
   const view = lists();
   assert.deepEqual(view.home.map(r => r.key), house.spots.map(spot => spot.id));
   const rug = view.spot("rug");
-  assert.deepEqual([rug.shown, rug.hint, rug.send, rug.preview], ["rug-oval", "◀ Plum oval ▶ · in the room", undefined, ["rug", "rug-oval"]]);
-  assert.deepEqual(rug.options, ["rug-oval", "rug-moon", "rug-star", "rug-rainbow", "rug-paw"]);
+  assert.deepEqual([rug.shown, rug.hint, rug.send, rug.preview], ["rug-oval", "Plum oval · in the room · Enter for more", undefined, ["rug", "rug-oval"]]);
+  assert.deepEqual(rug.options, ["rug-oval"], "◀ ▶ step only through rugs she owns: the shop's are in the rug's whole list");
   rug.local();
   assert.deepEqual(view.went, [{ open: "rug" }]);
 });
 
-test("a flipped row previews its choice and Enter buys or places it", () => {
+test("a flipped row previews one of her own things and Enter puts it out; nothing she'd have to buy is in the row", () => {
   const priced = lists({}, null, { rug: "rug-moon" }).spot("rug");
-  assert.deepEqual([priced.hint, priced.send, priced.preview, priced.label], ["◀ Moon rug ▶ · 100 coins · showing in the room · Enter buys it", { action: "decorate", item: "rug-moon" }, ["rug", "rug-moon"], "Moon rug"]);
-  const owned = lists({ decor: ["rug-moon"] }, null, { rug: "rug-moon" }).spot("rug");
-  assert.equal(owned.hint, "◀ Moon rug ▶ · yours · Enter puts it out");
+  assert.deepEqual([priced.shown, priced.send, priced.preview], ["rug-oval", undefined, ["rug", "rug-oval"]], "A rug she doesn't own can't be flipped to: the row stays on hers");
+  const owned = lists({ decor: [...starters, "rug-moon"] }, null, { rug: "rug-moon" }).spot("rug");
+  assert.deepEqual(owned.options, ["rug-oval", "rug-moon"]);
+  assert.deepEqual([owned.hint, owned.send, owned.preview, owned.label], ["◀ Moon rug ▶ · yours · Enter puts it out", { action: "decorate", item: "rug-moon" }, ["rug", "rug-moon"], "Moon rug"]);
+  assert.equal(lists({ decor: [...starters, "rug-moon"] }).spot("rug").hint, "◀ Plum oval ▶ · in the room · Enter for more", "With two of hers, the arrows show");
   const placed = lists({ decor: [...starters, "rug-moon"], house: { ...firsts, rug: "rug-moon" } }, null, { rug: "rug-oval" }).spot("rug");
   assert.deepEqual([placed.hint, placed.send], ["◀ Plum oval ▶ · yours · Enter puts it out", { action: "decorate", item: "rug-oval" }]);
   assert.equal(lists({}, null, { rug: "rug-retired" }).spot("rug").shown, "rug-oval", "A choice that no longer exists falls back to what is placed");
@@ -156,7 +158,7 @@ test("a bare spot says so, the boxes come first, and a worn piece waits in its b
   assert.deepEqual(bare.home[0].send, { action: "unpack" });
   assert.equal(bare.home[0].hint, "Box 1 of 14: Mattress on the floor");
   const bed = bare.spot("bed");
-  assert.deepEqual([bed.shown, bed.preview, bed.hint], [null, null, "Bare for now · ◀ ▶ to look through what you could buy"]);
+  assert.deepEqual([bed.shown, bed.preview, bed.hint], [null, null, "Bare for now · Enter to see what you could buy"]);
   assert.ok(!bed.options.includes("bed-worn"), "Her own mattress isn't among the choices until it is unpacked");
   const waiting = lists({ house: {}, decor: [] }, null, {}, { left: 13, total: 14, next: "Bare bulb on a stand", ready: false });
   assert.match(waiting.home[0].note, /Another box tomorrow/);
@@ -164,7 +166,7 @@ test("a bare spot says so, the boxes come first, and a worn piece waits in its b
   assert.match(full.spot("lamp-worn").note, /moving box 2/);
   assert.equal(full.spot("lamp-worn").send, undefined);
   const unpacked = lists({ house: { bed: "bed-worn" }, decor: ["bed-worn"] }).spot("bed");
-  assert.deepEqual([unpacked.shown, unpacked.hint], ["bed-worn", "◀ Mattress on the floor ▶ · in the room"]);
+  assert.deepEqual([unpacked.shown, unpacked.hint], ["bed-worn", "Mattress on the floor · in the room · Enter for more"]);
 });
 
 test("buying is try before you buy: the first choice shows it, the second buys it", () => {

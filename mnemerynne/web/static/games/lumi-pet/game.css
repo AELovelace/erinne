@@ -332,3 +332,10 @@
   .gm[data-kit="lumi-pet"] .lp-tint { margin-bottom: .35rem; }
   .gm[data-kit="lumi-pet"] .lp-tint input { min-height: 2.2rem; }   /* A thumb-sized slider. */
 }
+/* Lumi's Garden's pages (the Flower tree, Helpers, Moonrise: garden-tree-art.js) cover the plots; Lumi steps off while one is up. */
+.lp-room[data-garden="true"]:not([data-garden-page=""]) .lp-pet-wrap { visibility: hidden; }
+/* Her room's door (house.js data-click="door"): in Lumi Pet it goes to Lumi Dungeons (game.js doorPress, adventure). */
+.gm[data-game="lumi-pet"] .lp-house [data-click="door"] { cursor: pointer; transition: filter .2s; }
+.gm[data-game="lumi-pet"] .lp-house [data-click="door"]:hover { filter: drop-shadow(0 0 6px var(--pet-glow, #ff8ecb)) brightness(1.12); }   /* A soft glow: this one can be pressed. */
+.lp-room[data-leaving="true"] .lp-pet-wrap { transform: translateX(calc(-170 * var(--u))) scale(.8); opacity: 0; transition: transform .7s ease-in, opacity .7s ease-in; }   /* She trots off towards the door. */
+@media (prefers-reduced-motion: reduce) { .lp-room[data-leaving="true"] .lp-pet-wrap { transform: none; transition: opacity .3s; } }

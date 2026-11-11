@@ -574,10 +574,10 @@ def act(conn: sqlite3.Connection, user_id: int, pet: dict, action: str, now: int
     elif action == "leave":
         if room["kind"] != "start":
             raise DungeonError("The way home is back where Lumi came in.")
-        _bank(conn, user_id, pet, run)
+        _bank(conn, user_id, pet, run, now)
     elif action == "abandon":
         lumibattle.hurt(pet, run["hp"])                               # her bruises come home with her
-        run.update(over="abandoned", ended={"lost": run["satchel"], "depth": run["depth"]}, event={"scenario": "abandon"})
+        run.update(over="abandoned", ended={"lost": run["satchel"], "depth": run["depth"], "at": now}, event={"scenario": "abandon"})   # "at": when, so Lumi Pet only welcomes a fresh trip home
         run["satchel"] = {"coins": 0, "potions": 0, "keys": 0, "trophies": [], "mods": []}
     else:
         raise DungeonError("Lumi doesn't know that one.")
@@ -585,8 +585,9 @@ def act(conn: sqlite3.Connection, user_id: int, pet: dict, action: str, now: int
     return fight
 
 
-def _bank(conn: sqlite3.Connection, user_id: int, pet: dict, run: dict) -> None:
-    """Walk out with the satchel: only now is any of it really hers. Coins are paid once, by the run's id."""
+def _bank(conn: sqlite3.Connection, user_id: int, pet: dict, run: dict, now: int) -> None:
+    """Walk out with the satchel: only now is any of it really hers. Coins are paid once, by the run's id.
+    `now` is kept as ended["at"], so Lumi Pet can tell a trip that just ended from an old one (its welcome home)."""
     bag = run["satchel"]
     lumibattle.hurt(pet, run["hp"])                                   # her bruises come home with her, to mend there
     paid = coins.prize(conn, user_id, bag["coins"], GAME, f"lumi-run:{user_id}:{run['id']}") if bag["coins"] else 0
@@ -594,14 +595,15 @@ def _bank(conn: sqlite3.Connection, user_id: int, pet: dict, run: dict) -> None:
     pet["potions"] += kept
     pet["decor"] += [t for t in bag["trophies"] if t not in pet["decor"]]
     pet["mods_owned"] += [m for m in bag["mods"] if m not in pet["mods_owned"]]
-    run.update(over="home", ended={"coins": paid, "potions": kept, "trophies": bag["trophies"], "mods": bag["mods"], "depth": run["depth"]},
+    run.update(over="home", ended={"coins": paid, "potions": kept, "trophies": bag["trophies"], "mods": bag["mods"], "depth": run["depth"], "at": now},
                event={"scenario": "home"})
 
 
-def after_fight(conn: sqlite3.Connection, user_id: int, pet: dict, run: dict, fight: dict) -> None:
+def after_fight(conn: sqlite3.Connection, user_id: int, pet: dict, run: dict, fight: dict, now: int | None = None) -> None:
     """A dungeon fight just ended. A win clears the room and puts its coins in the satchel; running steps back the way
     she came; a defeat ends the run, empties the satchel and leaves her with no health at all (her nap is
-    lumibattle's doing, and lasts exactly as long as mending from nothing). Saves the run; the caller saves the pet."""
+    lumibattle's doing, and lasts exactly as long as mending from nothing). Saves the run; the caller saves the pet.
+    `now` (ms) dates a defeat's ending for Lumi Pet's welcome home; without it the ending has no date and isn't welcomed."""
     run["fight"] = None
     lumi = fight["player"]
     run["hp"], run["mp"] = max(1, lumi["hp"]), lumi["mp"]
@@ -617,7 +619,7 @@ def after_fight(conn: sqlite3.Connection, user_id: int, pet: dict, run: dict, fi
         run["event"] = {"scenario": "fled", "enemy": fight["enemy"]["name"]}
     else:
         lumibattle.hurt(pet, 0)
-        run.update(over="defeat", ended={"lost": run["satchel"], "depth": run["depth"]}, event={"scenario": "defeat", "enemy": fight["enemy"]["name"]})
+        run.update(over="defeat", ended={"lost": run["satchel"], "depth": run["depth"], "at": now}, event={"scenario": "defeat", "enemy": fight["enemy"]["name"]})
         run["satchel"] = {"coins": 0, "potions": 0, "keys": 0, "trophies": [], "mods": []}
     _save(conn, user_id, run)
 

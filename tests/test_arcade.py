@@ -126,6 +126,8 @@ def test_the_page_and_the_server_build_the_same_games():
       const game = S.newGame(2024);
       for (let i = 0; i < 40; i++) {{ S.step(game, i % 7 === 0 ? (game.heading + 1) % 4 : game.heading); if (!game.alive) break; }}
       out.snake = {{ score: game.score, length: game.body.length, alive: game.alive, moves: game.moves, turns: game.turns }};
+      const empty = Array.from({{ length: S.W }}, function () {{ return new Array(S.H).fill(0); }});
+      for (const seed of [1, 7, 31337, 2147483645]) for (let i = 0; i < 50; i++) out.foods.push(S.food(seed, i, empty));
       console.log(JSON.stringify(out));
     """
     out = json.loads(subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True).stdout)
@@ -134,6 +136,19 @@ def test_the_page_and_the_server_build_the_same_games():
     snake = out["snake"]
     played = arcade.snake_replay(2024, [tuple(t) for t in snake["turns"]], snake["moves"])
     assert (played["score"], played["length"], played["alive"]) == (snake["score"], snake["length"], snake["alive"])
+    empty = [[0] * arcade.SNAKE_H for _ in range(arcade.SNAKE_W)]
+    assert out["foods"] == [list(arcade.snake_food(seed, i, empty)) for seed in (1, 7, 31337, 2147483645) for i in range(50)]
+
+
+def test_snake_food_kinds_are_not_streaky():
+    """Doll saw a whole Lumi Conga of +1 Lumis: the kinds once crept by one roll every two foods. Now nearly every game
+    meets a +5 or +10 in its first ten foods (true dice: 97%), and the overall mix stays 70 / 22 / 8."""
+    empty = [[0] * arcade.SNAKE_H for _ in range(arcade.SNAKE_W)]
+    seeds = range(1, 2147483647, 2147483647 // 2000)
+    kinds = [[arcade.snake_food(seed, i, empty)[2] for i in range(10)] for seed in seeds]
+    assert sum(1 for game in kinds if set(game) != {2}) / len(kinds) > 0.94
+    flat = [k for game in kinds for k in game]
+    assert 0.66 < flat.count(2) / len(flat) < 0.74 and 0.05 < flat.count(4) / len(flat) < 0.11
 
 
 def test_teacup_tower_climbs_must_fit_the_time():

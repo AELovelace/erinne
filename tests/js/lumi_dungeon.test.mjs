@@ -56,6 +56,30 @@ test("a finished trip shows how it ended once, then the places again", () => {
   assert.equal(open(lost).rows[0].hint, "Carried home from floor 2 · left behind: 24 coins · 1 potion");
 });
 
+test("a trip's ending offers to take her home first, which reads the ending on the way out", () => {
+  const home = run({ over: "home", ended: { coins: 80, potions: 1, trophies: [], mods: [], depth: 3 } }), went = [], opened = [];
+  const snap = { pet: { potions: 2 }, dungeon: { run: home, environments: [] } };
+  const rows = UI.rows({ snap, play: {}, dismissed: null, go: change => went.push(change), home: () => opened.push("lumi-pet") });
+  assert.deepEqual(rows.map(r => r.key), ["go-home", "continue"]);
+  assert.equal(rows[0].name, "Take her home");
+  rows[0].local();
+  assert.deepEqual([went, opened], [[{ dismiss: 9 }], ["lumi-pet"]], "Read, then off to her room");
+  assert.deepEqual(UI.rows({ snap, play: {}, dismissed: null, go() {} }).map(r => r.key), ["continue"], "No way home offered (a party): just the ending");
+  assert.deepEqual(UI.homeRow(() => {}).key, "go-home");
+});
+
+test("Lumi Pet's welcome home: once per fresh trip, in her words, never for an old or undated one", () => {
+  const at = 1_000_000_000, hour = 3600000;
+  const home = run({ over: "home", ended: { coins: 80, potions: 2, trophies: ["trophy-geode-egg"], mods: [], depth: 3, at } });
+  assert.equal(UI.welcome(home, at + hour), "Home! " + catalog.environments[1].name + ", floor 3: she brought back 80 coins, 2 potions and something for the house.");
+  assert.match(UI.welcome(run({ over: "defeat", ended: { lost: bag, depth: 2, at } }), at), /^Carried home from .*A cuddle and a nap would help\.$/);
+  assert.match(UI.welcome(run({ over: "abandoned", ended: { lost: bag, depth: 1, at } }), at), /^Home early from /);
+  assert.equal(UI.welcome(home, at + UI.WELCOME_HOURS * hour + 1), "", "Too old to be news");
+  assert.equal(UI.welcome(run({ over: "home", ended: { coins: 5, potions: 0, trophies: [], mods: [], depth: 1 } }), at), "", "Ended before endings were dated");
+  assert.equal(UI.welcome(run(), at), "", "Still out exploring");
+  assert.equal(UI.welcome(null, at), "");
+});
+
 test("exploring offers each way out, saying what is known there, and only choices are sent", () => {
   const list = open(run());
   assert.deepEqual(list.rows.map(r => r.key), ["go-e", "go-n", "look", "potion", "care", "abandon"]);

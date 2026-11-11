@@ -142,7 +142,8 @@
 
   function cool(ms, passed) { return ms - passed > 0 ? "ready in " + clock(ms - passed) : ""; }
 
-  // ---- The lists. ctx: { garden, decor (the decorations' catalog), drawer (null, "seeds", "helpers", "moon", "decor", "decor:<slot>", "store"),
+  // ---- The lists. ctx: { garden, decor (the decorations' catalog), drawer (null, "decor", "decor:<slot>", "store"; "seeds", "helpers" and
+  //      "moon" are pages of their own, garden-tree.js),
   //      seed, cursor, mini, passed, pending, level, go(change) }
   function rows(ctx) {
     const garden = ctx.garden, go = ctx.go, passed = ctx.passed || 0, mini = ctx.mini;
@@ -153,19 +154,6 @@
     if (mini && mini.kind === "feed") return [{ key: "feeding", icon: "🌱", name: "Fertilize! " + mini.count + " presses", hint: "Enter, ⏯ or the big button, as fast as you can",
       local: function () { go({ feed: 1 }); } }];
 
-    if (ctx.drawer === "seeds") return [back()].concat(garden.flowers.map(function (flower) {
-      const what = span(flower.minutes_now) + " · " + format(flower.powder_now) + " powder · " + (flower.sort === "perennial" ? "grows back" : "plant again each time");
-      if (flower.unlocked) return { key: "seed-" + flower.id, icon: flower.id === ctx.seed ? "✓" : "❀", name: flower.name, hint: what, local: function () { go({ seed: flower.id, drawer: null }); } };
-      const cost = flower.stardust ? format(flower.stardust) + " starpowder" : flower.coins + " coins";
-      if (!flower.next) return { key: "seed-" + flower.id, icon: "🔒", name: flower.name, hint: "Further up the ladder · " + what, note: "Unlock the flowers before " + flower.name + " first." };
-      if (garden.given < flower.needs) return { key: "seed-" + flower.id, icon: "🔒", name: flower.name, hint: "When this garden has given " + format(flower.needs) + " powder (" + format(garden.given) + " so far) · then " + cost,
-        note: flower.name + " opens when this garden has given " + format(flower.needs) + " starpowder." };
-      if ((ctx.level || 1) < flower.level) return { key: "seed-" + flower.id, icon: "🔒", name: flower.name, hint: "Needs Lumi at level " + flower.level + " · then " + cost, note: flower.name + " needs Lumi to be level " + flower.level + "." };
-      return ask("seed-" + flower.id, "✧", "Unlock " + flower.name, cost + " · " + what, { action: "unlock", item: flower.id });
-    }));
-    if (ctx.drawer === "helpers") return [back()].concat(garden.helpers.map(function (helper) {
-      return ask("helper-" + helper.id, "✦", helper.name + " · level " + helper.level, format(helper.cost) + " starpowder · " + helper.about, { action: "helper", item: helper.id });
-    }));
     const decor = ctx.decor || { slots: [], capsule: { name: "Capsule", price: 0, sell: {} } }, mine = garden.decor || { placed: {}, owned: {}, spare: {} };
     function worth(item) { return item.rarity === "shop" ? Math.floor(item.stardust / 2) : decor.capsule.sell[item.rarity]; }
     function grand(rarity) { return rarity[0].toUpperCase() + rarity.slice(1); }
@@ -195,20 +183,13 @@
           note: owned ? "Your " + item.name + " is out in another garden. Put it away there first, or win another." : item.name + " only comes from the " + decor.capsule.name + "." };
       }));
     }
-    if (ctx.drawer === "moon") return [back()].concat(
-      [ask("moon-garden", "☾", "Another garden", "A new starter garden beside this one, to fill from the first flower", { action: "moonrise", item: "garden" }, { confirm: true })],
-      garden.upgrades.map(function (thing) {
-        return thing.count >= thing.max ? { key: "moon-" + thing.id, icon: "✓", name: thing.name, hint: "As high as it goes (" + thing.count + ")", note: thing.name + " is as high as it goes." }
-          : ask("moon-" + thing.id, "✦", thing.name, thing.about + " · for good · have " + thing.count, { action: "moonrise", item: thing.id }, { confirm: true });
-      }));
-
     const ready = garden.plots.filter(function (plot) { const now = stage(plot, passed); return now === "ready" || now === "overgrown"; }).length;
     const growing = garden.plots.some(function (plot) { return stage(plot, passed) === "growing"; });
     const list = [{ key: "press", icon: "◎", name: "Press the powder", hint: "⏯ presses too · " + format(Math.max(0, garden.powder - (ctx.pending || 0) * garden.rates.tap)) + " waiting", local: function () { go({ press: 1 }); } }];
     list.push(ready ? ask("trim-all", "✂", "Harvest everything ready (" + ready + ")", "Trims them all, and replants the cut flowers", { action: "trim_all" })
       : { key: "trim-all", icon: "✂", name: "Harvest everything ready", hint: growing ? "Nothing is ready yet" : "Nothing is planted", note: "Nothing is ready to trim yet." });
     const seed = flowerOf(garden, seedFor(garden, null, ctx.seed));
-    list.push({ key: "seeds", icon: "❀", name: "Seed: " + seed.name, hint: "What Enter plants in an empty plot · open the seed drawer", local: function () { go({ drawer: "seeds" }); } });
+    list.push({ key: "seeds", icon: "❀", name: "Seed: " + seed.name, hint: "What Enter plants in an empty plot · the flower tree: choose a seed, unlock more", local: function () { go({ drawer: "seeds" }); } });
     const under = garden.plots[ctx.cursor]; // The plot the cursor is on: a flower there can be dug up, which is how a perennial is replaced (it never leaves by itself).
     if (under && under.flower) {
       const there = flowerOf(garden, under.flower), done = stage(under, passed) !== "growing";
@@ -226,9 +207,8 @@
     });
     list.push({ key: "helpers", icon: "♟", name: "Helpers", hint: "Six class helpers, levelled with starpowder", local: function () { go({ drawer: "helpers" }); } });
     list.push({ key: "decor", icon: "✧", name: "Decorations", hint: "Fifteen places to dress, the Seedling Capsule, and the store", local: function () { go({ drawer: "decor" }); } });
-    list.push(garden.moonrise.ready ? { key: "moon", icon: "☾", name: "Moonrise", hint: "Replant this garden for something that lasts", local: function () { go({ drawer: "moon" }); } }
-      : { key: "moon", icon: "☾", name: "Moonrise", hint: "When this garden has all its plots and has given " + format(garden.moonrise.needs) + " powder",
-        note: "A moonrise needs every plot dug and " + format(garden.moonrise.needs) + " starpowder given by this garden (" + format(garden.given) + " so far)." });
+    list.push({ key: "moon", icon: "☾", name: "Moonrise", local: function () { go({ drawer: "moon" }); }, // Its page opens before it is ready, to see what it can bring.
+      hint: garden.moonrise.ready ? "Ready: replant this garden for something that lasts" : "When this garden has all its plots and has given " + format(garden.moonrise.needs) + " powder" });
     if (garden.gardens > 1) list.push(ask("other", "⇄", "Go to garden " + ((garden.at + 1) % garden.gardens + 1), "You have " + garden.gardens + " gardens", { action: "garden", count: (garden.at + 1) % garden.gardens }));
     list.push({ key: "leave", icon: "♡", name: "Back to Lumi", hint: "The garden keeps growing without you", local: function () { go({ leave: true }); } });
     return list;

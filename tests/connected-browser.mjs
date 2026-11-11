@@ -47,6 +47,8 @@ try {
   await mkdir("runs/casino-browser", { recursive: true });
   if (process.env.LUMI_SOFT_ONLY === "1") { // Focused iteration on Lumi-Soft.
     await checkLumiSoft(bob, base);
+  } else if (process.env.LUMI_GARDEN_ONLY === "1") { // Focused iteration on Lumi's Garden: its plots, minigames and pages.
+    await checkLumiPetGarden(browser, alice, base);
   } else if (process.env.ARCADE_ONLY === "1") { // Focused iteration on Lumi in the arcade games.
     await checkArcadeLumi(browser, alice, base);
   } else if (process.env.LUMI_PARTY_ONLY === "1") { // Focused iteration on Lumi Dungeons parties and Who's playing?

@@ -54,20 +54,20 @@ LADDER = [flower["id"] for flower in G.CATALOG["flowers"]]
 
 
 # --------------------------------------------------------------------------- the catalog
-def test_the_ladder_starts_free_runs_in_order_and_ends_in_perennials():
+def test_the_flowers_start_free_open_in_order_and_end_in_perennials():
     flowers = G.CATALOG["flowers"]
     assert len(flowers) == 42 and flowers[0]["coins"] == flowers[0]["stardust"] == 0
     assert (min(f["minutes"] for f in flowers), max(f["minutes"] for f in flowers)) == (2, 24 * 60)       # two minutes to a whole day
     sorts = [flower["sort"] for flower in flowers]
     assert sorts == sorted(sorts) and sorts.count("cut") == 30 and sorts.count("perennial") == 12        # every cut flower comes before every perennial
     assert sum(1 for f in flowers if f["stardust"]) == 10 and all(not (f["coins"] and f["stardust"]) for f in flowers)     # boutique ones for powder only
-    assert all(f["level"] == 1 for f in flowers)                                # the ladder is in order, so nothing on it may wait on fights
+    assert all(f["level"] == 1 for f in flowers)                                # the gates climb in order, so nothing may wait on fights
     best_cut = max(f["powder"] / f["minutes"] for f in flowers if f["sort"] == "cut")
     assert all(f["powder"] / f["minutes"] < best_cut for f in flowers if f["sort"] == "perennial")       # tending pays more than leaving
     for fern in (f for f in flowers if f["sort"] == "perennial"):               # and a cut flower of the same time always out-earns a perennial
         same = [f for f in flowers if f["sort"] == "cut" and f["minutes"] == fern["minutes"]]
         assert all(cut["powder"] > fern["powder"] for cut in same), fern["id"]
-    assert G._FLOWERS["dusk-tulip"]["minutes"] == G._FLOWERS["moon-fern"]["minutes"] == 60
+    assert G._FLOWERS["moon-fern"]["minutes"] == 60
     looks = {(f["shape"], f["petals"], f["colour"]) for f in flowers}
     assert len(looks) == 42 and {f["shape"] for f in flowers} == set(G.SHAPES)   # no two alike, and every shape is used
     assert all(a["shape"] != b["shape"] for a, b in zip(flowers, flowers[1:]))  # neighbours on the ladder never share a shape
@@ -86,6 +86,9 @@ def test_bad_garden_catalogs_are_refused(tmp_path):
     broken(lambda d: d["flowers"][0].update(coins=5))                           # nothing to plant in a new garden
     broken(lambda d: d["flowers"][3].update(coins=5, stardust=5))               # one price or the other
     broken(lambda d: d["flowers"][3].update(needs=0))                           # out of ladder order
+    broken(lambda d: d["flowers"][3].update(after=[d["flowers"][5]["id"]]))     # opens from a flower further down: a loop could follow
+    broken(lambda d: d["flowers"][3].update(after=[]))                          # only the first flower opens from nothing
+    broken(lambda d: d["flowers"][3].pop("branch"))                             # nowhere on the tree page
     broken(lambda d: d["flowers"][2].update(colour="red"))
     broken(lambda d: d["flowers"][2].update(shape="triangle"))                  # nothing garden-art.js could draw
     broken(lambda d: d["flowers"][3].update(shape=d["flowers"][2]["shape"], petals=d["flowers"][2]["petals"], colour=d["flowers"][2]["colour"]))     # two alike
@@ -131,36 +134,60 @@ def test_a_flower_can_be_dug_up_so_a_perennial_can_be_replaced(conn, alice):
     assert (said["dug"], said["trimmed"], said["powder"]) == ("Moon Fern", 1, fern)
     plots = _look(conn, alice, T0 + HOUR)["plots"]
     assert [(p["flower"], p["stage"]) for p in plots[:2]] == [(None, "empty"), (None, "empty")]
-    _g(conn, alice, "plant", T0 + HOUR, plot=0, item="dusk-tulip")              # and the plot takes something else
-    assert _look(conn, alice, T0 + HOUR)["plots"][0]["flower"] == "dusk-tulip"
+    _g(conn, alice, "plant", T0 + HOUR, plot=0, item="moon-mushroom")           # and the plot takes something else
+    assert _look(conn, alice, T0 + HOUR)["plots"][0]["flower"] == "moon-mushroom"
 
 
 def test_a_perennial_grows_back_and_harvest_all_replants_cut_flowers(conn, alice):
     _look(conn, alice)
     _set(conn, alice, garden={"unlocked": LADDER})
-    tulip, fern = G._FLOWERS["dusk-tulip"]["powder"], G._FLOWERS["moon-fern"]["powder"]
+    tulip, fern = G._FLOWERS["moon-mushroom"]["powder"], G._FLOWERS["moon-fern"]["powder"]      # a 50-minute cut flower and an hour-long perennial
     _g(conn, alice, "plant", plot=0, item="moon-fern")
-    _g(conn, alice, "plant", plot=1, item="dusk-tulip")
+    _g(conn, alice, "plant", plot=1, item="moon-mushroom")
     _g(conn, alice, "plant", plot=2, item="moondaisy")
     with pytest.raises(lumipet.PetError, match="already growing"):
         _g(conn, alice, "plant", plot=0, item="moondaisy")
     said = _g(conn, alice, "trim_all", T0 + HOUR)["said"]
     assert said["trimmed"] == 3 and said["powder"] == fern + tulip + 3          # the daisy has sat there overgrown for most of the hour
     plots = _look(conn, alice, T0 + HOUR)["plots"]
-    assert [(p["flower"], p["stage"], p["ready_in"]) for p in plots[:3]] == [("moon-fern", "growing", HOUR), ("dusk-tulip", "growing", HOUR), ("moondaisy", "growing", 2 * MIN)]
+    assert [(p["flower"], p["stage"], p["ready_in"]) for p in plots[:3]] == [("moon-fern", "growing", HOUR), ("moon-mushroom", "growing", 50 * MIN), ("moondaisy", "growing", 2 * MIN)]
     with pytest.raises(lumipet.PetError, match="Nothing is ready"):
         _g(conn, alice, "trim_all", T0 + HOUR)
     assert _g(conn, alice, "trim", T0 + HOUR + 2 * MIN, plot=2)["said"]["powder"] == 6
     assert _look(conn, alice, T0 + HOUR + 2 * MIN)["plots"][2]["flower"] is None  # trimmed one at a time, a cut flower leaves its plot
 
-def test_each_garden_climbs_the_ladder_itself_with_coins_or_starpowder(conn, alice):
+def test_the_flower_tree_branches_three_ways_with_bridges_and_a_crown():
+    flowers, by = G.CATALOG["flowers"], G._FLOWERS
+    branches = [f["branch"] for f in flowers]
+    assert (branches.count("root"), branches.count("quick"), branches.count("slow"), branches.count("perennial"), branches.count("crown")) == (1, 14, 14, 12, 1)
+    assert [f["id"] for f in flowers if f["after"] == ["moondaisy"]] == ["glowbell", "pixie-puff", "moon-fern"]   # Moondaisy opens all three branches
+    quick, slow = [f for f in flowers if f["branch"] == "quick"], [f for f in flowers if f["branch"] == "slow"]
+    assert all(f["minutes"] <= 35 for f in quick) and all(f["minutes"] < G.CATALOG["reminder_minutes"] for f in quick[:12])   # quick blooms never buzz a phone
+    for fast, big in zip(quick, slow):                                         # each step has one of each: the quick one opens sooner and costs less
+        assert fast["needs"] < big["needs"] and fast["minutes"] < big["minutes"]
+        assert abs(fast["powder"] / fast["minutes"] - big["powder"] / big["minutes"]) < 0.3   # and earns about the same a minute, if tended
+    assert by["midnight-rose"]["after"] == ["glass-lily", "phoenix-daisy"]       # the crown, from the top of either cut branch
+    assert {f["id"]: f["after"][1] for f in flowers if len(f["after"]) > 1 and f["branch"] != "crown"} ==         {"little-sun": "sugar-trumpet", "lantern-lily": "snowball-bloom", "star-wisteria": "little-sun"}       # three bridges between branches
+
+
+def test_a_flower_opens_from_any_one_of_the_flowers_it_grows_from(conn, alice):
+    _look(conn, alice)
+    _set(conn, alice, garden={"given": 10 ** 6, "unlocked": ["moondaisy", "glowbell", "dewdrop-star", "candy-spike", "sugar-trumpet"]})
+    shown = [f["id"] for f in _look(conn, alice)["flowers"] if f["next"]]
+    assert shown == ["pixie-puff", "dusk-tulip", "little-sun", "moon-fern"]     # the bridge from Sugar Trumpet skips four slow giants
+    assert _g(conn, alice, "unlock", item="little-sun")["garden"]["flowers"][10]["unlocked"]
+    with pytest.raises(lumipet.PetError, match="grows from Glass Lily or Phoenix Daisy: unlock one of them first"):
+        _g(conn, alice, "unlock", item="midnight-rose")
+
+
+def test_each_garden_grows_its_own_tree_with_coins_or_starpowder(conn, alice):
     shown = _look(conn, alice)
-    assert [f["id"] for f in shown["flowers"] if f["unlocked"]] == ["moondaisy"] and [f["id"] for f in shown["flowers"] if f["next"]] == ["glowbell"]
+    assert [f["id"] for f in shown["flowers"] if f["unlocked"]] == ["moondaisy"] and [f["id"] for f in shown["flowers"] if f["next"]] == ["glowbell", "pixie-puff", "moon-fern"]
     bell, rose = G._FLOWERS["glowbell"], G._FLOWERS["nebula-rose"]
     with pytest.raises(lumipet.PetError, match="given 40 starpowder"):
         _g(conn, alice, "unlock", item="glowbell")
     _set(conn, alice, garden={"given": 40})
-    with pytest.raises(lumipet.PetError, match="before it first"):
+    with pytest.raises(lumipet.PetError, match="Starpoppy grows from Pixie Puff: unlock it first"):
         _g(conn, alice, "unlock", item="starpoppy")
     assert _g(conn, alice, "unlock", item="glowbell")["coins"] == 1000 - bell["coins"]      # an ordinary flower: coins
     with pytest.raises(lumipet.PetError, match="can unlock"):
@@ -171,9 +198,9 @@ def test_each_garden_climbs_the_ladder_itself_with_coins_or_starpowder(conn, ali
     _set(conn, alice, powder=rose["stardust"])
     out = _g(conn, alice, "unlock", item="nebula-rose")                         # a boutique flower: starpowder only
     assert out["coins"] == 1000 - bell["coins"] and out["garden"]["powder"] == 0 and out["garden"]["flowers"][rose["rung"]]["unlocked"]
-    # A garden saved under an older, shorter ladder: the flower it never had is simply next, and nothing it had is lost.
+    # A garden saved under the old one-flower-after-another ladder: nothing it had is lost, and the tree opens from there.
     _set(conn, alice, garden={"given": 10 ** 6, "unlocked": ["moondaisy", "glowbell", "starpoppy", "comet-clover"]})
-    assert [f["id"] for f in _look(conn, alice)["flowers"] if f["next"]] == ["pixie-puff"]
+    assert [f["id"] for f in _look(conn, alice)["flowers"] if f["next"]] == ["pixie-puff", "dewdrop-star", "moon-mushroom", "moon-fern"]
     assert _g(conn, alice, "unlock", item="pixie-puff")["garden"]["flowers"][2]["unlocked"]
 
 def test_plots_cost_more_each_time_and_a_garden_holds_sixteen(conn, alice):
@@ -333,7 +360,7 @@ def test_watering_is_a_growing_sequence_the_server_keeps(conn, alice):
 def test_fertilizing_counts_ten_seconds_of_presses_and_no_more(conn, alice):
     _look(conn, alice)
     _set(conn, alice, garden={"unlocked": LADDER})
-    _g(conn, alice, "plant", plot=0, item="dusk-tulip")
+    _g(conn, alice, "plant", plot=0, item="moon-fern")                         # an hour to grow
     with pytest.raises(lumipet.PetError, match="Start a round"):
         _g(conn, alice, "feed_end", count=50)
     assert _g(conn, alice, "feed_start")["garden"]["feed"]["until_in"] == 10_000
@@ -544,7 +571,7 @@ def test_the_numbers_keep_a_gentle_pace():
     plots = sum(round(rules["price"] * rules["growth"] ** n) for n in range(rules["max"] - rules["start"]))
     assert plots + sum(flower["coins"] for flower in flowers) < 6000            # a whole garden's coin cost: weeks of casual play, not months
     state = {"coins_today": 0}
-    powder, made = 8 * G._FLOWERS["dusk-tulip"]["powder"] * 4, 0                # a casual day: eight Dusk Tulips, trimmed four times
+    powder, made = 8 * G._FLOWERS["little-sun"]["powder"] * 3, 0                # a casual day: eight Little Suns (75 minutes), trimmed three times
     while powder >= G.price(state):
         powder -= G.price(state)
         state["coins_today"] += 1

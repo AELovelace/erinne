@@ -1,14 +1,21 @@
 """Make the Stardust Garden's flowers and decorations (mnemerynne/lumipet_data/garden.json).
 
-The garden has 42 flowers on one ladder and 15 decoration slots of 15 things each. Typing 267 entries by hand would
+The garden has 42 flowers on one tree and 15 decoration slots of 15 things each. Typing 267 entries by hand would
 hide the pattern, so this script writes them from the short tables below and leaves every other setting in
 garden.json (the press, plots, helpers, minigames, gifts) exactly as it is. Run it from the repo root after changing
 a table:
 
     .venv/Scripts/python.exe python/make_lumi_garden.py
 
-Then run tests/test_lumigarden.py and tests/js/lumi_garden.test.mjs: they check the ladder's order, that every
-flower looks different, and that garden-art.js can draw every shape and decoration named here.
+Then run tests/test_lumigarden.py, tests/js/lumi_garden.test.mjs and tests/js/lumi_garden_tree.test.mjs: they check
+the order the flowers open in, that the tree has no loops, that every flower looks different, and that garden-art.js
+can draw every shape and decoration named here.
+
+The flower tree (2026-11-11, Doll's pick): Moondaisy opens three branches. Quick blooms are short timers for someone
+sitting with the garden; Slow giants are long ones to leave overnight; Perennials grow back. A flower opens from any
+one of the flowers in its `after` (a branch's flower before it, or a bridge from a neighbouring branch), and still
+waits for its own gates: the powder this garden has given, Lumi's level and its price. Midnight Rose crowns the two
+cut branches. The `needs` order down the list is the old ladder's, so nothing about the gates moved.
 """
 
 from __future__ import annotations
@@ -20,7 +27,8 @@ from pathlib import Path
 
 PATH = Path(__file__).resolve().parents[1] / "mnemerynne" / "lumipet_data" / "garden.json"
 
-# (id, name, minutes, shape). Cut flowers first, quickest first: harvested once and planted again.
+# (id, name, minutes, shape). Cut flowers first, quickest first: harvested once and planted again. These minutes
+# set each flower's place on the old ladder (its gates and its powder a minute); a quick bloom then grows in QUICK's time.
 CUT = [
     ("moondaisy", "Moondaisy", 2, "daisy"), ("glowbell", "Glowbell", 5, "bell"), ("pixie-puff", "Pixie Puff", 8, "puff"),
     ("dewdrop-star", "Dewdrop Star", 12, "star"), ("starpoppy", "Starpoppy", 15, "poppy"), ("candy-spike", "Candy Spike", 20, "spike"),
@@ -40,6 +48,13 @@ PERENNIAL = [
     ("lullaby-hearts", "Lullaby Hearts", 600, "hearts"), ("comet-orchid", "Comet Orchid", 720, "orchid"), ("silver-fern", "Silver Fern", 900, "fern"),
     ("dawn-iris", "Dawn Iris", 1080, "iris"), ("galaxy-wisteria", "Galaxy Wisteria", 1260, "wisteria"), ("eternity-lotus", "Eternity Lotus", 1440, "lotus"),
 ]
+# The tree. QUICK and SLOW climb side by side, one of each per step: the quick one is always the earlier, cheaper one.
+QUICK = {"glowbell": 3, "dewdrop-star": 4, "candy-spike": 5, "sugar-trumpet": 7, "dusk-tulip": 9, "heartstring": 11, "nebula-rose": 13,   # id: minutes
+         "ribbon-orchid": 15, "lantern-lily": 18, "aurora-iris": 21, "frost-star": 24, "honey-trumpet": 27, "royal-spike": 30, "glass-lily": 35}
+SLOW = ["pixie-puff", "starpoppy", "comet-clover", "moon-mushroom", "little-sun", "pebble-cactus", "mist-lotus", "snowball-bloom", "twilight-bell",
+        "ember-poppy", "velvet-tulip", "dream-puff", "fortune-clover", "phoenix-daisy"]
+CROWN = "midnight-rose"                  # opens from the top of either cut branch
+BRIDGES = {"little-sun": "sugar-trumpet", "lantern-lily": "snowball-bloom", "star-wisteria": "little-sun"}   # a second way in, from the next branch over
 BOUTIQUE = {"nebula-rose", "mist-lotus", "aurora-iris", "dream-puff", "glass-lily", "midnight-rose",      # bought with starpowder, never coins
             "prism-hydrangea", "comet-orchid", "galaxy-wisteria", "eternity-lotus"}
 PETALS = {"daisy": 10, "bell": 3, "puff": 12, "star": 5, "poppy": 4, "spike": 6, "clover": 3, "trumpet": 5, "mushroom": 3, "tulip": 3, "sun": 12,
@@ -91,19 +106,35 @@ def colour(turn: float, light: float, rich: float) -> str:
     return f"#{round(red * 255):02x}{round(green * 255):02x}{round(blue * 255):02x}"
 
 
+def branch(ident: str) -> tuple[str, list[str]]:
+    """Which branch a flower is on, and the flowers it opens from (any one of them will do)."""
+    quick, perennial = list(QUICK), [entry[0] for entry in PERENNIAL]
+    if ident == CUT[0][0]:
+        return "root", []
+    if ident == CROWN:
+        return "crown", [quick[-1], SLOW[-1]]
+    line, name = (quick, "quick") if ident in QUICK else (SLOW, "slow") if ident in SLOW else (perennial, "perennial")
+    at = line.index(ident)
+    after = [line[at - 1] if at else CUT[0][0]] + ([BRIDGES[ident]] if ident in BRIDGES else [])
+    return name, after
+
+
 def flowers() -> list[dict]:
     ladder = [(*entry, "cut") for entry in CUT] + [(*entry, "perennial") for entry in PERENNIAL]
+    assert len(QUICK) + len(SLOW) + 2 == len(CUT), "every cut flower is quick, slow, the root or the crown"
     grow = (LAST_NEEDS / 40) ** (1 / (len(ladder) - 2))            # needs climb evenly from 40 to LAST_NEEDS
     out, used = [], {}
     for rung, (ident, name, minutes, shape, sort) in enumerate(ladder):
         rate = 3 + 3 * min(1.0, math.log(minutes / 2) / math.log(720))    # 3 powder a minute for a daisy, 6 for a day-long bloom
+        minutes = QUICK.get(ident, minutes)                          # a quick bloom keeps its step's powder a minute, in far less time
         powder = round(minutes * rate * (PERENNIAL_SHARE if sort == "perennial" else 1))
         needs = 0 if rung == 0 else nice(40 * grow ** (rung - 1))
         boutique = ident in BOUTIQUE
         second = used.get(shape, 0)                                 # the second flower of a shape gets more petals and stands taller
         used[shape] = second + 1
         turn = rung * 0.381966                                      # the golden angle: neighbours on the ladder never share a colour
-        out.append({"id": ident, "name": name, "sort": sort, "minutes": minutes, "powder": powder,
+        on, after = branch(ident)
+        out.append({"id": ident, "name": name, "sort": sort, "branch": on, "after": after, "minutes": minutes, "powder": powder,
                     "coins": 0 if boutique or rung == 0 else 20 + 5 * rung, "stardust": nice(needs * 0.3) if boutique else 0,
                     "level": 1, "needs": needs, "shape": shape, "petals": PETALS[shape] + 2 * second, "size": round(0.9 + 0.3 * second + 0.004 * rung, 2),
                     "colour": "#f6f1ff" if rung == 0 else colour(turn, 0.74, 0.82), "heart": "#ffdc83" if rung == 0 else colour(turn + 0.42, 0.62, 0.78)})

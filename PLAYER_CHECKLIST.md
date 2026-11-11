@@ -80,3 +80,9 @@ Games follow **Screens → Text size**, including while a game is already open. 
 4. **Away:** leave your turn for 45 seconds and check your Lumi braces and the turn moves on. Leave the party mid-fight and check your Lumi goes home and the fight carries on.
 5. **Couch:** the same fight on one TV with remotes: each person's column shows their moves only on their turn; ◀ ▶ choose aim and who an item is for; ⏯ drinks a potion on your turn.
 6. **Open parties:** with a party waiting on another device, choose **See open parties**: check the card shows its host, place, code, the Lumis already in it (in their colours) and free seats; join with arrows + Enter and with two taps.
+
+## Lumi Pet ⇄ Lumi Dungeons: the door (2026-11-11)
+
+1. **The door:** in Lumi Pet, press the door in her room. Check she trots off and Lumi Dungeons opens. Inside Media's game window, check the name in the bar changes too. On a phone where the door is off-screen, check **Care → Through the door** (the last row) does the same.
+2. **Take her home:** in Lumi Dungeons, check **Take her home** is the first row of the Dungeon tab and goes back to her room. Check it isn't there in a party lobby or on a party trip.
+3. **After a trip:** finish a trip (walk home, give up, or lose). Check the ending screen has **Take her home** first, with the cursor on it. Choose it and check Lumi Pet says where she went and what she brought back. Reload and check she doesn't say it again.

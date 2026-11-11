@@ -1,6 +1,8 @@
 /* The Home and Closet tabs' lists: one row per spot in the house, or per place on Lumi, each showing one of its
-   choices. ◀ ▶ flip through a row's choices, shown in the room (or on her) before anything is bought; Enter buys
-   it or puts it out. Pure: it turns the server's snapshot into plain rows for game.js to draw.
+   choices. In the Closet ◀ ▶ flip through a row's choices, shown on her before anything is bought; Enter buys it or
+   wears it. In Home ◀ ▶ flip only through what she owns (Doll's call, 2026-11-11: swapping her own things round
+   shouldn't wander into the shop), and Enter on a row opens the spot's whole list, where new things are tried and
+   bought. Pure: it turns the server's snapshot into plain rows for game.js to draw.
 
    A row is { key, icon, name, hint } and may have: `options` and `shown` (the choices ◀ ▶ flip through, and the one
    showing), `flipKey` (where game.js remembers the choice), `preview` or `wear` ([spot or slot, choice] to draw),
@@ -46,14 +48,15 @@
       ? { key: "unpack", icon: "📦", name: "Unpack a moving box", hint: "Box " + (boxes.total - boxes.left + 1) + " of " + boxes.total + ": " + boxes.next, send: { action: "unpack" } }
       : { key: "unpack", icon: "📦", name: "Moving boxes: " + boxes.left + " left", hint: "One a day · next: " + boxes.next, note: "Lumi has unpacked enough for one day. Another box tomorrow!" });
     return top.concat(snap.house.spots.map(function (entry) {
-      const choices = entry.items.filter(function (piece) { return !hidden(piece); }); // A trophy, Capsule or Lumi-Soft prize, or unpacked box joins the row once she has it.
+      const choices = entry.items.filter(mine); // ◀ ▶ step only through what is hers (free with the house, bought, won, found or unpacked).
       const ids = choices.map(function (piece) { return piece.id; }), placed = pet.house[entry.id];
       const shown = ids.indexOf(ctx.flip[entry.id]) >= 0 ? ctx.flip[entry.id] : placed;
       const piece = choices.find(function (found) { return found.id === shown; }) || null;
+      const more = ids.length > (piece && piece.id === placed ? 1 : 0); // Something else of hers to flip to.
       if (!piece) return { key: entry.id, icon: "⌂", name: entry.name, label: "nothing yet", options: ids, shown: null, flipKey: entry.id, preview: null, // Bare: nothing here yet.
-        hint: "Bare for now" + (ids.length ? " · ◀ ▶ to look through what you could buy" : ""), local: function () { go({ open: entry.id }); } };
+        hint: "Bare for now · " + (ids.length ? "◀ ▶ through yours, or " : "") + "Enter to see what you could buy", local: function () { go({ open: entry.id }); } };
       const row = { key: entry.id, icon: "⌂", name: entry.name, label: piece.name, options: ids, shown: piece.id, flipKey: entry.id, preview: [entry.id, piece.id],
-        hint: "◀ " + piece.name + " ▶ · " + (piece.id === placed ? "in the room" : mine(piece) ? "yours · Enter puts it out" : piece.price + " coins · showing in the room · Enter buys it") };
+        hint: (more ? "◀ " + piece.name + " ▶" : piece.name) + " · " + (piece.id === placed ? "in the room · Enter for more" : "yours · Enter puts it out") };
       if (piece.id === placed) row.local = function () { go({ open: entry.id }); }; else row.send = { action: "decorate", item: piece.id };
       return row;
     }));

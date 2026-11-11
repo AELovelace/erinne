@@ -4938,6 +4938,10 @@
     "floor-bare": function () {
       return rect(0, 350, 400, 150, "#34303a") + scatter(43, 60, function (roll) { return circle(round(roll(0, 400)), round(roll(356, 498)), round(roll(0.6, 1.8)), "#403b46"); }) + rect(0, 350, 400, 3, "#55505c");
     },
+    "door-bare": function () { // The flat's own door, before her worn one is unpacked: plain primed wood, a builder's sticker, a brass knob. Her way out to Lumi Dungeons.
+      return rect(-62, 196, 74, 158, "#5c5560", 'rx="2"') + rect(-56, 202, 62, 152, "#8a8290") + rect(-50, 214, 50, 54, "none", 'stroke="#7a7280" stroke-width="2"') +
+        rect(-50, 280, 50, 62, "none", 'stroke="#7a7280" stroke-width="2"') + circle(-4, 278, 4.5, "#d8b24a") + rect(-44, 226, 22, 12, "#e8e4d8", 'opacity=".8" transform="rotate(-6 -33 232)"');
+    },
     // Moving boxes, stacked at the front of the room: as many as are left to unpack (up to four drawn).
     boxes: function (left) {
       const spots = [[318, 452, 46, 40], [360, 458, 40, 34], [326, 418, 38, 34], [362, 428, 32, 30]];
@@ -5185,7 +5189,10 @@
   const NUDGE = { plant: 82 }; // Plants are drawn beside the door but stand between the lamp and Lumi, clear of both.
   const REPEATED = { wallpaper: TILES, floor: TILES, view: WINDOWS, frame: WINDOWS, curtains: WINDOWS };
 
-  const BARE = { wallpaper: "wall-bare", floor: "floor-bare" }; // What an empty wall or floor looks like before she unpacks her own.
+  const BARE = { wallpaper: "wall-bare", floor: "floor-bare", door: "door-bare" }; // What an empty wall, floor or door looks like before she unpacks her own (every flat has a door).
+  // Her door is pressable (Lumi Pet goes through it to Lumi Dungeons, game.js doorPress): an invisible box over the
+  // door's usual place catches the press, so even a door drawn with gaps (beads, a portal) answers anywhere on it.
+  const DOOR_HIT = '<rect x="-66" y="192" width="82" height="166" fill="transparent"/>';
 
   function render(house, backdrop, extra) { // The room as SVG markup, back to front. `house` is {spot: object id} from the server.
     // `extra.boxes`: moving boxes still to unpack, stacked at the front of the room. A spot missing from `house` is
@@ -5202,9 +5209,10 @@
       const id = Object.prototype.hasOwnProperty.call(ART, house[spot]) ? house[spot] : BARE[spot], draw = id ? ART[id] : null;
       let art = draw && !(spot === "view" && open) ? draw() : ""; // An object this file doesn't know simply isn't drawn.
       if (art && spot === "view") art = group(art, 'clip-path="url(#lp-view-clip)"');
+      if (art && spot === "door") art += DOOR_HIT; // The door's press box, drawn on top of it.
       const places = REPEATED[spot] || [MIDDLE + (NUDGE[spot] || 0)];
       return group(art ? places.map(function (x) { return group(art, 'transform="translate(' + x + ' 0)"'); }).join("") : "",
-        'data-spot="' + spot + '"' + (spot === "wallpaper" ? ' mask="url(#lp-wall-mask)"' : "") + (spot === "view" && open ? ' data-open="true"' : ""));
+        'data-spot="' + spot + '"' + (spot === "wallpaper" ? ' mask="url(#lp-wall-mask)"' : "") + (spot === "view" && open ? ' data-open="true"' : "") + (spot === "door" ? ' data-click="door"' : ""));
     }).join("") + (extra && extra.boxes ? group(group(ART.boxes(extra.boxes), 'transform="translate(' + MIDDLE + ' 0)"'), 'data-boxes="' + extra.boxes + '"') : "");
   }
 

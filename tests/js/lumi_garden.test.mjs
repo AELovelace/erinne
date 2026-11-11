@@ -10,7 +10,7 @@ const Art = require("../../mnemerynne/web/static/games/lumi-pet/garden-art.js");
 const catalog = JSON.parse(readFileSync(new URL("../../mnemerynne/lumipet_data/garden.json", import.meta.url), "utf8"));
 const MIN = 60000;
 
-function garden(extra = {}) { // A young garden: a daisy growing, a daisy ready, two empty plots; glowbell is next up the ladder.
+function garden(extra = {}) { // A young garden: a daisy growing, a daisy ready, two empty plots; glowbell is next on the tree.
   const plot = (flower, stage, ready_in, grow) => ({ flower, last: flower, stage, ready_in, grow });
   return { at: 0, gardens: 1, plot_price: 25, given: 12, powder: 120, squeezed: 10, price: 40, coins_today: 3, band: 100, away: null, max_rate: 12,
     plots: [plot("moondaisy", "growing", MIN, 2 * MIN), plot("moondaisy", "ready", -5000, 2 * MIN), plot(null, "empty", 0, 0), plot(null, "empty", 0, 0)],
@@ -57,7 +57,9 @@ test("the garden's list offers the press, the harvest, both minigames, her moves
   assert.deepEqual(list.row("feed").send, { action: "feed_start" });
   assert.deepEqual(list.row("move-pounce").send, { action: "ability", item: "pounce" });
   assert.ok(list.rows.filter(r => r.send).every(r => r.url === "garden"), "Every choice goes to the garden's own address");
-  assert.ok(list.row("moon").note.includes("100K"), "Moonrise says what it is waiting for");
+  assert.match(list.row("moon").hint, /100K/, "Moonrise says what it is waiting for");
+  list.row("moon").local();                                          // and its page opens anyway, to see what a moonrise can bring
+  assert.deepEqual(list.went.at(-1), { drawer: "moon" });
   const cooling = open(garden({ water: { ready_in: 90000, rounds: 8, share: 5, show: null }, moves: [{ ...garden().moves[0], ready_in: 30000 }] }), { passed: 10000 });
   assert.equal(cooling.row("water").send, undefined);
   assert.equal(cooling.row("water").hint, "ready in 1:20");
@@ -67,36 +69,6 @@ test("the garden's list offers the press, the harvest, both minigames, her moves
   assert.deepEqual(two.row("other").send, { action: "garden", count: 1 });
   two.row("moon").local();
   assert.deepEqual(two.went, [{ drawer: "moon" }]);
-});
-
-test("the seed drawer climbs the ladder one flower at a time and only ever sends a choice", () => {
-  const drawer = open(garden({ given: 40 }), { drawer: "seeds", seed: "moondaisy" });
-  assert.equal(drawer.rows.length, 1 + catalog.flowers.length);
-  assert.equal(drawer.row("seed-moondaisy").icon, "✓");
-  drawer.row("seed-moondaisy").local();
-  assert.deepEqual(drawer.went, [{ seed: "moondaisy", drawer: null }]);
-  assert.deepEqual(drawer.row("seed-glowbell").send, { action: "unlock", item: "glowbell" });
-  assert.match(drawer.row("seed-glowbell").hint, /^25 coins/);
-  assert.equal(drawer.row("seed-starpoppy").send, undefined, "The flower after next waits its turn");
-  assert.match(open(garden(), { drawer: "seeds" }).row("seed-glowbell").note, /given 40 starpowder/);
-  const at = catalog.flowers.findIndex(flower => flower.id === "nebula-rose"), rose = garden({ given: 10 ** 6 });
-  rose.flowers.forEach((flower, i) => { flower.unlocked = i < at; flower.next = i === at; });
-  const ready = open(rose, { drawer: "seeds" }).row("seed-nebula-rose");
-  assert.deepEqual(ready.send, { action: "unlock", item: "nebula-rose" });
-  assert.match(ready.hint, /^\d+ starpowder/, "A boutique flower is priced in starpowder");
-  assert.match(open(rose, { drawer: "seeds" }).row("seed-moon-fern").hint, /grows back/);
-});
-
-test("helpers and moonrise are drawers of their own", () => {
-  const helpers = open(garden(), { drawer: "helpers" });
-  assert.deepEqual(helpers.rows.map(r => r.key), ["back", "helper-fighter", "helper-thief", "helper-monk", "helper-mage", "helper-cleric", "helper-paladin"]);
-  assert.deepEqual(helpers.row("helper-monk").send, { action: "helper", item: "monk" });
-  helpers.row("back").local();
-  assert.deepEqual(helpers.went, [{ drawer: null }]);
-  const moon = open(garden({ upgrades: catalog.upgrades.map((thing, i) => ({ ...thing, count: i === 1 ? thing.max : 0 })) }), { drawer: "moon" });
-  assert.deepEqual(moon.row("moon-garden").send, { action: "moonrise", item: "garden" });
-  assert.ok(moon.row("moon-garden").confirm && moon.row("moon-strong-press").confirm, "Replanting a garden asks twice");
-  assert.equal(moon.row("moon-rich-soil").send, undefined, "An upgrade at its top can't be chosen");
 });
 
 test("decorations: fifteen slots, the capsule, and a store of spares to put out or sell", () => {

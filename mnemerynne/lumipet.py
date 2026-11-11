@@ -696,7 +696,7 @@ def fight_act(conn: sqlite3.Connection, user_id: int, battle_id: int, turn: int,
     if fight.get("party") and fight["status"] != "active":
         lumiparty.after_fight(conn, user_id, pet, fight, now, rng)    # a party's fight: the party settles the room
     elif run and run["fight"] == battle_id and fight["status"] != "active":
-        lumidungeon.after_fight(conn, user_id, pet, run, fight)       # a dungeon fight: clear the room, step back, or end the trip
+        lumidungeon.after_fight(conn, user_id, pet, run, fight, now)  # a dungeon fight: clear the room, step back, or end the trip (dated, for the welcome home)
         _narrate(conn, user_id, rng)
     _save(conn, user_id, pet)
     return {**snapshot(conn, user_id, pet, now), "fight": fight}

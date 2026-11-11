@@ -10,8 +10,10 @@ Lumi's own build runs the garden: six helpers, one per class tree, each made str
 learned in that tree and by her fitted mods, and the moves she has equipped are abilities to fire by hand. Two
 minigames move every growing flower forward: watering (repeat a growing sequence) and fertilizing (press fast).
 
-Every garden climbs the flower ladder by its own harvests: kinds are unlocked per garden, in order. Moonrise
-replants a finished garden as a starter garden in exchange for a permanent upgrade or one more garden.
+Every garden grows its own flower tree by its own harvests: kinds are unlocked per garden. Moondaisy opens three
+branches (quick blooms, slow giants, perennials; garden.json `branch`), and a flower can be unlocked once any one of
+the flowers in its `after` is (plus its gates: powder given, Lumi's level, its price). Moonrise replants a finished
+garden as a starter garden in exchange for a permanent upgrade or one more garden.
 
 Decorations are for looks only. Each garden has fifteen slots with one thing in each; the things themselves are
 owned in a shared store, as counts, because there may be several gardens to dress. Five per slot are sold for
@@ -43,6 +45,7 @@ PRESS_SPARE = 3                         # a few presses of slack, for a batch th
 LUCKY_CAP, GIFT_CAP = 0.5, 0.25         # the Thief can only make so many presses lucky, and gifts so common
 MAX_GARDENS = 99
 MAX_COPIES = 99                         # of any one decoration in the store
+BRANCHES = ("root", "quick", "slow", "perennial", "crown")      # where a flower sits on the tree page (garden-tree.js)
 SHAPES = ("daisy", "bell", "puff", "star", "poppy", "spike", "clover", "trumpet", "mushroom", "tulip", "sun", "hearts", "cactus", "rose",
           "lotus", "orchid", "cluster", "lily", "iris", "fern", "wisteria")      # how a flower is drawn (garden-art.js draws each)
 RARITIES = ("common", "rare", "epic", "legendary")
@@ -96,8 +99,14 @@ def load_catalog(path: Path | None = None) -> dict:
                 or not _COLOUR.match(str(flower.get("colour"))) or not _COLOUR.match(str(flower.get("heart"))) or not _whole(flower.get("petals"), 3, 16) \
                 or flower.get("shape") not in SHAPES or not 0.5 <= flower.get("size", 0) <= 2:
             raise bad(f"{flower['id']} is missing something, or has both a coin and a stardust price.")
-    if flowers[0]["coins"] or flowers[0]["stardust"] or flowers[0]["needs"] or flowers[0]["level"] != 1:
-        raise bad("the first flower must be free, so a new garden always has something to plant.")
+    if flowers[0]["coins"] or flowers[0]["stardust"] or flowers[0]["needs"] or flowers[0]["level"] != 1 or flowers[0].get("after") != []:
+        raise bad("the first flower must be free and need no other, so a new garden always has something to plant.")
+    earlier: set[str] = set()
+    for flower in flowers:                                 # the tree: each flower opens from flowers listed above it, so it has no loops
+        after = flower.get("after")
+        if flower.get("branch") not in BRANCHES or not isinstance(after, list) or (earlier and not after)                 or any(not isinstance(one, str) or one not in earlier for one in after) or len(set(after)) != len(after):
+            raise bad(f"{flower['id']} needs a branch, and opens only from flowers listed before it.")
+        earlier.add(flower["id"])
     if [flower["needs"] for flower in flowers] != sorted(flower["needs"] for flower in flowers):
         raise bad("flowers must be listed in the order they unlock.")
     helpers = data.get("helpers")
@@ -360,10 +369,10 @@ def worth(item: dict) -> int:
     return item["stardust"] // 2 if item["rarity"] == "shop" else CATALOG["decor"]["capsule"]["sell"][item["rarity"]]
 
 
-def next_flower(garden: dict) -> dict | None:
-    """The next kind this garden can unlock: the first on the ladder it doesn't have (so a flower added to the
-    ladder later is simply next for a garden already past it)."""
-    return next((flower for flower in CATALOG["flowers"] if flower["id"] not in garden["unlocked"]), None)
+def opens(garden: dict, flower: dict) -> bool:
+    """Whether this garden may unlock this kind now, as far as the tree goes: it doesn't have it yet, and has any one
+    of the flowers it opens from. (Its gates, the powder given, her level and its price, are checked on unlocking.)"""
+    return flower["id"] not in garden["unlocked"] and any(one in garden["unlocked"] for one in flower["after"])
 
 
 def moonrise_needs(state: dict) -> float:
@@ -461,8 +470,9 @@ def act(conn: sqlite3.Connection, user_id: int, pet: dict, state: dict, action: 
         flower = _FLOWERS.get(item or "")
         if flower is None or item in garden["unlocked"]:
             raise GardenError("That isn't a flower this garden can unlock.")
-        if next_flower(garden)["id"] != item:
-            raise GardenError("Unlock the flowers before it first.")
+        if not opens(garden, flower):
+            names = " or ".join(_FLOWERS[one]["name"] for one in flower["after"])
+            raise GardenError(f"{flower['name']} grows from {names}: unlock {'one of them' if len(flower['after']) > 1 else 'it'} first.")
         if garden["given"] < flower["needs"]:
             raise GardenError(f"This garden needs to have given {flower['needs']:,} starpowder first.")
         if pet["level"] < flower["level"]:
@@ -645,10 +655,9 @@ def view(state: dict, pet: dict, now: int) -> dict:
     numbers, garden = rates(state, pet, now), state["gardens"][state["at"]]
     plots = [{"flower": plot["flower"], "last": plot["last"], "stage": _stage(plot, numbers, now), "ready_in": plot["ready_at"] - now if plot["flower"] else 0,
               "grow": plot["grow"]} for plot in garden["plots"]]
-    flowers, upcoming = [], next_flower(garden)
-    for flower in CATALOG["flowers"]:
-        unlocked = flower["id"] in garden["unlocked"]
-        flowers.append({**flower, "unlocked": unlocked, "next": not unlocked and upcoming is not None and upcoming["id"] == flower["id"],
+    flowers = []
+    for flower in CATALOG["flowers"]:                     # "next": the tree lets this garden unlock it now (its gates may still say no)
+        flowers.append({**flower, "unlocked": flower["id"] in garden["unlocked"], "next": opens(garden, flower),
                         "powder_now": flower["powder"] * numbers["yield"], "minutes_now": flower["minutes"] * numbers["growth"]})
     moves = []
     for move in pet["moves"]:

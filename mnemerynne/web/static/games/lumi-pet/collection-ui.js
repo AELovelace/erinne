@@ -63,7 +63,7 @@
       { id: "closet", icon: "🎀", name: "Things to wear", about: "Bought, or won from capsules and Lumi-Soft", items: clothes },
       { id: "toys", icon: "🧸", name: "Toys", about: "From the Shop and from capsules", items: toys },
       { id: "mods", icon: "⚙", name: "Mods", about: "Bought, or found in dungeon vaults", items: mods },
-      { id: "flowers", icon: "❀", name: "Flowers", about: "The garden's ladder, for the garden you are in", items: flowers },
+      { id: "flowers", icon: "❀", name: "Flowers", about: "The garden's flower tree, for the garden you are in", items: flowers },
       { id: "garden", icon: "✧", name: "Garden decorations", about: "Bought with starpowder, or won from the " + capsule, items: dressing },
     ].filter(function (shelf) { return shelf.items.length; });
   }
