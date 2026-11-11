@@ -76,21 +76,25 @@ try {
   await checkLumiPartyCouch(browser, alice, bob, base);
   await checkArcadeLumi(browser, alice, base);
   await alice.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]); // Skip the ball's animation: the server's drops are what's under test.
+  const resumed = alice.waitForResponse(answer => answer.url().endsWith("/api/media/games/prism-drop/run")); // the game alice may have left unfinished
   await alice.goto(base + "/media/games/prism-drop");
+  await resumed;
   await alice.waitForFunction(() => /^[\d,]+$/.test(document.getElementById("pd-coins").textContent));
+  // checkArcadeLumi (above) drops one ball as alice and leaves that game unfinished: this one carries on from wherever it stands.
+  const already = Number((await alice.$eval("#pd-drop", e => e.textContent)).split(" ")[0]) - 1;
   const prismCoins = async () => Number((await alice.$eval("#pd-coins", e => e.textContent)).replaceAll(",", ""));
   const dropOnce = async n => { // Each drop comes from the server; wait for it to be scored before pressing again.
     await alice.waitForSelector("#pd-drop-button:not([disabled])");
     await alice.click("#pd-drop-button");
     await alice.waitForFunction(count => document.getElementById("pd-drop").textContent === (count >= 10 ? "Done" : (count + 1) + " / 10"), {}, n);
   };
-  for (let n = 1; n <= 3; n++) await dropOnce(n);
+  for (let n = already + 1; n <= already + 3; n++) await dropOnce(n);
   const scoreBefore = await alice.$eval("#pd-score", e => e.textContent);
   await alice.reload();
-  await alice.waitForFunction(() => document.getElementById("pd-drop").textContent === "4 / 10"); // An unfinished game carries on after a reload.
+  await alice.waitForFunction(at => document.getElementById("pd-drop").textContent === at + " / 10", {}, already + 4); // An unfinished game carries on after a reload.
   assert.equal(await alice.$eval("#pd-score", e => e.textContent), scoreBefore);
   const coinsBefore = await prismCoins();
-  for (let n = 4; n <= 10; n++) await dropOnce(n);
+  for (let n = already + 4; n <= 10; n++) await dropOnce(n);
   const finalScore = Number(await alice.$eval("#pd-score", e => e.textContent));
   assert.equal(await prismCoins(), coinsBefore + Math.floor(finalScore / 10), "A finished game pays its score in coins");
   await alice.emulateMediaFeatures([]);
@@ -110,7 +114,9 @@ try {
       await alice.keyboard.press("p");
       await alice.waitForFunction(() => document.getElementById("casino-error").textContent.includes("Set a bet"));
       await alice.evaluate(() => { for (let i = 0; i < 60; i++) window.MGame.tap("up"); });
-      assert.equal(await alice.$eval("#casino-amount", e => e.textContent), "500");
+      // The top bet is 500, or less when the purse is smaller (casino.py: in tens, within the balance). The arcade checks above spend some of alice's coins.
+      const purse = (await alice.evaluate(async () => (await (await fetch("/api/media/games/coins")).json()).coins));
+      assert.equal(await alice.$eval("#casino-amount", e => e.textContent), String(Math.min(500, Math.floor(purse / 10) * 10)));
       await alice.evaluate(() => { for (let i = 0; i < 60; i++) window.MGame.tap("down"); });
       assert.equal(await alice.$eval("#casino-amount", e => e.textContent), "10");
       await alice.evaluate(() => { for (let i = 0; i < 4; i++) window.MGame.tap("up"); });
