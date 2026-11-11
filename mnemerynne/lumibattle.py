@@ -419,7 +419,7 @@ def current(conn: sqlite3.Connection, user_id: int) -> dict | None:
 
 
 def start(conn: sqlite3.Connection, user_id: int, pet: dict, tier: str, now: int, rng=None, *, enemy: str | None = None,
-          level: int | None = None, carry: dict | None = None, dungeon: bool = False) -> dict:
+          level: int | None = None, carry: dict | None = None, dungeon: bool = False, party: str | None = None) -> dict:
     """Begin a fight against a random enemy of this tier (or any tier: "gamble", for a fifth more reward).
     The dungeon names the enemy and its level itself, carries Lumi's health in, and keeps the coins for her satchel.
     Changes the pet (her waiting treat boost is used); the caller saves it. Call inside a transaction."""
@@ -436,6 +436,8 @@ def start(conn: sqlite3.Connection, user_id: int, pet: dict, tier: str, now: int
     lumi = _lumi(pet, carry)
     state = {"player": lumi, "enemy": _enemy(entry, level, pet["level"], lumi["element"]), "choice": tier, "boost": pet["boost"],
              "dungeon": dungeon, "outcome": None, "reward": None, "log": [f"A wild {entry['name']} appears!"]}
+    if party:
+        state["party"] = party                            # a party's dungeon fight (lumiparty.py): its end goes back to the party
     pet["boost"] = None
     made = conn.execute("INSERT INTO lumi_battles(user_id, state, created_at) VALUES (?, ?, ?)", (user_id, json.dumps(state, separators=(",", ":")), now))
     return {**state, "id": made.lastrowid, "turn": 0, "status": "active"}

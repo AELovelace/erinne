@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import net from "node:net";
 import { checkLumiApps, checkLumiPet, checkLumiPetCapsules, checkLumiPetDoors, checkLumiPetFrame, checkLumiPetGarden, checkLumiPetPhone, checkLumiPetSkills } from "./lumi-pet-browser.mjs";
 import { checkSharedTV } from "./casino-tv-browser.mjs";
+import { checkLumiPartyCouch, checkLumiPartyOnline, checkLumiPartyPuzzle } from "./lumi-party-browser.mjs";
 import { checkGameScaling } from "./game-scaling-browser.mjs";
 
 const modulePath = process.env.PUPPETEER_MODULE;
@@ -42,7 +43,11 @@ try {
     await page.evaluateOnNewDocument(() => { Object.defineProperty(document, "hidden", { get: () => false }); }); // Both test tabs act like visible TV screens.
   }
   await mkdir("runs/casino-browser", { recursive: true });
-  if (process.env.GAME_SCALING_ONLY === "1") {
+  if (process.env.LUMI_PARTY_ONLY === "1") { // Focused iteration on Lumi Dungeons parties and Who's playing?
+    await checkLumiPartyOnline(alice, bob, base);
+    await checkLumiPartyPuzzle(browser, alice, base);
+    await checkLumiPartyCouch(browser, alice, bob, base);
+  } else if (process.env.GAME_SCALING_ONLY === "1") {
     await checkGameScaling(alice, bob, base);
   } else if (process.env.CASINO_TV_ONLY === "1") { // Focused iteration for controller routing without replaying unrelated casino rounds.
     const screen = await alice.evaluate(async () => (await fetch("/api/media/screens", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Shared TV test" }) })).json());
@@ -59,6 +64,9 @@ try {
   await checkLumiPetPhone(browser, alice, base);
   await checkLumiApps(browser, alice, base);
   await checkLumiPetCapsules(bob, base);
+  await checkLumiPartyOnline(alice, bob, base);
+  await checkLumiPartyPuzzle(browser, alice, base);
+  await checkLumiPartyCouch(browser, alice, bob, base);
   await alice.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]); // Skip the ball's animation: the server's drops are what's under test.
   await alice.goto(base + "/media/games/prism-drop");
   await alice.waitForFunction(() => /^[\d,]+$/.test(document.getElementById("pd-coins").textContent));
@@ -283,6 +291,8 @@ try {
   }
   assert.deepEqual(errors, []);
 } catch (failure) {
+  if (errors.length) console.error("Page errors before the failure:", errors.join(" || ")); // A script error is often the real cause.
+  if (process.env.SHOW_SERVER_LOG === "1") console.error("Server log:", logs.slice(-6000));
   if (browser) { // Capture the visible board and error copy when a UI check fails; never print cookies or panel keys.
     for (const page of await browser.pages()) for (const frame of page.frames()) {
       if (frame.url().includes("/media/games/")) {

@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from mnemerynne import arcade, lobby, runner, showdown
 from mnemerynne.rooms_bus import sse
-from mnemerynne import bfgguf, casino, casino_remote, claude_chat, coins, games,lumidungeon, lumipet, lumitales, prism, push
+from mnemerynne import bfgguf, casino, casino_remote, claude_chat, coins, games, lumi_tv, lumidungeon, lumiparty, lumipet, lumitales, prism, push, users
 from mnemerynne.db import transaction
 from mnemerynne.media import remotes, screens
 from mnemerynne.web.deps import _session_user, get_db
@@ -43,6 +43,73 @@ def coin_balance(user=Depends(media_user), conn=Depends(get_db)):
     """This account's coins (a paired TV shows its owner's). Also brings home stakes from any table that has expired."""
     casino.sweep(conn)
     return {"coins": coins.peek(conn, user["id"])}
+
+
+# ------------------------------------------------- Who's playing? (lumi_tv.py)
+# A TV is paired to one account, but in the Lumi apps each person plays their own pet there: a remote's OK press is
+# swapped for a play pass, and the Lumi routes below load the pass holder's account instead of the TV owner's.
+
+def _pass_holder(request: Request, conn, token: str):
+    """The person a play pass is for, if it is still good on this TV: the pass is signed and fresh, it was made for this
+    very screen (and pairing), and its remote may still drive this TV (_live_remote). None otherwise."""
+    screen = _screen(request, conn)
+    if screen is None or screen["speaker"]:
+        return None                                                   # only a TV page can play with a pass
+    try:
+        held = lumi_tv.read(request.app.state.settings.secret_key, token)
+    except lumi_tv.BadData:
+        return None                                                   # tampered with, or older than PASS_SECONDS
+    display = casino_remote.actor("screen", screen)
+    if held.get("screen") != screen["id"] or held.get("display") != display:
+        return None                                                   # made for another TV, or this TV was re-paired
+    remote = _live_remote(request, conn, {"remote": held["remote"], "screen": display, "pairing": held["pairing"]},
+                          screen, display)
+    if remote is None or remote["user_id"] != held["user"]:
+        return None                                                   # re-paired, removed, or no longer a guest
+    return users.get_user_by_id(conn, held["user"])
+
+
+def pet_user(request: Request, user=Depends(media_user), conn=Depends(get_db)):
+    """Whose Lumi this request is about: the signed-in person or the TV's owner (media_user), unless the TV page
+    sends a play pass (lumi_tv.HEADER), when it's the person holding the remote. A pass that no longer holds is
+    refused (403), never quietly swapped for the TV owner's pet: the page then asks Who's playing? again."""
+    token = request.headers.get(lumi_tv.HEADER)
+    if not token or _session_user(request, conn) is not None:
+        return user                                                   # no pass, or someone signed in on this browser
+    holder = _pass_holder(request, conn, token[:2000])
+    if holder is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Who's playing? Press OK on your remote to carry on.")
+    return holder
+
+
+class PlayerPick(BaseModel):
+    """A remote's OK press, as the TV page received it: the server's own signed proof (casino_remote.issue)."""
+    model_config = ConfigDict(extra="forbid")
+    controller: str = Field(min_length=1, max_length=2000)
+
+
+@router.post("/api/media/games/lumi-pet/tv/player")
+def pet_tv_player(body: PlayerPick, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+    """Who's playing? The TV page hands over a remote's OK press; the person holding that remote (the TV's owner, or
+    one of their TV guests) gets a play pass for their own Lumi on this TV."""
+    screen = screen_device(request, conn)
+    if screen["speaker"] or screen["user_id"] != user["id"] or _session_user(request, conn) is not None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Who's playing? is for a TV itself, with nobody signed in on it.")
+    try:
+        proof = casino_remote.read(request.app.state.settings.secret_key, body.controller)
+    except casino_remote.BadData:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "That press is too old. Press OK on your remote again.") from None
+    if proof.get("action") != "enter":
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Press OK on your remote to play.")
+    display = casino_remote.actor("screen", screen)
+    remote = _live_remote(request, conn, proof, screen, display)
+    if remote is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This remote can't play on this TV. The TV's owner can make you "
+                                                       "a TV guest under Media → Screens.")
+    holder = users.get_user_by_id(conn, remote["user_id"])
+    token = lumi_tv.issue(request.app.state.settings.secret_key, screen, remote, holder["id"])
+    return {"pass": token, "name": holder["username"], "owner": holder["id"] == screen["user_id"],
+            "idle": lumi_tv.IDLE_SECONDS}
 
 
 class PrismDrop(BaseModel):
@@ -86,7 +153,7 @@ def runner_finish(body: RunnerFinish, user=Depends(media_user), conn=Depends(get
 
 
 @router.post("/api/media/games/lumi-pet/visit")
-def pet_visit(user=Depends(media_user), conn=Depends(get_db)):
+def pet_visit(user=Depends(pet_user), conn=Depends(get_db)):
     """The first time someone spends a moment with Lumi today. Takes no numbers from the page, so there's nothing to fake."""
     with transaction(conn):
         paid = coins.pet_visit(conn, user["id"])
@@ -106,14 +173,14 @@ class PetAction(BaseModel):
 
 
 @router.get("/api/media/games/lumi-pet/state")
-def pet_state(user=Depends(media_user), conn=Depends(get_db)):
+def pet_state(user=Depends(pet_user), conn=Depends(get_db)):
     """Lumi as she is right now, caught up from the last time anyone looked. A paired TV shows its owner's pet."""
     with transaction(conn):
         return lumipet.state(conn, user["id"])
 
 
 @router.post("/api/media/games/lumi-pet/act")
-def pet_act(body: PetAction, user=Depends(media_user), conn=Depends(get_db)):
+def pet_act(body: PetAction, user=Depends(pet_user), conn=Depends(get_db)):
     """One care action or purchase. A refusal (too soon, not enough coins) changes nothing and says why."""
     try:
         with transaction(conn):
@@ -138,7 +205,7 @@ class FightTurn(BaseModel):
 
 
 @router.post("/api/media/games/lumi-pet/battle")
-def pet_fight(body: FightStart, user=Depends(media_user), conn=Depends(get_db)):
+def pet_fight(body: FightStart, user=Depends(pet_user), conn=Depends(get_db)):
     """Start a fight. One at a time; it waits for as long as it takes."""
     try:
         with transaction(conn):
@@ -148,7 +215,7 @@ def pet_fight(body: FightStart, user=Depends(media_user), conn=Depends(get_db)):
 
 
 @router.post("/api/media/games/lumi-pet/battle/act")
-def pet_fight_turn(body: FightTurn, user=Depends(media_user), conn=Depends(get_db)):
+def pet_fight_turn(body: FightTurn, user=Depends(pet_user), conn=Depends(get_db)):
     """Play one turn. A stale or repeated press is refused and changes nothing."""
     try:
         with transaction(conn):
@@ -174,7 +241,7 @@ class DungeonStep(BaseModel):
 
 
 @router.post("/api/media/games/lumi-pet/dungeon")
-def pet_dungeon(body: DungeonStart, user=Depends(media_user), conn=Depends(get_db)):
+def pet_dungeon(body: DungeonStart, user=Depends(pet_user), conn=Depends(get_db)):
     """Set out on a dungeon trip. One at a time; it waits for as long as it takes."""
     try:
         with transaction(conn):
@@ -196,7 +263,7 @@ class GardenStep(BaseModel):
 
 
 @router.post("/api/media/games/lumi-pet/garden")
-def pet_garden(body: GardenStep, user=Depends(media_user), conn=Depends(get_db)):
+def pet_garden(body: GardenStep, user=Depends(pet_user), conn=Depends(get_db)):
     """Tend the garden or work the press."""
     try:
         with transaction(conn):
@@ -206,13 +273,203 @@ def pet_garden(body: GardenStep, user=Depends(media_user), conn=Depends(get_db))
 
 
 @router.post("/api/media/games/lumi-pet/dungeon/act")
-def pet_dungeon_step(body: DungeonStep, user=Depends(media_user), conn=Depends(get_db)):
+def pet_dungeon_step(body: DungeonStep, user=Depends(pet_user), conn=Depends(get_db)):
     """Take one step, or make one choice, in the dungeon."""
     try:
         with transaction(conn):
             return lumipet.dungeon_act(conn, user["id"], body.action, way=body.way, moves=body.moves, picks=body.picks)
     except lumipet.PetError as refused:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(refused)) from None
+
+
+# ------------------------------------------------------- Lumi Dungeons with friends (lumiparty.py)
+# A party of up to three, each with their own Lumi, on one shared floor. Online, each member plays from their own
+# device (pet_user: a TV plays as its Who's playing? pass). On the couch the TV owns the party and every remote's
+# press arrives signed (party_tv_input), as its holder's own member.
+
+class PartyCreate(BaseModel):
+    """Online (each on their own device) or couch (one TV, the remotes around it)."""
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["online", "couch"] = "online"
+
+
+PARTY_ACTIONS = Literal["join", "leave", "ready", "env", "start", "vote", "move", "back", "descend", "take", "look", "unlock",
+                        "potion", "sokoban", "lights", "rune", "cup", "flip", "pass", "abandon"]
+
+
+class PartyMove(BaseModel):
+    """One choice at the party: a vote, a step that is a vote, a puzzle move, or the lobby's buttons. Never a result."""
+    model_config = ConfigDict(extra="forbid")
+    action: PARTY_ACTIONS
+    way: Literal["n", "e", "s", "w"] | None = None
+    target: str = Field(default="", max_length=20, pattern="^(|[nesw]|back|descend|home|m[0-9]{1,12})$")
+    item: str = Field(default="", max_length=40)
+    moves: str = Field(default="", max_length=600, pattern="^[udlr]*$")
+    picks: list[int | str] = Field(default_factory=list, max_length=200)
+
+
+class PartyPress(BaseModel):
+    """A couch remote's press, relayed by the TV: the server's own signed proof of the press, and what that member
+    chose with it (their cursor lives on the TV). A fight turn says which turn the TV was showing."""
+    model_config = ConfigDict(extra="forbid")
+    token: str = Field(min_length=1, max_length=2000)
+    action: PARTY_ACTIONS | Literal["fight"]
+    way: Literal["n", "e", "s", "w"] | None = None
+    target: str = Field(default="", max_length=20, pattern="^(|[nesw]|back|descend|home|m[0-9]{1,12}|move[0-3]|defend|potion|run)$")
+    item: str = Field(default="", max_length=40)
+    moves: str = Field(default="", max_length=600, pattern="^[udlr]*$")
+    picks: list[int | str] = Field(default_factory=list, max_length=200)
+    turn: int = Field(default=0, ge=0, strict=True)
+
+
+def _party_call(fn, *args, **kwargs):
+    """A refusal becomes a small error the page can show; nothing was changed."""
+    try:
+        return fn(*args, **kwargs)
+    except lumiparty.PartyError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+
+
+def _party_display(request: Request, conn, owner) -> str | None:
+    """This browser's couch identity: the TV itself (its screen key), as its owner (also with its owner signed in on its top
+    bar, as _tv_identity allows). None otherwise."""
+    screen = _screen(request, conn)
+    if screen is None or screen["speaker"] or screen["user_id"] != owner["id"]:
+        return None
+    return casino_remote.actor("screen", screen)
+
+
+@router.get("/api/media/games/lumi-pet/parties")
+def party_list(user=Depends(pet_user), conn=Depends(get_db)):
+    """Parties waiting in their lobby, and this person's own."""
+    with transaction(conn):
+        lumiparty.sweep(conn)
+    return {"parties": lumiparty.parties(conn, user["id"]), "mine": lumiparty.code_of(conn, user["id"])}
+
+
+@router.post("/api/media/games/lumi-pet/parties")
+def party_create(request: Request, body: PartyCreate | None = None, user=Depends(pet_user), owner=Depends(media_user),
+                 conn=Depends(get_db)):
+    """A new party: online with this person as its host, or a couch party owned by this TV."""
+    now = lumipet.now_ms()
+    with transaction(conn):
+        if body is not None and body.mode == "couch":
+            screen, display = _tv_identity(request, conn, owner)        # only the TV itself, as its owner
+            state = _party_call(lumiparty.create, conn, None, "", now, mode="couch", display=display, screen=screen["name"])
+            return lumiparty.view(conn, state, None, now=now, display=True)
+        state = _party_call(lumiparty.create, conn, user["id"], user["username"], now)
+        return lumiparty.view(conn, state, user["id"], now=now)
+
+
+@router.get("/api/media/games/lumi-pet/parties/{code}")
+def party_look(code: str, request: Request, user=Depends(pet_user), owner=Depends(media_user), conn=Depends(get_db)):
+    """The party as this member, or its couch TV, sees it."""
+    display = _party_display(request, conn, owner)
+    with transaction(conn):
+        return _party_call(lumiparty.look, conn, code, user["id"], display=display)
+
+
+@router.post("/api/media/games/lumi-pet/parties/{code}")
+def party_move(code: str, body: PartyMove, user=Depends(pet_user), conn=Depends(get_db)):
+    """One thing this member does at the party (or joining it)."""
+    with transaction(conn):
+        return _party_call(lumiparty.act, conn, code, user["id"], body.action, name=user["username"], way=body.way,
+                           target=body.target, item=body.item, moves=body.moves, picks=body.picks)
+
+
+@router.post("/api/media/games/lumi-pet/parties/{code}/tv/input")
+def party_tv_input(code: str, body: PartyPress, request: Request, owner=Depends(media_user), conn=Depends(get_db)):
+    """A couch remote's press. The proof says which remote pressed, for this very TV; the remote's own account (the
+    TV owner's, or one of their TV guests') is the member who acts, with their own Lumi."""
+    screen, display = _tv_identity(request, conn, owner)
+    try:
+        proof = casino_remote.read(request.app.state.settings.secret_key, body.token)
+    except casino_remote.BadData:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "That press is too old. Press again.") from None
+    remote = _live_remote(request, conn, proof, screen, display)
+    if remote is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This remote can't play on this TV.")
+    holder = users.get_user_by_id(conn, remote["user_id"])
+    fields = {"way": body.way, "target": body.target, "item": body.item, "moves": body.moves, "picks": body.picks}
+    with transaction(conn):
+        return _party_call(lumiparty.couch, conn, code, display, user_id=holder["id"], name=holder["username"],
+                           remote=remote["id"], press=proof["id"], action=body.action, turn=body.turn, **fields)
+
+
+@router.post("/api/media/games/lumi-pet/parties/{code}/tv/close")
+def party_tv_close(code: str, request: Request, owner=Depends(media_user), conn=Depends(get_db)):
+    """The couch TV ends its party (a trip still out is given up)."""
+    _, display = _tv_identity(request, conn, owner)
+    with transaction(conn):
+        return _party_call(lumiparty.close, conn, code, display)
+
+
+@router.get("/api/media/games/lumi-pet/parties/{code}/stream")
+async def party_stream(code: str, request: Request, user=Depends(pet_user), owner=Depends(media_user), conn=Depends(get_db)):
+    """The party, live: "party" whenever it changes (and every few seconds while its clocks run), a ping every 15 s,
+    and "end" once it has broken up or this member has left. While it's open the member (or the couch TV) counts
+    as there."""
+    display = _party_display(request, conn, owner)
+    pool = request.app.state.db_pool
+
+    def look():
+        c = pool.get()
+        try:
+            with transaction(c):
+                return lumiparty.look(c, code, user["id"], display=display)
+        finally:
+            pool.put(c)
+
+    try:
+        first = await asyncio.to_thread(look)
+    except lumiparty.PartyError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    if first.get("you") is None and not first.get("display"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Join this party first.")
+    actor = display if first.get("display") else f"user:{user['id']}"
+
+    async def events():
+        table = ("lumi-party", first["code"])
+        lobby.PRESENCE.opened(table, actor)
+        wake = asyncio.Event()
+        lumiparty.HUB.listen(first["code"], wake)
+        try:
+            yield sse("party", first)
+            shown = (first["revision"], [m["away"] for m in first["members"]])
+            seen = lumiparty.HUB.version(first["code"])[0]
+            looked = beat = time.monotonic()
+            while True:
+                try:
+                    await asyncio.wait_for(wake.wait(), timeout=2)
+                except TimeoutError:
+                    pass
+                wake.clear()
+                if await request.is_disconnected():
+                    return
+                version = lumiparty.HUB.version(first["code"])[0]
+                if version != seen or time.monotonic() - looked >= 2:      # clocks (votes, turns) need a look too
+                    seen, looked = version, time.monotonic()
+                    try:
+                        now = await asyncio.to_thread(look)
+                    except lumiparty.PartyError:
+                        yield sse("end", {"reason": "The party has broken up."})
+                        return
+                    if now.get("you") is None and not now.get("display"):
+                        yield sse("end", {"reason": "You've left the party."})
+                        return
+                    mark = (now["revision"], [m["away"] for m in now["members"]])
+                    if mark != shown:
+                        shown = mark
+                        yield sse("party", now)
+                if time.monotonic() - beat >= 15:
+                    beat = time.monotonic()
+                    yield b": ping\n\n"
+        finally:
+            lumiparty.HUB.unlisten(first["code"], wake)
+            lobby.PRESENCE.closed(table, actor)
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 TALES_A_MINUTE = 12                     # live lines one person may ask for; a room is one line, so this is generous
@@ -231,14 +488,14 @@ def _storyteller(request: Request, conn, user) -> tuple[str, object] | None:
 
 
 @router.get("/api/media/games/lumi-pet/dungeon/tale")
-def pet_tale_source(request: Request, user=Depends(media_user), conn=Depends(get_db)):
+def pet_tale_source(request: Request, user=Depends(pet_user), conn=Depends(get_db)):
     """Whether a live storyteller is there for this person, and which, so Settings can say."""
     found = _storyteller(request, conn, user)
     return {"live": found[0] if found else None}
 
 
 @router.post("/api/media/games/lumi-pet/dungeon/tale")
-async def pet_tale(request: Request, user=Depends(media_user), conn=Depends(get_db)):
+async def pet_tale(request: Request, user=Depends(pet_user), conn=Depends(get_db)):
     """A freshly written line for the moment Lumi is in, in live mode. Takes nothing from the page: the moment is the
     run's own. Answers {"line": null} whenever there is nothing new to say (the library line simply stays)."""
     run = lumidungeon.current(conn, user["id"])
@@ -317,7 +574,11 @@ def game_page(slug: str, request: Request, user=Depends(media_user), conn=Depend
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such game")
     paired = _screen(request, conn)
     tv_play = paired is not None and not paired["speaker"] and paired["user_id"] == user["id"] and screens.may_use(conn, user, request.app.state.directory)
-    return request.app.state.templates.TemplateResponse(request, "game.html", {"game": game, "tv_play": tv_play})
+    # Who's playing? (lumi_tv.py): a Lumi app on a TV whose owner has TV guests asks whose Lumi to show, by a remote's OK.
+    who_plays = (tv_play and game.kit == "lumi-pet" and _session_user(request, conn) is None
+                 and bool(screens.guests(conn, user["id"])))
+    return request.app.state.templates.TemplateResponse(request, "game.html", {"game": game, "tv_play": tv_play,
+                                                                               "who_plays": who_plays})
 
 
 class TableCreate(BaseModel):
@@ -340,6 +601,21 @@ class TVManage(BaseModel):
     action: Literal["remove", "close"]
     seat: str = Field(default="", max_length=32)
     revision: int = Field(ge=1, strict=True)
+
+
+def _live_remote(request, conn, proof, screen, display):
+    """The remote a verified press came from, if it may still drive this TV: the press was made for this screen, the
+    remote hasn't been re-paired since, and it is the TV owner's own or a TV guest's (screens.drivable) whose account
+    is still in the screens group. None otherwise."""
+    remote = remotes.get(conn, proof["remote"])
+    if remote is None or proof["screen"] != display or proof["pairing"] != casino_remote.pairing(remote):
+        return None                                                     # removed, re-paired, or meant for another TV
+    if screens.drivable(conn, remote["user_id"], screen["id"]) is None:
+        return None                                                     # no longer a guest of this TV's owner
+    holder = users.get_user_by_id(conn, remote["user_id"])
+    if holder is None or not holder["active"] or not screens.may_use(conn, holder, request.app.state.directory):
+        return None                                                     # their account left the screens group
+    return remote
 
 
 def _tv_identity(request, conn, user):
@@ -434,9 +710,8 @@ def tv_input(slug: str, code: str, body: TVInput, request: Request, user=Depends
         proof = casino_remote.read(request.app.state.settings.secret_key, body.token)
     except casino_remote.BadData as exc:
         raise HTTPException(403, "That remote input expired or could not be verified. Press again.") from exc
-    remote = remotes.get(conn, proof["remote"])
-    if (remote is None or remote["user_id"] != screen["user_id"] or proof["screen"] != display
-            or proof["pairing"] != casino_remote.pairing(remote)):
+    remote = _live_remote(request, conn, proof, screen, display)        # the owner's remote, or a TV guest's
+    if remote is None:
         raise HTTPException(403, "This remote is no longer paired to this TV's owner.")
     command = {"id": proof["id"], "action": proof["action"], "actor": casino_remote.actor("remote", remote), "name": remote["name"]}
     return _casino_call(casino.couch, conn, slug, code, display, command=command,

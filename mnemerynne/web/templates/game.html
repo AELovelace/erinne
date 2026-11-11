@@ -19,13 +19,13 @@
 {% set asset = 'casino' if game.multiplayer else (game.kit or game.slug) %}
 <link rel="stylesheet" href="{{ static('games/' ~ asset ~ '/game.css') }}">
 {% for part in game.extras if part.endswith('.css') %}<link rel="stylesheet" href="{{ static('games/' ~ part) }}">{% endfor %}
-<main class="gm" id="gm" data-game="{{ game.slug }}" data-kit="{{ asset }}" data-name="{{ game.name }}">
+<main class="gm" id="gm" data-game="{{ game.slug }}" data-kit="{{ asset }}" data-name="{{ game.name }}"{% if who_plays %} data-who="1"{% endif %}{% if tv_play %} data-tv="1"{% endif %}>
   {% include "games/" ~ asset ~ ".html" %}
 </main>
 <script src="{{ static('games/common.js') }}"></script>
 {% if game.slug == 'roulette' %}<script src="{{ static('games/casino/roulette.js') }}"></script>{% endif %}
 {% if not game.multiplayer %}<script src="{{ static('games/' ~ asset ~ '/rules.js') }}"></script>{% endif %}
-{% if asset == 'lumi-pet' %}{% for part in ('house', 'closet', 'picker-ui', 'enemies', 'battle-ui', 'dungeon-ui', 'dungeon-art', 'garden-ui', 'garden-art', 'skills-ui', 'skills-art', 'collection-ui', 'collection-art') %}<script src="{{ static('games/lumi-pet/' ~ part ~ '.js') }}"></script>{% endfor %}{% endif %}
+{% if asset == 'lumi-pet' %}{% for part in ('house', 'closet', 'picker-ui', 'enemies', 'battle-ui', 'dungeon-ui', 'dungeon-art', 'garden-ui', 'garden-art', 'skills-ui', 'skills-art', 'collection-ui', 'collection-art', 'party-ui') %}<script src="{{ static('games/lumi-pet/' ~ part ~ '.js') }}"></script>{% endfor %}{% endif %}
 {% for part in game.extras if part.endswith('.js') %}<script src="{{ static('games/' ~ part) }}"></script>{% endfor %}
 <script src="{{ static('games/' ~ asset ~ '/game.js') }}"></script>
 {% endblock %}

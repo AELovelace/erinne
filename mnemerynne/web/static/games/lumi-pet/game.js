@@ -7,7 +7,7 @@
    They are one pet on one save, so all three talk to the same API. */
 (function () {
   "use strict";
-  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Pk = window.LumiPetPicker, Gd = window.LumiPetGarden, Ga = window.LumiPetGardenArt, Sk = window.LumiPetSkills, Sa = window.LumiPetSkillsArt, Cl = window.LumiPetCollection, Ca = window.LumiPetCollectionArt, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt;
+  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Pk = window.LumiPetPicker, Gd = window.LumiPetGarden, Ga = window.LumiPetGardenArt, Sk = window.LumiPetSkills, Sa = window.LumiPetSkillsArt, Cl = window.LumiPetCollection, Ca = window.LumiPetCollectionArt, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt, Pu = window.LumiPetParty;
   const $ = function (id) { return document.getElementById(id); };
   const room = $("lp-room"), list = $("lp-list"), houseArt = $("lp-house"), tabButtons = Array.from(document.querySelectorAll("[data-lp-tab]"));
   const API = "/api/media/games/lumi-pet/", OLD_SAVE = "mnemerynne-game:lumi-pet:companion";
@@ -21,6 +21,16 @@
   // What "Back" from a full-room view says where it doesn't lead to her room (goHome): Lumi Dungeons' first tab is the dungeon, and the garden is Lumi's Garden's own first tab.
   const LEAVE = APP === "lumi-dungeons" ? { icon: "🗝", name: "Back to the dungeons" } : APP === "lumi-garden" ? { icon: "⚙", name: "Settings", hint: "Sound, reminders and Lumi's other apps · the garden keeps growing" } : null;
   function has(name) { return TABS.indexOf(name) >= 0; } // Whether this app has that tab.
+  // Who's playing? (mnemerynne/lumi_tv.py): on a shared TV whose owner has TV guests, a remote's OK picks whose Lumi
+  // is shown. The play pass the server answers is sent with every request, so the whole page is that person's.
+  const WHO = $("gm").dataset.who === "1", PLAYER_HEADER = "X-Lumi-Player", PLAYER_KEY = "mnemerynne-lumi-player";
+  let player = null, picking = false; // The pass holder ({pass, name, owner, idle, at}); whether the picker is showing.
+  // Lumi Dungeons with friends (mnemerynne/lumiparty.py, rows in party-ui.js). `party` is the server's party view, kept
+  // live by its stream (or by asking every couple of seconds when a play pass is in use: a stream can't carry its
+  // header). On the couch (this TV owns the party) every remote has its own cursor and menu here, by remote id.
+  const TV = $("gm").dataset.tv === "1", COUCH_KEY = "mnemerynne-lumi-couch";
+  let party = null, partyCode = null, partyFeed = null, openParties = [], partiesAsked = 0, partySending = false, partyNext = null;
+  let couchCursor = {}, couchGuess = {}, couchCell = {}, couchConfirm = {}, couchSpot = {}, couchEndArmed = false;
   const MEMORIES = { cuddle: "A warm little cuddle", snack: "A shared snack", play: "Playtime together", rest: "A quiet moment together" };
   const NEEDS = { hunger: "Tummy rumbling. A snack would help.", energy: "So sleepy. A nap would help.", joy: "A little lonely. Stay and play?" };
   const BUSY = { nap: "napping", play: "playing" };
@@ -70,6 +80,7 @@
   function take(data) { // Keep the server's answer and how far this device's clock is from the server's.
     snap = data; offset = data.now - Date.now(); polled = Date.now();
     $("lp-coins").textContent = data.coins.toLocaleString();
+    syncParty();
   }
 
   function say(text) { $("lp-message").textContent = text; } // The live region announces it to screen readers too.
@@ -132,8 +143,16 @@
     if (name === "garden" && exploring()) return awayRows(); // Lumi's Garden during a dungeon trip: the garden grows without her until she is home (lumipet.garden_act).
     if (name === "garden") return relabel(Gd.rows({ garden: snap.garden, decor: snap.garden_decor, drawer: drawer, seed: seed, cursor: plotCursor, mini: mini, passed: passed(), pending: pending, level: pet.level, go: gardenGo }));
     if (name === "dungeon") { // A dungeon fight and its result use the Battle lists; everything else is the dungeon's own.
+      if (couching()) return []; // The couch draws one menu per person instead (drawCouch).
       if ((snap.fight && snap.fight.status === "active") || finished) return battleRows();
-      return Dg.rows({ snap: snap, play: play, dismissed: dismissedRun, care: caring, go: dungeonGo });
+      const own = Dg.rows({ snap: snap, play: play, dismissed: dismissedRun, care: caring, go: dungeonGo });
+      if (inParty() && party.phase === "lobby") return Pu.lobbyRows(party, partyAct);
+      if (inParty() && party.run) return Pu.tripRows(party, own, serverNow());
+      if (!exploring() && !(snap.dungeon.run && snap.dungeon.run.over && dismissedRun !== snap.dungeon.run.id)) { // Choosing where to go: or going with friends.
+        askParties();
+        return Pu.startRows({ open: openParties, tv: TV, askCode: askCode }).concat(own);
+      }
+      return own;
     }
     if (name === "shop") return Pk.capsuleRows(snap).concat(c.snacks.concat(c.treats, c.toys).filter(function (thing) { return thing.price && !pet.toys.includes(thing.id); }).map(function (thing) { // The capsules first: this is where people look to buy one.
       const held = pet.inventory[thing.id] || 0, toy = c.toys.includes(thing);
@@ -145,6 +164,7 @@
       turn: function (by) { submit({ key: "glow", send: { action: "glow", glow: Pk.turn(R.PALETTES, pet.glow, by) } }); } });
     if (has("dungeon")) settings.push({ key: "storyteller", icon: "✎", name: "Storyteller: " + (pet.storyteller === "live" ? "Live" : "Library"), hint: "Who writes the dungeon's lines: the game's library, or a model as you go", send: { action: "storyteller" } });
     settings.push({ key: "sound", icon: "♪", name: "Sound: " + (G.sound.isOn() ? "on" : "off"), hint: "Little chimes", local: function () { G.sound.toggle(); } });
+    if (WHO) settings.push({ key: "switch-player", icon: "⇄", name: "Switch player", hint: "Playing " + (player ? player.name + "'s" : "this TV's own") + " Lumi · someone else presses OK on their remote", local: function () { forgetPlayer("Who's playing next?"); } }); // A shared TV: hand it to the next person.
     if (reminders !== "unsupported" && !has("dungeon")) { // Phones and computers only: a TV has nobody's pocket to buzz. Her needs and her flowers send them; the dungeons never do.
       if (has("garden")) settings.push({ key: "garden-reminders", icon: "❀", name: "Garden reminders: " + (pet.garden_reminders === false ? "off" : "on"), hint: "A nudge when slow flowers are ready to trim (needs Reminders on)", send: { action: "garden_reminders" } });
       settings.push({ key: "reminders", icon: "✉", name: "Reminders: " + reminders, local: toggleReminders,
@@ -171,13 +191,15 @@
 
   function syncPlay() { // Keep the page's copy of a puzzle in step with where Lumi is: start one at a door, drop it on leaving.
     const run = trip(), lock = run && run.facing ? run.facing.lock : null, cards = run && !run.facing && run.game && run.game.kind === "match" && !run.room.done;
-    const id = !run ? "" : lock ? run.id + ":" + run.facing.at + ":" + lock.kind + (lock.tries ? lock.tries.length : "") : cards ? run.id + ":" + run.at + ":match" : "";
-    if (play.id === id) return;
+    const turn = run && run.party && run.party.puzzle ? ":" + run.party.puzzle.phase + run.party.puzzle.turn + ":" + run.party.puzzle.holder : ""; // A party's new turn starts the board afresh.
+    const id = (!run ? "" : lock ? run.id + ":" + run.facing.at + ":" + lock.kind + (lock.tries ? lock.tries.length : "") : cards ? run.id + ":" + run.at + ":match" : "") + turn;
+    if (play.id === id) { if (watching()) play.board = partyBoard(lock, play.board); return; } // Someone else's turn (or the couch): show their moves as they make them.
     if (lock && lock.kind === "sokoban") { play = { id: id, board: Dg.sokobanStart(lock.rows) }; focus = "board"; }
     else if (lock && lock.kind === "lights") { play = { id: id, board: Dg.lightsStart(lock) }; focus = "board"; }
     else if (lock && lock.kind === "runes") { play = { id: id, guess: [] }; focus = "list"; }
     else if (cards) { play = { id: id, cursor: play.cursor || 0 }; focus = "board"; }
     else { play = { id: id }; focus = "list"; }
+    if (run && run.party && lock && (lock.kind === "sokoban" || lock.kind === "lights")) play.board = partyBoard(lock, play.board); // A turn picked up halfway (a reload) carries on from the server's moves.
     picks[tab] = 0;
   }
 
@@ -188,6 +210,7 @@
     if ("care" in change) { caring = change.care; picks[tab] = 0; focus = "list"; } // The snack-and-potion list, or back to the room's own.
     if (change.undo) play.board = Dg.sokobanUndo(play.board);
     if (change.reset && lock) play.board = lock.kind === "sokoban" ? Dg.sokobanStart(lock.rows) : Dg.lightsStart(lock);
+    if ((change.undo || change.reset) && inParty() && lock) partyProgress(lock.kind === "sokoban" ? { action: "sokoban", moves: play.board.moves } : { action: "lights", picks: play.board.presses });
     if (change.rune && play.guess.length < lock.slots) play.guess = play.guess.concat([change.rune]);
     if (change.erase) play.guess = play.guess.slice(0, -1);
     lastDungeon = "";
@@ -197,6 +220,7 @@
     const run = exploring(), lock = run.facing ? run.facing.lock : null;
     if (lock && lock.kind === "sokoban") { // Arrows push; Enter takes the last step back.
       play.board = action === "enter" ? Dg.sokobanUndo(play.board) : Dg.sokobanMove(play.board, { up: "u", down: "d", left: "l", right: "r" }[action]);
+      if (inParty()) { partyProgress({ action: "sokoban", moves: play.board.moves }); return; } // The others watch each step; the server opens the door once it's solved.
       if (Dg.sokobanSolved(play.board)) submit({ key: "solved", url: "dungeon/act", send: { action: "sokoban", moves: play.board.moves } });
       return;
     }
@@ -205,6 +229,7 @@
     if (action === "enter") { // Press the lamp, or turn the card, under the cursor.
       if (lock) {
         play.board = Object.assign(Dg.lightsPress(board, at), { cursor: at });
+        if (inParty()) { partyProgress({ action: "lights", picks: play.board.presses }); return; }
         if (Dg.lightsSolved(play.board)) submit({ key: "solved", url: "dungeon/act", send: { action: "lights", picks: play.board.presses } });
       } else submit({ key: "flip", url: "dungeon/act", send: { action: "flip", picks: [at] } });
       return;
@@ -551,7 +576,7 @@
   }
 
   function tellLive(moment) { // Live storyteller: the library's line is already showing; swap in a fresh one if it comes.
-    if (snap.pet.storyteller !== "live" || !exploring()) return;
+    if (snap.pet.storyteller !== "live" || !exploring() || exploring().party) return; // A party trip tells its story from the library.
     G.api(API + "dungeon/tale", {}).then(function (data) {
       const run = snap.dungeon.run;
       if (data.line && run && JSON.stringify(run.event) === moment) { run.say = data.line; say(data.line); }
@@ -666,6 +691,7 @@
     drawAlbum();
     drawPad();
     drawFight();
+    drawCouch();
     const doing = snap.fight ? "fighting " + snap.fight.enemy.name : task ? BUSY[task.kind] : scene.asleep ? "dreaming" : mood.need ? "needs " + mood.need : "content";
     const report = "Lumi · " + doing + " · " + tabButtons[tab].textContent + ": " + (pick ? pick.name : "nothing yet") + " · Enter to choose";
     if (report !== lastReport) { G.report(report); lastReport = report; }
@@ -681,6 +707,7 @@
   }
 
   function refresh() { // Ask the server how Lumi is; a failure keeps the last picture and tries again later.
+    if (picking) return Promise.resolve(); // Nobody's Lumi is chosen yet: nothing to ask about.
     return G.api(API + "state").then(function (data) { take(data); announceDone(); render(); }).catch(function () {
       if (!snap) say("Lumi can't be reached just now. She'll be here when the connection is back.");
     });
@@ -708,6 +735,9 @@
 
   function submit(row) { // Send one choice to the server, one request at a time, and show what came of it.
     if (row.url === "garden") { gardenSend(row.send); return; } // The garden's choices have their own words (garden-ui.js said).
+    if (row.url === "party" || (row.url === "dungeon/act" && inParty() && party.run)) { partyAct(row.send); return; } // Out with friends: every dungeon choice is the party's (a step is a vote).
+    if (row.url === "party-new") { partyNew(row.send.mode); return; }
+    if (row.url === "party-join") { partyJoin(row.send.code); return; }
     if (busy) return;
     pendingConfirm = null;
     busy = true;
@@ -760,7 +790,11 @@
     }).catch(function (refused) { say(refused.message); }).then(function () { busy = false; render(); });
   }
 
-  function onKey(action) { // Keyboard, TV remote, and the on-screen arrow pad. Everywhere: ◀ ▶ change tab, ▲ ▼ or ⏮ ⏭ move through the list, Enter chooses.
+  function onKey(action, controller, remote) { // Keyboard, TV remote, and the on-screen arrow pad. Everywhere: ◀ ▶ change tab, ▲ ▼ or ⏮ ⏭ move through the list, Enter chooses.
+    if (couching()) { couchKey(action, controller, remote); return; } // A couch party: every remote is its own person.
+    if (picking) { pickPlayer(action, controller); return; } // Who's playing? waits for someone's OK.
+    if (player && Date.now() - player.at > player.idle * 1000) { forgetPlayer("Nobody pressed anything for a while. Who's playing?"); return; } // A long-idle TV asks again.
+    if (player) { player.at = Date.now(); keepPlayer(); } // Still here: the idle clock starts over.
     // In the dungeon the arrows are Lumi's own: they walk her from room to room, or work the puzzle in front of her.
     // The list is then reached with ⏮ ⏭ (Prev/Next, or Page Up/Down, or [ ]), and ⏯ drinks a potion.
     if (!snap) return;
@@ -779,6 +813,7 @@
     if (walking()) {
       if (busy) return;
       const board = play.board || play.cursor !== undefined; // Crates, lamps or cards are in front of her.
+      if (arrow && board && watching()) { say("It's " + holderName() + "'s turn. Yours comes round if they don't solve it."); return; } // A party's puzzle: only the holder moves it.
       if (arrow && board) { focus = "board"; boardKey(action); render(); return; }
       if (arrow && exploring().facing) { // A key or rune door has no board: up and down just move through its list.
         if (action === "up" || action === "down") { const count = rows().length; picks[tab] = (picks[tab] + (action === "up" ? count - 1 : 1)) % count; render(); }
@@ -954,7 +989,7 @@
     return G.api(API + "act", body).then(take).catch(function () { /* she starts fresh; nothing else depends on it */ });
   }
 
-  G.api(API + "state").then(function (data) { // First hello: load her, bring any old memories, then start the clock.
+  function begin() { G.api(API + "state").then(function (data) { // First hello: load her, bring any old memories, then start the clock.
     take(data);
     return bringOldMemories();
   }).then(function () {
@@ -966,7 +1001,328 @@
     announceDone(); render();
   }).catch(function () {
     say("Lumi can't be reached just now. She'll be here when the connection is back.");
-  });
+  }); }
+
+  // ---- Lumi Dungeons with friends (mnemerynne/lumiparty.py; rows in party-ui.js).
+  function inParty() { return Boolean(party && !party.display && party.you !== null && has("dungeon")); } // A member here, on their own device.
+  function couching() { return Boolean(party && party.display); } // This TV is a couch party's screen.
+  function partyHolder() { const p = party && party.run && party.run.party.puzzle; return p && p.phase === "attempt" ? p.holder : null; }
+  function holderName() { const m = Pu.member(party, partyHolder()); return m ? m.name : "someone"; }
+  function watching() { return Boolean(party && party.run && partyHolder() !== null && (couching() || partyHolder() !== party.you)); } // Someone else works the puzzle: show their moves.
+
+  function partyBoard(lock, was) { // The puzzle as the holder has left it so far: replay their moves on a fresh board.
+    const puzzle = party && party.run && party.run.party.puzzle;
+    if (!lock || !puzzle) return was;
+    let board = lock.kind === "sokoban" ? Dg.sokobanStart(lock.rows) : Dg.lightsStart(lock);
+    if (lock.kind === "sokoban") puzzle.moves.split("").forEach(function (move) { board = Dg.sokobanMove(board, move); });
+    else puzzle.presses.forEach(function (cell) { board = Dg.lightsPress(board, cell); });
+    const cursor = couching() ? couchCell[puzzle.holder] : was && was.cursor; // Lamps: the holder's own cursor.
+    return Object.assign(board, { cursor: cursor || 0 });
+  }
+
+  function syncParty() { // After each snapshot: follow the party this person is in (Lumi Dungeons only), or stop.
+    if (couching()) { if (party.run) snap.dungeon.run = party.run; return; } // The couch TV shows the party's trip, whoever's Lumi is underneath.
+    if (!has("dungeon")) return;
+    const code = snap.party ? snap.party.code : null;
+    if (code !== partyCode) followParty(code);
+    if (party && party.run && snap.dungeon.run && snap.dungeon.run.party) snap.dungeon.run = party.run; // The stream's copy is the freshest.
+  }
+
+  function followParty(code) { // Open (or close) the party's live feed: its stream, or asking every 2 s with a play pass.
+    if (partyFeed) { if (partyFeed.close) partyFeed.close(); else clearInterval(partyFeed); }
+    partyFeed = null; partyCode = code;
+    if (!code) { party = null; return; }
+    const url = API + "parties/" + code;
+    if (player || !window.EventSource) { partyPoll(url); return; }
+    partyFeed = partyStream(url, function () { if (partyCode === code) partyPoll(url); });
+  }
+
+  function partyPoll(url) { // Ask every two seconds (a play pass can't ride on a stream, and a stuck stream falls back to this).
+    if (partyFeed && partyFeed.close) partyFeed.close();
+    partyFeed = setInterval(function () { G.api(url).then(takeParty).catch(partyGone); }, 2000);
+  }
+
+  function partyStream(url, stuck) { // The party's live stream. If it says nothing for 6 s or drops for good (a proxy holding it back, too many open tabs), stuck() switches to asking.
+    const feed = new EventSource(url + "/stream");
+    let heard = false;
+    const watchdog = setTimeout(function () { if (!heard) { feed.close(); stuck(); } }, 6000);
+    feed.addEventListener("party", function (e) { heard = true; clearTimeout(watchdog); takeParty(JSON.parse(e.data)); });
+    feed.addEventListener("end", function (e) { clearTimeout(watchdog); feed.close(); partyGone({ message: JSON.parse(e.data).reason }); });
+    feed.addEventListener("error", function () { if (feed.readyState === 2) { clearTimeout(watchdog); stuck(); } }); // 2: closed for good
+    return feed;
+  }
+
+  function partyGone(why) { // The party broke up, or this member left it: back to their own Lumi.
+    if (why && why.status && why.status !== 404 && why.status !== 403) return; // A blip: the next ask tries again.
+    const was = party;
+    followParty(null);
+    try { sessionStorage.removeItem(COUCH_KEY); } catch (e) { /* nothing kept */ }
+    if (was && why && why.message) say(why.message);
+    if (snap && snap.dungeon.run && snap.dungeon.run.party) snap.dungeon.run = null;
+    lastList = ""; refresh();
+  }
+
+  function takeParty(view) { // A fresh party view: draw it, fetch a fight that just began or ended, say what happened.
+    if (!view || view.closed || (!view.display && view.you === null)) { partyGone({ message: view && view.closed ? "The party has broken up." : "" }); return; }
+    const before = party;
+    party = view; partyCode = view.code;
+    if (snap) {
+      if (view.run) snap.dungeon.run = view.run;
+      else if (snap.dungeon.run && snap.dungeon.run.party) snap.dungeon.run = null; // The trip just ended: the lobby again.
+    }
+    const me = Pu.member(view, view.you), fighting = Boolean(snap && snap.fight && snap.fight.status === "active");
+    if (me && me.fighting !== fighting) refresh(); // A fight began (or ended) for this member: fetch it.
+    const said = view.run ? view.run.say : (view.notes || []).slice(-1)[0];
+    if (said && (!before || said !== (before.run ? before.run.say : (before.notes || []).slice(-1)[0]))) say(said);
+    if (!before || before.revision !== view.revision) lastList = "";
+    render();
+  }
+
+  function partyAct(body) { // One move at the party, from this member's own device.
+    if (busy || !party) return;
+    busy = true; pendingConfirm = null;
+    G.api(API + "parties/" + party.code, body).then(function (view) {
+      takeParty(view); picks[tab] = Math.min(picks[tab], Math.max(0, rows().length - 1));
+      if (view.run && view.run.event && body.action !== "vote" && body.action !== "move") effect("cuddle", "✦");
+    }).catch(function (refused) { say(refused.message); }).then(function () { busy = false; render(); });
+  }
+
+  function partyProgress(body) { // The holder's crates or lamps, as they go. One request at a time; the latest board wins.
+    if (partySending) { partyNext = body; return; }
+    partySending = true;
+    G.api(API + "parties/" + party.code, body).then(takeParty).catch(function (refused) { say(refused.message); }).then(function () {
+      partySending = false;
+      if (partyNext) { const next = partyNext; partyNext = null; partyProgress(next); }
+    });
+  }
+
+  function partyNew(mode) { // Make a party: online with me as host, or this TV's couch party.
+    if (busy) return;
+    busy = true;
+    G.api(API + "parties", { mode: mode }).then(function (view) {
+      if (view.display) { startCouch(view); say("Party on this TV! Everyone presses OK on their own remote to join. Code " + view.code + "."); }
+      else { followParty(view.code); takeParty(view); say("Party " + view.code + " is open. Friends join from Lumi Dungeons → Dungeon, with this code."); }
+    }).catch(function (refused) { say(refused.message); }).then(function () { busy = false; render(); });
+  }
+
+  function partyJoin(code) { // Join a party by its code.
+    if (busy || !code) return;
+    busy = true;
+    G.api(API + "parties/" + encodeURIComponent(code), { action: "join" }).then(function (view) {
+      followParty(view.code); takeParty(view); say("You're in " + view.code + "! Choose I'm ready when you are.");
+    }).catch(function (refused) { say(refused.message); }).then(function () { busy = false; render(); });
+  }
+
+  function askCode() { // A keyboard's way in: type the code a friend shares.
+    const code = window.prompt("The party's code:");
+    if (code) partyJoin(code.trim().toUpperCase().replace(/[^0-9A-F]/g, ""));
+  }
+
+  function askParties() { // The parties waiting to be joined, looked up now and then while the places list is showing.
+    if (Date.now() - partiesAsked < 8000) return;
+    partiesAsked = Date.now();
+    G.api(API + "parties").then(function (found) {
+      openParties = found.parties;
+      if (found.mine && found.mine !== partyCode) followParty(found.mine); // In a party already (made on another device): follow it.
+      lastList = ""; render();
+    }).catch(function () { /* the list simply stays as it was */ });
+  }
+
+  // ---- The couch: this TV is the party's screen; each remote is its holder's own member, with its own cursor here.
+  function startCouch(view) {
+    party = view; partyCode = view.code; couchCursor = {}; couchGuess = {}; couchCell = {}; couchConfirm = {}; couchSpot = {};
+    try { sessionStorage.setItem(COUCH_KEY, view.code); } catch (e) { /* it just won't survive a reload */ }
+    if (picking) { picking = false; if ($("lp-who")) $("lp-who").hidden = true; }
+    const url = API + "parties/" + view.code;
+    partyFeed = partyStream(url, function () { if (couching() && partyCode === view.code) partyPoll(url); });
+    if (has("dungeon")) changeTab(TABS.indexOf("dungeon"));
+    takeParty(view);
+  }
+
+  function couchPress(controller, body) { // One remote's press, with what it chose, for the server to check and do.
+    G.api(API + "parties/" + party.code + "/tv/input", Object.assign({ token: controller }, body)).then(takeParty).catch(function (refused) {
+      if (refused.status === 404) partyGone(refused); else say(refused.message);
+    });
+  }
+
+  function couchMenu(m) { // This person's menu. A new moment (lobby or trip, another room, a fight, a puzzle turn) starts their cursor at the top.
+    const run = party.run, p = run && run.party;
+    const spot = [party.phase, run ? run.at + ":" + (run.facing ? run.facing.at : "") : "", m.fight ? "fight" : "", p && p.fighting, p && p.puzzle ? p.puzzle.phase + p.puzzle.holder : ""].join("|");
+    if (couchSpot[m.user] !== spot) { couchSpot[m.user] = spot; couchCursor[m.user] = 0; couchConfirm[m.user] = null; }
+    return Pu.couchMenu(party, m, { guess: couchGuess[m.user] || [], now: serverNow() });
+  }
+
+  function couchKey(action, controller, remote) { // A key at a couch party.
+    if (!controller) { // The TV's own keyboard: Enter twice ends the party here.
+      if (action !== "enter") return;
+      if (!couchEndArmed) { couchEndArmed = true; say("Press Enter again to end the party on this TV."); return; }
+      couchEndArmed = false;
+      G.api(API + "parties/" + party.code + "/tv/close", {}).catch(function () { /* it ends by itself in time */ }).then(function () { partyGone({ message: "The party on this TV has ended." }); });
+      return;
+    }
+    const m = party.members.find(function (x) { return x.remote === remote; });
+    if (!m) { if (action === "enter") couchPress(controller, { action: "join" }); return; } // A new remote's OK sits it down.
+    const puzzle = party.run && party.run.party.puzzle, holding = puzzle && puzzle.phase === "attempt" && puzzle.holder === m.user;
+    if (holding && couchBoard(m, action, controller, puzzle)) return;
+    if (action === "play") { // ⏯: pass the puzzle on, or drink a potion.
+      if (holding) couchPress(controller, { action: "pass" });
+      else if (party.run && !m.fainted && !m.fight && m.hp < m.hpMax) couchPress(controller, { action: "potion" });
+      return;
+    }
+    const menu = couchMenu(m);
+    let at = Math.min(couchCursor[m.user] || 0, Math.max(0, menu.length - 1));
+    if (action === "up" || action === "down") { couchCursor[m.user] = (at + (action === "up" ? menu.length - 1 : 1)) % menu.length; couchConfirm[m.user] = null; drawCouch(); return; }
+    const row = menu[at];
+    if (!row) return;
+    if ((action === "left" || action === "right") && row.turn) { couchPress(controller, row.turn(action === "left" ? -1 : 1)); return; }
+    if (action !== "enter") return;
+    if (row.local) { // A rune added or taken off: kept here until they try the code.
+      const guess = couchGuess[m.user] || [];
+      couchGuess[m.user] = row.local.erase ? guess.slice(0, -1) : guess.length < party.run.facing.lock.slots ? guess.concat([row.local.rune]) : guess;
+      drawCouch(); return;
+    }
+    if (!row.send) return;
+    if (row.confirm && couchConfirm[m.user] !== row.key) { couchConfirm[m.user] = row.key; say(m.name + ": press OK again to leave the party."); drawCouch(); return; }
+    if (row.send.action === "rune") couchGuess[m.user] = [];
+    couchPress(controller, row.send);
+  }
+
+  function couchBoard(m, action, controller, puzzle) { // The holder's remote on the crates, lamps or cards. True if it was theirs to take.
+    const lock = party.run.facing ? party.run.facing.lock : null;
+    const way = { up: "n", down: "s", left: "w", right: "e" }[action];
+    if (puzzle.kind === "sokoban" && lock) {
+      if (action !== "enter" && !way) return false;
+      const board = partyBoard(lock, null);
+      const moves = action === "enter" ? board.moves.slice(0, -1) : Dg.sokobanMove(board, { n: "u", s: "d", w: "l", e: "r" }[way]).moves;
+      if (moves !== board.moves) couchPress(controller, { action: "sokoban", moves: moves });
+      return true;
+    }
+    if (puzzle.kind === "lights" && lock) {
+      const at = couchCell[m.user] || 0, size = lock.size;
+      if (way) { const to = Dg.cursorMove(at, way, size, size * size); if (to !== null) { couchCell[m.user] = to; play.board = partyBoard(lock, play.board); render(); } return true; }
+      if (action === "enter") { couchPress(controller, { action: "lights", picks: puzzle.presses.concat([at]) }); return true; }
+      return false;
+    }
+    if (puzzle.kind === "match") {
+      const cards = party.run.game ? party.run.game.cards.length : 8, at = couchCell[m.user] || 0;
+      if (way) { const to = Dg.cursorMove(at, way, 4, cards); if (to !== null) { couchCell[m.user] = to; play.cursor = to; render(); } return true; }
+      if (action === "enter") { couchPress(controller, { action: "flip", picks: [at] }); return true; }
+    }
+    return false;
+  }
+
+  function drawCouch() { // One column per person: their Lumi's health, their vote, and their own menu with its cursor.
+    const box = $("lp-couch"), on = couching();
+    box.hidden = !on; list.hidden = on;
+    if (!on) return;
+    const columns = party.members.map(function (m) {
+      const menu = couchMenu(m), at = Math.min(couchCursor[m.user] || 0, Math.max(0, menu.length - 1));
+      return { m: m, menu: menu, at: at };
+    });
+    const signature = JSON.stringify([party.revision, columns.map(function (c) { return [c.m, c.at, c.menu.map(function (r) { return r.name + (r.hint || ""); }), couchConfirm[c.m.user] || ""]; }), Math.floor(serverNow() / 1000)]);
+    if (signature === box.dataset.drawn) return;
+    box.dataset.drawn = signature;
+    const head = document.createElement("p");
+    head.className = "lp-couch-head";
+    head.textContent = party.phase === "lobby" ? "Party on this TV · press OK on your own remote to join (" + party.members.length + "/3) · Enter on the keyboard twice ends it"
+      : party.run ? Pu.status(party, serverNow()).name : "";
+    const grid = document.createElement("div");
+    grid.className = "lp-couch-grid";
+    columns.forEach(function (c) {
+      const col = document.createElement("section"), name = document.createElement("h3"), bar = document.createElement("div"), fill = document.createElement("i"), info = document.createElement("small");
+      col.className = "lp-couch-col"; col.dataset.ghost = String(c.m.fainted);
+      name.textContent = c.m.name + (c.m.host ? " ★" : "") + (party.phase === "lobby" ? (c.m.ready ? " ✓" : " …") : "");
+      bar.className = "lp-bar"; fill.style.width = Math.round(100 * c.m.hp / Math.max(1, c.m.hpMax)) + "%"; bar.appendChild(fill);
+      info.textContent = c.m.fainted ? "A little ghost" : c.m.hp + "/" + c.m.hpMax + " HP · " + c.m.satchel.coins + " coins" + (c.m.fight ? " · vs " + c.m.fight.enemy.name + " " + c.m.fight.enemy.hp + "/" + c.m.fight.enemy.hpMax : "");
+      col.append(name, bar, info);
+      if (c.m.fight && c.m.fight.log.length) { const said = document.createElement("small"); said.className = "lp-couch-log"; said.textContent = c.m.fight.log.slice(-1)[0]; col.appendChild(said); }
+      const menu = document.createElement("ol");
+      c.menu.forEach(function (row, i) {
+        const li = document.createElement("li");
+        li.textContent = row.icon + " " + (couchConfirm[c.m.user] === row.key ? "Press OK again: " : "") + row.name + (row.hint ? " · " + row.hint : "");
+        if (i === c.at) li.setAttribute("aria-current", "true");
+        menu.appendChild(li);
+      });
+      col.appendChild(menu);
+      grid.appendChild(col);
+    });
+    box.replaceChildren(head, grid);
+  }
+
+  function resumeCouch() { // A TV page reopened mid-party (a reload, or Lumi's other app): pick the couch party up again.
+    let code = null;
+    try { code = sessionStorage.getItem(COUCH_KEY); } catch (e) { code = null; }
+    if (!code || !TV) return false;
+    G.api(API + "parties/" + code).then(function (view) { if (view.display) startCouch(view); else partyGone(null); }).catch(function () {
+      try { sessionStorage.removeItem(COUCH_KEY); } catch (e) { /* nothing kept */ }
+    });
+    return true;
+  }
+
+  // ---- Who's playing? (mnemerynne/lumi_tv.py). Only on a shared TV whose owner has TV guests (game.html data-who).
+  const rawApi = G.api; // Every request in the Lumi kit goes through G.api: a pass that stopped working sends the TV back to the picker.
+  G.api = function (url, body) {
+    return rawApi(url, body).catch(function (failure) {
+      if (failure.status === 403 && player) forgetPlayer(failure.message); // Re-paired, guest removed, or too old.
+      throw failure;
+    });
+  };
+
+  function keepPlayer() { // The pass lives in this TV tab's session only, so Lumi's other two apps open on the same player.
+    try { if (player) sessionStorage.setItem(PLAYER_KEY, JSON.stringify(player)); else sessionStorage.removeItem(PLAYER_KEY); } catch (e) { /* private mode: asked again next app */ }
+  }
+
+  function usePlayer(found) { // Play as the pass holder from now on (null: the TV's own Lumi).
+    player = found; picking = false;
+    G.setHeader(PLAYER_HEADER, player ? player.pass : null);
+    keepPlayer();
+    const box = $("lp-who");
+    if (box) box.hidden = true;
+    $("lp-player").hidden = !player;
+    $("lp-player").textContent = player ? "Playing: " + player.name + "'s Lumi" : "";
+    snap = null; finished = null; play = {}; lastList = lastDungeon = lastHouse = lastGarden = lastSkills = lastAlbum = lastStory = ""; visited = false; tab = 0; picks = TABS.map(function () { return 0; }); // Nothing of the last player's Lumi stays on screen.
+    begin();
+  }
+
+  function forgetPlayer(why) { // Back to the picker: the next person presses OK on their own remote.
+    player = null; picking = true;
+    G.setHeader(PLAYER_HEADER, null);
+    keepPlayer();
+    $("lp-player").hidden = true;
+    showWho(why);
+  }
+
+  function showWho(why) { // The picker over the room: whose Lumi to show on this TV.
+    picking = true;
+    let box = $("lp-who");
+    if (!box) {
+      box = document.createElement("section");
+      box.id = "lp-who"; box.className = "lp-who gm-panel"; box.setAttribute("role", "dialog"); box.setAttribute("aria-label", "Who's playing?");
+      box.innerHTML = '<p class="gm-eyebrow">// ONE TV, EVERYONE&rsquo;S LUMI</p><h2>Who&rsquo;s playing?</h2>' +
+        '<p class="lp-who-big">Press <b>OK</b> on your own remote to play your Lumi.</p>' +
+        '<p class="lp-who-small">Or press Enter on a keyboard for this TV&rsquo;s own Lumi.</p><p class="lp-who-why" id="lp-who-why" aria-live="polite"></p>';
+      $("gm").appendChild(box);
+    }
+    $("lp-who-why").textContent = why || "";
+    box.hidden = false;
+    G.report("Lumi · Who's playing? Press OK on your remote");
+  }
+
+  function pickPlayer(action, controller) { // A press while the picker shows: a remote's OK is a person; a keyboard's Enter is the TV's owner.
+    if (action !== "enter") return;
+    if (!controller) { usePlayer(null); return; } // No remote identity (keyboard, or the phone's cast controls): the TV's own Lumi.
+    rawApi(API + "tv/player", { controller: controller }).then(function (found) {
+      usePlayer({ pass: found.pass, name: found.name, owner: found.owner, idle: found.idle, at: Date.now() });
+      say("Hello, " + found.name + "! Here is your Lumi.");
+    }).catch(function (refused) { $("lp-who-why").textContent = refused.message; });
+  }
+
+  if (resumeCouch()) begin(); // A couch party in this TV tab: back to it (the TV's own Lumi underneath).
+  else if (WHO) { // A shared TV: pick up the player this TV tab already has, or ask.
+    let kept = null;
+    try { kept = JSON.parse(sessionStorage.getItem(PLAYER_KEY)); } catch (e) { kept = null; }
+    if (kept && kept.pass && Date.now() - kept.at < kept.idle * 1000) usePlayer(kept); else showWho("");
+  } else begin();
   visibility();
   checkReminders();
   if ("serviceWorker" in navigator && window.isSecureContext && !framed) navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(function () { /* she works without it; only installing and reminders need it */ });

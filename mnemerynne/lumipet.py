@@ -22,7 +22,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from mnemerynne import coins, lumibattle, lumidungeon, lumigarden, push
+from mnemerynne import coins, lumibattle, lumidungeon, lumigarden, lumiparty, push
 from mnemerynne.db import transaction
 
 GAME = "lumi-pet"
@@ -250,15 +250,22 @@ def _save(conn: sqlite3.Connection, user_id: int, pet: dict) -> None:
 def snapshot(conn: sqlite3.Connection, user_id: int, pet: dict, now: int) -> dict:
     """What the page draws. `now` is the server's clock, so the page can count timers down without trusting its own."""
     worn = {slot: item for slot, item in pet["outfit"].items() if _WEAR.get(item, {}).get("slot") == slot}   # drop anything since retired
+    run, party = lumidungeon.current(conn, user_id), lumiparty.mine(conn, user_id)
+    party_info = {"code": party["code"], "phase": party["phase"], "mode": party["mode"]} if party else None
+    if party and party["phase"] == "trip":               # out with friends: the party's trip is her trip (lumiparty.py)
+        run_view = lumiparty.view(conn, party, user_id, now=now)["run"]
+        run = {"over": None, "hp": run_view["hp"], "satchel": {"potions": run_view["satchel"]["potions"]}, "fight": None}
+    else:
+        run_view = lumidungeon.view(run, pet)
     return {"pet": {**pet, **{meter: round(pet[meter], 1) for meter in DECAY}, "house": placed(pet), "outfit": worn}, "now": now,
             "coins": coins.peek(conn, user_id), "catalog": CATALOG, "house": HOUSE, "closet": CLOSET,
             "battle": {key: lumibattle.CATALOG[key] for key in ("basics", "trees", "mods")} | {"rules": lumibattle.RULES},
             "progress": lumibattle.summary(pet), "fight": lumibattle.current(conn, user_id),
-            "potions_ready": lumidungeon.potions_ready(lumidungeon.current(conn, user_id), pet),
-            "health": _health(lumidungeon.current(conn, user_id), pet),
+            "potions_ready": lumidungeon.potions_ready(run, pet),
+            "health": _health(run, pet), "party": party_info,
             "garden": lumigarden.view(_garden(conn, user_id, pet, now), pet, now),
             "garden_decor": lumigarden.CATALOG["decor"],        # the decorations and the capsule: fixed, so not part of the view
-            "dungeon": {"environments": lumidungeon.open_environments(pet), "run": lumidungeon.view(lumidungeon.current(conn, user_id), pet)}}
+            "dungeon": {"environments": lumidungeon.open_environments(pet), "run": run_view}}
 
 
 def _garden(conn: sqlite3.Connection, user_id: int, pet: dict, now: int) -> dict:
@@ -272,7 +279,8 @@ def _garden(conn: sqlite3.Connection, user_id: int, pet: dict, now: int) -> dict
 
 def _health(run: dict | None, pet: dict) -> dict:
     """Her health for the page: the trip's own count while she is out (nothing mends down there but potions and
-    food), else what she has at home and how long plain waiting takes to fill it (a nap takes half as long)."""
+    food), else what she has at home and how long plain waiting takes to fill it (a nap takes half as long). A party
+    trip's view (lumiparty) has the same hp."""
     full = lumibattle.stats(pet)["hp"]
     if run and not run["over"]:
         return {"hp": min(full, run["hp"]), "max": full, "mends_in": 0, "out": True}
@@ -281,6 +289,8 @@ def _health(run: dict | None, pet: dict) -> dict:
 
 def _eat(conn: sqlite3.Connection, user_id: int, pet: dict, share: float) -> None:
     """Bought food gives back a share of her health: at home, or to the trip's count if she is out (not mid-fight)."""
+    if lumiparty.heal(conn, user_id, share):              # out with a party: their trip's count
+        return
     run = lumidungeon.current(conn, user_id)
     if run and not run["over"]:
         if not run["fight"]:
@@ -461,7 +471,7 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
         pet["glow"] = glow
     elif action in ("learn", "respec", "equip", "mod", "potions", "heal", "drink"):
         run = lumidungeon.current(conn, user_id) if action == "drink" else None
-        if run and not run["over"]:
+        if (run and not run["over"]) or (action == "drink" and lumiparty.on_trip(conn, user_id)):
             raise PetError("Lumi is out exploring. She can drink it there, in Lumi Dungeons.")
         try:                                              # her skills, moves, mods and potions (lumibattle.py)
             said = lumibattle.progress(conn, user_id, pet, action, item, slot, count, now)
@@ -541,7 +551,7 @@ def fight_start(conn: sqlite3.Connection, user_id: int, tier: str, now: int | No
     if pet["task"]:
         raise PetError("Lumi is busy napping." if pet["task"]["kind"] == "nap" else "Lumi is busy playing.")
     run = lumidungeon.current(conn, user_id)
-    if run and not run["over"]:
+    if (run and not run["over"]) or lumiparty.on_trip(conn, user_id):
         raise PetError("Lumi is out exploring. Her fights are in the dungeon until she comes home.")
     try:
         fight = lumibattle.start(conn, user_id, pet, tier, now, rng)
@@ -559,6 +569,9 @@ def fight_act(conn: sqlite3.Connection, user_id: int, battle_id: int, turn: int,
     pet = load(conn, user_id, now)
     run = lumidungeon.current(conn, user_id)
     found = action == "potion" and run is not None and run["fight"] == battle_id and run["satchel"]["potions"] > 0
+    lent = action == "potion" and not found and lumiparty.satchel_potion(conn, user_id, battle_id, take=False)
+    if lent:
+        pet["potions"] += 1                               # a party trip: lend her one found in her own satchel
     if found:
         pet["potions"] += 1                               # lend her one from the satchel for this turn; a refusal rolls it all back
     try:
@@ -568,7 +581,11 @@ def fight_act(conn: sqlite3.Connection, user_id: int, battle_id: int, turn: int,
     if found:
         run["satchel"]["potions"] -= 1                    # the potion she drank was the found one
         lumidungeon._save(conn, user_id, run)
-    if run and run["fight"] == battle_id and fight["status"] != "active":
+    if lent:
+        lumiparty.satchel_potion(conn, user_id, battle_id, take=True)
+    if fight.get("party") and fight["status"] != "active":
+        lumiparty.after_fight(conn, user_id, pet, fight, now, rng)    # a party's fight: the party settles the room
+    elif run and run["fight"] == battle_id and fight["status"] != "active":
         lumidungeon.after_fight(conn, user_id, pet, run, fight)       # a dungeon fight: clear the room, step back, or end the trip
         _narrate(conn, user_id, rng)
     _save(conn, user_id, pet)
@@ -595,6 +612,8 @@ def dungeon_start(conn: sqlite3.Connection, user_id: int, env: str, now: int | N
     pet = load(conn, user_id, now)
     if pet["task"]:
         raise PetError("Lumi is busy napping." if pet["task"]["kind"] == "nap" else "Lumi is busy playing.")
+    if lumiparty.code_of(conn, user_id):
+        raise PetError("Lumi is in a party. Leave it to explore on her own.")
     try:
         lumidungeon.start(conn, user_id, pet, env, now, rng)
     except lumidungeon.DungeonError as refused:
@@ -629,7 +648,7 @@ def garden_act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str
     now = now_ms() if now is None else now
     pet = load(conn, user_id, now)
     run = lumidungeon.current(conn, user_id)
-    if run and not run["over"]:
+    if (run and not run["over"]) or lumiparty.on_trip(conn, user_id):
         raise PetError("Lumi is out exploring. The garden grows without her until she is home.")
     garden = _garden(conn, user_id, pet, now)
     pantry = [snack["id"] for snack in CATALOG["snacks"] if snack["price"]]      # what a gift of a snack may be

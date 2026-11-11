@@ -36,6 +36,18 @@ Snacks, treats and toys are `mnemerynne/lumipet_data/items.json`: `fullness` and
 
 **The Stardust Garden** tunes in `mnemerynne/lumipet_data/garden.json` (the Lumi Pet editor opens it). Its `flowers` and `decor` are written by `python/make_lumi_garden.py`, so change those there: the ladder's times (`CUT`, `PERENNIAL`), which flowers are boutique, how powder a minute rises with a flower's time, `LAST_NEEDS` (how much a garden gives before its last flower), `PERENNIAL_SHARE`, each slot's first price, and the capsule's price, odds and selling prices (`CAPSULE_RULES`). `plots`: how many to start with and at most, the first extra plot's coin price and how fast it climbs. `press`: `powder_per_coin` and `band` (each further `band` coins in a day costs double), `tap` (powder a press squeezes), `max_rate` (presses a second the server believes), `lucky` and `lucky_chance`, `away_hours` and `away_kept` (percent of the Monk's rate kept while away), `present_seconds` (a gap shorter than this counts as the page being open). `fresh`: how many growing-times a ready flower waits before it is overgrown. `flowers`, in ladder order: `minutes`, `powder`, `sort` (cut or perennial), a price in `coins` or in `stardust` (boutique), `level`, and `needs` (powder the garden must have given). Keep cut flowers paying more per minute than perennials, or nobody will tend. `helpers`: first cost and growth; what each does is in `lumigarden.rates`, with `SKILL_MULT` (1.25 a learned skill) and `LEVEL_BONUS`. `abilities`: seconds and cooldown per tree. `water`, `feed`, `moonrise` (`needs` and how it grows), `gifts` (chance per trimmed flower, and weights), `reminder_minutes`. `tests/test_lumigarden.py::test_the_numbers_keep_a_gentle_pace` pins the pace: a whole garden under 4,000 coins, about a hundred coins from a casual day, a first Moonrise in days of a full garden.
 
+**Dungeons with friends** tune at the top of `mnemerynne/lumiparty.py`:
+
+- `MAX_MEMBERS` (3).
+- `VOTE_SECONDS` (20): after the first vote, the most votes win.
+- `LIMITS`, the length of a puzzle turn: 180 seconds for crates, 120 for lamps, 3 rune guesses, 6 card flips. A card turn only ends after a whole pair.
+- `HOLDER_QUIET` (30): seconds unheard before the holder's turn passes on.
+- `FIGHT_QUIET` (60): seconds unheard before a fighter counts as having run.
+- `AWAY_SECONDS` (8): unheard this long and a member is shown as away.
+- `IDLE_MS` (two hours): untouched this long and the party breaks up.
+
+A party fight's creature is at the party's average level (±1, plus the floor), so a much stronger friend makes it harder for a weaker one. Raise the weaker Lumi's level, or go with friends at a similar level. A chest gives everyone standing the same coins, so a party of three brings home three times a solo chest between them; the vault rolls each member's own.
+
 ## Shared-TV casino controls
 
 Each remote gets 1,000 free credits, independent `amount` (initially 50), `pick` (first option) and `hand` (Hit) fields. Arrow edits do not place a bet; Enter joins first, then submits bets, confirms Hit/Stand or refills when below the game's minimum. Play belongs to the first seated player. The existing 8-seat cap includes remote and ordinary account guests, with no extra TV seat. A late join watches the active round. Shared slot cards show all three lines per player, including the full three-line stake.

@@ -243,3 +243,29 @@
   .gm[data-kit="lumi-pet"] .lp-pad { left: .5rem; bottom: .5rem; }
   .gm[data-kit="lumi-pet"] .lp-squeeze { right: .6rem; bottom: .6rem; }
 }
+
+/* Who's playing? (mnemerynne/lumi_tv.py): on a shared TV whose owner has TV guests, a remote's OK picks whose Lumi shows.
+   The picker covers the whole page until someone presses; the badge in the room says whose Lumi it is. */
+.gm[data-kit="lumi-pet"] .lp-who { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .6rem; margin: 0; border-radius: 0; text-align: center; background: color-mix(in srgb, var(--blush, #07020d) 92%, transparent); }
+.gm[data-kit="lumi-pet"] .lp-who[hidden] { display: none; }
+.gm[data-kit="lumi-pet"] .lp-who h2 { margin: 0; font-size: 2.4rem; letter-spacing: .08em; color: var(--rose, #ff2e97); text-shadow: 0 0 18px rgba(var(--glow, 255, 46, 151), .6); }
+.gm[data-kit="lumi-pet"] .lp-who-big { margin: 0; font-size: 1.35rem; }
+.gm[data-kit="lumi-pet"] .lp-who-big b { padding: 0 .35em; border: 1px solid currentColor; border-radius: .3em; }
+.gm[data-kit="lumi-pet"] .lp-who-small { margin: 0; font-size: .85rem; color: var(--muted, #b98aa9); }
+.gm[data-kit="lumi-pet"] .lp-who-why { min-height: 1.3em; margin: .4rem 0 0; color: var(--cyan, #00f0ff); }
+.gm[data-kit="lumi-pet"] .lp-player { color: var(--cyan, #00f0ff); }
+.gm[data-kit="lumi-pet"] .lp-player[hidden] { display: none; }
+
+/* A couch party (Lumi Dungeons with friends): one column per person at the TV, each with their own menu and cursor. */
+.gm[data-kit="lumi-pet"] .lp-couch[hidden], .gm[data-kit="lumi-pet"] .lp-actions[hidden] { display: none; }
+.gm[data-kit="lumi-pet"] .lp-couch { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.gm[data-kit="lumi-pet"] .lp-couch-head { margin: 0 0 .5rem; font-size: .85rem; color: var(--cyan, #00f0ff); }
+.gm[data-kit="lumi-pet"] .lp-couch-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .6rem; }
+.gm[data-kit="lumi-pet"] .lp-couch-col { padding: .5rem .6rem; border: 1px solid rgba(var(--glow, 255, 46, 151), .45); border-radius: .6rem; }
+.gm[data-kit="lumi-pet"] .lp-couch-col[data-ghost="true"] { opacity: .65; border-style: dashed; }
+.gm[data-kit="lumi-pet"] .lp-couch-col h3 { margin: 0 0 .3rem; font-size: 1rem; color: var(--rose, #ff2e97); }
+.gm[data-kit="lumi-pet"] .lp-couch-col small { display: block; margin-top: .25rem; font-size: .7rem; color: var(--muted, #b98aa9); }
+.gm[data-kit="lumi-pet"] .lp-couch-col .lp-couch-log { color: var(--ink, #ffe9f5); }
+.gm[data-kit="lumi-pet"] .lp-couch-col ol { margin: .45rem 0 0; padding: 0; list-style: none; font-size: .78rem; }
+.gm[data-kit="lumi-pet"] .lp-couch-col li { padding: .25rem .35rem; border-radius: .35rem; }
+.gm[data-kit="lumi-pet"] .lp-couch-col li[aria-current="true"] { background: rgba(var(--glow, 255, 46, 151), .28); outline: 1px solid var(--rose, #ff2e97); }

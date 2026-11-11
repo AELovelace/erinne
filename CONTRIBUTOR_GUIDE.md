@@ -44,6 +44,35 @@ See [Testing](TESTING_GUIDE.md) and [Tuning](GENERATION_TUNING_GUIDE.md).
 
 **The Stardust Garden.** `mnemerynne/lumigarden.py` holds every rule; one JSON document per person in `lumi_gardens` (migration 0069); the catalog is `lumipet_data/garden.json`. Growing is only timestamps: a plot stores `ready_at` and `grow`, and watering, fertilizer and the Mage's ability move `ready_at` earlier, so nothing ticks and nothing is replayed. `rates()` is the one place every number comes from (helper levels, the skills learned in each tree, `lumibattle.bonuses`, her level, permanent upgrades, running effects). `advance()` pays the Monk's squeezing since the last look: full rate while the page is open, the kept share for up to the away limit after a gap; only `lumipet._garden` calls it (from `snapshot` and `garden_act`), never the reminders sweep. Coins leave only through `_squeeze`, as whole coins paid by a running count (`coins.prize` with a ref), priced by `price()` from how many were made today. Flower kinds are unlocked per garden, in order, gated by that garden's `given`; Moonrise replaces the garden with `_starter()`. Presses are the one thing the page counts: the server accepts about twelve a second and decides what they made. The watering sequence stays on the server and the page is sent only this round's part. On the page, `garden-ui.js` (rows, words, number format) and `garden-art.js` (drawing, `data-click` shapes) are pure and tested in node; `game.js` treats the Garden tab like a trip (`gardening()`, `gardenKey`, `gardenSend`, `drawGarden`), batches presses once a second, and listens for `pointerdown` so a press is never lost to a redraw. `drawList` now changes a list's words in place when its rows are the same, for the same reason. The reminder is the `garden` kind in `lumipet.sweep`, from `lumigarden.ready_since`.
 
+**Lumi Dungeons with friends (2026-11-10).** `mnemerynne/lumiparty.py` is a party of up to three on one shared floor.
+
+- **Storage.** One JSON document per party in `lumi_parties`, and `lumi_party_members` keeps each account to one party (migration 0073).
+- **Shape.** It follows `showdown.py`. `act()` reads the party, catches up its clocks (`_advance`: a vote's 20 seconds, a puzzle turn's time, a holder or fighter gone quiet), does one thing, and writes and wakes `HUB` only if the document changed. `look()` takes the write lock only when `_due()` says a clock has run out. Presence is `lobby.PRESENCE` under `("lumi-party", code)`, keyed `user:<id>` online and by the TV's actor for couch members.
+- **Floor and loot.** The floor is `lumidungeon.generate` with an empty pet, because loot is rolled per member when it is taken (`_take`). A chest gives everyone standing the same coins and potion; the vault runs `_vault_loot` and `_set_piece` for each member.
+- **Votes.** Each member has a `vote`, settled by `_tally`. A majority settles it at once, and so does everyone having voted. Otherwise the most votes win after `VOTE_SECONDS`. Ties go to the dice, except a tie between members, which goes to whoever has the fewest `puzzles`.
+- **Puzzles.** A puzzle is `run["puzzle"]`. It starts in `pick` (voting who goes first), then moves to `attempt`. `_pick` fixes the `order`: the chosen member, then the fewest tried (by seat), then the last. `turn` moves round that order in `_fail`. Only `holder()` may move it. Crates and lamps are sent as the moves so far (`_sokoban_progress` checks every step is legal), so the others can replay them.
+- **Fights.** Each standing member gets one `lumibattle.start(..., party=code)`. `lumipet.fight_act` sees `fight["party"]` and hands the end to `lumiparty.after_fight`, which settles the room once nobody is still fighting (`_settle_fights`).
+- **What the page sees.** `view()` gives the page a run shaped exactly like `lumidungeon.view`, plus `run.party` (options, votes, puzzle, deadlines). So `dungeon-ui.js` and `dungeon-art.js` draw a party trip unchanged, and `lumipet.snapshot` puts it in `dungeon.run`.
+- **The page (`game.js`).** The solo page's own buttons mean the same at a party (`move` votes a way, `leave` votes home). So `game.js` only:
+  - redirects `dungeon/act` rows to the party (`submit`);
+  - adds the rows in `party-ui.js` (`startRows`, `lobbyRows`, `tripRows`);
+  - sends the holder's crates and lamps move by move (`partyProgress`);
+  - rebuilds a watched board from the server (`partyBoard`).
+- **The couch (`couching()`).** The TV owns the party (`display`).
+  - Every remote press arrives with its signed `controller` and its plain remote id; `media.js` now forwards both.
+  - The TV keeps one cursor per member (`couchCursor`, reset when their menu changes) over `Pu.couchMenu`.
+  - OK is sent as `POST …/parties/<code>/tv/input` with the press's proof. `web/games.py` checks it with `_live_remote`, then `lumiparty.couch` acts as that remote's own account.
+- **Out on a trip.** A party member can't start a solo trip, an arena fight or a garden action (`lumipet` checks `lumiparty.on_trip`).
+
+**TV guests and Who's playing? (2026-11-10).**
+
+- **Guests.** `media/screens.py` has `guests`, `add_guest`, `remove_guest` and `drivable` (migration 0072, `media_screen_guests`). An owner makes another account a guest on all of their TVs.
+- **Guest commands.** `remote_command` uses `drivable` and builds a guest's command as the TV's **owner** (`_command(conn, owner, …)`), so what plays comes from the owner's library. `sender` is the guest.
+- **One check for presses.** `web/games.py` `_live_remote` checks that a signed press may still drive a TV: the proof is for this screen and pairing, the remote's owner is the TV's owner or a guest, and they are still in the screens group. Casino `tv_input`, the party's couch input and Who's playing? all use it.
+- **Play pass.** `mnemerynne/lumi_tv.py` issues a play pass for a remote's OK on a TV (`POST /api/media/games/lumi-pet/tv/player`). The Lumi page sends it as `X-Lumi-Player` through `MGame.setHeader`.
+- **`pet_user`.** This dependency is on every Lumi route except push. It loads the pass holder instead of the TV owner, and refuses with 403 (never falling back) once the pass stops holding.
+- **Page flags.** `game.html` sets `data-who` when the TV's owner has guests (this shows the picker) and `data-tv` on a TV as its owner (this offers Party on this TV).
+
 ## One TV, multiple casino remotes
 
 The casino lobby on a paired, non-speaker TV offers **One TV, multiple remotes**. It creates a display-only host surface, leaving all eight player slots available. Each paired remote's first Enter joins its own seat; subsequent keys affect only its persisted `controls` draft. The first player is host. Normal account/device tables and guests joining their code retain the original controls.

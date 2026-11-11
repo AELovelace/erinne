@@ -35,7 +35,7 @@
 </section>
 
 <section class="lp-room" id="lp-room" data-palette="rose" data-sleep="false" aria-label="Lumi's room">
-  <div class="lp-room-top"><span>THE STARLIGHT NOOK</span><span id="lp-clock">A quiet afternoon</span></div>
+  <div class="lp-room-top"><span>THE STARLIGHT NOOK</span>{#- On a shared TV: whose Lumi this is (Who's playing?, mnemerynne/lumi_tv.py). -#}<span class="lp-player" id="lp-player" hidden></span><span id="lp-clock">A quiet afternoon</span></div>
   {#- The house: game.js draws every spot's object here from static/games/lumi-pet/house.js. The room fills the screen and crops this wide
       drawing's sides to fit. Its windows are holes in the wall: the theme's scrolling backdrop, behind the page, shows through them. -#}
   <svg class="lp-house" id="lp-house" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
@@ -103,6 +103,8 @@
     {% endfor %}
   </div>
   <div class="lp-actions" id="lp-list" aria-label="Choices"></div>
+  {#- A couch party (Lumi Dungeons with friends, mnemerynne/lumiparty.py): one column per person at this TV, each worked with their own remote. -#}
+  <div class="lp-couch" id="lp-couch" aria-label="Everyone's choices" aria-live="polite" hidden></div>
   {#- game.js swaps these lines for the dungeon's own controls while Lumi is exploring. -#}
   <p class="gm-keys" id="lp-keys">⏮ ⏭ change tab · ▲ ▼ choose<br>◀ ▶ flip a row's choices · Enter does it<br>Keyboard: Page Up / Page Down or [ ]<br>Escape / Back returns to Games</p>
 </section>

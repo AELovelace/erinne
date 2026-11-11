@@ -608,7 +608,45 @@ def list_screens(request: Request, user=Depends(api_user), conn: sqlite3.Connect
         out += [row(s, s["owner"]) for s in screens.of_others(conn, user["id"])]
     mine_remotes = [{"id": r["id"], "name": r["name"], "last_seen": r["last_seen_at"]}
                     for r in remotes.of_user(conn, user["id"])]
-    return {"allowed": allowed, "admin": admin, "screens": out, "remotes": mine_remotes}
+    guests = [{"id": g["id"], "username": g["username"], "added": g["added_at"]}
+              for g in screens.guests(conn, user["id"])]          # people whose remotes may drive my TVs
+    hosts = [h["username"] for h in screens.hosts(conn, user["id"])]   # people whose TVs my remotes may drive
+    return {"allowed": allowed, "admin": admin, "screens": out, "remotes": mine_remotes, "guests": guests,
+            "hosts": hosts}
+
+
+class GuestBody(BaseModel):
+    username: str = Field(..., min_length=1, max_length=200)
+
+
+@router.post("/api/media/screens/guests", status_code=status.HTTP_201_CREATED)
+def add_screen_guest(body: GuestBody, request: Request, user=Depends(screens_user),
+                     conn: sqlite3.Connection = Depends(get_db)):
+    """Make someone a TV guest on all of the person's TVs: their own remotes then drive them too. Only someone
+    who may use screens themselves can be one, and the name must be typed (accounts aren't listed)."""
+    guest = users.get_user(conn, body.username.strip())                  # by exact username, like signing in
+    if guest is None or not guest["active"] or not screens.may_use(conn, guest, request.app.state.directory):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No one by that name can use screens. Check the username, "
+                                                       "or ask an admin to add them to the screens group.")
+    try:
+        with transaction(conn):
+            added = screens.add_guest(conn, user["id"], guest["id"])    # one row covers every TV of mine
+            if added:
+                _log(conn, user, "screen.guest_add", guest["username"])
+    except screens.ScreenError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    return {"id": guest["id"], "username": guest["username"], "added": added}
+
+
+@router.delete("/api/media/screens/guests/{guest_id}")
+def remove_screen_guest(guest_id: int, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Stop a guest's remotes driving the person's TVs (always allowed, even outside the screens group)."""
+    with transaction(conn):
+        if not screens.remove_guest(conn, user["id"], guest_id):
+            raise _not_found()
+        guest = users.get_user_by_id(conn, guest_id)
+        _log(conn, user, "screen.guest_remove", guest["username"] if guest else str(guest_id))
+    return {"status": "removed"}
 
 
 @router.delete("/api/media/screens/{screen_id}")
@@ -983,13 +1021,16 @@ def remote_screens(request: Request, background: BackgroundTasks, remote=Depends
     h = hub(request)
     keep = ("kind", "title", "sub", "position", "duration", "paused", "volume", "muted", "night")
 
-    def row(s: sqlite3.Row) -> dict:
+    def row(s: sqlite3.Row, host: str | None = None) -> dict:
         state = h.state(s["id"])
         return {"id": s["id"], "name": s["name"], "online": h.online(s["id"]), "speaker": bool(s["speaker"]),
-                "state": {k: state.get(k) for k in keep} if state else None}
+                "state": {k: state.get(k) for k in keep} if state else None,
+                "guest": host is not None, "host": host}               # a TV guest's: someone else's TV
     mine = remotes.speaker_of(conn, remote)
+    own = [row(s) for s in screens.of_user(conn, remote["user_id"])]
+    guest = [row(s, s["owner"]) for s in screens.guest_screens(conn, remote["user_id"])]   # TVs I'm a guest on
     return {"name": remote["name"], "owner": remote["username"], "speaker": mine["id"] if mine else None,
-            "screens": [row(s) for s in screens.of_user(conn, remote["user_id"])]}
+            "screens": own + guest}
 
 
 @router.get("/api/media/remote/channels")
@@ -1016,20 +1057,26 @@ class RemoteCommand(BaseModel):
 @router.post("/api/media/remote/screens/{screen_id}/command")
 async def remote_command(screen_id: int, body: RemoteCommand, request: Request, remote=Depends(remote_device),
                          conn: sqlite3.Connection = Depends(get_db)):
-    """Control one of the remote's owner's screens: as their phone would, but only these commands."""
-    screen = screens.owned(conn, remote["user_id"], screen_id)
-    if screen is None:
-        raise _not_found()
-    owner = users.get_user_by_id(conn, remote["user_id"])
+    """Control one of the remote's owner's screens, or a TV whose owner made them a guest: as their phone would,
+    but only these commands. A guest's commands are built as the TV's owner (what plays comes from the owner's
+    library: the TV is theirs), and the TV is told who pressed."""
+    screen = screens.drivable(conn, remote["user_id"], screen_id)          # theirs, or a TV they're a guest on
+    if screen is None or (screen["speaker"] and screen["user_id"] != remote["user_id"]):
+        raise _not_found()                                                 # a guest never drives someone's speaker
+    holder = users.get_user_by_id(conn, remote["user_id"])                 # who is holding the remote
+    owner = holder if screen["user_id"] == holder["id"] else users.get_user_by_id(conn, screen["user_id"])
+    if owner is None or not screens.may_use(conn, owner, request.app.state.directory):
+        raise _not_found()                                                 # the TV's owner left the screens group
     command = await anyio.to_thread.run_sync(_command, conn, owner, Command(**body.model_dump()), request.app.state.settings)
     if screen["speaker"]:
         command = await anyio.to_thread.run_sync(_for_speaker, request, conn, owner, screen, command)
-    command.update(sender=owner["username"], override=False)
+    command.update(sender=holder["username"], override=False)
     if not screen["speaker"] and body.action in ("press", "toggle"):
         from mnemerynne import casino_remote
         # Only authenticated panel commands carry a seat proof; phone/keyboard controls remain ordinary inputs.
         command["controller"] = casino_remote.issue(request.app.state.settings.secret_key, remote, screen,
                                                      body.button if body.action == "press" else "play")
+        command["remote"] = remote["id"]                  # which remote pressed, so a couch game keeps each one's cursor (not a proof)
     command_id = hub(request).send(screen_id, command)
     if command_id is None:
         raise HTTPException(status.HTTP_409_CONFLICT, f"{screen['name']} isn't connected: is Media open on it?")

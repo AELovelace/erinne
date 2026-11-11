@@ -22,6 +22,22 @@ The dungeon has no dialogue tree: it has one short line per moment, chosen from 
 
 The `look` scenario is the environment's own storytelling: one small detail of a room, with no treasure, door, enemy or puzzle in it, since it can be shown in any room. Each room shows one of these lines for as long as Lumi stands in it, and **Look around** tells the next one along, so write them to stand alone and to differ from each other. Seven per environment ship, written by hand; `mnemerynne lumi-tales` writes more like any other scenario.
 
+## Party lines (`mnemerynne/lumiparty.py`)
+
+A party trip tells its story from the same library as a solo one. Every room, chest, creature and door uses the scenario lines above, unchanged (they talk about "Lumi", which reads as the party's Lumis).
+
+What only a party has is written as fixed sentences in `lumiparty.py`, never handed to a model:
+
+- who joins and leaves ("jane joins the party.")
+- what was voted ("The party chooses east." / "The dice choose south.")
+- whose turn it is at a puzzle ("jane's turn at the runes (3 guesses).")
+- how a turn ended ("mina passes it on.", "Time's up for doll.", "That was jane's last guess.")
+- who opened a door, and who won a fight
+- who fainted ("…'s Lumi faints, and drops everything she found. She follows along as a little ghost.")
+- who found something for the house
+
+Within one action these add up before the library's line, so the panel reads as one moment. The live storyteller is not used on party trips.
+
 ## Shared-TV casino messages
 
 The TV's guide must explain that the first Enter joins and a later Enter submits a bet. Player cards identify the remote by its paired name and show the draft separately from the submitted stake. Host-only Play errors and invalid wagers belong to that player's card, not another player's controls. Reconnection/expired-input messages ask the player to check the TV before pressing again. A late join is described as watching until the next round. Remote panels continue to show the shared table summary; their individual draft and hand prompts are on the TV. Keep removal copy explicit about forfeiting credits and the distinction between leaving the view and ending the table.

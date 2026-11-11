@@ -132,7 +132,7 @@
   function send(command) {
     const s = current();
     if (!s) { setStatus("Choose a screen first"); return; }                            // the panel's own message
-    if (!s.online) { setStatus(s.name + " isn't connected: is Media open on it?"); return; }
+    if (!s.online) { setStatus(screenName(s) + " isn't connected: is Media open on it?"); return; }
     setStatus("Sending...");
     sends = sends.then(async function () {                                             // waits for the taps before this one
       try {
@@ -268,6 +268,9 @@
     $("mp-status").textContent = line;
     $("mp-status").classList.toggle("mp-alert", Boolean(statusText || stale));
   }
+  function screenName(s) {   // a TV guest's screens say whose they are: "Living room (Doll's)"
+    return s.guest && s.host ? s.name + " (" + s.host + "'s)" : s.name;
+  }
   function kindLabel(s) {   // what a screen is doing, in the panel's words
     if (!s.online) return "Not connected";
     if (!s.state) return "Connected";
@@ -313,7 +316,7 @@
     const st = s && s.online ? s.state : null;                                       // what's shown only for a connected screen
     $("mp-title").textContent = "Remote";
     $("mp-dot").classList.toggle("mp-online", Boolean(s && s.online));
-    $("mp-name").textContent = s ? s.name : remote.screens.length ? "Choose a screen" : "No screens: pair a TV on your phone";
+    $("mp-name").textContent = s ? screenName(s) : remote.screens.length ? "Choose a screen" : "No screens: pair a TV on your phone";
     $("mp-state").textContent = s ? kindLabel(s) + (st && st.paused ? " - paused" : "") : "";
     $("mp-now").textContent = st && st.kind !== "idle" ? st.title || "" : "";
     $("mp-sub").textContent = st && st.kind !== "idle" ? st.sub || "" : "";
@@ -351,7 +354,7 @@
     $("mp-title").textContent = "Choose a screen";
     const page = all.slice(screensPage * ROWS, (screensPage + 1) * ROWS).map(function (s) {
       const playing = s.online && s.state && s.state.kind !== "idle" && s.state.title;    // its title beats its kind
-      return { id: s.id, name: s.name, sub: playing ? s.state.title : kindLabel(s), chosen: s.id === chosen };
+      return { id: s.id, name: screenName(s), sub: playing ? s.state.title : kindLabel(s), chosen: s.id === chosen };
     });
     setRows(["screens", page], function () {
       return page.map(function (s) { return row(s.name, s.sub, s.chosen, function () { choose(s.id); show("remote"); }); });

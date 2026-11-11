@@ -1015,8 +1015,8 @@
     },
 
     /* One key for the game: a remote panel's press, or the keyboard while focus is on this page. */
-    key: function (key, controller) {
-      if (gameFrame.contentWindow) gameFrame.contentWindow.postMessage({ type: "mnemerynne-game-key", key: key, controller: controller }, location.origin);
+    key: function (key, controller, remote) { // remote: which remote pressed (a couch game keeps one cursor per remote); the signed controller is the proof
+      if (gameFrame.contentWindow) gameFrame.contentWindow.postMessage({ type: "mnemerynne-game-key", key: key, controller: controller, remote: remote }, location.origin);
     },
 
     syncScale: function () { // Frames do not inherit root CSS; send the TV's actual scale after loading, resizing or text-size changes.
@@ -2102,10 +2102,10 @@
      an idle slideshow). A replayed Enter presses nothing by itself, so it presses the focused button here;
      with a film or the pictures open, whose arrows don't move focus, it plays or pauses instead. */
   const REMOTE_KEYS = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight", enter: "Enter" };
-  function remotePress(button, controller) {
+  function remotePress(button, controller, remote) {
     const key = REMOTE_KEYS[button];
     if (!key) return;
-    if (games.isOpen()) { games.key(key, controller); return; }   // Preserve the signed remote identity through the TV frame.
+    if (games.isOpen()) { games.key(key, controller, remote); return; }   // Preserve the signed remote identity (and which remote it was) through the TV frame.
     const target = document.activeElement || document.body;
     const field = ["INPUT", "SELECT", "TEXTAREA"].indexOf(target.tagName) >= 0;
     if (!target.dispatchEvent(new KeyboardEvent("keydown", { key: key, bubbles: true, cancelable: true }))) return;  // taken
@@ -2150,7 +2150,7 @@
   /* This device (the phone) sends what to play to one of its owner's screens (the TV); the choice is
      kept in this browser. With a screen chosen, every Play on the page goes there instead. */
   const cast = {
-    target: null, screens: [], remotes: [], allowed: true, admin: false, timer: null, followTimer: null,
+    target: null, screens: [], remotes: [], guests: [], hosts: [], allowed: true, admin: false, timer: null, followTimer: null,
 
     init: function () {
       if (screenId || !$("mc-cast")) return;   // a screen itself, or not in the screens group
@@ -2178,6 +2178,8 @@
       try { data = await api("GET", "/api/media/screens"); } catch (e) { return; }
       this.screens = data.screens;
       this.remotes = data.remotes || [];
+      this.guests = data.guests || [];                       // people whose remotes may drive my TVs
+      this.hosts = data.hosts || [];                         // people whose TVs my remotes may drive
       this.allowed = data.allowed;
       this.admin = !!data.admin;
       if (this.target !== null && !this.screen()) this.choose(null);
@@ -2415,6 +2417,63 @@
     });
   }
 
+  /* TV guests: people whose own remotes may drive all of my TVs (and who play their own Lumi there). They are
+     added by typing their username, since accounts aren't listed; removing one stops their remote at once. */
+  function guestBox() {
+    const box = el("form", "mc-paste");
+    box.id = "mc-guests";
+    box.appendChild(el("h2", null, "TV guests"));
+    box.appendChild(el("p", "mc-note", "Let someone else's remote drive your TVs, e.g. your partner's phone remote. " +
+      "What they start plays from your library, as the TVs are yours; in the Lumi games they play their own Lumi."));
+    const who = el("input");
+    who.placeholder = "Their username";
+    who.setAttribute("aria-label", "Guest's username");
+    who.autocapitalize = "none";
+    who.autocomplete = "off";
+    who.spellcheck = false;
+    const addBtn = el("button", null, "Add guest");
+    addBtn.type = "submit";
+    const row = el("div", "mc-paste-row");
+    row.append(who, addBtn);
+    box.appendChild(row);
+    box.addEventListener("submit", async function (e) {          // add a guest by username
+      e.preventDefault();
+      try {
+        await api("POST", "/api/media/screens/guests", { username: who.value.trim() });
+        who.value = "";
+        await cast.refresh();
+        paintGuests(list);
+      } catch (err) { showError(err.message); }
+    });
+    const list = el("div", "mc-screen-list");
+    box.appendChild(list);
+    paintGuests(list);
+    return box;
+  }
+
+  /* The guest rows (each with Remove), and which TVs my own remotes are a guest on. */
+  function paintGuests(list) {
+    list.textContent = "";
+    cast.guests.forEach(function (g) {
+      const row = el("div", "mc-screen");
+      row.appendChild(el("div", "mc-screen-name", "Guest: " + g.username));
+      row.appendChild(el("div", "mc-sub", "Added " + g.added + " UTC"));
+      const actions = el("div", "mc-actions");
+      actions.appendChild(button("Remove", "link small danger", async function () {   // their remote stops at once
+        if (!confirm("Stop " + g.username + "'s remotes driving your TVs?")) return;
+        try { await api("DELETE", "/api/media/screens/guests/" + g.id); } catch (err) { showError(err.message); }
+        await cast.refresh();
+        paintGuests(list);
+      }));
+      row.appendChild(actions);
+      list.appendChild(row);
+    });
+    if (!cast.guests.length) list.appendChild(el("p", "mc-sub", "No guests yet."));
+    if (cast.hosts.length) {                                   // the other way round: TVs I'm a guest on
+      list.appendChild(el("p", "mc-sub", "Your remotes can also drive the TVs of: " + cast.hosts.join(", ") + "."));
+    }
+  }
+
   /* arg: a YouTube link to fill in (#cast/<link>, from the Share menu); code: a TV's pairing code
      (#pair/<code>, from its QR code). */
   async function viewScreens(arg, code) {
@@ -2505,6 +2564,7 @@
     list.id = "mc-screen-list";
     listBox.appendChild(list);
     out.push(listBox);
+    out.push(guestBox());                                     // TV guests: other people's remotes on my TVs
 
     const pair = el("form", "mc-paste");
     pair.appendChild(el("h2", null, "Use this browser as a screen"));
@@ -2653,7 +2713,7 @@
       } else if (a === "play_station") {
         nowPlaying.playStation(cmd.station);
       } else if (a === "toggle") {
-        if (games.isOpen()) games.key("MediaPlay", cmd.controller); // The host remote can start its shared-TV table.
+        if (games.isOpen()) games.key("MediaPlay", cmd.controller, cmd.remote); // The host remote can start its shared-TV table.
         else if (!$("mc-player").hidden) player.toggleAny();
         else if (!$("mc-viewer").hidden) viewer.slideshow();
         else nowPlaying.toggle();
@@ -2683,7 +2743,7 @@
         nowPlaying.stop();
         viewer.close();
       } else if (a === "press") {
-        remotePress(cmd.button, cmd.controller);
+        remotePress(cmd.button, cmd.controller, cmd.remote);
       }
       setTimeout(function () { screenMode.report(true); }, 300);
     },

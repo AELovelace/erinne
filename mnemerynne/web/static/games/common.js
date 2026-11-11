@@ -22,9 +22,9 @@
     if (framed) window.parent.postMessage(Object.assign({ type: "mnemerynne-game-" + kind }, extra || {}), location.origin);
   }
 
-  function act(action, controller) { // A signed panel input keeps its identity; local keys and older games need none.
+  function act(action, controller, remote) { // A signed panel input keeps its identity (and says which remote it was); local keys and older games need neither.
     sound.unlock();
-    if (onAction) onAction(action, controller);
+    if (onAction) onAction(action, controller, remote);
   }
 
   document.addEventListener("keydown", function (e) {
@@ -44,7 +44,8 @@
   window.addEventListener("message", function (e) { // A remote panel's arrow or Enter, forwarded by the TV page.
     if (e.origin !== location.origin || e.source !== window.parent) return;
     const data = e.data || {};
-    if (data.type === "mnemerynne-game-key" && KEYS[data.key]) act(KEYS[data.key], typeof data.controller === "string" ? data.controller : undefined);
+    if (data.type === "mnemerynne-game-key" && KEYS[data.key]) act(KEYS[data.key], typeof data.controller === "string" ? data.controller : undefined,
+      Number.isInteger(data.remote) ? data.remote : undefined);
     if (data.type === "mnemerynne-game-scale" && document.documentElement.classList.contains("tv") &&
         Number.isFinite(data.scale) && data.scale >= .75 && data.scale <= 3) {
       document.documentElement.style.setProperty("--ui-scale", String(data.scale)); // Reuse the UI's rem scale, never multiply it twice.
@@ -108,9 +109,11 @@
     return { unlock: unlock, stop: stop, tone: tone, toggle: toggle, isOn: function () { return on; } };
   })();
 
+  const extraHeaders = {}; // Sent with every api() call: the Lumi apps' play pass on a shared TV (mnemerynne/lumi_tv.py).
+
   async function api(url, body) { // A bounded GET, or a POST when there's a body. A refusal throws with its status and the server's words.
     const response = await fetch(url, { method: body === undefined ? "GET" : "POST", credentials: "same-origin",
-      headers: body === undefined ? {} : { "Content-Type": "application/json" },
+      headers: Object.assign({}, extraHeaders, body === undefined ? {} : { "Content-Type": "application/json" }),
       body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(10000), cache: "no-store" });
     const data = await response.json();
     if (!response.ok) {
@@ -130,6 +133,7 @@
 
   window.MGame = {
     api: api, showCoins: showCoins,
+    setHeader: function (name, value) { if (value) extraHeaders[name] = value; else delete extraHeaders[name]; }, // Add (or, with no value, drop) a header every api() call sends.
     framed: framed,
     reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
     onAction: function (fn, options) { onAction = fn; directEnter = options && options.directEnter; }, // Optional direct Enter controls; older games keep native buttons.

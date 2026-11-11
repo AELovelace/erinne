@@ -128,6 +128,45 @@ Run `.venv/Scripts/python.exe -m pytest tests/test_lumidungeon.py tests/test_lum
 
 The connected browser runner also checks Lumi against the real server: the old browser save's moments arriving on the account, cuddle and its cooldown message, feeding by remote keys after stale focus, buying a cookie, a skill refused for lack of points, a fight (enemy drawn, bars, Defend by remote keys, picked up mid-fight after a reload, Run), a timed play with its countdown, one-thing-at-a-time refusal, the closet (try on, buy, capsule-only refusal, take off), the house (the room filling a wide screen, three window holes in the wall, open windows exactly when the theme has a backdrop, a painted view flipped to with Left/Right and previewed in all three, Lumi centred, buy and place), the controls (Next for the next tab, Left/Right flipping a closet place and a house spot, the dungeon's own panel with the tabs folded away, the story at its top and the choices at its bottom, Look around, the mouse (a door, a lamp, a card and crate squares pressed in real Chrome) and Look after Lumi offering only snacks and a potion, arrows walking, Previous/Next on its list, Play for a potion, every door kind and the card game driven by keyboard, and a paired TV's real Previous/Next reaching Lumi through the command stream), glow and sound in Settings, a reload showing the same pet, Tab activation, mobile overflow, reduced motion, blocked storage, and Media-frame remote messages. Screenshots `lumi-pet.png`, `lumi-pet-fight.png`, `lumi-pet-closet.png`, `lumi-pet-house.png` and `lumi-pet-phone.png` are saved in `runs/casino-browser/`. The fight step only defends and runs so coin sums stay fixed; about once in several hundred runs a common enemy could still win, and the step then asks for a re-run. Not covered by any automated test: hours of real decay on a live server, two devices open at once, a real phone's notifications, and smooth scrolling on a real TV box.
 
+## TV guests, Who's playing? and Dungeons with friends
+
+**Server tests:**
+
+- `tests/test_tv_guests.py`:
+  - a guest's remote drives the owner's TV, as the owner
+  - it is refused once removed
+  - it takes a casino couch seat, and never drives a speaker
+- `tests/test_lumi_tv_player.py`:
+  - an OK press plays the guest's own Lumi and pays her visit
+  - a pass works only on its own TV and pairing
+  - once a pass stops holding it is refused, never swapped for the owner's pet
+- `tests/test_lumiparty.py`:
+  - the lobby, votes and their timing and dice
+  - the puzzle circle and its limits, crates watched move by move, passing and leaving mid-turn
+  - cards and cups
+  - fights at once, and ghosts
+  - each member's own finds, with coins paid once
+  - what the page is never told
+  - a party through the web app, and a couch party seating each remote as its own account
+
+**Page tests:** `tests/js/lumi_party.test.mjs` covers `party-ui.js`.
+
+**Chrome checks:** `tests/lumi-party-browser.mjs`, run by `connected-browser.mjs` (`LUMI_PARTY_ONLY=1` runs just these):
+
+- two accounts make a party, join, get ready, vote and walk home
+- a party's crates on the real page: the holder's moves go out one by one, and a watcher can't move them
+- a real TV with nobody signed in: a TV guest's remote picks his own Lumi through Who's playing?, then two remotes play a couch party (screenshot `runs/casino-browser/lumi-couch-party.png`)
+
+Without a project Puppeteer, run `npm install puppeteer-core` in a scratch folder. Set `PUPPETEER_MODULE` to its `lib/esm/puppeteer/puppeteer-core.js` and `CHROME_PATH` to Chrome.
+
+**Not covered by a browser:**
+
+- a party fight played through to the end (the server tests cover its ending)
+- lamps and cards at a party
+- anything on a real TV box or a physical remote
+
+For those, see PLAYER_CHECKLIST steps 18–20.
+
 ## Star Capsule and Moon Capsule
 
 Lumi Pet's capsules now give clothes, toys and house objects: 120 accessories (20 a slot, of which 105 come only from capsules), 10 Capsule-only toys and 150 Capsule-only house objects, ten or more in every closet slot and house spot except trophies. The newest 60 clothes are the "Star Capsule wardrobe" at the end of `closet.js`: in the Closet, flip through each place and check every piece sits on her properly, including the kitsune tails (which redraw her own tail in front of them). In the Closet, open each capsule a few times.

@@ -1089,7 +1089,8 @@ def test_a_remote_pairs_with_a_code_and_controls_only_its_owners_screens(client,
 
     seen = panel.get("/api/media/remote", headers=auth).json()
     assert seen["name"] == "Kitchen tablet" and seen["owner"] == "boss"
-    assert seen["screens"] == [{"id": screen_id, "name": "Living room", "online": False, "speaker": False, "state": None}]
+    assert seen["screens"] == [{"id": screen_id, "name": "Living room", "online": False, "speaker": False, "state": None,
+                                "guest": False, "host": None}]
     assert seen["speaker"] is None                                          # paired without a speaker
     assert conn.execute("SELECT last_seen_at FROM media_remotes").fetchone()[0]
     off = panel.post(f"/api/media/remote/screens/{screen_id}/command", json={"action": "toggle"}, headers=auth)
@@ -1113,7 +1114,7 @@ def test_a_remote_pairs_with_a_code_and_controls_only_its_owners_screens(client,
     assert r.status_code == 200, r.text                   # the panel's arrows and Enter
     sent = queue.get_nowait()
     assert sent == {"action": "press", "button": "left", "id": sent["id"], "sender": "boss", "override": False,
-                    "controller": sent["controller"]}
+                    "controller": sent["controller"], "remote": remote_id}   # which remote pressed, for a couch game's cursors
     from mnemerynne import casino_remote
     proof = casino_remote.read(client.app.state.settings.secret_key, sent["controller"])
     assert proof["remote"] == remote_id and proof["action"] == "left"  # Identity comes from the bearer key, not a body field.

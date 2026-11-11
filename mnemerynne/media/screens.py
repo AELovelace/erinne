@@ -20,6 +20,11 @@ Taking over: a screen box (is_box) listens on every page, not only the TV page. 
 page to carry it out; an admin may override that. Each command has an id, and the screen answers how
 it went (Hub.answer: waiting, done, kept), which the phone asks after (Hub.answer_of).
 
+TV guests: an owner may make other people guests on all of their TVs (Media → Screens → TV guests). A guest's
+own remotes (paired to the guest's account) then drive those TVs as the owner's remotes do; what they start plays
+from the owner's library, as the TV is the owner's. In the Lumi apps the guest plays their own pet there
+(web/games.py, pet_user). Removing a guest stops their remotes at their next press. Speakers stay the owner's.
+
 Only members of the screens group (Settings → Entertainment → Media; AD or Entra groups) may pair screens and cast;
 with no group set, nobody may. It is checked live on every request, the screen key's included: a
 screen whose owner leaves the group stops working at once. Owners may always remove their screens.
@@ -120,6 +125,66 @@ def of_others(conn: sqlite3.Connection, user_id: int) -> list[sqlite3.Row]:
     return conn.execute("SELECT s.*, u.username AS owner FROM media_screens s JOIN users u ON u.id = s.user_id "
                         "WHERE s.user_id != ? ORDER BY u.username COLLATE NOCASE, s.name COLLATE NOCASE",
                         (user_id,)).fetchall()
+
+
+# -- TV guests: people whose remotes may drive someone else's TVs (migration 0072)
+MAX_GUESTS = 20                 # guests per owner
+
+
+def guests(conn: sqlite3.Connection, owner_id: int) -> list[sqlite3.Row]:
+    """The owner's TV guests, with their names, oldest first."""
+    return conn.execute("SELECT g.guest_id AS id, u.username, g.added_at FROM media_screen_guests g "
+                        "JOIN users u ON u.id = g.guest_id WHERE g.owner_id = ? ORDER BY g.added_at, u.username",
+                        (owner_id,)).fetchall()   # one row per guest: their id, username and when they were added
+
+
+def hosts(conn: sqlite3.Connection, guest_id: int) -> list[sqlite3.Row]:
+    """The people who made this person a TV guest (whose TVs their remotes may drive), active accounts only."""
+    return conn.execute("SELECT g.owner_id AS id, u.username FROM media_screen_guests g JOIN users u ON u.id = g.owner_id "
+                        "WHERE g.guest_id = ? AND u.active = 1 ORDER BY u.username COLLATE NOCASE",
+                        (guest_id,)).fetchall()   # one row per host who trusts this guest
+
+
+def add_guest(conn: sqlite3.Connection, owner_id: int, guest_id: int) -> bool:
+    """Make guest_id a guest on all of owner_id's TVs, in the caller's transaction. False if already one."""
+    if guest_id == owner_id:
+        raise ScreenError("Your own remotes already drive your TVs.")   # a person can't be their own guest
+    if conn.execute("SELECT count(*) FROM media_screen_guests WHERE owner_id = ?", (owner_id,)).fetchone()[0] >= MAX_GUESTS:
+        raise ScreenError(f"At most {MAX_GUESTS} TV guests; remove one first.")
+    return conn.execute("INSERT OR IGNORE INTO media_screen_guests(owner_id, guest_id) VALUES (?, ?)",
+                        (owner_id, guest_id)).rowcount > 0   # rowcount 0: they were already a guest
+
+
+def remove_guest(conn: sqlite3.Connection, owner_id: int, guest_id: int) -> bool:
+    """Stop a guest's remotes driving the owner's TVs; their next press is refused."""
+    return conn.execute("DELETE FROM media_screen_guests WHERE owner_id = ? AND guest_id = ?",
+                        (owner_id, guest_id)).rowcount > 0
+
+
+def is_guest(conn: sqlite3.Connection, owner_id: int, guest_id: int) -> bool:
+    """Whether guest_id's remotes may drive owner_id's TVs."""
+    return conn.execute("SELECT 1 FROM media_screen_guests WHERE owner_id = ? AND guest_id = ?",
+                        (owner_id, guest_id)).fetchone() is not None
+
+
+def drivable(conn: sqlite3.Connection, user_id: int, screen_id: int) -> sqlite3.Row | None:
+    """The screen, if user_id's remotes may drive it: their own, or a TV of someone who made them a guest
+    (the owner's account must be active). Callers check the screens group themselves (may_use)."""
+    screen = conn.execute("SELECT s.*, u.username AS owner FROM media_screens s JOIN users u ON u.id = s.user_id "
+                          "WHERE s.id = ? AND u.active = 1", (screen_id,)).fetchone()   # the TV and its owner's name
+    if screen is None:
+        return None
+    if screen["user_id"] == user_id or is_guest(conn, screen["user_id"], user_id):
+        return screen                                            # theirs, or they are the owner's guest
+    return None
+
+
+def guest_screens(conn: sqlite3.Connection, guest_id: int) -> list[sqlite3.Row]:
+    """The TVs a guest's remotes may drive (not speakers: those play only what their owner casts), with owners."""
+    return conn.execute("SELECT s.*, u.username AS owner FROM media_screen_guests g "
+                        "JOIN media_screens s ON s.user_id = g.owner_id JOIN users u ON u.id = g.owner_id "
+                        "WHERE g.guest_id = ? AND s.speaker = 0 AND u.active = 1 "
+                        "ORDER BY u.username COLLATE NOCASE, s.name COLLATE NOCASE", (guest_id,)).fetchall()
 
 
 def mark_box(conn: sqlite3.Connection, screen_id: int) -> None:
