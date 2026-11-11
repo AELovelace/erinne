@@ -26,7 +26,7 @@
 {% if game.slug == 'roulette' %}<script src="{{ static('games/casino/roulette.js') }}"></script>{% endif %}
 {% if game.multiplayer %}<script src="{{ static('games/lumi-pet/closet.js') }}"></script><script src="{{ static('games/casino/lumi-table.js') }}"></script>{% endif %}{# Lumi's Lounge: Dealer Lumi, each player's Lumi in her clothes, chips. #}
 {% if not game.multiplayer %}<script src="{{ static('games/' ~ asset ~ '/rules.js') }}"></script>{% endif %}
-{% if asset == 'lumi-pet' %}{% for part in ('house', 'closet', 'picker-ui', 'enemies', 'battle-ui', 'dungeon-ui', 'dungeon-art', 'garden-ui', 'garden-art', 'garden-tree', 'garden-tree-art', 'skills-ui', 'skills-art', 'collection-ui', 'collection-art', 'party-ui') %}<script src="{{ static('games/lumi-pet/' ~ part ~ '.js') }}"></script>{% endfor %}{% endif %}
+{% if asset == 'lumi-pet' %}{% for part in ('house', 'closet', 'picker-ui', 'enemies', 'battle-ui', 'dungeon-ui', 'dungeon-art', 'tavern-art', 'garden-ui', 'garden-art', 'garden-tree', 'garden-tree-art', 'skills-ui', 'skills-art', 'collection-ui', 'collection-art', 'party-ui') %}<script src="{{ static('games/lumi-pet/' ~ part ~ '.js') }}"></script>{% endfor %}{% endif %}
 {% for part in game.extras if part.endswith('.js') %}<script src="{{ static('games/' ~ part) }}"></script>{% endfor %}
 <script src="{{ static('games/' ~ asset ~ '/game.js') }}"></script>
 {% endblock %}

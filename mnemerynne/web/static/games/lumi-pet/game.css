@@ -339,3 +339,9 @@
 .gm[data-game="lumi-pet"] .lp-house [data-click="door"]:hover { filter: drop-shadow(0 0 6px var(--pet-glow, #ff8ecb)) brightness(1.12); }   /* A soft glow: this one can be pressed. */
 .lp-room[data-leaving="true"] .lp-pet-wrap { transform: translateX(calc(-170 * var(--u))) scale(.8); opacity: 0; transition: transform .7s ease-in, opacity .7s ease-in; }   /* She trots off towards the door. */
 @media (prefers-reduced-motion: reduce) { .lp-room[data-leaving="true"] .lp-pet-wrap { transform: none; transition: opacity .3s; } }
+/* Lumi Dungeons' lobby, the Lantern & Paw tavern (tavern-art.js): the hearth's fire flickers and the lanterns and candles breathe. */
+.lp-house .lp-tv-fire { transform-box: fill-box; transform-origin: 50% 100%; animation: lp-tv-fire 1.6s ease-in-out infinite alternate; }
+.lp-house .lp-tv-glow { animation: lp-tv-glow 3.2s ease-in-out infinite alternate; }
+@keyframes lp-tv-fire { 0% { transform: scale(1, 1); } 35% { transform: scale(1.04, .92); } 70% { transform: scale(.97, 1.07); } 100% { transform: scale(1.02, .96); } }
+@keyframes lp-tv-glow { from { opacity: .7; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .lp-house .lp-tv-fire, .lp-house .lp-tv-glow { animation: none; } }

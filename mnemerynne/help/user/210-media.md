@@ -118,7 +118,7 @@ All built-in games on a paired TV follow **Screens → Text size**, just like th
 Lumi is a little glowing fairy cat, and she has three apps on the **Lumi** shelf. They are the same Lumi: one pet, one level, one purse of coins, whichever you open.
 
 - **Lumi Pet** ✨ is her room: looking after her, her food and toys, her clothes, her house, the shop and her collection.
-- **Lumi Dungeons** 🗝 is her adventures: dungeon trips, arena fights, and her skills and mods.
+- **Lumi Dungeons** 🗝 is her adventures: dungeon trips, arena fights, and her skills and mods. It opens in **the Lantern & Paw**, the tavern adventurers set out from, instead of her room. It has a bar of glowing potions, a quest board and a crackling hearth, with stars in the window at night.
 - **Lumi's Garden** 🌸 is the Stardust Garden: flowers, starpowder and the press.
 
 Each app's **Settings** tab has **Open** rows for the other two. Lumi Pet and Lumi Dungeons also have a door between them. In Lumi Pet, press the **door** in her room, or choose **Through the door** at the end of **Care**, and she trots off to Lumi Dungeons. The door is on the left of her room, so on a squarer screen or a phone the panel can hide it; the Care row always works. In Lumi Dungeons, **Take her home** is the first row of the Dungeon tab whenever she isn't on a trip, and the first row when a trip ends. It isn't offered while you're in a party. Back in her room after a trip, Lumi says where she went and what she brought home, once per trip. While Lumi is on a dungeon trip or in a fight she is in Lumi Dungeons: her room in Lumi Pet is empty and the garden waits, and both show a row, **Lumi is out exploring**, that takes you to her. You can still send her a snack from the Pantry.

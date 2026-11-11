@@ -7,7 +7,7 @@
    They are one pet on one save, so all three talk to the same API. */
 (function () {
   "use strict";
-  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Pk = window.LumiPetPicker, Gd = window.LumiPetGarden, Ga = window.LumiPetGardenArt, Sk = window.LumiPetSkills, Sa = window.LumiPetSkillsArt, Cl = window.LumiPetCollection, Ca = window.LumiPetCollectionArt, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt, Pu = window.LumiPetParty, GT = window.LumiPetGardenTree, GTa = window.LumiPetGardenTreeArt;
+  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Pk = window.LumiPetPicker, Gd = window.LumiPetGarden, Ga = window.LumiPetGardenArt, Sk = window.LumiPetSkills, Sa = window.LumiPetSkillsArt, Cl = window.LumiPetCollection, Ca = window.LumiPetCollectionArt, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt, Pu = window.LumiPetParty, GT = window.LumiPetGardenTree, GTa = window.LumiPetGardenTreeArt, Ta = window.LumiPetTavernArt;
   const $ = function (id) { return document.getElementById(id); };
   const room = $("lp-room"), list = $("lp-list"), houseArt = $("lp-house"), tabButtons = Array.from(document.querySelectorAll("[data-lp-tab]"));
   const API = "/api/media/games/lumi-pet/", OLD_SAVE = "mnemerynne-game:lumi-pet:companion";
@@ -742,6 +742,14 @@
   }
 
   function drawHouse(preview) { // Draw the room: what the server says is placed, with the highlighted object tried on.
+    if (APP === "lumi-dungeons") { // Lumi Dungeons' lobby is the Lantern & Paw tavern (tavern-art.js), not her apartment (Doll's request, 2026-11-11).
+      const night = sceneNow().night, signature = "tavern:" + night;
+      if (signature === lastHouse) return; // Only redrawn when day turns to night or back.
+      lastHouse = signature;
+      room.dataset.open = "false"; // No windows onto the page's scenery here: the tavern paints its own.
+      houseArt.innerHTML = Ta.scene({ night: night }); // Markup authored in tavern-art.js; nothing a person typed goes into it.
+      return;
+    }
     const house = Object.assign({}, snap.pet.house);
     if (preview) house[preview[0]] = preview[1];
     const scenery = document.querySelector(".parallax"), backdrop = Boolean(scenery) && getComputedStyle(scenery).display !== "none"; // The neon theme's drifting cities.

@@ -924,6 +924,11 @@ export async function checkLumiApps(browser, page, base) { // One pet in three a
     await tab.setViewport({ width: 1440, height: 1000 });
     await tab.waitForSelector(row("go-home"));
     assert.equal(await tab.evaluate(() => location.pathname), "/media/games/lumi-dungeons");
+    // Lumi Dungeons' lobby is the Lantern & Paw tavern (tavern-art.js), not her apartment.
+    await tab.waitForSelector("#lp-house [data-tavern]");
+    assert.equal(await tab.$('#lp-house [data-spot="door"]'), null, "None of her furniture in the tavern");
+    assert.match(await tab.$eval(".lp-room-top span", el => el.textContent), /THE LANTERN & PAW/);
+    await tab.screenshot({ path: "runs/casino-browser/lumi-dungeons-tavern.png" });
     await Promise.all([tab.waitForNavigation(), tab.click(row("go-home"))]);
     await tab.waitForSelector(row("adventure")); // The door as a row, at the end of Care, for remotes and narrow phones.
     assert.equal(await tab.$$eval("[data-lp-row]", rows => rows[rows.length - 1].dataset.lpRow), "adventure");
