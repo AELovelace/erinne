@@ -107,6 +107,7 @@
     if (send.action === "plant") return "Planted: " + flower.name + ". Ready in " + span(flower.minutes_now) + ".";
     if (send.action === "trim" || send.action === "trim_all") return "Snip! " + (note.trimmed === 1 ? "One flower" : note.trimmed + " flowers") + " trimmed: +" + format(note.powder) + " starpowder." + gift(note.gift, name);
     if (send.action === "plot") return "A new plot, dug and raked, for " + note.paid + " coins.";
+    if (send.action === "dig") return "Dug up: " + note.dug + "." + (note.trimmed ? " It was ready, so it gave its " + format(note.powder) + " starpowder first." + gift(note.gift, name) : "") + " The plot is empty: Enter plants the chosen seed.";
     if (send.action === "unlock") return "Unlocked for this garden: " + flower.name + "! " + (flower.sort === "perennial" ? "It grows back after every trim." : "Plant it again after each harvest.");
     if (send.action === "decor_buy") return "Bought and put out: " + thing(send.item) + ". Lumi walks round it twice, approving.";
     if (send.action === "decor_place") return note.stored ? thing(send.item) + " goes back in the store." : thing(send.item) + " is out. Lumi approves.";
@@ -208,6 +209,11 @@
       : { key: "trim-all", icon: "✂", name: "Harvest everything ready", hint: growing ? "Nothing is ready yet" : "Nothing is planted", note: "Nothing is ready to trim yet." });
     const seed = flowerOf(garden, seedFor(garden, null, ctx.seed));
     list.push({ key: "seeds", icon: "❀", name: "Seed: " + seed.name, hint: "What Enter plants in an empty plot · open the seed drawer", local: function () { go({ drawer: "seeds" }); } });
+    const under = garden.plots[ctx.cursor]; // The plot the cursor is on: a flower there can be dug up, which is how a perennial is replaced (it never leaves by itself).
+    if (under && under.flower) {
+      const there = flowerOf(garden, under.flower), done = stage(under, passed) !== "growing";
+      list.push(ask("dig", "⛏", "Dig up plot " + (ctx.cursor + 1) + ": " + there.name, (done ? "It gives its powder first" : "Still growing: its powder is lost") + " · leaves the plot empty for another seed", { action: "dig", plot: ctx.cursor }, { confirm: true }));
+    }
     [["water", "💧", "Water the flowers", "Repeat the cans: up to " + garden.water.rounds * garden.water.share + "% of every flower's time", "water_start"],
       ["feed", "🌱", "Fertilize", garden.feed.seconds + " seconds of fast presses: up to " + garden.feed.max + " minutes for every flower", "feed_start"]].forEach(function (game) {
       const wait = cool(garden[game[0]].ready_in, passed);

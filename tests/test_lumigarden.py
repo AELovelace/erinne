@@ -117,6 +117,24 @@ def test_a_cut_flower_is_ready_on_time_waits_and_then_overgrows_to_half(conn, al
             _g(conn, alice, "plant", **body)
 
 
+def test_a_flower_can_be_dug_up_so_a_perennial_can_be_replaced(conn, alice):
+    _look(conn, alice)
+    _set(conn, alice, garden={"unlocked": LADDER})
+    fern = G._FLOWERS["moon-fern"]["powder"]
+    with pytest.raises(lumipet.PetError, match="already empty"):
+        _g(conn, alice, "dig", plot=0)
+    _g(conn, alice, "plant", plot=0, item="moon-fern")
+    _g(conn, alice, "plant", plot=1, item="moon-fern")
+    said = _g(conn, alice, "dig", T0 + 10 * MIN, plot=0)["said"]                # still growing: out it comes, with nothing for it
+    assert said == {"dug": "Moon Fern"}
+    said = _g(conn, alice, "dig", T0 + HOUR, plot=1)["said"]                    # ready: it gives its powder first, and doesn't grow back
+    assert (said["dug"], said["trimmed"], said["powder"]) == ("Moon Fern", 1, fern)
+    plots = _look(conn, alice, T0 + HOUR)["plots"]
+    assert [(p["flower"], p["stage"]) for p in plots[:2]] == [(None, "empty"), (None, "empty")]
+    _g(conn, alice, "plant", T0 + HOUR, plot=0, item="dusk-tulip")              # and the plot takes something else
+    assert _look(conn, alice, T0 + HOUR)["plots"][0]["flower"] == "dusk-tulip"
+
+
 def test_a_perennial_grows_back_and_harvest_all_replants_cut_flowers(conn, alice):
     _look(conn, alice)
     _set(conn, alice, garden={"unlocked": LADDER})

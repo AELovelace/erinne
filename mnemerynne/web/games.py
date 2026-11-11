@@ -187,7 +187,7 @@ class GardenStep(BaseModel):
     """One choice in the Stardust Garden: which plot, which flower or helper, how many presses, or a watering answer.
     Never an amount of powder or coins: the server works those out."""
     model_config = ConfigDict(extra="forbid")
-    action: Literal["look", "press", "plot", "plant", "trim", "trim_all", "unlock", "decor_buy", "decor_place", "decor_sell", "capsule", "helper", "ability", "water_start", "water_answer",
+    action: Literal["look", "press", "plot", "plant", "dig", "trim", "trim_all", "unlock", "decor_buy", "decor_place", "decor_sell", "capsule", "helper", "ability", "water_start", "water_answer",
                     "feed_start", "feed_end", "moonrise", "garden"]
     item: str | None = Field(default=None, max_length=40)
     plot: int | None = Field(default=None, ge=0, le=15, strict=True)

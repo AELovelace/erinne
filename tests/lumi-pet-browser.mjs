@@ -575,8 +575,20 @@ export async function checkLumiPetGarden(browser, page, base) { // The Stardust 
     assert.equal(await tab.$(row("glow")), null, "Her colour is Lumi Pet's and Lumi Dungeons' to change");
     await tab.click('[data-lp-tab="garden"]'); // And back to the beds by the tab.
     await tab.waitForSelector(row("press"));
+    const before = await tab.$$eval('#lp-dungeon [data-plot="empty"]', plots => plots.length); // Digging a flower up: the way to replace a perennial.
+    await tab.click('[data-click="plot:3"]'); // Plant the last plot; the cursor is on it now, so the list offers to dig it up.
+    await said(tab, "Planted: Moondaisy");
+    await tab.waitForSelector(row("dig"));
+    assert.match(await tab.$eval(row("dig"), el => el.textContent), /Dig up plot 4: Moondaisy.*Still growing/s);
+    await tab.click(row("dig")); // One press only asks.
+    await said(tab, "Sure?");
+    assert.equal((await tab.$$('#lp-dungeon [data-plot="empty"]')).length, before - 1);
+    await tab.click(row("dig"));
+    await said(tab, "Dug up: Moondaisy");
+    await tab.waitForFunction(count => document.querySelectorAll('#lp-dungeon [data-plot="empty"]').length === count, {}, before);
+    assert.equal(await tab.$(row("dig")), null, "An empty plot has nothing to dig up");
     assert.deepEqual(errors, [], "Nothing threw on the page");
-    console.log("Lumi's Garden: its own app, planting and trimming by keyboard and mouse, the press, fertilizing, watering, drawers, Settings and a reload passed");
+    console.log("Lumi's Garden: its own app, planting and trimming by keyboard and mouse, the press, fertilizing, watering, drawers, digging a flower up, Settings and a reload passed");
   } finally { if (errors.length) console.log("Page errors:", errors.join(" | ")); await tab.close(); }
 }
 

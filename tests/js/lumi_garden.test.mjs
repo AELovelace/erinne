@@ -38,7 +38,15 @@ test("numbers stay short however big they get", () => {
 
 test("the garden's list offers the press, the harvest, both minigames, her moves, and the drawers", () => {
   const list = open(garden());
-  assert.deepEqual(list.rows.map(r => r.key), ["press", "trim-all", "seeds", "water", "feed", "move-pounce", "helpers", "decor", "moon", "leave"]);
+  assert.deepEqual(list.rows.map(r => r.key), ["press", "trim-all", "seeds", "dig", "water", "feed", "move-pounce", "helpers", "decor", "moon", "leave"]);
+  // The plot under the cursor can be dug up (the only way to replace a perennial): asked twice, and it says what becomes of the powder.
+  assert.deepEqual([list.row("dig").send, list.row("dig").confirm, list.row("dig").url], [{ action: "dig", plot: 0 }, true, "garden"]);
+  assert.match(list.row("dig").name + list.row("dig").hint, /Dig up plot 1: Moondaisy.*Still growing: its powder is lost/);
+  assert.match(open(garden(), { cursor: 1 }).row("dig").hint, /gives its powder first/);
+  assert.equal(open(garden(), { cursor: 2 }).row("dig"), undefined, "Nothing to dig in an empty plot");
+  assert.equal(open(garden(), { cursor: 4 }).row("dig"), undefined, "Nor on the patch for a new plot");
+  assert.match(UI.said({ action: "dig", plot: 1 }, { dug: "Moondaisy", trimmed: 1, powder: 6, gift: null }, garden()), /Dug up: Moondaisy\. It was ready, so it gave its 6 starpowder first\..*plot is empty/);
+  assert.equal(UI.said({ action: "dig", plot: 0 }, { dug: "Moondaisy" }, garden()), "Dug up: Moondaisy. The plot is empty: Enter plants the chosen seed.");
   list.row("press").local();
   list.row("seeds").local();
   list.row("leave").local();

@@ -337,7 +337,8 @@
   }
 
   function lumiCheers(send, note) { // What Lumi does when the server answers a garden choice.
-    if (send.action === "plant" || send.action === "plot") lumiTo(Ga.spot(send.action === "plot" ? snap.garden.plots.length - 1 : send.plot), "dig");
+    if (send.action === "dig") lumiTo(Ga.spot(send.plot), "dig"); // Digging a flower up looks like planting one.
+    else if (send.action === "plant" || send.action === "plot") lumiTo(Ga.spot(send.action === "plot" ? snap.garden.plots.length - 1 : send.plot), "dig");
     else if (send.action === "trim") lumiTo(Ga.spot(send.plot), note && note.gift ? "cheer" : "snip");
     else if (["trim_all", "capsule", "helper", "ability", "unlock", "moonrise", "decor_buy", "decor_place"].indexOf(send.action) >= 0 || (note && (note.water === "done" || note.feed === "done"))) lumiTo(Ga.spot(plotCursor), "cheer");
   }

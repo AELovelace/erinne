@@ -444,6 +444,14 @@ def act(conn: sqlite3.Connection, user_id: int, pet: dict, state: dict, action: 
         if _stage(bed(), numbers, now) not in ("ready", "overgrown"):
             raise GardenError("Nothing there is ready to trim yet.")
         return harvest([bed()], False)
+    if action == "dig":                                    # take a flower out, so the plot can hold something else (the only way to replace a perennial)
+        plot_ = bed()
+        if not plot_["flower"]:
+            raise GardenError("That plot is already empty.")
+        name = _FLOWERS[plot_["flower"]]["name"]
+        said = harvest([plot_], False) if _stage(plot_, numbers, now) in ("ready", "overgrown") else {}   # a ready flower gives its powder first: nothing is lost
+        plot_.update(flower=None, ready_at=0, grow=0)       # (a perennial had just started growing back: out it comes)
+        return {**said, "dug": name}
     if action == "trim_all":
         ready = [one for one in garden["plots"] if _stage(one, numbers, now) in ("ready", "overgrown")]
         if not ready:
