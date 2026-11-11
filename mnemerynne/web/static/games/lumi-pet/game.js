@@ -31,6 +31,11 @@
   const TV = $("gm").dataset.tv === "1", COUCH_KEY = "mnemerynne-lumi-couch";
   let party = null, partyCode = null, partyFeed = null, openParties = [], partiesAsked = 0, partySending = false, partyNext = null;
   let couchCursor = {}, couchGuess = {}, couchCell = {}, couchConfirm = {}, couchSpot = {}, couchEndArmed = false;
+  // The co-op fight (Doll's design, 2026-11-11): the creature this person is aiming at, and the Lumi an item is for
+  // (by seat); on the couch, one of each per person. The party browser: which party the cursor is on (null: closed).
+  let aim = null, ally = null, couchAim = {}, couchAlly = {}, browsing = null, lastCrew = "", lastTeam = "", lastFightLog = "";
+  // Settings → Colour: the red, green and blue being tried (null: the colour drawer is closed). Shown in the room as they move.
+  let tint = null;
   const MEMORIES = { cuddle: "A warm little cuddle", snack: "A shared snack", play: "Playtime together", rest: "A quiet moment together" };
   const NEEDS = { hunger: "Tummy rumbling. A snack would help.", energy: "So sleepy. A nap would help.", joy: "A little lonely. Stay and play?" };
   const BUSY = { nap: "napping", play: "playing" };
@@ -57,6 +62,28 @@
   let effectUntil = 0, lastReport = "", lastList = "", lastKeys = "", lastDone = null, timer = null, polled = 0, reminders = "unsupported";
 
   function serverNow() { return Date.now() + offset; } // The server's clock, so timers agree across devices.
+
+  // ---- Drawing other Lumis (her friends in a party, the party browser): her own shapes from the page, in their
+  // colours and clothes. The template's Lumi is copied once with its ids taken off and its two clothing layers marked.
+  const LUMI_SHAPES = (function () {
+    const copy = $("lp-pet").cloneNode(true);
+    copy.querySelectorAll("title").forEach(function (node) { node.remove(); });
+    copy.querySelector("#lp-acc-back").setAttribute("data-slot", "back");
+    copy.querySelector("#lp-acc-front").setAttribute("data-slot", "front");
+    copy.querySelectorAll("[id]").forEach(function (node) { node.removeAttribute("id"); });
+    return copy.innerHTML;
+  })();
+
+  function lumiStyle(look) { // Her three colours as the CSS variables her shapes use (game.css .lp-body and friends).
+    const c = R.looks(look.glow, look.colour);
+    return "--pet-glow:" + c.glow + ";--pet-body:" + c.body + ";--pet-shadow:" + c.shadow;
+  }
+
+  function lumiMarkup(look) { // One Lumi, as SVG markup for a 320 x 300 box: her shapes, her clothes, her colours. All of it authored here or in closet.js.
+    const outfit = look.outfit || {};
+    return '<g style="' + lumiStyle(look) + '">' + LUMI_SHAPES.replace('<g data-slot="back"></g>', "<g>" + W.render(outfit, "back") + "</g>")
+      .replace('<g data-slot="front"></g>', "<g>" + W.render(outfit, "front") + "</g>") + "</g>";
+  }
 
   function openApp(slug) { // Go to another of Lumi's apps. Inside Media's game layer the layer swaps the game in its frame (media.js), so its bar and remote keys follow; on its own the page just goes there.
     if (framed) window.parent.postMessage({ type: "mnemerynne-game-open", slug: slug }, location.origin);
@@ -147,10 +174,11 @@
       if ((snap.fight && snap.fight.status === "active") || finished) return battleRows();
       const own = Dg.rows({ snap: snap, play: play, dismissed: dismissedRun, care: caring, go: dungeonGo });
       if (inParty() && party.phase === "lobby") return Pu.lobbyRows(party, partyAct);
-      if (inParty() && party.run) return Pu.tripRows(party, own, serverNow());
+      if (inParty() && party.run) return Pu.tripRows(party, own, serverNow(), fightCtx(aim, ally));
       if (!exploring() && !(snap.dungeon.run && snap.dungeon.run.over && dismissedRun !== snap.dungeon.run.id)) { // Choosing where to go: or going with friends.
         askParties();
-        return Pu.startRows({ open: openParties, tv: TV, askCode: askCode }).concat(own);
+        if (browsing) return Pu.browserRows(openParties, { at: browsing.at, back: function () { browsing = null; picks[tab] = 0; }, askCode: TV ? null : askCode });
+        return Pu.startRows({ open: openParties, tv: TV, askCode: askCode, browse: browse }).concat(own);
       }
       return own;
     }
@@ -159,7 +187,10 @@
       return { key: thing.id, icon: thing.icon, name: thing.name, send: { action: "buy", item: thing.id },
         hint: thing.price + " coins" + (toy ? " · a toy to keep" : held ? " · have " + held : "") };
     }));
+    if (tint) return tintRows(); // The colour drawer: red, green and blue, then keep it or go back.
     const settings = []; // Settings: each app lists what is its own, then the way to Lumi's other apps.
+    settings.push({ key: "name", icon: "✎", name: "Name: " + pet.name, hint: "What she's called, and what her friends see in a party", local: askName });
+    settings.push({ key: "colour", icon: "🎨", name: "Colour: " + (pet.colour ? pet.colour.toUpperCase() : "her glow's own"), hint: "Red, green and blue sliders for her very own colour", local: openTint });
     if (APP !== "lumi-garden") settings.push({ key: "glow", icon: "✦", name: "Glow: " + pet.glow[0].toUpperCase() + pet.glow.slice(1), hint: "◀ ▶ her colour, and her element in a fight: " + snap.battle.rules.glows[pet.glow], send: { action: "glow", glow: R.nextPalette(pet.glow) },
       turn: function (by) { submit({ key: "glow", send: { action: "glow", glow: Pk.turn(R.PALETTES, pet.glow, by) } }); } });
     if (has("dungeon")) settings.push({ key: "storyteller", icon: "✎", name: "Storyteller: " + (pet.storyteller === "live" ? "Live" : "Library"), hint: "Who writes the dungeon's lines: the game's library, or a model as you go", send: { action: "storyteller" } });
@@ -178,8 +209,49 @@
   }
 
   function changeTab(to) { // Open a category afresh: its sub-lists closed, nothing half-chosen.
-    tab = to; opened = { home: null, closet: null }; flip = {}; battleView = null; pendingConfirm = null; albumZoom = false; albumFocus = "board"; skillFocus = "board";
+    tab = to; opened = { home: null, closet: null }; flip = {}; battleView = null; pendingConfirm = null; albumZoom = false; albumFocus = "board"; skillFocus = "board"; tint = null; browsing = null;
   }
+
+  // ---- Her name and her colour (Settings).
+  function askName() { // A keyboard's way to name her; the server checks it (1 to 16 letters, numbers, spaces, ' . -).
+    const name = window.prompt("What's her name?", snap.pet.name);
+    if (name !== null && name.trim()) submit({ key: "name", send: { action: "name", name: name } });
+  }
+
+  function openTint() { // Open the colour drawer on the colour she has now (her own, or her glow's).
+    const now = R.hexRgb(R.looks(snap.pet.glow, snap.pet.colour).glow);
+    tint = { r: now[0], g: now[1], b: now[2] }; picks[tab] = 1;
+  }
+
+  function tintHex() { return R.rgbHex([tint.r, tint.g, tint.b]); }
+
+  function nudge(part, by) { tint[part] = Math.max(0, Math.min(255, tint[part] + by)); render(); } // One slider moved by a key.
+
+  function tintRows() { // The colour drawer: a row each for red, green and blue (◀ ▶ move it; the sliders do too), then keep it.
+    const names = { r: ["Red", "🔴"], g: ["Green", "🟢"], b: ["Blue", "🔵"] }, rows = [{ key: "tint-back", icon: "‹", name: "Back to Settings", hint: "Her colour stays as it was", local: function () { tint = null; picks[tab] = 1; } }];
+    ["r", "g", "b"].forEach(function (part) {
+      rows.push({ key: "tint-" + part, icon: names[part][1], name: names[part][0] + " " + tint[part], hint: "◀ ▶ less or more · Enter jumps up a step · or slide it below",
+        turn: function (by) { nudge(part, by * 8); }, local: function () { tint[part] = (tint[part] + 32) % 288 > 255 ? 0 : tint[part] + 32; } });
+    });
+    rows.push({ key: "tint-save", icon: "✓", name: "Keep " + tintHex().toUpperCase(), hint: "Her very own colour, everywhere she goes", send: { action: "colour", colour: tintHex() } });
+    if (snap.pet.colour) rows.push({ key: "tint-glow", icon: "✦", name: "Her glow's own colours", hint: "Back to " + snap.pet.glow + "'s colours (her element stays the same)", send: { action: "colour", colour: "" } });
+    return rows;
+  }
+
+  function drawTint() { // Her colours in the room (and on her), and the sliders while the drawer is open.
+    const panel = $("lp-tint"), look = tint ? R.tint(tintHex()) : snap.pet.colour ? R.tint(snap.pet.colour) : null;
+    ["glow", "body", "shadow"].forEach(function (part) { if (look) room.style.setProperty("--pet-" + part, look[part]); else room.style.removeProperty("--pet-" + part); });
+    panel.hidden = !tint;
+    if (!tint) return;
+    panel.querySelectorAll("[data-tint]").forEach(function (slider) { const part = slider.dataset.tint; if (Number(slider.value) !== tint[part]) slider.value = String(tint[part]); });
+    panel.querySelectorAll("[data-tint-n]").forEach(function (number) { number.textContent = String(tint[number.dataset.tintN]); });
+  }
+
+  $("lp-tint").addEventListener("input", function (event) { // A slider dragged with a finger or the mouse.
+    const part = event.target.dataset.tint;
+    if (!tint || !part) return;
+    tint[part] = Number(event.target.value); lastList = ""; render();
+  });
 
   function battleRows() { // The Battle tab's lists (battle-ui.js); also used by the Dungeon tab while a fight is on.
     return Bt.rows({ snap: snap, view: battleView, finished: finished, now: serverNow(), countdown: R.countdown,
@@ -528,7 +600,13 @@
   }
 
   function walking() { // In the dungeon with the Dungeon tab open and no fight on: the arrows are Lumi's feet.
-    return TABS[tab] === "dungeon" && exploring() && !(snap.fight && snap.fight.status === "active") && !finished;
+    return TABS[tab] === "dungeon" && exploring() && !(snap.fight && snap.fight.status === "active") && !finished && !teamFight();
+  }
+
+  function teamFight() { return party && party.run && party.run.party.fight ? party.run.party.fight : null; } // The party's co-op fight going on, if any.
+
+  function fightCtx(aimAt, allyOf) { // What the co-op fight's rows need (party-ui.js teamRows).
+    return { aim: aimAt, ally: allyOf, now: serverNow(), describe: Bt.describeMove, items: snap.battle.rules.kit };
   }
 
   function walk(action) { // One arrow, one room: up is north.
@@ -540,6 +618,11 @@
 
   function drinkPotion() { // The Play/Pause button: a potion, in a fight or between rooms.
     if (!has("battle")) return; // Only where the fights are.
+    const team = teamFight();
+    if (team) { // The co-op fight: a potion for herself, on her turn.
+      if (team.you !== null && team.at === team.you) partyAct({ action: "fight", target: "potion", ally: team.you, turn: team.turn });
+      return;
+    }
     const fight = snap.fight && snap.fight.status === "active" ? snap.fight : null;
     if (fight) submit({ key: "potion", url: "battle/act", send: { battle: fight.id, turn: fight.turn, action: "potion" } });
     else if (exploring()) submit({ key: "potion", url: "dungeon/act", send: { action: "potion" } });
@@ -587,11 +670,11 @@
     const house = Object.assign({}, snap.pet.house);
     if (preview) house[preview[0]] = preview[1];
     const scenery = document.querySelector(".parallax"), backdrop = Boolean(scenery) && getComputedStyle(scenery).display !== "none"; // The neon theme's drifting cities.
-    const signature = JSON.stringify(house) + backdrop;
+    const boxes = snap.boxes ? snap.boxes.left : 0, signature = JSON.stringify(house) + backdrop + boxes;
     if (signature === lastHouse) return; // Redrawing would restart the window's scrolling, so only when it changed.
     lastHouse = signature;
     room.dataset.open = String(backdrop && house.view === "view-city"); // The windows are open onto the page's own scenery.
-    houseArt.innerHTML = H.render(house, backdrop); // Markup authored in house.js; nothing a person typed goes into it.
+    houseArt.innerHTML = H.render(house, backdrop, { boxes: boxes }); // Markup authored in house.js; nothing a person typed goes into it.
   }
 
   function drawOutfit(preview) { // Dress her: what the server says she wears, with the highlighted accessory tried on.
@@ -605,6 +688,12 @@
   }
 
   function drawFight() { // The fight scene over the room: the enemy, and both sides' bars. Shown for a fight in progress or just ended.
+    const team = TABS[tab] === "dungeon" ? teamFight() : null;
+    room.dataset.team = String(Boolean(team)); // A co-op fight: every Lumi in one row (game.css).
+    $("lp-team").hidden = !team;
+    $("lp-fight").classList.toggle("lp-fight-team", Boolean(team));
+    if (team) { drawTeam(team); return; }
+    lastTeam = "";
     const fight = has("battle") ? snap.fight || finished : null; // Fights are Lumi Dungeons' to show.
     room.dataset.fight = String(Boolean(fight));
     $("lp-fight").hidden = !fight;
@@ -614,6 +703,88 @@
     $("lp-foe").dataset.down = String(foe.hp <= 0);
     $("lp-f-lumi").textContent = bars.lumi.label; $("lp-f-foe").textContent = bars.foe.label;
     $("lp-f-hp").style.width = bars.lumi.hp + "%"; $("lp-f-mp").style.width = bars.lumi.mp + "%"; $("lp-f-foehp").style.width = bars.foe.hp + "%";
+  }
+
+  function drawTeam(fight) { // The party's co-op fight: every Lumi's bars down the left, the creatures on the right (enemies.js).
+    room.dataset.fight = "true";
+    $("lp-fight").hidden = false;
+    const target = couching() ? null : Pu.aimOf(fight, aim);
+    const signature = JSON.stringify([fight.lumis.map(function (f) { return [f.name, f.hp, f.hpMax, f.mp, f.mpMax, f.stages, f.guarding, f.gone]; }),
+      fight.foes.map(function (f) { return [f.hp, f.status]; }), fight.at, target]);
+    if (signature === lastTeam) return;
+    const fresh = !lastTeam;
+    lastTeam = signature;
+    function pct(now, max) { return Math.max(0, Math.min(100, Math.round(100 * now / Math.max(1, max)))) + "%"; }
+    $("lp-team-lumis").replaceChildren.apply($("lp-team-lumis"), fight.lumis.map(function (f, seat) { // Text only: names are people's own words.
+      const li = document.createElement("li"), name = document.createElement("span"), hp = document.createElement("div"), mp = document.createElement("div");
+      li.dataset.turn = String(fight.at === seat); li.dataset.down = String(f.hp <= 0); li.dataset.you = String(fight.you === seat);
+      name.textContent = f.name + " · " + (f.gone ? "gone home" : f.hp + "/" + f.hpMax) + (Pu.standing([f]).length && f.guarding ? " 🛡" : "");
+      hp.className = "lp-bar"; hp.innerHTML = '<i style="width:' + pct(f.hp, f.hpMax) + '"></i>';
+      mp.className = "lp-bar lp-bar-mp"; mp.innerHTML = '<i style="width:' + pct(f.mp, f.mpMax) + '"></i>';
+      li.append(name, hp, mp);
+      return li;
+    }));
+    const foes = $("lp-team-foes");
+    if (fresh || foes.children.length !== fight.foes.length) foes.replaceChildren.apply(foes, fight.foes.map(function (f, i) { // Each creature, drawn once.
+      const box = document.createElement("figure"), art = document.createElementNS("http://www.w3.org/2000/svg", "svg"), label = document.createElement("figcaption"), bar = document.createElement("div");
+      box.dataset.click = "aim:" + i;
+      art.setAttribute("viewBox", "0 0 200 200"); art.innerHTML = E.draw(f.body, f.colour); // Art authored in enemies.js; colours are the server's checked #rrggbb.
+      bar.className = "lp-bar lp-bar-foe"; bar.innerHTML = "<i></i>";
+      box.append(art, label, bar);
+      return box;
+    }));
+    fight.foes.forEach(function (f, i) {
+      const box = foes.children[i];
+      box.dataset.down = String(f.hp <= 0); box.dataset.aim = String(i === target);
+      box.querySelector("figcaption").textContent = f.name + " · Lv " + f.level + " · " + f.hp + "/" + f.hpMax;
+      box.querySelector(".lp-bar i").style.width = pct(f.hp, f.hpMax);
+    });
+  }
+
+  // ---- In a party: every friend's Lumi beside yours (on the couch, everyone's), in her own colours and clothes.
+  function drawCrew() {
+    const box = $("lp-crew"), on = Boolean(party) && (couching() || inParty()) && TABS[tab] === "dungeon" && !browsing;
+    const crew = on ? party.members.filter(function (m) { return couching() || m.user !== party.you; }) : [];
+    const team = teamFight();
+    room.dataset.crew = String(crew.length);
+    room.dataset.couchCrew = String(on && couching());
+    box.hidden = !crew.length;
+    const signature = JSON.stringify(crew.map(function (m) { return [m.user, m.name, m.pet, m.glow, m.colour, m.outfit, m.fainted, team ? team.at : null]; }));
+    if (signature === lastCrew) return;
+    lastCrew = signature;
+    box.replaceChildren.apply(box, crew.map(function (m) {
+      const figure = document.createElement("figure"), name = document.createElement("figcaption");
+      const seat = team ? team.lumis.findIndex(function (f) { return f.user === m.user; }) : -1;
+      figure.className = "lp-crew-lumi"; figure.dataset.ghost = String(m.fainted); figure.dataset.turn = String(seat >= 0 && team.at === seat);
+      figure.innerHTML = '<svg viewBox="0 0 320 300" aria-hidden="true">' + lumiMarkup(m) + "</svg>"; // Authored markup; the name goes in as text below.
+      name.textContent = (m.pet && m.pet !== "Lumi" ? m.pet + " · " : "") + m.name;
+      figure.appendChild(name);
+      return figure;
+    }));
+  }
+
+  // ---- The party browser: every open party, full screen, each with its Lumis (party-ui.js browserScene).
+  function browse() { browsing = { at: 0 }; partiesAsked = 0; picks[tab] = 0; askParties(); }
+
+  function browserList() { return openParties.filter(function (p) { return !p.mine && p.phase === "lobby"; }); }
+
+  function drawBrowser() {
+    const on = Boolean(snap && browsing && TABS[tab] === "dungeon" && !trip() && !party);
+    room.dataset.browse = String(on);
+    if (!on) { if (browsing && party) browsing = null; return; }
+    if (Date.now() - partiesAsked > 4000) askParties(); // It keeps watching while open.
+    const open = browserList();
+    browsing.at = Math.max(0, Math.min(browsing.at, open.length - 1));
+    $("gm").dataset.walking = "true"; $("lp-dungeon").style.display = "";
+    lastDungeon = ""; lastGarden = ""; lastSkills = ""; lastAlbum = "";
+    $("lp-dungeon").innerHTML = Pu.browserScene(openParties, { at: browsing.at, lumi: lumiMarkup }); // Authored markup; every name is escaped by party-ui.js.
+  }
+
+  function browserKey(action) { // The arrows in the browser move over the cards, and the list's cursor with them (its join rows are in the same order), so Enter joins.
+    const count = browserList().length, move = { left: -1, right: 1, up: -1, down: 1 }[action]; // One column of cards: every arrow steps one.
+    if (move === undefined || !count) return false;
+    browsing.at = Math.max(0, Math.min(count - 1, browsing.at + move)); picks[tab] = browsing.at;
+    render(); return true;
   }
 
   function drawList(current) { // Rebuild the buttons only when the rows change, so focus and the remote's place survive a refresh.
@@ -650,6 +821,7 @@
     if (trip() && TABS[tab] !== "dungeon") changeTab(TABS.indexOf("dungeon")); // A trip (even one begun on another device) keeps Lumi Dungeons in the dungeon.
     const pet = snap.pet, now = Date.now(), scene = sceneNow(), mood = R.mood(pet), task = pet.task;
     room.dataset.palette = pet.glow;
+    $("lp-name").textContent = pet.name || "Lumi";
     room.dataset.night = String(scene.night);
     room.dataset.sleep = String(scene.asleep || snap.pet.faint_until > serverNow());
     room.dataset.mood = mood.sad ? "sad" : "fine";
@@ -670,10 +842,10 @@
     $("lp-clock").textContent = scene.night ? "Moonlight hours" : "A little daytime glow";
     const left = task ? R.countdown(task.finishesAt - serverNow()) : "";
     $("lp-state").textContent = task ? (task.kind === "nap" ? "Napping · " + left : "Playing · " + left)
-      : snap.fight ? "In a fight!" : exploring() ? "Exploring · floor " + exploring().depth : resting ? "Napping off a fight · " + R.countdown(pet.faint_until - serverNow())
+      : snap.fight || teamFight() ? "In a fight!" : exploring() ? "Exploring · floor " + exploring().depth : resting ? "Napping off a fight · " + R.countdown(pet.faint_until - serverNow())
       : !health.out && health.hp < health.max && mendsIn() > 0 ? "Mending · " + R.countdown(mendsIn())
       : scene.asleep ? "Dreaming in good company" : mood.need ? NEEDS[mood.need] : "Happy to be here with you";
-    $("lp-pet-title").textContent = scene.asleep ? "Lumi, a glowing fairy cat, sleeping peacefully" : "Lumi, a glowing fairy cat, awake";
+    $("lp-pet-title").textContent = (pet.name || "Lumi") + (scene.asleep ? ", a glowing fairy cat, sleeping peacefully" : ", a glowing fairy cat, awake");
     if (task && task.kind === "play") room.dataset.action = "play"; // She keeps playing for as long as the toy lasts.
     else if (now >= effectUntil) { delete room.dataset.action; $("lp-effect").textContent = scene.asleep ? "z z z" : mood.sad ? "…" : "♡"; }
     tabButtons.forEach(function (button, index) { button.setAttribute("aria-selected", String(index === tab)); });
@@ -689,8 +861,11 @@
     drawGarden();
     drawSkills();
     drawAlbum();
+    drawBrowser();
     drawPad();
     drawFight();
+    drawCrew();
+    drawTint();
     drawCouch();
     const doing = snap.fight ? "fighting " + snap.fight.enemy.name : task ? BUSY[task.kind] : scene.asleep ? "dreaming" : mood.need ? "needs " + mood.need : "content";
     const report = "Lumi · " + doing + " · " + tabButtons[tab].textContent + ": " + (pick ? pick.name : "nothing yet") + " · Enter to choose";
@@ -727,10 +902,18 @@
     const row = rows()[picks[tab]];
     if (!row) return;
     if (row.local) { pendingConfirm = null; row.local(); lastList = ""; render(); return; } // Nothing to ask the server: it works at once, even while an answer is on its way.
+    if (row.cycle && !row.send) { setCycle(row, 1); return; } // The co-op fight's Aim row: Enter aims at the next creature.
     if (busy) return; // One request at a time.
     if (!row.send) { say(row.note || "That's already in the room."); return; }
+    if (row.ask && pendingConfirm !== row.key) { pendingConfirm = row.key; say(row.ask); render(); return; } // Try before you buy: the first press shows it, the second buys it.
     if (row.confirm && pendingConfirm !== row.key) { pendingConfirm = row.key; say("Sure? Choose it once more to go. " + row.hint + "."); return; } // Nothing is lost to one stray press.
     submit(row);
+  }
+
+  function setCycle(row, by) { // ◀ ▶ (or Enter on the Aim row) in the co-op fight: the next creature to aim at, or Lumi to give to.
+    const to = row.next(by);
+    if (row.cycle === "aim") aim = to; else ally = to;
+    lastList = ""; render();
   }
 
   function submit(row) { // Send one choice to the server, one request at a time, and show what came of it.
@@ -786,6 +969,14 @@
       else if (send.action === "heal") { say("A stretch and a shake. Lumi is up and ready."); effect("rest", "☀"); }
       else if (send.action === "respec") { say("Every skill point is back. Her trees start afresh."); battleView = null; }
       else if (send.action === "buy") { say("Bought: " + thing.name + ". " + data.said.paid + " coins well spent."); effect("cuddle", "✧"); }
+      else if (send.action === "unpack") { const got = data.said; say("Box open! " + got.name + (got.put_out ? ": Lumi puts it out at once." : ". Something's already there, so she tucks it away for now (Home).") + (got.left ? " " + got.left + " boxes to go." : " That's the last box. She's all moved in!")); effect("play", "📦"); }
+      else if (send.action === "name") { say("Hello, " + data.pet.name + "! What a lovely name."); effect("cuddle", "♡"); }
+      else if (send.action === "colour") { tint = null; picks[tab] = 1; say(data.pet.colour ? "Ooh, " + data.pet.colour.toUpperCase() + "! That's her very own colour now." : "Back to her glow's own colours."); effect("cuddle", "✧ ✦"); }
+      else if (send.action === "stat") { const names = snap.battle.rules.stat_names; say(names[send.item] + " is " + data.progress.stats[send.item] + " now · " + data.progress.stat_points.left + " points left."); effect("cuddle", "↑"); }
+      else if (send.action === "stats_auto") { const names = snap.battle.rules.stat_names, placed = data.said.placed; say("Auto placed them: " + Object.keys(placed).map(function (key) { return "+" + placed[key] + " " + names[key].toLowerCase(); }).join(", ") + "."); effect("play", "✨"); }
+      else if (send.action === "auto_stats") { say(data.progress.stat_points.auto ? "Auto is on: new points place themselves as she levels." : "Auto is off: you place every new point yourself."); }
+      else if (send.action === "stats_reset") { say("Every point is back to place again" + (data.said.paid ? " (" + data.said.paid + " coins)." : ", free this once.")); }
+      else if (send.action === "kit") { const kit = snap.battle.rules.kit[send.item]; say("Bought: " + kit.name + ". Lumi carries " + data.progress.kit[send.item] + "."); effect("cuddle", kit.icon); }
       if (["cuddle", "feed", "play", "nap", "wake"].includes(send.action)) greet(); // Shopping and colours aren't a visit; time together is.
     }).catch(function (refused) { say(refused.message); }).then(function () { busy = false; render(); });
   }
@@ -801,6 +992,7 @@
     const arrow = ["left", "right", "up", "down"].indexOf(action) >= 0;
     if (action === "next" || action === "prev" || action === "play" || arrow) pendingConfirm = null; // Only a second Enter confirms.
     if (albuming()) { albumKey(action); return; } // So has the Collection's gallery.
+    if (room.dataset.browse === "true" && arrow && browserKey(action)) return; // The party browser: arrows move over the cards.
     if (treeing()) { skillsKey(action); return; } // The skill tree has its own keys too: the arrows move over the skills.
     if (gardening()) { gardenKey(action); return; } // The garden has its own keys: the arrows walk the plots, Play is the press.
     if ((action === "next" || action === "prev") && trip()) { // On a trip: the list's cursor (the arrows walk, and the other tabs wait at home).
@@ -824,6 +1016,7 @@
     }
     if (action === "left" || action === "right") { // A row's own options: its next choice, tried on before anything is bought.
       const row = rows()[picks[tab]], by = action === "left" ? -1 : 1;
+      if (row && row.cycle) { setCycle(row, by); return; }
       if (row && row.turn) { row.turn(by); return; }
       if (row && row.options) flip[row.flipKey] = Pk.turn(row.options, row.shown, by);
     } else if (action === "up" || action === "down") {
@@ -894,6 +1087,19 @@
       if (dx || dy) { focus = "board"; boardKey(Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up")); }
     }
     render();
+  });
+
+  $("lp-team").addEventListener("click", function (event) { // Mouse and touch on a creature in the co-op fight: aim at it.
+    const hit = event.target.closest("[data-click]");
+    if (!hit || couching()) return;
+    aim = Number(hit.dataset.click.split(":")[1]); lastList = ""; render();
+  });
+
+  $("lp-dungeon").addEventListener("pointerdown", function (event) { // Mouse and touch in the party browser: a card, then the same card again to join.
+    const hit = event.target.closest("[data-click]");
+    if (!hit || !browsing || hit.dataset.click.indexOf("join:") !== 0) return;
+    const code = hit.dataset.click.slice(5), at = browserList().findIndex(function (p) { return p.code === code; });
+    if (at === browsing.at) partyJoin(code); else { browsing.at = at; picks[tab] = at; render(); }
   });
 
   $("lp-dungeon").addEventListener("pointerdown", function (event) { // Mouse and touch in the garden. On the way down, not on the click: the drawing is
@@ -1071,9 +1277,19 @@
       else if (snap.dungeon.run && snap.dungeon.run.party) snap.dungeon.run = null; // The trip just ended: the lobby again.
     }
     const me = Pu.member(view, view.you), fighting = Boolean(snap && snap.fight && snap.fight.status === "active");
-    if (me && me.fighting !== fighting) refresh(); // A fight began (or ended) for this member: fetch it.
+    const team = view.run && view.run.party.fight, own = Boolean(me && me.fighting && !team); // An older one-each fight is the member's own (fetched with her state).
+    if (me && own !== fighting) refresh(); // Such a fight began (or ended) for this member: fetch it.
     const said = view.run ? view.run.say : (view.notes || []).slice(-1)[0];
     if (said && (!before || said !== (before.run ? before.run.say : (before.notes || []).slice(-1)[0]))) say(said);
+    if (team) { // The co-op fight: say what just happened, from its log, as it happens.
+      const log = team.log.join("|");
+      if (log !== lastFightLog) { const was = lastFightLog.split("|"); say(team.log.filter(function (line) { return was.indexOf(line) < 0; }).slice(-3).join(" ") || team.log.slice(-1)[0]); lastFightLog = log; }
+      if (team.at !== null && team.at === team.you && (!before || !before.run || !before.run.party.fight || before.run.party.fight.at !== team.at)) { G.sound.unlock(); G.sound.tone(784, .12, 0, .08); picks[tab] = 0; } // Your turn: a little chime.
+    } else if (lastFightLog) {
+      lastFightLog = ""; aim = null; ally = null;
+      const result = view.run && view.run.party.last_fight;
+      if (result && result.outcome === "victory") { say("Victory! Every Lumi gains " + result.exp + " EXP." + (result.levels[String(view.you)] ? " Lumi levels up!" : "")); effect("play", "✧ ✦ ✧"); refresh(); }
+    }
     if (!before || before.revision !== view.revision) lastList = "";
     render();
   }
@@ -1109,6 +1325,7 @@
     if (busy || !code) return;
     busy = true;
     G.api(API + "parties/" + encodeURIComponent(code), { action: "join" }).then(function (view) {
+      browsing = null;
       followParty(view.code); takeParty(view); say("You're in " + view.code + "! Choose I'm ready when you are.");
     }).catch(function (refused) { say(refused.message); }).then(function () { busy = false; render(); });
   }
@@ -1130,7 +1347,7 @@
 
   // ---- The couch: this TV is the party's screen; each remote is its holder's own member, with its own cursor here.
   function startCouch(view) {
-    party = view; partyCode = view.code; couchCursor = {}; couchGuess = {}; couchCell = {}; couchConfirm = {}; couchSpot = {};
+    party = view; partyCode = view.code; couchCursor = {}; couchGuess = {}; couchCell = {}; couchConfirm = {}; couchSpot = {}; couchAim = {}; couchAlly = {};
     try { sessionStorage.setItem(COUCH_KEY, view.code); } catch (e) { /* it just won't survive a reload */ }
     if (picking) { picking = false; if ($("lp-who")) $("lp-who").hidden = true; }
     const url = API + "parties/" + view.code;
@@ -1147,9 +1364,10 @@
 
   function couchMenu(m) { // This person's menu. A new moment (lobby or trip, another room, a fight, a puzzle turn) starts their cursor at the top.
     const run = party.run, p = run && run.party;
-    const spot = [party.phase, run ? run.at + ":" + (run.facing ? run.facing.at : "") : "", m.fight ? "fight" : "", p && p.fighting, p && p.puzzle ? p.puzzle.phase + p.puzzle.holder : ""].join("|");
+    const spot = [party.phase, run ? run.at + ":" + (run.facing ? run.facing.at : "") : "", m.fight ? "fight" : "", p && p.fighting, p && p.puzzle ? p.puzzle.phase + p.puzzle.holder : "",
+      p && p.fight ? "turn" + p.fight.at : ""].join("|"); // ...and a new turn in the co-op fight.
     if (couchSpot[m.user] !== spot) { couchSpot[m.user] = spot; couchCursor[m.user] = 0; couchConfirm[m.user] = null; }
-    return Pu.couchMenu(party, m, { guess: couchGuess[m.user] || [], now: serverNow() });
+    return Pu.couchMenu(party, m, { guess: couchGuess[m.user] || [], now: serverNow(), fight: snap ? fightCtx(couchAim[m.user], couchAlly[m.user]) : null });
   }
 
   function couchKey(action, controller, remote) { // A key at a couch party.
@@ -1165,6 +1383,8 @@
     const puzzle = party.run && party.run.party.puzzle, holding = puzzle && puzzle.phase === "attempt" && puzzle.holder === m.user;
     if (holding && couchBoard(m, action, controller, puzzle)) return;
     if (action === "play") { // ⏯: pass the puzzle on, or drink a potion.
+      const team = teamFight(), seat = team ? team.lumis.findIndex(function (f) { return f.user === m.user; }) : -1;
+      if (team) { if (seat >= 0 && team.at === seat) couchPress(controller, { action: "fight", target: "potion", ally: seat, turn: team.turn }); return; }
       if (holding) couchPress(controller, { action: "pass" });
       else if (party.run && !m.fainted && !m.fight && m.hp < m.hpMax) couchPress(controller, { action: "potion" });
       return;
@@ -1174,8 +1394,10 @@
     if (action === "up" || action === "down") { couchCursor[m.user] = (at + (action === "up" ? menu.length - 1 : 1)) % menu.length; couchConfirm[m.user] = null; drawCouch(); return; }
     const row = menu[at];
     if (!row) return;
+    if ((action === "left" || action === "right") && row.cycle) { couchCycle(m, row, action === "left" ? -1 : 1); return; }
     if ((action === "left" || action === "right") && row.turn) { couchPress(controller, row.turn(action === "left" ? -1 : 1)); return; }
     if (action !== "enter") return;
+    if (row.cycle && !row.send) { couchCycle(m, row, 1); return; }
     if (row.local) { // A rune added or taken off: kept here until they try the code.
       const guess = couchGuess[m.user] || [];
       couchGuess[m.user] = row.local.erase ? guess.slice(0, -1) : guess.length < party.run.facing.lock.slots ? guess.concat([row.local.rune]) : guess;
@@ -1185,6 +1407,12 @@
     if (row.confirm && couchConfirm[m.user] !== row.key) { couchConfirm[m.user] = row.key; say(m.name + ": press OK again to leave the party."); drawCouch(); return; }
     if (row.send.action === "rune") couchGuess[m.user] = [];
     couchPress(controller, row.send);
+  }
+
+  function couchCycle(m, row, by) { // A couch remote's ◀ ▶ in the co-op fight: their own aim, or who their item is for.
+    const to = row.next(by);
+    if (row.cycle === "aim") couchAim[m.user] = to; else couchAlly[m.user] = to;
+    drawCouch();
   }
 
   function couchBoard(m, action, controller, puzzle) { // The holder's remote on the crates, lamps or cards. True if it was theirs to take.
@@ -1219,7 +1447,7 @@
       const menu = couchMenu(m), at = Math.min(couchCursor[m.user] || 0, Math.max(0, menu.length - 1));
       return { m: m, menu: menu, at: at };
     });
-    const signature = JSON.stringify([party.revision, columns.map(function (c) { return [c.m, c.at, c.menu.map(function (r) { return r.name + (r.hint || ""); }), couchConfirm[c.m.user] || ""]; }), Math.floor(serverNow() / 1000)]);
+    const signature = JSON.stringify([party.revision, columns.map(function (c) { return [c.m, c.at, c.menu.map(function (r) { return r.name + (r.hint || ""); }), couchConfirm[c.m.user] || "", couchAim[c.m.user], couchAlly[c.m.user]]; }), Math.floor(serverNow() / 1000)]);
     if (signature === box.dataset.drawn) return;
     box.dataset.drawn = signature;
     const head = document.createElement("p");

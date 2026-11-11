@@ -58,6 +58,7 @@
     "frame-rose": "M140 161 A60 65 0 1 0 260 161 A60 65 0 1 0 140 161 Z",
     "frame-geode": "M198 96 L226 104 L240 98 L256 124 L250 146 L260 172 L246 196 L250 216 L222 222 L204 226 L180 220 L156 224 L146 200 L150 178 L140 156 L150 134 L144 112 L170 108 Z",
     "frame-orrery": "M140 161 A60 60 0 1 0 260 161 A60 60 0 1 0 140 161 Z",
+    "frame-worn": "M144 102 H256 V224 H144 Z",
     "frame-shrine-torii": "M148 226 V113 Q200 106 252 113 V226 Z",
     "frame-crystal-gem": "M166 98 H234 L262 138 L200 226 L138 138 Z",
     "frame-mushroom-cap": "M140 152 Q140 96 200 96 Q260 96 260 152 Q248 160 234 156 V226 H166 V156 Q152 160 140 152 Z",
@@ -4852,6 +4853,101 @@
     },
   };
 
+  // ---- Lumi's own old things (python/make_lumi_worn.py): the worn set she unpacks from her moving boxes when she
+  // has just moved in, one a day. Each stands where its spot's other pieces stand. Well loved, a bit tatty, cosy.
+  Object.assign(ART, {
+    "wall-worn": function () { // Old paper, faded to dusty mauve, peeling in strips with the plaster showing through.
+      const strips = [[34, 0, 22, 120], [118, 40, 18, 90], [286, 10, 24, 150], [356, 60, 20, 70]];
+      return rect(0, 0, 400, 352, "#3a2d3e") + scatter(17, 40, function (roll) { return circle(round(roll(0, 400)), round(roll(0, 350)), round(roll(3, 7)), "#463650", 'opacity=".7"'); }) + // A faded flower print.
+        strips.map(function (s) { return rect(s[0], s[1], s[2], s[3], "#5b5260") + path("M" + s[0] + " " + (s[1] + s[3]) + " q" + s[2] / 2 + " 10 " + s[2] + " 0 v-6 q-" + s[2] / 2 + " 8 -" + s[2] + " 0 Z", "#4d3d52"); }).join("") + // Torn strips, curling at the bottom.
+        oval(220, 70, 30, 18, "#2e2333", 'opacity=".6"');                                                        // An old water stain.
+    },
+    "floor-worn": function () { // Scuffed boards: one a different colour, a gap, scratches where furniture used to be.
+      let out = rect(0, 350, 400, 150, "#2b2019") + rect(0, 350, 400, 3, "#5a4434");
+      for (let y = 374; y < 500; y += 24) out += line(0, y, 400, y, "#1d1510", 2);
+      return out + rect(120, 422, 160, 22, "#3a2a1f") + path("M40 392 l60 6 M250 460 l70 -4 M300 408 l50 3", "none", 'stroke="#4a382b" stroke-width="1.6" stroke-linecap="round"') +
+        rect(0, 446, 400, 3, "#120c08", 'opacity=".8"');                                                          // A gap between two boards.
+    },
+    "art-worn": function () { // A postcard from her old town, held up with criss-crossed tape.
+      return group(rect(46, 168, 52, 36, "#e8dcc6") + rect(50, 172, 44, 20, "#7aa7c9") + path("M50 192 l12 -10 l10 6 l10 -12 l12 16 Z", "#5f8f6a") + circle(84, 179, 4, "#ffdc83") +
+        line(52, 198, 84, 198, "#a8977f", 1.2) + rect(40, 164, 16, 6, "#f1e7a8", 'opacity=".75" transform="rotate(-30 48 167)"') + rect(88, 200, 16, 6, "#f1e7a8", 'opacity=".75" transform="rotate(-30 96 203)"'),
+        'transform="rotate(-4 72 186)"');
+    },
+    "shelf-worn": function () { // A plank on two piles of bricks, a jar of pens and a chipped mug.
+      return rect(300, 168, 18, 32, "#9b4a3a") + path("M300 176 H318 M300 184 H318 M300 192 H318 M309 168 V176 M304 176 V184 M313 184 V192 M308 192 V200", "none", 'stroke="#6e3226" stroke-width="1"') +
+        rect(356, 168, 18, 32, "#9b4a3a") + path("M356 176 H374 M356 184 H374 M356 192 H374 M365 168 V176 M360 176 V184 M369 184 V192 M364 192 V200", "none", 'stroke="#6e3226" stroke-width="1"') +
+        rect(292, 160, 90, 8, "#b08a5a", 'rx="1"') + path("M300 160 v8 M330 160 v8", "none", 'stroke="#8a6a42" stroke-width="1"') +
+        rect(306, 140, 14, 20, "#c9e6e6", 'opacity=".6"') + path("M309 140 l-3 -10 M313 140 l1 -12 M317 140 l4 -9", "none", 'stroke="#ff8ecb" stroke-width="2" stroke-linecap="round"') +
+        path("M346 144 h16 v14 q0 2 -2 2 h-12 q-2 0 -2 -2 Z", "#e8dcc6") + path("M362 147 q6 0 5 5 q-1 4 -5 3", "none", 'stroke="#e8dcc6" stroke-width="2"') + path("M346 144 l4 4 l3 -4 Z", "#3a2d3e");
+    },
+    "frame-worn": function () { // A plain wooden frame, chipped at the corners, with a crack in one pane.
+      return path(CLIPS["frame-worn"], "none", 'stroke="#8a6a4a" stroke-width="7" stroke-linejoin="miter"') + line(200, 102, 200, 224, "#8a6a4a", 4) + line(144, 163, 256, 163, "#8a6a4a", 4) +
+        path("M142 100 l8 0 l-3 5 Z M258 226 l-9 0 l4 -6 Z", "#3a2d3e") + path("M214 112 l8 14 l-5 6 l9 18", "none", 'stroke="#e6f6ff" stroke-width="1" opacity=".55"') + rect(134, 224, 132, 7, "#7a5a3c", 'rx="1"');
+    },
+    "curtain-worn": function () { // An old bedsheet pinned over the window with clothes pegs, knotted to one side.
+      return line(124, 90, 276, 90, "#d8d0c4", 1.5) + path("M126 90 H274 V120 Q232 112 210 128 Q186 146 168 236 H150 Q160 150 126 132 Z", "#d9d4e8", 'opacity=".9"') +
+        path("M150 100 Q156 160 156 236 M190 96 Q186 120 180 140", "none", 'stroke="#b8b2c8" stroke-width="2"') + circle(170, 150, 9, "#c4bed6") + // The knot.
+        [138, 180, 222, 262].map(function (x) { return rect(x, 84, 5, 12, "#c79256", 'rx="1"'); }).join("") +                  // The clothes pegs.
+        scatter(8, 10, function (roll) { return circle(round(roll(132, 268)), round(roll(96, 118)), 2, "#a8c8e8", 'opacity=".7"'); });   // Little blue dots on the sheet.
+    },
+    "lamp-worn": function () { // A bare bulb on a tall thin stand, its flex trailing across the floor.
+      return oval(52, 250, 54, 54, "#fff3c0", 'opacity=".12"') + rect(51, 262, 3, 138, "#6f6a78") + path("M38 400 h30 l-4 -6 h-22 Z", "#6f6a78") +
+        rect(48, 256, 9, 8, "#8a8696") + circle(52, 248, 10, "#fff6d0", 'opacity=".95"') + path("M48 248 q4 -6 8 0", "none", 'stroke="#d8a840" stroke-width="1.2"') +
+        path("M53 398 Q90 420 130 410 T200 414", "none", 'stroke="#3a3440" stroke-width="2"');
+    },
+    "rug-worn": function () { // A rag rug from a thrift shop: rings of old T-shirts, a bit frayed at the edge.
+      const rings = ["#8a5a7a", "#5a7a8a", "#a8804a", "#6a8a5a", "#8a5a7a", "#c9a8a0"];
+      return rings.map(function (colour, i) { return oval(200, 440, 122 - i * 18, 28 - i * 4.2, colour); }).join("") +
+        scatter(13, 22, function (roll) { const a = roll(0, Math.PI * 2); return line(round(200 + 120 * Math.cos(a)), round(440 + 27 * Math.sin(a)), round(200 + 128 * Math.cos(a)), round(440 + 30 * Math.sin(a)), "#8a5a7a", 1.4); });
+    },
+    "bed-worn": function () { // A mattress straight on the floor, blue ticking, a squashed pillow and a crocheted blanket.
+      return rect(286, 424, 108, 26, "#c4cfe0", 'rx="5"') + [298, 314, 330, 346, 362, 378].map(function (x) { return line(x, 426, x, 448, "#8aa0c4", 1.5); }).join("") +
+        oval(306, 424, 20, 8, "#f0ece4") + path("M330 420 Q360 414 394 424 V450 H330 Q324 436 330 420 Z", "#c96a8a", 'opacity=".92"') +
+        scatter(23, 12, function (roll) { return circle(round(roll(338, 388)), round(roll(426, 446)), 2.4, "#ffdc83", 'opacity=".8"'); }) + rect(286, 448, 108, 4, "#00000044", 'rx="2"');
+    },
+    "door-worn": function () { // A creaky old door: paint flaking off, a mismatched knob, a draught excluder.
+      return rect(-62, 196, 74, 158, "#4a3d36", 'rx="2"') + rect(-56, 202, 62, 152, "#6e6058") +
+        scatter(29, 14, function (roll) { return rect(round(roll(-54, 0)), round(roll(206, 346)), round(roll(4, 12)), round(roll(3, 7)), "#8a7a6e", 'rx="1"'); }) + // Flaking paint.
+        rect(-50, 214, 50, 50, "none", 'stroke="#5a4c44" stroke-width="2"') + circle(-4, 280, 5, "#9aa4b0") + circle(-4, 280, 2, "#5a646e") +
+        rect(-58, 342, 66, 10, "#7a5a8c", 'rx="5"') + path("M-50 347 h50", "none", 'stroke="#ffdc83" stroke-width="1.2" stroke-dasharray="4 3"');
+    },
+    "hang-worn": function () { // A paper lantern on a string, with a tear patched with tape.
+      return line(330, 0, 330, 44, "#8a7aa8", 1.2) + oval(330, 68, 22, 24, "#f3e3c8", 'opacity=".95"') + path("M310 60 Q330 64 350 60 M309 70 Q330 74 351 70 M310 80 Q330 84 350 80", "none", 'stroke="#d8c4a4" stroke-width="1.2"') +
+        rect(326, 44, 8, 4, "#5a4a3a") + rect(326, 90, 8, 3, "#5a4a3a") + path("M340 58 l6 8 l-4 6", "none", 'stroke="#3a2d3e" stroke-width="1.6"') + rect(337, 60, 12, 6, "#f1e7a8", 'opacity=".7" transform="rotate(30 343 63)"');
+    },
+    "table-worn": function () { // A moving box doing a table's job, its flaps folded in, a mug and a book on top.
+      return rect(310, 322, 54, 40, "#c8a070") + rect(310, 322, 54, 6, "#b08858") + line(337, 322, 337, 362, "#a07848", 1.2) + rect(330, 328, 14, 22, "#f1e7a8", 'opacity=".7"') +
+        path("M318 346 l10 -6 M320 352 l10 -6", "none", 'stroke="#8a6040" stroke-width="1.2"') + rect(342, 310, 14, 12, "#70ebea", 'rx="2"') + path("M356 313 q5 0 4 4 q-1 3 -4 2", "none", 'stroke="#70ebea" stroke-width="2"') +
+        rect(314, 314, 24, 8, "#c85a8e", 'rx="1"');
+    },
+    "plant-worn": function () { // An avocado pit on toothpicks in a jam jar of water, sending up one brave shoot.
+      return path("M6 370 H30 V392 Q30 396 26 396 H10 Q6 396 6 392 Z", "#c9e6e6", 'opacity=".55"') + rect(6, 380, 24, 16, "#8ac6d8", 'opacity=".35"') + rect(5, 366, 26, 5, "#d8b24a", 'rx="1"') +
+        oval(18, 370, 8, 10, "#6b4426") + path("M4 372 L32 368 M6 366 L30 374", "none", 'stroke="#e8d8a8" stroke-width="1.4"') +
+        path("M18 360 Q16 336 20 318", "none", 'stroke="#5fae86" stroke-width="2.4" stroke-linecap="round"') + path("M20 326 q12 -8 14 2 q-8 4 -14 -2 Z M19 336 q-12 -6 -14 4 q8 2 14 -4 Z", "#7fc49a");
+    },
+    "chest-worn": function () { // A plastic laundry basket for a toy box, with a ball, a plush and a yo-yo poking out.
+      return circle(76, 432, 10, "#ff8ecb") + path("M68 428 q8 5 16 0", "none", 'stroke="#fff" stroke-width="2"') + oval(104, 430, 12, 10, "#c9a8ff") + circle(100, 427, 1.4, "#2a1a3a") + circle(108, 427, 1.4, "#2a1a3a") +
+        path("M96 422 l-4 -8 l6 4 Z M112 422 l4 -8 l-6 4 Z", "#c9a8ff") + circle(90, 436, 6, "#ffdc83") +
+        path("M56 440 H128 L122 476 H62 Z", "#70b8d8") + [70, 84, 98, 112].map(function (x) { return rect(x, 448, 6, 20, "#4a8aa8", 'rx="2"'); }).join("") + rect(54, 438, 76, 5, "#5aa0c0", 'rx="2"');
+    },
+    // A spot that hasn't been unpacked yet: bare plaster and bare concrete (render() draws these when a spot is empty).
+    "wall-bare": function () {
+      return rect(0, 0, 400, 352, "#4a4450") + scatter(41, 30, function (roll) { return oval(round(roll(0, 400)), round(roll(0, 350)), round(roll(10, 30)), round(roll(4, 10)), "#524c58", 'opacity=".6"'); }) +
+        path("M60 40 l14 10 M300 90 l-10 14 M180 260 l20 6", "none", 'stroke="#3a3440" stroke-width="1"') + rect(0, 340, 400, 12, "#3e3844");    // A crack or two, and a skirting board.
+    },
+    "floor-bare": function () {
+      return rect(0, 350, 400, 150, "#34303a") + scatter(43, 60, function (roll) { return circle(round(roll(0, 400)), round(roll(356, 498)), round(roll(0.6, 1.8)), "#403b46"); }) + rect(0, 350, 400, 3, "#55505c");
+    },
+    // Moving boxes, stacked at the front of the room: as many as are left to unpack (up to four drawn).
+    boxes: function (left) {
+      const spots = [[318, 452, 46, 40], [360, 458, 40, 34], [326, 418, 38, 34], [362, 428, 32, 30]];
+      return spots.slice(0, Math.min(left, spots.length)).map(function (b, i) {
+        return rect(b[0], b[1], b[2], b[3], i % 2 ? "#b8905e" : "#c8a070", 'rx="1"') + rect(b[0], b[1], b[2], 5, "#a07848") + rect(b[0] + b[2] / 2 - 4, b[1], 8, b[3], "#f1e7a8", 'opacity=".55"') +
+          path("M" + (b[0] + 6) + " " + (b[1] + b[3] - 10) + " h12 M" + (b[0] + 6) + " " + (b[1] + b[3] - 6) + " h8", "none", 'stroke="#5a3a2a" stroke-width="1.4"'); // "FRAGILE", scribbled.
+      }).join("");
+    },
+  });
+
   // ---- The whole room. It is drawn 1000 wide and 500 tall and fills whatever it is given (the whole screen on a TV
   // or computer, a card on a phone), cropping its sides rather than squashing. The furniture above is drawn in a
   // 400-wide block in the middle; the wall and floor repeat across the full width; and there are three windows, the
@@ -4860,7 +4956,11 @@
   const NUDGE = { plant: 82 }; // Plants are drawn beside the door but stand between the lamp and Lumi, clear of both.
   const REPEATED = { wallpaper: TILES, floor: TILES, view: WINDOWS, frame: WINDOWS, curtains: WINDOWS };
 
-  function render(house, backdrop) { // The room as SVG markup, back to front. `house` is {spot: object id} from the server.
+  const BARE = { wallpaper: "wall-bare", floor: "floor-bare" }; // What an empty wall or floor looks like before she unpacks her own.
+
+  function render(house, backdrop, extra) { // The room as SVG markup, back to front. `house` is {spot: object id} from the server.
+    // `extra.boxes`: moving boxes still to unpack, stacked at the front of the room. A spot missing from `house` is
+    // bare: plaster and concrete for the wall and floor, nothing at all for furniture.
     // `backdrop`: the page has its own scrolling scenery behind it (the neon theme's drifting pixel cities). The
     // windows are real holes in the wall, so with the first, free view that scenery is what shows through them.
     // Any other view, or a theme with nothing behind the page, paints a view of ours into the holes instead.
@@ -4870,13 +4970,13 @@
       '<mask id="lp-wall-mask" maskUnits="userSpaceOnUse" x="-100" y="0" width="' + (WIDE + 200) + '" height="500"><rect x="-100" width="' + (WIDE + 200) + '" height="500" fill="#fff"/>' +
       WINDOWS.map(function (x) { return '<path d="' + opening + '" transform="translate(' + x + ' 0)" fill="#000"/>'; }).join("") + "</mask></defs>";
     return defs + LAYERS.map(function (spot) {
-      const draw = Object.prototype.hasOwnProperty.call(ART, house[spot]) ? ART[house[spot]] : null;
+      const id = Object.prototype.hasOwnProperty.call(ART, house[spot]) ? house[spot] : BARE[spot], draw = id ? ART[id] : null;
       let art = draw && !(spot === "view" && open) ? draw() : ""; // An object this file doesn't know simply isn't drawn.
       if (art && spot === "view") art = group(art, 'clip-path="url(#lp-view-clip)"');
       const places = REPEATED[spot] || [MIDDLE + (NUDGE[spot] || 0)];
       return group(art ? places.map(function (x) { return group(art, 'transform="translate(' + x + ' 0)"'); }).join("") : "",
         'data-spot="' + spot + '"' + (spot === "wallpaper" ? ' mask="url(#lp-wall-mask)"' : "") + (spot === "view" && open ? ' data-open="true"' : ""));
-    }).join("");
+    }).join("") + (extra && extra.boxes ? group(group(ART.boxes(extra.boxes), 'transform="translate(' + MIDDLE + ' 0)"'), 'data-boxes="' + extra.boxes + '"') : "");
   }
 
   return { LAYERS: LAYERS, ART: ART, CLIPS: CLIPS, WINDOWS: WINDOWS, WIDE: WIDE, render: render };

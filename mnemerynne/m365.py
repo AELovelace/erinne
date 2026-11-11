@@ -9,8 +9,13 @@ account, kept encrypted (apis.encrypt_secret). SharePoint and mail use it to
 act as that person, so Microsoft's own permissions apply.
 
 Tenants are added by an admin (Settings → Microsoft 365). One multitenant app
-registration serves them all (MNEMERYNNE_M365_CLIENT_ID/SECRET), consented
-by each tenant's admin; a tenant may instead have its own app. A tenant's
+registration serves them all, consented by each tenant's admin; a tenant may
+instead have its own app. The shared registration's client ID and secret are
+set live on the Access page (shared_app, set_shared_app: kept in the database,
+the secret encrypted) or, as before, in the server's settings file
+(MNEMERYNNE_M365_CLIENT_ID/SECRET). What Access holds wins. Every function
+here that takes `conn` reads it afresh (live), so a change needs no restart
+and reaches the worker too. A tenant's
 mode decides who may link there: 'ad' tenants are synced from our AD, so the
 account must be the Mnemerynne user's own domain account; in 'cloud' tenants
 any account may be linked by whoever can sign in to it.
@@ -72,6 +77,66 @@ class GraphError(M365Error):
 
 def configured(settings: Settings) -> bool:
     return bool(settings.m365_client_id and settings.m365_client_secret)
+
+
+# ------------------------------------------------------- the shared app, live
+SHARED_KEY = "m365_shared_app"    # meta: {"client_id": ..., "secret_enc": ...}, set on the Access page
+
+
+def _saved_app(conn: sqlite3.Connection, settings: Settings) -> tuple[str, str | None] | None:
+    """(client id, secret) as saved on the Access page, or None if nothing is saved there. The secret is None when
+    it can't be read any more (the server's secret key changed since it was saved)."""
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (SHARED_KEY,)).fetchone()
+    if row is None:
+        return None
+    try:
+        saved = json.loads(row["value"])                   # what set_shared_app wrote
+        return str(saved["client_id"]), apis.decrypt_secret(settings, str(saved["secret_enc"]).encode())
+    except (ValueError, KeyError, TypeError):
+        return None                                        # not ours to read: as if nothing were saved
+
+
+def live(conn: sqlite3.Connection, settings: Settings) -> Settings:
+    """The settings with the shared app registration as it is right now: what the Access page saved if there is
+    something readable there, otherwise the settings file's, unchanged. A copy: the server's own settings object is
+    never altered. Call it wherever the shared app's ID or secret is about to be used."""
+    saved = _saved_app(conn, settings)
+    if saved is None or not saved[1]:
+        return settings
+    return settings.model_copy(update={"m365_client_id": saved[0], "m365_client_secret": saved[1]})
+
+
+def shared_app(conn: sqlite3.Connection, settings: Settings) -> dict:
+    """Where the shared app registration comes from, for the Access page: "access" (saved there), "server" (the
+    settings file) or None, with the client ID in use. Never the secret. `unreadable` is true when Access holds a
+    secret this server can no longer decrypt, so it has to be typed in again."""
+    saved = _saved_app(conn, settings)
+    if saved is not None and saved[1]:
+        return {"source": "access", "client_id": saved[0], "unreadable": False}
+    return {"source": "server" if configured(settings) else None, "client_id": settings.m365_client_id if configured(settings) else "",
+            "unreadable": saved is not None}
+
+
+def set_shared_app(conn: sqlite3.Connection, settings: Settings, client_id: str, client_secret: str) -> None:
+    """Save the shared app registration from the Access page. It takes effect at once, here and in the worker."""
+    client_id, client_secret = client_id.strip(), client_secret.strip()
+    if not _GUID.match(client_id):
+        raise M365Error("The client ID is the app registration's Application (client) ID, like 1b2c3d4e-0000-0000-0000-000000000000.")
+    if not client_secret:
+        raise M365Error("Enter the app registration's client secret (its Value, not its Secret ID).")
+    if _GUID.match(client_secret):                         # the commonest slip: Entra shows both side by side
+        raise M365Error("That looks like the secret's ID. Paste the secret's Value instead, shown once when it is created.")
+    value = json.dumps({"client_id": client_id.lower(), "secret_enc": apis.encrypt_secret(settings, client_secret).decode()})
+    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (SHARED_KEY, value))
+    with _lock:
+        _app_tokens.clear()                                # tokens the old app was given: ask again as the new one
+
+
+def clear_shared_app(conn: sqlite3.Connection) -> None:
+    """Forget what the Access page saved: the settings file's registration (if any) is used again."""
+    conn.execute("DELETE FROM meta WHERE key = ?", (SHARED_KEY,))
+    with _lock:
+        _app_tokens.clear()
 
 
 def _http() -> httpx.Client:
@@ -164,7 +229,7 @@ def credentials(settings: Settings, row: sqlite3.Row | None) -> tuple[str, str]:
             raise M365Error(f"{row['label']} has its own app, but its secret is missing or unreadable.")
         return row["client_id"], secret
     if not configured(settings):
-        raise M365Error("Microsoft 365 isn't set up on this server (MNEMERYNNE_M365_CLIENT_ID and _SECRET).")
+        raise M365Error("Microsoft 365 isn't set up on this server: an admin sets the shared app registration under Access → Microsoft 365.")
     return settings.m365_client_id, settings.m365_client_secret
 
 
@@ -174,17 +239,17 @@ def consent_url(settings: Settings, row: sqlite3.Row) -> str:
     return f"{AUTHORITY}/{row['tenant_id']}/adminconsent?" + urlencode({"client_id": client_id})
 
 
-_app_tokens: dict[str, tuple[str, float]] = {}
+_app_tokens: dict[str, tuple[str, float, str]] = {}      # tenant id: (token, expires at, the client ID it was given to)
 _lock = threading.Lock()
 
 
 def app_token(settings: Settings, row: sqlite3.Row) -> str:
     """An app-only token for that tenant (SharePoint indexing, Entra groups)."""
+    client_id, secret = credentials(settings, row)
     with _lock:
         hit = _app_tokens.get(row["tenant_id"])
-        if hit and hit[1] > time.time() + 60:
+        if hit and hit[1] > time.time() + 60 and hit[2] == client_id:   # not one given to an app since replaced on Access
             return hit[0]
-    client_id, secret = credentials(settings, row)
     with _http() as client:
         r = client.post(f"{AUTHORITY}/{row['tenant_id']}/oauth2/v2.0/token", data={
             "grant_type": "client_credentials", "client_id": client_id, "client_secret": secret,
@@ -193,12 +258,13 @@ def app_token(settings: Settings, row: sqlite3.Row) -> str:
     if r.status_code != 200:
         raise M365Error(_why(body, f"Microsoft refused the app's sign-in to {row['label']}"))
     with _lock:
-        _app_tokens[row["tenant_id"]] = (body["access_token"], time.time() + int(body.get("expires_in", 3600)))
+        _app_tokens[row["tenant_id"]] = (body["access_token"], time.time() + int(body.get("expires_in", 3600)), client_id)
     return body["access_token"]
 
 
 def check_consent(conn: sqlite3.Connection, settings: Settings, row_id: int) -> dict:
     """Try the app's own sign-in to that tenant and record whether it worked."""
+    settings = live(conn, settings)                       # the shared app as Access has it now
     row = tenant(conn, row_id)
     with _lock:
         _app_tokens.pop(row["tenant_id"], None)
@@ -234,6 +300,7 @@ def _b64(data: bytes) -> str:
 def begin_link(conn: sqlite3.Connection, settings: Settings, session: dict, user_id: int, redirect_uri: str,
                tenant_row: int | None = None) -> str:
     """Start linking: remember the attempt in the session, return Microsoft's sign-in URL."""
+    settings = live(conn, settings)                       # the shared app as Access has it now
     row = tenant(conn, tenant_row) if tenant_row else None
     if row is not None and not row["enabled"]:
         raise M365Error(f"{row['label']} is switched off.")
@@ -262,6 +329,7 @@ def _claims(id_token: str) -> dict:
 def finish_link(conn: sqlite3.Connection, settings: Settings, session: dict, user: sqlite3.Row, code: str,
                 state: str, redirect_uri: str) -> dict:
     """Finish linking: check everything, store the account and its token. Returns the identity."""
+    settings = live(conn, settings)                       # the shared app as Access has it now
     pending = session.pop("m365_link", None)
     if not pending or not secrets.compare_digest(str(pending.get("state", "")), state or ""):
         raise M365Error("That Microsoft sign-in didn't match one started here; start again from the Preferences page.")
@@ -332,6 +400,7 @@ _refreshing: dict[int, threading.Lock] = {}
 def access_token(conn: sqlite3.Connection, settings: Settings, identity_id: int) -> str:
     """A delegated token for a linked account, refreshed (and the refresh token
     rotated) when needed. NeedsRelink when Microsoft no longer accepts it."""
+    settings = live(conn, settings)                       # the shared app as Access has it now
     with _lock:
         hit = _user_tokens.get(identity_id)
         if hit and hit[1] > time.time() + 60:
@@ -424,6 +493,7 @@ def refresh_groups(conn: sqlite3.Connection, settings: Settings) -> dict:
     (for pickers and labels) and each linked account's groups, nested ones
     included. A tenant that fails keeps its old memberships, which go stale
     (and stop counting) after group_refs.FRESH_MINUTES."""
+    settings = live(conn, settings)                       # the shared app as Access has it now
     stats = {"tenants": 0, "groups": 0, "accounts": 0, "errors": []}
     for t in tenants(conn, enabled_only=True):
         try:

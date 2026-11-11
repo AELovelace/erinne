@@ -39,7 +39,8 @@ def alice(conn):
 
 
 def _pet(**fields):
-    return {"glow": "rose", "boost": None, "decor": [], **lumibattle.fresh_fields(), **fields}
+    even = {"stat_points": {key: fields["level"] - 1 for key in lumibattle.STAT_KEYS}} if "level" in fields else {}   # spread evenly
+    return {"glow": "rose", "boost": None, "decor": [], **lumibattle.fresh_fields(), **even, **fields}
 
 
 def _start(conn, uid, env="moonlit-shrine", seed=1):
@@ -62,6 +63,8 @@ def _put(conn, uid, run):
 
 def _set_pet(conn, uid, **fields):
     pet = json.loads(conn.execute("SELECT data FROM lumi_pets WHERE user_id = ?", (uid,)).fetchone()[0])
+    if "level" in fields and "stat_points" not in fields:            # a level set by hand comes with its points spread evenly
+        fields = {**fields, "stat_points": {key: fields["level"] - 1 for key in lumibattle.STAT_KEYS}}
     pet.update(fields)
     conn.execute("UPDATE lumi_pets SET data = ? WHERE user_id = ?", (json.dumps(pet), uid))
 

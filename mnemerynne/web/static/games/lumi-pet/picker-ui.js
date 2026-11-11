@@ -4,7 +4,9 @@
 
    A row is { key, icon, name, hint } and may have: `options` and `shown` (the choices ◀ ▶ flip through, and the one
    showing), `flipKey` (where game.js remembers the choice), `preview` or `wear` ([spot or slot, choice] to draw),
-   `label` (the choice's own name, for messages), and one of `send`, `local` or `note` as in the other lists. */
+   `label` (the choice's own name, for messages), and one of `send`, `local` or `note` as in the other lists.
+   Buying is try-before-you-buy: a row that would spend coins has `ask` (what to say the first time it is chosen), so
+   the first press or tap only shows the piece in the room (or on her) and the second buys it (game.js choose). */
 (function (root, make) {
   const ui = make();
   if (typeof module === "object" && module.exports) module.exports = ui; else root.LumiPetPicker = ui;
@@ -20,32 +22,40 @@
 
   function homeRows(ctx) { // ctx: { snap, open (a spot id, or null for the list of spots), flip, go(change) }
     const snap = ctx.snap, pet = snap.pet, go = ctx.go;
-    function mine(piece) { return (!piece.price && !piece.found && !piece.rarity) || pet.decor.indexOf(piece.id) >= 0; } // Free with the house, or already hers.
-    function hidden(piece) { return (piece.found || piece.rarity) && !mine(piece); } // A dungeon trophy or Star Capsule prize she hasn't got: it can't be bought.
+    function mine(piece) { return (!piece.price && !piece.found && !piece.rarity && !piece.worn) || pet.decor.indexOf(piece.id) >= 0; } // Free with the house, or already hers.
+    function hidden(piece) { return (piece.found || piece.rarity || piece.worn) && !mine(piece); } // A dungeon trophy, Star Capsule prize or packed box she hasn't got: it can't be bought.
+    function ask(piece) { return "Here's the " + piece.name + " in the room. Choose it again to buy it for " + piece.price + " coins."; } // Try before you buy.
     function where(piece) { // The dungeon place a found piece comes from, by name: "the Moonlit Shrine".
       const env = ((snap.dungeon || {}).environments || []).find(function (entry) { return entry.id === piece.found; });
       return env ? "the " + env.name : "the dungeon";
     }
     const spot = snap.house.spots.find(function (entry) { return entry.id === ctx.open; });
-    if (spot) return [{ key: "back", icon: "‹", name: "Back to the house", hint: spot.name, local: function () { go({ open: null, pick: snap.house.spots.indexOf(spot) }); } }]
+    const above = snap.boxes && snap.boxes.left ? 1 : 0; // The moving-box row sits above the spots while any are left.
+    if (spot) return [{ key: "back", icon: "‹", name: "Back to the house", hint: spot.name, local: function () { go({ open: null, pick: above + snap.house.spots.indexOf(spot) }); } }]
       .concat(spot.items.map(function (piece) {
         const here = pet.house[spot.id] === piece.id, owned = mine(piece);
-        const row = { key: piece.id, icon: here ? "✓" : owned ? "○" : hidden(piece) ? "🔒" : "✧", name: piece.name, label: piece.name, preview: [spot.id, piece.id],
-          hint: here ? "In the room now" : owned ? "Yours · Enter puts it out" : piece.found ? "Found in " + where(piece) + (spot.id === "trophy" ? "'s vault" : " · a rare find") : piece.rarity ? capital(piece.rarity) + " · only from a capsule" : piece.price + " coins · Enter buys it" };
-        if (here) row.note = piece.name + " is already in the room."; else if (!hidden(piece)) row.send = { action: "decorate", item: piece.id };
-        else row.note = piece.found ? piece.name + " can't be bought. It's waiting somewhere in " + where(piece) + "." : piece.name + " only comes from a capsule.";
+        const row = { key: piece.id, icon: here ? "✓" : owned ? "○" : piece.worn ? "📦" : hidden(piece) ? "🔒" : "✧", name: piece.name, label: piece.name, preview: [spot.id, piece.id],
+          hint: here ? "In the room now" : owned ? "Yours · Enter puts it out" : piece.worn ? "Her own · still in moving box " + piece.box : piece.found ? "Found in " + where(piece) + (spot.id === "trophy" ? "'s vault" : " · a rare find") : piece.rarity ? capital(piece.rarity) + " · only from a capsule" : piece.price + " coins · choose to see it, again to buy" };
+        if (here) row.note = piece.name + " is already in the room."; else if (!hidden(piece)) { row.send = { action: "decorate", item: piece.id }; if (!owned) row.ask = ask(piece); }
+        else row.note = piece.worn ? "That's still in moving box " + piece.box + ". Lumi unpacks one a day." : piece.found ? piece.name + " can't be bought. It's waiting somewhere in " + where(piece) + "." : piece.name + " only comes from a capsule.";
         return row;
       }));
-    return snap.house.spots.map(function (entry) {
-      const choices = entry.items.filter(function (piece) { return !hidden(piece); }); // A trophy or Capsule prize joins the row once she has it.
+    const boxes = snap.boxes || { left: 0 }, top = [];
+    if (boxes.left) top.push(boxes.ready // Her moving boxes: one a day, her own worn things.
+      ? { key: "unpack", icon: "📦", name: "Unpack a moving box", hint: "Box " + (boxes.total - boxes.left + 1) + " of " + boxes.total + ": " + boxes.next, send: { action: "unpack" } }
+      : { key: "unpack", icon: "📦", name: "Moving boxes: " + boxes.left + " left", hint: "One a day · next: " + boxes.next, note: "Lumi has unpacked enough for one day. Another box tomorrow!" });
+    return top.concat(snap.house.spots.map(function (entry) {
+      const choices = entry.items.filter(function (piece) { return !hidden(piece); }); // A trophy, Capsule prize or unpacked box joins the row once she has it.
       const ids = choices.map(function (piece) { return piece.id; }), placed = pet.house[entry.id];
       const shown = ids.indexOf(ctx.flip[entry.id]) >= 0 ? ctx.flip[entry.id] : placed;
-      const piece = choices.find(function (found) { return found.id === shown; }) || choices[0];
+      const piece = choices.find(function (found) { return found.id === shown; }) || null;
+      if (!piece) return { key: entry.id, icon: "⌂", name: entry.name, label: "nothing yet", options: ids, shown: null, flipKey: entry.id, preview: null, // Bare: nothing here yet.
+        hint: "Bare for now" + (ids.length ? " · ◀ ▶ to look through what you could buy" : ""), local: function () { go({ open: entry.id }); } };
       const row = { key: entry.id, icon: "⌂", name: entry.name, label: piece.name, options: ids, shown: piece.id, flipKey: entry.id, preview: [entry.id, piece.id],
-        hint: "◀ " + piece.name + " ▶ · " + (piece.id === placed ? "in the room" : mine(piece) ? "yours · Enter puts it out" : piece.price + " coins · Enter buys it") };
+        hint: "◀ " + piece.name + " ▶ · " + (piece.id === placed ? "in the room" : mine(piece) ? "yours · Enter puts it out" : piece.price + " coins · showing in the room · Enter buys it") };
       if (piece.id === placed) row.local = function () { go({ open: entry.id }); }; else row.send = { action: "decorate", item: piece.id };
       return row;
-    });
+    }));
   }
 
   function capsuleRows(snap) { // The two capsules. Sold at the top of the Closet and of the Shop: they give clothes, toys and things for the house.
@@ -67,6 +77,7 @@
         const row = { key: piece.id, icon: worn ? "✓" : owned ? "○" : piece.price ? "✧" : "🔒", name: piece.name, label: piece.name, wear: [slot.id, piece.id],
           hint: capital(piece.rarity) + " · " + (worn ? "wearing it · Enter takes it off" : status(piece, false)) };
         if (owned || piece.price) row.send = { action: "wear", item: piece.id }; else row.note = piece.name + " only comes from a capsule.";
+        if (!owned && piece.price) row.ask = "Lumi tries on the " + piece.name + ". Choose it again to buy it for " + piece.price + " coins."; // Try before you buy.
         return row;
       }));
     return capsuleRows(snap)

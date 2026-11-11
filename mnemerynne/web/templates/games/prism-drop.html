@@ -1,8 +1,9 @@
 {#- Prism Drop (static/games/prism-drop/): the field in the middle, the score on one side and the controls on the
     other (stacked on a narrow screen). Every text that changes is set with textContent by game.js. -#}
 <section class="gm-panel pd-score" aria-label="Score">
-  <p class="gm-eyebrow">// PRISM DROP</p>
+  <p class="gm-eyebrow">// LUMI'S ARCADE</p>
   <h1 class="gm-title">PRISM<span>DROP</span></h1>
+  <p class="pd-lead">You pick the pocket, Lumi drops the ball.</p>
   <dl class="pd-stats">
     <div><dt>Score</dt><dd id="pd-score">0</dd></div>
     <div><dt>Best</dt><dd id="pd-best">0</dd></div>
@@ -10,6 +11,7 @@
     <div><dt>Coins</dt><dd id="pd-coins">—</dd></div>
   </dl>
   <p class="pd-result" id="pd-result" role="status" aria-live="polite">Pick a pocket, then drop.</p>
+  <p class="pd-note">Lumi carries the ball to your pocket, lets it go, and flies down to fetch it for the next drop.</p>
 </section>
 <section class="pd-machine">
   <canvas id="pd-field" width="640" height="920" role="img"

@@ -77,12 +77,12 @@ Run the server and Media regression tests from the repository root:
 ```text
 .venv/Scripts/python.exe -m pytest tests/test_casino.py tests/test_casino_tv.py tests/test_coins.py tests/test_prism.py tests/test_media.py -q -p no:cacheprovider
 node --check mnemerynne/web/static/games/casino/game.js
-node --test tests/js/roulette.test.mjs
+node --test tests/js/roulette.test.mjs tests/js/lumi_table.test.mjs
 ```
 
 `test_coins.py` covers the shared purse: new purses, refusing an overdraft, bets to the house and wins back, reading a settled round twice, two tables sharing one balance, seats on one account, refills, forfeits, refunds from expired tables, local tables never touching a purse, daily caps, once-only payments, a TV spending its paired account, and the API refusing any amount or score a browser sends. `test_prism.py` covers Prism Drop's rules, which now run on the server, including the moving platforms: where they are at each step, turning at the walls, bouncing only a ball that's falling onto them, the breakout-style direction, and the two-bounce limit that lets every ball come down.
 
-`test_casino.py` covers aces, blackjack payouts, roulette zero, slot returns, shared race/spin settlement, private hole cards, automatic standing, round rollover, room limits, identity, wager replacement, host transfer, concurrent requests, reconnects, expiry and refills. Media tests cover registry/page integration, signed-in and paired-screen access, input validation, cross-site refusal, access revocation and the Node rule tests.
+`test_casino.py` covers aces, blackjack payouts, roulette zero, slot returns, shared race/spin settlement, private hole cards, automatic standing, round rollover, room limits, identity, wager replacement, host transfer, concurrent requests, reconnects, expiry and refills. `test_each_account_seat_shows_its_own_lumi` checks that a coin seat carries its Lumi's glow and outfit (retired clothes dropped), that someone without a Lumi gets a fresh one's look, that a credit seat gets none, and that looking never changes or creates a save. Media tests cover registry/page integration, signed-in and paired-screen access, input validation, cross-site refusal, access revocation and the Node rule tests.
 
 Slots tests cover wins on each of the three horizontal lines, combined returns, losing diagonals/columns, charging and replacing all three stakes, insufficient funds, the 30-coin refill threshold, and finishing old single-line rounds at their original cost before upgrading. Browser checks assert nine symbols, three lines, the displayed total before betting, the full balance deduction, individual line returns/highlights, net results, and shared results across accounts; screenshots include spinning and settled 3×3 layouts.
 
@@ -90,7 +90,9 @@ For real-browser checks, install/use Puppeteer and Chrome, then run `node tests/
 
 The browser checks play all four games with two isolated authenticated contexts, compare settlement, refresh a seat, check 390px mobile overflow, and verify host handoff. They check direct Left/Right picks, Up/Down stakes, Enter betting despite stale Leave-button focus, host-only Play, and blackjack Hit/Stand selection. They play a Prism Drop game through the server, reload partway to confirm it carries on, and check the coins it pays. They also open the Media Games cards, verify parent media-key routing and status reports, and pair a real test screen to send arrow/Enter/Play commands through its SSE stream. The roulette checks inspect all 37 labels, motion, persistent rotor identity and the server-result landing. Node geometry tests check the ball's final alignment for every possible result, zero included.
 
-The browser checks also cover bet limits, Play before betting, and reduced-motion roulette settlement. They use simulated visibility for both headless tabs; physically test two set-top boxes and their remote panels before release. Also check the available themes on target displays. A roulette snapshot during a round must keep its spin position; repeated polling must not recreate the rotor or replay its landing.
+The browser checks also cover bet limits, Play before betting, and reduced-motion roulette settlement. They use simulated visibility for both headless tabs; physically test two set-top boxes and their remote panels before release. Also check the available themes on target displays.
+
+**Lumi's Lounge by eye** (not automated): with two accounts whose Lumis wear different glows and clothes, both players should see the same two Lumis in the same seats. Dealer Lumi's line should change with each phase and name the result. Your Lumi hops with hearts on a win and gets a sweat drop on a loss, with your chips in front of her. On a real TV with eight remotes in slots, Dealer Lumi should sit on the table's top edge without covering a card. The ponies' legs gallop only during the race. With reduced motion on, nothing bounces. A roulette snapshot during a round must keep its spin position; repeated polling must not recreate the rotor or replay its landing.
 
 ## StickBob Runner
 
@@ -167,6 +169,16 @@ Without a project Puppeteer, run `npm install puppeteer-core` in a scratch folde
 
 For those, see PLAYER_CHECKLIST steps 18–20.
 
+## Co-op fights, stat points, fight items and moving in
+
+Server: `tests/test_lumiparty.py` plays the co-op fight: one fight in the party and no fight rows; seat order (Jane can't go before Doll), a stale turn refused, aiming at a chosen creature, the creatures striking only after every Lumi has gone, a creature already down refused; the whole EXP to every Lumi (even one who never had a turn) and coins to each satchel, and what each used remembered for Auto; a potion from Doll's pocket for Jane and an X-Attack for Mina, refused when it would do nothing or the pocket is empty; a Lumi at 0 becoming a ghost who still gets her EXP; everyone fainting ending the trip; a turn left for `TURN_SECONDS` braced through; Run taking everyone back; leaving mid-fight passing the turn on. `tests/test_lumipet.py`: a new house is bare with 14 boxes; one box a day, its piece put out only into an empty spot; a worn piece can't be bought; an older house is emptied once with its coins given back once (bought at price, capsule prizes at their value, finds at nothing); names and colours checked and refused; stat points by hand (to the cap), by Auto and taken back; fight items bought to their cap; an older Lumi's points placed by Auto with one free reset. `tests/test_lumibattle.py` and `tests/test_lumidungeon.py` set levels with points spread evenly, so their numbers are as before.
+
+Page: `tests/js/lumi_battle.test.mjs` (the Stats page, fight items in a fight and in the shop), `lumi_picker.test.mjs` (bare spots, the box row, worn pieces in their boxes, try-before-you-buy, Back landing on its row below the boxes), `lumi_party.test.mjs` (the co-op rows on your turn and someone else's, aiming and choosing a friend, a ghost, the couch menu, the browser's rows and scene with names escaped), `lumi_house.test.mjs` (the worn set drawn).
+
+Real Chrome: `checkLumiPet` unpacks the first box and checks the mattress and the box count in the room, buys a rug, tries the Star rug (a tap shows it, Back puts it back, nothing spent), names her through the browser's prompt, and slides green to its top to see her colour change before keeping it. `checkLumiPartyFight` shows the page a party view with a co-op fight: all three Lumis drawn the same size in one row with their names and their own colours and clothes, both creatures, aiming by the Aim row and by a click, a potion for a friend sent with the right seat and turn, then the wait on a friend's turn with the arrows sending nothing. `checkLumiPartyBrowser` fills the browser with two parties, checks their cards and Lumis, that names are text, and that arrows and Enter join the right one. Screenshots: `lumi-party-fight.png`, `lumi-party-browser.png`.
+
+Not automated: a real co-op fight walked into by three real people on three devices (the fight is driven only with a made-up view in Chrome; the server side is tested end to end in pytest); the couch's co-op fight with real remotes; the move-in on a real old save on the NAS (check the coins came back); a box opening the next real day.
+
 ## Star Capsule and Moon Capsule
 
 Lumi Pet's capsules now give clothes, toys and house objects: 120 accessories (20 a slot, of which 105 come only from capsules), 10 Capsule-only toys and 150 Capsule-only house objects, ten or more in every closet slot and house spot except trophies. The newest 60 clothes are the "Star Capsule wardrobe" at the end of `closet.js`: in the Closet, flip through each place and check every piece sits on her properly, including the kitsune tails (which redraw her own tail in front of them). In the Closet, open each capsule a few times.
@@ -190,8 +202,14 @@ Every dungeon place now has a decor set: one piece for each of the 15 house spot
 
 `tests/test_performance.py` covers the scan's write lock, the permission cache, the music list cache, connection reuse and the indexes. On the NAS, with something copied in or not: press around Files and Media while watching `journalctl -u mnemerynne-worker`, and no page should stall for the length of a scan. Remove someone's access to a folder from Windows: within 30 seconds lists stop showing it, and opening a file in it must fail at once. A brand-new folder must be usable straight away.
 
-## Breakout, Snake and the table lobby
+## Yarn Pop, Lumi Conga and the table lobby
 
+Yarn Pop and Lumi Conga are the arcade's Breakout and Snake (slugs `breakout` and `snake`), with Lumi in every game since 2026-11-11.
+
+- **Lumi in the arcade:**
+  - `tests/js/lumi_sprite.test.mjs` checks every piece Lumi can wear still makes a well-formed SVG picture. Her picture is an image, which is strict XML: an outfit with a repeated attribute would leave her drawn as a plain shape.
+  - `tests/arcade-lumi-browser.mjs` (in `connected-browser.mjs`; `ARCADE_ONLY=1` runs just it) dresses alice's Lumi, opens all four games, plays each a little, and saves pictures to `runs/casino-browser/arcade-*.png` for a person to look at.
+  - `tests/test_arcade.py` covers `lumi_look`, each showdown seat's look, and the conga's colours on the live board.
 - **Automated:**
   - `tests/test_arcade.py`: the server's rules, Python and JavaScript agreeing (needs Node), solo runs, showdown seats, ready, bets, settling and seats let go.
   - `tests/test_lobby.py`: casino polls that write nothing, seats and tables let go, TV tables, restarts.
@@ -225,3 +243,9 @@ Set `CASINO_TV_ONLY=1` when running `node tests/connected-browser.mjs` to run on
 Set `GAME_SCALING_ONLY=1` for the isolated browser scaling checks in `tests/game-scaling-browser.mjs`. They open six games (of Lumi's three apps, Lumi Pet) in the actual Media iframe on a paired TV, compare 1920×1080, 2560×1440 and 3840×2160 root fonts and board/control geometry, and resize back to verify no accumulated scaling. They also check saved manual size, live Bigger/Automatic/Cancel through the TV command stream, table preservation, canvas pixel density, horizontal overflow and unchanged unpaired desktop sizing. Screenshots include `slots-1080p.png`, `slots-4k.png`, `lumi-pet-1080p.png` and `lumi-pet-4k.png` in `runs/casino-browser/`.
 
 The shared-TV browser check also verifies eight active slot-player cards at 4K, with a `slots-eight-remotes-4k.png` capture. The Media pytest suite sends the real `Sec-Fetch-Dest: iframe` header to all game routes and checks inherited scale, no duplicated kiosk chrome/underscan, saved settings and unchanged non-game frames. Physically compare 1080p and 4K TVs after release; OS scaling and browser zoom change the CSS viewport that Automatic uses.
+
+## Microsoft 365: the shared app, set live on Access
+
+Run `.venv/Scripts/python.exe -m pytest tests/test_m365_link.py -q -p no:cacheprovider`. Two tests cover Access → Settings → Microsoft 365 → **Shared app registration**: with nothing in the settings file, an admin saves a client ID and secret and, with no restart, the tenant's consent link, the app's own sign-in (**Check**) and a person's link all send Microsoft the new ID and secret; non-admins are refused; a client ID that isn't one, an empty secret and a Secret ID pasted for its Value are refused with their reasons; the secret never comes back in any answer or the log and is stored encrypted; the server's own settings object is untouched. The second checks that Access wins over the settings file, that a token another process still holds from the old app is not reused, that a tenant's own app is left alone, that a secret the server can no longer read falls back and says so, and that **Remove** returns to the settings file.
+
+Not automated: the form was driven once in headless Chrome with a throwaway preview and Puppeteer (refused when wrong, saved, shown without its secret, used by the consent link, kept over a reload, removed). Never tried against real Microsoft: on the NAS, save the real client ID and secret, press **Check** on a tenant, link an account from Preferences, and confirm the worker's next SharePoint sync and group refresh still work without restarting it.

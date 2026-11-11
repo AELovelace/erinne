@@ -2,6 +2,7 @@
 
 import base64
 import json
+import re
 import time
 from urllib.parse import parse_qs, urlsplit
 
@@ -270,3 +271,79 @@ def test_nothing_shows_until_microsoft_365_is_set_up(client, conn, settings):
     assert client.get("/api/m365").json()["available"] is False
     back = client.get("/m365/link", follow_redirects=False)
     assert "isn't set up" in parse_qs(urlsplit(back.headers["location"]).query)["note"][0]
+
+
+# ------------------------------------------------- the shared app, set live on the Access page
+LIVE_APP = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+
+def test_the_shared_app_is_set_live_from_access_with_no_restart(client, ms, conn, settings, world):
+    settings.m365_client_id = settings.m365_client_secret = ""              # nothing in the server's settings file
+    _login(client, "alice")
+    assert client.get("/api/m365").json()["available"] is False
+    assert client.put("/api/admin/m365/shared-app", json={"client_id": LIVE_APP, "client_secret": "s3cret"}).status_code == 403   # admins only
+    client.post("/logout")
+    _login(client, "boss")
+    before = client.get("/api/admin/m365").json()
+    assert not before["configured"] and before["shared_app"] == {"source": None, "client_id": "", "unreadable": False}
+    assert before["tenants"][0]["consent_url"] is None
+    for bad, why in (({"client_id": "not-an-id", "client_secret": "s3cret"}, r"Application \(client\) ID"),
+                     ({"client_id": LIVE_APP, "client_secret": "   "}, "client secret"),
+                     ({"client_id": LIVE_APP, "client_secret": HOME}, "secret's ID")):        # the Secret ID pasted for its Value
+        refused = client.put("/api/admin/m365/shared-app", json=bad)
+        assert refused.status_code == 400 and re.search(why, refused.json()["detail"]), refused.text
+    saved = client.put("/api/admin/m365/shared-app", json={"client_id": LIVE_APP.upper(), "client_secret": " s3cret "})
+    assert saved.status_code == 200, saved.text
+    now = saved.json()
+    assert now["configured"] and now["shared_app"] == {"source": "access", "client_id": LIVE_APP, "unreadable": False}
+    assert f"adminconsent?client_id={LIVE_APP}" in now["tenants"][0]["consent_url"]
+    assert "s3cret" not in saved.text and "s3cret" not in client.get("/api/admin/m365").text         # the secret never comes back
+    stored = conn.execute("SELECT value FROM meta WHERE key = ?", (m365.SHARED_KEY,)).fetchone()["value"]
+    assert "s3cret" not in stored and LIVE_APP in stored                                            # and is kept encrypted
+    assert (settings.m365_client_id, settings.m365_client_secret) == ("", "")                        # the server's own settings are untouched
+    entry = client.get("/api/admin/log").json()["entries"][0]
+    assert entry["action"] == "m365.shared_app" and "s3cret" not in json.dumps(entry)
+
+    seen = []                                                                # what Microsoft is sent from now on
+    real = ms.handler
+    def spy(request):
+        if str(request.url).endswith("/oauth2/v2.0/token"):
+            form = parse_qs(request.content.decode())
+            seen.append((form["client_id"][0], form["client_secret"][0]))
+        return real(request)
+    m365.TRANSPORT = httpx.MockTransport(spy)
+    assert client.post(f"/api/admin/m365/tenants/{world['home']}/check").json()["ok"]                # the app's own sign-in uses it at once
+    assert seen[-1] == (LIVE_APP, "s3cret")
+    client.post("/logout")
+    _login(client, "alice")                                                  # and so does linking, for everyone
+    assert client.get("/api/m365").json()["available"] is True
+    ms.aud = LIVE_APP
+    assert _link(client, ms, HOME, "oid-alice", "alice@eternalhotels.com", "alice")["m365"] == ["linked"]
+    assert seen[-1] == (LIVE_APP, "s3cret")
+
+
+def test_access_wins_over_the_settings_file_and_removing_it_falls_back(client, ms, conn, settings, world):
+    _login(client, "boss")                                                   # the fixture's settings file has app-id / app-secret
+    assert client.get("/api/admin/m365").json()["shared_app"] == {"source": "server", "client_id": "app-id", "unreadable": False}
+    assert m365.app_token(m365.live(conn, settings), m365.tenant(conn, world["home"])) == "app-" + HOME
+    assert m365._app_tokens[HOME][2] == "app-id"
+    client.put("/api/admin/m365/shared-app", json={"client_id": LIVE_APP, "client_secret": "s3cret"})
+    assert m365.credentials(m365.live(conn, settings), None) == (LIVE_APP, "s3cret")
+    assert HOME not in m365._app_tokens                                      # tokens given to the old app are dropped
+    # Another process (the worker) still holds a token the old app was given: it is not used for the new app.
+    m365._app_tokens[HOME] = ("stale", time.time() + 3000, "app-id")
+    assert m365.app_token(m365.live(conn, settings), m365.tenant(conn, world["home"])) == "app-" + HOME
+    assert m365._app_tokens[HOME][2] == LIVE_APP
+    # A tenant's own app is never replaced by the shared one.
+    client.patch(f"/api/admin/m365/tenants/{world['gasco']}", json={"client_id": "own-app", "client_secret": "s3"})
+    assert m365.credentials(m365.live(conn, settings), m365.tenant(conn, world["gasco"])) == ("own-app", "s3")
+    # A secret this server can no longer read (its secret key changed) falls back, and Access says so.
+    conn.execute("UPDATE meta SET value = ? WHERE key = ?", (json.dumps({"client_id": LIVE_APP, "secret_enc": "garbage"}), m365.SHARED_KEY))
+    assert client.get("/api/admin/m365").json()["shared_app"] == {"source": "server", "client_id": "app-id", "unreadable": True}
+    assert m365.credentials(m365.live(conn, settings), None) == ("app-id", "app-secret")
+    gone = client.delete("/api/admin/m365/shared-app")
+    assert gone.status_code == 200 and gone.json()["shared_app"] == {"source": "server", "client_id": "app-id", "unreadable": False}
+    assert conn.execute("SELECT 1 FROM meta WHERE key = ?", (m365.SHARED_KEY,)).fetchone() is None
+    client.post("/logout")
+    _login(client, "alice")
+    assert client.delete("/api/admin/m365/shared-app").status_code == 403

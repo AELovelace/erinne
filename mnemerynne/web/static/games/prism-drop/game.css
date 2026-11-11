@@ -2,9 +2,12 @@
    the field's frame. Colours come from the theme (common.css); the field itself is drawn by game.js. */
 
 .pd-machine { display: flex; justify-content: center; min-width: 0; }
+.pd-score, .pd-controls { border-radius: 1rem; }                 /* Lumi Pet's rounded panels (lumi-pet/game.css) */
+.pd-lead { margin: 0 0 1rem; font-size: 1.1rem; color: var(--cyan); }
+.pd-note { margin: .8rem 0 0; color: var(--muted); font-size: .8rem; line-height: 1.5; }
 #pd-field {
   display: block; height: calc(100vh - 2 * clamp(.5rem, 2vh, 1.5rem)); width: auto; max-width: 100%; aspect-ratio: 640 / 920;
-  border: 1px solid var(--line); box-shadow: var(--bloom, 0 0 0 1px var(--line)), 0 0 40px rgba(var(--glow), .18);
+  border: 1px solid rgba(255, 142, 203, .55); border-radius: 1rem; box-shadow: var(--bloom, 0 0 0 1px var(--line)), 0 0 40px rgba(255, 142, 203, .22);
   background: var(--blush); cursor: pointer; touch-action: manipulation;
 }
 

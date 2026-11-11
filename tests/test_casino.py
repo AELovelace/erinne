@@ -237,3 +237,23 @@ def test_expiry_empty_table_and_free_refill(conn, monkeypatch):
     with pytest.raises(casino.Refused) as expired:
         casino.room(conn, "slots", s["code"], "alice", "Alice")
     assert expired.value.status == 404
+
+
+def test_each_account_seat_shows_its_own_lumi(conn):
+    """A coin seat carries its Lumi's glow and outfit (drawn sitting at the table); credit seats get none; looking saves nothing."""
+    from mnemerynne import lumipet, users
+    alice, bob = users.create_user(conn, "alice", "password123"), users.create_user(conn, "bob", "password123")
+    pet = lumipet._fresh(0)                                                           # Alice's Lumi: lagoon, a bow, one retired item
+    pet.update(glow="lagoon", outfit={"head": "acc-bow", "neck": "acc-gone-forever"})
+    conn.execute("INSERT INTO lumi_pets(user_id, data) VALUES (?, ?)", (alice, json.dumps(pet)))
+    saved = conn.execute("SELECT data, updated_at FROM lumi_pets WHERE user_id = ?", (alice,)).fetchone()
+    s = casino.create(conn, "blackjack", f"user:{alice}", "Alice", account=alice)
+    s = casino.room(conn, "blackjack", s["code"], f"user:{bob}", "Bob", "join", account=bob)
+    s = casino.room(conn, "blackjack", s["code"], "guest", "Guest", "join")           # a table-credits seat
+    looks = {p["name"]: p.get("look") for p in s["players"]}
+    assert looks["Alice"] == {"glow": "lagoon", "outfit": {"head": "acc-bow"}, "colour": None, "name": "Lumi"}   # retired things aren't drawn (colour and name: 8c73's RGB colour and naming)
+    assert looks["Bob"] == {"glow": "rose", "outfit": {}, "colour": None, "name": "Lumi"}   # no Lumi yet: a fresh one's look
+    assert looks["Guest"] is None                                                     # the page draws a plain Lumi
+    assert tuple(conn.execute("SELECT data, updated_at FROM lumi_pets WHERE user_id = ?", (alice,)).fetchone()) == tuple(saved)
+    assert conn.execute("SELECT COUNT(*) FROM lumi_pets WHERE user_id = ?", (bob,)).fetchone()[0] == 0   # Bob's Lumi isn't made by looking
+    assert "account" not in json.dumps(s["players"])                                  # whose purse it is stays on the server

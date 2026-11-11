@@ -102,8 +102,9 @@ def load_catalog(path: Path | None = None) -> dict:
 def load_house(path: Path | None = None) -> dict:
     """The house: fixed spots, each with a handful of objects to swap in, paperdoll style (Littlepottchi's outfit
     slots, pointed at furniture). The order of spots here is the order the page lists them; the page's own art file
-    (static/games/lumi-pet/house.js) decides how they layer. Each spot's first object is free: it is what a new
-    house starts with."""
+    (static/games/lumi-pet/house.js) decides how they layer. Each spot's first object is free. A "worn" object (Lumi's
+    own old things, python/make_lumi_worn.py) is free too, but only comes out of her moving boxes (unpack); a spot
+    whose first object is worn starts bare. The others (nothing, or the view outside) are what a house starts with."""
     data = json.loads((path or Path(__file__).parent / "lumipet_data" / "house.json").read_text(encoding="utf-8"))
     seen: set[str] = set()
     if not isinstance(data.get("spots"), list) or not data["spots"]:
@@ -123,8 +124,16 @@ def load_house(path: Path | None = None) -> dict:
             # A rarity marks a Star Capsule prize: it can only be won, so it can't also be sold or found in the dungeon.
             if "rarity" in item and (item["rarity"] not in RARITIES or item["price"] or item.get("found")):
                 raise ValueError(f"The house's {item['id']} can't be a Star Capsule prize as well as sold or found.")
+            if item.get("worn") and (item["price"] or "rarity" in item or item.get("found") or not isinstance(item.get("box"), int)):
+                raise ValueError(f"The house's {item['id']} is a worn piece: free, from a numbered moving box, never sold, won or found.")
         if spot["items"][0]["price"] != 0 or "rarity" in spot["items"][0]:
             raise ValueError(f"The {spot['id']} spot's first object must be free.")
+        free = [item["id"] for item in spot["items"][1:] if not item["price"] and not item.get("worn") and "rarity" not in item and not item.get("found")]
+        if free:
+            raise ValueError(f"Only a spot's first object and worn pieces are free: {', '.join(free)} needs a price.")
+    boxes = sorted(item["box"] for spot in data["spots"] for item in spot["items"] if item.get("worn"))
+    if boxes != list(range(1, len(boxes) + 1)):
+        raise ValueError("The moving boxes must be numbered 1, 2, 3 and so on, one worn piece each.")
     return data
 
 
@@ -171,6 +180,12 @@ _ITEMS = {item["id"]: {**item, "kind": kind} for kind in KINDS for item in CATAL
 # All the capsules can give: clothes, then toys, then decor. A clothing prize has a "slot", a toy's kind is "toys" and
 # a house object has a "spot"; _shelf says which of her lists keeps each.
 _PRIZES = [*_WEAR.values(), *(toy for toy in _ITEMS.values() if "rarity" in toy), *(piece for piece in _DECOR.values() if "rarity" in piece)]
+# Lumi's moving boxes, in the order they are unpacked: one worn piece each (python/make_lumi_worn.py).
+BOXES = sorted((piece for piece in _DECOR.values() if piece.get("worn")), key=lambda piece: piece["box"])
+MOVE_IN = 1                                               # pet["moved_in"]: the house reset that began the move-in has happened
+NAME_MAX = 16
+_NAME = re.compile(r"^[\w' .-]{1,%d}$" % NAME_MAX)        # letters (any alphabet), digits, spaces, apostrophes, dots, hyphens
+_COLOUR = re.compile(r"^#[0-9a-f]{6}$")
 
 
 def _shelf(prize: dict) -> str:
@@ -187,6 +202,8 @@ def _fresh(now: int) -> dict:
             "glow": "rose", "rest": "auto", "restUntil": 0, "task": None, "done": None, "cooldowns": {},
             "inventory": {}, "toys": [], "boost": None, "imported": False, "low": {}, "seen": now, "house": {}, "decor": [],
             "outfit": {}, "closet": [], "storyteller": "library", "garden_reminders": True,
+            "name": "Lumi", "colour": None,               # what her friends see her called; her own colour (None: her glow's)
+            "moved_in": MOVE_IN, "unpacked": 0, "box_day": "",   # she has just moved in: boxes unpacked so far, and the day of the last
             **lumibattle.fresh_fields()}
 
 
@@ -234,12 +251,53 @@ def load(conn: sqlite3.Connection, user_id: int, now: int | None = None, *, seen
     not the person, so it doesn't count as a visit."""
     now = now_ms() if now is None else now
     row = conn.execute("SELECT data FROM lumi_pets WHERE user_id = ?", (user_id,)).fetchone()
-    pet = {**_fresh(now), **json.loads(row["data"])} if row else _fresh(now)   # older saves gain any newer fields
+    saved = json.loads(row["data"]) if row else None
+    pet = {**_fresh(now), **saved} if saved else _fresh(now)   # older saves gain any newer fields
+    if saved is not None and "stat_points" not in saved:  # from before stat points: hers, placed by Auto, with a free reset
+        lumibattle.settle_points(pet)
+    if saved is not None and saved.get("moved_in") != MOVE_IN:   # from before the move-in: the house starts again, coins back
+        _move_in(conn, user_id, pet)
     advance(pet, now)
     if seen:
         pet["seen"] = now
     _save(conn, user_id, pet)
     return pet
+
+
+def _move_in(conn: sqlite3.Connection, user_id: int, pet: dict) -> int:
+    """Doll's fresh start for every house (2026-11-11): Lumi has just moved to a new town. Her room is emptied and
+    everything she owned for it is gone, and the coins it was worth come back: what each bought piece cost, and what
+    each capsule piece is worth (the closet's values for its rarity, the same a repeat pays half of). Pieces found in
+    the dungeon cost nothing, so give nothing back. Her moving boxes start from the first. Paid once, by its reference.
+    Returns the coins given back."""
+    worth = sum(_DECOR[item]["price"] or (CLOSET["values"][_DECOR[item]["rarity"]] if "rarity" in _DECOR[item] else 0)
+                for item in set(pet.get("decor", [])) if item in _DECOR)
+    pet.update(house={}, decor=[], moved_in=MOVE_IN, unpacked=0, box_day="")
+    return coins.prize(conn, user_id, worth, GAME, f"lumi-move-in:{user_id}") if worth else 0
+
+
+def boxes(conn: sqlite3.Connection, pet: dict) -> dict:
+    """Her moving boxes, for the page: how many are left, what the next one holds, and whether one can be opened today
+    (one a day, by the server's date)."""
+    left = BOXES[pet.get("unpacked", 0):]
+    return {"left": len(left), "total": len(BOXES), "next": left[0]["name"] if left else None,
+            "ready": bool(left) and pet.get("box_day") != coins.today(conn)}
+
+
+def look(conn: sqlite3.Connection, user_id: int) -> dict:
+    """How this person's Lumi looks (her glow and what she wears), for drawing her somewhere else, such as her seat at a
+    table game (casino.py). Only reads: no catching up, no visit, nothing saved. Someone without a Lumi yet gets a fresh one's look."""
+    row = conn.execute("SELECT data FROM lumi_pets WHERE user_id = ?", (user_id,)).fetchone()   # her save, if she has one
+    try:
+        pet = json.loads(row["data"]) if row else {}                                               # an unreadable save looks fresh
+    except ValueError:
+        pet = {}
+    glow = pet.get("glow") if pet.get("glow") in GLOWS else "rose"                                 # a retired colour falls back to rose
+    outfit = pet.get("outfit") if isinstance(pet.get("outfit"), dict) else {}
+    worn = {slot: item for slot, item in outfit.items() if _WEAR.get(item, {}).get("slot") == slot}   # drop anything since retired, as snapshot() does
+    colour = pet.get("colour") if isinstance(pet.get("colour"), str) and _COLOUR.match(pet["colour"]) else None
+    name = pet.get("name") if isinstance(pet.get("name"), str) and _NAME.match(pet["name"]) else "Lumi"
+    return {"glow": glow, "outfit": worn, "colour": colour, "name": name}
 
 
 def _save(conn: sqlite3.Connection, user_id: int, pet: dict) -> None:
@@ -262,7 +320,7 @@ def snapshot(conn: sqlite3.Connection, user_id: int, pet: dict, now: int) -> dic
             "battle": {key: lumibattle.CATALOG[key] for key in ("basics", "trees", "mods")} | {"rules": lumibattle.RULES},
             "progress": lumibattle.summary(pet), "fight": lumibattle.current(conn, user_id),
             "potions_ready": lumidungeon.potions_ready(run, pet),
-            "health": _health(run, pet), "party": party_info,
+            "health": _health(run, pet), "party": party_info, "boxes": boxes(conn, pet),
             "garden": lumigarden.view(_garden(conn, user_id, pet, now), pet, now),
             "garden_decor": lumigarden.CATALOG["decor"],        # the decorations and the capsule: fixed, so not part of the view
             "dungeon": {"environments": lumidungeon.open_environments(pet), "run": run_view}}
@@ -302,10 +360,17 @@ def _eat(conn: sqlite3.Connection, user_id: int, pet: dict, share: float) -> Non
 
 
 def placed(pet: dict) -> dict[str, str]:
-    """What stands in every spot: the person's choice where it is still valid, else the spot's free first object.
+    """What stands in every spot: the person's choice where it is still valid, else the spot's free first object, unless
+    that is a worn piece still in its box: then the spot is bare and left out (the page draws bare walls and floor).
     Worked out on reading, so a spot added to the catalog later, or an object removed from it, never breaks a save."""
-    return {spot["id"]: pet["house"][spot["id"]] if _DECOR.get(pet["house"].get(spot["id"]), {}).get("spot") == spot["id"]
-            else spot["items"][0]["id"] for spot in HOUSE["spots"]}
+    out = {}
+    for spot in HOUSE["spots"]:
+        chosen = pet["house"].get(spot["id"])
+        if _DECOR.get(chosen, {}).get("spot") == spot["id"]:
+            out[spot["id"]] = chosen
+        elif not spot["items"][0].get("worn"):
+            out[spot["id"]] = spot["items"][0]["id"]
+    return out
 
 
 def state(conn: sqlite3.Connection, user_id: int, now: int | None = None) -> dict:
@@ -327,7 +392,8 @@ def _moment(pet: dict, memory: str) -> None:
 
 
 def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None = None, count: int = 1,
-        moments: int = 0, glow: str | None = None, slot: int | None = None, now: int | None = None, rng=None) -> dict:
+        moments: int = 0, glow: str | None = None, slot: int | None = None, name: str | None = None,
+        colour: str | None = None, now: int | None = None, rng=None) -> dict:
     """One thing the person chose to do. Call inside a transaction: the pet, and any coins, save together or not at all.
     The pet is caught up first, so a refused action never changes what time already did (store.js act)."""
     now = now_ms() if now is None else now
@@ -401,6 +467,8 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
             raise PetError("That one can't be bought. It's waiting somewhere in the dungeon.")
         if "rarity" in piece and item not in pet["decor"]:   # priced 0 like the free objects, but it has to be won
             raise PetError("That one only comes from a capsule.")
+        if piece.get("worn") and item not in pet["decor"]:   # Lumi's own old things: still in a moving box
+            raise PetError(f"That's still packed in a moving box. Lumi unpacks one a day (box {piece['box']} of {len(BOXES)}).")
         if piece["price"] and item not in pet["decor"]:
             if not coins.spend(conn, user_id, piece["price"], GAME, "decor"):
                 raise PetError("Not enough coins for that.")
@@ -459,6 +527,31 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
         else:
             pet["closet"].append(won["id"])
             pet["outfit"][won["slot"]] = won["id"]        # she wears it straight out of the capsule
+    elif action == "unpack":                              # one moving box a day: a worn piece of her own, put out if its spot is free
+        if pet["unpacked"] >= len(BOXES):
+            raise PetError("Every box is unpacked. Lumi's all moved in!")
+        if pet["box_day"] == coins.today(conn):
+            raise PetError("Lumi has unpacked enough for one day. Another box tomorrow!")
+        piece = BOXES[pet["unpacked"]]
+        pet["unpacked"] += 1
+        pet["box_day"] = coins.today(conn)
+        if piece["id"] not in pet["decor"]:
+            pet["decor"].append(piece["id"])
+        put_out = piece["spot"] not in pet["house"]
+        if put_out:
+            pet["house"][piece["spot"]] = piece["id"]       # into the room, unless she has already put something there
+        said = {"unpacked": piece["id"], "name": piece["name"], "put_out": put_out, "left": len(BOXES) - pet["unpacked"]}
+        _moment(pet, "unpack")
+    elif action == "name":                                # what she is called, by her friends and in fights
+        cleaned = " ".join((name or "").split())
+        if not _NAME.match(cleaned) or not any(ch.isalnum() for ch in cleaned):
+            raise PetError(f"A name is 1 to {NAME_MAX} letters or numbers (spaces, ' . and - are fine too).")
+        pet["name"] = cleaned
+    elif action == "colour":                              # her own colour, from the red, green and blue sliders; "" goes back to her glow's
+        cleaned = (colour or "").strip().lower()
+        if cleaned and not _COLOUR.match(cleaned):
+            raise PetError("A colour is # and six hex digits, like #ff8ecb.")
+        pet["colour"] = cleaned or None
     elif action == "garden_reminders":                    # whether "your flowers are ready" may be sent to her phone
         pet["garden_reminders"] = not pet.get("garden_reminders", True)
     elif action == "storyteller":
@@ -469,7 +562,7 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
         if glow not in GLOWS:
             raise PetError("Choose one of Lumi's glow colours.")
         pet["glow"] = glow
-    elif action in ("learn", "respec", "equip", "mod", "potions", "heal", "drink"):
+    elif action in ("learn", "respec", "equip", "mod", "potions", "heal", "drink", "stat", "stats_auto", "auto_stats", "stats_reset", "kit"):
         run = lumidungeon.current(conn, user_id) if action == "drink" else None
         if (run and not run["over"]) or (action == "drink" and lumiparty.on_trip(conn, user_id)):
             raise PetError("Lumi is out exploring. She can drink it there, in Lumi Dungeons.")

@@ -16,6 +16,10 @@
   const $ = function (id) { return document.getElementById(id); };
   const W = 1366, H = 768;                                   // the canvas's own units, the GameMaker room's size
   const ARENA = { solo: [363, 144], left: [20, 144], right: [706, 144] };
+  // A solo game is drawn as big as the screen allows (Doll, 2026-11-11): the same 640 x 480 game, scaled up to fill
+  // the height. Showdowns keep two arenas side by side at their own size. The rules never see the difference.
+  const SOLO_K = Math.min((W - 120) / 640, (H - 110) / 480), SOLO = { x: (W - 640 * SOLO_K) / 2, y: 72, k: SOLO_K };
+  const L = window.LumiSprite;                               // each player's own Lumi (arcade/lumi-sprite.js)
   const COUNTDOWN = 3;                                       // seconds between a race starting and the games moving
 
   let mod = null, canvas, ctx, scale = 1, view = "menu", base = "";
@@ -71,19 +75,34 @@
     canvas.width = Math.round(W * scale); canvas.height = Math.round(H * scale);
   }
 
-  function backdrop(t) {                                     // the GameMaker game's night gradient
+  // Lumi's starry night (her room's own sky): soft pink and aqua glows and four-pointed sparkles that twinkle.
+  const SPARKLES = Array.from({ length: 42 }, function (_, i) { return { x: (i * 397) % W, y: (i * 233) % H, r: 2 + (i % 4), phase: i * 0.7 }; });
+  function sparkle(x, y, r) {                                // a four-pointed star, as Lumi Pet draws them
+    ctx.beginPath(); ctx.moveTo(x, y - r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.quadraticCurveTo(x, y, x, y + r);
+    ctx.quadraticCurveTo(x, y, x - r, y); ctx.quadraticCurveTo(x, y, x, y - r); ctx.fill();
+  }
+  function backdrop(t) {
     ctx.setTransform(scale, 0, 0, scale, 0, 0);
     const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, "rgb(5,6,10)"); g.addColorStop(0.48, "rgb(16,11,22)"); g.addColorStop(1, "rgb(34,15,38)");
+    g.addColorStop(0, "rgb(18,8,32)"); g.addColorStop(0.55, "rgb(32,14,48)"); g.addColorStop(1, "rgb(52,20,58)");
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    if (!G.reducedMotion) {                                  // slow drifting glow
-      ctx.globalAlpha = 0.08; ctx.fillStyle = "#ff2e97";
-      ctx.beginPath(); ctx.arc(W * (0.5 + 0.3 * Math.sin(t / 7000)), H * 0.2, 260, 0, Math.PI * 2); ctx.fill();
-      ctx.globalAlpha = 1;
-    }
+    const drift = G.reducedMotion ? 0 : t;
+    ctx.globalAlpha = 0.1; ctx.fillStyle = "#ff8ecb";        // her glow, drifting slowly
+    ctx.beginPath(); ctx.arc(W * (0.5 + 0.3 * Math.sin(drift / 7000)), H * 0.2, 280, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#70ebea"; ctx.globalAlpha = 0.06;
+    ctx.beginPath(); ctx.arc(W * (0.5 - 0.32 * Math.sin(drift / 9000)), H * 0.85, 320, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#fff8dc";
+    SPARKLES.forEach(function (s) { ctx.globalAlpha = 0.25 + 0.35 * (G.reducedMotion ? 0.5 : (Math.sin(t / 900 + s.phase) + 1) / 2); sparkle(s.x, s.y, s.r); });
+    ctx.globalAlpha = 1;
   }
 
-  function label(text, x, y, size, color, align) {
+  function looks() {                                          // whose Lumi is drawn where: mine, and each racer's from their seat
+    const out = { me: L ? L.own(G.api) : null };
+    if (table) table.seats.forEach(function (s) { if (s.role === "p1" || s.role === "p2") out[s.role] = s.look; });
+    return out;
+  }
+
+  function label(text, x, y, size, color, align) {         // text in the theme's font
     ctx.font = "700 " + (size || 18) + "px " + G.colors().font;
     ctx.textAlign = align || "left"; ctx.textBaseline = "alphabetic";
     ctx.fillStyle = color || "#ffe9f5"; ctx.fillText(text, x, y);
@@ -93,16 +112,19 @@
 
   function draw(t) {
     backdrop(t);
+    const who = looks();
     if (view === "solo" && game) {
-      mod.drawArena(ctx, game, ARENA.solo[0], ARENA.solo[1], t);
-      hud(ARENA.solo[0], ARENA.solo[1] - 18, mod.hud(game));
+      ctx.save(); ctx.translate(SOLO.x, SOLO.y); ctx.scale(SOLO.k, SOLO.k);   // the whole game, drawn bigger
+      mod.drawArena(ctx, game, 0, 0, t, who.me);
+      ctx.restore();
+      hud(SOLO.x, SOLO.y - 16, mod.hud(game));
       if (paused) center("PAUSED", "P or ⏯ to carry on");
-      else if (mod.waiting(game)) label(mod.waiting(game), W / 2, ARENA.solo[1] + 480 + 40, 22, "#00f0ff", "center");   // a hint under the arena
+      else if (mod.waiting(game)) label(mod.waiting(game), W / 2, SOLO.y + 480 * SOLO.k + 26, 20, "#70ebea", "center");   // a hint under the arena
     } else if (view === "race" && table) {
       const mine = table.role, other = mine === "p1" ? "p2" : "p1";
       const meAt = mine === "p1" ? ARENA.left : ARENA.right, themAt = mine === "p1" ? ARENA.right : ARENA.left;
       if (game && !myRunDone) {
-        mod.drawArena(ctx, game, meAt[0], meAt[1], t);
+        mod.drawArena(ctx, game, meAt[0], meAt[1], t, who.me);
         hud(meAt[0], meAt[1] - 18, "YOU · " + mod.hud(game));
       } else {
         drawRemote(mine, meAt);
@@ -117,14 +139,14 @@
       drawRemote("p2", ARENA.right);
       raceBar();
     } else {
-      mod.drawIdle(ctx, t, W, H);
+      mod.drawIdle(ctx, t, W, H, who.me);
     }
   }
 
   function drawRemote(role, at) {                            // a racer's board, from their live telemetry
     const racer = table.race && table.race.racers.find(function (r) { return r.role === role; });
     const board = racer ? boards[racer.seat] : null;
-    mod.drawBoard(ctx, board, at[0], at[1], t0());
+    mod.drawBoard(ctx, board, at[0], at[1], t0(), looks()[role]);
     hud(at[0], at[1] - 18, (racer ? racer.name : seatName(role) || "—") + (racer && racer.done ? " · finished" : "") +
         (board ? " · " + mod.boardHud(board) : ""));
   }
@@ -409,7 +431,7 @@
       window.addEventListener("resize", fit);
       canvas.addEventListener("pointermove", function (e) { pointer(e, false); });
       canvas.addEventListener("pointerdown", function (e) { pointer(e, true); });
-      canvas.addEventListener("pointerup", function (e) { if (game && mod.pointerUp) mod.pointerUp(game, local(e)); });
+      canvas.addEventListener("pointerup", function (e) { if (game && mod.pointerUp) { const at = arenaPoint(e); mod.pointerUp(game, { x: at[0], y: at[1] }); } });
       $("ar-solo").addEventListener("click", function () { G.sound.unlock(); solo(); });
       $("ar-showdown").addEventListener("click", function () { G.sound.unlock(); lobby(); });
       $("ar-sound").addEventListener("click", function () { $("ar-sound").textContent = "Sound: " + (G.sound.toggle() ? "on" : "off"); });
@@ -434,9 +456,15 @@
     const box = canvas.getBoundingClientRect();
     return { x: (e.clientX - box.left) / box.width * W, y: (e.clientY - box.top) / box.height * H };
   }
+  function arenaPoint(e) {                                   // a pointer's place in my arena's own units (the solo arena is drawn scaled)
+    const at = local(e);
+    if (view === "solo") return [(at.x - SOLO.x) / SOLO.k, (at.y - SOLO.y) / SOLO.k];
+    const origin = table && table.role === "p2" ? ARENA.right : ARENA.left;
+    return [at.x - origin[0], at.y - origin[1]];
+  }
   function pointer(e, down) {
     if (!game || !mod.pointer || !(view === "solo" || view === "race")) return;
-    const at = local(e), origin = view === "solo" ? ARENA.solo : table && table.role === "p2" ? ARENA.right : ARENA.left;
-    mod.pointer(game, at.x - origin[0], at.y - origin[1], down);
+    const at = arenaPoint(e);
+    mod.pointer(game, at[0], at[1], down);
   }
 })();

@@ -1,9 +1,11 @@
+{#- Lumi's Lounge: Dealer Lumi runs the table and every player's own Lumi sits in their seat (static/games/casino/lumi-table.js). -#}
 <section class="casino-heading">
-  <div><p class="gm-eyebrow">The velvet lounge · Multiplayer</p><h1 class="gm-title">{{ game.icon }} {{ game.name }}</h1></div>
+  <div><p class="gm-eyebrow">Lumi’s Lounge · Multiplayer</p><h1 class="gm-title">{{ game.icon }} {{ game.name }}</h1></div>
   <p>Your coins online · Free credits on a shared TV · Up to 8 players · No cash value</p>
 </section>
 <p id="casino-error" class="casino-error" role="alert" hidden></p>
 <section id="casino-lobby" class="gm-panel">
+  <div class="casino-greeter"><div class="casino-dealer-lumi" id="casino-lobby-dealer"></div><p class="casino-bubble" id="casino-lobby-bubble">Pull up a cushion! Pick a table, or start your own~</p></div>
   <div class="casino-section-head"><div><h2>Find your table</h2><p>Create a table, then have your friends choose its code here on their device.</p></div>
     <button type="button" id="casino-create" class="gm-primary">Create table</button></div>
   <p>Your coins: <b id="casino-coins">—</b></p>
@@ -19,7 +21,13 @@
     <button type="button" id="casino-leave">Leave table</button>
   </div>
   <div class="casino-layout">
-    <div class="casino-board gm-panel"><div id="casino-stage" class="casino-stage"></div><div id="casino-players" class="casino-players"></div></div>
+    <div class="casino-board gm-panel">
+      <div class="casino-house">{# Dealer Lumi and her speech bubble, then the game itself on the felt. #}
+        <div class="casino-dealer"><div class="casino-dealer-lumi" id="casino-dealer-lumi"></div><p class="casino-bubble" id="casino-bubble" aria-live="polite"></p></div>
+        <div id="casino-stage" class="casino-stage"></div>
+      </div>
+      <div id="casino-players" class="casino-players"></div>{# One cushion per seat, each with that player's own Lumi. #}
+    </div>
     <aside class="gm-panel casino-controls" id="casino-controls">
       <p class="gm-eyebrow">Your seat</p><h2 id="casino-balance"></h2>
       <div id="casino-betting">

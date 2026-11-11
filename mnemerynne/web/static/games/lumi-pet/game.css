@@ -269,3 +269,66 @@
 .gm[data-kit="lumi-pet"] .lp-couch-col ol { margin: .45rem 0 0; padding: 0; list-style: none; font-size: .78rem; }
 .gm[data-kit="lumi-pet"] .lp-couch-col li { padding: .25rem .35rem; border-radius: .35rem; }
 .gm[data-kit="lumi-pet"] .lp-couch-col li[aria-current="true"] { background: rgba(var(--glow, 255, 46, 151), .28); outline: 1px solid var(--rose, #ff2e97); }
+
+/* ---- Lumi with friends (2026-11-11): each friend's Lumi beside yours, the co-op fight, the party browser, her own colour. */
+/* Friends' Lumis stand to the right of yours, a little smaller, each with her name under her (game.js drawCrew). On the couch
+   nobody's Lumi is "yours": they all stand together in the middle, and the TV's own Lumi steps aside. */
+.lp-crew { position: absolute; z-index: 1; bottom: calc(50% - 196 * var(--u)); left: calc(50% + 70 * var(--u)); display: flex; gap: calc(6 * var(--u)); pointer-events: none; }
+.lp-crew[hidden] { display: none; }
+.lp-crew-lumi { margin: 0; width: calc(120 * var(--u)); text-align: center; }
+.lp-crew-lumi svg { display: block; width: 100%; overflow: visible; filter: drop-shadow(0 0 10px var(--pet-shadow)); animation: lp-breathe 4.4s ease-in-out infinite; transform-origin: 50% 90%; }
+.lp-crew-lumi:nth-child(2) svg { animation-delay: -1.4s; } .lp-crew-lumi:nth-child(3) svg { animation-delay: -2.8s; }
+.lp-crew-lumi figcaption { margin-top: .15rem; padding: .1rem .45rem; display: inline-block; border-radius: 1rem; background: #0e0b1acc; font-size: .66rem; letter-spacing: .04em; white-space: nowrap; }
+.lp-crew-lumi[data-ghost="true"] { opacity: .45; filter: grayscale(.7); }
+.lp-crew-lumi[data-turn="true"] figcaption { background: #70ebea; color: #0e0b1a; }
+.lp-room[data-couch-crew="true"] .lp-pet-wrap { opacity: 0; }
+.lp-room[data-couch-crew="true"] .lp-crew { left: 50%; transform: translateX(-50%); }
+.lp-room[data-couch-crew="true"] .lp-crew-lumi { width: calc(150 * var(--u)); }
+.lp-room[data-dungeon="true"] .lp-crew { z-index: 2; }
+/* The co-op fight: everyone's bars down the left, the creatures on the right; the solo fight's two bars and one enemy step aside. */
+.lp-fight-team .lp-fight-bars, .lp-fight-team .lp-foe { display: none; }
+.lp-team { position: absolute; inset: 0; }
+.lp-team[hidden] { display: none; }
+.lp-team-lumis { position: absolute; top: 8%; left: max(3%, calc(50% - 168 * var(--u))); width: min(46%, calc(150 * var(--u)));   /* inside the always-visible middle, like the solo fight's bars */ margin: 0; padding: 0; list-style: none; display: grid; gap: .35rem; font-size: .66rem; letter-spacing: .03em; }
+.lp-team-lumis li { padding: .3rem .45rem; border-radius: .5rem; background: #0e0b1acc; border: 1px solid transparent; }
+.lp-team-lumis li[data-turn="true"] { border-color: #70ebea; box-shadow: 0 0 12px #70ebea66; }
+.lp-team-lumis li[data-you="true"] span { color: #ffdc83; }
+.lp-team-lumis li[data-down="true"] { opacity: .45; }
+.lp-team-lumis span { display: block; margin-bottom: .2rem; }
+.lp-team-lumis .lp-bar { margin-bottom: .15rem; background: #0006; }
+.lp-team-lumis .lp-bar i { background: #7fe08f; transition: width .4s ease; }
+.lp-team-lumis .lp-bar-mp { height: .3rem; }
+.lp-team-lumis .lp-bar-mp i { background: var(--pet-glow); }
+.lp-team-foes { position: absolute; right: max(2%, calc(50% - 168 * var(--u))); bottom: calc(50% - 196 * var(--u)); display: flex; align-items: flex-end; gap: calc(4 * var(--u)); }
+.lp-team-foes figure { margin: 0; width: calc(62 * var(--u)); text-align: center; cursor: pointer; border-radius: 1rem; padding: .2rem; border: 2px solid transparent; transition: opacity .6s, filter .6s; }
+.lp-team-foes figure[data-aim="true"] { border-color: #ffdc83; box-shadow: 0 0 14px #ffdc8355; }
+.lp-team-foes figure[data-down="true"] { opacity: .25; filter: grayscale(1); }
+.lp-team-foes svg { display: block; width: 100%; overflow: visible; animation: lp-breathe 3s ease-in-out infinite; transform-origin: 50% 90%; }
+.lp-team-foes figcaption { font-size: .6rem; padding: .1rem .3rem; border-radius: .6rem; background: #0e0b1acc; }
+.lp-team-foes .lp-bar { margin-top: .2rem; background: #0006; }
+.lp-team-foes .lp-bar i { display: block; height: 100%; background: #ff7a8a; transition: width .4s ease; }
+/* A co-op fight: every Lumi in the party stands in one even row on the left, yours first, and the one to three creatures
+   take the right, a little smaller, so all of them fit between the panels together. */
+.lp-room[data-team="true"] .lp-pet-wrap { left: max(2%, calc(50% - 168 * var(--u))); width: calc(72 * var(--u)); transition: none; }   /* into the row at once, beside her friends */
+.lp-room[data-team="true"] .lp-crew { left: calc(max(2%, calc(50% - 168 * var(--u))) + 66 * var(--u)); bottom: calc(50% - 196 * var(--u)); gap: calc(-6 * var(--u)); }
+.lp-room[data-team="true"] .lp-crew-lumi { width: calc(72 * var(--u)); }
+.lp-room[data-team="true"] .lp-crew-lumi figcaption { font-size: .55rem; }
+.lp-room[data-team="true"] .lp-team-foes figure { width: calc(42 * var(--u)); }
+/* The party browser: the room is the browser; Lumi steps aside like she does for the gallery. */
+.lp-room[data-browse="true"] .lp-pet-wrap { opacity: 0; pointer-events: none; }
+.lp-room[data-browse="true"] .lp-room-top, .lp-room[data-browse="true"] .lp-caption { display: none; }
+.lp-dungeon .lp-pb-card { cursor: pointer; }
+/* Her own colour: three sliders under the words while Settings → Colour is open. */
+.lp-tint { display: grid; gap: .4rem; margin: 0 0 .7rem; }
+.lp-tint[hidden] { display: none; }
+.lp-tint label { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr) 2.2rem; gap: .5rem; align-items: center; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.lp-tint input { width: 100%; accent-color: var(--pet-glow, #ff8ecb); min-height: 1.6rem; }
+.lp-tint b { text-align: right; color: var(--cyan); font-variant-numeric: tabular-nums; }
+@media (max-width: 700px) {
+  .gm[data-kit="lumi-pet"] .lp-crew-lumi { width: calc(105 * var(--u)); }
+  .gm[data-kit="lumi-pet"] .lp-team-lumis { top: 2.4rem; width: 46%; font-size: .58rem; gap: .2rem; }
+  .gm[data-kit="lumi-pet"] .lp-team-lumis li { padding: .2rem .35rem; }
+  .gm[data-kit="lumi-pet"] .lp-team-foes figure { width: calc(62 * var(--u)); }
+  .gm[data-kit="lumi-pet"] .lp-tint { margin-bottom: .35rem; }
+  .gm[data-kit="lumi-pet"] .lp-tint input { min-height: 2.2rem; }   /* A thumb-sized slider. */
+}

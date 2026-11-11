@@ -87,16 +87,55 @@
     return tr;
   }
 
+  /* The shared (multitenant) app registration every tenant without its own app uses. Saved here it takes effect at
+     once, on the web app and the worker, with no restart; it wins over the server's settings file. The secret is
+     write-only: the server never sends it back, so the box is always empty. */
+  function sharedApp(data) {
+    const app = data.shared_app || { source: null, client_id: "" }, wrap = el("div");
+    wrap.id = "m365-shared-app";
+    wrap.appendChild(el("h3", "ax-h small", "Shared app registration"));
+    if (!data.configured) {
+      wrap.appendChild(el("p", "error", app.unreadable
+        ? "The secret saved here can't be read any more (the server's secret key changed). Enter the client ID and secret again."
+        : "The shared app registration isn't set. Enter its client ID and secret here. Only tenants with their own app can be linked until it is."));
+    } else {
+      const now = el("p", "small muted");
+      now.append(document.createTextNode(app.source === "access" ? "Set here: " : "Set in the server's settings file: "), el("code", null, app.client_id),
+        document.createTextNode(app.source === "access" ? ". The secret is saved and never shown." : ". Saving one here replaces it, with no restart."));
+      wrap.appendChild(now);
+    }
+    const form = el("form", "ax-new");
+    const id = input("text", "Application (client) ID", app.source === "access" ? app.client_id : "");
+    id.required = true; id.autocomplete = "off"; id.spellcheck = false; id.size = 38; // Wide enough to read a whole client ID.
+    const secret = input("password", "Client secret (its Value)");
+    secret.required = true; secret.autocomplete = "new-password";
+    const save = el("button", "small", app.source === "access" ? "Replace" : "Save");
+    save.type = "submit";
+    [id, secret].forEach(function (i) { i.setAttribute("aria-label", "Shared app: " + i.placeholder); });
+    form.append(id, secret, save);
+    if (app.source === "access" || app.unreadable) { // Something is saved here: it can be taken away again.
+      form.append(document.createTextNode(" "), button("Remove", "link danger small", function () {
+        if (!confirm("Remove the shared app registration saved here? The server's settings file is used instead, if it has one; otherwise only tenants with their own app keep working.")) return;
+        change("DELETE", "/api/admin/m365/shared-app");
+      }));
+    }
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      change("PUT", "/api/admin/m365/shared-app", { client_id: id.value.trim(), client_secret: secret.value });
+    });
+    wrap.appendChild(form);
+    wrap.appendChild(el("p", "small muted", "From Entra → App registrations → your multitenant app: the Application (client) ID on its Overview, and a " +
+      "secret's Value from Certificates & secrets. It takes effect at once. After changing it, press Check on each tenant."));
+    return wrap;
+  }
+
   function render(data) {
     const box = $("m365-settings");
     box.replaceChildren();
     box.appendChild(el("p", "muted", "People sign in to Mnemerynne as always, then link their Microsoft 365 accounts on " +
       "the Preferences page, one per tenant. Linked accounts let Erynne reach SharePoint, and for the agent group mail and " +
       "calendar, with Microsoft's own permissions. Nothing is ever sent, deleted or moved."));
-    if (!data.configured) {
-      box.appendChild(el("p", "error", "The shared app registration isn't set on the server (MNEMERYNNE_M365_CLIENT_ID and " +
-        "MNEMERYNNE_M365_CLIENT_SECRET). Only tenants with their own app can be linked until it is."));
-    }
+    box.appendChild(sharedApp(data)); // The shared app registration: set here, live.
     const redirect = el("p", "small muted");
     redirect.append(document.createTextNode("Redirect URI to register: "), el("code", null, data.redirect_uri));
     box.appendChild(redirect);

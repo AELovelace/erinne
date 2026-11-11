@@ -38,6 +38,12 @@ def media_games(user=Depends(media_user)):
     return {"games": games.listing()}
 
 
+@router.get("/api/media/games/lumi-look")
+def lumi_look(user=Depends(media_user), conn=Depends(get_db)):
+    """How this account's Lumi looks (glow and outfit), for the arcade games to draw her. Only reads her save."""
+    return arcade.lumi_look(conn, user["id"])
+
+
 @router.get("/api/media/games/coins")
 def coin_balance(user=Depends(media_user), conn=Depends(get_db)):
     """This account's coins (a paired TV shows its owner's). Also brings home stakes from any table that has expired."""
@@ -164,12 +170,15 @@ class PetAction(BaseModel):
     """What the person chose to do with Lumi. Only choices: which thing and how many. The server decides every result."""
     model_config = ConfigDict(extra="forbid")
     action: Literal["cuddle", "feed", "play", "nap", "wake", "buy", "decorate", "wear", "capsule", "glow", "import", "storyteller",
-                    "learn", "respec", "equip", "mod", "potions", "heal", "drink", "garden_reminders"]
+                    "learn", "respec", "equip", "mod", "potions", "heal", "drink", "garden_reminders",
+                    "unpack", "name", "colour", "stat", "stats_auto", "auto_stats", "stats_reset", "kit"]
     item: str | None = Field(default=None, max_length=40)
     count: int = Field(default=1, ge=1, le=lumipet.MAX_HELD, strict=True)
     moments: int = Field(default=0, ge=0, le=lumipet.MAX_MOMENTS, strict=True)   # only read by "import", once
     glow: str | None = Field(default=None, max_length=20)
     slot: int | None = Field(default=None, ge=0, le=9, strict=True)             # which mod slot, for "mod"
+    name: str | None = Field(default=None, max_length=40)                       # what to call her, for "name"
+    colour: str | None = Field(default=None, max_length=7)                      # "#rrggbb" or "" (her glow's own), for "colour"
 
 
 @router.get("/api/media/games/lumi-pet/state")
@@ -185,7 +194,7 @@ def pet_act(body: PetAction, user=Depends(pet_user), conn=Depends(get_db)):
     try:
         with transaction(conn):
             return lumipet.act(conn, user["id"], body.action, item=body.item, count=body.count, moments=body.moments,
-                               glow=body.glow, slot=body.slot)
+                               glow=body.glow, slot=body.slot, name=body.name, colour=body.colour)
     except lumipet.PetError as refused:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(refused)) from None
 
@@ -201,7 +210,7 @@ class FightTurn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     battle: int = Field(ge=1, strict=True)
     turn: int = Field(ge=0, strict=True)
-    action: Literal["move0", "move1", "move2", "move3", "defend", "potion", "run"]
+    action: Literal["move0", "move1", "move2", "move3", "defend", "potion", "ether", "x-attack", "x-defend", "x-speed", "run"]
 
 
 @router.post("/api/media/games/lumi-pet/battle")
@@ -294,7 +303,9 @@ class PartyCreate(BaseModel):
 
 
 PARTY_ACTIONS = Literal["join", "leave", "ready", "env", "start", "vote", "move", "back", "descend", "take", "look", "unlock",
-                        "potion", "sokoban", "lights", "rune", "cup", "flip", "pass", "abandon"]
+                        "potion", "sokoban", "lights", "rune", "cup", "flip", "pass", "abandon", "fight"]
+# What a co-op fight turn (action "fight") may be: a move, Defend, Run, or an item (lumiparty.FIGHT).
+FIGHT_TARGET = "move[0-3]|defend|run|potion|ether|x-attack|x-defend|x-speed"
 
 
 class PartyMove(BaseModel):
@@ -302,10 +313,13 @@ class PartyMove(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: PARTY_ACTIONS
     way: Literal["n", "e", "s", "w"] | None = None
-    target: str = Field(default="", max_length=20, pattern="^(|[nesw]|back|descend|home|m[0-9]{1,12})$")
+    target: str = Field(default="", max_length=20, pattern="^(|[nesw]|back|descend|home|m[0-9]{1,12}|" + FIGHT_TARGET + ")$")
     item: str = Field(default="", max_length=40)
     moves: str = Field(default="", max_length=600, pattern="^[udlr]*$")
     picks: list[int | str] = Field(default_factory=list, max_length=200)
+    foe: int | None = Field(default=None, ge=0, le=2, strict=True)              # a fight move: which creature it is aimed at
+    ally: int | None = Field(default=None, ge=0, le=2, strict=True)             # a fight item: which Lumi (by seat) it is for
+    turn: int | None = Field(default=None, ge=0, strict=True)                   # a fight turn: the one the page was showing
 
 
 class PartyPress(BaseModel):
@@ -315,11 +329,13 @@ class PartyPress(BaseModel):
     token: str = Field(min_length=1, max_length=2000)
     action: PARTY_ACTIONS | Literal["fight"]
     way: Literal["n", "e", "s", "w"] | None = None
-    target: str = Field(default="", max_length=20, pattern="^(|[nesw]|back|descend|home|m[0-9]{1,12}|move[0-3]|defend|potion|run)$")
+    target: str = Field(default="", max_length=20, pattern="^(|[nesw]|back|descend|home|m[0-9]{1,12}|" + FIGHT_TARGET + ")$")
     item: str = Field(default="", max_length=40)
     moves: str = Field(default="", max_length=600, pattern="^[udlr]*$")
     picks: list[int | str] = Field(default_factory=list, max_length=200)
     turn: int = Field(default=0, ge=0, strict=True)
+    foe: int | None = Field(default=None, ge=0, le=2, strict=True)
+    ally: int | None = Field(default=None, ge=0, le=2, strict=True)
 
 
 def _party_call(fn, *args, **kwargs):
@@ -374,7 +390,8 @@ def party_move(code: str, body: PartyMove, user=Depends(pet_user), conn=Depends(
     """One thing this member does at the party (or joining it)."""
     with transaction(conn):
         return _party_call(lumiparty.act, conn, code, user["id"], body.action, name=user["username"], way=body.way,
-                           target=body.target, item=body.item, moves=body.moves, picks=body.picks)
+                           target=body.target, item=body.item, moves=body.moves, picks=body.picks,
+                           foe=body.foe, ally=body.ally, turn=body.turn)
 
 
 @router.post("/api/media/games/lumi-pet/parties/{code}/tv/input")
@@ -391,6 +408,8 @@ def party_tv_input(code: str, body: PartyPress, request: Request, owner=Depends(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This remote can't play on this TV.")
     holder = users.get_user_by_id(conn, remote["user_id"])
     fields = {"way": body.way, "target": body.target, "item": body.item, "moves": body.moves, "picks": body.picks}
+    if body.action == "fight":
+        fields |= {"foe": body.foe, "ally": body.ally}      # a co-op fight turn: aimed at a creature, or an item for a friend
     with transaction(conn):
         return _party_call(lumiparty.couch, conn, code, display, user_id=holder["id"], name=holder["username"],
                            remote=remote["id"], press=proof["id"], action=body.action, turn=body.turn, **fields)
@@ -802,6 +821,7 @@ class Board(BaseModel):
     alive: bool = True
     points: list[Unit] = Field(default_factory=list, max_length=600)              # body, head first, x and y pairs
     food: list[Annotated[int, Field(ge=0, le=20)]] = Field(default_factory=list, max_length=3)   # column, row, kind
+    kinds: str = Field(default="", max_length=400, pattern="^[1-4]*$")            # Lumi Conga: each dancer's colour, head first
     height: float = Field(default=0, ge=0, le=1e9)                                # Teacup Tower: how far up the view is
     frame: int = Field(default=0, ge=0, le=100_000_000, strict=True)              # ...and its frame, for the sliding cups
 

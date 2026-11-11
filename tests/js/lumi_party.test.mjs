@@ -119,3 +119,70 @@ test("how the last trip went, for each member", () => {
   assert.equal(Pu.lastWords(last, 1), "Home together from floor 2 · you brought 40 coins, 1 potion, something for the house");
   assert.equal(Pu.lastWords(last, 2), "Home together from floor 2 · your satchel was left behind");
 });
+
+// ---- The co-op fight's rows (Doll's design, 2026-11-11), and the party browser's.
+const ITEMS = { ether: { name: "Mana potion", icon: "💧", about: "Half her MP back" }, "x-attack": { name: "X-Attack", icon: "⚔", about: "Attack up" } };
+function fighter(user, name, extra = {}) {
+  return { user, name, level: 3, element: "fire", hp: 30, hpMax: 40, mp: 6, mpMax: 20, status: {}, stages: {}, guarding: false, gone: false, pocket: {},
+    moves: [{ name: "Pounce", mp: 0, element: "none", magic: false, power: 50 }, { name: "Ember", mp: 8, element: "fire", magic: true, power: 60 }], ...extra };
+}
+function coop(at = 0, extra = {}) {
+  return { lumis: [fighter(1, "doll's Lumi", { pocket: { potion: 2, ether: 0, "x-attack": 1 } }), fighter(2, "Twinkle", { hp: 5 }), fighter(3, "mina's Lumi", { hp: 0 })],
+    foes: [{ name: "Dust Bunny A", level: 3, hp: 20, hpMax: 30 }, { name: "Dust Bunny B", level: 3, hp: 0, hpMax: 30 }, { name: "Puddle Slime", level: 4, hp: 25, hpMax: 25 }],
+    round: 2, at, turn: 11, log: [], outcome: null, ends: 1000 + 30000, you: 0, ...extra };
+}
+const ctx = (extra = {}) => ({ aim: null, ally: null, now: 1000, describe: () => "Power 50", items: ITEMS, ...extra });
+
+test("on your Lumi's turn: aim, your moves at the creature you aim at, Defend, items from your own pocket for anyone standing, and Run", () => {
+  const rows = Pu.teamRows(coop(), 0, ctx());
+  assert.deepEqual(rows.slice(0, 7).map(r => r.key), ["fight-aim", "move0", "move1", "defend", "potion", "x-attack", "run"]);
+  assert.ok(rows.slice(0, 7).filter(r => r.send).every(r => r.url === "party" && r.send.action === "fight" && r.send.turn === 11), "every move goes to the party, with the turn it was shown for");
+  assert.deepEqual(rows[1].send, { action: "fight", target: "move0", foe: 0, turn: 11 });
+  assert.match(rows[2].hint, /not enough MP/);
+  assert.equal(rows[0].name, "Aim at: Dust Bunny A");
+  assert.deepEqual([rows[0].next(1), rows[0].next(-1)], [2, 2], "aiming skips the creature that's down");
+  assert.deepEqual(Pu.teamRows(coop(), 0, ctx({ aim: 2 }))[1].send.foe, 2);
+  assert.deepEqual(Pu.teamRows(coop(), 0, ctx({ aim: 1 }))[1].send.foe, 0, "an aim at a creature now down moves on");
+  const potion = rows.find(r => r.key === "potion");
+  assert.deepEqual([potion.name, potion.send.ally, potion.cycle], ["Potion (2) for yourself", 0, "ally"]);
+  assert.deepEqual([potion.next(1), potion.next(2)], [1, 0], "a friend standing, then back to herself (mina has fainted)");
+  const forTwinkle = Pu.teamRows(coop(), 0, ctx({ ally: 1 })).find(r => r.key === "potion");
+  assert.deepEqual([forTwinkle.name, forTwinkle.send], ["Potion (2) for Twinkle", { action: "fight", target: "potion", ally: 1, turn: 11 }]);
+  assert.equal(rows.find(r => r.key === "ether"), undefined, "nothing she hasn't got");
+  assert.deepEqual(rows.slice(7).map(r => r.key), ["who-0", "who-1", "who-2", "foe-0", "foe-1", "foe-2"], "then everyone in the fight, to read");
+  assert.equal(Pu.teamRows(coop(0, { foes: [{ name: "Solo", level: 1, hp: 5, hpMax: 9 }] }), 0, ctx())[0].key, "move0", "one creature: nothing to aim between");
+});
+
+test("someone else's turn: who is choosing and how long they have; a ghost cheers; the couch gets the same rows per person", () => {
+  const waiting = Pu.teamRows(coop(1), 0, ctx());
+  assert.equal(waiting[0].key, "fight-wait");
+  assert.match(waiting[0].name, /Twinkle is choosing/);
+  assert.match(waiting[0].hint, /^0:30 left · round 2/);
+  assert.ok(!waiting.some(r => r.send), "nothing to send while it isn't your turn");
+  assert.equal(Pu.teamRows(coop(2), 2, ctx())[0].key, "fight-watch", "mina has fainted: a little ghost cheers from the back");
+  assert.equal(Pu.teamRows(coop(), null, ctx())[0].key, "fight-watch");
+  const view = trip({}, { party: { ...trip().run.party, fight: coop(1), fighting: true } });
+  assert.equal(Pu.couchMenu(view, view.members[1], { now: 1000, fight: ctx() })[0].key, "fight-aim", "on the couch: Twinkle's own turn, with her own aim");
+  assert.equal(Pu.couchMenu(view, view.members[0], { now: 1000, fight: ctx() })[0].key, "fight-wait");
+  assert.equal(Pu.status(view, 1000).name, "Round 2: Twinkle's turn");
+});
+
+test("the party browser: a join row for each open party, then start one, a code, back; its scene draws every Lumi and escapes names", () => {
+  const lumi = (name, pet) => ({ name, pet, glow: "rose", colour: null, outfit: {}, level: 2, ready: true });
+  const open = [{ code: "AAAA1111", mode: "online", phase: "lobby", mine: false, host: "jane", members: ["jane"], lumis: [lumi("jane", "Twinkle")], env: "Moonlit Shrine", max: 3 },
+    { code: "BBBB2222", mode: "online", phase: "lobby", mine: true, host: "doll", members: ["doll"], lumis: [lumi("doll", "Lumi")], env: "", max: 3 },
+    { code: "CCCC3333", mode: "couch", phase: "lobby", mine: false, host: "<i>x</i>", members: ["<i>x</i>"], lumis: [lumi("<i>x</i>", "Lumi")], env: "", screen: "Den", max: 3 }];
+  const went = [];
+  const rows = Pu.browserRows(open, { at: 0, back: () => went.push("back"), askCode: () => {} });
+  assert.deepEqual(rows.map(r => r.key), ["party-join-AAAA1111", "party-join-CCCC3333", "party-new", "party-code", "party-back"], "your own party isn't one to join");
+  assert.deepEqual(rows[0].send, { code: "AAAA1111" });
+  assert.match(rows[1].hint, /on Den/);
+  rows[4].local();
+  assert.deepEqual(went, ["back"]);
+  assert.equal(Pu.browserRows([], { at: 0, back() {} })[0].key, "party-none");
+  const scene = Pu.browserScene(open, { at: 1, lumi: look => "<g data-lumi=\"" + look.name.length + "\"/>" });
+  assert.equal((scene.match(/data-click="join:/g) || []).length, 2);
+  assert.equal((scene.match(/data-lumi=/g) || []).length, 2, "each Lumi drawn");
+  assert.ok(scene.includes("&lt;i&gt;x&lt;/i&gt;") && !scene.includes("<i>x"), "names are text, never markup");
+  assert.match(scene, /stroke="#70ebea"[^>]*\/>(?:(?!data-click).)*CCCC3333|join:CCCC3333[\s\S]*#70ebea/, "the picked card glows");
+});

@@ -93,9 +93,9 @@ Media → Games includes Lumi, a companion using the existing Media permissions 
 
 StickBob Runner (Media → Games → Mouse & keyboard) pays coins at the end of each run: 1 per 10 m plus 1 per kill, recorded in `coin_transactions` as type `reward`, game `stickbob-runner`, with a reference `stickbob-runner:<user>:<run>`. Unlike Prism Drop, the run happens in the browser, so the server can only check that a claim is possible: each run gets a ticket when it starts (table `runner_runs`, migration **0070**, at most one per person), and a distance faster than StickBob can run, or a ticket used twice, pays nothing. Someone could still script a believable claim. **Settings → Entertainment → Media → Games → StickBob Runner coins a day** caps what one person can earn from it per day, by the server's date. It is **0, no limit**, unless you set it. Changes are logged with the other Media settings.
 
-## Breakout, Snake and Teacup Tower
+## Yarn Pop, Lumi Conga and Teacup Tower
 
-Breakout and Snake (Media → Games → Arcade) are ported from Doll's GameMaker arcade. `python/export_roulette_arcade.py` copies their power-up icons, banner and sounds from the GameMaker project, and they share one shell (`static/games/arcade/`). They need no setup. Migration **0071** adds two tables:
+Yarn Pop and Lumi Conga (Media → Games → Arcade) are Breakout and Snake, ported from Doll's GameMaker arcade and dressed up with Lumi on 2026-11-11. Their slugs (`breakout`, `snake`), rules, runs and server checks are unchanged; only their names and looks are new. Each game draws the player's own Lumi from her save through `GET /api/media/games/lumi-look` (`arcade.lumi_look`: her glow and outfit, read only), and each showdown seat keeps its racer's look from when they sat down. Prism Drop and Teacup Tower draw her the same way. `python/export_roulette_arcade.py` copies their power-up icons, banner and sounds from the GameMaker project, and they share one shell (`static/games/arcade/`). They need no setup. Migration **0071** adds two tables:
 - `arcade_runs`: one ticket per run, with the seed the server handed out.
 - `arcade_rooms`: the showdown tables, one JSON document each, like `casino_rooms`.
 
@@ -105,8 +105,8 @@ Breakout and Snake (Media → Games → Arcade) are ported from Doll's GameMaker
 - Watchers' bets go to the house as `<game>_bet`. A bet on the winner comes back double as `<game>_win`, and refunds are `<game>_refund`.
 
 **Checking scores:** the server never takes a score from the page.
-- **Snake:** the page sends only the moves it turned on, and `arcade.py` plays the whole game again from the run's seed.
-- **Breakout:** the page sends its score and level. The server rebuilds every level from the seed and refuses a score that doesn't fit the levels played, or that came faster than 6 bricks a second.
+- **Lumi Conga (Snake):** the page sends only the moves it turned on, and `arcade.py` plays the whole game again from the run's seed.
+- **Yarn Pop (Breakout):** the page sends its score and level. The server rebuilds every level from the seed and refuses a score that doesn't fit the levels played, or that came faster than 6 bricks a second.
 - **Teacup Tower** is our own climber in the same shell, with Lumi from Lumi Pet as the climber. The page sends the highest floor reached, and the server refuses more than 6 floors a second; the fastest real climb is about 4.6. It has no files of its own beyond its scripts, because every sound is synthesized.
 - Racers' live boards go through memory only, never the database.
 

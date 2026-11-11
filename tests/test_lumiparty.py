@@ -270,49 +270,130 @@ def test_cards_take_six_flips_a_turn_and_cups_are_one_pick(conn, trio):
 
 
 # ------------------------------------------------------------------ fights
-def _fight_ends(conn, code, uid, status, coins_won=12, hp=10):
-    state = _state(conn, code)
-    member = P.member_of(state, uid)
-    fight = {"id": member["fight"], "party": code, "status": status, "player": {"hp": hp, "mp": 5},
-             "reward": {"coins": coins_won}, "enemy": {"name": "x"}}
-    with transaction(conn):
-        pet = lumipet.load(conn, uid, T0)
-        P.after_fight(conn, uid, pet, fight, T0, Dice(99))
-        lumipet._save(conn, uid, pet)
+# ------------------------------------------------------------------ the co-op fight
+KO = {"name": "Crush", "power": 250, "accuracy": 1000, "magic": False, "element": "none", "effect": None, "hits": 1, "mp": 0}
+TAP = {"name": "Tap", "power": 1, "accuracy": 1000, "magic": False, "element": "none", "effect": None, "hits": 1, "mp": 0}
 
 
 def _into_creature(conn, code, trio):
+    """Walk the party into the creature's room: one co-op fight for everyone, kept in the party, no fight rows."""
     _walk(conn, code, trio, "e")
     _walk(conn, code, trio, "s")
     _act(conn, code, trio[0], "move", way="e")
     seen = _act(conn, code, trio[1], "move", way="e")
     assert seen["run"]["at"] == "2,1" and seen["run"]["party"]["fighting"]
-    state = _state(conn, code)
-    assert all(m["fight"] for m in state["members"])        # everyone fights their own copy, in their own fight
-    assert all(lumibattle.current(conn, m["user"])["party"] == code for m in state["members"])
+    fight = seen["run"]["party"]["fight"]
+    assert [lumi["user"] for lumi in fight["lumis"]] == trio and 1 <= len(fight["foes"]) <= 3
+    assert (fight["round"], fight["at"], fight["turn"]) == (1, 0, 0) and fight["you"] == 1      # Jane looking: she is seat 1
+    assert not any(m["fight"] for m in _state(conn, code)["members"])
+    assert all(lumibattle.current(conn, uid) is None for uid in trio)
     return seen
 
 
-def test_everyone_fights_at_once_and_a_loser_follows_as_a_ghost(conn, trio):
+def _rig(conn, code, foes=1, foe_hp=500, move=TAP, **lumis):
+    """Make the fight predictable: `foes` creatures with this much health and this one move, and any Lumi's numbers
+    set by seat (lumis={"0": {"hp": 1}})."""
+    state = _state(conn, code)
+    fight = state["run"]["fight"]
+    first = fight["foes"][0]
+    fight["foes"] = [{**first, "name": first["name"] + (" " + "ABC"[i] if foes > 1 else ""), "hp": foe_hp, "hpMax": foe_hp,
+                      "moves": [dict(move)], "dodge": 0, "thorns": 0} for i in range(foes)]
+    for seat, numbers in lumis.items():
+        fight["lumis"][int(seat)].update(numbers)
+    _put(conn, state)
+
+
+def _turn(conn, code, uid, target, **kwargs):
+    turn = _state(conn, code)["run"]["fight"]["turn"]
+    return _act(conn, code, uid, "fight", rng=Dice(chance=0.0), target=target, turn=kwargs.pop("turn", turn), **kwargs)
+
+
+def test_a_party_fight_is_one_fight_taken_in_turns_round_robin(conn, trio):
     code = _party(conn, trio)
     _into_creature(conn, code, trio)
+    _rig(conn, code, foes=2)
+    with pytest.raises(P.PartyError, match="still fighting"):
+        _act(conn, code, trio[0], "move", way="e")
+    with pytest.raises(P.PartyError, match="doll's Lumi|It's"):        # Jane can't go before Doll: seat order
+        _turn(conn, code, trio[1], "move0")
+    with pytest.raises(P.PartyError, match="already happened"):        # a stale page's press changes nothing
+        _turn(conn, code, trio[0], "move0", turn=7)
+    seen = _turn(conn, code, trio[0], "move0", foe=1)                   # Doll aims at the second creature
+    fight = seen["run"]["party"]["fight"]
+    assert fight["foes"][1]["hp"] < 500 and fight["foes"][0]["hp"] == 500 and (fight["at"], fight["turn"]) == (1, 1)
+    hp = [lumi["hp"] for lumi in fight["lumis"]]
+    _turn(conn, code, trio[1], "defend")
+    seen = _turn(conn, code, trio[2], "move0")                          # the last Lumi: then both creatures strike
+    fight = seen["run"]["party"]["fight"]
+    assert fight["round"] == 2 and fight["at"] == 0 and sum(lumi["hp"] for lumi in fight["lumis"]) < sum(hp)
+    assert any("Tap" in line for line in fight["log"]) and fight["ends"] == T0 + P.TURN_SECONDS * S
+    with pytest.raises(P.PartyError, match="already down"):           # aiming at a creature that is down
+        state = _state(conn, code)
+        state["run"]["fight"]["foes"][0]["hp"] = 0
+        _put(conn, state)
+        _turn(conn, code, trio[0], "move0", foe=0)
+
+
+def test_a_win_gives_every_lumi_the_whole_exp_and_her_own_coins(conn, trio):
+    code = _party(conn, trio)
+    _into_creature(conn, code, trio)
+    _rig(conn, code, foes=2, foe_hp=1)
+    fight = _state(conn, code)["run"]["fight"]
+    whole = lumibattle.team_reward(fight)[0]
+    assert whole == sum(15 + foe["level"] * 3 + lumibattle.TIERS[foe["tier"]][3] for foe in fight["foes"])
+    exp = {uid: lumipet.load(conn, uid, T0)["exp"] for uid in trio}
+    _turn(conn, code, trio[0], "move0", foe=0)
+    seen = _turn(conn, code, trio[1], "move0", foe=1)                   # both down: the room is won
+    state = _state(conn, code)
+    assert state["run"]["fight"] is None and state["run"]["rooms"]["2,1"]["done"] and not seen["run"]["party"]["fighting"]
+    assert seen["run"]["party"]["last_fight"]["outcome"] == "victory" and seen["run"]["party"]["last_fight"]["exp"] == whole
+    for uid in trio:                                                    # every Lumi, even Mina who never got a turn, gets all of it
+        pet = lumipet.load(conn, uid, T0)
+        assert pet["exp"] + sum(lumibattle.level_threshold(lv) for lv in range(1, pet["level"])) == exp[uid] + whole
+        assert pet["used"].get("pounce", 0) == (1 if uid in trio[:2] else 0)      # what she used counts towards Auto
+    assert [m["satchel"]["coins"] for m in state["members"]] == [int(whole * 0.6)] * 3
+
+
+def test_a_friend_heals_another_with_her_own_potion_or_lifts_her_with_an_x_item(conn, trio):
+    code = _party(conn, trio)
+    with transaction(conn):
+        pet = lumipet.load(conn, trio[0], T0)
+        pet["potions"], pet["kit"] = 2, {"x-attack": 1, "ether": 1}
+        lumipet._save(conn, trio[0], pet)
+    _into_creature(conn, code, trio)
+    _rig(conn, code, **{"1": {"hp": 5, "mp": 0}})
+    with pytest.raises(P.PartyError, match="already at full health"):
+        _turn(conn, code, trio[0], "potion", ally=2)
+    seen = _turn(conn, code, trio[0], "potion", ally=1)                 # Doll's own potion, for Jane
+    fight = seen["run"]["party"]["fight"]
+    assert fight["lumis"][1]["hp"] > 5 and fight["at"] == 1 and "doll's Lumi gives jane's Lumi a potion" in " ".join(fight["log"])
+    assert lumipet.load(conn, trio[0], T0)["potions"] == 1 and lumipet.load(conn, trio[1], T0)["potions"] == 0
+    _turn(conn, code, trio[1], "defend")
+    _turn(conn, code, trio[2], "defend")
+    seen = _turn(conn, code, trio[0], "x-attack", ally=2)              # round two: Mina's attack goes up a stage
+    assert seen["run"]["party"]["fight"]["lumis"][2]["stages"] == {"attack": 1}
+    with pytest.raises(P.PartyError, match="No X-Attack left"):
+        _turn(conn, code, trio[1], "x-attack", ally=1)                 # Jane has none of her own
+    assert lumipet.load(conn, trio[0], T0)["kit"]["x-attack"] == 0
+
+
+def test_a_lumi_down_at_the_end_faints_into_a_ghost_but_still_gets_her_exp(conn, trio):
+    code = _party(conn, trio)
+    _into_creature(conn, code, trio)
+    _rig(conn, code, foe_hp=1, **{"1": {"hp": 0}})                      # Jane fell earlier in the fight
     state = _state(conn, code)
     for m in state["members"]:
         m["satchel"]["coins"] = 5
     _put(conn, state)
-    with pytest.raises(P.PartyError, match="still fighting"):
-        _act(conn, code, trio[0], "move", way="e")
-    _fight_ends(conn, code, trio[0], "victory")
-    _fight_ends(conn, code, trio[1], "defeat")
-    assert _state(conn, code)["run"]["fighting"]            # Mina is still fighting
-    _fight_ends(conn, code, trio[2], "ran")
+    level = lumipet.load(conn, trio[1], T0)
+    _turn(conn, code, trio[0], "move0")
     state = _state(conn, code)
     doll, jane, mina = state["members"]
-    assert not state["run"]["fighting"] and state["run"]["rooms"]["2,1"]["done"]
-    assert doll["satchel"]["coins"] == 17 and not doll["fainted"]
     assert jane["fainted"] and jane["satchel"]["coins"] == 0 and jane["hp"] == 0
-    assert mina["satchel"]["coins"] == 5
-    seen = _act(conn, code, trio[1], "move", way="e")        # a ghost still votes
+    assert not doll["fainted"] and doll["satchel"]["coins"] > 5 and mina["satchel"]["coins"] == doll["satchel"]["coins"]
+    after = lumipet.load(conn, trio[1], T0)
+    assert (after["level"], after["exp"]) != (level["level"], level["exp"]) and after["wound"] == 1.0   # EXP all the same; she comes home hurt
+    seen = _act(conn, code, trio[1], "move", way="e")                   # a ghost still votes
     assert seen["run"]["party"]["votes"] == {str(trio[1]): "e"}
     with pytest.raises(P.PartyError, match="ghost"):
         _act(conn, code, trio[1], "potion")
@@ -321,11 +402,36 @@ def test_everyone_fights_at_once_and_a_loser_follows_as_a_ghost(conn, trio):
 def test_if_everyone_faints_the_trip_is_over(conn, trio):
     code = _party(conn, trio)
     _into_creature(conn, code, trio)
+    _rig(conn, code, foes=3, move=KO, **{"0": {"hp": 1}, "1": {"hp": 1}, "2": {"hp": 1}})   # three creatures: one Lumi each
     for uid in trio:
-        _fight_ends(conn, code, uid, "defeat")
+        _turn(conn, code, uid, "defend")
     state = _state(conn, code)
     assert state["phase"] == "lobby" and state["last"]["how"] == "defeat" and state["run"] is None
     assert all(not m["ready"] for m in state["members"])
+
+
+def test_a_turn_left_too_long_is_braced_through_and_running_takes_everyone_back(conn, trio):
+    code = _party(conn, trio)
+    _into_creature(conn, code, trio)
+    _rig(conn, code)
+    with transaction(conn):
+        seen = P.look(conn, code, trio[1], T0 + P.TURN_SECONDS * S)
+    fight = seen["run"]["party"]["fight"]
+    assert fight["at"] == 1 and fight["log"][-1] == "Time's up! doll's Lumi braces."
+    _act(conn, code, trio[1], "fight", T0 + P.TURN_SECONDS * S, Dice(chance=0.0), target="run", turn=fight["turn"])
+    state = _state(conn, code)
+    assert state["run"]["fight"] is None and state["run"]["at"] == "1,1" and state["run"]["event"]["scenario"] == "fled"
+
+
+def test_leaving_mid_fight_takes_her_lumi_out_and_passes_her_turn_on(conn, trio):
+    code = _party(conn, trio)
+    _into_creature(conn, code, trio)
+    _rig(conn, code)
+    _act(conn, code, trio[0], "abandon")
+    fight = _state(conn, code)["run"]["fight"]
+    assert fight["lumis"][0]["gone"] and fight["at"] == 1               # Jane's turn now
+    seen = _turn(conn, code, trio[1], "defend")
+    assert seen["run"]["party"]["fight"]["at"] == 2
 
 
 # ------------------------------------------------------------------ finds and going home

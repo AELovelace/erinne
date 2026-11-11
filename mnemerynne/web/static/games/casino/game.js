@@ -1,7 +1,7 @@
 /* Shared table client: renders server snapshots and sends intentions, never outcomes or balances. */
 (function () {
   "use strict";
-  const $ = id => document.getElementById(id), game = $("gm").dataset.game, M = window.MGame;
+  const $ = id => document.getElementById(id), game = $("gm").dataset.game, M = window.MGame, T = window.LumiTable; // T: Lumi's Lounge art (lumi-table.js)
   const base = "/api/media/games/" + encodeURIComponent(game) + "/rooms";
   const horses = ["Moonbeam", "Velvet Thunder", "Starlight", "Cherry Comet", "Lucky Clover", "Blue Ribbon"];
   const symbols = { cherry: "🍒", lemon: "🍋", bell: "🔔", diamond: "💎", clover: "🍀", star: "⭐" };
@@ -14,7 +14,7 @@
   const choices = game === "roulette" ? [["red", "Red"], ["black", "Black"], ["odd", "Odd"], ["even", "Even"], ["low", "1–18"], ["high", "19–36"]].concat(Array.from({ length: 37 }, (_, n) => [String(n), String(n)])) :
     game === "horse-racing" ? horses.map((name, i) => [String(i), name]) : [["", ""]];
   let state = null, busy = false, refreshing = false, amount = 50, pick = 0, signature = "", offset = 0, handPick = "hit", wheel = null;
-  let resume = null, tvMode = false, inputQueue = Promise.resolve(), pendingInputs = 0;
+  let resume = null, tvMode = false, inputQueue = Promise.resolve(), pendingInputs = 0, dealerMood = ""; // dealerMood: the pose Dealer Lumi is drawn in now
   try {
     resume = sessionStorage.getItem("casino-room:" + game);
     tvMode = !!resume && sessionStorage.getItem("casino-view:" + game) === "tv";
@@ -90,7 +90,7 @@
     const row = node("div", undefined, "casino-cards"), ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"], suits = ["♠", "♥", "♦", "♣"];
     hand.forEach(c => {
       const suit = c === null ? -1 : Math.floor(c / 13);
-      row.append(node("span", c === null ? "?" : ranks[c % 13] + suits[suit], "casino-card" + (c === null ? " back" : suit === 1 || suit === 2 ? " red" : "")));
+      row.append(node("span", c === null ? "✦" : ranks[c % 13] + suits[suit], "casino-card" + (c === null ? " back" : suit === 1 || suit === 2 ? " red" : ""))); // the hole card shows Lumi's star
     });
     return row;
   }
@@ -124,6 +124,19 @@
     }
     return machine;
   }
+  function cushion(seat, i) { // One seat at the table: that player's own Lumi (or a plain one on credits), in the mood of the round, and their chips.
+    const look = { glow: T.glowOf(seat, i), outfit: seat.look ? seat.look.outfit : {} };
+    const chipsFor = state.phase === "results" ? seat.payout : stake(seat);            // what's on the felt: the bet, then what came back
+    const el = node("div", undefined, "casino-seat");
+    el.innerHTML = T.lumi(look, { mood: T.seatMood(state, seat, game) }) + '<span class="casino-seat-chips">' + T.chips(chipsFor) + "</span>"; // authored SVG only
+    return el;
+  }
+  function seatGlow(box, seat, i) { box.style.setProperty("--seat-glow", T.PALETTES[T.glowOf(seat, i)].glow); } // the cushion's trim matches her glow
+  function dealer() { // Dealer Lumi: redraw her only when her pose changes; her line changes with the round.
+    const mood = T.dealerMood(state);
+    if (mood !== dealerMood) { $("casino-dealer-lumi").innerHTML = T.dealer(mood); dealerMood = mood; }
+    $("casino-bubble").textContent = T.say(game, state, tvMode ? null : mine());     // text only
+  }
   function stage() { // Give each game a distinct board while all seats share the same server round.
     const el = $("casino-stage"), playing = state.phase === "playing", result = state.result;
     if (game === "roulette") {
@@ -137,9 +150,10 @@
       el.append(node("p", result ? "Dealer: " + result.dealer_total : playing ? "Hole card stays hidden until settlement" : "Place your bets for the next hand"));
     } else if (game === "horse-racing") {
       el.append(node("h2", result ? horses[result.order[0]] + " wins!" : playing ? "And they’re off!" : "Meet the field"));
-      const tracks = node("div", undefined, "casino-tracks");
+      const tracks = node("div", undefined, "casino-tracks" + (playing ? " racing" : "")); // racing: the ponies' legs gallop (game.css)
       horses.forEach((name, i) => {
-        const lane = node("div", undefined, "casino-lane"), track = node("div", undefined, "casino-track"), horse = node("span", "🏇", "casino-horse");
+        const lane = node("div", undefined, "casino-lane"), track = node("div", undefined, "casino-track"), horse = node("span", undefined, "casino-horse");
+        horse.innerHTML = T.pony(i); // a pastel pony in this lane's colours (authored art, no server text)
         horse.dataset.horse = i;
         horse.style.marginLeft = result ? (88 - result.order.indexOf(i) * 10) + "%" : "0%";
         lane.append(node("span", (i + 1) + ". " + name)); track.append(horse); lane.append(track); tracks.append(lane);
@@ -170,10 +184,11 @@
       data.phase === "results" ? (p.bet ? "Returned " + p.payout + " " + unit() + " · Net " + (p.payout - stake(p)) : "You watched this round. Join the next one!") :
       !p.bet ? "You’re watching this round. Betting reopens after the results." : p.stood ? "Your hand is finished. Waiting for the table." : "Bets are closed. Watch the table!";
     if (!old || old.revision !== data.revision || old.code !== data.code) {
-      stage();
+      stage(); dealer();
       const players = $("casino-players"); players.replaceChildren();
       data.players.forEach((seat, i) => {
         const box = node("article", undefined, "casino-player"); box.dataset.you = seat.id === data.you; box.dataset.seat = seat.id;
+        seatGlow(box, seat, i); box.append(cushion(seat, i)); // their Lumi sitting at the table, with their chips in front of her
         box.append(node("h3", seat.name + (seat.id === data.you ? " · You" : "") + (i === 0 ? " · Host" : "")));
         box.append(node("p", seat.chips.toLocaleString() + " " + unit() + " · Bet " + seat.bet + (game === "slots" ? "/line · Total " + stake(seat) : "")));
         if (seat.choice && choices.length > 1) box.append(node("p", (choices.find(c => c[0] === seat.choice) || ["", seat.choice])[1]));
@@ -229,7 +244,7 @@
   }
   function lobby() { // Leave the seat view, clear its resume pointer, and reload the shared lobby.
     if (wheel) { wheel.destroy(); wheel = null; } // Stop animation and visibility listeners when leaving a table.
-    state = null; resume = null; tvMode = false; signature = ""; remember(null);
+    state = null; resume = null; tvMode = false; signature = ""; dealerMood = ""; remember(null);
     $("casino-table").hidden = true; $("casino-lobby").hidden = false;
     $("casino-rooms").replaceChildren(); $("casino-empty").hidden = false; $("casino-empty").textContent = "Looking for tables…";
     M.report("Choose a table to play together");
@@ -360,5 +375,6 @@
   async function poll() { await refresh(); setTimeout(poll, state ? 1000 : 3000); } // Schedule after completion to avoid overlapping polls.
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
   setInterval(tick, 500);
+  $("casino-lobby-dealer").innerHTML = T.dealer("cheer"); // Dealer Lumi greets you in the lobby
   controls(); poll(); M.showCoins("casino-coins");
 })();

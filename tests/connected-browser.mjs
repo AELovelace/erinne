@@ -7,7 +7,8 @@ import { pathToFileURL } from "node:url";
 import net from "node:net";
 import { checkLumiApps, checkLumiPet, checkLumiPetCapsules, checkLumiPetDoors, checkLumiPetFrame, checkLumiPetGarden, checkLumiPetPhone, checkLumiPetSkills } from "./lumi-pet-browser.mjs";
 import { checkSharedTV } from "./casino-tv-browser.mjs";
-import { checkLumiPartyCouch, checkLumiPartyOnline, checkLumiPartyPuzzle } from "./lumi-party-browser.mjs";
+import { checkLumiPartyBrowser, checkLumiPartyCouch, checkLumiPartyFight, checkLumiPartyOnline, checkLumiPartyPuzzle } from "./lumi-party-browser.mjs";
+import { checkArcadeLumi } from "./arcade-lumi-browser.mjs";
 import { checkGameScaling } from "./game-scaling-browser.mjs";
 
 const modulePath = process.env.PUPPETEER_MODULE;
@@ -43,9 +44,13 @@ try {
     await page.evaluateOnNewDocument(() => { Object.defineProperty(document, "hidden", { get: () => false }); }); // Both test tabs act like visible TV screens.
   }
   await mkdir("runs/casino-browser", { recursive: true });
-  if (process.env.LUMI_PARTY_ONLY === "1") { // Focused iteration on Lumi Dungeons parties and Who's playing?
+  if (process.env.ARCADE_ONLY === "1") { // Focused iteration on Lumi in the arcade games.
+    await checkArcadeLumi(browser, alice, base);
+  } else if (process.env.LUMI_PARTY_ONLY === "1") { // Focused iteration on Lumi Dungeons parties and Who's playing?
     await checkLumiPartyOnline(alice, bob, base);
     await checkLumiPartyPuzzle(browser, alice, base);
+    await checkLumiPartyFight(browser, alice, base);
+    await checkLumiPartyBrowser(browser, alice, base);
     await checkLumiPartyCouch(browser, alice, bob, base);
   } else if (process.env.GAME_SCALING_ONLY === "1") {
     await checkGameScaling(alice, bob, base);
@@ -66,7 +71,10 @@ try {
   await checkLumiPetCapsules(bob, base);
   await checkLumiPartyOnline(alice, bob, base);
   await checkLumiPartyPuzzle(browser, alice, base);
+  await checkLumiPartyFight(browser, alice, base);
+  await checkLumiPartyBrowser(browser, alice, base);
   await checkLumiPartyCouch(browser, alice, bob, base);
+  await checkArcadeLumi(browser, alice, base);
   await alice.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]); // Skip the ball's animation: the server's drops are what's under test.
   await alice.goto(base + "/media/games/prism-drop");
   await alice.waitForFunction(() => /^[\d,]+$/.test(document.getElementById("pd-coins").textContent));

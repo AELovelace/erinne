@@ -8,6 +8,16 @@ that refuses a stale button. None of its characters, spell names or art come acr
 Added on top: physical moves use attack against defense while spells use magic against ward and cost MP; every enemy
 has its own elemental weaknesses and resistances; and enemies scale to Lumi (her level, give or take two).
 
+Stat points (Doll's design, 2026-11-11, Pokémon style): each level raises every stat by half of what it used to by
+itself, and gives STAT_KEYS-many points to place by hand (one per stat if spread evenly), each worth the other half of
+that stat's growth. So a Lumi with her points spread evenly has exactly the numbers she had before points existed.
+Auto places them from her skill trees and the moves she uses most (auto_weights). Fight items (KIT) are bought between
+fights: a mana potion, and X-Attack, X-Defend and X-Speed, which raise a stat by one stage for the rest of the fight.
+
+Two ways to fight: a solo fight (resolve: Lumi and the creature, the faster first), and a party's co-op fight
+(team_start, team_act: up to three Lumis against one to three creatures, in rounds: every Lumi in seat order, then
+every creature). lumiparty.py keeps a co-op fight in its party; this module only plays it.
+
 The server rolls everything. The page only says which button was pressed. `rng` is anything with random() and
 randrange(n): a secure one in play, a seeded one in tests.
 
@@ -57,6 +67,34 @@ BONUS_KEYS = ("attack", "defense", "magic", "ward", "speed", "hp", "mp", "crit",
 EFFECTS = (None, "pierce", "crit", "first", "poison", "burn", "stun", "ward", "drain")
 BODIES = ("blob", "spark", "bug", "wing", "sprout", "imp", "crab", "cat", "golem", "ghost", "bird", "hound", "jelly", "crystal", "drake")
 _ID = re.compile(r"^[a-z0-9-]{1,40}$")
+
+# Stat points. GROWTH is what each stat used to gain per level by itself (base_stats); now half of it is fixed and the
+# other half comes from points. A point in a stat is worth GROWTH / 2 of it.
+STAT_KEYS = ("hp", "attack", "defense", "magic", "ward", "speed", "mp")
+STAT_NAMES = {"hp": "Health", "attack": "Attack", "defense": "Defense", "magic": "Magic", "ward": "Ward", "speed": "Speed", "mp": "MP"}
+GROWTH = {"hp": 8, "attack": 2, "defense": 1.5, "magic": 2, "ward": 1.5, "speed": 1, "mp": 2}
+POINTS_PER_LEVEL = len(STAT_KEYS)       # one per stat, if spread evenly
+POINT_CAP = 3                           # at most this many points a level in any one stat (three times an even share)
+STAT_RESET_PRICE = 100                  # coins to take every placed point back (the first time after points arrived is free)
+# What each skill tree leans on, for Auto. Every stat also starts with a weight of 1, so none is ever left at nothing.
+TREE_STATS = {"fighter": {"attack": 3, "hp": 2, "defense": 1}, "thief": {"speed": 3, "attack": 2},
+              "monk": {"hp": 2, "defense": 2, "speed": 1, "attack": 1}, "mage": {"magic": 3, "mp": 2},
+              "cleric": {"ward": 2, "mp": 2, "hp": 1, "magic": 1}, "paladin": {"defense": 2, "ward": 2, "hp": 2}}
+# What using each kind of action leans on, for Auto: a punch, a spell, bracing, or a fight item.
+USE_STATS = {"physical": {"attack": 2, "speed": 1}, "magic": {"magic": 2, "mp": 1}, "defend": {"defense": 1.5, "ward": 1.5}, "item": {"hp": 1}}
+
+# Fight items, bought between fights (Lumi Dungeons → Battle) and used in a fight, on Lumi or, in a party, on a friend.
+# An X item raises its stats by one stage (STAGE each, up to MAX_STAGE stages) until the fight ends.
+KIT = {"ether": {"name": "Mana potion", "icon": "💧", "price": 25, "about": "Gives back half her MP"},
+       "x-attack": {"name": "X-Attack", "icon": "⚔", "price": 30, "about": "Attack and magic up a stage for the rest of the fight", "stage": "attack"},
+       "x-defend": {"name": "X-Defend", "icon": "⛨", "price": 30, "about": "Defense and ward up a stage for the rest of the fight", "stage": "defend"},
+       "x-speed": {"name": "X-Speed", "icon": "➶", "price": 30, "about": "Speed up a stage: she goes first more, and dodges more", "stage": "speed"}}
+KIT_CAP = 9                             # of each fight item she carries
+STAGE, MAX_STAGE = 0.5, 2               # each stage adds half again; two stages at most (double)
+STAGED = {"attack": "attack", "magic": "attack", "defense": "defend", "ward": "defend", "speed": "speed"}   # which stage lifts each stat
+SPEED_DODGE = 8                         # extra percent to dodge for each stage of speed
+# Co-op fights (lumiparty.py): up to three Lumis against one to three creatures.
+TEAM_FOES = 3
 
 
 class BattleError(ValueError):
@@ -153,7 +191,9 @@ _ENEMIES = {enemy["id"]: enemy for enemy in CATALOG["enemies"]}
 def fresh_fields() -> dict:
     """What a pet needs for battles; lumipet merges these under any save, so older pets gain them."""
     return {"level": 1, "exp": 0, "skills": [], "moves": list(_BASICS), "mods": [None] * len(MOD_SLOTS), "mods_owned": [],
-            "potions": 0, "faint_until": 0, "wins": 0, "losses": 0, "wound": 0.0}
+            "potions": 0, "faint_until": 0, "wins": 0, "losses": 0, "wound": 0.0,
+            "stat_points": dict.fromkeys(STAT_KEYS, 0), "auto_stats": False, "stat_reset_free": 0,   # placed points; Auto on level-up; a free reset waiting
+            "used": {}, "kit": {}}                        # how often each move (and defend, items) was used, for Auto; fight items held
 
 
 # --------------------------------------------------------------------------- her health between dungeon trips
@@ -211,11 +251,103 @@ def base_stats(level: int) -> dict[str, float]:
             "ward": 8 + 1.5 * level, "speed": 10 + level, "mp": 20 + 2 * level}
 
 
+def lumi_base(pet: dict) -> dict[str, float]:
+    """Her numbers before passives and mods: level 1's, half of each level's growth since by itself, and the
+    points she has placed (each worth the other half). Spread evenly this is exactly base_stats(level)."""
+    one, gained, placed = base_stats(1), pet["level"] - 1, pet.get("stat_points") or {}
+    return {key: one[key] + GROWTH[key] * gained / 2 + GROWTH[key] / 2 * min(int(placed.get(key, 0)), POINT_CAP * gained) for key in STAT_KEYS}
+
+
 def stats(pet: dict) -> dict:
-    """Lumi's fighting numbers right now: her level, lifted by passives and mods."""
-    extra, base = bonuses(pet), base_stats(pet["level"])
+    """Lumi's fighting numbers right now: her level and placed points, lifted by passives and mods."""
+    extra, base = bonuses(pet), lumi_base(pet)
     out = {key: floor(value * (1 + extra[key] / 100)) for key, value in base.items()}
     return {**out, "crit": extra["crit"], "dodge": extra["dodge"], "coins": extra["coins"]}
+
+
+# --------------------------------------------------------------------------- stat points
+def stat_points_earned(pet: dict) -> int:
+    return POINTS_PER_LEVEL * (pet["level"] - 1)
+
+
+def stat_points_left(pet: dict) -> int:
+    """Points waiting to be placed."""
+    return stat_points_earned(pet) - sum(pet["stat_points"].get(key, 0) for key in STAT_KEYS)
+
+
+def stat_cap(pet: dict) -> int:
+    """The most points any one stat may hold at her level."""
+    return POINT_CAP * (pet["level"] - 1)
+
+
+def _use_kind(action: str) -> str | None:
+    """What a remembered action leans on: "physical", "magic", "defend" or "item" (None: running doesn't count)."""
+    if action == "defend":
+        return "defend"
+    if action in KIT or action == "potion":
+        return "item"
+    move = _BASICS.get(action) or _NODES.get(action)
+    return None if move is None else "magic" if move.get("magic") else "physical"
+
+
+def remember(pet: dict, action: str) -> None:
+    """Count one use of a move (by its id), "defend" or an item, for Auto."""
+    if _use_kind(action):
+        pet["used"][action] = pet["used"].get(action, 0) + 1
+
+
+def auto_weights(pet: dict) -> dict[str, float]:
+    """How much Auto favours each stat: 1 each, plus her skill trees (each learned skill counts) and the actions she
+    uses most (their share of all she has used, so a long history and a short one weigh the same)."""
+    weight = dict.fromkeys(STAT_KEYS, 1.0)
+    for skill in pet["skills"]:
+        node = _NODES.get(skill)
+        for key, amount in (TREE_STATS.get(node["tree"], {}) if node else {}).items():
+            weight[key] += amount / 2
+    counted = {action: n for action, n in pet["used"].items() if _use_kind(action) and n > 0}
+    total = sum(counted.values())
+    for action, n in counted.items():
+        for key, amount in USE_STATS[_use_kind(action)].items():
+            weight[key] += amount * 3 * n / total
+    return weight
+
+
+def place_auto(pet: dict, count: int | None = None) -> dict[str, int]:
+    """Place `count` points (all that are waiting, by default) the way auto_weights leans, one at a time to whichever
+    stat is furthest below its fair share (the D'Hondt rule), never past the cap. Returns what was placed where."""
+    count = stat_points_left(pet) if count is None else min(count, stat_points_left(pet))
+    weight, cap, placed = auto_weights(pet), stat_cap(pet), dict.fromkeys(STAT_KEYS, 0)
+    for _ in range(max(0, count)):
+        room = [key for key in STAT_KEYS if pet["stat_points"].get(key, 0) < cap]
+        if not room:
+            break
+        best = max(room, key=lambda key: (weight[key] / (1 + pet["stat_points"].get(key, 0)), -STAT_KEYS.index(key)))
+        pet["stat_points"][best] = pet["stat_points"].get(best, 0) + 1
+        placed[best] += 1
+    return {key: n for key, n in placed.items() if n}
+
+
+def level_up(pet: dict, gained: int) -> int:
+    """Add EXP; levels follow (Touhou Trader's curve), and with Auto on their stat points place themselves.
+    Returns how many levels she went up."""
+    before = pet["level"]
+    pet["exp"] += gained
+    while pet["level"] < MAX_LEVEL and pet["exp"] >= level_threshold(pet["level"]):
+        pet["exp"] -= level_threshold(pet["level"])
+        pet["level"] += 1
+    if pet["level"] == MAX_LEVEL:
+        pet["exp"] = 0
+    if pet["level"] > before and pet.get("auto_stats"):
+        place_auto(pet)
+    return pet["level"] - before
+
+
+def settle_points(pet: dict) -> None:
+    """A save from before stat points: give her every point her level has earned, placed by Auto so she is as strong
+    as she was, and one free reset to place them herself. lumipet.load calls this once."""
+    pet["stat_points"] = dict.fromkeys(STAT_KEYS, 0)
+    place_auto(pet)
+    pet["stat_reset_free"] = 1
 
 
 def known_moves(pet: dict) -> list[dict]:
@@ -233,16 +365,16 @@ def _lumi(pet: dict, carry: dict | None = None) -> dict:
     `carry` says what she has left (in the dungeon, one fight's bruises go into the next)."""
     numbers, element = stats(pet), GLOW_ELEMENT.get(pet["glow"], "fire")
     known = {move["id"]: move for move in known_moves(pet)}
-    moves = [{k: v for k, v in known[m].items() if k not in ("tree", "index", "kind")} for m in pet["moves"] if m in known] or [dict(_BASICS["pounce"])]
+    moves = [{k: v for k, v in known[m].items() if k not in ("tree", "index", "kind", "needs", "at")} for m in pet["moves"] if m in known] or [dict(_BASICS["pounce"])]
     for move in moves:
         if move["element"] == "glow":                     # Glow Spark and Starfall take whatever colour she is
             move["element"] = element
     weak, resist = _defences(element)
     hp = max(1, min(numbers["hp"], carry["hp"])) if carry else numbers["hp"]
     mp = max(0, min(numbers["mp"], carry["mp"])) if carry else numbers["mp"]
-    return {"name": "Lumi", "side": "lumi", "level": pet["level"], "element": element, "hp": hp, "hpMax": numbers["hp"],
+    return {"name": pet.get("name") or "Lumi", "side": "lumi", "level": pet["level"], "element": element, "hp": hp, "hpMax": numbers["hp"],
             "mp": mp, "mpMax": numbers["mp"], "stats": numbers, "crit": numbers["crit"], "dodge": numbers["dodge"],
-            "moves": moves, "weak": weak, "resist": resist, "immune": [], "status": {}}
+            "moves": moves, "weak": weak, "resist": resist, "immune": [], "status": {}, "stages": {}}
 
 
 def _enemy(entry: dict, level: int, lumi_level: int, lumi_element: str) -> dict:
@@ -263,10 +395,15 @@ def _enemy(entry: dict, level: int, lumi_level: int, lumi_element: str) -> dict:
                "speed": floor(base["speed"] * shape["spd"])}
     return {"id": entry["id"], "name": entry["name"], "side": "enemy", "tier": entry["tier"], "body": entry["body"], "colour": entry["colour"],
             "level": level, "element": element, "hp": hp, "hpMax": hp, "stats": numbers, "crit": 0, "dodge": entry.get("dodge", 0),
-            "thorns": entry.get("thorns", 0), "moves": moves, "weak": weak, "resist": resist, "immune": list(entry["immune"]), "status": {}}
+            "thorns": entry.get("thorns", 0), "moves": moves, "weak": weak, "resist": resist, "immune": list(entry["immune"]), "status": {}, "stages": {}}
 
 
 # --------------------------------------------------------------------------- one turn
+def stat_of(fighter: dict, key: str) -> float:
+    """A fighter's stat with its X-item stages: each stage adds STAGE of it."""
+    return fighter["stats"][key] * (1 + STAGE * fighter.get("stages", {}).get(STAGED[key], 0))
+
+
 def _multiplier(attacker: dict, defender: dict, move: dict) -> float:
     element = move["element"]
     if element == "none":
@@ -295,23 +432,27 @@ def _strike(state: dict, attacker: dict, defender: dict, move: dict, rng, guardi
     if mult == 0:
         log.append(f"{attacker['name']} used {move['name']}. It has no effect on {defender['name']}!")
         return
-    boost = state.get("boost")
+    # A treat's boost: the solo fight keeps one for Lumi in the state; in a co-op fight each Lumi carries her own.
+    power_up = attacker["side"] == "lumi" and attacker.get("boost", state.get("boost")) == "power"
+    guard_up = defender["side"] == "lumi" and defender.get("boost", state.get("boost")) == "guard"
+    guarding = guarding or bool(defender.get("guarding"))  # a co-op Lumi who chose Defend this round
+    dodge = defender["dodge"] + SPEED_DODGE * defender.get("stages", {}).get("speed", 0)
     for _ in range(move.get("hits", 1)):
         if defender["hp"] <= 0:
             break
-        if rng.random() * 100 >= move["accuracy"] - (5 if guarding else 0) - defender["dodge"]:
+        if rng.random() * 100 >= move["accuracy"] - (5 if guarding else 0) - dodge:
             log.append(f"{attacker['name']}'s {move['name']} missed!")
             continue
-        power = attacker["stats"]["magic" if move["magic"] else "attack"]
-        guard = defender["stats"]["ward" if move["magic"] else "defense"] * (0.7 if move.get("effect") == "pierce" else 1)
+        power = stat_of(attacker, "magic" if move["magic"] else "attack")
+        guard = stat_of(defender, "ward" if move["magic"] else "defense") * (0.7 if move.get("effect") == "pierce" else 1)
         damage = floor((((2 * attacker["level"] / 5 + 2) * move["power"] * power / max(1, guard)) / 50 + 2) * PACE)
         damage = floor(damage * (0.85 + rng.random() * 0.15) * mult)
         crit = rng.random() * 100 < attacker["crit"] + (25 if move.get("effect") == "crit" else 0)
         if crit:
             damage = floor(damage * 1.5)
-        if boost == "power" and attacker["side"] == "lumi":
+        if power_up:
             damage = floor(damage * 1.1)                  # a treat's boost, eaten before the fight
-        if boost == "guard" and defender["side"] == "lumi":
+        if guard_up:
             damage = floor(damage * 0.9)
         if guarding:
             damage = floor(damage * 0.5)
@@ -363,25 +504,23 @@ def resolve(state: dict, action: str, rng) -> None:
     elif action == "run":
         if rng.random() < 0.75:
             state["outcome"] = "ran"
-            state["log"].append("Lumi darts away safely.")
+            state["log"].append(f"{lumi['name']} darts away safely.")
             state["log"] = state["log"][-8:]
             return
-        state["log"].append("Lumi couldn't get away!")
+        state["log"].append(f"{lumi['name']} couldn't get away!")
         enemy_acts()
-    elif action == "potion":
-        before = lumi["hp"]
-        lumi["hp"] = min(lumi["hpMax"], lumi["hp"] + max(1, lumi["hpMax"] // 2))
-        state["log"].append(f"The potion restores {lumi['hp'] - before} HP.")
+    elif action == "potion" or action in KIT:
+        use_item(state, lumi, lumi, action)
         enemy_acts()
     elif action == "defend":
         lumi["mp"] = min(lumi["mpMax"], lumi["mp"] + DEFEND_MP)
-        state["log"].append("Lumi braces and gathers her glow.")
+        state["log"].append(f"{lumi['name']} braces and gathers her glow.")
         enemy_acts(guarding=True)
     else:
         move = lumi["moves"][int(action.removeprefix("move"))]
         lumi["mp"] -= move.get("mp", 0)
-        first = move.get("effect") == "first" or lumi["stats"]["speed"] > enemy["stats"]["speed"] or \
-            (lumi["stats"]["speed"] == enemy["stats"]["speed"] and rng.random() < 0.5)
+        mine, theirs = stat_of(lumi, "speed"), stat_of(enemy, "speed")
+        first = move.get("effect") == "first" or mine > theirs or (mine == theirs and rng.random() < 0.5)
         if first:
             _strike(state, lumi, enemy, move, rng)
             enemy_acts()
@@ -404,6 +543,232 @@ def resolve(state: dict, action: str, rng) -> None:
     elif enemy["hp"] <= 0:
         state["outcome"] = "victory"
     state["log"] = state["log"][-8:]
+
+
+# --------------------------------------------------------------------------- fight items
+def item_refusal(target: dict, item: str, giver: str = "") -> str | None:
+    """Why this item would do nothing for this fighter (the words to show), or None if it helps."""
+    who = target["name"]
+    if target["hp"] <= 0:
+        return f"{who} has fainted. Only a rest at home helps now."
+    if item == "potion" and target["hp"] >= target["hpMax"]:
+        return f"{who} is already at full health."
+    if item == "ether" and target["mp"] >= target["mpMax"]:
+        return f"{who}'s MP is already full."
+    stage = KIT.get(item, {}).get("stage")
+    if stage and target.get("stages", {}).get(stage, 0) >= MAX_STAGE:
+        return f"{who}'s {KIT[item]['name'].removeprefix('X-').lower()} can't go any higher this fight."
+    return None
+
+
+def has_item(pet: dict, item: str) -> bool:
+    return pet["potions"] > 0 if item == "potion" else pet["kit"].get(item, 0) > 0
+
+
+def take_item(pet: dict, item: str) -> None:
+    """Use one up from her pocket. Refuses if there isn't one."""
+    if not has_item(pet, item):
+        raise BattleError("No potions left. Lumi Dungeons' Battle tab sells them between fights." if item == "potion"
+                          else f"No {KIT[item]['name']} left. Lumi Dungeons' Battle tab sells them.")
+    if item == "potion":
+        pet["potions"] -= 1
+    else:
+        pet["kit"][item] -= 1
+
+
+def use_item(state: dict, giver: dict, target: dict, item: str) -> None:
+    """An item's effect on a fighter (the caller has checked it helps and taken it from a pocket)."""
+    log, by = state["log"], "" if giver is target else f"{giver['name']} gives {target['name']} "
+    if item == "potion":
+        before = target["hp"]
+        target["hp"] = min(target["hpMax"], target["hp"] + max(1, target["hpMax"] // 2))
+        log.append((by + "a potion: " if by else "The potion restores ") + f"{target['hp'] - before} HP" + (" back." if by else "."))
+    elif item == "ether":
+        before = target["mp"]
+        target["mp"] = min(target["mpMax"], target["mp"] + max(1, target["mpMax"] // 2))
+        log.append((by + "a mana potion: " if by else "The mana potion restores ") + f"{target['mp'] - before} MP" + (" back." if by else "."))
+    else:
+        stage = KIT[item]["stage"]
+        target.setdefault("stages", {})[stage] = min(MAX_STAGE, target.get("stages", {}).get(stage, 0) + 1)
+        words = {"attack": "attack and magic", "defend": "defense and ward", "speed": "speed"}[stage]
+        log.append((by + f"an {KIT[item]['name']}: " if by else f"{KIT[item]['name']}! ") + f"{target['name']}'s {words} go up.")
+
+
+# --------------------------------------------------------------------------- a co-op fight (a party's: lumiparty.py)
+def team_fighter(pet: dict, user_id: int, carry: dict | None) -> dict:
+    """One Lumi for a co-op fight: her own numbers, moves, glow and waiting treat boost, and who she belongs to."""
+    lumi = _lumi(pet, carry)
+    return {**lumi, "user": user_id, "boost": pet.get("boost"), "guarding": False}
+
+
+def team_foe(entry_id: str, level: int, lumi_level: int, lumi_element: str) -> dict:
+    return _enemy(_ENEMIES[entry_id], level, lumi_level, lumi_element)
+
+
+def team_start(lumis: list[dict], foes: list[dict]) -> dict:
+    """A co-op fight: rounds in which every standing Lumi acts in seat order, then every standing creature.
+    `turn` counts every action, so a stale button (the page showing an older turn) is refused."""
+    names = [f["name"] for f in foes]
+    fight = {"lumis": lumis, "foes": foes, "round": 1, "side": "lumis", "acted": [], "at": 0, "turn": 0, "outcome": None,
+             "log": [("A wild " + names[0] + " appears!") if len(names) == 1 else "A pack appears: " + ", ".join(names) + "!"],
+             "reward": None, "used": {}}
+    fight["at"] = _team_next_lumi(fight)
+    return fight
+
+
+def _standing(fighters: list[dict]) -> list[int]:
+    return [i for i, f in enumerate(fighters) if f["hp"] > 0]
+
+
+def _team_next_lumi(fight: dict) -> int | None:
+    """The next standing Lumi this round who hasn't acted, in seat order; None once they all have."""
+    return next((i for i in _standing(fight["lumis"]) if i not in fight["acted"]), None)
+
+
+def _team_over(fight: dict) -> bool:
+    if not _standing(fight["foes"]):
+        fight["outcome"] = "victory"
+    elif not _standing(fight["lumis"]):
+        fight["outcome"] = "defeat"
+    return fight["outcome"] is not None
+
+
+def team_refusal(fight: dict, seat: int, action: str, *, target: int | None = None) -> str | None:
+    """Why this Lumi (by seat) can't do this now, or None. Items are checked by the caller, who knows the pockets."""
+    if fight["outcome"]:
+        return "That fight is over."
+    if fight["at"] != seat:
+        who = fight["lumis"][fight["at"]]["name"] if fight["at"] is not None else "the creatures"
+        return f"It's {who}'s turn."
+    lumi = fight["lumis"][seat]
+    if action.startswith("move"):
+        index = action.removeprefix("move")
+        if not index.isdigit() or int(index) >= len(lumi["moves"]):
+            return f"{lumi['name']} doesn't have that move ready."
+        if lumi["moves"][int(index)].get("mp", 0) > lumi["mp"]:
+            return "Not enough MP for that. Defend to gather some, or a friend can give a mana potion."
+        if target is not None and not (0 <= target < len(fight["foes"]) and fight["foes"][target]["hp"] > 0):
+            return "That creature is already down. Choose another."
+    elif action not in ("defend", "run") and action != "potion" and action not in KIT:
+        return f"{lumi['name']} doesn't know that one."
+    return None
+
+
+def team_act(fight: dict, seat: int, action: str, rng, *, target: int | None = None) -> None:
+    """One Lumi's action (team_refusal has said yes; an item has been taken from its giver's pocket, and `target` is
+    then the seat of the Lumi it is for). Then, if every standing Lumi has acted, the creatures act and a new round
+    begins. Sets fight["outcome"] ("victory", "defeat" or "ran") when it is over."""
+    lumi, log = fight["lumis"][seat], fight["log"]
+    lumi["guarding"] = False                              # a Defend lasts until her next turn
+    if action.startswith("move"):
+        move = lumi["moves"][int(action.removeprefix("move"))]
+        lumi["mp"] -= move.get("mp", 0)
+        foes = _standing(fight["foes"])
+        aim = target if target in foes else foes[0]
+        _strike(fight, lumi, fight["foes"][aim], move, rng)   # (a move that helps its user, _strike gives to her)
+        fight["used"].setdefault(str(lumi["user"]), []).append(move.get("id", ""))
+    elif action == "defend":
+        lumi["mp"] = min(lumi["mpMax"], lumi["mp"] + DEFEND_MP)
+        lumi["guarding"] = True
+        log.append(f"{lumi['name']} braces and gathers her glow.")
+        fight["used"].setdefault(str(lumi["user"]), []).append("defend")
+    elif action == "run":
+        if rng.random() < 0.75:
+            fight["outcome"] = "ran"
+            log.append(f"{lumi['name']} calls everyone back, and the party slips away!")
+            fight["log"] = log[-12:]
+            fight["turn"] += 1
+            return
+        log.append(f"{lumi['name']} tries to lead everyone away, but the way is blocked!")
+    else:                                                 # an item, on herself or a friend
+        use_item(fight, lumi, fight["lumis"][seat if target is None else target], action)
+        fight["used"].setdefault(str(lumi["user"]), []).append(action)
+    fight["acted"].append(seat)
+    fight["turn"] += 1
+    if not _team_over(fight):
+        _team_advance(fight, rng)
+    fight["log"] = fight["log"][-12:]
+
+
+def team_skip(fight: dict, rng, why: str) -> None:
+    """The Lumi whose turn it is doesn't act (her player stepped away): she braces, so the round goes on."""
+    seat = fight["at"]
+    if seat is None or fight["outcome"]:
+        return
+    lumi = fight["lumis"][seat]
+    lumi["guarding"] = True
+    fight["log"].append(f"{why} {lumi['name']} braces.")
+    fight["acted"].append(seat)
+    fight["turn"] += 1
+    _team_advance(fight, rng)
+    fight["log"] = fight["log"][-12:]
+
+
+def team_drop(fight: dict, seat: int, rng) -> None:
+    """This Lumi's player has gone home mid-fight: she leaves with them. Her turn, if it was hers, passes on."""
+    lumi = fight["lumis"][seat]
+    lumi.update(gone=True, hp=0)
+    fight["log"].append(f"{lumi['name']} heads home.")
+    if fight["outcome"] or _team_over(fight):
+        return
+    if fight["at"] == seat:
+        fight["acted"].append(seat)
+        fight["turn"] += 1
+        _team_advance(fight, rng)
+
+
+def _team_advance(fight: dict, rng) -> None:
+    """Move on to the next Lumi; once every standing Lumi has acted, every standing creature strikes a standing Lumi,
+    poison and burn bite, and the next round begins."""
+    fight["at"] = _team_next_lumi(fight)
+    if fight["at"] is not None:
+        return
+    for foe in [fight["foes"][i] for i in _standing(fight["foes"])]:
+        targets = _standing(fight["lumis"])
+        if not targets or _stunned(fight, foe):
+            continue
+        move = foe["moves"][rng.randrange(len(foe["moves"]))]
+        _strike(fight, foe, fight["lumis"][targets[rng.randrange(len(targets))]], move, rng)
+    everyone = fight["lumis"] + fight["foes"]
+    for who in everyone:                                  # the end of the round: poison and burn bite, wards fade
+        for hurt_by in ("poison", "burn"):
+            if who["status"].get(hurt_by) and who["hp"] > 0:
+                loss = max(1, who["hpMax"] * STATUS_HURT // 100)
+                who["hp"] = max(0, who["hp"] - loss)
+                fight["log"].append(f"{who['name']} takes {loss} from the {hurt_by}.")
+                who["status"][hurt_by] -= 1
+        if who["status"].get("ward"):
+            who["status"]["ward"] -= 1
+        who["status"] = {key: left for key, left in who["status"].items() if left > 0}
+    if _team_over(fight):
+        return
+    fight["round"] += 1
+    fight["acted"] = []
+    fight["at"] = _team_next_lumi(fight)
+    while fight["at"] is not None and _stunned(fight, fight["lumis"][fight["at"]]):
+        fight["acted"].append(fight["at"])                # stunned: this round's turn is lost
+        fight["at"] = _team_next_lumi(fight)
+    if fight["at"] is None:                               # everyone standing was stunned: the creatures go again
+        _team_advance(fight, rng)
+
+
+def team_reward(fight: dict) -> tuple[int, int]:
+    """(EXP, coins) each Lumi in a won co-op fight gets: the whole of every creature's worth, for every one of them."""
+    gained = sum(15 + foe["level"] * 3 + TIERS[foe["tier"]][3] for foe in fight["foes"])
+    return gained, floor(gained * 0.6)
+
+
+def team_finish(pet: dict, fight: dict, seat: int) -> dict:
+    """A won co-op fight, for one member's pet: her own share (the whole of it, as Doll decided), her treat's luck,
+    her coin bonus, her levels. Returns what she got. The caller saves the pet."""
+    gained, prize = team_reward(fight)
+    lumi = fight["lumis"][seat]
+    if lumi.get("boost") == "luck":
+        gained, prize = floor(gained * 1.25), floor(prize * 1.25)
+    prize = floor(prize * (1 + lumi["stats"]["coins"] / 100))
+    levels = level_up(pet, gained)
+    pet["wins"] += 1
+    return {"exp": gained, "coins": prize, "level": pet["level"], "levels": levels}
 
 
 # --------------------------------------------------------------------------- fights, saved
@@ -462,21 +827,21 @@ def act(conn: sqlite3.Connection, user_id: int, pet: dict, battle_id: int, turn:
             raise BattleError("Lumi doesn't have that move ready.")
         if lumi["moves"][int(index)].get("mp", 0) > lumi["mp"]:
             raise BattleError("Not enough MP for that. Defend to gather some.")
-    elif action == "potion":
-        if lumi["hp"] >= lumi["hpMax"]:
-            raise BattleError("Lumi is already at full health.")
-        if pet["potions"] < 1:
-            raise BattleError("No potions left. Lumi Dungeons' Battle tab sells them between fights.")
-        pet["potions"] -= 1
+    elif action == "potion" or action in KIT:
+        why = item_refusal(lumi, action)
+        if why:
+            raise BattleError(why)
+        take_item(pet, action)
     elif action not in ("defend", "run"):
         raise BattleError("Lumi doesn't know that one.")
+    remember(pet, lumi["moves"][int(action.removeprefix("move"))].get("id", "") if action.startswith("move") else action)
     resolve(state, action, rng)
     if state["outcome"] == "victory":
         _reward(conn, user_id, pet, state, battle_id)
     elif state["outcome"] == "defeat":
         pet["losses"] += 1
         pet["faint_until"] = now + FAINT_MS
-        state["log"].append(f"Lumi curls up, worn out. She'll nap for ten minutes, or wake now for {HEAL_PRICE} coins.")
+        state["log"].append(f"{lumi['name']} curls up, worn out. She'll nap for ten minutes, or wake now for {HEAL_PRICE} coins.")
     conn.execute("UPDATE lumi_battles SET state = ?, status = ?, turn = turn + 1 WHERE id = ?",
                  (json.dumps(state, separators=(",", ":")), state["outcome"] or "active", battle_id))
     conn.execute("DELETE FROM lumi_battles WHERE user_id = ? AND status != 'active' AND id != ?", (user_id, battle_id))   # keep only the latest finished fight
@@ -494,17 +859,12 @@ def _reward(conn: sqlite3.Connection, user_id: int, pet: dict, state: dict, batt
         gained, prize = floor(gained * 1.25), floor(prize * 1.25)
     prize = floor(prize * (1 + state["player"]["stats"]["coins"] / 100))
     before = pet["level"]
-    pet["exp"] += gained
-    while pet["level"] < MAX_LEVEL and pet["exp"] >= level_threshold(pet["level"]):
-        pet["exp"] -= level_threshold(pet["level"])
-        pet["level"] += 1
-    if pet["level"] == MAX_LEVEL:
-        pet["exp"] = 0
+    level_up(pet, gained)
     pet["wins"] += 1
     # In the dungeon the coins go into her satchel (lumidungeon.after_fight), hers only if she gets home with it.
     paid = prize if state.get("dungeon") else coins.prize(conn, user_id, prize, GAME, f"lumi-battle:{battle_id}")
     state["reward"] = {"exp": gained, "coins": paid, "level": pet["level"], "levels": pet["level"] - before}
-    state["log"].append(f"Victory! +{gained} EXP, +{paid} coins." + (f" Lumi is now level {pet['level']}!" if pet["level"] > before else ""))
+    state["log"].append(f"Victory! +{gained} EXP, +{paid} coins." + (f" {state['player'].get('name', 'Lumi')} is now level {pet['level']}!" if pet["level"] > before else ""))
 
 
 # --------------------------------------------------------------------------- between fights
@@ -580,6 +940,43 @@ def progress(conn: sqlite3.Connection, user_id: int, pet: dict, action: str, ite
             raise BattleError("Not enough coins for that. She'll wake by herself soon.")
         pet["faint_until"], pet["wound"] = 0, 0.0         # woken and whole again
         return {"bought": "heal", "count": 1, "paid": HEAL_PRICE}
+    elif action == "stat":                                # place points in one stat by hand
+        if item not in STAT_KEYS:
+            raise BattleError("Choose one of her stats.")
+        left, held = stat_points_left(pet), pet["stat_points"].get(item, 0)
+        if left < 1:
+            raise BattleError("No stat points waiting. Each level brings " + str(POINTS_PER_LEVEL) + " more.")
+        if held >= stat_cap(pet):
+            raise BattleError(f"{STAT_NAMES[item]} holds as many points as her level allows ({stat_cap(pet)}).")
+        pet["stat_points"][item] = held + max(1, min(count, left, stat_cap(pet) - held))
+    elif action == "stats_auto":                          # place everything waiting the way Auto would
+        if stat_points_left(pet) < 1:
+            raise BattleError("No stat points waiting.")
+        return {"placed": place_auto(pet)}
+    elif action == "auto_stats":                          # Auto on or off for the levels to come
+        pet["auto_stats"] = not pet.get("auto_stats")
+        if pet["auto_stats"] and stat_points_left(pet) > 0:
+            return {"placed": place_auto(pet)}
+    elif action == "stats_reset":                         # take every placed point back, to place again
+        if not any(pet["stat_points"].values()):
+            raise BattleError("No points are placed yet.")
+        if pet.get("stat_reset_free"):
+            pet["stat_reset_free"] = 0
+            pet["stat_points"] = dict.fromkeys(STAT_KEYS, 0)
+            return {"bought": "stats_reset", "count": 1, "paid": 0}
+        if not coins.spend(conn, user_id, STAT_RESET_PRICE, GAME, "stats_reset"):
+            raise BattleError("Not enough coins for that.")
+        pet["stat_points"] = dict.fromkeys(STAT_KEYS, 0)
+        return {"bought": "stats_reset", "count": 1, "paid": STAT_RESET_PRICE}
+    elif action == "kit":                                 # fight items: a mana potion, X-Attack, X-Defend, X-Speed
+        if item not in KIT:
+            raise BattleError("That isn't a fight item.")
+        if not 1 <= count <= KIT_CAP or pet["kit"].get(item, 0) + count > KIT_CAP:
+            raise BattleError(f"Lumi carries up to {KIT_CAP} of each.")
+        if not coins.spend(conn, user_id, KIT[item]["price"] * count, GAME, item):
+            raise BattleError("Not enough coins for that.")
+        pet["kit"][item] = pet["kit"].get(item, 0) + count
+        return {"bought": item, "count": count, "paid": KIT[item]["price"] * count}
     elif action == "drink":                               # a potion at home, between trips (lumipet.act refuses it on one)
         if pet["wound"] <= 0:
             raise BattleError("Lumi is already at full health.")
@@ -594,10 +991,17 @@ def progress(conn: sqlite3.Connection, user_id: int, pet: dict, action: str, ite
 
 def summary(pet: dict) -> dict:
     """What the page needs about her progress, worked out here so the page never does the sums."""
+    weights = auto_weights(pet)
     return {"points": points(pet), "stats": stats(pet), "next": level_threshold(pet["level"]) if pet["level"] < MAX_LEVEL else 0,
+            "stat_points": {"left": stat_points_left(pet), "placed": {key: pet["stat_points"].get(key, 0) for key in STAT_KEYS},
+                            "cap": stat_cap(pet), "auto": bool(pet.get("auto_stats")), "free_reset": bool(pet.get("stat_reset_free")),
+                            "per_point": {key: GROWTH[key] / 2 for key in STAT_KEYS},
+                            "leans": sorted(STAT_KEYS, key=lambda key: -weights[key])[:3]},   # what Auto favours most, to say so
+            "kit": {key: pet["kit"].get(key, 0) for key in KIT},
             "element": GLOW_ELEMENT.get(pet["glow"], "fire"),
             "slots": [{"tek": tek, "opens": opens, "open": pet["level"] >= opens, "mod": pet["mods"][i]} for i, (tek, opens) in enumerate(MOD_SLOTS)]}
 
 
 RULES = {"mend_ms": MEND_MS, "nap_mend": NAP_MEND, "costs": NODE_COSTS, "respec": RESPEC_PRICE, "potion": POTION_PRICE, "potion_cap": POTION_CAP, "heal": HEAL_PRICE,
+         "kit": KIT, "kit_cap": KIT_CAP, "stat_keys": STAT_KEYS, "stat_names": STAT_NAMES, "stat_reset": STAT_RESET_PRICE, "points_per_level": POINTS_PER_LEVEL,
          "moves": MOVE_SLOTS, "max_level": MAX_LEVEL, "tiers": list(TIERS), "glows": GLOW_ELEMENT}

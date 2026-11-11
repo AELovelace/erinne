@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from mnemerynne import coins, lumipet, users
+from mnemerynne import coins, lumibattle, lumipet, users
 from mnemerynne.db import transaction
 from test_media import (_login, _no_network, _pair, _screens_for, _turn_on, checker, client, conn,  # noqa: F401
                         directory, root, settings)
@@ -240,24 +240,116 @@ def test_the_shipped_catalog_is_valid_and_bad_ones_are_refused(tmp_path):
 
 
 # --------------------------------------------------------------------------- the house
-def test_a_new_house_has_each_spots_free_first_object(conn, alice):
+def test_a_new_house_is_bare_she_has_just_moved_in(conn, alice):
     house = _state(conn, alice, T0)
-    assert house["pet"]["house"] == {spot["id"]: spot["items"][0]["id"] for spot in lumipet.HOUSE["spots"]}
+    assert house["pet"]["house"] == {"curtains": "curtain-none", "view": "view-city", "trophy": "trophy-none"}   # nothing, the outside, an empty bracket
+    assert house["pet"]["decor"] == [] and house["boxes"] == {"left": 14, "total": 14, "next": "Mattress on the floor", "ready": True}
     spots = house["house"]["spots"]
-    assert len(spots) == 16 and all(sum("rarity" not in item and "found" not in item for item in spot["items"]) == 5 for spot in spots[:15])   # 75 pieces to buy or start with
-    assert spots[15]["id"] == "trophy" and len(spots[15]["items"]) == 25 and house["pet"]["house"]["trophy"] == "trophy-none"
+    sold = lambda spot: [item for item in spot["items"] if "rarity" not in item and "found" not in item and not item.get("worn")]   # noqa: E731
+    assert len(spots) == 16 and all(len(sold(spot)) == 5 for spot in spots[:15])                  # 75 pieces to buy, as before
+    assert sum(item.get("worn", False) for spot in spots for item in spot["items"]) == 14            # one worn piece in each box
+    assert spots[15]["id"] == "trophy" and len(spots[15]["items"]) == 25
+    tier_one = {spot["id"]: next(i for i in spot["items"] if not i.get("worn")) for spot in spots if spot["items"][0].get("worn")}
+    assert len(tier_one) == 13 and all(item["price"] >= 40 for item in tier_one.values())          # the old free starters are bought now
+
+
+def test_one_moving_box_a_day_unpacks_her_own_worn_things(conn, alice):
+    first = _act(conn, alice, "unpack", T0)
+    assert first["said"] == {"unpacked": "bed-worn", "name": "Mattress on the floor", "put_out": True, "left": 13}
+    assert first["pet"]["house"]["bed"] == "bed-worn" and first["pet"]["decor"] == ["bed-worn"] and first["boxes"]["ready"] is False
+    with pytest.raises(lumipet.PetError, match="Another box tomorrow"):
+        _act(conn, alice, "unpack", T0)
+    with pytest.raises(lumipet.PetError, match="still packed in a moving box"):
+        _act(conn, alice, "decorate", T0, item="lamp-worn")                       # can't be bought, only unpacked
+    _act(conn, alice, "decorate", T0, item="lamp-floor")                          # she buys a lamp before its box comes
+    conn.execute("UPDATE lumi_pets SET data = json_set(data, '$.box_day', '2000-01-01') WHERE user_id = ?", (alice,))   # the next day
+    second = _act(conn, alice, "unpack", T0)
+    assert second["said"]["unpacked"] == "lamp-worn" and second["said"]["put_out"] is False and second["pet"]["house"]["lamp"] == "lamp-floor"
+    assert _act(conn, alice, "decorate", T0, item="lamp-worn")["pet"]["house"]["lamp"] == "lamp-worn"   # hers now: it swaps in for free
+    conn.execute("UPDATE lumi_pets SET data = json_set(data, '$.unpacked', 14) WHERE user_id = ?", (alice,))
+    with pytest.raises(lumipet.PetError, match="all moved in"):
+        _act(conn, alice, "unpack", T0)
+
+
+def test_an_older_house_moves_in_afresh_with_its_coins_given_back_once(conn, alice):
+    _state(conn, alice, T0)
+    capsule = next(p for p in lumipet._PRIZES if "spot" in p and p["rarity"] == "rare")
+    found = next(item for item in lumipet._DECOR.values() if item.get("found"))
+    old = json.loads(conn.execute("SELECT data FROM lumi_pets WHERE user_id = ?", (alice,)).fetchone()[0])
+    for key in ("moved_in", "unpacked", "box_day"):
+        old.pop(key)
+    old.update(house={"rug": "rug-moon", "bed": "bed-cushion"}, decor=["rug-moon", capsule["id"], found["id"]])
+    conn.execute("UPDATE lumi_pets SET data = ? WHERE user_id = ?", (json.dumps(old), alice))
+    after = _state(conn, alice, T0)
+    worth = lumipet._DECOR["rug-moon"]["price"] + lumipet.CLOSET["values"]["rare"]   # bought at its price, won at its value, found for nothing
+    assert after["coins"] == 1000 + worth and after["pet"]["decor"] == [] and "rug" not in after["pet"]["house"] and "bed" not in after["pet"]["house"]
+    assert after["pet"]["moved_in"] == lumipet.MOVE_IN and after["boxes"]["left"] == 14
+    assert _state(conn, alice, T0)["coins"] == 1000 + worth                          # only once
+    rows = conn.execute("SELECT amount FROM coin_transactions WHERE ref = ?", (f"lumi-move-in:{alice}",)).fetchall()
+    assert [r["amount"] for r in rows] == [worth]
+
+
+def test_her_name_and_colour_are_hers_to_choose(conn, alice):
+    assert _state(conn, alice, T0)["pet"]["name"] == "Lumi"
+    assert _act(conn, alice, "name", T0, name="  Twinkle   Toes ")["pet"]["name"] == "Twinkle Toes"
+    assert _act(conn, alice, "name", T0, name="Ünïcørn-2")["pet"]["name"] == "Ünïcørn-2"
+    for bad in ("", "   ", "x" * 17, "<b>hi</b>", "...", "a/b"):
+        with pytest.raises(lumipet.PetError, match="1 to 16"):
+            _act(conn, alice, "name", T0, name=bad)
+    assert _act(conn, alice, "colour", T0, colour="#FF8ECB")["pet"]["colour"] == "#ff8ecb"
+    for bad in ("red", "#ff8ec", "#ggg000", "ff8ecb"):
+        with pytest.raises(lumipet.PetError, match="six hex digits"):
+            _act(conn, alice, "colour", T0, colour=bad)
+    assert lumipet.look(conn, alice) == {"glow": "rose", "outfit": {}, "colour": "#ff8ecb", "name": "Ünïcørn-2"}
+    assert _act(conn, alice, "colour", T0, colour="")["pet"]["colour"] is None      # back to her glow's own colours
+
+
+def test_stat_points_placed_by_hand_or_by_auto_and_fight_items_bought(conn, alice):
+    _state(conn, alice, T0)
+    _set(conn, alice, level=3, stat_points={k: 0 for k in lumibattle.STAT_KEYS})
+    progress = _state(conn, alice, T0)["progress"]["stat_points"]
+    assert (progress["left"], progress["cap"], progress["auto"]) == (14, 6, False)
+    before = _state(conn, alice, T0)["progress"]["stats"]["attack"]
+    out = _act(conn, alice, "stat", T0, item="attack", count=4)
+    assert out["progress"]["stat_points"]["placed"]["attack"] == 4 and out["progress"]["stats"]["attack"] == before + 4   # a point is half a level's growth: 1 attack
+    capped = _act(conn, alice, "stat", T0, item="attack", count=9)                  # only up to the cap: 3 a level, 6 at level 3
+    assert capped["progress"]["stat_points"]["placed"]["attack"] == 6
+    with pytest.raises(lumipet.PetError, match="as many points as her level allows"):
+        _act(conn, alice, "stat", T0, item="attack", count=1)
+    auto = _act(conn, alice, "stats_auto", T0)
+    assert auto["progress"]["stat_points"]["left"] == 0 and sum(auto["said"]["placed"].values()) == 14 - 6
+    free = _act(conn, alice, "stats_reset", T0)                                      # no free reset for a new Lumi: it costs
+    assert free["said"]["paid"] == lumibattle.STAT_RESET_PRICE and free["progress"]["stat_points"]["left"] == 14
+    bought = _act(conn, alice, "kit", T0, item="x-speed", count=2)
+    assert bought["progress"]["kit"]["x-speed"] == 2 and bought["said"]["paid"] == 60
+    with pytest.raises(lumipet.PetError, match="up to 9"):
+        _act(conn, alice, "kit", T0, item="x-speed", count=8)
+
+
+def test_an_older_lumi_gets_her_points_placed_by_auto_and_one_free_reset(conn, alice):
+    _state(conn, alice, T0)
+    old = json.loads(conn.execute("SELECT data FROM lumi_pets WHERE user_id = ?", (alice,)).fetchone()[0])
+    for key in ("stat_points", "auto_stats", "stat_reset_free", "used", "kit"):
+        old.pop(key)
+    old.update(level=11, skills=["heavy-paw"])
+    conn.execute("UPDATE lumi_pets SET data = ? WHERE user_id = ?", (json.dumps(old), alice))
+    after = _state(conn, alice, T0)["progress"]["stat_points"]
+    assert after["left"] == 0 and sum(after["placed"].values()) == 70 and after["free_reset"]
+    assert after["placed"]["attack"] > after["placed"]["magic"]                     # a Fighter skill: Auto leans on attack
+    reset = _act(conn, alice, "stats_reset", T0)
+    assert reset["said"]["paid"] == 0 and reset["coins"] == 1000 and not reset["progress"]["stat_points"]["free_reset"]
 
 
 def test_decorating_buys_once_then_swaps_for_free_like_an_outfit(conn, alice):
     bought = _act(conn, alice, "decorate", T0, item="rug-moon")
     assert bought["said"] == {"bought": "rug-moon", "count": 1, "paid": 100} and bought["coins"] == 900
     assert bought["pet"]["house"]["rug"] == "rug-moon" and bought["pet"]["decor"] == ["rug-moon"]
-    back = _act(conn, alice, "decorate", T0, item="rug-oval")                   # the free first object is always there
-    assert back["said"] is None and back["pet"]["house"]["rug"] == "rug-oval" and back["coins"] == 900
+    back = _act(conn, alice, "decorate", T0, item="rug-oval")                   # the old starter is tier 1 now: bought too
+    assert back["said"]["paid"] == 50 and back["pet"]["house"]["rug"] == "rug-oval" and back["coins"] == 850
     again = _act(conn, alice, "decorate", T0, item="rug-moon")                  # already hers: nothing to pay
-    assert again["said"] is None and again["coins"] == 900 and again["pet"]["decor"] == ["rug-moon"]
+    assert again["said"] is None and again["coins"] == 850 and again["pet"]["decor"] == ["rug-moon", "rug-oval"]
     row = conn.execute("SELECT amount FROM coin_transactions WHERE type = 'lumi-pet_decor'").fetchall()
-    assert [r["amount"] for r in row] == [100]
+    assert [r["amount"] for r in row] == [100, 50]
 
 
 def test_decorating_refuses_what_isnt_furniture_or_cant_be_afforded(conn, alice):
@@ -270,14 +362,14 @@ def test_decorating_refuses_what_isnt_furniture_or_cant_be_afforded(conn, alice)
     with pytest.raises(lumipet.PetError, match="Not enough coins"):
         _act(conn, alice, "decorate", T0, item="bed-castle")
     after = _state(conn, alice, T0)
-    assert after["coins"] == 50 and after["pet"]["house"]["bed"] == "bed-cushion" and after["pet"]["decor"] == []
+    assert after["coins"] == 50 and "bed" not in after["pet"]["house"] and after["pet"]["decor"] == []   # still bare
 
 
 def test_a_save_naming_an_object_that_no_longer_exists_falls_back_to_the_free_one(conn, alice):
     _state(conn, alice, T0)
     _set(conn, alice, house={"rug": "rug-retired", "bed": "rug-moon", "attic": "bed-moon"})   # gone, wrong spot, no such spot
     house = _state(conn, alice, T0)["pet"]["house"]
-    assert house["rug"] == "rug-oval" and house["bed"] == "bed-cushion" and "attic" not in house
+    assert "rug" not in house and "bed" not in house and "attic" not in house       # nothing valid there: bare
 
 
 def test_the_shipped_house_is_valid_and_bad_ones_are_refused(tmp_path):
@@ -432,14 +524,17 @@ def test_capsule_decor_cant_be_bought_and_a_win_goes_straight_into_the_room(conn
     out = _act(conn, alice, "capsule", T0, rng=Dice(0, 10_000))                 # a common, the last in the list: clothes come first, so it's decor
     won = lumipet._DECOR[out["said"]["capsule"]]
     assert out["pet"]["decor"] == [won["id"]] and out["pet"]["house"][won["spot"]] == won["id"] and out["pet"]["closet"] == []
-    free = next(spot for spot in lumipet.HOUSE["spots"] if spot["id"] == won["spot"])["items"][0]["id"]
-    assert _act(conn, alice, "decorate", T0, item=free)["pet"]["house"][won["spot"]] == free
+    spot = next(spot for spot in lumipet.HOUSE["spots"] if spot["id"] == won["spot"])
+    other = next(item for item in spot["items"] if item["price"])["id"]           # something bought, to swap with
+    bought = _act(conn, alice, "decorate", T0, item=other)
+    assert bought["pet"]["house"][won["spot"]] == other
     back = _act(conn, alice, "decorate", T0, item=won["id"])
-    assert back["pet"]["house"][won["spot"]] == won["id"] and back["said"] is None and back["coins"] == out["coins"]   # hers now, so it swaps freely
+    assert back["pet"]["house"][won["spot"]] == won["id"] and back["said"] is None and back["coins"] == bought["coins"]   # hers now, so it swaps freely
+    free = other
     _act(conn, alice, "decorate", T0, item=free)
     repeat = _act(conn, alice, "capsule", T0, rng=Dice(0, 10_000))
     assert repeat["said"]["duplicate"] is True and repeat["said"]["buyback"] == 30
-    assert repeat["pet"]["house"][won["spot"]] == free and repeat["pet"]["decor"] == [won["id"]]   # a repeat doesn't rearrange the room
+    assert repeat["pet"]["house"][won["spot"]] == free and repeat["pet"]["decor"] == [won["id"], other]   # a repeat doesn't rearrange the room
 
 
 def test_repeats_never_pay_back_as_much_as_the_capsule_costs(conn):

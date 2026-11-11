@@ -15,10 +15,15 @@ The floor comes from lumidungeon.generate, so it is the same dungeon a solo trip
   member. That order is fixed for this puzzle: if everyone fails, it starts again from the first. Each attempt has a
   limit (LIMITS: time for crates and lamps, guesses for runes, flips for cards), and "Pass it on" ends it early. Only
   the holder's moves count; everyone else watches their board live. Cups are one pick by the chosen member.
-- In a FIGHT everyone fights their own copy of the creature at once (each in their own lumi_battles row, tagged with
-  the party). The room is cleared once everyone has finished and someone won. A member who loses FAINTS: their own
-  satchel is dropped and they follow the party as a ghost, still voting and taking puzzle turns, but finding nothing.
-  If everyone faints, the trip is over.
+- A FIGHT is one co-op fight for the whole party (Doll's design, 2026-11-11): every standing Lumi against one to three
+  creatures (never more than there are Lumis), in rounds: each Lumi in seat order takes her turn, then every creature
+  strikes (lumibattle.team_act). It lives in the party (run["fight"]), so every page sees each turn as it happens.
+  On her turn a Lumi attacks a creature of her choice, defends, runs (for everyone), or uses an item from her own
+  pocket on herself or a friend: a potion, a mana potion, or an X item. A turn left for TURN_SECONDS is braced
+  through. A win gives every Lumi in the fight the whole EXP of every creature (not a share) and her own coins. A Lumi
+  who ends the fight at 0 FAINTS: her own satchel is dropped and she follows the party as a ghost, still voting and
+  taking puzzle turns, but finding nothing. If everyone faints, the trip is over. (Older fights, one lumi_battles row
+  each, still finish the old way: after_fight.)
 
 Each member's finds go in their own satchel (loot and decor are rolled against their own pet), and only count once the
 party walks out of the entrance together. Coins are paid once per member, by "lumi-party:<code>:<trip>:<user>". Keys go
@@ -43,7 +48,8 @@ MAX_MEMBERS = 3
 VOTE_SECONDS = 20                       # after the first vote, the most votes win
 LIMITS = {"sokoban": ("seconds", 180), "lights": ("seconds", 120), "runes": ("guesses", 3), "match": ("flips", 6)}
 HOLDER_QUIET = 30                       # seconds a puzzle holder may go unheard before their attempt fails
-FIGHT_QUIET = 60                        # seconds a fighter may go unheard before their fight counts as run from
+FIGHT_QUIET = 60                        # seconds a fighter may go unheard before their (old-style) fight counts as run from
+TURN_SECONDS = 45                       # a co-op fight turn left this long is braced through, so the round goes on
 AWAY_SECONDS = 8                        # unheard this long: shown as away
 IDLE_MS = 2 * 3600 * 1000               # a party nobody has changed in this long breaks up
 MAX_INPUTS = 64                         # couch presses remembered, so a replayed press does nothing
@@ -158,9 +164,15 @@ def _member(conn: sqlite3.Connection, user_id: int, name: str, pet: dict, remote
     """A new member, with their Lumi's numbers as she is now (refreshed again when the party sets out)."""
     numbers = lumibattle.stats(pet)
     return {"user": user_id, "name": name, "remote": remote, "ready": False, "level": pet["level"], "glow": pet["glow"],
+            **_looks(pet),
             "hp": lumibattle.health(pet), "hpMax": numbers["hp"], "mp": numbers["mp"], "mpMax": numbers["mp"],
             "owned": list(pet["decor"]), "mods": list(pet["mods_owned"]),     # what loot rolls must not give twice
             "satchel": _bag(), "fight": None, "fought": None, "fainted": False, "puzzles": 0, "vote": None, "ended": None}
+
+
+def _looks(pet: dict) -> dict:
+    """How a member's Lumi looks to the others: her name, her own colour and what she wears."""
+    return {"pet": pet.get("name") or "Lumi", "colour": pet.get("colour"), "outfit": dict(pet.get("outfit") or {})}
 
 
 def create(conn: sqlite3.Connection, user_id: int | None, name: str, now: int, *, mode: str = "online",
@@ -203,6 +215,10 @@ def _leave(conn: sqlite3.Connection, state: dict, member: dict, now: int) -> Non
         pet = _pet(conn, member["user"], now)
         if member["fight"]:
             _end_fight_row(conn, member["user"], member["fight"])
+        seat = _seat(run, member["user"])
+        if seat is not None:                              # out of the co-op fight: her Lumi leaves with her
+            member["hp"] = max(0, run["fight"]["lumis"][seat]["hp"]) or member["hp"]
+            lumibattle.team_drop(run["fight"], seat, random.SystemRandom())
         lumibattle.hurt(pet, 0 if member["fainted"] else member["hp"])
         _save_pet(conn, member["user"], pet)
         puzzle = run["puzzle"]
@@ -230,8 +246,10 @@ def _after_leave(conn: sqlite3.Connection, state: dict, member: dict, now: int) 
     if state["phase"] == "trip" and state["run"]:
         if not state["members"]:
             state["phase"], state["run"] = "lobby", None
+        elif state["run"].get("fight") and state["run"]["fight"]["outcome"]:
+            _team_end(conn, state, now, random.SystemRandom())         # their leaving ended the fight
         else:
-            _settle_fights(conn, state, now, random.SystemRandom())   # their leaving may finish a fight room
+            _settle_fights(conn, state, now, random.SystemRandom())   # their leaving may finish an old-style fight room
 
 
 def _end_fight_row(conn: sqlite3.Connection, user_id: int, battle_id: int) -> None:
@@ -261,7 +279,7 @@ def _set_out(conn: sqlite3.Connection, state: dict, now: int, rng) -> None:
             raise PartyError(f"{m['name']}'s Lumi is busy {'napping' if pet['task']['kind'] == 'nap' else 'playing'}.")
         _can_go(conn, m["user"], pet, now, state["code"])
         fresh = _member(conn, m["user"], m["name"], pet, m["remote"])
-        m.update({k: fresh[k] for k in ("level", "glow", "hp", "hpMax", "mp", "mpMax", "owned", "mods")},
+        m.update({k: fresh[k] for k in ("level", "glow", "pet", "colour", "outfit", "hp", "hpMax", "mp", "mpMax", "owned", "mods")},
                  satchel=_bag(), fight=None, fought=None, fainted=False, puzzles=0, vote=None, ended=None)
         pet["rest"], pet["restUntil"] = "awake", now + 15 * 60_000     # a trip wakes her (lumipet.AWAKE_MS)
         _save_pet(conn, m["user"], pet)
@@ -406,28 +424,150 @@ def _enter(conn: sqlite3.Connection, state: dict, to: str, now: int, rng) -> Non
         run["event"] = {"scenario": {"stairs": "stairs", "start": "start"}.get(room["kind"], "empty" if first else "again")}
 
 
-# --------------------------------------------------------------------------- fights
+# --------------------------------------------------------------------------- the co-op fight
+def _seat(run: dict | None, user_id: int) -> int | None:
+    """This member's place among the Lumis of the co-op fight going on, or None."""
+    fight = run.get("fight") if run else None
+    if not fight or fight["outcome"]:
+        return None
+    return next((i for i, lumi in enumerate(fight["lumis"]) if lumi["user"] == user_id), None)
+
+
+def _fighter_name(state: dict, member: dict) -> str:
+    """What a Lumi is called in the fight's log: her own name, unless another Lumi in the party has the same one (two
+    called Lumi, as every Lumi starts), then "<owner>'s <name>"."""
+    name = member.get("pet") or "Lumi"
+    clash = sum(1 for m in state["members"] if (m.get("pet") or "Lumi").lower() == name.lower()) > 1
+    return f"{member['name']}'s {name}" if clash else name
+
+
 def _start_fights(conn: sqlite3.Connection, state: dict, room: dict, now: int, rng) -> None:
-    """Everyone still standing meets their own copy of the creature, at the party's level."""
+    """Every standing Lumi meets the room's creature, and maybe one or two more of the place's: one to three, never
+    more than there are Lumis. They are at the party's level, like the floor."""
     run = state["run"]
     entry = lumibattle._ENEMIES[room["enemy"]["id"]]
     standing = [m for m in state["members"] if not m["fainted"]]
     level = round(sum(m["level"] for m in standing) / max(1, len(standing)))
     level = max(1, min(lumibattle.MAX_LEVEL, level + rng.randrange(3) - 1 + (run["depth"] - 1)))
+    lumis = []
     for m in standing:
         pet = _pet(conn, m["user"], now)
-        try:
-            fight = lumibattle.start(conn, m["user"], pet, entry["tier"], now, rng, enemy=entry["id"], level=level,
-                                     carry={"hp": m["hp"], "mp": m["mp"]}, dungeon=True, party=state["code"])
-        except lumibattle.BattleError:
-            m["fought"] = "ran"                           # she can't fight right now (a fight elsewhere): she hangs back
-            continue
+        lumi = lumibattle.team_fighter(pet, m["user"], {"hp": m["hp"], "mp": m["mp"]})
+        lumi["name"] = _fighter_name(state, m)            # "jane's Lumi" when two would share a name
+        lumi["pocket"] = {"potion": pet["potions"] + m["satchel"]["potions"], **{item: pet["kit"].get(item, 0) for item in lumibattle.KIT}}   # what she can give, for every page to show
+        lumis.append(lumi)
+        pet["boost"] = None                               # a waiting treat is eaten for this fight
+        pet["rest"], pet["restUntil"] = "awake", now + 15 * 60_000
         _save_pet(conn, m["user"], pet)
-        m["fight"], m["fought"] = fight["id"], None
-    run["fighting"] = any(m["fight"] for m in state["members"])
+        m["fought"] = None
+    if not lumis:
+        return
+    count = 1 + rng.randrange(min(lumibattle.TEAM_FOES, len(lumis)))
+    env = lumidungeon._ENVS[run["env"]]
+    kinds = [entry["id"]] + [lumidungeon._enemy(env, run["depth"], rng)["id"] for _ in range(count - 1)]
+    foes = [lumibattle.team_foe(kind, level, level, lumis[0]["element"]) for kind in kinds]
+    for name, many in Counter(foe["name"] for foe in foes).items():   # two of a kind are told apart: "Dust Bunny A", "... B"
+        if many > 1:
+            for letter, foe in zip("ABC", [foe for foe in foes if foe["name"] == name]):
+                foe["name"] += " " + letter
+    fight = lumibattle.team_start(lumis, foes)
+    fight["since"] = now
+    run["fight"], run["fighting"] = fight, True
     run["event"] = {"scenario": "enemy", "enemy": entry["name"]}
-    if not run["fighting"]:
-        _settle_fights(conn, state, now, rng)
+
+
+def _team_turn(conn: sqlite3.Connection, state: dict, member: dict, what: str, now: int, rng, *, foe: int | None,
+               ally: int | None, turn: int | None) -> None:
+    """One member's turn in the co-op fight: a move at a creature, Defend, Run, or an item from her own pocket on
+    herself or a friend. Refused (nothing changes) unless it is her Lumi's turn and the page was showing this turn."""
+    run = state["run"]
+    fight = run.get("fight")
+    if not fight or fight["outcome"]:
+        raise PartyError("There's no fight going on.")
+    if turn is not None and turn != fight["turn"]:
+        raise PartyError("That turn already happened.")
+    seat = _seat(run, member["user"])
+    if seat is None:
+        raise PartyError("A little ghost can only cheer from the back." if member["fainted"] else "Your Lumi isn't in this fight.")
+    why = lumibattle.team_refusal(fight, seat, what, target=foe if what.startswith("move") else None)
+    if why:
+        raise PartyError(why)
+    target = foe if what.startswith("move") else None
+    if what == "potion" or what in lumibattle.KIT:
+        target = seat if ally is None else ally
+        if not 0 <= target < len(fight["lumis"]):
+            raise PartyError("Choose a Lumi in this fight.")
+        why = lumibattle.item_refusal(fight["lumis"][target], what)
+        if why:
+            raise PartyError(why)
+        if what == "potion" and member["satchel"]["potions"] > 0:
+            member["satchel"]["potions"] -= 1             # one found on this trip goes first
+        else:
+            pet = _pet(conn, member["user"], now)
+            try:
+                lumibattle.take_item(pet, what)
+            except lumibattle.BattleError as refused:
+                raise PartyError(str(refused)) from None
+            _save_pet(conn, member["user"], pet)
+        pocket = fight["lumis"][seat].setdefault("pocket", {})
+        pocket[what] = max(0, pocket.get(what, 0) - 1)
+    lumibattle.team_act(fight, seat, what, rng, target=target)
+    fight["since"] = now
+    if fight["outcome"]:
+        _team_end(conn, state, now, rng)
+
+
+def _team_end(conn: sqlite3.Connection, state: dict, now: int, rng) -> None:
+    """The co-op fight is over. Every Lumi's health and MP carry on; what each used is remembered for her Auto stats.
+    A win gives every Lumi who fought the whole EXP (Doll's rule) and, if she is still standing, her coins in her
+    satchel and maybe a piece of the place's decor set. A Lumi at 0 faints into a ghost. Running steps the party back;
+    if nobody is left standing the trip is over."""
+    run = state["run"]
+    fight, enemy = run["fight"], run["event"].get("enemy", "creature")
+    outcome, gained = fight["outcome"], lumibattle.team_reward(fight)[0]
+    got: dict[int, dict] = {}
+    for seat, lumi in enumerate(fight["lumis"]):
+        member = member_of(state, lumi["user"])
+        if member is None or lumi.get("gone"):
+            continue                                      # gone home mid-fight
+        pet = _pet(conn, member["user"], now)
+        for action in fight["used"].get(str(member["user"]), []):
+            lumibattle.remember(pet, action)
+        member["hp"], member["mp"] = max(0, lumi["hp"]), lumi["mp"]
+        if outcome == "victory":
+            got[member["user"]] = lumibattle.team_finish(pet, fight, seat)
+            numbers = lumibattle.stats(pet)               # a level gained mid-trip: her bars grow (what she has left stays)
+            member.update(level=pet["level"], hpMax=numbers["hp"], mpMax=numbers["mp"])
+            if lumi["hp"] > 0:
+                member["satchel"]["coins"] += got[member["user"]]["coins"]
+                piece = lumidungeon._set_piece(lumidungeon._ENVS[run["env"]], "enemy", run["depth"], rng, _owned(member))
+                if piece:
+                    member["satchel"]["trophies"].append(piece)
+                    _note(state, f"{member['name']} finds the {lumidungeon.FOUND_NAMES.get(piece, 'treasure')}!")
+        if lumi["hp"] <= 0:
+            pet["losses"] += 1
+            _faint(pet, member, state)
+        _save_pet(conn, member["user"], pet)
+    run["last_fight"] = {"outcome": outcome, "exp": gained if outcome == "victory" else 0, "log": fight["log"][-4:],
+                         "foes": [foe["name"] for foe in fight["foes"]],
+                         "levels": {str(user): g["levels"] for user, g in got.items() if g["levels"]}, "at": now}
+    run["fight"], run["fighting"] = None, False
+    for m in state["members"]:
+        m["fought"] = None
+    if all(m["fainted"] for m in state["members"]):
+        run.update(over="defeat", event={"scenario": "defeat", "enemy": enemy})
+        _narrate(state, rng)
+        _finish(conn, state, now, "defeat")
+        return
+    if outcome == "victory":
+        run["rooms"][run["at"]]["done"] = True
+        run["rooms"][run["at"]].pop("loot", None)          # drops were rolled for each winner instead
+        run["event"] = {"scenario": "victory", "enemy": enemy}
+        _narrate(state, rng, f"Victory! Every Lumi gains {gained} EXP.")
+    else:
+        run["at"], run["prev"] = run["prev"] or run["at"], run["at"]
+        run["event"] = {"scenario": "fled", "enemy": enemy}
+        _narrate(state, rng)
 
 
 def after_fight(conn: sqlite3.Connection, user_id: int, pet: dict, fight: dict, now: int | None = None, rng=None) -> None:
@@ -761,8 +901,8 @@ def _abandon(conn: sqlite3.Connection, state: dict, now: int) -> None:
 def _potion(conn: sqlite3.Connection, state: dict, member: dict, now: int) -> None:
     if member["fainted"]:
         raise PartyError("A little ghost can't drink a potion. She'll mend at home.")
-    if member["fight"]:
-        raise PartyError("Drink it in the fight, with the Potion button.")
+    if member["fight"] or _seat(state["run"], member["user"]) is not None:
+        raise PartyError("Drink it in the fight, on your turn.")
     if member["hp"] >= member["hpMax"]:
         raise PartyError("Your Lumi is already at full health.")
     if member["satchel"]["potions"] > 0:
@@ -848,6 +988,9 @@ def _due(state: dict, now: int) -> bool:
         who = member_of(state, holder(state))
         if who and _quiet(state, who) >= HOLDER_QUIET:
             return True
+    fight = run.get("fight")
+    if fight and not fight["outcome"] and now - fight["since"] >= TURN_SECONDS * 1000:
+        return True
     return any(m["fight"] and _quiet(state, m) >= FIGHT_QUIET for m in state["members"])
 
 
@@ -867,6 +1010,12 @@ def _advance(conn: sqlite3.Connection, state: dict, now: int, rng) -> None:
             _fail(state, now, f"Time's up for {who['name'] if who else 'them'}.")
         elif who and _quiet(state, who) >= HOLDER_QUIET:
             _fail(state, now, f"{who['name']} seems to have stepped away.")
+    fight = run.get("fight") if run else None
+    if fight and not fight["outcome"] and now - fight["since"] >= TURN_SECONDS * 1000:
+        lumibattle.team_skip(fight, rng, "Time's up!")    # a turn left too long: she braces, and the round goes on
+        fight["since"] = now
+        if fight["outcome"]:
+            _team_end(conn, state, now, rng)
     for m in state["members"]:
         if run and m["fight"] and _quiet(state, m) >= FIGHT_QUIET:
             _end_fight_row(conn, m["user"], m["fight"])
@@ -899,18 +1048,22 @@ def _close(conn: sqlite3.Connection, state: dict, now: int) -> None:
 
 # --------------------------------------------------------------------------- one thing a member does
 FREE = ("take", "look", "unlock", "potion")               # anyone may, at once
+FIGHT = ("move0", "move1", "move2", "move3", "defend", "run", "potion", *lumibattle.KIT)   # a co-op fight turn's `target`
 VOTED = {"move": None, "back": "back", "descend": "descend", "leave": "home"}   # the solo page's buttons, as votes
 PUZZLE = ("sokoban", "lights", "rune", "cup", "flip", "pass")
 
 
 def act(conn: sqlite3.Connection, code: str, user_id: int, action: str, now: int | None = None, rng=None, *,
         name: str = "", way: str | None = None, target: str = "", item: str = "", moves: str = "",
-        picks: list | None = None, remote: int | None = None) -> dict:
+        picks: list | None = None, remote: int | None = None, foe: int | None = None, ally: int | None = None,
+        turn: int | None = None) -> dict:
     """One thing a member (or someone joining) does. Call inside a transaction. Answers the party as they see it.
     Actions: join, leave, ready, env (item), start; vote (target: a way, descend, home, back or "m<user>"), and the
     solo page's own buttons, which mean the same here: move (way) votes that way, back/descend/leave vote, take, look,
     unlock and potion happen at once, and sokoban, lights, rune, cup and flip are the puzzle holder's moves; pass hands
-    the puzzle on; abandon is this member giving up the trip."""
+    the puzzle on; abandon is this member giving up the trip. fight is a co-op fight turn: target is the move (move0
+    to move3), defend, run or an item (potion, ether, x-attack, x-defend, x-speed); foe is the creature a move is
+    aimed at, ally the seat of the Lumi an item is for, and turn the fight turn the page was showing."""
     rng = rng or random.SystemRandom()
     now = _ms() if now is None else now
     state = _read(conn, code)
@@ -927,7 +1080,12 @@ def act(conn: sqlite3.Connection, code: str, user_id: int, action: str, now: int
         if remote is not None:
             member["remote"] = remote
         lobby.PRESENCE.seen(_table(state["code"]), _actor(member, state))
-        _member_act(conn, state, member, action, now, rng, way=way, target=target, item=item, moves=moves, picks=picks or [])
+        if action == "fight":
+            if target not in FIGHT:
+                raise PartyError("Your Lumi doesn't know that one.")
+            _team_turn(conn, state, member, target, now, rng, foe=foe, ally=ally, turn=turn)
+        else:
+            _member_act(conn, state, member, action, now, rng, way=way, target=target, item=item, moves=moves, picks=picks or [])
     if not state["members"]:
         _close(conn, state, now)
         return {"code": state["code"], "closed": True}
@@ -1030,8 +1188,12 @@ def parties(conn: sqlite3.Connection, user_id: int | None, now: int | None = Non
         mine_ = member_of(state, user_id) is not None
         if mine_ or (state["phase"] == "lobby" and len(state["members"]) < MAX_MEMBERS):
             host = member_of(state, state["host"])
+            env = lumidungeon._ENVS.get(state.get("env") or "")
             out.append({"code": state["code"], "mode": state["mode"], "phase": state["phase"], "mine": mine_,
-                        "host": host["name"] if host else state.get("screen") or "", "members": [m["name"] for m in state["members"]]})
+                        "host": host["name"] if host else state.get("screen") or "", "members": [m["name"] for m in state["members"]],
+                        "lumis": [{"name": m["name"], "pet": m.get("pet", "Lumi"), "glow": m["glow"], "colour": m.get("colour"),
+                                   "outfit": m.get("outfit", {}), "level": m["level"], "ready": m["ready"]} for m in state["members"]],
+                        "env": env["name"] if env else "", "screen": state.get("screen", ""), "max": MAX_MEMBERS})
     return out
 
 
@@ -1052,7 +1214,11 @@ def couch(conn: sqlite3.Connection, code: str, display: str, *, user_id: int, na
     _write(conn, state, now)
     if member_of(state, user_id) is None and action != "join":
         action = "join"                                   # a remote nobody has seated yet: its OK sits it down
-    if action == "fight":                                 # a turn in this member's own fight (it ends back in after_fight)
+    if action == "fight" and fields.get("target", "") in FIGHT and _seat(state["run"], user_id) is not None:
+        fields.setdefault("turn", turn)                   # a co-op fight turn, like any other party action
+        out = act(conn, code, user_id, "fight", now, rng, name=name, remote=remote, **fields)
+        return out if out.get("closed") else view(conn, _read(conn, code), None, now=now, display=True)
+    if action == "fight":                                 # a turn in this member's own old-style fight (it ends back in after_fight)
         from mnemerynne import lumipet
         member = member_of(state, user_id)
         if not member["fight"]:
@@ -1114,7 +1280,7 @@ def _run_view(state: dict, me: dict | None, now: int) -> dict:
            "satchel": {**shown["satchel"], "keys": run["keys"]}, "hp": shown["hp"], "hpMax": shown["hpMax"],
            "mp": shown["mp"], "mpMax": shown["mpMax"], "over": run["over"], "ended": None, "event": run["event"],
            "say": run.get("say", ""), "scene": run.get("scene", ""), "story": run["log"],
-           "fighting": bool(shown["fight"]), "facing": None, "game": None}
+           "fighting": bool(shown["fight"]) or bool(run.get("fight")), "facing": None, "game": None}
     if run["facing"]:
         out["facing"] = {"at": run["facing"], "lock": lumidungeon._public_lock(run["rooms"][run["facing"]]["lock"])}
     if here["kind"] == "game":
@@ -1122,8 +1288,27 @@ def _run_view(state: dict, me: dict | None, now: int) -> dict:
     out["party"] = {"code": state["code"], "options": options(state), "puzzle": _public_puzzle(state, now),
                     "votes": {str(m["user"]): m["vote"] for m in state["members"] if m["vote"]},
                     "ends": run["vote_since"] + VOTE_SECONDS * 1000 if run["vote_since"] else None,
-                    "fighting": run["fighting"], "words": {k: _choice_words(state, k) for k in options(state)}}
+                    "fighting": run["fighting"], "words": {k: _choice_words(state, k) for k in options(state)},
+                    "fight": _public_fight(run.get("fight"), me, now), "last_fight": run.get("last_fight")}
     return out
+
+
+def _public_fight(fight: dict | None, me: dict | None, now: int) -> dict | None:
+    """The co-op fight for a page: everyone's bars, stages and status, whose turn it is and until when, and the log.
+    Each Lumi's moves are listed (their names and costs), so a friend can see what she might do."""
+    if not fight:
+        return None
+    def fighter(f: dict, lumi: bool) -> dict:
+        out = {k: f.get(k) for k in ("name", "level", "element", "hp", "hpMax", "status", "stages")}
+        if lumi:
+            out.update(user=f["user"], mp=f["mp"], mpMax=f["mpMax"], guarding=f.get("guarding", False), gone=bool(f.get("gone")), pocket=f.get("pocket", {}),
+                       moves=[{"name": m["name"], "mp": m.get("mp", 0), "element": m["element"], "magic": m["magic"], "power": m["power"]} for m in f["moves"]])
+        else:
+            out.update({k: f.get(k) for k in ("id", "tier", "body", "colour", "weak", "resist")})
+        return out
+    return {"lumis": [fighter(f, True) for f in fight["lumis"]], "foes": [fighter(f, False) for f in fight["foes"]],
+            "round": fight["round"], "at": fight["at"], "turn": fight["turn"], "log": fight["log"][-8:], "outcome": fight["outcome"],
+            "ends": fight["since"] + TURN_SECONDS * 1000, "you": next((i for i, f in enumerate(fight["lumis"]) if me and f["user"] == me["user"]), None)}
 
 
 def view(conn: sqlite3.Connection, state: dict, user_id: int | None, *, now: int | None = None, display: bool = False) -> dict:
@@ -1138,9 +1323,10 @@ def view(conn: sqlite3.Connection, state: dict, user_id: int | None, *, now: int
             if found:
                 fight = {k: found[k] for k in ("id", "turn", "status", "player", "enemy", "log")}
         members.append({"user": m["user"], "name": m["name"], "seat": i, "host": m["user"] == state["host"],
-                        "ready": m["ready"], "level": m["level"], "glow": m["glow"], "hp": m["hp"], "hpMax": m["hpMax"],
+                        "ready": m["ready"], "level": m["level"], "glow": m["glow"], "pet": m.get("pet", "Lumi"), "colour": m.get("colour"),
+                        "outfit": m.get("outfit", {}), "hp": m["hp"], "hpMax": m["hpMax"],
                         "mp": m["mp"], "mpMax": m["mpMax"], "fainted": m["fainted"], "satchel": m["satchel"],
-                        "puzzles": m["puzzles"], "vote": m["vote"], "fighting": bool(m["fight"]),
+                        "puzzles": m["puzzles"], "vote": m["vote"], "fighting": bool(m["fight"]) or _seat(state["run"], m["user"]) is not None,
                         "away": _quiet(state, m) >= AWAY_SECONDS, "you": m is me, "couch": m.get("remote") is not None,
                         "remote": m.get("remote") if display else None, "fight": fight})
     return {"code": state["code"], "mode": state["mode"], "phase": state["phase"], "host": state["host"],
@@ -1149,4 +1335,4 @@ def view(conn: sqlite3.Connection, state: dict, user_id: int | None, *, now: int
             "run": _run_view(state, me, now) if state["phase"] == "trip" and state["run"] else None,
             "last": state["last"], "notes": state.get("notes", []), "revision": state["revision"], "server_time": now,
             "rules": {"vote_seconds": VOTE_SECONDS, "limits": {k: {"kind": v[0], "count": v[1]} for k, v in LIMITS.items()},
-                      "max": MAX_MEMBERS}}
+                      "max": MAX_MEMBERS, "turn_seconds": TURN_SECONDS}}

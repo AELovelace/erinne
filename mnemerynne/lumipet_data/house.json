@@ -1,7 +1,8 @@
 {
   "spots": [
     {"id": "wallpaper", "name": "Wallpaper", "items": [
-      {"id": "wall-dusk", "name": "Dusk plum", "price": 0},
+      {"id": "wall-worn", "name": "Peeling old paper", "price": 0, "worn": true, "box": 11},
+      {"id": "wall-dusk", "name": "Dusk plum", "price": 60},
       {"id": "wall-stars", "name": "Starry night", "price": 120},
       {"id": "wall-stripes", "name": "Candy stripes", "price": 120},
       {"id": "wall-clouds", "name": "Soft clouds", "price": 180},
@@ -29,7 +30,8 @@
       {"id": "wall-datavault-racks", "name": "Humming server racks", "price": 0, "found": "data-vault"},
       {"id": "wall-rooftop-vines", "name": "Vine-wrapped brick", "price": 0, "found": "rooftop-garden"}]},
     {"id": "floor", "name": "Floor", "items": [
-      {"id": "floor-boards", "name": "Dark boards", "price": 0},
+      {"id": "floor-worn", "name": "Scuffed old boards", "price": 0, "worn": true, "box": 12},
+      {"id": "floor-boards", "name": "Dark boards", "price": 60},
       {"id": "floor-checker", "name": "Checker tiles", "price": 120},
       {"id": "floor-honey", "name": "Honey boards", "price": 120},
       {"id": "floor-moss", "name": "Moss carpet", "price": 180},
@@ -57,7 +59,8 @@
       {"id": "floor-datavault-tiles", "name": "Raised vault floor", "price": 0, "found": "data-vault"},
       {"id": "floor-rooftop-pavers", "name": "Roof pavers and clover", "price": 0, "found": "rooftop-garden"}]},
     {"id": "wallart", "name": "Wall art", "items": [
-      {"id": "art-star", "name": "Star poster", "price": 0},
+      {"id": "art-worn", "name": "Taped-up postcard", "price": 0, "worn": true, "box": 9},
+      {"id": "art-star", "name": "Star poster", "price": 50},
       {"id": "art-moons", "name": "Moon phases", "price": 90},
       {"id": "art-portrait", "name": "Cat portrait", "price": 140},
       {"id": "art-heart", "name": "Neon heart", "price": 200},
@@ -85,7 +88,8 @@
       {"id": "art-datavault-firewall", "name": "Polite firewall screen", "price": 0, "found": "data-vault"},
       {"id": "art-rooftop-billboard", "name": "Tiny bee billboard", "price": 0, "found": "rooftop-garden"}]},
     {"id": "shelf", "name": "Shelf", "items": [
-      {"id": "shelf-books", "name": "Book shelf", "price": 0},
+      {"id": "shelf-worn", "name": "Plank and brick shelf", "price": 0, "worn": true, "box": 8},
+      {"id": "shelf-books", "name": "Book shelf", "price": 60},
       {"id": "shelf-plants", "name": "Plant shelf", "price": 110},
       {"id": "shelf-trophies", "name": "Trophy shelf", "price": 160},
       {"id": "shelf-crystals", "name": "Crystal shelf", "price": 220},
@@ -141,7 +145,8 @@
       {"id": "view-datavault-cloud", "name": "The actual cloud", "price": 0, "found": "data-vault"},
       {"id": "view-rooftop-city", "name": "City glow below", "price": 0, "found": "rooftop-garden"}]},
     {"id": "frame", "name": "Window frame", "items": [
-      {"id": "frame-arch", "name": "Arch", "price": 0},
+      {"id": "frame-worn", "name": "Chipped wooden frame", "price": 0, "worn": true, "box": 13},
+      {"id": "frame-arch", "name": "Arch", "price": 50},
       {"id": "frame-round", "name": "Porthole", "price": 100},
       {"id": "frame-panes", "name": "Four panes", "price": 100},
       {"id": "frame-hex", "name": "Honeycomb", "price": 160},
@@ -170,6 +175,7 @@
       {"id": "frame-rooftop-greenhouse", "name": "Greenhouse window", "price": 0, "found": "rooftop-garden"}]},
     {"id": "curtains", "name": "Curtains", "items": [
       {"id": "curtain-none", "name": "No curtains", "price": 0},
+      {"id": "curtain-worn", "name": "Pinned-up bedsheet", "price": 0, "worn": true, "box": 4},
       {"id": "curtain-rose", "name": "Rose drapes", "price": 90},
       {"id": "curtain-sheer", "name": "Lagoon sheers", "price": 90},
       {"id": "curtain-valance", "name": "Star valance", "price": 140},
@@ -197,7 +203,8 @@
       {"id": "curtain-datavault-cables", "name": "Patch cable curtains", "price": 0, "found": "data-vault"},
       {"id": "curtain-rooftop-awning", "name": "Cafe awning and lights", "price": 0, "found": "rooftop-garden"}]},
     {"id": "lamp", "name": "Lamp", "items": [
-      {"id": "lamp-floor", "name": "Floor lamp", "price": 0},
+      {"id": "lamp-worn", "name": "Bare bulb on a stand", "price": 0, "worn": true, "box": 2},
+      {"id": "lamp-floor", "name": "Floor lamp", "price": 60},
       {"id": "lamp-lantern", "name": "Paper lantern", "price": 110},
       {"id": "lamp-mushroom", "name": "Mushroom lamp", "price": 150},
       {"id": "lamp-lava", "name": "Lava lamp", "price": 200},
@@ -225,7 +232,8 @@
       {"id": "lamp-datavault-cube", "name": "Data cube lamp", "price": 0, "found": "data-vault"},
       {"id": "lamp-rooftop-neonbee", "name": "Neon bee sign lamp", "price": 0, "found": "rooftop-garden"}]},
     {"id": "rug", "name": "Rug", "items": [
-      {"id": "rug-oval", "name": "Plum oval", "price": 0},
+      {"id": "rug-worn", "name": "Thrift-shop rag rug", "price": 0, "worn": true, "box": 3},
+      {"id": "rug-oval", "name": "Plum oval", "price": 50},
       {"id": "rug-moon", "name": "Moon rug", "price": 100},
       {"id": "rug-star", "name": "Star rug", "price": 140},
       {"id": "rug-rainbow", "name": "Rainbow runner", "price": 180},
@@ -253,7 +261,8 @@
       {"id": "rug-datavault-chip", "name": "Microchip rug", "price": 0, "found": "data-vault"},
       {"id": "rug-rooftop-honeycomb", "name": "Honeycomb rug", "price": 0, "found": "rooftop-garden"}]},
     {"id": "bed", "name": "Lumi's bed", "items": [
-      {"id": "bed-cushion", "name": "Plum cushion", "price": 0},
+      {"id": "bed-worn", "name": "Mattress on the floor", "price": 0, "worn": true, "box": 1},
+      {"id": "bed-cushion", "name": "Plum cushion", "price": 70},
       {"id": "bed-basket", "name": "Wicker basket", "price": 130},
       {"id": "bed-cloud", "name": "Cloud bed", "price": 200},
       {"id": "bed-moon", "name": "Crescent cradle", "price": 280},
@@ -281,7 +290,8 @@
       {"id": "bed-datavault-drawer", "name": "Server drawer bed", "price": 0, "found": "data-vault"},
       {"id": "bed-rooftop-planter", "name": "Garden bed (a real one)", "price": 0, "found": "rooftop-garden"}]},
     {"id": "door", "name": "Door", "items": [
-      {"id": "door-plum", "name": "Plum door", "price": 0},
+      {"id": "door-worn", "name": "Creaky old door", "price": 0, "worn": true, "box": 14},
+      {"id": "door-plum", "name": "Plum door", "price": 70},
       {"id": "door-round", "name": "Round-top door", "price": 140},
       {"id": "door-catflap", "name": "Cat-flap door", "price": 180},
       {"id": "door-beads", "name": "Bead doorway", "price": 220},
@@ -309,7 +319,8 @@
       {"id": "door-datavault-vault", "name": "Vault door", "price": 0, "found": "data-vault"},
       {"id": "door-rooftop-stairwell", "name": "Roof stairwell door", "price": 0, "found": "rooftop-garden"}]},
     {"id": "ceiling", "name": "Ceiling hanging", "items": [
-      {"id": "hang-stars", "name": "Star mobile", "price": 0},
+      {"id": "hang-worn", "name": "Paper lantern, a bit torn", "price": 0, "worn": true, "box": 10},
+      {"id": "hang-stars", "name": "Star mobile", "price": 60},
       {"id": "hang-cranes", "name": "Paper cranes", "price": 110},
       {"id": "hang-planets", "name": "Little planets", "price": 160},
       {"id": "hang-basket", "name": "Hanging basket", "price": 160},
@@ -337,7 +348,8 @@
       {"id": "hang-datavault-cloud", "name": "Cloud storage mobile", "price": 0, "found": "data-vault"},
       {"id": "hang-rooftop-hive", "name": "Hanging hive and bees", "price": 0, "found": "rooftop-garden"}]},
     {"id": "sidetable", "name": "Side table", "items": [
-      {"id": "table-tea", "name": "Tea table", "price": 0},
+      {"id": "table-worn", "name": "Moving-box table", "price": 0, "worn": true, "box": 5},
+      {"id": "table-tea", "name": "Tea table", "price": 50},
       {"id": "table-books", "name": "Book stack", "price": 100},
       {"id": "table-candle", "name": "Candle stand", "price": 140},
       {"id": "table-radio", "name": "Little radio", "price": 200},
@@ -365,7 +377,8 @@
       {"id": "table-datavault-terminal", "name": "Friendly terminal", "price": 0, "found": "data-vault"},
       {"id": "table-rooftop-vent", "name": "Air vent with snow globe", "price": 0, "found": "rooftop-garden"}]},
     {"id": "plant", "name": "Plant", "items": [
-      {"id": "plant-fern", "name": "Fern", "price": 0},
+      {"id": "plant-worn", "name": "Avocado pit in a jar", "price": 0, "worn": true, "box": 7},
+      {"id": "plant-fern", "name": "Fern", "price": 50},
       {"id": "plant-cactus", "name": "Cactus", "price": 90},
       {"id": "plant-sunflower", "name": "Sunflower", "price": 130},
       {"id": "plant-bonsai", "name": "Bonsai", "price": 200},
@@ -393,7 +406,8 @@
       {"id": "plant-datavault-bonsai", "name": "Circuit bonsai", "price": 0, "found": "data-vault"},
       {"id": "plant-rooftop-antenna", "name": "Antenna morning glory", "price": 0, "found": "rooftop-garden"}]},
     {"id": "toychest", "name": "Toy chest", "items": [
-      {"id": "chest-wood", "name": "Wooden chest", "price": 0},
+      {"id": "chest-worn", "name": "Laundry basket of toys", "price": 0, "worn": true, "box": 6},
+      {"id": "chest-wood", "name": "Wooden chest", "price": 50},
       {"id": "chest-pink", "name": "Pink toy box", "price": 100},
       {"id": "chest-yarn", "name": "Yarn basket", "price": 140},
       {"id": "chest-rocket", "name": "Rocket box", "price": 220},

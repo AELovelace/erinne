@@ -245,10 +245,20 @@ export async function checkLumiPet(browser, page, base) { // Exercise real contr
   for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowRight"); // sea, forest, snow
   await page.waitForFunction(() => document.querySelectorAll('#lp-house [data-spot="view"] .lp-fall-snow').length === 3);
   assert.equal(await page.$eval('#lp-house [data-spot="view"] .lp-px-3', el => getComputedStyle(el).animationName), "lp-scroll");
-  assert.equal(await page.$eval('[data-lp-row="view"] small', el => el.textContent), "◀ Snowy hills ▶ · 300 coins · Enter buys it");
+  assert.equal(await page.$eval('[data-lp-row="view"] small', el => el.textContent), "◀ Snowy hills ▶ · 300 coins · showing in the room · Enter buys it");
   for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowLeft"); // Back to what is placed, with nothing bought.
   assert.match(await page.$eval('[data-lp-row="view"] small', el => el.textContent), /The city outside ▶ · in the room/);
+  // She has just moved in: the room is bare (plaster, concrete, a stack of boxes) until she unpacks her own things.
+  assert.equal(await page.$eval('#lp-house [data-spot="bed"]', el => el.innerHTML), "", "No bed yet: it's in a box");
+  assert.equal(await page.$eval("#lp-house [data-boxes]", el => el.dataset.boxes), "14");
+  await moveTo(page, "unpack");
+  await page.keyboard.press("Enter");
+  await said(page, "Box open! Mattress on the floor: Lumi puts it out at once.");
+  assert.ok(await page.$eval('#lp-house [data-spot="bed"]', el => el.innerHTML.length > 100), "Her own mattress is out");
+  assert.equal(await page.$eval("#lp-house [data-boxes]", el => el.dataset.boxes), "13");
+  assert.match(await page.$eval(row("unpack") + " small", el => el.textContent), /One a day · next: Bare bulb on a stand/);
   await moveTo(page, "rug");
+  assert.match(await page.$eval(row("rug") + " small", el => el.textContent), /^Bare for now/);
   const plain = await page.$eval('#lp-house [data-spot="rug"]', el => el.innerHTML);
   await page.keyboard.press("ArrowRight"); // The moon rug, shown in the room before it's bought.
   await page.waitForFunction(was => document.querySelector('#lp-house [data-spot="rug"]').innerHTML !== was, {}, plain);
@@ -257,15 +267,38 @@ export async function checkLumiPet(browser, page, base) { // Exercise real contr
   await said(page, "Bought and put out: Moon rug");
   assert.equal(await text(page, "#lp-coins"), "677");
   await page.waitForFunction(() => document.querySelector('[data-lp-row="rug"] small').textContent === "◀ Moon rug ▶ · in the room");
+  const moon = await page.$eval('#lp-house [data-spot="rug"]', el => el.innerHTML);
   await page.click(row("rug")); // Its whole list, for a mouse or a finger.
   await page.waitForFunction(() => document.querySelector('[data-lp-row="rug-moon"] small') && document.querySelector('[data-lp-row="rug-moon"] small').textContent === "In the room now");
-  await page.click(row("back"));
-  await page.waitForSelector(row("rug"));
+  await page.click(row("rug-star")); // Try before you buy: a tap shows it in the room and asks, nothing is spent...
+  await said(page, "Here's the Star rug in the room. Choose it again to buy it for");
+  await page.waitForFunction(was => document.querySelector('#lp-house [data-spot="rug"]').innerHTML !== was, {}, moon);
+  assert.equal(await text(page, "#lp-coins"), "677");
+  await page.click(row("back")); // ...and walking away puts it back.
+  await page.waitForSelector(row("rug") + '[aria-pressed="true"]');                  // back on the rug's own row
+  await page.waitForFunction(was => document.querySelector('#lp-house [data-spot="rug"]').innerHTML === was, {}, moon);
   await page.click('[data-lp-tab="care"]'); // Leaving the tab keeps what was placed and drops any preview.
   assert.notEqual(await page.$eval('#lp-house [data-spot="rug"]', el => el.innerHTML), plain);
   await page.screenshot({ path: "runs/casino-browser/lumi-pet-house.png", fullPage: true });
 
   await page.click('[data-lp-tab="settings"]');
+  page.once("dialog", dialog => dialog.accept("Twinkle")); // Her name: typed into the browser's own box.
+  await page.click(row("name"));
+  await said(page, "Hello, Twinkle!");
+  assert.equal(await text(page, "#lp-name"), "Twinkle");
+  await page.click(row("colour")); // Her own colour: the sliders show it in the room as they move.
+  await page.waitForSelector("#lp-tint:not([hidden])");
+  await page.$eval('#lp-tint [data-tint="g"]', el => { el.value = "255"; el.dispatchEvent(new Event("input", { bubbles: true })); });
+  await page.waitForFunction(() => /^#[0-9a-f]{2}ff[0-9a-f]{2}$/.test(document.getElementById("lp-room").style.getPropertyValue("--pet-glow").trim()));
+  const chosen = await page.$eval(row("tint-save"), el => el.textContent.match(/#[0-9A-F]{6}/)[0]);
+  await page.click(row("tint-save"));
+  await said(page, "That's her very own colour now.");
+  assert.equal(await page.$("#lp-tint:not([hidden])"), null, "The sliders put themselves away");
+  assert.equal(await page.$eval("#lp-room", el => el.style.getPropertyValue("--pet-glow").trim()), chosen.toLowerCase());
+  await page.click(row("colour"));
+  await page.waitForSelector(row("tint-glow"));
+  await page.click(row("tint-glow")); // Back to her glow's own, for the rest of this check.
+  await said(page, "Back to her glow's own colours.");
   await page.click(row("glow"));
   await page.waitForFunction(() => document.getElementById("lp-room").dataset.palette === "starlight");
   await page.click(row("sound"));
@@ -273,7 +306,7 @@ export async function checkLumiPet(browser, page, base) { // Exercise real contr
 
   await page.reload(); // Everything came from the account, so a reload (or another device) shows the same Lumi.
   await page.waitForSelector(row("cuddle"));
-  assert.equal(await text(page, "#lp-moments"), "9");
+  assert.equal(await text(page, "#lp-moments"), "10"); // cuddles, a snack, a toy, and the first moving box
   assert.equal(await page.$eval("#lp-room", el => el.dataset.palette), "starlight");
   assert.equal(await text(page, "#lp-coins"), "677");
   assert.ok((await text(page, "#lp-state")).startsWith("Playing"));
@@ -302,7 +335,7 @@ export async function checkLumiPet(browser, page, base) { // Exercise real contr
     });
     await blocked.goto(base + "/media/games/lumi-pet");
     await blocked.waitForSelector(row("cuddle"));
-    assert.equal(await text(blocked, "#lp-moments"), "9");
+    assert.equal(await text(blocked, "#lp-moments"), "10");
   } finally { await blocked.close(); }
   console.log("Lumi Pet and Lumi Dungeons: account save, old-save import, care, pantry, shop, a fight, a dungeon trip, toys, the closet, the house, settings, mobile, reduced motion and blocked storage passed");
 }
@@ -426,9 +459,9 @@ export async function checkLumiPetFrame(page) { // Parent-origin remote messages
   });
   const frame = await (await page.waitForSelector("#mc-game-frame")).contentFrame();
   await frame.waitForSelector(row("cuddle"));
-  await page.evaluate(() => { // Previous wraps straight to Settings, and ▼ steps from Glow to Sound.
+  await page.evaluate(() => { // Previous wraps straight to Settings, and ▼ ▼ ▼ steps from Name past Colour and Glow to Sound.
     const target = document.getElementById("mc-game-frame").contentWindow;
-    for (const key of ["MediaTrackPrevious", "ArrowDown"]) target.postMessage({ type: "mnemerynne-game-key", key }, location.origin);
+    for (const key of ["MediaTrackPrevious", "ArrowDown", "ArrowDown", "ArrowDown"]) target.postMessage({ type: "mnemerynne-game-key", key }, location.origin);
   });
   await page.waitForFunction(() => window.petReport.includes("Settings: Sound"));
   const before = await frame.$eval(row("sound"), el => el.textContent.includes("Sound: on"));
@@ -642,7 +675,7 @@ export async function checkLumiPetSkills(browser, page, base) { // The skill tre
     assert.ok(cells > 10 && cells <= 36, "A page of pictures: " + cells);
     const fitted = await tab.$$eval("#lp-dungeon svg[data-thumb]", frames => frames.filter(frame => frame.getAttribute("viewBox") !== "0 0 400 500").length);
     assert.ok(fitted >= cells - 2, "Each picture is framed round its own drawing: " + fitted + " of " + cells);
-    assert.ok(await tab.$$eval('#lp-dungeon [data-cell="have"]', owned => owned.length) >= 1, "What came with the house is hers");
+    assert.match(await tab.$eval("#lp-story", el => el.textContent), /For the house: [1-9]\d* of/, "What she has unpacked and bought is hers (the first page is all still boxed or for sale)");
     assert.match(await tab.$eval("#lp-story", el => el.textContent), /Collected \d+ of \d+.*For the house: \d+ of \d+/s);
     const gallery = () => tab.$eval("#lp-dungeon [data-cursor]", el => el.dataset.cursor);
     assert.equal(await gallery(), "0");

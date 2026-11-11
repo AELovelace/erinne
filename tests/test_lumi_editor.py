@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 import lumi_pet_editor as editor  # noqa: E402
 
 
-@pytest.mark.parametrize("name, count", [("Snacks, treats and toys", 24), ("House", 446), ("Closet and Star Capsule", 129), ("Battles: enemies, skills, mods", 87), ("Dungeon environments", 12)])
+@pytest.mark.parametrize("name, count", [("Snacks, treats and toys", 24), ("House", 460), ("Closet and Star Capsule", 129), ("Battles: enemies, skills, mods", 87), ("Dungeon environments", 12)])
 def test_every_entry_of_every_catalog_is_listed_and_reachable(name, count):
     path, loader = editor.CATALOGS[name]
     data = json.loads(path.read_text(encoding="utf-8"))

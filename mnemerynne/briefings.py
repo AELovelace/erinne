@@ -146,7 +146,7 @@ def m365_security(conn: sqlite3.Connection, settings: Settings, kind: str, tenan
     for row in rows:
         entry: dict = {"tenant": row["label"]}
         try:
-            graph = m365.Graph(m365.app_token(settings, row))
+            graph = m365.Graph(m365.app_token(m365.live(conn, settings), row))   # live: the shared app as Access has it now
             entry.update(_security(graph, kind))
         except m365.GraphError as exc:
             entry["error"] = (f"Microsoft refused: grant the Entra app the application permission "

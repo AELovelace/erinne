@@ -1,17 +1,22 @@
-{#- The arcade shell Breakout and Snake share (static/games/arcade/arcade.js): the canvas the game draws on, and one
-    panel at a time over it (menu, showdown lobby, a table, game over). Every text that changes is set with
-    textContent by arcade.js; buttons it adds itself are made with createElement. -#}
+{#- The arcade shell Yarn Pop, Lumi Conga and Teacup Tower share (static/games/arcade/arcade.js): the canvas the game
+    draws on, and one panel at a time over it (menu, showdown lobby, a table, game over). Every text that changes is set
+    with textContent by arcade.js; buttons it adds itself are made with createElement. The panels wear Lumi Pet's look:
+    an eyebrow, a two-tone title, a cyan lead line, and rows with an icon (data-icon, drawn by arcade.css). -#}
+{%- set words = game.name.split(' ', 1) %}
+{%- set lead = {"breakout": "Bounce Lumi, pop the yarn.", "snake": "Everybody conga!", "teacup-tower": "Brave little bounces."}.get(game.slug, "") %}
 <section class="ar-stage">
   <canvas id="ar-canvas" width="1366" height="768" role="img" aria-label="{{ game.name }}"></canvas>
   <p class="ar-coins">Coins <b id="ar-coins">—</b></p>
   <div class="ar-panel gm-panel" id="ar-panel">
     <div id="ar-menu">
-      <p class="gm-eyebrow">// {{ game.name|upper }}</p>
+      <p class="gm-eyebrow">// LUMI'S ARCADE</p>
+      <h1 class="gm-title ar-name">{{ words[0]|upper }}<span>{{ words[1]|upper if words|length > 1 else '' }}</span></h1>
+      {% if lead %}<p class="ar-lead">{{ lead }}</p>{% endif %}
       <p class="ar-muted">{{ game.description }}</p>
       <div class="ar-actions">
-        <button type="button" id="ar-solo" class="gm-primary">Play solo (25 coins)</button>
-        <button type="button" id="ar-showdown">Showdown tables</button>
-        <button type="button" id="ar-sound">Sound: on</button>
+        <button type="button" id="ar-solo" class="gm-primary" data-icon="✦">Play solo (25 coins)</button>
+        <button type="button" id="ar-showdown" data-icon="♡">Showdown tables</button>
+        <button type="button" id="ar-sound" data-icon="♪">Sound: on</button>
       </div>
       <p class="ar-muted">Best on this device: <b id="ar-best">0</b></p>
       <p class="gm-keys">{{ game.controls }}</p>
@@ -20,10 +25,10 @@
       <p class="gm-eyebrow">// SHOWDOWN TABLES</p>
       <p class="ar-muted">Two racers play the same game side by side; the further run wins. Up to five can watch and bet. Each racer pays 25 coins and is paid their own score.</p>
       <div class="ar-actions">
-        <button type="button" id="ar-create" class="gm-primary">Start a table</button>
+        <button type="button" id="ar-create" class="gm-primary" data-icon="✦">Start a table</button>
       </div>
       <div class="ar-tables" id="ar-tables"></div>
-      <div class="ar-actions"><button type="button" id="ar-lobby-back">Back</button></div>
+      <div class="ar-actions"><button type="button" id="ar-lobby-back" data-icon="‹">Back</button></div>
     </div>
     <div id="ar-table" hidden>
       <p class="gm-eyebrow">// SHOWDOWN</p>
@@ -36,8 +41,8 @@
       <h2 class="ar-title" id="ar-over-title">Game over</h2>
       <p id="ar-over-line"></p>
       <div class="ar-actions">
-        <button type="button" id="ar-again" class="gm-primary">Play again (25 coins)</button>
-        <button type="button" id="ar-over-menu">Menu</button>
+        <button type="button" id="ar-again" class="gm-primary" data-icon="↻">Play again (25 coins)</button>
+        <button type="button" id="ar-over-menu" data-icon="‹">Menu</button>
       </div>
     </div>
     <p class="ar-status" id="ar-status" role="status" aria-live="polite"></p>

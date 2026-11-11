@@ -18,7 +18,7 @@ import json
 import secrets
 import time
 
-from mnemerynne import coins, lobby
+from mnemerynne import coins, lobby, lumipet
 from mnemerynne.db import transaction
 
 GAMES = {"blackjack", "roulette", "horse-racing", "slots"}
@@ -94,8 +94,10 @@ def _load_purses(conn, state, peek=False):
             balance = coins.peek(conn, p["account"]) if peek else coins.held(conn, p["account"])
             if balance is None:
                 p["account"] = None                       # that account was deleted: the seat plays on with credits
+                p.pop("look", None)                       # ...and sits as a plain Lumi from now on
             else:
                 p["chips"] = balance
+                p["look"] = lumipet.look(conn, p["account"])   # their own Lumi sits in the seat: her glow and outfit, read fresh
 
 
 def _pay_purses(conn, state, held, why):

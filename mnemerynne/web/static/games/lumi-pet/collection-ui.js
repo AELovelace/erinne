@@ -23,9 +23,9 @@
     ((snap.house || {}).spots || []).forEach(function (spot) {
       spot.items.forEach(function (piece) {
         if (!piece.price && !piece.found && !piece.rarity && spot.items.indexOf(piece) === 0 && /-none$/.test(piece.id)) return; // "Empty bracket": a way to show nothing, not a thing to collect.
-        const owned = (!piece.price && !piece.found && !piece.rarity) || pet.decor.indexOf(piece.id) >= 0;
+        const owned = (!piece.price && !piece.found && !piece.rarity && !piece.worn) || pet.decor.indexOf(piece.id) >= 0; // A worn piece is hers once it is out of its box.
         const item = { id: piece.id, name: piece.name, owned: owned, art: { kind: "house", id: piece.id, spot: spot.id },
-          from: spot.name + " · " + (piece.found ? "found in " + place(piece.found) : piece.rarity ? grand(piece.rarity) + " · from a capsule" : piece.price ? "the Home tab, " + piece.price + " coins" : "came with the house") };
+          from: spot.name + " · " + (piece.found ? "found in " + place(piece.found) : piece.rarity ? grand(piece.rarity) + " · from a capsule" : piece.worn ? "Lumi's own, from moving box " + piece.box : piece.price ? "the Home tab, " + piece.price + " coins" : "came with the house") };
         (piece.found ? finds : home).push(item);
       });
     });

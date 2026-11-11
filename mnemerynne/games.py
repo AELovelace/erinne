@@ -51,8 +51,9 @@ GAMES: tuple[Game, ...] = (
          controls="▲ ▼ ◀ ▶ move over the plots · Enter plants or trims · ⏯ presses the powder · ⏮ ⏭ choose", track_keys=True,
          shelf="Lumi", kit="lumi-pet", tabs=("garden", "settings")),
     Game(slug="prism-drop", name="Prism Drop", icon="🔮",
-         description="Pick a pocket and drop a neon ball through blocks, bombs, bonus pegs and sliding platforms. Ten drops, and your score pays coins.",
-         controls="◀ ▶ pick a pocket · Enter drops · ▲ replays the last drop · ▼ sound on or off"),
+         description="Pick a pocket and Lumi drops her glowing ball through blocks, bombs, bonus pegs and sliding platforms, then flies down to fetch it. Ten drops, and your score pays coins.",
+         controls="◀ ▶ pick a pocket · Enter drops · ▲ replays the last drop · ▼ sound on or off",
+         extras=("lumi-pet/closet.js", "arcade/lumi-sprite.js")),
     # Ported from Doll's GameMaker game (python/export_stickbob.py makes its art and levels). It runs in the browser and
     # pays coins for what the page reports, checked against the run's time (runner.py), with an optional daily cap.
     Game(slug="stickbob-runner", name="StickBob Runner", icon="🏃",
@@ -61,19 +62,21 @@ GAMES: tuple[Game, ...] = (
          mouse_keyboard=True),
     # Ported from Doll's GameMaker arcade (python/export_roulette_arcade.py copies the art and sounds). Both share one shell
     # (games/arcade/): solo runs and showdown tables, where two race and five can watch and bet (arcade.py, showdown.py).
-    Game(slug="breakout", name="Breakout", icon="🧱",
-         description="Break every brick with a neon ball: catch power-ups, juggle multiball, clear level after level. Race someone in a showdown while others bet. 25 coins a run; every brick pays one.",
-         controls="◀ ▶ move the bat · Enter or ▲ launches · P pauses · menus: arrows and Enter",
-         extras=("arcade/arcade.css", "arcade/arcade.js")),
-    Game(slug="snake", name="Snake", icon="🐍",
-         description="Eat and grow without hitting the walls or yourself. Red is 1, yellow 5, aqua 10. Race someone in a showdown while others bet. 25 coins a run; every point pays one.",
+    # Breakout as "Yarn Pop" (Doll, 2026-11-11): Lumi, curled up, is the ball. The slug and the rules stay Breakout's.
+    Game(slug="breakout", name="Yarn Pop", icon="🧶",
+         description="Lumi curls up into a ball and you bounce her off a cushion to pop every block: catch treats, juggle her friends, clear level after level. Race someone in a showdown while others bet. 25 coins a run; every block pays one.",
+         controls="◀ ▶ move the cushion · Enter or ▲ launches Lumi · P pauses · menus: arrows and Enter",
+         extras=("lumi-pet/closet.js", "arcade/lumi-sprite.js", "arcade/arcade.css", "arcade/arcade.js")),
+    # Snake as "Lumi Conga" (Doll, 2026-11-11): a conga line of Lumis; each one picked up joins in her own colour.
+    Game(slug="snake", name="Lumi Conga", icon="💃",
+         description="Lead a conga line of Lumis: pick up the Lumis waiting around the room and they join the end of the line in their own colours. Pink is 1, gold 5, aqua 10. Don't bump the walls or the line. Race someone in a showdown while others bet. 25 coins a run; every point pays one.",
          controls="Arrows turn · the first arrow starts · P pauses · menus: arrows and Enter",
-         extras=("arcade/arcade.css", "arcade/arcade.js")),
+         extras=("lumi-pet/closet.js", "arcade/lumi-sprite.js", "arcade/arcade.css", "arcade/arcade.js")),
     # Our own climber in the same shell (Doll's idea, 2026-11-10), with Lumi Pet as the climber.
     Game(slug="teacup-tower", name="Teacup Tower", icon="🫖",
          description="Lumi bounces up an endless tower of teacups: steer her, run at the walls to fly higher, string big hops into combos, and keep ahead as the tower rises. Race someone in a showdown. 25 coins a run; every floor pays one.",
          controls="◀ ▶ steer · she bounces by herself · faster sideways jumps higher · P pauses · menus: arrows and Enter",
-         extras=("arcade/arcade.css", "arcade/arcade.js")),
+         extras=("lumi-pet/closet.js", "arcade/lumi-sprite.js", "arcade/arcade.css", "arcade/arcade.js")),
 )
 
 # Casino tables share one renderer and server rules; each still has its own Games card.

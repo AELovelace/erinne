@@ -229,7 +229,7 @@
   function distance(g) { return (g.level - 1) * 100 + g.score; }   // how a showdown ranks a run
 
   const API = { M: M, COLS: COLS, ROWS: ROWS, CELL: CELL, BRICK_H: BRICK_H, ORIGIN: ORIGIN, W: W, H: H, BAT_W: BAT_W,
-                BAT_H: BAT_H, BAT_Y: BAT_Y, RADIUS: RADIUS, levelSeed: levelSeed, field: field, brickRect: brickRect,
+                BAT_H: BAT_H, BAT_Y: BAT_Y, RADIUS: RADIUS, MAX_SPEED: MAX_SPEED, levelSeed: levelSeed, field: field, brickRect: brickRect,
                 newGame: newGame, step: step, board: board, distance: distance, batHalf: batHalf, radius: radius,
                 bricksLeft: bricksLeft };
   if (typeof module !== "undefined" && module.exports) module.exports = API; else root.BreakoutRules = API;

@@ -36,6 +36,7 @@ def alice(conn):
 def _pet(level=1, skills=(), mods=(), glow="rose", moves=None):
     pet = {"glow": glow, "boost": None, **B.fresh_fields()}
     pet.update(level=level, skills=list(skills), mods=(list(mods) + [None] * 5)[:5])
+    pet["stat_points"] = {key: level - 1 for key in B.STAT_KEYS}      # points spread evenly: her numbers from before points
     if moves:
         pet["moves"] = moves
     return pet
@@ -51,6 +52,8 @@ def _set(conn, uid, **fields):
     with transaction(conn):
         lumipet.state(conn, uid, T0)
     pet = json.loads(conn.execute("SELECT data FROM lumi_pets WHERE user_id = ?", (uid,)).fetchone()[0])
+    if "level" in fields and "stat_points" not in fields:            # a level set by hand comes with its points spread evenly
+        fields = {**fields, "stat_points": {key: fields["level"] - 1 for key in B.STAT_KEYS}}
     pet.update(fields)
     conn.execute("UPDATE lumi_pets SET data = ? WHERE user_id = ?", (json.dumps(pet), uid))
 

@@ -43,7 +43,7 @@ BET_CHIPS = (1, 5, 10, 25, 100)
 BET_LIMIT = 500                  # the most one watcher may have riding on one race
 MAX_TABLES = 50                  # per game
 IDLE_SECONDS = 7200              # a table nobody has changed in this long closes, whoever is still "there"
-NAMES = {"breakout": "Breakout", "snake": "Snake", "teacup-tower": "Teacup Tower"}
+NAMES = {"breakout": "Yarn Pop", "snake": "Lumi Conga", "teacup-tower": "Teacup Tower"}   # their names on the Games shelf (games.py)
 
 
 def _key(code: str) -> tuple:
@@ -204,7 +204,8 @@ def _public(state: dict, actor: str) -> dict:
     """What a page may see: no actors or accounts; the seed only once the race has started."""
     me = _seat_of(state, actor)
     seats = [{"id": s["id"], "name": s["name"], "role": s["role"], "ready": s["ready"],
-              "away": _quiet(state, s) >= AWAY_SECONDS, "you": s is me} for s in state["seats"] if s["role"] != "gone"]
+              "away": _quiet(state, s) >= AWAY_SECONDS, "you": s is me, "look": s.get("look") or {"glow": "rose", "outfit": {}}}
+             for s in state["seats"] if s["role"] != "gone"]
     race = None
     if state["race"]:
         r = state["race"]
@@ -260,8 +261,10 @@ def tables(conn, game: str, actor: str) -> list[dict]:
     return [_summary(json.loads(r["state"]), actor) for r in rows]
 
 
-def _new_seat(actor: str, name: str, account: int, role: str) -> dict:
-    return {"id": secrets.token_hex(6), "actor": actor, "name": name[:40], "account": account, "role": role, "ready": False}
+def _new_seat(actor: str, name: str, account: int, role: str, look: dict | None = None) -> dict:
+    """A seat, with its player's Lumi's look as she sat down (drawn on their board: arcade.lumi_look)."""
+    return {"id": secrets.token_hex(6), "actor": actor, "name": name[:40], "account": account, "role": role, "ready": False,
+            "look": look or {"glow": "rose", "outfit": {}}}
 
 
 def _leave_others(conn, game: str, actor: str, keep: str | None, now: float) -> None:
@@ -295,7 +298,7 @@ def create(conn, game: str, actor: str, name: str, account: int) -> dict:
         code = lobby.new_code(conn, "arcade_rooms")
         lobby.PRESENCE.seen(_key(code), actor)
         state = {"code": code, "game": game, "name": f"{name[:40]}'s {NAMES[game]} table", "revision": 1,
-                 "phase": "waiting", "seats": [_new_seat(actor, name, account, "p1")], "race": None, "bets": [],
+                 "phase": "waiting", "seats": [_new_seat(actor, name, account, "p1", arcade.lumi_look(conn, account))], "race": None, "bets": [],
                  "last": None, "result_until": 0}
         conn.execute("INSERT INTO arcade_rooms VALUES (?, ?, ?, ?)", (code, game, json.dumps(state), now))
     return _public(state, actor)
@@ -327,7 +330,7 @@ def act(conn, game: str, code: str, actor: str, name: str, account: int, action:
             seat = None
         if action == "join":
             if seat is None:
-                seat = _join(state, actor, name, account)
+                seat = _join(state, actor, name, account, arcade.lumi_look(conn, account))
         elif action is not None and seat is None:
             raise Refused("You're not at this table any more. Join it again from the lobby.", 403)
         elif action == "leave":
@@ -352,17 +355,17 @@ def act(conn, game: str, code: str, actor: str, name: str, account: int, action:
         return {"left": True} if action == "leave" else _public(state, actor)
 
 
-def _join(state: dict, actor: str, name: str, account: int) -> dict:
+def _join(state: dict, actor: str, name: str, account: int, look: dict | None = None) -> dict:
     """Sit down: in an empty racer seat between races (unless the other racer is the same account), else to watch."""
     for role in ("p1", "p2"):
         other = _racer(state, "p2" if role == "p1" else "p1")
         if state["phase"] != "racing" and _racer(state, role) is None and (other is None or other["account"] != account):
-            seat = _new_seat(actor, name, account, role)   # bets need both racers, so none can be riding yet
+            seat = _new_seat(actor, name, account, role, look)   # bets need both racers, so none can be riding yet
             state["seats"].append(seat)
             return seat
     if sum(s["role"] == "watch" for s in state["seats"]) >= WATCHERS:
         raise Refused("This table is full. Choose another or start one.")
-    seat = _new_seat(actor, name, account, "watch")
+    seat = _new_seat(actor, name, account, "watch", look)
     state["seats"].append(seat)
     return seat
 

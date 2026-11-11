@@ -25,7 +25,13 @@
   function screenY(y, worldY, camera) { return y + T.H - (worldY - camera); }
   const remote = {};                                          // the smoothed view of each other racer's board, by screen side
 
-  function drawLumi(ctx, x, y, size, squash, tilt, blink) {   // her feet at (x, y)
+  // Each player's own Lumi (arcade/lumi-sprite.js: her glow and what she wears); the drawing below stands in where
+  // the sprite isn't loaded (Node's tests). `size` is her scale in Lumi Pet's 320 x 300 drawing (0.22: about 51 tall).
+  function drawLumi(ctx, x, y, size, squash, tilt, blink, look) {   // her feet at (x, y)
+    if (window.LumiSprite) {
+      window.LumiSprite.draw(ctx, look || window.LumiSprite.PLAIN, x, y, (272 - 40) * size, { squash: squash, tilt: tilt, eyes: blink ? "closed" : "open" });
+      return;
+    }
     ctx.save();
     ctx.translate(x, y); ctx.rotate(tilt); ctx.scale(size * (2 - squash), size * squash); ctx.translate(-160, -272);
     ctx.shadowColor = SHADOW; ctx.shadowBlur = 30;
@@ -165,7 +171,7 @@
     boardHud: function (b) { return "Floor " + b.score + (b.alive ? "" : " · fell"); },
     waiting: function (g) { return g.state.started ? "" : "Press ◀ or ▶ to start climbing"; },
 
-    drawArena: function (ctx, g, x, y, t) {
+    drawArena: function (ctx, g, x, y, t, look) {
       const s = g.state;
       tower(ctx, x, y, s.seed, s.camera, s.frames, s.broken, t);
       ctx.save(); ctx.beginPath(); ctx.rect(x, y, T.W, T.H); ctx.clip();
@@ -175,7 +181,7 @@
         ctx.beginPath(); ctx.arc(x + p.x, screenY(y, p.y, s.camera), 3, 0, Math.PI * 2); ctx.fill();
       });
       ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
-      drawLumi(ctx, x + s.x, screenY(y, s.y, s.camera), 0.22, g.squash, s.vx * 0.02, g.blink > 0);
+      drawLumi(ctx, x + s.x, screenY(y, s.y, s.camera), 0.22, g.squash, s.vx * 0.02, g.blink > 0, look);
       g.pops.forEach(function (p) {
         ctx.globalAlpha = 1 - p.age / 60; ctx.fillStyle = "#ffe14d"; ctx.font = "800 26px " + G.colors().font; ctx.textAlign = "center";
         ctx.fillText(p.text, x + Math.max(90, Math.min(T.W - 90, p.x)), screenY(y, p.y + p.age, s.camera));
@@ -185,10 +191,11 @@
         ctx.fillStyle = "#ff2e97"; ctx.font = "800 44px " + G.colors().font; ctx.textAlign = "center"; ctx.fillText("FASTER!", x + T.W / 2, y + 70);
       }
       ctx.restore();
-      ctx.strokeStyle = "rgb(110,188,236)"; ctx.lineWidth = 2; ctx.strokeRect(x - 4, y - 4, T.W + 8, T.H + 8);
+      ctx.save(); ctx.shadowColor = "#ff8ecb"; ctx.shadowBlur = 16; ctx.strokeStyle = "#ff8ecb"; ctx.lineWidth = 3;   // Lumi's soft pink frame
+      ctx.strokeRect(x - 4, y - 4, T.W + 8, T.H + 8); ctx.restore();
     },
 
-    drawBoard: function (ctx, b, x, y, t) {                   // another racer's climb: their tower from the race's seed
+    drawBoard: function (ctx, b, x, y, t, look) {             // another racer's climb (their own Lumi): their tower from the race's seed
       if (!b || !game.raceSeed) {
         ctx.fillStyle = "rgb(10,4,18)"; ctx.fillRect(x, y, T.W, T.H);
         ctx.fillStyle = "#b98aa9"; ctx.font = "600 22px " + G.colors().font; ctx.textAlign = "center";
@@ -202,17 +209,15 @@
       s.cam = glide(s.cam, b.height); s.x = glide(s.x, b.points[0] * T.W); s.y = glide(s.y, worldY);
       s.frame = b.frame > s.frame ? s.frame + Math.min(4, b.frame - s.frame) : b.frame;   // sliding cups keep moving smoothly
       tower(ctx, x, y, game.raceSeed, s.cam, s.frame, null, t);
-      drawLumi(ctx, x + s.x, screenY(y, s.y, s.cam), 0.22, 1, 0, !b.alive);
-      ctx.strokeStyle = "rgb(110,188,236)"; ctx.lineWidth = 2; ctx.strokeRect(x - 4, y - 4, T.W + 8, T.H + 8);
+      drawLumi(ctx, x + s.x, screenY(y, s.y, s.cam), 0.22, 1, 0, !b.alive, look);
+      ctx.save(); ctx.shadowColor = "#ff8ecb"; ctx.shadowBlur = 16; ctx.strokeStyle = "#ff8ecb"; ctx.lineWidth = 3;   // Lumi's soft pink frame
+      ctx.strokeRect(x - 4, y - 4, T.W + 8, T.H + 8); ctx.restore();
     },
 
-    drawIdle: function (ctx, t, W, H) {                       // behind the menus: the name, a cup and Lumi bouncing on it
-      ctx.save(); ctx.shadowColor = "#ff8ecb"; ctx.shadowBlur = 30;
-      ctx.font = "800 100px " + G.colors().font; ctx.textAlign = "center"; ctx.fillStyle = "#ffe9f5";
-      ctx.fillText("TEACUP TOWER", W / 2, 140); ctx.restore();
+    drawIdle: function (ctx, t, W, H, look) {                 // behind the menus: the name, a cup and Lumi bouncing on it
       cupRow(ctx, W - 300, 640, 140, "#00f0ff", "cup", t);   // to the right of the menu panel, so she's in view
       const hop = G.reducedMotion ? 0 : Math.abs(Math.sin(t / 380)) * 160;
-      drawLumi(ctx, W - 230, 640 - hop, 0.34, 1, 0, false);
+      drawLumi(ctx, W - 230, 640 - hop, 0.34, 1, 0, false, look);
     },
   };
 

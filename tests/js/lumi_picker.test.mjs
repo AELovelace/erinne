@@ -6,11 +6,13 @@ import { createRequire } from "node:module";
 const Pk = createRequire(import.meta.url)("../../mnemerynne/web/static/games/lumi-pet/picker-ui.js");
 const data = name => JSON.parse(readFileSync(new URL("../../mnemerynne/lumipet_data/" + name, import.meta.url), "utf8"));
 const house = data("house.json"), closet = data("closet.json");
-const firsts = Object.fromEntries(house.spots.map(spot => [spot.id, spot.items[0].id]));
+// A Lumi who has bought the tier-1 piece (the old free starter) for every spot, and put it out.
+const firsts = Object.fromEntries(house.spots.map(spot => [spot.id, spot.items.find(item => !item.worn).id]));
+const starters = Object.values(firsts).filter(id => house.spots.some(spot => spot.items.some(item => item.id === id && item.price)));
 
-function lists(pet = {}, open = null, flip = {}) {
+function lists(pet = {}, open = null, flip = {}, boxes = { left: 0 }) {
   const went = [];
-  const snap = { pet: { house: firsts, decor: [], outfit: {}, closet: [], ...pet }, house, closet };
+  const snap = { pet: { house: firsts, decor: starters, outfit: {}, closet: [], ...pet }, house, closet, boxes };
   const ctx = { snap, open, flip, go: change => went.push(change) };
   const find = rows => key => rows.find(r => r.key === key);
   const home = Pk.homeRows(ctx), wear = Pk.closetRows(ctx);
@@ -34,10 +36,10 @@ test("the house is one row a spot, showing what is placed; Enter there opens the
 
 test("a flipped row previews its choice and Enter buys or places it", () => {
   const priced = lists({}, null, { rug: "rug-moon" }).spot("rug");
-  assert.deepEqual([priced.hint, priced.send, priced.preview, priced.label], ["◀ Moon rug ▶ · 100 coins · Enter buys it", { action: "decorate", item: "rug-moon" }, ["rug", "rug-moon"], "Moon rug"]);
+  assert.deepEqual([priced.hint, priced.send, priced.preview, priced.label], ["◀ Moon rug ▶ · 100 coins · showing in the room · Enter buys it", { action: "decorate", item: "rug-moon" }, ["rug", "rug-moon"], "Moon rug"]);
   const owned = lists({ decor: ["rug-moon"] }, null, { rug: "rug-moon" }).spot("rug");
   assert.equal(owned.hint, "◀ Moon rug ▶ · yours · Enter puts it out");
-  const placed = lists({ decor: ["rug-moon"], house: { ...firsts, rug: "rug-moon" } }, null, { rug: "rug-oval" }).spot("rug");
+  const placed = lists({ decor: [...starters, "rug-moon"], house: { ...firsts, rug: "rug-moon" } }, null, { rug: "rug-oval" }).spot("rug");
   assert.deepEqual([placed.hint, placed.send], ["◀ Plum oval ▶ · yours · Enter puts it out", { action: "decorate", item: "rug-oval" }]);
   assert.equal(lists({}, null, { rug: "rug-retired" }).spot("rug").shown, "rug-oval", "A choice that no longer exists falls back to what is placed");
 });
@@ -127,4 +129,43 @@ test("the capsules are also sold at the top of the Shop", () => {
   assert.deepEqual(rows.map(r => [r.key, r.name, r.send]), [["capsule", "Star Capsule", { action: "capsule" }], ["capsule-moon", "Moon Capsule", { action: "capsule", item: "moon" }]]);
   assert.match(rows[0].hint, /^150 coins/);
   assert.match(rows[1].hint, /^300 coins · rare, epic or legendary only/);
+});
+
+test("a bare spot says so, the boxes come first, and a worn piece waits in its box until it is unpacked", () => {
+  const bare = lists({ house: {}, decor: [] }, null, {}, { left: 14, total: 14, next: "Mattress on the floor", ready: true });
+  assert.deepEqual(bare.home[0].send, { action: "unpack" });
+  assert.equal(bare.home[0].hint, "Box 1 of 14: Mattress on the floor");
+  const bed = bare.spot("bed");
+  assert.deepEqual([bed.shown, bed.preview, bed.hint], [null, null, "Bare for now · ◀ ▶ to look through what you could buy"]);
+  assert.ok(!bed.options.includes("bed-worn"), "Her own mattress isn't among the choices until it is unpacked");
+  const waiting = lists({ house: {}, decor: [] }, null, {}, { left: 13, total: 14, next: "Bare bulb on a stand", ready: false });
+  assert.match(waiting.home[0].note, /Another box tomorrow/);
+  const full = lists({ house: {}, decor: [] }, "lamp");
+  assert.match(full.spot("lamp-worn").note, /moving box 2/);
+  assert.equal(full.spot("lamp-worn").send, undefined);
+  const unpacked = lists({ house: { bed: "bed-worn" }, decor: ["bed-worn"] }).spot("bed");
+  assert.deepEqual([unpacked.shown, unpacked.hint], ["bed-worn", "◀ Mattress on the floor ▶ · in the room"]);
+});
+
+test("buying is try before you buy: the first choice shows it, the second buys it", () => {
+  const full = lists({}, "rug");
+  const moon = full.spot("rug-moon");
+  assert.deepEqual([moon.preview, moon.send], [["rug", "rug-moon"], { action: "decorate", item: "rug-moon" }]);
+  assert.equal(moon.ask, "Here's the Moon rug in the room. Choose it again to buy it for 100 coins.");
+  assert.equal(full.spot("rug-oval").ask, undefined, "Already hers: no need to ask");
+  const hat = lists({}, null, {}).wear.find(r => r.key === "slot-head");
+  hat.local && hat.local();
+  const slot = lists({}, "head").wear.find(r => r.send && r.send.action === "wear" && !r.note);
+  assert.match(slot.ask, /tries on the .*Choose it again to buy it for \d+ coins/);
+});
+
+test("back from a spot's whole list lands on that spot's row, below the moving boxes while any are left", () => {
+  const index = house.spots.findIndex(spot => spot.id === "rug");
+  const withBoxes = lists({}, "rug", {}, { left: 3, total: 14, next: "x", ready: false });
+  withBoxes.spot("back").local();
+  assert.deepEqual(withBoxes.went, [{ open: null, pick: index + 1 }]);
+  assert.equal(lists({}, null, {}, { left: 3, total: 14, next: "x", ready: false }).home[index + 1].key, "rug");
+  const unpacked = lists({}, "rug");
+  unpacked.spot("back").local();
+  assert.deepEqual(unpacked.went, [{ open: null, pick: index }]);
 });

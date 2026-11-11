@@ -120,7 +120,7 @@ test("the collection counts everything there is, by shelf, and what she has of i
   assert.equal(count("mods"), battle.mods.length);
   assert.deepEqual([count("flowers"), count("garden")], [42, 225]);
   const owned = id => shelves.find(shelf => shelf.id === id).items.filter(item => item.owned).length;
-  assert.equal(owned("home"), house.spots.filter(spot => !/-none$/.test(spot.items[0].id)).length, "A new Lumi has what came with the house");
+  assert.equal(owned("home"), house.spots.filter(spot => !/-none$/.test(spot.items[0].id) && !spot.items[0].worn).length, "A new Lumi has only what came with the house: the view outside (she has just moved in)");
   assert.deepEqual([owned("finds"), owned("closet"), owned("mods"), owned("flowers"), owned("garden")], [0, 0, 0, 2, 0]);
   assert.equal(owned("toys"), items.toys.filter(toy => !toy.price && !toy.rarity).length);
   const totals = Album.totals(shelves);

@@ -1,4 +1,5 @@
-/* Full single-zero wheel: SVG artwork and motion are local; the server alone chooses the winning pocket. */
+/* Full single-zero wheel: SVG artwork and motion are local; the server alone chooses the winning pocket.
+   Lumi's Lounge colours: a rose-gold rim and hub on plum (the pockets' colours are in game.css). */
 (function (root) {
   "use strict";
   const ORDER = Object.freeze([0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10,
@@ -47,13 +48,13 @@
     const element = document.createElement("div"); element.className = "roulette-display";
     const wheel = svg("svg", { viewBox: "-260 -260 520 520", class: "roulette-wheel", role: "img", "aria-label": "Single-zero roulette wheel with 37 numbered pockets" });
     const defs = svg("defs"), gold = svg("radialGradient", { id: "roulette-gold", cx: "36%", cy: "27%", r: "75%" });
-    [["0%", "#fff3bf"], ["35%", "#d6ae57"], ["70%", "#86602b"], ["90%", "#e5bd67"], ["100%", "#48311c"]].forEach(([offset, color]) => gold.append(svg("stop", { offset, "stop-color": color })));
+    [["0%", "#fff0f7"], ["35%", "#ffb3d9"], ["70%", "#b8569f"], ["90%", "#ffc4e1"], ["100%", "#5a2848"]].forEach(([offset, color]) => gold.append(svg("stop", { offset, "stop-color": color })));
     const wood = svg("radialGradient", { id: "roulette-wood" });
-    [["0%", "#4d2428"], ["70%", "#20151f"], ["90%", "#703a36"], ["100%", "#261923"]].forEach(([offset, color]) => wood.append(svg("stop", { offset, "stop-color": color })));
+    [["0%", "#3d2450"], ["70%", "#1a0f2e"], ["90%", "#5a3a6e"], ["100%", "#1a0f2e"]].forEach(([offset, color]) => wood.append(svg("stop", { offset, "stop-color": color })));
     defs.append(gold, wood); wheel.append(defs);
-    wheel.append(svg("circle", { r: 254, fill: "url(#roulette-wood)", stroke: "#d9b666", "stroke-width": 3 }),
-      svg("circle", { r: 242, fill: "#1a151c", stroke: "#997540", "stroke-width": 3 }),
-      svg("circle", { r: TRACK, fill: "none", stroke: "#59432d", "stroke-width": 1 }),
+    wheel.append(svg("circle", { r: 254, fill: "url(#roulette-wood)", stroke: "#ffc4e1", "stroke-width": 3 }),
+      svg("circle", { r: 242, fill: "#1a0f2e", stroke: "#b8569f", "stroke-width": 3 }),
+      svg("circle", { r: TRACK, fill: "none", stroke: "#7a55c0", "stroke-width": 1 }),
       svg("circle", { r: 220, fill: "url(#roulette-gold)" }));
     const rotor = svg("g", { class: "roulette-rotor" }), pockets = [];
     ORDER.forEach((number, index) => {
@@ -64,11 +65,11 @@
         svg("text", { x: 0, y: -195, transform: "rotate(" + angle + ")", "text-anchor": "middle", "dominant-baseline": "middle", class: "roulette-number" }, number));
       rotor.append(pocket); pockets.push(pocket);
     });
-    rotor.append(svg("circle", { r: 137, fill: "url(#roulette-wood)", stroke: "#d9b666", "stroke-width": 4 }),
-      svg("circle", { r: 113, fill: "none", stroke: "#ae8751", "stroke-width": 1 }),
-      svg("circle", { r: 84, fill: "none", stroke: "#6f4f36", "stroke-width": 2 }));
+    rotor.append(svg("circle", { r: 137, fill: "url(#roulette-wood)", stroke: "#ffc4e1", "stroke-width": 4 }),
+      svg("circle", { r: 113, fill: "none", stroke: "#ff8ecb", "stroke-width": 1 }),
+      svg("circle", { r: 84, fill: "none", stroke: "#7a55c0", "stroke-width": 2 }));
     for (let i = 0; i < 4; i++) rotor.append(svg("path", { d: "M -6 -15 L -4 -96 Q 0 -106 4 -96 L 6 -15 Z", transform: "rotate(" + i * 90 + ")", fill: "url(#roulette-gold)" }));
-    rotor.append(svg("circle", { r: 25, fill: "url(#roulette-gold)", stroke: "#edd08d", "stroke-width": 2 }));
+    rotor.append(svg("circle", { r: 25, fill: "url(#roulette-gold)", stroke: "#fff0f7", "stroke-width": 2 }));
     wheel.append(rotor);
     const orbit = svg("g", { class: "roulette-orbit" }), ball = svg("circle", { cx: 0, cy: -TRACK, r: 6, class: "roulette-ball" });
     orbit.append(ball); wheel.append(orbit);

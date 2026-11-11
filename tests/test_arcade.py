@@ -185,7 +185,7 @@ def _race(conn, people, clock):
     """Alice and Bob at a Breakout table, Carol watching with 10 on Bob."""
     alice, bob, carol = people["alice"], people["bob"], people["carol"]
     table = showdown.create(conn, "breakout", f"user:{alice}", "Alice", alice)
-    assert table["role"] == "p1" and table["name"] == "Alice's Breakout table"
+    assert table["role"] == "p1" and table["name"] == "Alice's Yarn Pop table"
     assert _act(conn, table["code"], bob, "join")["role"] == "p2"
     assert _act(conn, table["code"], carol, "join")["role"] == "watch"
     after = _act(conn, table["code"], carol, "bet", target="p2", amount=10)
@@ -313,3 +313,36 @@ def test_the_page_keeps_tables_to_their_players(client, conn, directory):
     assert client.post(f"/api/media/games/breakout/tables/{code}", json={"action": "leave"}).json() == {"left": True}
     assert client.get(f"/api/media/games/breakout/tables/{code}").status_code == 404
     assert client.get(f"/api/media/games/breakout/tables/{code}/stream").status_code == 404
+
+
+# ------------------------------------------------------------------ Lumi in the arcade (2026-11-11)
+def test_each_player_s_lumi_look_is_read_without_changing_her(conn, people):
+    """arcade.lumi_look: her glow and what she wears, read only; a retired item or colour is simply left off."""
+    assert arcade.lumi_look(conn, people["alice"]) == {"glow": "rose", "outfit": {}}          # no Lumi yet: a fresh one's look
+    pet = {"glow": "lagoon", "outfit": {"head": "acc-flower-crown", "neck": "acc-not-a-thing", "paws": "acc-flower-crown"}}
+    conn.execute("INSERT INTO lumi_pets(user_id, data) VALUES (?, ?)", (people["alice"], json.dumps(pet)))
+    before = conn.execute("SELECT data, updated_at FROM lumi_pets").fetchone()
+    assert arcade.lumi_look(conn, people["alice"]) == {"glow": "lagoon", "outfit": {"head": "acc-flower-crown"}}
+    assert tuple(conn.execute("SELECT data, updated_at FROM lumi_pets").fetchone()) == tuple(before)   # nothing written
+    conn.execute("UPDATE lumi_pets SET data = ?", (json.dumps({"glow": "plaid"}),))
+    assert arcade.lumi_look(conn, people["alice"])["glow"] == "rose"
+
+
+def test_every_showdown_seat_carries_its_racer_s_lumi(conn, people, clock):
+    conn.execute("INSERT INTO lumi_pets(user_id, data) VALUES (?, ?)", (people["bob"], json.dumps({"glow": "umbra", "outfit": {}})))
+    table = showdown.create(conn, "breakout", f"user:{people['alice']}", "alice", people["alice"])
+    assert table["name"] == "alice's Yarn Pop table"
+    seen = _act(conn, table["code"], people["bob"], "join")
+    looks = {s["name"]: s["look"] for s in seen["seats"]}
+    assert looks == {"alice": {"glow": "rose", "outfit": {}}, f"P{people['bob']}": {"glow": "umbra", "outfit": {}}}
+
+
+def test_the_page_asks_for_its_lumi_and_sends_the_conga_s_colours(client, conn, directory):
+    uid = _login(client, conn, directory)
+    _turn_on(client)
+    conn.execute("INSERT INTO lumi_pets(user_id, data) VALUES (?, ?)", (uid, json.dumps({"glow": "wisp", "outfit": {}})))
+    assert client.get("/api/media/games/lumi-look").json() == {"glow": "wisp", "outfit": {}}
+    code = client.post("/api/media/games/snake/tables").json()["code"]
+    board = {"score": 1, "length": 4, "alive": True, "points": [0.5, 0.5], "food": [1, 2, 3], "kinds": "1223"}
+    assert client.post(f"/api/media/games/snake/tables/{code}/board", json=board).status_code == 409   # accepted shape; not racing yet
+    assert client.post(f"/api/media/games/snake/tables/{code}/board", json=board | {"kinds": "<b>"}).status_code == 422

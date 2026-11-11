@@ -1,5 +1,8 @@
 /* Snake's rules, ported from Doll's GameMaker arcade (Roulette: objSnakeController): a 20 x 15 grid, one move every 8
-   frames, three kinds of food. No drawing here, so Node can test it (tests/js/snake.test.mjs), and
+   frames, three kinds of food. On the Games shelf it is Lumi Conga (2026-11-11): the snake is a conga line of Lumis
+   and the food is Lumis waiting to join, so the body also remembers each dancer's kind (`kinds`, head first: 0 is the
+   player's own Lumi leading, 2-4 the colours they joined in). Only for drawing: the score and the server's replay
+   (mnemerynne/arcade.py) never look at it. No drawing here, so Node can test it (tests/js/snake.test.mjs), and
    mnemerynne/arcade.py plays every run again with the same arithmetic before it pays: the page sends only the moves it
    turned on (game.turns), never its score.
 
@@ -31,7 +34,7 @@
 
   function newGame(seed) {                                  // head at (10, 7) heading right, three long, first food placed
     const g = { seed: seed, board: Array.from({ length: W }, function () { return new Array(H).fill(0); }),
-                body: [[10, 7], [9, 7], [8, 7]], heading: 0, score: 0, alive: true, moves: 0, turns: [], foodIndex: 0, food: null };
+                body: [[10, 7], [9, 7], [8, 7]], kinds: [0, 2, 2], heading: 0, score: 0, alive: true, moves: 0, turns: [], foodIndex: 0, food: null };
     g.body.forEach(function (c) { g.board[c[0]][c[1]] = 1; });
     place(g);
     return g;
@@ -60,6 +63,7 @@
     g.body.unshift([x, y]);
     g.board[x][y] = 1;
     if (ate) {
+      g.kinds.push(cell);                                   // she joins the end of the line, in her own colour
       g.score += POINTS[cell];
       if (events) events.push({ type: "eat", kind: cell, x: x, y: y });
       if (!place(g)) { g.alive = false; if (events) events.push({ type: "die" }); }
@@ -69,7 +73,8 @@
   function board(g) {                                       // the live board other players see (web/games.py Board)
     const points = [];
     g.body.slice(0, 300).forEach(function (c) { points.push((c[0] + 0.5) / W, (c[1] + 0.5) / H); });
-    return { score: g.score, length: g.body.length, alive: g.alive, points: points, food: g.food ? g.food.slice() : [] };
+    return { score: g.score, length: g.body.length, alive: g.alive, points: points, food: g.food ? g.food.slice() : [],
+             kinds: g.kinds.slice(0, 300).map(function (k) { return k || 1; }).join("") };   // 1 is the leader (web/games.py Board)
   }
 
   function distance(g) { return g.score + Math.max(0, g.body.length - 3) * 5; }   // how a showdown ranks a run

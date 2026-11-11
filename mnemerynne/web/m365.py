@@ -68,7 +68,7 @@ async def callback(request: Request, user=Depends(page_user), conn: sqlite3.Conn
 def my_accounts(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
     """The person's linked accounts, and the tenants they can link."""
     settings = request.app.state.settings
-    shared = m365.configured(settings)
+    shared = m365.configured(m365.live(conn, settings))    # the shared app, from Access or the settings file
     tenants = [{"id": t["id"], "label": t["label"], "own_app": bool(t["client_id"])}
                for t in m365.tenants(conn, enabled_only=True) if shared or t["client_id"]]
     return {"available": bool(tenants), "accounts": m365.identities(conn, user["id"]), "tenants": tenants}
@@ -99,7 +99,7 @@ class TenantPatch(BaseModel):
 
 
 def _tenants(request: Request, conn: sqlite3.Connection) -> dict:
-    settings = request.app.state.settings
+    settings = m365.live(conn, request.app.state.settings)   # with the shared app as Access has it now
     out = []
     for t in m365.tenants(conn):
         try:
@@ -112,11 +112,40 @@ def _tenants(request: Request, conn: sqlite3.Connection) -> dict:
                     "client_id": t["client_id"], "secret_set": t["client_secret_enc"] is not None,
                     "consent_url": consent, "consent_ok_at": t["consent_ok_at"], "consent_error": t["consent_error"],
                     "linked": linked})
-    return {"configured": m365.configured(settings), "redirect_uri": _redirect_uri(request), "tenants": out}
+    return {"configured": m365.configured(settings), "shared_app": m365.shared_app(conn, request.app.state.settings),
+            "redirect_uri": _redirect_uri(request), "tenants": out}
 
 
 @router.get("/api/admin/m365")
 def admin_tenants(request: Request, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+    return _tenants(request, conn)
+
+
+class SharedAppBody(BaseModel):
+    """The shared (multitenant) app registration, set live from the Access page."""
+    client_id: str = Field(min_length=1, max_length=100)
+    client_secret: str = Field(min_length=1, max_length=500)
+
+
+@router.put("/api/admin/m365/shared-app")
+def set_shared_app(body: SharedAppBody, request: Request, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Save the shared app registration. It is used from the next request on, here and in the worker: no restart.
+    The secret is kept encrypted and never sent back; the log records the client ID only."""
+    try:
+        with transaction(conn):
+            m365.set_shared_app(conn, request.app.state.settings, body.client_id, body.client_secret)
+            _log(conn, user, "m365.shared_app", body.client_id.strip().lower(), "client ID and secret set on Access")
+    except m365.M365Error as exc:
+        raise _refused(exc) from None
+    return _tenants(request, conn)
+
+
+@router.delete("/api/admin/m365/shared-app")
+def clear_shared_app(request: Request, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+    """Forget the registration saved on Access; the settings file's, if there is one, is used again."""
+    with transaction(conn):
+        m365.clear_shared_app(conn)
+        _log(conn, user, "m365.shared_app", "", "removed from Access")
     return _tenants(request, conn)
 
 

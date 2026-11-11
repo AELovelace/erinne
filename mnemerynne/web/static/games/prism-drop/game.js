@@ -6,11 +6,15 @@
    Controls, the same from a keyboard or a remote panel (common.js turns both into actions):
    ◀ ▶ pick a pocket · Enter drop (or start again after the tenth) · ▲ replay the last drop · ▼ sound on or off.
    A tap on the field picks that pocket, and a second tap on it drops. Ported from MommyBot's ball drop, without
-   the wager. */
+   the wager.
+
+   Lumi plays it with you (Doll, 2026-11-11): the player's own Lumi (arcade/lumi-sprite.js) hovers over the pick holding
+   the ball, lets it go, darts round the field while it falls, then flies down to the pocket, picks it up and carries
+   it back to the top. Only for looks: the drop's path is the server's. With reduced motion she simply waits at the top. */
 (function () {
   "use strict";
 
-  const R = window.PrismRules, G = window.MGame;
+  const R = window.PrismRules, G = window.MGame, L = window.LumiSprite;
   const $ = function (id) { return document.getElementById(id); };
   const canvas = $("pd-field"), ctx = canvas.getContext("2d");
   const W = 640, H = 920;                                        // the field's own units; fit() scales them to the screen
@@ -23,6 +27,10 @@
   let last = null, shown = null, animating = false, busy = false, over = false;   // busy: a drop until it's scored
   let ball = null, particles = [], impacts = [], used = new Set(), scale = 1;
   let tick = 0, bounced = [];                                    // how far the platforms have moved, and each one's bounces so far
+  const HOLD_Y = 46, TALL = 46;                                  // where Lumi hovers with the ball (her paws), and how tall she is
+  // Lumi: where she is, where she's heading, and what she's doing: "hold" (over the pick, the ball in her paws), "dart"
+  // (flitting about while it falls), "fetch" (down to the pocket) or "carry" (back up with it).
+  const lumi = { x: 0, y: HOLD_Y, tx: 0, ty: HOLD_Y, mode: "hold", flip: false, next: 0, cheer: 0 };
 
   // ---------------------------------------------------------------- drawing
   function fit() { // Match the canvas's pixels to its size on screen (crisp on a 4K TV and a phone alike).
@@ -90,11 +98,11 @@
   function draw() { // The whole field: grid, lanes, pins, pockets, platforms, then hits, sparks and the ball on top.
     const field = new Map(((shown && shown.obstacles) || []).map(function (o) { return [o.row + ":" + o.column, o.type]; }));
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = NEON.night; ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = "rgba(" + NEON.glow + ", .07)"; ctx.lineWidth = 1; ctx.beginPath();   // the cyber grid
-    for (let gx = 0; gx <= W; gx += 32) { ctx.moveTo(gx, 0); ctx.lineTo(gx, H); }
-    for (let gy = 0; gy <= H; gy += 32) { ctx.moveTo(0, gy); ctx.lineTo(W, gy); }
-    ctx.stroke();
+    const sky = ctx.createLinearGradient(0, 0, 0, H);              // Lumi's night sky, with faint sparkles
+    sky.addColorStop(0, "rgb(18,8,32)"); sky.addColorStop(1, "rgb(44,18,58)");
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(255,248,220,.18)";
+    for (let i = 0; i < 40; i++) { const sx = (i * 157) % W, sy = (i * 389) % H, r = 1.5 + (i % 3); ctx.beginPath(); ctx.moveTo(sx, sy - r * 2); ctx.lineTo(sx + r * .6, sy); ctx.lineTo(sx, sy + r * 2); ctx.lineTo(sx - r * .6, sy); ctx.closePath(); ctx.fill(); }
     for (let col = 1; col <= R.WIDTH; col++) {
       const chosen = col === pick && !over, landed = !animating && shown && shown.landing === col;
       if (chosen) { // The picked lane: a cyan wash from top to bottom.
@@ -125,7 +133,35 @@
     });
     particles.forEach(function (p) { ctx.globalAlpha = Math.max(0, p.life); glowDot(p.x, p.y, p.size * Math.max(.1, p.life), p.color, 7); });
     ctx.globalAlpha = 1;
-    if (ball) { glowDot(ball.x, ball.y, 15, "rgba(" + NEON.glow + ", .18)", 26); glowDot(ball.x, ball.y, 7, NEON.pink, 20); glowDot(ball.x - 2, ball.y - 2, 2.4, "#ffffff"); }
+    if (L) L.draw(ctx, L.own(G.api), lumi.x, lumi.y, TALL, { flip: lumi.flip, eyes: lumi.cheer > 0 ? "happy" : "open", tilt: lumi.mode === "dart" ? (lumi.tx - lumi.x) * 0.002 : 0 });
+    const held = lumi.mode === "hold" || lumi.mode === "carry";
+    const at = held ? { x: lumi.x, y: lumi.y + 6 } : ball;          // in her paws, or wherever the drop has it
+    if (at) { glowDot(at.x, at.y, 15, "rgba(" + NEON.glow + ", .18)", 26); glowDot(at.x, at.y, 7, NEON.pink, 20); glowDot(at.x - 2, at.y - 2, 2.4, "#ffffff"); }
+  }
+
+  function stepLumi(now) { // One frame of Lumi: hovering, darting, fetching or carrying (a smooth glide toward where she's heading).
+    if (G.reducedMotion) { if (lumi.mode === "hold") { lumi.x = x(pick); lumi.y = HOLD_Y; } return; }
+    if (lumi.mode === "hold") { lumi.tx = x(pick); lumi.ty = HOLD_Y + Math.sin(now / 420) * 3; }
+    if (lumi.mode === "dart" && now >= lumi.next) {                 // a new spot to flit to, every half second or so
+      lumi.tx = 40 + Math.random() * (W - 80); lumi.ty = 90 + Math.random() * 700; lumi.next = now + 450 + Math.random() * 500;
+    }
+    const ease = lumi.mode === "dart" ? 0.06 : lumi.mode === "hold" ? 0.2 : 0.09;
+    const dx = lumi.tx - lumi.x;
+    if (Math.abs(dx) > 1) lumi.flip = dx < 0;                        // she faces the way she flies
+    lumi.x += dx * ease; lumi.y += (lumi.ty - lumi.y) * ease;
+    if (lumi.mode === "fetch" && Math.hypot(lumi.tx - lumi.x, lumi.ty - lumi.y) < 4) {   // got it: up she goes
+      lumi.mode = "carry"; lumi.tx = x(pick); lumi.ty = HOLD_Y; ball = null;
+    } else if (lumi.mode === "carry") {
+      lumi.tx = x(pick);
+      if (Math.hypot(lumi.tx - lumi.x, lumi.ty - lumi.y) < 3) lumi.mode = "hold";
+    }
+    if (lumi.cheer > 0) lumi.cheer--;
+  }
+
+  function loop(now) { // Lumi moves all the time; while a drop plays, its own frames draw the field.
+    requestAnimationFrame(loop);
+    stepLumi(now);
+    if (!animating) draw();
   }
 
   // ------------------------------------------------------------------ sound
@@ -149,7 +185,8 @@
     if (G.reducedMotion) { finishAnimation(round); return Promise.resolve(); }
     cue("drop");
     return new Promise(function (resolve) {
-      const points = [{ x: x(round.trajectory[0].column), y: 34 }].concat(round.trajectory.map(function (p) {
+      lumi.mode = "dart"; lumi.next = 0; lumi.x = x(round.trajectory[0].column);   // she lets go over the entry pin, then darts off
+      const points = [{ x: x(round.trajectory[0].column), y: HOLD_Y + 6 }].concat(round.trajectory.map(function (p) {
         return Object.assign({}, p, { x: x(p.column), y: p.row === R.HEIGHT ? 858 : y(p.row) - 8 });
       }));
       const ends = [0];
@@ -200,6 +237,9 @@
     round.trajectory.forEach(function (p) { if (p.hit === "platform") bounced[p.platform] = (bounced[p.platform] || 0) + 1; });
     tick = round.trajectory.length - 1;
     ball = { x: x(round.landing), y: 852 }; animating = false; particles = []; impacts = [];
+    if (G.reducedMotion) { lumi.mode = "hold"; lumi.x = lumi.tx = x(pick); lumi.y = HOLD_Y; }   // no flying: she's simply back at the top
+    else { lumi.mode = "fetch"; lumi.tx = ball.x; lumi.ty = 846; }   // down she goes to fetch it
+    lumi.cheer = Math.abs(round.pick - round.landing) === 0 ? 90 : 0;
     cue("landing", round); draw();
   }
 
@@ -283,8 +323,10 @@
     if (column === pick) G.tap("enter"); else { pick = column; G.sound.unlock(); hud(); draw(); }
   });
   window.addEventListener("resize", fit);
+  lumi.x = lumi.tx = x(pick);
   newGame();
   fit();
+  requestAnimationFrame(loop);
   canvas.focus();
   G.showCoins("pd-coins");
   G.api("/api/media/games/prism-drop/run").then(function (run) { // A game left unfinished, here or on another device, carries on.

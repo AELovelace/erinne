@@ -33,7 +33,7 @@ No inline comments in the file: systemd would keep them as part of the value.
 | `ADMIN_USERS` | empty | Usernames that are always admins, comma-separated; bootstrap only. |
 | `AD_DOMAIN` | empty | NetBIOS name of the domain the box is joined to (e.g. `ETERNALHOTELS`). Enables linking users to domain accounts, the admin group, share permissions, API groups. |
 | `AD_SNAPSHOT` | `/var/lib/mnemerynne-ad/snapshot.txt` | Group memberships written by the `mnemerynne-adsync` timer; winbind is used while the file is missing or older than 30 minutes. |
-| `M365_CLIENT_ID`, `M365_CLIENT_SECRET` | empty | The multitenant app registration people link Microsoft accounts through. Empty: no Microsoft 365. |
+| `M365_CLIENT_ID`, `M365_CLIENT_SECRET` | empty | The multitenant app registration people link Microsoft accounts through. Usually left empty and set live instead, under Access → Settings → Microsoft 365 → Shared app registration (no restart; what is saved there wins over these). Empty in both places: only tenants with their own app work. |
 | `M365_SYNC_SECONDS` | 300 | How often the worker refreshes Entra groups and SharePoint libraries. |
 
 Also in the database (Access → Settings): the **admin group** (default `Domain Admins`), the **agent group**, the **Claude group**, the **balancer nodes and key**, the **Claude links** policy, the **wiki library**, and each API's group.

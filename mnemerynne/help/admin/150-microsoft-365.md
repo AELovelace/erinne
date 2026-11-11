@@ -5,7 +5,10 @@ People keep signing in with their Mnemerynne account. On Preferences they link t
 ## One app registration (home tenant)
 
 1. Entra admin center → App registrations → New registration: `Mnemerynne`, *Accounts in any organizational directory (multitenant)*, redirect URI **Web** `https://YOUR-HOST/auth/microsoft/callback` (Access → Settings → Microsoft 365 shows the exact one).
-2. Certificates & secrets → New client secret. Put the client ID and the secret in the settings file as `MNEMERYNNE_M365_CLIENT_ID` and `MNEMERYNNE_M365_CLIENT_SECRET`, restart the web app and worker.
+2. Certificates & secrets → New client secret. Copy the secret's **Value** (shown once; not its Secret ID) and the **Application (client) ID** from the app's Overview. In Mnemerynne, open Access → Settings → Microsoft 365 and enter both under **Shared app registration**, then **Save**. It takes effect at once on the web app and the worker: no restart. The secret is kept encrypted in the database and is never shown again; the page shows only the client ID. **Replace** swaps in a new ID and secret (do this when a secret is about to expire), and **Remove** forgets what was saved there. After changing it, press **Check** on each tenant.
+   - The settings file still works: `MNEMERYNNE_M365_CLIENT_ID` and `MNEMERYNNE_M365_CLIENT_SECRET` are used when nothing is saved on the page (that needs a restart of the web app and worker, as before). What is saved on the page wins. The page says which one is in use.
+   - If the server's `SECRET_KEY` changes, the saved secret can't be read any more. The page says so and falls back to the settings file; enter the ID and secret again.
+   - A tenant with its own app keeps using its own; the shared registration is for every tenant without one.
 3. API permissions → Microsoft Graph:
    - **Delegated**: `openid`, `profile`, `email`, `offline_access`, `User.Read`, `Files.Read.All`, `Mail.Read`, `Mail.Read.Shared`, `Calendars.Read`, `Mail.ReadWrite` (drafts only).
    - **Application**: `Sites.Selected` (SharePoint indexing, granted per site) and `GroupMember.Read.All` (Entra groups).

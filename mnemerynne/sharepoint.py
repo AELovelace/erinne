@@ -50,7 +50,7 @@ def configure(settings: Settings) -> None:
 
 
 def _app_graph(conn: sqlite3.Connection, settings: Settings, tenant_row: int) -> m365.Graph:
-    return m365.Graph(m365.app_token(settings, m365.tenant(conn, tenant_row)))
+    return m365.Graph(m365.app_token(m365.live(conn, settings), m365.tenant(conn, tenant_row)))   # live: the shared app as Access has it now
 
 
 # ------------------------------------------------------------------- admin
@@ -68,7 +68,7 @@ def resolve_site(conn: sqlite3.Connection, settings: Settings, tenant_row: int, 
     except m365.GraphError as exc:
         if exc.status in (401, 403, 404):
             row = m365.tenant(conn, tenant_row)
-            app_id = row["client_id"] or settings.m365_client_id
+            app_id = row["client_id"] or m365.live(conn, settings).m365_client_id
             raise SharePointError(f"Mnemerynne can't open that site (Microsoft said {exc.status}: {exc}). A tenant admin "
                                   f"grants the app {app_id} read access to it (Sites.Selected): deploy/m365/SharePointAccess.ps1 "
                                   f"-AppId {app_id}, or the deploy guide, section 5i. A new grant can take a few minutes "
@@ -176,7 +176,7 @@ def sync_drive(conn: sqlite3.Connection, settings: Settings, drive_row: int) -> 
                         (drive_row,)).rowcount:
         return {**stats, "busy": True}
     try:
-        token = m365.app_token(settings, m365.tenant(conn, d["tenant_row"]))
+        token = m365.app_token(m365.live(conn, settings), m365.tenant(conn, d["tenant_row"]))
         graph = m365.Graph(token)
         full = not d["delta_link"]
         url = d["delta_link"] or f"/drives/{d['drive_id']}/root/delta?$select={_SELECT}"

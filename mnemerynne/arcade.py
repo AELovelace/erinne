@@ -19,6 +19,7 @@ Coins follow Roulette's rules (Doll's call): a run costs ENTRY coins and pays it
 
 from __future__ import annotations
 
+import json
 import secrets
 import sqlite3
 import time
@@ -28,6 +29,26 @@ from mnemerynne import coins
 GAMES = ("breakout", "snake", "teacup-tower")
 ENTRY = 25                                # what a solo run or a showdown race costs
 MODULUS = 2147483647                      # 2**31 - 1: every seed and random number lives below it
+
+
+GLOWS = ("rose", "lagoon", "starlight", "zephyr", "wisp", "umbra")   # Lumi's glow colours (lumipet.GLOWS)
+
+
+def lumi_look(conn: sqlite3.Connection, user_id: int | None) -> dict:
+    """How this person's Lumi looks (her glow and what she wears), so the arcade games draw their own Lumi: leading the
+    conga, curled up as Yarn Pop's ball, carrying Prism Drop's ball, climbing Teacup Tower. Only reads her save (no
+    catching up, nothing written); someone without a Lumi gets a fresh one's look. What she wears is checked against
+    the wardrobe catalog, so a retired item is simply left off."""
+    from mnemerynne import lumipet                       # imported late: lumipet's catalogs load with it
+    row = conn.execute("SELECT data FROM lumi_pets WHERE user_id = ?", (user_id,)).fetchone() if user_id else None
+    try:
+        pet = json.loads(row["data"]) if row else {}     # an unreadable save looks fresh
+    except ValueError:
+        pet = {}
+    glow = pet.get("glow") if pet.get("glow") in GLOWS else "rose"
+    outfit = pet.get("outfit") if isinstance(pet.get("outfit"), dict) else {}
+    worn = {slot: item for slot, item in outfit.items() if isinstance(item, str) and lumipet._WEAR.get(item, {}).get("slot") == slot}
+    return {"glow": glow, "outfit": worn}
 
 
 class Refused(ValueError):
