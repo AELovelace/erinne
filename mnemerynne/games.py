@@ -8,9 +8,9 @@
   TV page hands a remote panel's arrows and Enter to it (media.js games.key).
 - Who may play: whoever may use Media, and a paired screen (the TV) as its owner, like the rest of Media.
 - Coins are one purse per account, shared by every game and kept on this server (coins.py). Online casino tables bet them,
-  local multiplayer tables use free-to-play credits instead, and Prism Drop and Lumi Pet pay small rewards the server has
-  checked. Breakout and Snake cost a run's entry and pay its checked score (arcade.py), solo or in showdowns (showdown.py). Prism Drop's best score stays on the device. Lumi Pet lives on the account (lumipet.py), where her shop
-  spends coins. Coins have no cash value.
+  local multiplayer tables use free-to-play credits instead, and Prism Drop and the Lumi apps pay small rewards the server has
+  checked. Breakout and Snake cost a run's entry and pay its checked score (arcade.py), solo or in showdowns (showdown.py). Prism Drop's best score stays on the device. Lumi lives on the account (lumipet.py): one pet for Lumi Pet, Lumi Dungeons and Lumi’s Garden, whose shops
+  spend coins. Coins have no cash value.
 """
 
 from __future__ import annotations
@@ -30,13 +30,26 @@ class Game:
     shelf: str = "Arcade"   # the heading it is listed under in Media → Games; shelves appear in the order their first game does
     mouse_keyboard: bool = False   # can't be played with a remote or touch: listed under "Mouse & keyboard", and only where there's a mouse (media.js viewGames)
     extras: tuple[str, ...] = ()   # more files under static/games/ its page loads before game.js (.css and .js), e.g. a shared shell
+    kit: str = ""       # the folder under static/games/ (and the partial) its page is built from, when that isn't its own slug: the three Lumi apps share "lumi-pet"
+    tabs: tuple[str, ...] = ()     # which of the kit's tabs this app shows, in order (templates/games/lumi-pet.html); empty means the game has no tabs
 
 
 GAMES: tuple[Game, ...] = (
+    # Lumi is one pet on one save (lumipet.py), in three apps that share one page kit (static/games/lumi-pet/): each
+    # shows its own tabs, and opens the others from Settings. Split from the one Lumi Pet page at Doll's request, 2026-11-10.
     Game(slug="lumi-pet", name="Lumi Pet", icon="✨",
-         description="A little neon companion to feed, dress, fight beside and make a home for. She gets hungry, sleepy and lonely while you’re away. Your first visit each day pays coins.",
-         controls="⏮ ⏭ change tab · ▲ ▼ choose · ◀ ▶ options · Enter does it · in the dungeon: arrows walk, ⏮ ⏭ choose, ⏯ potion", track_keys=True,
-         shelf="Lumi Pet"),                               # a shelf of her own, first on the page
+         description="A little neon companion to feed, cuddle, dress and make a home for. She gets hungry, sleepy and lonely while you’re away. Your first visit each day pays coins.",
+         controls="⏮ ⏭ change tab · ▲ ▼ choose · ◀ ▶ options · Enter does it", track_keys=True,
+         shelf="Lumi", kit="lumi-pet",                    # a shelf of her own, first on the page
+         tabs=("care", "pantry", "toys", "closet", "home", "shop", "collection", "settings")),
+    Game(slug="lumi-dungeons", name="Lumi Dungeons", icon="🗝",
+         description="Take Lumi down through twelve dungeons of rooms, puzzle doors and treasure, or into the arena for a fight. Learn skills, fit mods, and bring the loot home.",
+         controls="▲ ▼ ◀ ▶ walk or work a puzzle · ⏮ ⏭ choose · Enter does it · ⏯ potion · at home: ⏮ ⏭ change tab", track_keys=True,
+         shelf="Lumi", kit="lumi-pet", tabs=("dungeon", "battle", "skills", "settings")),
+    Game(slug="lumi-garden", name="Lumi’s Garden", icon="🌸",
+         description="The Stardust Garden: plant flowers, trim them when they’re ready, and press their starpowder into coins. It keeps growing while you’re away.",
+         controls="▲ ▼ ◀ ▶ move over the plots · Enter plants or trims · ⏯ presses the powder · ⏮ ⏭ choose", track_keys=True,
+         shelf="Lumi", kit="lumi-pet", tabs=("garden", "settings")),
     Game(slug="prism-drop", name="Prism Drop", icon="🔮",
          description="Pick a pocket and drop a neon ball through blocks, bombs, bonus pegs and sliding platforms. Ten drops, and your score pays coins.",
          controls="◀ ▶ pick a pocket · Enter drops · ▲ replays the last drop · ▼ sound on or off"),
@@ -82,3 +95,11 @@ def get(slug: str) -> Game | None:
 def listing() -> list[dict]:
     """What Media → Games shows, in order."""
     return [asdict(g) for g in GAMES]
+
+
+def kit(game: Game) -> str:
+    """The folder under static/games/ (and the partial under templates/games/) this game's page is built from."""
+    return "casino" if game.multiplayer else game.kit or game.slug
+
+
+LUMI_APPS: tuple[Game, ...] = tuple(g for g in GAMES if g.kit == "lumi-pet")   # Lumi Pet, Lumi Dungeons, Lumi's Garden: installable apps of their own (web/app.py)

@@ -1,5 +1,6 @@
-/* Lumi's room fits a TV, keyboard and narrow touchscreen; the character is native vector art. */
-.gm[data-game="lumi-pet"] { grid-template-columns: minmax(12rem, .85fr) minmax(0, 1.65fr) minmax(14rem, 1fr); max-width: 112.5rem; margin: auto; } /* Keep the room proportional to the TV's text scale. */
+/* Lumi's room fits a TV, keyboard and narrow touchscreen; the character is native vector art.
+   Shared by the three Lumi apps (data-kit="lumi-pet" on the page; data-game is the app itself). */
+.gm[data-kit="lumi-pet"] { grid-template-columns: minmax(12rem, .85fr) minmax(0, 1.65fr) minmax(14rem, 1fr); max-width: 112.5rem; margin: auto; } /* Keep the room proportional to the TV's text scale. */
 .lp-intro, .lp-controls { border-radius: 1rem; }
 .lp-intro p { line-height: 1.65; }
 .lp-intro .lp-lead { font-size: 1.2rem; color: var(--cyan); }
@@ -63,7 +64,9 @@
 .lp-actions small { display: block; font: .7rem/1.7 system-ui, sans-serif; letter-spacing: .02em; color: var(--muted); }
 .gm .lp-actions button[aria-pressed="true"] { border-color: var(--rose); background: rgba(var(--glow), .1); box-shadow: inset 3px 0 var(--rose); }
 .lp-actions { max-height: 24rem; overflow-y: auto; } /* A long pantry scrolls inside the panel, in step with the TV's text scale. */
-.lp-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .3rem; margin-bottom: .8rem; } /* Twelve tabs: three tidy rows of four. */
+.lp-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .3rem; margin-bottom: .8rem; } /* Lumi Pet's eight tabs: two tidy rows of four; Lumi Dungeons' four: one row. */
+.lp-tabs[data-count="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); } /* Lumi's Garden: the garden and its settings. */
+.lp-room[data-away="true"] .lp-pet-wrap { opacity: 0; pointer-events: none; } /* She is out in another of her apps (a dungeon trip or a fight): her room waits, empty. */
 .gm .lp-tabs button { letter-spacing: .02em; overflow: hidden; text-overflow: clip; }
 .gm .lp-tabs button { flex: 1; border-radius: .5rem; font-size: .68rem; padding: .55rem .3rem; }
 .gm .lp-tabs button[aria-selected="true"] { border-color: var(--cyan); color: var(--cyan); background: rgba(var(--glow), .08); }
@@ -83,11 +86,11 @@
 @keyframes lp-play { to { transform: translateY(-13px) rotate(5deg); } }
 @keyframes lp-snack { to { transform: rotate(-2deg) scale(1.025); } }
 @media (max-width: 1000px) {
-  .gm[data-game="lumi-pet"] { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .gm[data-kit="lumi-pet"] { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .lp-room { grid-column: 1 / -1; order: -1; width: min(100%, 37.5rem); justify-self: center; height: 33.75rem; }
 }
 @media (max-width: 560px) {
-  .gm[data-game="lumi-pet"] { grid-template-columns: minmax(0, 1fr); }
+  .gm[data-kit="lumi-pet"] { grid-template-columns: minmax(0, 1fr); }
   .lp-room { min-height: 22.5rem; height: 26.25rem; }
   .lp-controls { order: 0; }
   .lp-intro { order: 1; }
@@ -144,13 +147,13 @@
 @media (min-width: 1001px) {
   /* The panels keep the width they always had (their share of the old, padded and capped layout, worked out here as
      --lp-wide) but sit right out at the screen's edges, so the room between them is as wide as it can be. */
-  .gm[data-game="lumi-pet"] { --lp-wide: calc(min(100vw, 112.5rem) - 2 * clamp(.75rem, 3vw, 2.5rem) - 2 * clamp(.75rem, 2vw, 2rem)); max-width: none;
+  .gm[data-kit="lumi-pet"] { --lp-wide: calc(min(100vw, 112.5rem) - 2 * clamp(.75rem, 3vw, 2.5rem) - 2 * clamp(.75rem, 2vw, 2rem)); max-width: none;
     padding-left: clamp(.3rem, .5vw, .6rem); padding-right: clamp(.3rem, .5vw, .6rem);
     grid-template-columns: max(12rem, calc(var(--lp-wide) * .85 / 3.5)) minmax(0, 1fr) max(14rem, calc(var(--lp-wide) / 3.5)); }
-  .gm[data-game="lumi-pet"] .lp-room { position: fixed; inset: 0; width: auto; height: auto; min-height: 0; border: 0; border-radius: 0; box-shadow: none; z-index: 0; }
-  .gm[data-game="lumi-pet"] .lp-intro { grid-column: 1; position: relative; z-index: 1; }
-  .gm[data-game="lumi-pet"] .lp-controls { grid-column: 3; position: relative; z-index: 1; }
-  .gm[data-game="lumi-pet"] .lp-room-top { top: 4%; }
+  .gm[data-kit="lumi-pet"] .lp-room { position: fixed; inset: 0; width: auto; height: auto; min-height: 0; border: 0; border-radius: 0; box-shadow: none; z-index: 0; }
+  .gm[data-kit="lumi-pet"] .lp-intro { grid-column: 1; position: relative; z-index: 1; }
+  .gm[data-kit="lumi-pet"] .lp-controls { grid-column: 3; position: relative; z-index: 1; }
+  .gm[data-kit="lumi-pet"] .lp-room-top { top: 4%; }
 }
 
 /* The Stardust Garden: drawn over the room like the dungeon (garden-art.js). Lumi stands small beside the beds. */
@@ -204,39 +207,39 @@
    list of big buttons that scrolls by itself, and the tabs as a bar along the bottom to swipe through. In the dungeon,
    garden, skill trees and collection the room gets more of the screen, since that is where the fingers go. */
 @media (max-width: 700px) {
-  .gm[data-game="lumi-pet"] { display: flex; flex-direction: column; gap: 0; padding: 0; height: 100vh; height: 100dvh; min-height: 0; max-width: none; overflow: hidden; }
-  .gm[data-game="lumi-pet"] .lp-intro { order: 0; flex: none; align-self: stretch; display: flex; align-items: center; gap: .6rem; padding: max(.35rem, env(safe-area-inset-top, 0px)) .6rem .35rem; border-radius: 0; border-width: 0 0 1px; box-shadow: none; }
-  .gm[data-game="lumi-pet"] .lp-intro :is(.gm-eyebrow, .gm-title, .lp-lead, .lp-note, .lp-save) { display: none; }
-  .gm[data-game="lumi-pet"] .lp-meters { flex: 1; min-width: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .45rem; margin: 0; }
-  .gm[data-game="lumi-pet"] .lp-meter { grid-template-columns: minmax(0, 1fr) auto; gap: .12rem .25rem; font-size: .55rem; letter-spacing: .03em; }
-  .gm[data-game="lumi-pet"] .lp-meter .lp-bar { grid-column: 1 / -1; grid-row: 2; }
-  .gm[data-game="lumi-pet"] .lp-meter b { font-size: .6rem; }
-  .gm[data-game="lumi-pet"] .lp-stats { margin: 0; flex: none; }
-  .gm[data-game="lumi-pet"] .lp-stats div { display: none; padding: 0; border: 0; }
-  .gm[data-game="lumi-pet"] .lp-stats div:last-child { display: block; text-align: right; } /* Only her coins: the rest is in the tabs. */
-  .gm[data-game="lumi-pet"] .lp-stats dt { font-size: .5rem; }
-  .gm[data-game="lumi-pet"] .lp-stats dd { margin: 0; font-size: .85rem; }
-  .gm[data-game="lumi-pet"] .lp-room { order: 1; flex: none; width: 100%; height: 38vh; height: 38dvh; min-height: 0; border-radius: 0; border-width: 0; box-shadow: none; }
-  .gm[data-game="lumi-pet"] .lp-room[data-dungeon="true"] { height: 46dvh; }
-  .gm[data-game="lumi-pet"] .lp-room[data-garden="true"] { height: 54dvh; } /* Tall enough that a plot is a comfortable tap. */
-  .gm[data-game="lumi-pet"] .lp-room:is([data-skills="true"], [data-album="true"]) { height: 56dvh; }
-  .gm[data-game="lumi-pet"] .lp-room-top { display: none; }
-  .gm[data-game="lumi-pet"] .lp-caption { bottom: auto; top: .4rem; font-size: .7rem; }
-  .gm[data-game="lumi-pet"] .lp-room:is([data-dungeon="true"], [data-garden="true"]) .lp-caption { display: none; } /* Their own bar says it. */
-  .gm[data-game="lumi-pet"] .lp-dhud { top: .4rem; left: .5rem; width: 62%; }
-  .gm[data-game="lumi-pet"] .lp-controls { order: 2; flex: 1 1 0; min-height: 0; align-self: stretch; display: flex; flex-direction: column; padding: .5rem .6rem max(.4rem, env(safe-area-inset-bottom, 0px)); border-radius: 0; border-width: 1px 0 0; box-shadow: none; }
-  .gm[data-game="lumi-pet"] .lp-controls :is(.gm-eyebrow, .gm-keys) { display: none; } /* No keys on a phone: everything is pressed. */
-  .gm[data-game="lumi-pet"] .lp-message { flex: none; min-height: 0; max-height: 4.3em; overflow-y: auto; margin: 0 0 .4rem; padding: 0; border: 0; font-size: .88rem; line-height: 1.4; }
-  .gm[data-game="lumi-pet"] .lp-story { flex: none; min-height: 0; max-height: 4.4em; margin-bottom: .3rem; font-size: .72rem; line-height: 1.45; }
-  .gm[data-game="lumi-pet"] .lp-story p { margin: 0 0 .15rem; }
-  .gm[data-game="lumi-pet"] .lp-actions { flex: 1 1 0; min-height: 0; max-height: none; overflow-y: auto; grid-template-columns: minmax(0, 1fr); gap: .4rem; align-content: start; overscroll-behavior: contain; }
-  .gm[data-game="lumi-pet"] .lp-actions button { min-height: 3.1rem; padding: .5rem .7rem; gap: .7rem; }
-  .gm[data-game="lumi-pet"] .lp-tabs { order: 9; flex: none; display: flex; overflow-x: auto; gap: .3rem; margin: .45rem 0 0; padding-bottom: .1rem; scrollbar-width: none; scroll-snap-type: x proximity; }
-  .gm[data-game="lumi-pet"] .lp-tabs::-webkit-scrollbar { display: none; }
+  .gm[data-kit="lumi-pet"] { display: flex; flex-direction: column; gap: 0; padding: 0; height: 100vh; height: 100dvh; min-height: 0; max-width: none; overflow: hidden; }
+  .gm[data-kit="lumi-pet"] .lp-intro { order: 0; flex: none; align-self: stretch; display: flex; align-items: center; gap: .6rem; padding: max(.35rem, env(safe-area-inset-top, 0px)) .6rem .35rem; border-radius: 0; border-width: 0 0 1px; box-shadow: none; }
+  .gm[data-kit="lumi-pet"] .lp-intro :is(.gm-eyebrow, .gm-title, .lp-lead, .lp-note, .lp-save) { display: none; }
+  .gm[data-kit="lumi-pet"] .lp-meters { flex: 1; min-width: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .45rem; margin: 0; }
+  .gm[data-kit="lumi-pet"] .lp-meter { grid-template-columns: minmax(0, 1fr) auto; gap: .12rem .25rem; font-size: .55rem; letter-spacing: .03em; }
+  .gm[data-kit="lumi-pet"] .lp-meter .lp-bar { grid-column: 1 / -1; grid-row: 2; }
+  .gm[data-kit="lumi-pet"] .lp-meter b { font-size: .6rem; }
+  .gm[data-kit="lumi-pet"] .lp-stats { margin: 0; flex: none; }
+  .gm[data-kit="lumi-pet"] .lp-stats div { display: none; padding: 0; border: 0; }
+  .gm[data-kit="lumi-pet"] .lp-stats div:last-child { display: block; text-align: right; } /* Only her coins: the rest is in the tabs. */
+  .gm[data-kit="lumi-pet"] .lp-stats dt { font-size: .5rem; }
+  .gm[data-kit="lumi-pet"] .lp-stats dd { margin: 0; font-size: .85rem; }
+  .gm[data-kit="lumi-pet"] .lp-room { order: 1; flex: none; width: 100%; height: 38vh; height: 38dvh; min-height: 0; border-radius: 0; border-width: 0; box-shadow: none; }
+  .gm[data-kit="lumi-pet"] .lp-room[data-dungeon="true"] { height: 46dvh; }
+  .gm[data-kit="lumi-pet"] .lp-room[data-garden="true"] { height: 54dvh; } /* Tall enough that a plot is a comfortable tap. */
+  .gm[data-kit="lumi-pet"] .lp-room:is([data-skills="true"], [data-album="true"]) { height: 56dvh; }
+  .gm[data-kit="lumi-pet"] .lp-room-top { display: none; }
+  .gm[data-kit="lumi-pet"] .lp-caption { bottom: auto; top: .4rem; font-size: .7rem; }
+  .gm[data-kit="lumi-pet"] .lp-room:is([data-dungeon="true"], [data-garden="true"]) .lp-caption { display: none; } /* Their own bar says it. */
+  .gm[data-kit="lumi-pet"] .lp-dhud { top: .4rem; left: .5rem; width: 62%; }
+  .gm[data-kit="lumi-pet"] .lp-controls { order: 2; flex: 1 1 0; min-height: 0; align-self: stretch; display: flex; flex-direction: column; padding: .5rem .6rem max(.4rem, env(safe-area-inset-bottom, 0px)); border-radius: 0; border-width: 1px 0 0; box-shadow: none; }
+  .gm[data-kit="lumi-pet"] .lp-controls :is(.gm-eyebrow, .gm-keys) { display: none; } /* No keys on a phone: everything is pressed. */
+  .gm[data-kit="lumi-pet"] .lp-message { flex: none; min-height: 0; max-height: 4.3em; overflow-y: auto; margin: 0 0 .4rem; padding: 0; border: 0; font-size: .88rem; line-height: 1.4; }
+  .gm[data-kit="lumi-pet"] .lp-story { flex: none; min-height: 0; max-height: 4.4em; margin-bottom: .3rem; font-size: .72rem; line-height: 1.45; }
+  .gm[data-kit="lumi-pet"] .lp-story p { margin: 0 0 .15rem; }
+  .gm[data-kit="lumi-pet"] .lp-actions { flex: 1 1 0; min-height: 0; max-height: none; overflow-y: auto; grid-template-columns: minmax(0, 1fr); gap: .4rem; align-content: start; overscroll-behavior: contain; }
+  .gm[data-kit="lumi-pet"] .lp-actions button { min-height: 3.1rem; padding: .5rem .7rem; gap: .7rem; }
+  .gm[data-kit="lumi-pet"] .lp-tabs { order: 9; flex: none; display: flex; overflow-x: auto; gap: .3rem; margin: .45rem 0 0; padding-bottom: .1rem; scrollbar-width: none; scroll-snap-type: x proximity; }
+  .gm[data-kit="lumi-pet"] .lp-tabs::-webkit-scrollbar { display: none; }
   /* On a phone a tab is always one tap away, in the garden, the trees and the collection too. Only a dungeon trip puts the bar
      away: she can't be anywhere else until she is home. */
-  .gm[data-game="lumi-pet"]:has(.lp-room[data-dungeon="true"]) .lp-tabs { display: none; }
-  .gm[data-game="lumi-pet"] .lp-tabs button { flex: 0 0 auto; min-width: 4.7rem; min-height: 2.7rem; font-size: .68rem; scroll-snap-align: center; }
-  .gm[data-game="lumi-pet"] .lp-pad { left: .5rem; bottom: .5rem; }
-  .gm[data-game="lumi-pet"] .lp-squeeze { right: .6rem; bottom: .6rem; }
+  .gm[data-kit="lumi-pet"]:has(.lp-room[data-dungeon="true"]) .lp-tabs { display: none; }
+  .gm[data-kit="lumi-pet"] .lp-tabs button { flex: 0 0 auto; min-width: 4.7rem; min-height: 2.7rem; font-size: .68rem; scroll-snap-align: center; }
+  .gm[data-kit="lumi-pet"] .lp-pad { left: .5rem; bottom: .5rem; }
+  .gm[data-kit="lumi-pet"] .lp-squeeze { right: .6rem; bottom: .6rem; }
 }

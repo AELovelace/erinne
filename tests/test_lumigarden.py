@@ -538,7 +538,26 @@ def test_the_numbers_keep_a_gentle_pace():
     assert all(later["needs"] < earlier["powder"] * 16 * 40 for earlier, later in zip(flowers, flowers[1:]))    # no rung is a wall: forty full harvests at most
 
 
-# --------------------------------------------------------------------------- Lumi Pet as an app of her own
+# --------------------------------------------------------------------------- Lumi's three apps, each an app of its own
+def test_each_lumi_app_installs_as_its_own_app_with_its_own_icon(on):
+    static = G.Path(G.__file__).parent / "web" / "static"
+    pages = {}
+    for slug, name, stem in (("lumi-pet", "Lumi Pet", "lumi"), ("lumi-dungeons", "Lumi Dungeons", "lumi-dungeons"), ("lumi-garden", "Lumi’s Garden", "lumi-garden")):
+        page = pages[slug] = on.get(f"/media/games/{slug}").text
+        assert f'rel="manifest" href="/media/games/{slug}/manifest.webmanifest"' in page and f"icons/{stem}-180.png" in page
+        assert 'href="/manifest.webmanifest"' not in page and f'apple-mobile-web-app-title" content="{name}"' in page
+        manifest = on.get(f"/media/games/{slug}/manifest.webmanifest").json()
+        assert (manifest["id"], manifest["name"], manifest["start_url"], manifest["scope"], manifest["display"]) ==             (f"/media/games/{slug}", name, f"/media/games/{slug}", f"/media/games/{slug}", "standalone")
+        assert [icon["src"].split("?")[0].rsplit("/", 1)[1] for icon in manifest["icons"]] == [f"{stem}-192.png", f"{stem}-512.png", f"{stem}-maskable-512.png"]
+        assert sorted(s["url"] for s in manifest["shortcuts"]) == sorted(f"/media/games/{other}" for other in ("lumi-pet", "lumi-dungeons", "lumi-garden") if other != slug)
+        for file in ("180.png", "192.png", "512.png", "maskable-512.png"):
+            assert (static / "icons" / f"{stem}-{file}").stat().st_size > 1000, (stem, file)
+        assert (static / "icons" / f"{stem}.svg").stat().st_size > 1000
+    assert 'data-lp-tab="garden"' in pages["lumi-garden"] and 'data-lp-tab="garden"' not in pages["lumi-pet"]      # the garden moved out of Lumi Pet
+    assert 'data-lp-tab="dungeon"' in pages["lumi-dungeons"] and 'data-lp-tab="dungeon"' not in pages["lumi-pet"]
+    assert on.get("/media/games/prism-drop/manifest.webmanifest").status_code == 404       # no other game is an app of its own
+
+
 def test_lumi_pet_installs_as_her_own_app_with_her_own_icon(on):
     static = G.Path(G.__file__).parent / "web" / "static"
     page = on.get("/media/games/lumi-pet").text

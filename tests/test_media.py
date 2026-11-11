@@ -1170,7 +1170,7 @@ def test_built_in_games_open_from_media_and_show_on_a_remote(client, conn, direc
     _turn_on(client)
     assert 'data-view="games"' in client.get("/media").text                # built in: listed with no setup
     listed = client.get("/api/media/games").json()["games"]
-    assert [g["slug"] for g in listed] == [g.slug for g in games.GAMES] and [g["name"] for g in listed[:2]] == ["Lumi Pet", "Prism Drop"]
+    assert [g["slug"] for g in listed] == [g.slug for g in games.GAMES] and [g["name"] for g in listed[:4]] == ["Lumi Pet", "Lumi Dungeons", "Lumi’s Garden", "Prism Drop"]
     page = client.get("/media/games/prism-drop")
     assert page.status_code == 200
     for name in ("games/common.js", "games/common.css", "games/prism-drop/rules.js", "games/prism-drop/game.js",
@@ -1180,10 +1180,10 @@ def test_built_in_games_open_from_media_and_show_on_a_remote(client, conn, direc
     assert 'id="pd-field"' in page.text and "messages.js" not in page.text   # the game's partial, none of the app's scripts
     # StickBob Runner: only it is in the mouse-and-keyboard category, and its page brings its own art and levels.
     assert [g["slug"] for g in listed if g["mouse_keyboard"]] == ["stickbob-runner"]
-    shelves = {}                                         # Lumi Pet has a shelf of her own, and so do the table games
+    shelves = {}                                         # Lumi's three apps have a shelf of their own, and so do the table games
     for g in listed:
         shelves.setdefault(g["shelf"], []).append(g["slug"])
-    assert list(shelves) == ["Lumi Pet", "Arcade", "Table games"] and shelves["Lumi Pet"] == ["lumi-pet"]
+    assert list(shelves) == ["Lumi", "Arcade", "Table games"] and shelves["Lumi"] == ["lumi-pet", "lumi-dungeons", "lumi-garden"]
     assert shelves["Table games"] == ["blackjack", "roulette", "horse-racing", "slots"] and shelves["Arcade"] == ["prism-drop", "stickbob-runner", "breakout", "snake", "teacup-tower"]
     for slug in ("breakout", "snake", "teacup-tower"):                   # the GameMaker ports: the shared arcade shell, then the game
         page = client.get(f"/media/games/{slug}")
@@ -1203,6 +1203,21 @@ def test_built_in_games_open_from_media_and_show_on_a_remote(client, conn, direc
         assert f"/static/games/lumi-pet/{name}?v=" in pet.text
         assert (Path(__file__).parent.parent / "mnemerynne/web/static/games/lumi-pet" / name).is_file()
     assert "messages.js" not in pet.text and "casino/game.js" not in pet.text
+    # Lumi is one pet in three apps: each page is the same kit (static/games/lumi-pet/) showing only its own tabs.
+    import re
+    tabs = {}
+    for slug in ("lumi-pet", "lumi-dungeons", "lumi-garden"):
+        app = client.get(f"/media/games/{slug}")
+        assert app.status_code == 200 and f'data-game="{slug}" data-kit="lumi-pet"' in app.text and 'id="lp-pet"' in app.text
+        assert "/static/games/lumi-pet/game.js?v=" in app.text and "/static/games/lumi-pet/garden-ui.js?v=" in app.text
+        assert f"/static/games/{slug}/" not in app.text or slug == "lumi-pet"       # the other two have no folder of their own
+        tabs[slug] = re.findall(r'data-lp-tab="([a-z]+)"', app.text)
+        assert tabs[slug] == list(games.get(slug).tabs) and f'data-count="{len(tabs[slug])}"' in app.text
+    assert tabs == {"lumi-pet": ["care", "pantry", "toys", "closet", "home", "shop", "collection", "settings"],
+                    "lumi-dungeons": ["dungeon", "battle", "skills", "settings"], "lumi-garden": ["garden", "settings"]}
+    assert "LUMI<span>PET</span>" in pet.text and "LUMI<span>DUNGEONS</span>" in client.get("/media/games/lumi-dungeons").text
+    assert all(g["track_keys"] and g["kit"] == "lumi-pet" for g in listed[:3])   # a remote's Previous and Next reach all three
+    assert anonymous.get("/media/games/lumi-dungeons").status_code == 401 and anonymous.get("/media/games/lumi-garden").status_code == 401
     assert any(g["slug"] == "lumi-pet" and not g["multiplayer"] for g in listed)
     assert anonymous.get("/media/games/lumi-pet").status_code == 401
     assert client.get("/media/games/no-such-game").status_code == 404

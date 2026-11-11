@@ -462,7 +462,7 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
     elif action in ("learn", "respec", "equip", "mod", "potions", "heal", "drink"):
         run = lumidungeon.current(conn, user_id) if action == "drink" else None
         if run and not run["over"]:
-            raise PetError("Lumi is out exploring. She can drink it there, from the Dungeon tab.")
+            raise PetError("Lumi is out exploring. She can drink it there, in Lumi Dungeons.")
         try:                                              # her skills, moves, mods and potions (lumibattle.py)
             said = lumibattle.progress(conn, user_id, pet, action, item, slot, count, now)
         except lumibattle.BattleError as refused:

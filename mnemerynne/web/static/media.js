@@ -950,7 +950,7 @@
       return card({ title: g.name, sub: g.description, glyph: g.icon || "🎮", shape: "square",
                     onClick: function () { games.open(g); } });
     };
-    const out = [], named = {};                          // a shelf per kind of game (Lumi Pet, Arcade, Table games), in the order the server lists them
+    const out = [], named = {};                          // a shelf per kind of game (Lumi, Arcade, Table games), in the order the server lists them
     data.games.filter(function (g) { return !g.mouse_keyboard; }).forEach(function (g) {   // what any remote or touch screen can play
       const title = g.shelf || "Games";
       if (!named[title]) { named[title] = []; out.push(title); }
@@ -977,8 +977,9 @@
      Mnemerynne's own code on its own origin, so the two talk by messages (static/games/common.js):
      - here → game: a remote panel's arrows and Enter ({type: "mnemerynne-game-key", key}), and the keyboard's
        when the frame doesn't have focus;
-     - game → here: its score line ("mnemerynne-game-state", which a remote panel shows under the game's name)
-       and Escape or Backspace inside it ("mnemerynne-game-close").
+     - game → here: its score line ("mnemerynne-game-state", which a remote panel shows under the game's name),
+       Escape or Backspace inside it ("mnemerynne-game-close"), and a request for another game by its slug
+       ("mnemerynne-game-open": Lumi's three apps open each other this way, so the bar and the remote follow).
      The panel's Stop, or anything cast to the TV, closes the game (screenMode.command). */
   const gameFrame = $("mc-game-frame");
   const games = {
@@ -1047,6 +1048,12 @@
     if (e.origin !== location.origin || e.source !== gameFrame.contentWindow || !games.isOpen()) return;   // our game only
     const data = e.data || {};
     if (data.type === "mnemerynne-game-close") games.close();
+    else if (data.type === "mnemerynne-game-open") {   // only ever a game the server lists for this person
+      api("GET", "/api/media/games").then(function (listed) {
+        const next = listed.games.find(function (g) { return g.slug === data.slug; });
+        if (next && games.isOpen()) games.open(next);
+      }).catch(function () {});                        // the game that asked simply stays open
+    }
     else if (data.type === "mnemerynne-game-state") {
       games.sub = String(data.sub || "").slice(0, 300);
       if (screenId) screenMode.report(true);   // the remote panels see the new score at once

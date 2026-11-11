@@ -1,29 +1,31 @@
 {% extends "base.html" %}
 {% block title %}{{ game.name }} · {{ product_name }}{% endblock %}
-{#- Lumi Pet is an app of her own: installed from this page she gets her own name and icon (web/app.py lumi_manifest). -#}
-{% block app_links %}{% if game.slug == 'lumi-pet' %}
-  <link rel="manifest" href="/media/games/lumi-pet/manifest.webmanifest">
-  <link rel="apple-touch-icon" href="{{ static('icons/lumi-180.png') }}">
+{#- Each Lumi app (Lumi Pet, Lumi Dungeons, Lumi's Garden: games.py LUMI_APPS) is an app of its own: installed from its
+    page it gets its own name and icon (web/app.py lumi_manifest). Lumi Pet's icons keep their first names (lumi-180.png). -#}
+{% block app_links %}{% if game.kit == 'lumi-pet' %}{% set icon = 'lumi' if game.slug == 'lumi-pet' else game.slug %}
+  <link rel="manifest" href="/media/games/{{ game.slug }}/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="{{ static('icons/' ~ icon ~ '-180.png') }}">
   <meta name="theme-color" content="#1a0f2e">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="Lumi Pet">
+  <meta name="apple-mobile-web-app-title" content="{{ game.name }}">
 {% else %}{{ super() }}{% endif %}{% endblock %}
 {% block body %}
 {#- A built-in game (mnemerynne/games.py, web/games.py), in the person's theme. Media's game layer frames this page;
-    opened on its own it works the same. The game's markup is its partial (templates/games/<slug>.html); its scripts
-    are files under /static/games/ (no inline script: ready for a script-src 'self' policy). -#}
+    opened on its own it works the same. The game's markup is its partial (templates/games/<kit>.html); its scripts
+    are files under /static/games/ (no inline script: ready for a script-src 'self' policy). A game's kit is its own
+    slug unless it shares one: the casino tables share "casino", the three Lumi apps "lumi-pet" (games.py kit). -#}
 <link rel="stylesheet" href="{{ static('games/common.css') }}">
-{% set asset = 'casino' if game.multiplayer else game.slug %}
+{% set asset = 'casino' if game.multiplayer else (game.kit or game.slug) %}
 <link rel="stylesheet" href="{{ static('games/' ~ asset ~ '/game.css') }}">
 {% for part in game.extras if part.endswith('.css') %}<link rel="stylesheet" href="{{ static('games/' ~ part) }}">{% endfor %}
-<main class="gm" id="gm" data-game="{{ game.slug }}" data-name="{{ game.name }}">
+<main class="gm" id="gm" data-game="{{ game.slug }}" data-kit="{{ asset }}" data-name="{{ game.name }}">
   {% include "games/" ~ asset ~ ".html" %}
 </main>
 <script src="{{ static('games/common.js') }}"></script>
 {% if game.slug == 'roulette' %}<script src="{{ static('games/casino/roulette.js') }}"></script>{% endif %}
 {% if not game.multiplayer %}<script src="{{ static('games/' ~ asset ~ '/rules.js') }}"></script>{% endif %}
-{% if game.slug == 'lumi-pet' %}{% for part in ('house', 'closet', 'picker-ui', 'enemies', 'battle-ui', 'dungeon-ui', 'dungeon-art', 'garden-ui', 'garden-art', 'skills-ui', 'skills-art', 'collection-ui', 'collection-art') %}<script src="{{ static('games/lumi-pet/' ~ part ~ '.js') }}"></script>{% endfor %}{% endif %}
+{% if asset == 'lumi-pet' %}{% for part in ('house', 'closet', 'picker-ui', 'enemies', 'battle-ui', 'dungeon-ui', 'dungeon-art', 'garden-ui', 'garden-art', 'skills-ui', 'skills-art', 'collection-ui', 'collection-art') %}<script src="{{ static('games/lumi-pet/' ~ part ~ '.js') }}"></script>{% endfor %}{% endif %}
 {% for part in game.extras if part.endswith('.js') %}<script src="{{ static('games/' ~ part) }}"></script>{% endfor %}
 <script src="{{ static('games/' ~ asset ~ '/game.js') }}"></script>
 {% endblock %}

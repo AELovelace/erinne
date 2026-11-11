@@ -1,4 +1,7 @@
 // Included by connected-browser.mjs so the pet is checked against the real, disposable Media application.
+// Lumi is one pet in three apps (mnemerynne/games.py): Lumi Pet (/media/games/lumi-pet: her room), Lumi Dungeons
+// (/media/games/lumi-dungeons: dungeon, battle, skills) and Lumi's Garden (/media/games/lumi-garden). Each check
+// below opens the app that has the tab it is checking; checkLumiApps checks the ways between them.
 import assert from "node:assert/strict";
 
 const text = (page, id) => page.$eval(id, el => el.textContent);
@@ -10,6 +13,7 @@ async function moveTo(page, key) { // Move the list's cursor onto a row with the
   }
   throw new Error("The list's cursor never reached " + key);
 }
+const places = row("env-moonlit-shrine") + ", " + row("continue"); // Lumi Dungeons' first list: the places to explore, or (on a device that hasn't read it yet) how the last trip ended.
 const said = (page, words) => page.waitForFunction(w => document.getElementById("lp-message").textContent.includes(w), {}, words);
 
 export async function checkLumiPetCapsules(page, base) { // Run on the second account, whose purse the casino checks don't count on to the coin.
@@ -64,6 +68,11 @@ export async function checkLumiPet(browser, page, base) { // Exercise real contr
   await page.click('[data-lp-tab="pantry"]');
   await page.waitForFunction(() => document.querySelector('[data-lp-row="cookie"] small').textContent.includes("1 left"));
 
+  assert.equal(await page.$('[data-lp-tab="battle"]'), null, "Fights and dungeons are Lumi Dungeons' now, not a tab of Lumi Pet");
+  await page.goto(base + "/media/games/lumi-dungeons"); // The same Lumi, in her other app: it opens on the list of places to explore.
+  await page.waitForSelector(row("env-moonlit-shrine"));
+  assert.deepEqual(await page.$$eval("[data-lp-tab]", tabs => tabs.map(tab => tab.dataset.lpTab)), ["dungeon", "battle", "skills", "settings"]);
+  assert.equal(await text(page, "#lp-coins"), "1,017", "One purse and one pet across her apps");
   await page.click('[data-lp-tab="battle"]'); // A fight: find one, see the enemy, play a turn, then run (so no coins or EXP move).
   assert.equal(await text(page, "#lp-level"), "1 · 0/35 EXP");
   assert.equal(await text(page, "#lp-health-n"), "58/58"); // Her health: full, so nothing to mend and no potion row in Care.
@@ -173,6 +182,8 @@ export async function checkLumiPet(browser, page, base) { // Exercise real contr
   assert.equal(await page.$eval("#lp-room", el => el.dataset.dungeon), "false");
   assert.equal(await text(page, "#lp-coins"), "1,017");
 
+  await page.goto(base + "/media/games/lumi-pet"); // Home again: the rest is in her room.
+  await page.waitForSelector(row("cuddle"));
   await page.click('[data-lp-tab="toys"]');
   await page.click(row("star-ribbon"));
   await page.waitForFunction(() => document.getElementById("lp-state").textContent.startsWith("Playing · 1:"));
@@ -293,7 +304,7 @@ export async function checkLumiPet(browser, page, base) { // Exercise real contr
     await blocked.waitForSelector(row("cuddle"));
     assert.equal(await text(blocked, "#lp-moments"), "9");
   } finally { await blocked.close(); }
-  console.log("Lumi Pet: account save, old-save import, care, pantry, shop, a fight, a dungeon trip, toys, the closet, the house, settings, mobile, reduced motion and blocked storage passed");
+  console.log("Lumi Pet and Lumi Dungeons: account save, old-save import, care, pantry, shop, a fight, a dungeon trip, toys, the closet, the house, settings, mobile, reduced motion and blocked storage passed");
 }
 
 export async function checkLumiPetDoors(browser, page, base) { // Every kind of locked door, and the card game, on the real page.
@@ -331,7 +342,7 @@ export async function checkLumiPetDoors(browser, page, base) { // Every kind of 
           return new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
         };
       }, made);
-      await tab.goto(base + "/media/games/lumi-pet");
+      await tab.goto(base + "/media/games/lumi-dungeons");
       await tab.waitForSelector(row(made.rows[0]));
       assert.equal(await tab.$eval('[data-lp-tab="dungeon"]', el => el.getAttribute("aria-selected")), "true", made.name + ": a trip under way opens on the Dungeon tab");
       for (const key of made.rows) assert.ok(await tab.$(row(key)), made.name + " offers " + key);
@@ -415,18 +426,24 @@ export async function checkLumiPetFrame(page) { // Parent-origin remote messages
   });
   const frame = await (await page.waitForSelector("#mc-game-frame")).contentFrame();
   await frame.waitForSelector(row("cuddle"));
-  await page.evaluate(() => { // ▶ to Settings' neighbour and back would do; Previous wraps straight to Settings, ▼ ▼ passes Storyteller to Sound.
+  await page.evaluate(() => { // Previous wraps straight to Settings, and ▼ steps from Glow to Sound.
     const target = document.getElementById("mc-game-frame").contentWindow;
-    for (const key of ["MediaTrackPrevious", "ArrowDown", "ArrowDown"]) target.postMessage({ type: "mnemerynne-game-key", key }, location.origin);
+    for (const key of ["MediaTrackPrevious", "ArrowDown"]) target.postMessage({ type: "mnemerynne-game-key", key }, location.origin);
   });
   await page.waitForFunction(() => window.petReport.includes("Settings: Sound"));
   const before = await frame.$eval(row("sound"), el => el.textContent.includes("Sound: on"));
   await page.evaluate(() => document.getElementById("mc-game-frame").contentWindow.postMessage({ type: "mnemerynne-game-key", key: "Enter" }, location.origin));
   await frame.waitForFunction(was => document.querySelector('[data-lp-row="sound"]').textContent.includes("Sound: on") !== was, {}, before);
-  await frame.focus(row("sound"));
-  await frame.page().keyboard.press("Escape");
+  assert.equal(await frame.$(row("install")), null, "Inside Media the frame around it is the app: nothing to install");
+  await frame.click(row("open-lumi-garden")); // One of Lumi's apps opens another: Media's layer swaps the game, so its bar (and a remote) follow.
+  await page.waitForFunction(() => document.getElementById("mc-game-title").textContent === "Lumi’s Garden");
+  const garden = await (await page.waitForSelector("#mc-game-frame")).contentFrame();
+  await garden.waitForFunction(() => document.getElementById("gm") && document.getElementById("gm").dataset.game === "lumi-garden");
+  await garden.waitForSelector(row("press"));
+  await garden.focus(row("press"));
+  await garden.page().keyboard.press("Escape");
   await page.waitForFunction(() => document.getElementById("mc-game").hidden);
-  console.log("Lumi Pet: Media card, frame remote controls, status report and Escape passed");
+  console.log("Lumi Pet: Media card, frame remote controls, status report, opening Lumi's Garden from inside the frame, and Escape passed");
 }
 
 export async function checkLumiPetGarden(browser, page, base) { // The Stardust Garden in a real browser: keyboard, mouse, both minigames, a reload.
@@ -438,8 +455,11 @@ export async function checkLumiPetGarden(browser, page, base) { // The Stardust 
   try {
     await tab.setCookie(...await page.cookies());
     await tab.setViewport({ width: 1440, height: 1000 });
-    await tab.goto(base + "/media/games/lumi-pet#garden"); // The address a "flowers are ready" reminder opens.
+    await tab.goto(base + "/media/games/lumi-pet#garden"); // The address an old "flowers are ready" reminder opened, from when the garden was a tab of Lumi Pet: she sends it on.
     await tab.waitForSelector(row("press"));
+    assert.equal(await tab.evaluate(() => location.pathname), "/media/games/lumi-garden", "Lumi's Garden is an app of its own");
+    assert.deepEqual(await tab.$$eval("[data-lp-tab]", tabs => tabs.map(tab => tab.dataset.lpTab)), ["garden", "settings"]);
+    assert.equal(await tab.$eval(".gm-title", el => el.textContent), "LUMI’SGARDEN");
     assert.equal(await tab.$eval('[data-lp-tab="garden"]', el => el.getAttribute("aria-selected")), "true");
     assert.equal(await tab.$eval(".lp-tabs", el => getComputedStyle(el).display), "none", "The garden has the panel to itself, like a dungeon trip");
     assert.equal(await tab.$eval("#lp-room", el => el.dataset.garden), "true");
@@ -542,18 +562,21 @@ export async function checkLumiPetGarden(browser, page, base) { // The Stardust 
     await tab.waitForSelector(row("press"));
     await tab.screenshot({ path: "runs/casino-browser/lumi-pet-garden.png", fullPage: true });
 
-    await tab.goto(base + "/media/games/lumi-pet"); // A reload: the same garden, reached from its tab.
-    await tab.waitForSelector(row("cuddle"));
-    await tab.click('[data-lp-tab="garden"]');
+    await tab.goto(base + "/media/games/lumi-garden"); // A reload: the same garden, straight away (it is this app's first tab).
     await tab.waitForSelector(row("press"));
     assert.ok((await story()).includes(squeezed), "The same garden after a reload");
+    assert.match(await tab.$eval(row("leave"), el => el.textContent), /Settings/, "The garden's way out is this app's Settings, since her room is another app");
     await tab.click(row("leave"));
-    await tab.waitForSelector(row("cuddle"));
+    await tab.waitForSelector(row("sound"));
+    assert.equal(await tab.$eval('[data-lp-tab="settings"]', el => el.getAttribute("aria-selected")), "true");
     assert.equal(await tab.$eval("#lp-room", el => el.dataset.garden), "false");
     assert.notEqual(await tab.$eval(".lp-tabs", el => getComputedStyle(el).display), "none");
-    assert.equal(await tab.$eval("#lp-dungeon", el => el.style.display), "none", "Back with Lumi, the garden's drawing is put away");
+    assert.equal(await tab.$eval("#lp-dungeon", el => el.style.display), "none", "In Settings the garden's drawing is put away");
+    assert.equal(await tab.$(row("glow")), null, "Her colour is Lumi Pet's and Lumi Dungeons' to change");
+    await tab.click('[data-lp-tab="garden"]'); // And back to the beds by the tab.
+    await tab.waitForSelector(row("press"));
     assert.deepEqual(errors, [], "Nothing threw on the page");
-    console.log("Lumi Pet garden: planting and trimming by keyboard and mouse, the press, fertilizing, watering, drawers and a reload passed");
+    console.log("Lumi's Garden: its own app, planting and trimming by keyboard and mouse, the press, fertilizing, watering, drawers, Settings and a reload passed");
   } finally { if (errors.length) console.log("Page errors:", errors.join(" | ")); await tab.close(); }
 }
 
@@ -565,9 +588,9 @@ export async function checkLumiPetSkills(browser, page, base) { // The skill tre
   try {
     await tab.setCookie(...await page.cookies());
     await tab.setViewport({ width: 1440, height: 1000 });
-    await tab.goto(base + "/media/games/lumi-pet");
-    await tab.waitForSelector(row("cuddle"));
-    assert.equal((await tab.$$("[data-lp-tab]")).length, 12);
+    await tab.goto(base + "/media/games/lumi-dungeons"); // The skill trees are Lumi Dungeons'.
+    await tab.waitForSelector(places);
+    assert.equal((await tab.$$("[data-lp-tab]")).length, 4);
     await tab.click('[data-lp-tab="skills"]'); // All six trees on one page, with the panel to itself like the garden.
     await tab.waitForSelector(row("act"));
     assert.equal(await tab.$eval(".lp-tabs", el => getComputedStyle(el).display), "none");
@@ -589,11 +612,15 @@ export async function checkLumiPetSkills(browser, page, base) { // The skill tre
     await tab.keyboard.press("PageDown"); // Previous and Next reach the list.
     assert.ok(await tab.$(row("leave") + '[aria-pressed="true"]') || await tab.$(row("respec") + '[aria-pressed="true"]'));
     await tab.screenshot({ path: "runs/casino-browser/lumi-pet-skills.png", fullPage: true });
+    assert.match(await tab.$eval(row("leave"), el => el.textContent), /Back to the dungeons/);
     await tab.click(row("leave"));
-    await tab.waitForSelector(row("cuddle"));
+    await tab.waitForSelector(places); // This app's first tab: the places to explore.
     assert.equal(await tab.$eval("#lp-room", el => el.dataset.skills), "false");
     assert.equal(await tab.$eval("#lp-dungeon", el => el.style.display), "none");
 
+    await tab.goto(base + "/media/games/lumi-pet"); // The Collection is in her room's app.
+    await tab.waitForSelector(row("cuddle"));
+    assert.equal((await tab.$$("[data-lp-tab]")).length, 8);
     await tab.click('[data-lp-tab="collection"]'); // The Collection: a gallery over the room, like the trees.
     await tab.waitForSelector(row("look"));
     assert.equal(await tab.$eval(".lp-tabs", el => getComputedStyle(el).display), "none");
@@ -633,7 +660,7 @@ export async function checkLumiPetSkills(browser, page, base) { // The skill tre
     await tab.waitForSelector(row("cuddle"));
     assert.equal(await tab.$eval("#lp-room", el => el.dataset.album), "false");
     assert.deepEqual(errors, [], "Nothing threw on the page");
-    console.log("Lumi Pet skills and collection: six trees drawn, walked by arrows and mouse; the gallery's shelves, pages, pictures and close look passed");
+    console.log("Lumi Dungeons' skills and Lumi Pet's collection: six trees drawn, walked by arrows and mouse; the gallery's shelves, pages, pictures and close look passed");
   } finally { if (errors.length) console.log("Page errors:", errors.join(" | ")); await tab.close(); }
 }
 
@@ -672,8 +699,12 @@ export async function checkLumiPetPhone(browser, page, base) { // A phone: one s
     assert.match(await tab.$eval(row("install"), el => el.textContent), /Install Lumi Pet.*home screen/s);
     // (Not pressed here: where the browser offers to install her, the row opens the browser's own dialog, which a test can't answer.)
 
-    await tab.tap('[data-lp-tab="garden"]'); // The garden: plots under the thumb, and a big button for the press.
+    await tab.goto(base + "/media/games/lumi-garden"); // Lumi's Garden: plots under the thumb, and a big button for the press.
     await tab.waitForSelector(row("press"));
+    assert.match(await tab.$eval('link[rel="manifest"]', el => el.getAttribute("href")), /\/media\/games\/lumi-garden\/manifest\.webmanifest$/); // An app of its own too.
+    const gardenApp = await tab.evaluate(() => fetch(document.querySelector('link[rel="manifest"]').href).then(answer => answer.json()));
+    assert.deepEqual([gardenApp.name, gardenApp.start_url, gardenApp.scope], ["Lumi’s Garden", "/media/games/lumi-garden", "/media/games/lumi-garden"]);
+    for (const icon of gardenApp.icons) assert.equal(await tab.evaluate(src => fetch(src).then(answer => answer.status + ":" + answer.headers.get("content-type")), icon.src), "200:image/png");
     await fits("Garden");
     await tab.waitForSelector("#lp-squeeze:not([hidden])");
     assert.equal(await tab.$eval(".lp-tabs", el => getComputedStyle(el).display), "flex", "On a phone the tab bar stays out in the garden: another tab is one tap away");
@@ -684,11 +715,16 @@ export async function checkLumiPetPhone(browser, page, base) { // A phone: one s
     await tab.tap("#lp-squeeze");
     await tab.waitForFunction(() => document.getElementById("lp-room").dataset.gardenAct && document.getElementById("lp-room").dataset.gardenAct.startsWith("bounce"));
     await shot("garden");
-    await tab.tap(row("leave"));
-    await tab.waitForSelector(row("cuddle"));
+    await tab.tap(row("leave")); // Its Settings.
+    await tab.waitForSelector(row("install"));
+    assert.match(await tab.$eval(row("install"), el => el.textContent), /Install Lumi’s Garden/);
     assert.ok(await tab.$eval("#lp-squeeze", el => el.hidden));
 
-    await tab.tap('[data-lp-tab="skills"]'); // The skill trees and the collection get most of the screen.
+    await tab.goto(base + "/media/games/lumi-dungeons"); // The skill trees (Lumi Dungeons) and the collection (Lumi Pet) get most of the screen.
+    await tab.waitForSelector(places);
+    await fits("Dungeons");
+    assert.match(await tab.$eval('link[rel="manifest"]', el => el.getAttribute("href")), /\/media\/games\/lumi-dungeons\/manifest\.webmanifest$/);
+    await tab.tap('[data-lp-tab="skills"]');
     await tab.waitForSelector(row("act"));
     await fits("Skills");
     const trees = await box("#lp-room"), node = await box('[data-click="skill:heavy-paw"]');
@@ -697,6 +733,8 @@ export async function checkLumiPetPhone(browser, page, base) { // A phone: one s
     await tab.waitForFunction(() => document.querySelector("#lp-dungeon [data-cursor]").dataset.cursor === "ember");
     await shot("skills");
     await tab.tap(row("leave"));
+    await tab.waitForSelector(places);
+    await tab.goto(base + "/media/games/lumi-pet");
     await tab.waitForSelector(row("cuddle"));
     await tab.tap('[data-lp-tab="collection"]');
     await tab.waitForSelector(row("look"));
@@ -730,7 +768,7 @@ export async function checkLumiPetPhone(browser, page, base) { // A phone: one s
           return new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
         };
       });
-      await out.goto(base + "/media/games/lumi-pet");
+      await out.goto(base + "/media/games/lumi-dungeons");
       await out.waitForSelector(row("go-e"));
       await out.waitForSelector("#lp-pad:not([hidden])");
       assert.equal(await out.$eval(".lp-tabs", el => getComputedStyle(el).display), "none", "On a trip the tab bar is put away");
@@ -745,6 +783,104 @@ export async function checkLumiPetPhone(browser, page, base) { // A phone: one s
       await Promise.all([out.waitForRequest(request => request.url().endsWith("/dungeon/act") && (request.postData() || "").includes('"way":"n"')), out.tap('#lp-pad [data-pad="up"]')]); // A tap walks her north.
     } finally { await out.close(); }
     assert.deepEqual(errors, [], "Nothing threw on the page");
-    console.log("Lumi Pet on a phone: one screen with a tab bar, thumb-sized rows, the press button, the arrow pad, the trees and gallery by touch, and her own app manifest passed");
+    console.log("Lumi's apps on a phone: one screen with a tab bar, thumb-sized rows, the press button, the arrow pad, the trees and gallery by touch, and each app's own manifest passed");
+  } finally { if (errors.length) console.log("Page errors:", errors.join(" | ")); await tab.close(); }
+}
+
+export async function checkLumiApps(browser, page, base) { // One pet in three apps: what each shows, the ways between them, and Lumi being away.
+  const tab = await browser.newPage();
+  const errors = [];
+  tab.on("pageerror", error => errors.push(String(error)));
+  const tabs = () => tab.$$eval("[data-lp-tab]", buttons => buttons.map(button => button.dataset.lpTab));
+  try {
+    await tab.setCookie(...await page.cookies());
+    await tab.setViewport({ width: 1440, height: 1000 });
+    await tab.goto(base + "/media/games/lumi-pet");
+    await tab.waitForSelector(row("cuddle"));
+    assert.deepEqual(await tabs(), ["care", "pantry", "toys", "closet", "home", "shop", "collection", "settings"]);
+    assert.deepEqual(await tab.$eval("#gm", el => [el.dataset.game, el.dataset.kit, el.dataset.name]), ["lumi-pet", "lumi-pet", "Lumi Pet"]);
+    assert.equal(await tab.$eval("#lp-room", el => el.dataset.away), "false");
+    const coins = await text(tab, "#lp-coins"), level = await text(tab, "#lp-level");
+    await tab.click('[data-lp-tab="settings"]'); // Settings lists her other two apps, and no storyteller: that is the dungeons'.
+    await tab.waitForSelector(row("open-lumi-dungeons"));
+    assert.ok(await tab.$(row("open-lumi-garden")) && await tab.$(row("glow")) && await tab.$(row("install")));
+    assert.equal(await tab.$(row("storyteller")), null);
+    assert.equal(await tab.$(row("open-lumi-pet")), null, "An app doesn't offer to open itself");
+    await Promise.all([tab.waitForNavigation(), tab.click(row("open-lumi-dungeons"))]);
+    await tab.waitForSelector(places);
+    if (await tab.$(row("continue"))) { // How her last trip ended is read once on a device: after that the app opens on the places to explore.
+      await tab.click(row("continue"));
+      await tab.waitForSelector(row("env-moonlit-shrine"));
+      await tab.reload();
+      await tab.waitForSelector(row("env-moonlit-shrine"));
+    }
+    assert.equal(await tab.evaluate(() => location.pathname), "/media/games/lumi-dungeons");
+    assert.deepEqual(await tabs(), ["dungeon", "battle", "skills", "settings"]);
+    assert.equal(await tab.$eval(".gm-title", el => el.textContent), "LUMIDUNGEONS");
+    assert.deepEqual([await text(tab, "#lp-coins"), await text(tab, "#lp-level")], [coins, level], "The same Lumi and the same purse");
+    assert.equal(await tab.$(row("cuddle")), null);
+    await tab.keyboard.press("PageUp"); // Previous wraps to this app's Settings: the storyteller lives here, reminders don't.
+    await tab.waitForSelector(row("storyteller"));
+    assert.ok(await tab.$(row("glow")) && await tab.$(row("open-lumi-pet")) && await tab.$(row("open-lumi-garden")));
+    assert.equal(await tab.$(row("reminders")), null);
+    assert.match(await tab.$eval(row("install"), el => el.textContent), /Install Lumi Dungeons/);
+    await Promise.all([tab.waitForNavigation(), tab.click(row("open-lumi-garden"))]);
+    await tab.waitForSelector(row("press"));
+    assert.deepEqual(await tabs(), ["garden", "settings"]);
+    await tab.click(row("leave"));
+    await tab.waitForSelector(row("open-lumi-pet"));
+    await Promise.all([tab.waitForNavigation(), tab.click(row("open-lumi-pet"))]);
+    await tab.waitForSelector(row("cuddle"));
+    assert.equal(await tab.evaluate(() => location.pathname), "/media/games/lumi-pet");
+    for (const slug of ["lumi-pet", "lumi-dungeons", "lumi-garden"]) { // Each is an app of its own, with its own icons.
+      const manifest = await tab.evaluate(slug => fetch("/media/games/" + slug + "/manifest.webmanifest").then(answer => answer.json()), slug);
+      assert.deepEqual([manifest.id, manifest.scope, manifest.shortcuts.length], ["/media/games/" + slug, "/media/games/" + slug, 2]);
+    }
+
+    // Lumi out on a trip, as her other two apps see it. (As in the door checks, the page is shown the server's own state with a trip under way.)
+    for (const slug of ["lumi-pet", "lumi-garden"]) {
+      const away = await browser.newPage();
+      away.on("pageerror", error => errors.push(String(error)));
+      try {
+        await away.setCookie(...await page.cookies());
+        await away.setViewport({ width: 1440, height: 1000 });
+        await away.evaluateOnNewDocument(() => {
+          const real = window.fetch;
+          window.fetch = async function (url, options) {
+            const answer = await real(url, options);
+            if (!String(url).endsWith("/lumi-pet/state")) return answer;
+            const data = await answer.json(), env = data.dungeon.environments[0];
+            data.fight = null; data.pet.task = null; // (She may still be playing with a toy from an earlier check.)
+            data.dungeon.run = { id: 79, env: { id: env.id, name: env.name, family: env.family, palette: env.palette }, depth: 2, at: "1,1", over: null, ended: null,
+              rooms: { "1,1": { kind: "empty", done: true, exits: ["e"] }, "2,1": { kind: "unknown" } }, room: { kind: "empty", done: true, exits: ["e"] },
+              satchel: { coins: 12, potions: 0, keys: 0, trophies: [], mods: [] }, hp: 40, hpMax: 58, mp: 20, mpMax: 22, event: { scenario: "empty" },
+              say: "A quiet room.", scene: "Moonlight on old stone.", story: ["Lumi set out.", "A quiet room."], fighting: false, facing: null, game: null };
+            return new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
+          };
+        });
+        await away.goto(base + "/media/games/" + slug);
+        await away.waitForSelector(row("away"));
+        assert.match(await away.$eval(row("away"), el => el.textContent), /Lumi is out exploring.*Open Lumi Dungeons/s, slug);
+        assert.equal(await away.$(row(slug === "lumi-pet" ? "cuddle" : "press")), null, slug + ": nothing to do with her until she is home");
+        assert.deepEqual(await away.$eval("#lp-room", el => [el.dataset.away, el.dataset.dungeon, el.dataset.garden]), ["true", "false", "false"], slug + ": her room waits, and no dungeon is drawn here");
+        assert.equal(await away.$eval(".lp-pet-wrap", el => getComputedStyle(el).opacity), "0", slug + ": she isn't in the room");
+        assert.equal(await away.$eval("#lp-dungeon", el => getComputedStyle(el).display), "none");
+        assert.equal(await text(away, "#lp-state"), "Exploring · floor 2");
+        assert.match(await text(away, "#lp-message"), /Lumi is out exploring/);
+        assert.notEqual(await away.$eval(".lp-tabs", el => getComputedStyle(el).display), "none", slug + ": its tabs stay in reach");
+        if (slug === "lumi-pet") { // The rest of her room's app still works while she is out: the pantry can send her a snack.
+          await away.click('[data-lp-tab="pantry"]');
+          await away.waitForSelector(row("apple"));
+          await away.click('[data-lp-tab="care"]');
+          await away.waitForSelector(row("away"));
+        }
+        await Promise.all([away.waitForNavigation(), away.click(row("away"))]);
+        assert.equal(await away.evaluate(() => location.pathname), "/media/games/lumi-dungeons", slug + ": the row goes to where she is");
+        await away.waitForSelector(row("go-e")); // And Lumi Dungeons picks the trip up, in the dungeon.
+        assert.equal(await away.$eval("#lp-room", el => el.dataset.dungeon), "true");
+      } finally { await away.close(); }
+    }
+    assert.deepEqual(errors, [], "Nothing threw on the page");
+    console.log("Lumi's three apps: each one's own tabs and Settings, the Open rows between them, one pet and purse, three manifests, and Lumi away on a trip passed");
   } finally { if (errors.length) console.log("Page errors:", errors.join(" | ")); await tab.close(); }
 }

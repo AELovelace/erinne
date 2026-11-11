@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import aiosqlite
-from fastapi import Depends, FastAPI, Form, Request, status
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -30,6 +30,7 @@ from mnemerynne.agent import Agent
 from mnemerynne.media import screens as media_screens, transcode as media_transcode
 from mnemerynne.rooms_erynne import RoomErynne
 from mnemerynne import automations as automations_mod, automations_run
+from mnemerynne import games   # the built-in games' registry: Lumi's three apps each get a manifest (lumi_manifest)
 from mnemerynne import health
 from mnemerynne.automations_run import Scheduler
 from mnemerynne.answer import ASSISTANT_NAME
@@ -384,19 +385,25 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                              "params": {"title": "title", "text": "text", "url": "url"}},
         }, media_type="application/manifest+json", headers={"Cache-Control": "no-cache"})
 
-    @app.get("/media/games/lumi-pet/manifest.webmanifest", include_in_schema=False)
-    def lumi_manifest():
-        """Makes Lumi Pet an app of her own, installed beside Erynne with her own icon and opening straight to her:
-        its own id, and a scope covering only her page. Public, like the main manifest."""
-        icons = [{"src": static(f"icons/{file}"), "sizes": size, "type": "image/png", "purpose": purpose}
-                 for file, size, purpose in (("lumi-192.png", "192x192", "any"), ("lumi-512.png", "512x512", "any"),
-                                             ("lumi-maskable-512.png", "512x512", "maskable"))]
+    @app.get("/media/games/{slug}/manifest.webmanifest", include_in_schema=False)
+    def lumi_manifest(slug: str):
+        """Makes each of Lumi's three apps (games.LUMI_APPS: Lumi Pet, Lumi Dungeons, Lumi's Garden) an app of its
+        own, installed beside Erynne with its own icon and opening straight to it: its own id, and a scope covering
+        only its page. Public, like the main manifest. Lumi Pet's icon files keep their first names (lumi-*.png);
+        the other two are named after their slug (python/make_lumi_icons.py draws those)."""
+        game = next((g for g in games.LUMI_APPS if g.slug == slug), None)
+        if game is None:                                      # no other game is an app of its own
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No such app")
+        stem = "lumi" if slug == "lumi-pet" else slug         # the icon files' first name
+        icons = [{"src": static(f"icons/{stem}-{file}"), "sizes": size, "type": "image/png", "purpose": purpose}
+                 for file, size, purpose in (("192.png", "192x192", "any"), ("512.png", "512x512", "any"),
+                                             ("maskable-512.png", "512x512", "maskable"))]
+        page = f"/media/games/{slug}"
         return JSONResponse({
-            "id": "/media/games/lumi-pet", "name": "Lumi Pet", "short_name": "Lumi Pet", "start_url": "/media/games/lumi-pet",
-            "scope": "/media/games/lumi-pet", "display": "standalone",
-            "description": "A little glowing fairy cat to care for, with a house, a dungeon and a garden.",
+            "id": page, "name": game.name, "short_name": game.name, "start_url": page, "scope": page, "display": "standalone",
+            "description": game.description,
             "background_color": "#0D0614", "theme_color": "#1a0f2e", "icons": icons,      # her room's night plum
-            "shortcuts": [{"name": "Garden", "url": "/media/games/lumi-pet#garden"}],
+            "shortcuts": [{"name": other.name, "url": f"/media/games/{other.slug}"} for other in games.LUMI_APPS if other is not game],
         }, media_type="application/manifest+json", headers={"Cache-Control": "no-cache"})
 
     @app.get("/media/panel/manifest.webmanifest", include_in_schema=False)

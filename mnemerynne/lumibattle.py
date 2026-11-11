@@ -464,7 +464,7 @@ def act(conn: sqlite3.Connection, user_id: int, pet: dict, battle_id: int, turn:
         if lumi["hp"] >= lumi["hpMax"]:
             raise BattleError("Lumi is already at full health.")
         if pet["potions"] < 1:
-            raise BattleError("No potions left. The Battle tab sells them between fights.")
+            raise BattleError("No potions left. Lumi Dungeons' Battle tab sells them between fights.")
         pet["potions"] -= 1
     elif action not in ("defend", "run"):
         raise BattleError("Lumi doesn't know that one.")
@@ -582,7 +582,7 @@ def progress(conn: sqlite3.Connection, user_id: int, pet: dict, action: str, ite
         if pet["wound"] <= 0:
             raise BattleError("Lumi is already at full health.")
         if pet["potions"] < 1:
-            raise BattleError("No potions left. The Battle tab sells them.")
+            raise BattleError("No potions left. Lumi Dungeons' Battle tab sells them.")
         pet["potions"] -= 1
         mend(pet, POTION_MEND)
     else:

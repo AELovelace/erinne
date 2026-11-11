@@ -1,8 +1,17 @@
-{# Lumi's room uses native SVG and CSS: no downloaded art, fonts or external service. #}
+{# Lumi's room uses native SVG and CSS: no downloaded art, fonts or external service.
+   One page for three apps (mnemerynne/games.py): Lumi Pet, Lumi Dungeons and Lumi's Garden each show their own tabs
+   (game.tabs) over the same room, and game.js only offers what the tabs here allow. #}
+{%- set words = {
+  "lumi-pet": ("// A LITTLE LIGHT, JUST FOR YOU", "LUMI", "PET", "A soft place to land."),
+  "lumi-dungeons": ("// DOWN WHERE THE TREASURE IS", "LUMI", "DUNGEONS", "Brave little paws."),
+  "lumi-garden": ("// THE STARDUST GARDEN", "LUMI’S", "GARDEN", "Flowers, powder and patience."),
+}[game.slug] %}
+{%- set tab_names = {"care": "Care", "pantry": "Pantry", "toys": "Toys", "closet": "Closet", "home": "Home", "battle": "Battle",
+  "skills": "Skills", "dungeon": "Dungeon", "garden": "Garden", "shop": "Shop", "collection": "Collection", "settings": "Settings"} %}
 <section class="lp-intro gm-panel" aria-label="Your companion">
-  <p class="gm-eyebrow">// A LITTLE LIGHT, JUST FOR YOU</p>
-  <h1 class="gm-title">LUMI<span>PET</span></h1>
-  <p class="lp-lead">A soft place to land.</p>
+  <p class="gm-eyebrow">{{ words[0] }}</p>
+  <h1 class="gm-title">{{ words[1] }}<span>{{ words[2] }}</span></h1>
+  <p class="lp-lead">{{ words[3] }}</p>
   {#- Her three needs, drawn by game.js from the server's numbers (mnemerynne/lumipet.py). They run down while you're away. -#}
   <div class="lp-meters">
     {% for meter, label in (("hunger", "Tummy"), ("energy", "Energy"), ("joy", "Joy")) %}
@@ -88,20 +97,10 @@
   {#- On a dungeon trip: what the room is like, and the tale so far (game.js fills it; the newest line is the message below). -#}
   <div class="lp-story" id="lp-story" aria-label="The story so far"></div>
   <p id="lp-message" class="lp-message" role="status" aria-live="polite">Hello, you. There’s a place beside me.</p>
-  {#- The tabs are fixed; game.js fills the list under them from the server's catalog and Lumi's own pantry and toy box. -#}
-  <div class="lp-tabs" role="tablist" aria-label="What to do">
-    <button type="button" role="tab" data-lp-tab="care" aria-selected="true">Care</button>
-    <button type="button" role="tab" data-lp-tab="pantry" aria-selected="false">Pantry</button>
-    <button type="button" role="tab" data-lp-tab="toys" aria-selected="false">Toys</button>
-    <button type="button" role="tab" data-lp-tab="closet" aria-selected="false">Closet</button>
-    <button type="button" role="tab" data-lp-tab="home" aria-selected="false">Home</button>
-    <button type="button" role="tab" data-lp-tab="battle" aria-selected="false">Battle</button>
-    <button type="button" role="tab" data-lp-tab="skills" aria-selected="false">Skills</button>
-    <button type="button" role="tab" data-lp-tab="dungeon" aria-selected="false">Dungeon</button>
-    <button type="button" role="tab" data-lp-tab="garden" aria-selected="false">Garden</button>
-    <button type="button" role="tab" data-lp-tab="shop" aria-selected="false">Shop</button>
-    <button type="button" role="tab" data-lp-tab="collection" aria-selected="false">Collection</button>
-    <button type="button" role="tab" data-lp-tab="settings" aria-selected="false">Settings</button>
+  {#- This app's tabs (games.py tabs); game.js fills the list under them from the server's catalog and Lumi's own pantry and toy box. -#}
+  <div class="lp-tabs" role="tablist" aria-label="What to do" data-count="{{ game.tabs|length }}">
+    {% for tab in game.tabs %}<button type="button" role="tab" data-lp-tab="{{ tab }}" aria-selected="{{ 'true' if loop.first else 'false' }}">{{ tab_names[tab] }}</button>
+    {% endfor %}
   </div>
   <div class="lp-actions" id="lp-list" aria-label="Choices"></div>
   {#- game.js swaps these lines for the dungeon's own controls while Lumi is exploring. -#}

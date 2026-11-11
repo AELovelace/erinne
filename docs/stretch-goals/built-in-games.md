@@ -33,11 +33,15 @@ Games with `mouse_keyboard=True` in `games.py` appear on their own **Mouse & key
 
 ## Status (2026-11-10): the Stardust Garden
 
-Lumi Pet has an idle game: a flower farm that feeds a powder press (`mnemerynne/lumigarden.py`, migration 0069, the Garden tab). Doll's design: Farmville mixed with Cookie Clicker, for someone who loves idle clickers. Plots, twelve flowers (cut flowers early, perennials last), a press that turns starpowder into coins and slows down each day without stopping, watering (Simon Says) and fertilizing (fast presses) for time boosts, six class helpers lifted by Lumi's real skills and mods, her equipped moves as abilities, gifts, cosmetics for starpowder, Moonrise for a permanent upgrade or another garden, and a reminder when slow flowers are ready. Not built: visiting other people's gardens, seasons, weather. Every number is a first guess until someone has played it for a week.
+Lumi Pet has an idle game: a flower farm that feeds a powder press (`mnemerynne/lumigarden.py`, migration 0069, the Garden tab; since 2026-11-10 its own app, Lumi's Garden). Doll's design: Farmville mixed with Cookie Clicker, for someone who loves idle clickers. Plots, twelve flowers (cut flowers early, perennials last), a press that turns starpowder into coins and slows down each day without stopping, watering (Simon Says) and fertilizing (fast presses) for time boosts, six class helpers lifted by Lumi's real skills and mods, her equipped moves as abilities, gifts, cosmetics for starpowder, Moonrise for a permanent upgrade or another garden, and a reminder when slow flowers are ready. Not built: visiting other people's gardens, seasons, weather. Every number is a first guess until someone has played it for a week.
 
 ## Status (2026-11-09): shared coins
 
 Every Media game now shares one purse per account, kept on this server (`mnemerynne/coins.py`, migration 0063). It's built the way LumiBot's SadGirlCoin is, but Doll decided each NAS has its own coins, so it isn't connected to SadGirlCoin and the tie-in ideas below are not what shipped. Online casino tables bet coins, and a TV at one spends the account it's paired to. Local multiplayer (remotes around one TV) stays on free credits. Prism Drop's rules moved to the server (`mnemerynne/prism.py`) so a finished game can pay; Lumi Pet pays for the day's first visit. Where this conflicts with older sections below, this section is current.
+
+## Status (2026-11-10): Lumi Pet split into three apps
+
+At Doll's request Lumi Pet became three games on one "Lumi" shelf: **Lumi Pet** (the house and tamagotchi: care, pantry, toys, closet, home, shop, collection), **Lumi Dungeons** (the dungeon crawler and arena: dungeon, battle, skills) and **Lumi's Garden** (the Stardust Garden, slug `lumi-garden`). They are one pet, one save and one purse; the three pages share one code base and differ only in which tabs they show. Each can be installed as its own app with its own icon. Lumi's choices that Doll hasn't confirmed: Skills went with the dungeons and Shop and Collection stayed with the pet; the shelf is called "Lumi"; while Lumi is on a trip her room is empty and the other two apps point to Lumi Dungeons; the garden still can't be tended during a trip.
 
 ## Status (2026-11-09): Lumi Pet overhaul, first steps
 

@@ -13,7 +13,8 @@ const LUMI = { // Lumi Pet's reminders (mnemerynne/lumipet.py sweep): one per ne
   nap: "Lumi is up from her nap and looking for you.",
   garden: "Lumi's flowers are ready to trim.",
 };
-const LUMI_PAGE = "/media/games/lumi-pet", LUMI_GARDEN = LUMI_PAGE + "#garden"; // The garden reminder opens Lumi on her Garden tab.
+const LUMI_PAGE = "/media/games/lumi-pet", LUMI_GARDEN = "/media/games/lumi-garden"; // Her needs open Lumi Pet; the garden reminder opens Lumi's Garden, an app of its own.
+const LUMI_OLD_GARDEN = LUMI_PAGE + "#garden"; // A reminder shown before the garden moved out of Lumi Pet: her page sends that on to the garden.
 
 self.addEventListener("install", function () { self.skipWaiting(); }); // A newer copy of this file takes over at once.
 self.addEventListener("activate", function (event) { event.waitUntil(self.clients.claim()); });
@@ -30,7 +31,7 @@ self.addEventListener("push", function (event) { // Show the fixed words for a k
 
 self.addEventListener("notificationclick", function (event) { // Tapping it opens Lumi, in the app if it's already open.
   event.notification.close();
-  const asked = event.notification.data && event.notification.data.page, page = asked === LUMI_PAGE || asked === LUMI_GARDEN ? asked : "/"; // Only an address that shipped with this file.
+  const asked = event.notification.data && event.notification.data.page, page = asked === LUMI_PAGE || asked === LUMI_GARDEN || asked === LUMI_OLD_GARDEN ? asked : "/"; // Only an address that shipped with this file.
   event.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(function (windows) {
     const open = windows.find(function (client) { return new URL(client.url).pathname === page.split("#")[0]; });
     return open ? open.focus() : self.clients.openWindow(page);

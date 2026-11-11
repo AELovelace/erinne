@@ -10,7 +10,7 @@ Open Erynne in Chrome on Android and choose **⋮ → Install app** (or **Add to
 - In a phone's browser, **☰** has **Install Erynne** and **Install TV Remote** at the bottom, one for each app. Install either or both. Once you're in the installed Erynne app, only **Install TV Remote** is left: it copies a link to paste into your browser, because apps install from there.
 - On an iPhone, **Share → Add to Home Screen** in Safari installs it too. iPhones don't let web apps appear in the Share menu, so copy the link and paste it in **Media → Screens** instead.
 
-The installed app can receive notifications. Lumi Pet uses them for reminders: switch them on in **Media → Games → Lumi Pet → Settings → Reminders**. Notifications need the secure (https) address, so install the app from the public address rather than a local one.
+The installed app can receive notifications. Lumi uses them for reminders: switch them on in **Media → Games → Lumi Pet → Settings → Reminders** (or in Lumi's Garden's Settings). Notifications need the secure (https) address, so install the app from the public address rather than a local one.
 
 ## Finding your way around
 

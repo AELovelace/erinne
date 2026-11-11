@@ -55,16 +55,19 @@ test("there is no fetch handler, so pages always load as they would without it",
   assert.deepEqual(Object.keys(worker().handlers).sort(), ["activate", "install", "notificationclick", "push"]);
 });
 
-test("the garden reminder has its own words and opens Lumi on her Garden tab", async () => {
+test("the garden reminder has its own words and opens Lumi's Garden, an app of its own", async () => {
   const sw = worker();
   await sw.push({ kind: "lumi-pet", need: "garden", page: "https://evil.example" });
   assert.match(sw.shown[0][1].body, /flowers are ready to trim/);
-  assert.equal(sw.shown[0][1].data.page, "/media/games/lumi-pet#garden");
+  assert.equal(sw.shown[0][1].data.page, "/media/games/lumi-garden");
   await sw.click(sw.shown[0][1].data);
-  assert.deepEqual(sw.opened, ["/media/games/lumi-pet#garden"]);
-  const already = worker(["https://nas.example/media/games/lumi-pet"]);
-  await already.click({ page: "/media/games/lumi-pet#garden" });
-  assert.deepEqual([already.focused.length, already.opened.length], [1, 0], "An open Lumi is brought forward, not opened twice");
+  assert.deepEqual(sw.opened, ["/media/games/lumi-garden"]);
+  const already = worker(["https://nas.example/media/games/lumi-pet", "https://nas.example/media/games/lumi-garden"]);
+  await already.click({ page: "/media/games/lumi-garden" });
+  assert.deepEqual([already.focused, already.opened.length], [["https://nas.example/media/games/lumi-garden"], 0], "An open garden is brought forward, not opened twice, and never Lumi Pet instead");
+  const old = worker(); // A reminder shown before the garden moved out of Lumi Pet still opens: her page sends it on (game.js).
+  await old.click({ page: "/media/games/lumi-pet#garden" });
+  assert.deepEqual(old.opened, ["/media/games/lumi-pet#garden"]);
   const odd = worker();
   await odd.click({ page: "/media/games/lumi-pet#elsewhere" });
   assert.deepEqual(odd.opened, ["/"], "Only an address that shipped with the worker is ever opened");

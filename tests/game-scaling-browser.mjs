@@ -8,7 +8,7 @@ export async function checkGameScaling(page, desktop, base) { // Use one paired 
   })).json());
   await page.setViewport({ width: 1920, height: 1080 });
   await page.goto(base + "/media/screen#games");
-  await page.waitForFunction(() => document.querySelectorAll(".mc-card").length === 9);
+  await page.waitForFunction(() => document.querySelectorAll(".mc-card").length === 11);
 
   async function measure(frame) { // Capture the physical size of text, room limits and each game's board/control.
     return frame.evaluate(() => {
@@ -65,7 +65,7 @@ export async function checkGameScaling(page, desktop, base) { // Use one paired 
     if (!response.ok) throw new Error("Could not save TV scale");
   });
   await page.reload();
-  await page.waitForFunction(() => document.querySelectorAll(".mc-card").length === 9);
+  await page.waitForFunction(() => document.querySelectorAll(".mc-card").length === 11);
   await page.evaluate(() => [...document.querySelectorAll(".mc-card")].find(b => b.querySelector(".mc-label").textContent === "Slot Machines").click());
   const frame = await (await page.waitForSelector("#mc-game-frame")).contentFrame();
   await frame.waitForFunction(() => document.getElementById("casino-table") && !document.getElementById("casino-table").hidden);
