@@ -4948,6 +4948,235 @@
     },
   });
 
+  // ---- Lumi-Soft prizes (the "prize": "lumi-soft" entries in the catalog): won by playing Lumi-Soft, Lumi's candy-coloured
+  // toy target gallery (mnemerynne/lumisoft.py), never sold, rolled from a capsule or found. One piece for every spot, made
+  // as a set: pastel bullseyes, range bunting, stars and confetti, cardboard creature standees, stardust BBs, and her
+  // Sparkle Popper (a rounded candy toy with a star on the end) where a piece calls for it. Everything here is a toy.
+  // Palette: pink #ff8ecb, blush #ffc6e4, lilac #c9a8ff, plum wall #35285a, mint #8be9a8, sea-mint #5fd6b0, gold #ffdc83, cream #fff8ec.
+  const SOFT = { pink: "#ff8ecb", blush: "#ffc6e4", lilac: "#c9a8ff", plum: "#35285a", mint: "#8be9a8", sea: "#5fd6b0", gold: "#ffdc83", amber: "#e8b94a", cream: "#fff8ec", ink: "#3a2147", card: "#f2d6ae", cardEdge: "#c99a6a" };
+  CLIPS["soft-frame"] = "M150 104 H250 V202 H150 Z"; // The photo's picture area: the view shows through it.
+  Object.assign(ART, {
+    softTarget: function (x, y, r, flat) { // A pastel bullseye: pink, cream, mint, cream and a gold middle with a sparkle. `flat` squashes it to lie on the floor.
+      const rings = [SOFT.pink, SOFT.cream, SOFT.mint, SOFT.cream, SOFT.gold];
+      return group(rings.map(function (fill, i) { return circle(0, 0, round(r * (1 - i * .2)), fill); }).join("") + path(star(0, 0, round(r * .17)), "#fff"),
+        'transform="translate(' + x + " " + y + ")" + (flat ? " scale(1 " + flat + ")" : "") + '"');
+    },
+    softFlags: function (x1, y1, x2, y2, sag, count, size, turn) { // Range bunting: a string from one point to another, dipping by `sag`, with `count` triangle flags in turn pink, mint, gold and lilac.
+      const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2 + sag * 2;                                                  // The curve's control point, so its middle dips by `sag`.
+      const at = function (t) { return [round((1 - t) * (1 - t) * x1 + 2 * (1 - t) * t * cx + t * t * x2), round((1 - t) * (1 - t) * y1 + 2 * (1 - t) * t * cy + t * t * y2)]; };
+      const colours = [SOFT.pink, SOFT.mint, SOFT.gold, SOFT.lilac], flags = ["", "", "", ""];
+      for (let i = 0; i < count; i++) {
+        const t = (i + .5) / count, a = at(t - .36 / count), b = at(t + .36 / count), m = at(t);               // Each flag hangs from two points on the string, its tip below the middle.
+        flags[(i + (turn || 0)) % 4] += "M" + a[0] + " " + a[1] + " L" + b[0] + " " + b[1] + " L" + m[0] + " " + round(m[1] + size) + " Z ";
+      }
+      return path("M" + x1 + " " + y1 + " Q" + cx + " " + cy + " " + x2 + " " + y2, "none", 'stroke="' + SOFT.cream + '" stroke-width="1.4" opacity=".85"') +
+        flags.map(function (d, i) { return d ? path(d, colours[i]) : ""; }).join("");
+    },
+    softStandee: function (x, y, s, kind, tilt) { // A cardboard creature cut-out on a little foot (cat, bunny or slime), with a bullseye on its tummy. (x, y) is where it stands.
+      const shapes = { // Each creature's cardboard outline as one path, around its feet at 0 0.
+        cat: "M-12 0 V-18 Q-12 -23 -7 -23 H7 Q12 -23 12 -18 V0 Z M-11 -31 a11 10 0 1 0 22 0 a11 10 0 1 0 -22 0 Z M-11 -35 L-9 -47 L-2 -40 Z M11 -35 L9 -47 L2 -40 Z",
+        bunny: "M-11 0 Q-13 -20 0 -22 Q13 -20 11 0 Z M-10 -31 a10 9 0 1 0 20 0 a10 9 0 1 0 -20 0 Z M-7 -38 Q-11 -56 -5 -57 Q-1 -56 -2 -38 Z M7 -38 Q11 -56 5 -57 Q1 -56 2 -38 Z",
+        slime: "M-15 0 Q-17 -14 -10 -24 Q-4 -32 0 -33 Q-3 -40 3 -42 Q2 -37 5 -33 Q12 -30 15 -18 Q17 -8 15 0 Z",
+      };
+      const face = kind === "slime" ? -19 : -31;                                                                // Where its eyes go: slimes are all face.
+      return group(path(shapes[kind], SOFT.cardEdge, 'stroke="' + SOFT.cardEdge + '" stroke-width="3" stroke-linejoin="round"') + path(shapes[kind], SOFT.card) + // A darker cut edge, then the card.
+        (kind === "bunny" ? path("M-6 -40 Q-8 -52 -5 -53 Q-3 -50 -3.5 -40 Z M6 -40 Q8 -52 5 -53 Q3 -50 3.5 -40 Z", SOFT.blush) : "") +            // Pink insides of a bunny's ears.
+        circle(-4, face, 1.5, SOFT.ink) + circle(4, face, 1.5, SOFT.ink) + oval(-7.5, face + 3.5, 2.4, 1.3, SOFT.pink, 'opacity=".8"') + oval(7.5, face + 3.5, 2.4, 1.3, SOFT.pink, 'opacity=".8"') +
+        path("M-1.6 " + (face + 3) + " q1.6 1.6 3.2 0", "none", 'stroke="' + SOFT.ink + '" stroke-width=".9" stroke-linecap="round"') +              // A little smile.
+        ART.softTarget(0, kind === "slime" ? -8 : -10, 5.5) + path("M-9 0 L0 5 L9 0 Z", SOFT.cardEdge),                                         // Its tummy bullseye and its folded foot.
+        'transform="translate(' + x + " " + y + ") rotate(" + (tilt || 0) + ") scale(" + s + ')"');
+    },
+    softPopper: function (x, y, s, tilt) { // Lumi's Sparkle Popper, facing right: a chubby lilac candy toy with a bubble of stardust BBs on top, a heart grip and a big sparkle on the end.
+      return group(path("M-9 3 Q-14 15 -7 18 Q-1 20 1 13 L3 3 Z", SOFT.pink) +                                                                 // The heart-shaped grip.
+        circle(-3, -9, 6.5, "#e6f6ff", 'opacity=".55" stroke="#fff" stroke-width="1"') + circle(-5, -9, 1.6, SOFT.pink) + circle(-1.5, -11, 1.6, SOFT.mint) + circle(-2.5, -6.5, 1.6, SOFT.gold) + // The BB bubble.
+        rect(-17, -6, 30, 12, SOFT.lilac, 'rx="6"') + rect(-9, -6, 4, 12, SOFT.mint) + rect(-17, -6, 30, 3.5, "#fff", 'rx="1.75" opacity=".35"') + // The chubby body, a mint band and a shine.
+        rect(11, -3.5, 10, 7, SOFT.pink, 'rx="3.5"') + path(star(24, 0, 7.5), SOFT.gold) + circle(24, 0, 1.6, "#fff") +                       // The rounded nozzle and its sparkle.
+        path("M2 -1 c-3 -2 -2.6 -4.6 -.8 -4.6 q.8 0 .8 1 q0 -1 .8 -1 c1.8 0 2.2 2.6 -.8 4.6 Z", "#fff1f8"),                                 // A heart sticker on the side.
+        'transform="translate(' + x + " " + y + ") rotate(" + (tilt || 0) + ") scale(" + s + ')"');
+    },
+
+    "soft-wallpaper": function () { // Plum lilac stripes with rows of soft bullseyes, confetti, range bunting swagged along the top and a mint rail over panelling.
+      let stripes = "", targets = "";
+      for (let x = 0; x < 400; x += 50) stripes += "M" + x + " 0 h25 V300 h-25 Z ";                                    // Even stripes: 50 goes into the tile exactly.
+      [[150, [50, 150, 250, 350]], [226, [0, 100, 200, 300, 400]]].forEach(function (row) {                           // Two staggered rows; those on the edges are cut exactly in half.
+        row[1].forEach(function (x) { targets += ART.softTarget(x, row[0], 15); });
+      });
+      const confetti = scatter(1601, 46, function (roll, i) { // Little paper squares and dots, tumbling in every colour of the set.
+        const x = round(roll(8, 392)), y = round(roll(70, 290)), colour = [SOFT.pink, SOFT.mint, SOFT.gold, SOFT.lilac][i % 4];
+        return i % 3 ? rect(x, y, 4, 2.4, colour, 'opacity=".55" transform="rotate(' + Math.round(roll(0, 180)) + " " + x + " " + y + ')"') : circle(x, y, 1.6, colour, 'opacity=".6"');
+      });
+      return rect(0, 0, 400, 352, SOFT.plum) + path(stripes, "#3d2f66") + group(targets, 'opacity=".42"') + confetti +
+        scatter(1602, 10, function (roll) { return path(star(round(roll(14, 386)), round(roll(80, 280)), round(roll(3, 6))), SOFT.gold, 'opacity=".7"'); }) + // A few gold sparkles.
+        [0, 100, 200, 300].map(function (x, i) { return ART.softFlags(x, 14, x + 100, 14, 12, 6, 14, i); }).join("") +                          // Bunting, one swag every 100, so it tiles.
+        [0, 100, 200, 300].map(function (x) { return circle(x, 14, 2.6, SOFT.cream); }).join("") + rect(400 - 2.6, 11.4, 2.6, 5.2, SOFT.cream) + // The pins it hangs from.
+        rect(0, 300, 400, 52, "#2b2150") + path("M25 308 h50 v36 h-50 Z M125 308 h50 v36 h-50 Z M225 308 h50 v36 h-50 Z M325 308 h50 v36 h-50 Z", "none", 'stroke="#4a3a7a" stroke-width="2"') + // Panelling.
+        rect(0, 296, 400, 6, SOFT.sea) + rect(0, 296, 400, 2, SOFT.mint) + [50, 150, 250, 350].map(function (x) { return path(star(x, 299, 4), SOFT.gold); }).join(""); // The mint rail, with gold stars.
+    },
+
+    "soft-floor": function () { // Painted range lanes in two lilacs with pink dashed dividers, a mint toe line, star lane markers and stray confetti.
+      let lanes = "";
+      for (let x = 50; x < 400; x += 200) lanes += "M" + x + " 350 h100 V500 h-100 Z ";                                    // Every other lane a shade lighter.
+      return rect(0, 350, 400, 150, "#30264f") + path(lanes, "#3a2f60") +
+        path("M50 372 V500 M150 372 V500 M250 372 V500 M350 372 V500", "none", 'stroke="' + SOFT.pink + '" stroke-width="3" stroke-dasharray="12 9" opacity=".75"') + // Lane dividers.
+        rect(0, 362, 400, 6, SOFT.mint, 'opacity=".85"') + rect(0, 368, 400, 2, SOFT.sea) +                                                     // The toe line.
+        [0, 100, 200, 300, 400].map(function (x) { return path(star(x, 384, 5), SOFT.gold, 'opacity=".9"'); }).join("") +                       // A gold star in front of each lane.
+        [100, 300].map(function (x) { return ART.softTarget(x, 470, 16, .35); }).join("") +                                                     // Bullseye decals far down the lanes.
+        scatter(1603, 30, function (roll, i) { const x = round(roll(6, 394)), y = round(roll(392, 494)); return rect(x, y, 4, 2.4, [SOFT.pink, SOFT.mint, SOFT.gold, SOFT.lilac][i % 4], 'opacity=".7" transform="rotate(' + Math.round(roll(0, 180)) + " " + x + " " + y + ')"'); }) +
+        rect(0, 350, 400, 3, SOFT.pink, 'opacity=".5"');
+    },
+
+    "soft-wallart": function () { // A little pink scoreboard: a bullseye header, a big gold S-rank badge, glowing score bars and three stars, ringed with bulbs.
+      const bars = [[180, 5], [192, 4], [204, 3]];                                                                         // Each row of the score: its height, and how many cells are lit.
+      return rect(28, 146, 82, 86, "#ff8ecb", 'opacity=".12" rx="10"') + rect(30, 148, 78, 82, "#231a44", 'rx="8" stroke="' + SOFT.pink + '" stroke-width="3"') +
+        rect(34, 152, 70, 14, SOFT.pink, 'rx="5"') + ART.softTarget(42, 159, 5) + path("M52 159 h44", "none", 'stroke="#fff1f8" stroke-width="2.4" stroke-dasharray="4 3" stroke-linecap="round"') + // The header.
+        circle(54, 192, 16, SOFT.amber) + circle(54, 192, 13, SOFT.gold) + path("M60 185 Q54 179 48.5 184 Q45.5 189.5 54 192 Q62.5 194.5 59.5 200 Q54 205 47.5 199", "none", 'stroke="#fff8dc" stroke-width="3.6" stroke-linecap="round"') + // The S rank.
+        path("M45 207 l-5 12 l6 -3 l3 6 l3 -11 Z M63 207 l5 12 l-6 -3 l-3 6 l-3 -11 Z", SOFT.pink) +                                          // Ribbon tails under the badge.
+        bars.map(function (b) { let out = ""; for (let i = 0; i < 5; i++) out += rect(76 + i * 5.6, b[0], 4.2, 8, i < b[1] ? SOFT.mint : "#3a3060", 'rx="1.2"' + (i < b[1] ? ' class="lp-neon"' : "")); return out; }).join("") + // Score cells.
+        [70, 82, 94].map(function (x, i) { return path(star(x + 6, 222, 4.6), SOFT.gold, 'class="lp-twinkle" style="animation-delay:' + (i * .4) + 's"'); }).join("") +
+        [36, 50, 64, 78, 92, 102].map(function (x, i) { return circle(x, 148, 2, i % 2 ? SOFT.gold : SOFT.cream, 'class="lp-twinkle" style="animation-delay:' + (i * .3) + 's"'); }).join(""); // Bulbs along the top.
+    },
+
+    "soft-shelf": function () { // Three glass jars of stardust BBs in every pastel, with ribbon-tied lids and star labels, a few BBs rolled loose on a pink shelf.
+      const BB = [SOFT.pink, SOFT.mint, SOFT.gold, SOFT.lilac, SOFT.cream];
+      function jar(x, w, h, fill, lid, seed) { // A jar `fill` full of BBs, then its glass, its lid and a star label.
+        let balls = "";
+        const roll = dice(seed);
+        for (let y = 197; y > 200 - fill; y -= 3) for (let bx = x - w / 2 + 3 + (Math.round(y) % 2) * 1.5; bx < x + w / 2 - 2; bx += 3.2) balls += circle(round(bx), y, 1.5, BB[Math.floor(roll(0, 5))]); // Packed rows of BBs.
+        return balls + rect(x - w / 2, 200 - h, w, h, "#e6f6ff", 'rx="4" opacity=".22" stroke="#f4fbff" stroke-width="1.5"') + rect(x - w / 2 + 2.5, 203 - h, 2.6, h - 8, "#fff", 'rx="1.3" opacity=".5"') + // The glass and its shine.
+          rect(x - w / 2 - 1.5, 194 - h, w + 3, 7, lid, 'rx="2.5"') + path("M" + (x - w / 2 - 1.5) + " " + (198 - h) + " h" + (w + 3), "none", 'stroke="#fff" stroke-width="1" opacity=".5"') + // The lid.
+          circle(x, 186 - h * .35, 5, "#fff8ec") + path(star(x, 186 - h * .35, 4), lid);                                                    // A round label with a sparkle.
+      }
+      return jar(312, 24, 36, 26, SOFT.pink, 1611) + jar(340, 18, 26, 14, SOFT.mint, 1612) + jar(364, 20, 31, 22, SOFT.lilac, 1613) +
+        path(star(326, 158, 5), SOFT.gold, 'class="lp-twinkle"') + path(star(378, 164, 3.5), "#fff", 'class="lp-twinkle" style="animation-delay:.7s"') +
+        circle(328, 198, 1.8, SOFT.gold) + circle(352, 198, 1.8, SOFT.pink) + circle(356, 198.4, 1.6, SOFT.mint) +                              // A few rolled loose.
+        rect(294, 200, 88, 6, "#d47aae", 'rx="2"') + rect(294, 205, 88, 1.5, SOFT.mint, 'opacity=".7"') +
+        path("M304 206 l6 10 M372 206 l-6 10", "none", 'stroke="#a85a8a" stroke-width="3" stroke-linecap="round"');
+    },
+
+    "soft-view": function () { // Out over a toy range on a sunny day: lilac hills with flagpoles, cardboard creatures and bullseyes lined up on the grass, a bunting rope, and confetti drifting down.
+      let far = hills(1621, 80, 24, "#b7a6e6");
+      [24, 86, 150, 210].forEach(function (x, i) { const y = 70 + (i % 2) * 4; far += line(x, y, x, y - 16, "#7a6aa8", 1.2) + path("M" + x + " " + (y - 16) + " l9 3 l-9 3 Z", [SOFT.pink, SOFT.mint, SOFT.gold, SOFT.lilac][i]); }); // Flagpoles on the hills.
+      let mid = rect(0, 100, TILE, 40, "#9fe0b4") + rect(0, 100, TILE, 2, "#c4f0d2");                                       // The range's grass.
+      [[22, "cat"], [82, "target"], [130, "bunny"], [186, "target"], [222, "slime"]].forEach(function (m, i) {
+        mid += m[1] === "target" ? line(m[0] - 6, 104, m[0], 92, "#8a6a4a", 1.4) + line(m[0] + 6, 104, m[0], 92, "#8a6a4a", 1.4) + ART.softTarget(m[0], 88, 9) // A bullseye on an easel...
+          : ART.softStandee(m[0], 104, .5, m[1], i % 2 ? 4 : -4);                                                         // ...or a cardboard creature.
+      });
+      const near = rect(0, 124, TILE, 20, "#7fd6a0") + path("M0 128 H240 M0 134 H240", "none", 'stroke="#fff" stroke-width="1" stroke-dasharray="8 6" opacity=".5"') + // The near lane.
+        [0, 80, 160].map(function (x) { return rect(x + 38, 104, 4, 22, "#c99a6a", 'rx="1.5"') + circle(x + 40, 104, 3, SOFT.gold); }).join("") + // Rope posts...
+        [0, 80, 160].map(function (x, i) { return ART.softFlags(x - 40, 108, x + 40, 108, 4, 5, 7, i); }).join("") + ART.softFlags(200, 108, 280, 108, 4, 5, 7, 0); // ...and bunting between them, tiling at 240.
+      return view(["#b4d8ff", "#ffd6ec"], ["#141a3a", "#3a2a5e"], 24, far, mid, near,
+        falling("snow", scatter(1622, 14, function (roll, i) { const x = round(roll(0, 120)), y = round(roll(0, 130)); return rect(x, y, 3, 1.8, [SOFT.pink, SOFT.mint, SOFT.gold, SOFT.lilac][i % 4], 'transform="rotate(' + Math.round(roll(0, 180)) + " " + x + " " + y + ')"'); })));
+    },
+
+    "soft-frame": function () { // The window as an instant photo from range day: a thick cream card, washi tape at the corners, and stickers on its wide bottom edge (her Sparkle Popper, a bullseye, hearts).
+      return rect(138, 96, 128, 140, "#000", 'opacity=".18" rx="3"') +                                                             // A soft shadow behind the card.
+        path("M138 92 H262 Q266 92 266 96 V228 Q266 232 262 232 H138 Q134 232 134 228 V96 Q134 92 138 92 Z " + CLIPS["soft-frame"], SOFT.cream, 'fill-rule="evenodd"') + // The card, with the picture cut out.
+        path(CLIPS["soft-frame"], "none", 'stroke="#e8dff0" stroke-width="2"') +
+        [[141, SOFT.pink, -32], [259, SOFT.mint, 32]].map(function (w) { // Washi tape over the two top corners, with little dashes printed on it.
+          return group(rect(-15, -5.5, 30, 11, w[1], 'opacity=".8"') + path("M-9 -5.5 v11 M-3 -5.5 v11 M3 -5.5 v11 M9 -5.5 v11", "none", 'stroke="#fff" stroke-width="1.2" stroke-dasharray="2 2" opacity=".6"'),
+            'transform="translate(' + w[0] + ' 91) rotate(' + w[2] + ')"');
+        }).join("") +
+        ART.softPopper(162, 217, .7, -8) + ART.softTarget(240, 217, 8) +                                                         // Stickers: her Sparkle Popper and a bullseye...
+        path("M199 222 c-6 -4 -5 -9 -2 -9 q2 0 2 2 q0 -2 2 -2 c3 0 4 5 -2 9 Z", SOFT.pink) + path("M214 219 c-4 -3 -3.5 -6.5 -1.4 -6.5 q1.4 0 1.4 1.4 q0 -1.4 1.4 -1.4 c2.1 0 2.5 3.5 -1.4 6.5 Z", SOFT.lilac) + // ...two hearts...
+        path(star(186, 210, 4), SOFT.gold) + path(star(224, 226, 3), SOFT.gold) + path("M190 228 q6 -4 12 0 t12 0", "none", 'stroke="' + SOFT.lilac + '" stroke-width="1.4" stroke-linecap="round"'); // ...and a doodled squiggle.
+    },
+
+    "soft-curtains": function () { // Candy-striped panels tied back with bullseye rosettes, range bunting across the top and a mint rod with bullseye ends.
+      function panel(flip) { // One tied-back panel, pink with cream stripes following its folds; mirrored for the other side.
+        return group(path("M122 88 H166 Q158 140 142 168 Q152 200 160 236 H122 Z", SOFT.pink, 'opacity=".95"') +
+          path("M130 88 Q130 140 128 168 Q132 200 134 236 M142 88 Q141 140 134 168 Q140 200 146 236 M154 88 Q150 140 139 168 Q146 200 154 236", "none", 'stroke="' + SOFT.cream + '" stroke-width="3" opacity=".8"') + // Stripes gathered at the tie.
+          oval(140, 168, 13, 4, SOFT.sea) + ART.softTarget(146, 168, 6.5),                                                                 // The tie and its rosette.
+          flip ? 'transform="translate(400 0) scale(-1 1)"' : "");
+      }
+      return panel(false) + panel(true) + ART.softFlags(124, 92, 276, 92, 7, 9, 14) +
+        rect(120, 84, 160, 6, SOFT.sea, 'rx="3"') + rect(120, 84, 160, 2, SOFT.mint, 'rx="1"') + ART.softTarget(118, 87, 6) + ART.softTarget(282, 87, 6);
+    },
+
+    "soft-lamp": function () { // A neon bullseye sign on a candy-striped pole: pink, mint and gold rings glowing round a twinkling star.
+      return oval(56, 258, 60, 54, SOFT.pink, 'opacity=".1"') + oval(56, 258, 34, 30, SOFT.gold, 'opacity=".1"') +
+        oval(56, 404, 22, 5, "#00000055") + path("M38 404 Q42 390 56 388 Q70 390 74 404 Z", SOFT.lilac) + rect(53, 290, 6, 100, SOFT.cream) + // The base and pole...
+        path("M53 302 l6 -6 M53 318 l6 -6 M53 334 l6 -6 M53 350 l6 -6 M53 366 l6 -6 M53 382 l6 -6", "none", 'stroke="' + SOFT.pink + '" stroke-width="4"') + // ...striped like candy.
+        circle(56, 258, 34, "#1d1638", 'opacity=".75" stroke="#4a3a7a" stroke-width="2"') +                                                    // The sign's backboard.
+        circle(56, 258, 28, "none", 'stroke="' + SOFT.pink + '" stroke-width="3.4" class="lp-neon"') + circle(56, 258, 19, "none", 'stroke="' + SOFT.mint + '" stroke-width="3.2" class="lp-neon"') +
+        circle(56, 258, 10, "none", 'stroke="' + SOFT.gold + '" stroke-width="3" class="lp-neon"') + path(star(56, 258, 6), "#fff8dc", 'class="lp-twinkle"') +
+        path(star(84, 230, 4), SOFT.gold, 'class="lp-twinkle" style="animation-delay:.6s"') + path(star(26, 286, 3), SOFT.mint, 'class="lp-twinkle" style="animation-delay:1.1s"');
+    },
+
+    "soft-rug": function () { // A lilac lane runner with pink edges and dashed lane lines, a bullseye in the middle, gold stars at the ends and cream tassels.
+      let tassels = "";
+      for (let y = 422; y <= 460; y += 6) tassels += "M64 " + y + " h-6 M336 " + y + " h6 ";                                     // Fringe at both ends.
+      return oval(200, 446, 146, 26, "#000", 'opacity=".18"') + path(tassels, "none", 'stroke="' + SOFT.cream + '" stroke-width="2" stroke-linecap="round"') +
+        rect(64, 418, 272, 46, "#b9a2ff", 'rx="8"') + rect(64, 418, 272, 7, SOFT.pink, 'rx="3"') + rect(64, 457, 272, 7, SOFT.pink, 'rx="3"') +
+        path("M72 433 H328 M72 449 H328", "none", 'stroke="#fff8ec" stroke-width="1.6" stroke-dasharray="10 7" opacity=".7"') +            // Lane lines.
+        ART.softTarget(200, 441, 44, .34) + path(star(92, 441, 8), SOFT.gold) + path(star(308, 441, 8), SOFT.gold);
+    },
+
+    "soft-bed": function () { // A round padded nest of a bed: pink rim, a cushion full of confetti and BBs, ribbon curls, a cardboard-cat pillow and a starry blanket.
+      const bits = scatter(1631, 18, function (roll, i) { const x = round(roll(308, 372)), y = round(roll(424, 440)); return i % 3 ? rect(x, y, 4, 2.2, [SOFT.pink, SOFT.mint, SOFT.gold, SOFT.lilac][i % 4], 'transform="rotate(' + Math.round(roll(0, 180)) + " " + x + " " + y + ')"') : circle(x, y, 1.6, [SOFT.gold, SOFT.mint, SOFT.pink][i % 3]); });
+      return oval(340, 460, 56, 6, "#00000055") + oval(340, 430, 50, 19, "#e872b0") + oval(340, 433, 40, 12, "#fff1f8") + bits +          // The back of the rim, the cushion and its confetti.
+        ART.softStandee(316, 438, .55, "cat", -70) +                                                                                   // A cardboard-cat pillow, lying down.
+        path("M336 440 Q348 420 380 428 Q376 444 352 448 Z", SOFT.lilac) + path(star(356, 436, 3.5), SOFT.gold) + path(star(368, 432, 2.6), SOFT.gold) + // A starry blanket.
+        path("M290 432 Q290 460 340 460 Q390 460 390 432 Q390 448 340 448 Q290 448 290 432 Z", SOFT.pink) +                                // The front of the rim.
+        path("M296 440 Q340 458 384 440", "none", 'stroke="#fff1f8" stroke-width="1.4" stroke-dasharray="3 3" opacity=".8"') +             // Stitching.
+        [[306, 446, SOFT.mint], [374, 446, SOFT.lilac]].map(function (b) { return path("M" + b[0] + " " + b[1] + " l-5 -3.5 v7 Z M" + b[0] + " " + b[1] + " l5 -3.5 v7 Z", b[2]) + circle(b[0], b[1], 1.8, b[2]); }).join(""); // Two ribbon bows on the rim.
+    },
+
+    "soft-door": function () { // The range's door: mint with a bullseye porthole, a pink pennant hung on a nail, a star knob, candy-stripe kickplate and bunting over the top.
+      let stripes = "";
+      for (let x = -58; x <= -8; x += 10) stripes += "M" + x + " 352 l10 -22 h5 l-10 22 Z ";                                        // Pink diagonals on the kickplate, all inside the door.
+      return rect(-66, 192, 82, 162, "#3a2a5a", 'rx="3"') + rect(-58, 202, 66, 152, "#6fcfac") + rect(-58, 202, 66, 3, "#a8ecd0") +
+        rect(-58, 330, 66, 22, SOFT.cream) + path(stripes, SOFT.pink) +
+        rect(-58, 328, 66, 3, "#4fae90") + circle(-25, 244, 19, "#4fae90") + ART.softTarget(-25, 244, 16) +                                    // The porthole.
+        circle(-25, 244, 16, "#fff", 'opacity=".18"') + path("M-34 236 q4 -6 10 -7", "none", 'stroke="#fff" stroke-width="2" opacity=".7" stroke-linecap="round"') +
+        circle(-25, 274, 1.6, "#8a6a4a") + path("M-25 274 L-36 286 M-25 274 L-14 286", "none", 'stroke="#8a6a4a" stroke-width="1"') +           // A nail and string...
+        path("M-38 286 H-12 L-25 308 Z", SOFT.pink) + path(star(-25, 293, 4.5), "#fff8dc") +                                                 // ...and a pennant.
+        path(star(0, 300, 6), SOFT.gold) + circle(0, 300, 1.6, "#fff") +                                                                     // A star knob.
+        rect(-58, 352, 66, 2, "#3a2a5a") + ART.softFlags(-68, 194, 18, 194, 6, 6, 11, 1);
+    },
+
+    "soft-ceiling": function () { // A mobile of bullseyes and a cardboard cat on a mint bar, hung with gold sparkles on their threads.
+      return line(333, 0, 333, 30, "#8a7aa8", 1.4) + path("M300 31 V60 M333 31 V82 M366 31 V54 M300 86 V96 M366 76 V92", "none", 'stroke="#8a7aa8" stroke-width="1"') + // Threads.
+        rect(294, 28, 78, 5, SOFT.sea, 'rx="2.5" transform="rotate(-4 333 30)"') + circle(333, 30, 3.4, SOFT.gold) +                         // The bar, hanging a little crooked.
+        group(ART.softTarget(300, 73, 13), 'transform="rotate(-8 300 60)"') + group(ART.softTarget(366, 65, 11), 'transform="rotate(6 366 54)"') +
+        ART.softStandee(333, 122, .7, "cat", 3) + path(star(300, 100, 5), SOFT.gold, 'class="lp-twinkle"') + path(star(366, 96, 4.5), SOFT.pink, 'class="lp-twinkle" style="animation-delay:.6s"');
+    },
+
+    "soft-sidetable": function () { // A lilac table with the Star Scope on a little gold tripod, a sparkle cap glinting, and her Sparkle Popper resting on the shelf underneath.
+      return ART.table("#a88ad8") + ART.softPopper(336, 338, .62, 0) +                                                                     // On the bottom stretcher.
+        path("M332 298 L320 323 M332 298 L332 323 M332 298 L344 323", "none", 'stroke="' + SOFT.amber + '" stroke-width="2" stroke-linecap="round"') + // The tripod.
+        group(rect(306, 290.5, 8, 9, SOFT.lilac, 'rx="3"') + rect(312, 288, 38, 14, SOFT.pink, 'rx="7"') + rect(320, 288, 4, 14, SOFT.mint) + rect(338, 288, 4, 14, SOFT.mint) + // The scope's eyepiece, body and bands...
+          rect(312, 288, 38, 4, "#fff", 'rx="2" opacity=".35"') + path("M348 288 L356 284 V306 L348 302 Z", SOFT.gold) + path(star(361, 295, 8), "#fff8dc", 'class="lp-twinkle"') + // ...flared end and sparkle cap...
+          path("M331 286 c-3 -2.2 -2.6 -5 -.8 -5 q.8 0 .8 1 q0 -1 .8 -1 c1.8 0 2.2 2.8 -.8 5 Z", SOFT.cream), 'transform="rotate(-8 332 296)"') + // ...and a heart sight on top.
+        circle(352, 321.5, 1.8, SOFT.pink) + circle(357, 321.5, 1.8, SOFT.mint) + circle(314, 321.5, 1.8, SOFT.gold);                     // Stardust BBs on the tabletop.
+    },
+
+    "soft-plant": function () { // A little bush that grows popcorn, plain and candy pink and mint, in a striped popcorn-box pot with a bullseye sticker.
+      let stripes = "";
+      for (let k = 0; k < 8; k += 2) stripes += "M" + (2 + 4 * k) + " 360 h4 L" + (9 + 3 * k) + " 392 h-3 Z ";                           // Every other stripe pink, narrowing to the foot.
+      const puffs = [[2, 318, SOFT.cream], [16, 306, SOFT.blush], [30, 316, SOFT.cream], [8, 334, "#c4f5d4"], [24, 332, SOFT.cream], [36, 334, SOFT.blush], [18, 322, SOFT.cream], [0, 346, SOFT.cream]];
+      return path("M18 360 V340", "none", 'stroke="#7a5a3a" stroke-width="3"') +
+        circle(18, 326, 20, "#4f9a72") + circle(4, 336, 13, "#5fae86") + circle(32, 336, 13, "#5fae86") + circle(18, 314, 13, "#7fc49a") + // The bush.
+        puffs.map(function (p) { return circle(p[0] - 2.4, p[1], 3.2, p[2]) + circle(p[0] + 2.4, p[1] - .6, 3, p[2]) + circle(p[0], p[1] - 3, 3, p[2]) + circle(p[0] + .4, p[1] + .6, 1.2, "#ffe9a8"); }).join("") + // Popcorn puffs.
+        path("M2 360 H34 L30 392 H6 Z", SOFT.cream) + path(stripes, SOFT.pink) + rect(0, 356, 36, 6, "#e872b0", 'rx="2"') + ART.softTarget(18, 376, 5) +
+        circle(-2, 390, 2.6, SOFT.cream) + circle(40, 389, 2.4, SOFT.blush);                                                                 // Two popped loose on the floor.
+    },
+
+    "soft-toychest": function () { // A pastel crate of cardboard creature standees, a cat, a bunny and a slime, poking out with bullseyes on their tummies.
+      return oval(92, 478, 44, 4, "#00000055") +
+        ART.softStandee(72, 440, .85, "cat", -10) + ART.softStandee(94, 436, .95, "bunny", 2) + ART.softStandee(115, 442, .8, "slime", 12) +   // Behind the front slats.
+        rect(56, 430, 72, 6, "#7a5aa8") + [438, 451, 464].map(function (y, i) { return rect(54, y, 76, 10, i % 2 ? "#c9b0ff" : "#d9c4ff", 'rx="1"'); }).join("") + // Lilac slats.
+        rect(54, 434, 8, 42, SOFT.pink, 'rx="1"') + rect(122, 434, 8, 42, SOFT.pink, 'rx="1"') + ART.softTarget(92, 457, 8) +                // Pink corner posts and a stencilled bullseye.
+        path(star(66, 470, 3), SOFT.gold) + path(star(118, 446, 3), SOFT.gold);
+    },
+
+    "soft-trophy": function () { // The Golden Star Scope: a gold toy scope with a sparkle on its end, on a little stand on the bracket.
+      return ART.bracket() + rect(90, 130, 20, 4, SOFT.amber, 'rx="1.5"') + rect(98.5, 121, 3, 10, SOFT.amber) +
+        group(rect(83, 114, 5, 7, SOFT.amber, 'rx="2"') + rect(87, 112, 24, 11, SOFT.gold, 'rx="5.5" stroke="' + SOFT.amber + '" stroke-width="1"') + rect(93, 112, 3, 11, SOFT.amber) +
+          rect(88, 113, 22, 3, "#fff8dc", 'rx="1.5" opacity=".6"') + path(star(114, 117.5, 6.5), "#fff8dc", 'class="lp-twinkle"'), 'transform="rotate(-10 100 118)"') +
+        path(star(86, 104, 2.6), SOFT.gold, 'class="lp-twinkle" style="animation-delay:.7s"');
+    },
+  });
+
   // ---- The whole room. It is drawn 1000 wide and 500 tall and fills whatever it is given (the whole screen on a TV
   // or computer, a card on a phone), cropping its sides rather than squashing. The furniture above is drawn in a
   // 400-wide block in the middle; the wall and floor repeat across the full width; and there are three windows, the

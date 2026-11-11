@@ -126,9 +126,11 @@ def load_house(path: Path | None = None) -> dict:
                 raise ValueError(f"The house's {item['id']} can't be a Star Capsule prize as well as sold or found.")
             if item.get("worn") and (item["price"] or "rarity" in item or item.get("found") or not isinstance(item.get("box"), int)):
                 raise ValueError(f"The house's {item['id']} is a worn piece: free, from a numbered moving box, never sold, won or found.")
-        if spot["items"][0]["price"] != 0 or "rarity" in spot["items"][0]:
+            if "prize" in item and _bad_game_prize(item):   # won in another game (Lumi-Soft), so never sold, rolled, found or unpacked
+                raise ValueError(f"The house's {item['id']} is a game prize: free, never sold, won from a capsule, found or worn, and it says how to win it.")
+        if spot["items"][0]["price"] != 0 or "rarity" in spot["items"][0] or "prize" in spot["items"][0]:
             raise ValueError(f"The {spot['id']} spot's first object must be free.")
-        free = [item["id"] for item in spot["items"][1:] if not item["price"] and not item.get("worn") and "rarity" not in item and not item.get("found")]
+        free = [item["id"] for item in spot["items"][1:] if not item["price"] and not item.get("worn") and "rarity" not in item and not item.get("found") and "prize" not in item]
         if free:
             raise ValueError(f"Only a spot's first object and worn pieces are free: {', '.join(free)} needs a price.")
     boxes = sorted(item["box"] for spot in data["spots"] for item in spot["items"] if item.get("worn"))
@@ -138,12 +140,21 @@ def load_house(path: Path | None = None) -> dict:
 
 
 RARITIES = ("common", "uncommon", "rare", "epic", "legendary")
+# Pieces won in another game rather than bought or rolled: the catalog's "prize" names the game, and "how" says what to do.
+PRIZE_GAMES = {"lumi-soft": "Lumi-Soft"}   # prize id -> the game's name, for messages (mnemerynne/lumisoft.py grants them)
+
+
+def _bad_game_prize(item: dict) -> bool:
+    """True when a "prize" entry breaks the rules: a known game, free, nothing else's (capsule, dungeon, moving box), with a how."""
+    return not isinstance(item["prize"], str) or item["prize"] not in PRIZE_GAMES or item.get("price") != 0 or "rarity" in item or bool(item.get("found")) \
+        or bool(item.get("worn")) or not isinstance(item.get("how"), str) or not item["how"].strip()
 
 
 def load_closet(path: Path | None = None) -> dict:
     """What Lumi can wear: slots (one accessory each, like Littlepottchi's outfit slots), the two capsules' prices and
     odds, and `values`, what a prize of each rarity is worth when it has no shop price (a repeat pays back half).
-    An accessory priced 0 isn't sold: it only comes out of a capsule. Accessories are for looks, never for fights."""
+    An accessory priced 0 isn't sold: it only comes out of a capsule, unless it is a game "prize" (no rarity, won in
+    Lumi-Soft, see PRIZE_GAMES). Accessories are for looks, never for fights."""
     data = json.loads((path or Path(__file__).parent / "lumipet_data" / "closet.json").read_text(encoding="utf-8"))
     seen: set[str] = set()
     capsule = data.get("capsule")
@@ -165,8 +176,10 @@ def load_closet(path: Path | None = None) -> dict:
         seen.add(slot["id"])
         for item in slot["items"]:
             if not isinstance(item, dict) or not _ID.match(str(item.get("id", ""))) or item["id"] in seen or not item.get("name") \
-                    or item.get("rarity") not in RARITIES or not isinstance(item.get("price"), int) or not 0 <= item["price"] <= 100_000:
+                    or (item.get("rarity") not in RARITIES and "prize" not in item) or not isinstance(item.get("price"), int) or not 0 <= item["price"] <= 100_000:
                 raise ValueError(f"Lumi's closet has a bad or repeated accessory in {slot['id']}.")
+            if "prize" in item and _bad_game_prize(item):   # a game prize has no rarity, so no capsule can roll it
+                raise ValueError(f"Lumi's {item['id']} is a game prize: free, never sold or won from a capsule, and it says how to win it.")
             seen.add(item["id"])
     return data
 
@@ -178,8 +191,8 @@ _WEAR = {item["id"]: {**item, "slot": slot["id"]} for slot in CLOSET["slots"] fo
 _DECOR = {item["id"]: {**item, "spot": spot["id"]} for spot in HOUSE["spots"] for item in spot["items"]}
 _ITEMS = {item["id"]: {**item, "kind": kind} for kind in KINDS for item in CATALOG[kind]}
 # All the capsules can give: clothes, then toys, then decor. A clothing prize has a "slot", a toy's kind is "toys" and
-# a house object has a "spot"; _shelf says which of her lists keeps each.
-_PRIZES = [*_WEAR.values(), *(toy for toy in _ITEMS.values() if "rarity" in toy), *(piece for piece in _DECOR.values() if "rarity" in piece)]
+# a house object has a "spot"; _shelf says which of her lists keeps each. Game prizes (Lumi-Soft) have no rarity, so never.
+_PRIZES = [*(item for item in _WEAR.values() if "rarity" in item), *(toy for toy in _ITEMS.values() if "rarity" in toy), *(piece for piece in _DECOR.values() if "rarity" in piece)]
 # Lumi's moving boxes, in the order they are unpacked: one worn piece each (python/make_lumi_worn.py).
 BOXES = sorted((piece for piece in _DECOR.values() if piece.get("worn")), key=lambda piece: piece["box"])
 MOVE_IN = 1                                               # pet["moved_in"]: the house reset that began the move-in has happened
@@ -467,6 +480,8 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
             raise PetError("That one can't be bought. It's waiting somewhere in the dungeon.")
         if "rarity" in piece and item not in pet["decor"]:   # priced 0 like the free objects, but it has to be won
             raise PetError("That one only comes from a capsule.")
+        if "prize" in piece and item not in pet["decor"]:   # won by playing Lumi-Soft, never bought
+            raise PetError(f"That's a {PRIZE_GAMES[piece['prize']]} prize: {piece['how']}.")
         if piece.get("worn") and item not in pet["decor"]:   # Lumi's own old things: still in a moving box
             raise PetError(f"That's still packed in a moving box. Lumi unpacks one a day (box {piece['box']} of {len(BOXES)}).")
         if piece["price"] and item not in pet["decor"]:
@@ -482,6 +497,8 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
         if piece is None:
             raise PetError("That isn't something Lumi can wear.")
         if item not in pet["closet"]:
+            if "prize" in piece:                          # won by playing Lumi-Soft, never bought
+                raise PetError(f"That's a {PRIZE_GAMES[piece['prize']]} prize: {piece['how']}.")
             if not piece["price"]:
                 raise PetError("That one only comes from a capsule.")
             if not coins.spend(conn, user_id, piece["price"], GAME, "wear"):

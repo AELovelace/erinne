@@ -228,6 +228,53 @@
 #gm[data-game="slots"] .casino-tv .casino-dealer-lumi { width: 2.6rem; }
 #gm[data-game="slots"] .casino-tv .casino-bubble { margin-bottom: .2rem; padding: .25rem .7rem; font-size: .75rem; white-space: nowrap; }
 
+/* The rules fold away under the seat panel (open them with a click, or Tab and Enter). */
+.casino-rules-box { margin-top: .8rem; }
+.casino-rules-box summary { cursor: pointer; color: var(--lt-pink, var(--cyan)); font-weight: bold; }
+.casino-rules-box p { color: var(--muted); }
+
+/* ---- A seated table fits one 1080p screen (2026-11-11): nothing scrolls, so everyone's Lumi is in view. ----
+   Only on wide screens and only at an online table (#casino-table without .casino-tv); the shared-TV couch layout
+   has its own compact rules above, and phones keep their single column. Sizes that grow tall also follow the
+   screen's height (vh), so a 1440p or 4K TV still scales them in step with its bigger text. */
+.gm[data-kit="casino"]:has(#casino-table:not([hidden])) .casino-heading { padding: 0 0 .4rem; }       /* seated: a slim title row */
+.gm[data-kit="casino"]:has(#casino-table:not([hidden])) .casino-heading .gm-title { margin: 0; font-size: clamp(1.4rem, 2.2vw, 2.1rem); }
+.gm[data-kit="casino"]:has(#casino-table:not([hidden])) .casino-heading > p { display: none; }       /* the lobby's small print */
+@media (min-width: 1100px) {
+  .gm[data-kit="casino"] #casino-error { position: fixed; z-index: 20; top: 1rem; left: 50%; transform: translateX(-50%); width: max-content; max-width: min(90vw, 42rem);
+    box-shadow: 0 0 24px #ff8ecb66; }                                                                  /* floats over the title, never pushes the table down */
+  #casino-table:not(.casino-tv) .casino-table-bar { padding: .5rem 1.2rem; }
+  #casino-table:not(.casino-tv) .casino-layout { margin-top: .7rem; }
+  #casino-table:not(.casino-tv) .casino-board { padding: .9rem 1.2rem 1rem; }
+  /* Dealer Lumi and her bubble stand beside the game instead of a row above it. */
+  #casino-table:not(.casino-tv) .casino-house { flex-direction: row; align-items: center; justify-content: center; gap: 1.5rem; }
+  #casino-table:not(.casino-tv) .casino-dealer { flex: 0 1 21rem; }
+  #casino-table:not(.casino-tv) .casino-dealer-lumi { width: 7rem; }
+  #casino-table:not(.casino-tv) .casino-bubble { max-width: 13rem; margin-bottom: 1.6rem; }
+  #casino-table:not(.casino-tv) .casino-stage { flex: 1 1 auto; min-width: 0; min-height: 0; padding: .3rem; }
+  /* The game itself, capped by the screen's height. */
+  #casino-table:not(.casino-tv) .roulette-wheel { width: min(100%, 29rem, 40vh); }
+  #casino-table:not(.casino-tv) .casino-slot-machine.large .casino-slot-symbol { min-height: min(4.1rem, 5.5vh); font-size: min(3rem, 4.2vh); }
+  #casino-table:not(.casino-tv) .casino-lane { margin: .25rem 0; }
+  .gm[data-kit="casino"] #casino-table:not(.casino-tv) .casino-track { height: min(3.2rem, 4.6vh); padding-right: 3.8rem; }
+  #casino-table:not(.casino-tv) .casino-horse { width: min(4.4rem, 6.4vh); }
+  /* Smaller cushions: her head, wings and paws still peek over the table's edge. */
+  #casino-table:not(.casino-tv) .casino-players { display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem; }   /* all eight cushions in one row round the middle of the felt */
+  #casino-table:not(.casino-tv) .casino-players > * { flex: 1 1 8rem; max-width: 13rem; }   /* (a grid would count columns by the widest size and wrap at five) */
+  #casino-table:not(.casino-tv) .casino-player h3 { font-size: 1rem; }
+  #casino-table:not(.casino-tv) .casino-player p { font-size: .9rem; line-height: 1.3; }
+  #casino-table:not(.casino-tv) .casino-player .casino-slot-line { grid-template-columns: .8rem minmax(0, 1fr); }   /* each seat's own little reels */
+  #casino-table:not(.casino-tv) .casino-player .casino-slot-symbol { min-height: 1.8rem; font-size: 1.2rem; }
+  #casino-table:not(.casino-tv) .casino-player .casino-slot-machine { margin: .35rem 0; }
+  #casino-table:not(.casino-tv) .casino-player { padding: .55rem .7rem; }
+  #casino-table:not(.casino-tv) .casino-player h3 { margin-bottom: .3rem; }
+  #casino-table:not(.casino-tv) .casino-player p { margin: .2rem 0; }
+  #casino-table:not(.casino-tv) .casino-seat { height: 4.3rem; margin-bottom: .5rem; }
+  #casino-table:not(.casino-tv) .casino-seat .lt-lumi { width: 5.4rem; margin-bottom: -1rem; }
+  #casino-table:not(.casino-tv) .casino-seat-chips .lt-chips { height: 1.7rem; }
+  #casino-table:not(.casino-tv) .casino-controls h2 { font-size: 1.5rem; margin: .2rem 0 .6rem; }
+}
+
 @media (max-width: 850px) {
   .gm[data-kit="casino"] .casino-board { border-radius: 2.4rem 2.4rem 1rem 1rem; padding: 1rem .8rem; }
   .casino-dealer-lumi { width: 6rem; }

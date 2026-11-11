@@ -153,7 +153,8 @@ SNAKE_W, SNAKE_H = 20, 15
 SNAKE_START = ((10, 7), (9, 7), (8, 7))   # head first, heading right
 STEPS = ((1, 0), (0, 1), (-1, 0), (0, -1))   # directions 0-3: right, down, left, up
 FOOD_POINTS = {2: 1, 3: 5, 4: 10}         # red, yellow, aqua
-MOVES_PER_SECOND = 7.5                    # one move every 8 frames at 60 fps
+MOVES_PER_SECOND = 7.5                    # the fastest a page has ever played (8 frames a move); 6 a second since
+                                          # 2026-11-11, and a slower page always passes this bound
 
 
 def snake_food(seed: int, index: int, board: list[list[int]]) -> tuple[int, int, int] | None:

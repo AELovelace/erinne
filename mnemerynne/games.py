@@ -60,6 +60,13 @@ GAMES: tuple[Game, ...] = (
          description="Run, jump, slide and shoot through StickBob's world for as long as you can last. Every 10 m and every kill pays a coin.",
          controls="A D run · W or Space jump · S slide · mouse aims · left click shoots · right click kicks · F knife · P pause · M sound",
          mouse_keyboard=True),
+    # Lumi-Soft (Doll, 2026-11-11): her GameMaker sniper prototype (GameMakerProjects\Roulette, rmSniperScope) finished
+    # here as a cute "airsoft" target gallery. The page plays rules.js; the server replays every shot before it pays
+    # (lumisoft.py, lumisoft_rules.py). Its prizes are a set for Lumi's house and closet. Plan: BeepDrive file 286519.
+    Game(slug="lumi-soft", name="Lumi-Soft", icon="🎯",
+         description="Lie on your cushion and pop cardboard creatures through the Star Scope: five stages, bosses, a Daily Range, and a whole Lumi-Soft set for Lumi's house to win. 25 coins a run; your score pays.",
+         controls="Mouse aims · right button scope · left button pops · Shift holds your breath · R reloads · G glow scope · P pause",
+         mouse_keyboard=True, extras=("lumi-pet/closet.js", "arcade/lumi-sprite.js", "lumi-soft/art.js")),
     # Ported from Doll's GameMaker arcade (python/export_roulette_arcade.py copies the art and sounds). Both share one shell
     # (games/arcade/): solo runs and showdown tables, where two race and five can watch and bet (arcade.py, showdown.py).
     # Breakout as "Yarn Pop" (Doll, 2026-11-11): Lumi, curled up, is the ball. The slug and the rules stay Breakout's.

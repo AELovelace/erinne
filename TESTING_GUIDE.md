@@ -92,7 +92,7 @@ The browser checks play all four games with two isolated authenticated contexts,
 
 The browser checks also cover bet limits, Play before betting, and reduced-motion roulette settlement. They use simulated visibility for both headless tabs; physically test two set-top boxes and their remote panels before release. Also check the available themes on target displays.
 
-**Lumi's Lounge by eye** (not automated): with two accounts whose Lumis wear different glows and clothes, both players should see the same two Lumis in the same seats. Dealer Lumi's line should change with each phase and name the result. Your Lumi hops with hearts on a win and gets a sweat drop on a loss, with your chips in front of her. On a real TV with eight remotes in slots, Dealer Lumi should sit on the table's top edge without covering a card. The ponies' legs gallop only during the race. With reduced motion on, nothing bounces. A roulette snapshot during a round must keep its spin position; repeated polling must not recreate the rotor or replay its landing.
+**Lumi's Lounge by eye** (not automated): with two accounts whose Lumis wear different glows and clothes, both players should see the same two Lumis in the same seats. Dealer Lumi's line should change with each phase and name the result. Your Lumi hops with hearts on a win and gets a sweat drop on a loss, with your chips in front of her. On a real TV with eight remotes in slots, Dealer Lumi should sit on the table's top edge without covering a card. The ponies' legs gallop only during the race. With reduced motion on, nothing bounces. A roulette snapshot during a round must keep its spin position; repeated polling must not recreate the rotor or replay its landing. On a 1080p TV, each table should fit with no scrollbar, before a round and during one. Check each with eight online seats: all eight cushions in one row, with Slots' little reels inside each card. Opening **Table rules** makes the seat panel taller; during betting that may add a scrollbar, and it's the only thing that should.
 
 ## StickBob Runner
 
@@ -111,6 +111,23 @@ By hand, on a computer with a mouse:
 `tests/test_runner.py` covers the coins: a run pays once, a claim faster than StickBob can run pays nothing, a new run drops the old ticket, the cap (off by default) and its checks.
 
 If the GameMaker art or chunks change, run `.venv/Scripts/python.exe python/export_stickbob.py` and commit `static/games/stickbob-runner/assets/`.
+
+## Lumi-Soft
+
+`tests/test_lumisoft.py` replays the recorded runs in `tests/fixtures/lumi_soft_runs.json` on the server and needs every number to match what the page's `rules.js` recorded (score, hits, ranks, the step it ended on). It also covers the entry and continue fees (50, 100, 200, 400, 400), paying once, the wall-clock check, the daily cap and its setting, one run at a time, stage select opening in order, the Daily Range's one scored try and its board, bests, and the prizes landing in Lumi's house and closet (each once). `tests/js/lumi_soft.test.mjs` replays the same file in Node and has the robot (`tests/js/lumi_soft_bot.mjs`) play the runs again, plus scoring, pop-ups, the Popper's timing, wind, friends, ranks, and a drawing for every look, prop and boss. **After any rules or stages change, run `node tests/js/lumi_soft_bot.mjs` to re-record**, then both suites. In Chrome, `tests/lumi-soft-browser.mjs` (`LUMI_SOFT_ONLY=1 node tests/connected-browser.mjs`) plays the Training Range with a real mouse through the scope, pauses and ends the run, plays a paid Stardust Garden run and checks the coins, and opens the Daily Range, Prizes and Settings pages. Screenshots: `runs/casino-browser/lumi-soft-*.png`.
+
+By hand, on a computer with a mouse:
+
+1. **Media → Games → Mouse & keyboard** shows **Lumi-Soft** beside StickBob Runner (not on a phone or TV).
+2. Training Range: hold the right button over a can. The scope opens with the crosshair right there, and doesn't drift until you push the mouse further out. Hold Shift: the sway settles and the breath bar drains; let it run out and the sway gets worse until it refills. Pop all three cans, then reload with R.
+3. Story or Stage select: pop-ups rise from behind hedges, peekers slide out from walls, walkers cross, balloons float up. A water balloon's ring fills and Spotter Lumi warns you; let one land and a heart goes, with droplets down the screen. Pop a ♡ friend: −250, −5 s and Spotter Lumi is sad.
+4. Let the clock run out: the continue panel offers 50 coins, then 100 on the next one, with a 10-second countdown. Continue: the score stays.
+5. Teacup Tower: the wind line in the HUD says aim left, and far BBs land right of the crosshair. Deep Dungeon: it's dark until **G**; the glow bar drains.
+6. Each boss: its bullseyes open and close; hitting one flashes it and resets its wind-up ring; the hearts over the radar count down.
+7. Results show the server's score, ranks, coins (with "today's limit reached" once the cap is hit) and any prizes. Open Lumi Pet: a won piece is in her house list and can be put out for free; one not yet won says "Lumi-Soft prize · …" and can't be bought.
+8. Daily Range: the first try is scored and shows on the board for another account; a second try says Practice and pays nothing.
+
+Not tried yet: a real player's feel for difficulty and the coin rate (1 per 250 points is Doll's first guess to tune), and a slow PC's frame rate in the Night Fair.
 
 ## Lumi Pet
 
@@ -240,7 +257,7 @@ Set `CASINO_TV_ONLY=1` when running `node tests/connected-browser.mjs` to run on
 
 ## 1080p and 4K game sizing
 
-Set `GAME_SCALING_ONLY=1` for the isolated browser scaling checks in `tests/game-scaling-browser.mjs`. They open six games (of Lumi's three apps, Lumi Pet) in the actual Media iframe on a paired TV, compare 1920×1080, 2560×1440 and 3840×2160 root fonts and board/control geometry, and resize back to verify no accumulated scaling. They also check saved manual size, live Bigger/Automatic/Cancel through the TV command stream, table preservation, canvas pixel density, horizontal overflow and unchanged unpaired desktop sizing. Screenshots include `slots-1080p.png`, `slots-4k.png`, `lumi-pet-1080p.png` and `lumi-pet-4k.png` in `runs/casino-browser/`.
+Set `GAME_SCALING_ONLY=1` for the isolated browser scaling checks in `tests/game-scaling-browser.mjs`. They open six games (of Lumi's three apps, Lumi Pet) in the actual Media iframe on a paired TV, compare 1920×1080, 2560×1440 and 3840×2160 root fonts and board/control geometry, and resize back to verify no accumulated scaling. They also check saved manual size, live Bigger/Automatic/Cancel through the TV command stream, table preservation, canvas pixel density, horizontal overflow and unchanged unpaired desktop sizing. Since 2026-11-11 the four tables must also fit the TV's height with no scrolling at 1080p and 4K (the `tall` measurement). That covers a seated table only; to check a full table of eight, mid-round, by eye, look at the Lumi's Lounge section. Screenshots include `slots-1080p.png`, `slots-4k.png`, `lumi-pet-1080p.png` and `lumi-pet-4k.png` in `runs/casino-browser/`.
 
 The shared-TV browser check also verifies eight active slot-player cards at 4K, with a `slots-eight-remotes-4k.png` capture. The Media pytest suite sends the real `Sec-Fetch-Dest: iframe` header to all game routes and checks inherited scale, no duplicated kiosk chrome/underscan, saved settings and unchanged non-game frames. Physically compare 1080p and 4K TVs after release; OS scaling and browser zoom change the CSS viewport that Automatic uses.
 

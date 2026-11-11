@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from mnemerynne import arcade, lobby, runner, showdown
+from mnemerynne import arcade, lobby, lumisoft, runner, showdown
 from mnemerynne.rooms_bus import sse
 from mnemerynne import bfgguf, casino, casino_remote, claude_chat, coins, games, lumi_tv, lumidungeon, lumiparty, lumipet, lumitales, prism, push, users
 from mnemerynne.db import transaction
@@ -156,6 +156,67 @@ def runner_finish(body: RunnerFinish, user=Depends(media_user), conn=Depends(get
     """Game over: pay the run's coins once, if its distance and kills fit the time it took."""
     with transaction(conn):
         return runner.finish(conn, user["id"], body.run, body.meters, body.kills)
+
+
+# ------------------------------------------------------------------ Lumi-Soft (lumisoft.py)
+def _soft_call(fn, *args, **kwargs):
+    """A Lumi-Soft refusal becomes a small error the page can show; nothing was changed."""
+    try:
+        return fn(*args, **kwargs)
+    except lumisoft.Refused as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+
+
+class SoftStart(BaseModel):
+    """Which run to start. Never a score, a price or a balance."""
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["training", "story", "stage", "daily"]
+    stage: str | None = Field(None, max_length=40)
+
+
+class SoftRun(BaseModel):
+    """A run's ticket, for a continue."""
+    model_config = ConfigDict(extra="forbid")
+    run: int = Field(ge=1, strict=True)
+
+
+class SoftFinish(BaseModel):
+    """A finished run's log, exactly what rules.js recorded: each shot's step and aim point, each reload's step, how many
+    continues it used and the step it ended on. The server replays it; nothing here is a score."""
+    model_config = ConfigDict(extra="forbid")
+    run: int = Field(ge=1, strict=True)
+    shots: list[tuple[Annotated[int, Field(ge=0, le=10_000_000)], Annotated[float, Field(ge=-5000, le=10_000)],
+                      Annotated[float, Field(ge=-5000, le=10_000)]]] = Field(default_factory=list, max_length=20_000)
+    reloads: list[Annotated[int, Field(ge=0, le=10_000_000)]] = Field(default_factory=list, max_length=10_000)
+    continues: int = Field(default=0, ge=0, le=1000, strict=True)
+    end: int = Field(ge=0, le=10_000_000, strict=True)
+
+
+@router.get("/api/media/games/lumi-soft/state")
+def soft_state(user=Depends(media_user), conn=Depends(get_db)):
+    """The title screen: the stages, prices, this person's bests and prizes, and today's Daily Range with its board."""
+    return lumisoft.state(conn, user["id"])
+
+
+@router.post("/api/media/games/lumi-soft/start")
+def soft_start(body: SoftStart, user=Depends(media_user), conn=Depends(get_db)):
+    """A ticket for a new run (it costs lumisoft.ENTRY coins unless it's free practice)."""
+    with transaction(conn):
+        return _soft_call(lumisoft.start, conn, user["id"], body.mode, body.stage)
+
+
+@router.post("/api/media/games/lumi-soft/continue")
+def soft_continue(body: SoftRun, user=Depends(media_user), conn=Depends(get_db)):
+    """Game over: pay for a continue (each costs more; the score stays)."""
+    with transaction(conn):
+        return _soft_call(lumisoft.carry_on, conn, user["id"], body.run)
+
+
+@router.post("/api/media/games/lumi-soft/finish")
+def soft_finish(body: SoftFinish, user=Depends(media_user), conn=Depends(get_db)):
+    """The run is over: the server replays its shots, pays its score once, keeps bests and gives any prizes it won."""
+    with transaction(conn):
+        return _soft_call(lumisoft.finish, conn, user["id"], body.run, body.model_dump())
 
 
 @router.post("/api/media/games/lumi-pet/visit")

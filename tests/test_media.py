@@ -1180,12 +1180,12 @@ def test_built_in_games_open_from_media_and_show_on_a_remote(client, conn, direc
         assert (Path(__file__).parent.parent / "mnemerynne" / "web" / "static" / name).is_file()
     assert 'id="pd-field"' in page.text and "messages.js" not in page.text   # the game's partial, none of the app's scripts
     # StickBob Runner: only it is in the mouse-and-keyboard category, and its page brings its own art and levels.
-    assert [g["slug"] for g in listed if g["mouse_keyboard"]] == ["stickbob-runner"]
+    assert [g["slug"] for g in listed if g["mouse_keyboard"]] == ["stickbob-runner", "lumi-soft"]   # the Mouse & keyboard shelf
     shelves = {}                                         # Lumi's three apps have a shelf of their own, and so do the table games
     for g in listed:
         shelves.setdefault(g["shelf"], []).append(g["slug"])
     assert list(shelves) == ["Lumi", "Arcade", "Table games"] and shelves["Lumi"] == ["lumi-pet", "lumi-dungeons", "lumi-garden"]
-    assert shelves["Table games"] == ["blackjack", "roulette", "horse-racing", "slots"] and shelves["Arcade"] == ["prism-drop", "stickbob-runner", "breakout", "snake", "teacup-tower"]
+    assert shelves["Table games"] == ["blackjack", "roulette", "horse-racing", "slots"] and shelves["Arcade"] == ["prism-drop", "stickbob-runner", "lumi-soft", "breakout", "snake", "teacup-tower"]
     for slug in ("breakout", "snake", "teacup-tower"):                   # the GameMaker ports: the shared arcade shell, then the game
         page = client.get(f"/media/games/{slug}")
         assert page.status_code == 200 and 'id="ar-canvas"' in page.text

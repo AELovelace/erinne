@@ -1240,6 +1240,7 @@ class MediaSettingsBody(BaseModel):
     signage_folder: str | None = Field(None, max_length=120)   # the Signage folder at the top of the share
     signage_effects: dict | None = None                        # CRT effects for newly paired screens
     runner_daily_cap: int | None = Field(None, ge=0, le=1_000_000, strict=True)   # StickBob Runner's coins a day per person; 0: no limit
+    lumisoft_daily_cap: int | None = Field(None, ge=0, le=1_000_000, strict=True)  # Lumi-Soft's coins a day per person; 0: no limit
 
 
 @admin_router.put("/api/admin/settings/media")

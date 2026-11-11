@@ -1859,15 +1859,20 @@
     runnerCap.min = "0"; runnerCap.max = "1000000"; runnerCap.step = "1";
     agentField(gamesGrid, "StickBob Runner coins a day", runnerCap).title =
       "The most one person can earn from StickBob Runner in a day. 0 is no limit. Its scores come from the browser, so this is the guard against made-up runs.";
+    const softCap = agentInput("number", s.lumisoft_daily_cap);   // Lumi-Soft (mnemerynne/lumisoft.py): the server replays every shot, and this caps a day's pay
+    softCap.min = "0"; softCap.max = "1000000"; softCap.step = "1";
+    agentField(gamesGrid, "Lumi-Soft coins a day", softCap).title =
+      "The most one person can earn from Lumi-Soft in a day. 0 is no limit. A run pays 1 coin per 250 points; the server replays every shot to work out the score.";
     gamesForm.appendChild(gamesGrid);
     const gamesActions = el("div", "ax-new");
     const saveGames = el("button", "small", "Save");
     saveGames.type = "submit";
-    gamesActions.append(saveGames, el("span", "small muted", "0 is no limit. A run pays 1 coin per 10 m plus 1 per kill."));
+    gamesActions.append(saveGames, el("span", "small muted", "0 is no limit. StickBob pays 1 coin per 10 m plus 1 per kill; Lumi-Soft 1 per 250 points."));
     gamesForm.appendChild(gamesActions);
     gamesForm.addEventListener("submit", function (e) {   // sends the cap only, as a whole number
       e.preventDefault();
-      save({ runner_daily_cap: Math.max(0, Math.floor(Number(runnerCap.value) || 0)) });
+      save({ runner_daily_cap: Math.max(0, Math.floor(Number(runnerCap.value) || 0)),
+        lumisoft_daily_cap: Math.max(0, Math.floor(Number(softCap.value) || 0)) });   // both caps, as whole numbers
     });
     playback.appendChild(gamesForm);
 

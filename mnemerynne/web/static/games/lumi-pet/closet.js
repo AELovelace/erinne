@@ -1125,6 +1125,18 @@
         bow(243, 232, 9, "#e8405f") + c(243, 245, 5.5, "#f5c042", 'stroke="#8a6a2a" stroke-width="1.5"') + p("M239.5 246 H246.5", "none", 'stroke="#8a6a2a" stroke-width="1.4" ' + LINE) + // The red bow and its gold bell.
         p(star(296, 142, 4), "#fff8dc", 'class="lp-twinkle"') + p(star(230, 112, 3.5), "#fff8dc", 'class="lp-twinkle" style="animation-delay:.9s"');
     })() },
+
+    // ---- Lumi-Soft prizes: won by playing Lumi-Soft (the "prize": "lumi-soft" entries in the catalog), never sold or rolled.
+    // Pastel safety goggles pushed up on her head: a lilac strap with stitching round her head, pink rims and two mint lenses with a gold sparkle in each.
+    "acc-soft-goggles": { layer: "front", svg: p("M92 116 Q160 78 228 116", "none", 'stroke="#462846" stroke-opacity=".5" stroke-width="10" ' + LINE) + p("M92 116 Q160 78 228 116", "none", 'stroke="#c9a8ff" stroke-width="7" ' + LINE) + // The strap.
+      p("M100 110 Q160 80 220 110", "none", 'stroke="#fff8ec" stroke-width="1.4" stroke-dasharray="3 3" opacity=".8" ' + LINE) + // Its stitching.
+      p("M151 86 Q160 80 169 86", "none", 'stroke="#462846" stroke-opacity=".5" stroke-width="8" ' + LINE) + p("M151 86 Q160 80 169 86", "none", 'stroke="#ff8ecb" stroke-width="5" ' + LINE) + // The bridge.
+      [137, 183].map(function (x, i) { // Each eyepiece: a chunky pink rim, a mint lens, a gold sparkle and a shine.
+        return c(x, 86, 16, "#ff8ecb") + c(x, 86, 11.5, "#bff6f4", 'stroke="#f2b8dc" stroke-width="1.5"') + p(star(x, 86, 8), "#ffdc83", "") + c(x, 86, 1.6, "#fff", "") +
+          p("M" + (x - 7) + " 80 Q" + (x - 4) + " 76 " + x + " 75.5", "none", 'stroke="#fff" stroke-width="2.4" opacity=".75" ' + LINE) +
+          c(x + (i ? 15 : -15), 92, 3, "#ffdc83") + p(star(x + (i ? 10 : -10), 72, 3), "#fff8dc", 'class="lp-twinkle" style="animation-delay:' + (i * .6) + 's"'); // A gold clip where it meets the strap, and a twinkle.
+      }).join("") +
+      p("M201 108 c-4 -3 -3.4 -6.6 -1.2 -6.6 q1.2 0 1.2 1.4 q0 -1.4 1.2 -1.4 c2.2 0 2.8 3.6 -1.2 6.6 Z", "#ff8ecb", "") }, // A heart sticker on the strap.
   };
 
   function render(outfit, layer) { // The markup for everything she wears on one layer. `outfit` is {slot: accessory id}.

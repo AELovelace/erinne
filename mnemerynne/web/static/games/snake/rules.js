@@ -16,7 +16,8 @@
   const W = 20, H = 15;
   const STEPS = [[1, 0], [0, 1], [-1, 0], [0, -1]];       // directions 0-3: right, down, left, up
   const POINTS = { 2: 1, 3: 5, 4: 10 };                     // red, yellow, aqua
-  const FRAMES_PER_MOVE = 8;                                // 7.5 moves a second at 60 frames a second
+  const FRAMES_PER_MOVE = 10;                               // 6 moves a second at 60 frames a second (8 until 2026-11-11:
+                                                            // the bigger solo board made 7.5 feel too quick)
 
   function mix(seed, index, salt) {                         // snakeSeedValue from the GameMaker game
     const v = (Math.max(1, Math.abs(Math.trunc(seed))) * 1664525 + (Math.max(0, Math.trunc(index)) + 1) * 1013904223 +

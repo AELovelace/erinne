@@ -28,7 +28,8 @@
       {"id": "wall-starship-hull", "name": "Riveted hull panels", "price": 0, "found": "starship-wreck"},
       {"id": "wall-arcade-brick", "name": "Neon-lit brick wall", "price": 0, "found": "neon-arcade"},
       {"id": "wall-datavault-racks", "name": "Humming server racks", "price": 0, "found": "data-vault"},
-      {"id": "wall-rooftop-vines", "name": "Vine-wrapped brick", "price": 0, "found": "rooftop-garden"}]},
+      {"id": "wall-rooftop-vines", "name": "Vine-wrapped brick", "price": 0, "found": "rooftop-garden"},
+      {"id": "soft-wallpaper", "name": "Bunting and bullseyes", "price": 0, "prize": "lumi-soft", "how": "Clear the Stardust Garden in Lumi-Soft"}]},
     {"id": "floor", "name": "Floor", "items": [
       {"id": "floor-worn", "name": "Scuffed old boards", "price": 0, "worn": true, "box": 12},
       {"id": "floor-boards", "name": "Dark boards", "price": 60},
@@ -57,7 +58,8 @@
       {"id": "floor-starship-deck", "name": "Guide-lit deck plates", "price": 0, "found": "starship-wreck"},
       {"id": "floor-arcade-carpet", "name": "Arcade confetti carpet", "price": 0, "found": "neon-arcade"},
       {"id": "floor-datavault-tiles", "name": "Raised vault floor", "price": 0, "found": "data-vault"},
-      {"id": "floor-rooftop-pavers", "name": "Roof pavers and clover", "price": 0, "found": "rooftop-garden"}]},
+      {"id": "floor-rooftop-pavers", "name": "Roof pavers and clover", "price": 0, "found": "rooftop-garden"},
+      {"id": "soft-floor", "name": "Range-lane floor", "price": 0, "prize": "lumi-soft", "how": "Clear a Lumi-Soft stage with all three hearts"}]},
     {"id": "wallart", "name": "Wall art", "items": [
       {"id": "art-worn", "name": "Taped-up postcard", "price": 0, "worn": true, "box": 9},
       {"id": "art-star", "name": "Star poster", "price": 50},
@@ -86,7 +88,8 @@
       {"id": "art-starship-patch", "name": "Lost mission patch", "price": 0, "found": "starship-wreck"},
       {"id": "art-arcade-pixelcat", "name": "Pixel cat light box", "price": 0, "found": "neon-arcade"},
       {"id": "art-datavault-firewall", "name": "Polite firewall screen", "price": 0, "found": "data-vault"},
-      {"id": "art-rooftop-billboard", "name": "Tiny bee billboard", "price": 0, "found": "rooftop-garden"}]},
+      {"id": "art-rooftop-billboard", "name": "Tiny bee billboard", "price": 0, "found": "rooftop-garden"},
+      {"id": "soft-wallart", "name": "Lumi-Soft scoreboard", "price": 0, "prize": "lumi-soft", "how": "Earn an S rank in Lumi-Soft"}]},
     {"id": "shelf", "name": "Shelf", "items": [
       {"id": "shelf-worn", "name": "Plank and brick shelf", "price": 0, "worn": true, "box": 8},
       {"id": "shelf-books", "name": "Book shelf", "price": 60},
@@ -115,7 +118,8 @@
       {"id": "shelf-starship-salvage", "name": "Salvaged keepsakes shelf", "price": 0, "found": "starship-wreck"},
       {"id": "shelf-arcade-prizes", "name": "Prize counter shelf", "price": 0, "found": "neon-arcade"},
       {"id": "shelf-datavault-floppies", "name": "Floppy and data cube shelf", "price": 0, "found": "data-vault"},
-      {"id": "shelf-rooftop-honey", "name": "Honeycomb and jars shelf", "price": 0, "found": "rooftop-garden"}]},
+      {"id": "shelf-rooftop-honey", "name": "Honeycomb and jars shelf", "price": 0, "found": "rooftop-garden"},
+      {"id": "soft-shelf", "name": "Jars of stardust BBs", "price": 0, "prize": "lumi-soft", "how": "Pop 500 creatures in Lumi-Soft"}]},
     {"id": "view", "name": "Window view", "items": [
       {"id": "view-city", "name": "The city outside", "price": 0},
       {"id": "view-sea", "name": "Star sea", "price": 250},
@@ -143,7 +147,8 @@
       {"id": "view-starship-drift", "name": "Drifting wreck starfield", "price": 0, "found": "starship-wreck"},
       {"id": "view-arcade-rain", "name": "Rainy neon street", "price": 0, "found": "neon-arcade"},
       {"id": "view-datavault-cloud", "name": "The actual cloud", "price": 0, "found": "data-vault"},
-      {"id": "view-rooftop-city", "name": "City glow below", "price": 0, "found": "rooftop-garden"}]},
+      {"id": "view-rooftop-city", "name": "City glow below", "price": 0, "found": "rooftop-garden"},
+      {"id": "soft-view", "name": "View over the range", "price": 0, "prize": "lumi-soft", "how": "Finish a Lumi-Soft stage with 100% accuracy"}]},
     {"id": "frame", "name": "Window frame", "items": [
       {"id": "frame-worn", "name": "Chipped wooden frame", "price": 0, "worn": true, "box": 13},
       {"id": "frame-arch", "name": "Arch", "price": 50},
@@ -172,7 +177,8 @@
       {"id": "frame-starship-hatch", "name": "Tilted hull hatch", "price": 0, "found": "starship-wreck"},
       {"id": "frame-arcade-cabinet", "name": "Arcade cabinet window", "price": 0, "found": "neon-arcade"},
       {"id": "frame-datavault-port", "name": "Vault port window", "price": 0, "found": "data-vault"},
-      {"id": "frame-rooftop-greenhouse", "name": "Greenhouse window", "price": 0, "found": "rooftop-garden"}]},
+      {"id": "frame-rooftop-greenhouse", "name": "Greenhouse window", "price": 0, "found": "rooftop-garden"},
+      {"id": "soft-frame", "name": "Range-day photo", "price": 0, "prize": "lumi-soft", "how": "Pop 25 star badges in one Lumi-Soft run"}]},
     {"id": "curtains", "name": "Curtains", "items": [
       {"id": "curtain-none", "name": "No curtains", "price": 0},
       {"id": "curtain-worn", "name": "Pinned-up bedsheet", "price": 0, "worn": true, "box": 4},
@@ -201,7 +207,8 @@
       {"id": "curtain-starship-shutter", "name": "Half-shut blast shutter", "price": 0, "found": "starship-wreck"},
       {"id": "curtain-arcade-tinsel", "name": "Tinsel strip curtain", "price": 0, "found": "neon-arcade"},
       {"id": "curtain-datavault-cables", "name": "Patch cable curtains", "price": 0, "found": "data-vault"},
-      {"id": "curtain-rooftop-awning", "name": "Cafe awning and lights", "price": 0, "found": "rooftop-garden"}]},
+      {"id": "curtain-rooftop-awning", "name": "Cafe awning and lights", "price": 0, "found": "rooftop-garden"},
+      {"id": "soft-curtains", "name": "Range-flag curtains", "price": 0, "prize": "lumi-soft", "how": "Clear Teacup Tower in Lumi-Soft"}]},
     {"id": "lamp", "name": "Lamp", "items": [
       {"id": "lamp-worn", "name": "Bare bulb on a stand", "price": 0, "worn": true, "box": 2},
       {"id": "lamp-floor", "name": "Floor lamp", "price": 60},
@@ -230,7 +237,8 @@
       {"id": "lamp-starship-beacon", "name": "Emergency beacon lamp", "price": 0, "found": "starship-wreck"},
       {"id": "lamp-arcade-joystick", "name": "Giant joystick lamp", "price": 0, "found": "neon-arcade"},
       {"id": "lamp-datavault-cube", "name": "Data cube lamp", "price": 0, "found": "data-vault"},
-      {"id": "lamp-rooftop-neonbee", "name": "Neon bee sign lamp", "price": 0, "found": "rooftop-garden"}]},
+      {"id": "lamp-rooftop-neonbee", "name": "Neon bee sign lamp", "price": 0, "found": "rooftop-garden"},
+      {"id": "soft-lamp", "name": "Neon bullseye lamp", "price": 0, "prize": "lumi-soft", "how": "Clear Lumi's Lounge in Lumi-Soft"}]},
     {"id": "rug", "name": "Rug", "items": [
       {"id": "rug-worn", "name": "Thrift-shop rag rug", "price": 0, "worn": true, "box": 3},
       {"id": "rug-oval", "name": "Plum oval", "price": 50},
@@ -259,7 +267,8 @@
       {"id": "rug-starship-iris", "name": "Airlock iris rug", "price": 0, "found": "starship-wreck"},
       {"id": "rug-arcade-dance", "name": "Dance pad rug", "price": 0, "found": "neon-arcade"},
       {"id": "rug-datavault-chip", "name": "Microchip rug", "price": 0, "found": "data-vault"},
-      {"id": "rug-rooftop-honeycomb", "name": "Honeycomb rug", "price": 0, "found": "rooftop-garden"}]},
+      {"id": "rug-rooftop-honeycomb", "name": "Honeycomb rug", "price": 0, "found": "rooftop-garden"},
+      {"id": "soft-rug", "name": "Target-lane rug", "price": 0, "prize": "lumi-soft", "how": "Finish the Lumi-Soft Training Range"}]},
     {"id": "bed", "name": "Lumi's bed", "items": [
       {"id": "bed-worn", "name": "Mattress on the floor", "price": 0, "worn": true, "box": 1},
       {"id": "bed-cushion", "name": "Plum cushion", "price": 70},
@@ -288,7 +297,8 @@
       {"id": "bed-starship-pod", "name": "Escape pod bed", "price": 0, "found": "starship-wreck"},
       {"id": "bed-arcade-ballpit", "name": "Ball pit bed", "price": 0, "found": "neon-arcade"},
       {"id": "bed-datavault-drawer", "name": "Server drawer bed", "price": 0, "found": "data-vault"},
-      {"id": "bed-rooftop-planter", "name": "Garden bed (a real one)", "price": 0, "found": "rooftop-garden"}]},
+      {"id": "bed-rooftop-planter", "name": "Garden bed (a real one)", "price": 0, "found": "rooftop-garden"},
+      {"id": "soft-bed", "name": "Popper's nest bed", "price": 0, "prize": "lumi-soft", "how": "Clear the Night Fair in Lumi-Soft"}]},
     {"id": "door", "name": "Door", "items": [
       {"id": "door-worn", "name": "Creaky old door", "price": 0, "worn": true, "box": 14},
       {"id": "door-plum", "name": "Plum door", "price": 70},
@@ -317,7 +327,8 @@
       {"id": "door-starship-airlock", "name": "Ajar airlock door", "price": 0, "found": "starship-wreck"},
       {"id": "door-arcade-entrance", "name": "Arcade glass door", "price": 0, "found": "neon-arcade"},
       {"id": "door-datavault-vault", "name": "Vault door", "price": 0, "found": "data-vault"},
-      {"id": "door-rooftop-stairwell", "name": "Roof stairwell door", "price": 0, "found": "rooftop-garden"}]},
+      {"id": "door-rooftop-stairwell", "name": "Roof stairwell door", "price": 0, "found": "rooftop-garden"},
+      {"id": "soft-door", "name": "Range door", "price": 0, "prize": "lumi-soft", "how": "Play 10 Lumi-Soft Daily Ranges"}]},
     {"id": "ceiling", "name": "Ceiling hanging", "items": [
       {"id": "hang-worn", "name": "Paper lantern, a bit torn", "price": 0, "worn": true, "box": 10},
       {"id": "hang-stars", "name": "Star mobile", "price": 60},
@@ -346,7 +357,8 @@
       {"id": "hang-starship-satellite", "name": "Little lost satellite", "price": 0, "found": "starship-wreck"},
       {"id": "hang-arcade-gamepad", "name": "Neon gamepad sign", "price": 0, "found": "neon-arcade"},
       {"id": "hang-datavault-cloud", "name": "Cloud storage mobile", "price": 0, "found": "data-vault"},
-      {"id": "hang-rooftop-hive", "name": "Hanging hive and bees", "price": 0, "found": "rooftop-garden"}]},
+      {"id": "hang-rooftop-hive", "name": "Hanging hive and bees", "price": 0, "found": "rooftop-garden"},
+      {"id": "soft-ceiling", "name": "Swinging target mobile", "price": 0, "prize": "lumi-soft", "how": "Clear the Deep Dungeon in Lumi-Soft"}]},
     {"id": "sidetable", "name": "Side table", "items": [
       {"id": "table-worn", "name": "Moving-box table", "price": 0, "worn": true, "box": 5},
       {"id": "table-tea", "name": "Tea table", "price": 50},
@@ -375,7 +387,8 @@
       {"id": "table-starship-holo", "name": "Crate with a holo-globe", "price": 0, "found": "starship-wreck"},
       {"id": "table-arcade-pinball", "name": "Mini pinball table", "price": 0, "found": "neon-arcade"},
       {"id": "table-datavault-terminal", "name": "Friendly terminal", "price": 0, "found": "data-vault"},
-      {"id": "table-rooftop-vent", "name": "Air vent with snow globe", "price": 0, "found": "rooftop-garden"}]},
+      {"id": "table-rooftop-vent", "name": "Air vent with snow globe", "price": 0, "found": "rooftop-garden"},
+      {"id": "soft-sidetable", "name": "Star Scope on a stand", "price": 0, "prize": "lumi-soft", "how": "Reach a ×3.0 combo in Lumi-Soft"}]},
     {"id": "plant", "name": "Plant", "items": [
       {"id": "plant-worn", "name": "Avocado pit in a jar", "price": 0, "worn": true, "box": 7},
       {"id": "plant-fern", "name": "Fern", "price": 50},
@@ -404,7 +417,8 @@
       {"id": "plant-starship-hydro", "name": "Hydroponic glow sprout", "price": 0, "found": "starship-wreck"},
       {"id": "plant-arcade-cactus", "name": "Neon cactus in a pot", "price": 0, "found": "neon-arcade"},
       {"id": "plant-datavault-bonsai", "name": "Circuit bonsai", "price": 0, "found": "data-vault"},
-      {"id": "plant-rooftop-antenna", "name": "Antenna morning glory", "price": 0, "found": "rooftop-garden"}]},
+      {"id": "plant-rooftop-antenna", "name": "Antenna morning glory", "price": 0, "found": "rooftop-garden"},
+      {"id": "soft-plant", "name": "Popcorn bush", "price": 0, "prize": "lumi-soft", "how": "Clear a Lumi-Soft stage without popping a friend"}]},
     {"id": "toychest", "name": "Toy chest", "items": [
       {"id": "chest-worn", "name": "Laundry basket of toys", "price": 0, "worn": true, "box": 6},
       {"id": "chest-wood", "name": "Wooden chest", "price": 50},
@@ -433,7 +447,8 @@
       {"id": "chest-starship-cargo", "name": "Cargo crate of space toys", "price": 0, "found": "starship-wreck"},
       {"id": "chest-arcade-gacha", "name": "Capsule machine chest", "price": 0, "found": "neon-arcade"},
       {"id": "chest-datavault-cube", "name": "Data cube toy box", "price": 0, "found": "data-vault"},
-      {"id": "chest-rooftop-crate", "name": "Kite and seed crate", "price": 0, "found": "rooftop-garden"}]},
+      {"id": "chest-rooftop-crate", "name": "Kite and seed crate", "price": 0, "found": "rooftop-garden"},
+      {"id": "soft-toychest", "name": "Crate of cardboard standees", "price": 0, "prize": "lumi-soft", "how": "Beat a Lumi-Soft boss without losing a heart"}]},
     {"id": "trophy", "name": "Trophy", "items": [
       {"id": "trophy-none", "name": "Empty bracket", "price": 0},
       {"id": "trophy-moon-bell", "name": "Moon bell", "price": 0, "found": "moonlit-shrine"},
@@ -459,6 +474,7 @@
       {"id": "trophy-data-cube", "name": "Glowing data cube", "price": 0, "found": "data-vault"},
       {"id": "trophy-floppy", "name": "Old floppy disk", "price": 0, "found": "data-vault"},
       {"id": "trophy-honey-jar", "name": "Rooftop honey", "price": 0, "found": "rooftop-garden"},
-      {"id": "trophy-snow-globe", "name": "Skyline snow globe", "price": 0, "found": "rooftop-garden"}]}
+      {"id": "trophy-snow-globe", "name": "Skyline snow globe", "price": 0, "found": "rooftop-garden"},
+      {"id": "soft-trophy", "name": "Golden Star Scope", "price": 0, "prize": "lumi-soft", "how": "Clear Lumi-Soft's Story mode"}]}
   ]
 }

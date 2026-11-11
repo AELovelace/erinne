@@ -74,3 +74,11 @@ test("six ponies, one per horse, and the dealer's lines are the same for everyon
   assert.equal(T.say("slots", { phase: "betting", round: 1 }, null), T.say("slots", { phase: "betting", round: 1 }, { bet: 10 }));
   assert.match(T.say("roulette", null, null), /cushion/);
 });
+
+test("a Lumi with her own RGB colour sits in it: body toward white, shadow darker; a bad colour is ignored", () => {
+  assert.deepEqual(T.paletteOf({ glow: "wisp", colour: "#FF0000" }), { glow: "#ff0000", body: "#ffc7c7", shadow: "#8c0000" });
+  assert.match(T.lumi({ glow: "wisp", colour: "#00ff00", outfit: {} }), /--pet-glow:#00ff00;--pet-body:#c7ffc7;--pet-shadow:#008c00/);
+  assert.match(T.lumi({ glow: "wisp", colour: "red;}<x", outfit: {} }), /--pet-glow:#c9a8ff/);       // not #rrggbb: her glow's colours
+  assert.deepEqual(T.paletteOf(null), T.PALETTES.rose);
+});
+

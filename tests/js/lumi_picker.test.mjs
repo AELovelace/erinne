@@ -48,7 +48,7 @@ test("trophies appear among a spot's choices only once they are found", () => {
   assert.deepEqual(lists().spot("trophy").options, ["trophy-none"]);
   assert.deepEqual(lists({ decor: ["trophy-geode-egg"] }).spot("trophy").options, ["trophy-none", "trophy-geode-egg"]);
   const full = lists({ decor: ["trophy-geode-egg"] }, "trophy");
-  assert.equal(full.home.length, 26);
+  assert.equal(full.home.length, 27);
   assert.match(full.spot("trophy-moon-bell").note, /waiting somewhere in the dungeon/);
   assert.deepEqual(full.spot("trophy-geode-egg").send, { action: "decorate", item: "trophy-geode-egg" });
   full.spot("back").local();
@@ -80,6 +80,26 @@ test("Star Capsule decor stays out of a spot's row until she has it, and its ful
   assert.deepEqual(lists({ decor: [prize] }, "rug").spot(prize).send, { action: "decorate", item: prize });
 });
 
+test("a Lumi-Soft prize stays out of a spot's row until it is won, and says how to win it", () => {
+  const piece = house.spots.find(spot => spot.id === "lamp").items.find(item => item.prize);
+  assert.ok(!lists().spot("lamp").options.includes(piece.id), "Not in the row before it is won");
+  const full = lists({}, "lamp").spot(piece.id);
+  assert.deepEqual([full.icon, full.hint, full.send, full.ask], ["🔒", "Lumi-Soft prize · Clear Lumi's Lounge in Lumi-Soft", undefined, undefined]);
+  assert.equal(full.note, "Neon bullseye lamp is a Lumi-Soft prize. Clear Lumi's Lounge in Lumi-Soft.");
+  assert.ok(lists({ decor: [piece.id] }).spot("lamp").options.includes(piece.id), "Once won it swaps in like any of hers");
+  assert.deepEqual(lists({ decor: [piece.id] }, "lamp").spot(piece.id).send, { action: "decorate", item: piece.id });
+});
+
+test("the Lumi-Soft goggles can be tried on but not bought, and say how to win them", () => {
+  const flipped = lists({}, null, { "slot:head": "acc-soft-goggles" }).slot("slot-head");
+  assert.deepEqual([flipped.hint, flipped.send, flipped.wear], ["◀ Lumi-Soft goggles ▶ · Lumi-Soft prize · Clear Lumi-Soft's Story mode", undefined, ["head", "acc-soft-goggles"]]);
+  assert.equal(flipped.note, "Lumi-Soft goggles is a Lumi-Soft prize. Clear Lumi-Soft's Story mode.");
+  const full = lists({}, "head").slot("acc-soft-goggles");
+  assert.deepEqual([full.icon, full.hint, full.send, full.ask], ["🔒", "Lumi-Soft prize · Clear Lumi-Soft's Story mode", undefined, undefined]);
+  const won = lists({ closet: ["acc-soft-goggles"] }, "head").slot("acc-soft-goggles");
+  assert.deepEqual([won.hint, won.send], ["Lumi-Soft prize · hers · Enter puts it on", { action: "wear", item: "acc-soft-goggles" }]);
+});
+
 test("backing out of a place on Lumi lands on its row, below both capsules", () => {
   const view = lists({}, "tail");
   view.slot("back").local();
@@ -93,7 +113,7 @@ test("the closet is the capsule and one row a place on Lumi, with nothing as a c
   assert.deepEqual(view.slot("capsule-moon").send, { action: "capsule", item: "moon" });
   assert.match(view.slot("capsule-moon").hint, /^300 coins · rare, epic or legendary only · a repeat pays back half its value$/);
   const head = view.slot("slot-head");
-  assert.deepEqual([head.shown, head.hint, head.wear, head.options.length], [null, "◀ Nothing ▶ · nothing on", ["head", null], 21]);   // nothing, then twenty hats
+  assert.deepEqual([head.shown, head.hint, head.wear, head.options.length], [null, "◀ Nothing ▶ · nothing on", ["head", null], 22]);   // nothing, then twenty hats and the Lumi-Soft goggles
   head.local();
   assert.deepEqual(view.went, [{ open: "head" }]);
 });
@@ -117,7 +137,7 @@ test("a place's full list offers every accessory, as before", () => {
   const hats = closet.slots.find(slot => slot.id === "head").items.map(item => item.id);
   assert.deepEqual(head.wear.map(r => r.key), ["back"].concat(hats));
   assert.deepEqual(hats.slice(0, 10), ["acc-bow", "acc-star-clip", "acc-flower-crown", "acc-witch-hat", "acc-crown", "acc-sprout", "acc-party-hat", "acc-ear-cosies", "acc-toadstool-cap", "acc-planet-topper"]);
-  assert.equal(hats.length, 20);
+  assert.equal(hats.length, 21);
   assert.match(head.slot("acc-bow").hint, /wearing it · Enter takes it off/);
   assert.match(head.slot("acc-crown").note, /capsule/);
   assert.deepEqual(head.slot("acc-star-clip").send, { action: "wear", item: "acc-star-clip" });

@@ -125,13 +125,13 @@
     return machine;
   }
   function cushion(seat, i) { // One seat at the table: that player's own Lumi (or a plain one on credits), in the mood of the round, and their chips.
-    const look = { glow: T.glowOf(seat, i), outfit: seat.look ? seat.look.outfit : {} };
+    const look = { glow: T.glowOf(seat, i), outfit: seat.look ? seat.look.outfit : {}, colour: seat.look ? seat.look.colour : null };   // her RGB colour, if she has one
     const chipsFor = state.phase === "results" ? seat.payout : stake(seat);            // what's on the felt: the bet, then what came back
     const el = node("div", undefined, "casino-seat");
     el.innerHTML = T.lumi(look, { mood: T.seatMood(state, seat, game) }) + '<span class="casino-seat-chips">' + T.chips(chipsFor) + "</span>"; // authored SVG only
     return el;
   }
-  function seatGlow(box, seat, i) { box.style.setProperty("--seat-glow", T.PALETTES[T.glowOf(seat, i)].glow); } // the cushion's trim matches her glow
+  function seatGlow(box, seat, i) { box.style.setProperty("--seat-glow", T.paletteOf(seat.look && seat.look.colour ? seat.look : { glow: T.glowOf(seat, i) }).glow); } // the cushion's trim matches her colour
   function dealer() { // Dealer Lumi: redraw her only when her pose changes; her line changes with the round.
     const mood = T.dealerMood(state);
     if (mood !== dealerMood) { $("casino-dealer-lumi").innerHTML = T.dealer(mood); dealerMood = mood; }

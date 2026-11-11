@@ -19,6 +19,7 @@ export async function checkGameScaling(page, desktop, base) { // Use one paired 
       return { font: parseFloat(getComputedStyle(root).fontSize), width: main.getBoundingClientRect().width,
         boardWidth: box.width, boardHeight: box.height, buttonHeight: buttonBox.height,
         buttonFont: parseFloat(getComputedStyle(button).fontSize), overflow: root.scrollWidth > innerWidth + 1,
+        tall: slug === "lumi-pet" || slug === "prism-drop" ? false : root.scrollHeight > innerHeight + 1, // a seated table never scrolls (2026-11-11)
         toolbar: !!document.querySelector(".tv-strip"), padding: getComputedStyle(document.body).padding,
         canvas: slug === "prism-drop" ? { pixels: board.width, css: box.width, dpr: devicePixelRatio } : null };
     });
@@ -37,11 +38,13 @@ export async function checkGameScaling(page, desktop, base) { // Use one paired 
     const normal = await measure(frame);
     assert.equal(normal.font, 16, slug + " keeps 1080p sizing");
     assert.equal(normal.toolbar, false); assert.equal(normal.padding, "0px"); assert.equal(normal.overflow, false);
+    assert.equal(normal.tall, false, slug + " fits a 1080p TV without scrolling");
     if (slug === "slots" || slug === "lumi-pet") await page.screenshot({ path: `runs/casino-browser/${slug}-1080p.png`, fullPage: true });
     await page.setViewport({ width: 3840, height: 2160 });
     await frame.waitForFunction(() => parseFloat(getComputedStyle(document.documentElement).fontSize) === 32);
     const large = await measure(frame);
     assert.equal(large.overflow, false, slug + " fits 4K horizontally");
+    assert.equal(large.tall, false, slug + " fits a 4K TV without scrolling");
     for (const key of ["width", "boardWidth", "boardHeight", "buttonHeight", "buttonFont"]) {
       const ratio = large[key] / normal[key];
       assert.ok(ratio >= 1.85 && ratio <= 2.15, `${slug} ${key} must grow with 4K UI scale: ${ratio}`);

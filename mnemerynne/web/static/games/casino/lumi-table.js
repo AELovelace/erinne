@@ -36,8 +36,20 @@
     return Object.prototype.hasOwnProperty.call(PALETTES, own) ? own : SEAT_GLOWS[Math.abs(index || 0) % SEAT_GLOWS.length];
   }
 
-  function paletteStyle(glow) { // The three colours as CSS variables on her <svg>, read by game.css's .lt-* rules.
-    const p = PALETTES[glow] || PALETTES.rose;
+  function mix(hex, toward, amount) { // A #rrggbb colour moved `amount` (0-1) of the way toward another, as #rrggbb.
+    const a = parseInt(hex.slice(1), 16), b = parseInt(toward.slice(1), 16);
+    return "#" + [16, 8, 0].map(function (sh) { const x = (a >> sh) & 255, y = (b >> sh) & 255; return Math.round(x + (y - x) * amount).toString(16).padStart(2, "0"); }).join("");
+  }
+  function custom(look) { // Her own RGB colour, if she has one (lumipet.look "colour"): only a well-formed #rrggbb counts.
+    return look && typeof look.colour === "string" && /^#[0-9a-fA-F]{6}$/.test(look.colour) ? look.colour.toLowerCase() : null;
+  }
+  function paletteOf(look) { // Her three colours: from her RGB colour the way Lumi Pet derives them (body 78% toward white, shadow 45% darker), else her glow's.
+    const own = custom(look);
+    if (own) return { glow: own, body: mix(own, "#ffffff", 0.78), shadow: mix(own, "#000000", 0.45) };
+    return PALETTES[look && Object.prototype.hasOwnProperty.call(PALETTES, look.glow) ? look.glow : "rose"];
+  }
+  function paletteStyle(look) { // The three colours as CSS variables on her <svg>, read by game.css's .lt-* rules.
+    const p = paletteOf(look);
     return "--pet-glow:" + p.glow + ";--pet-body:" + p.body + ";--pet-shadow:" + p.shadow;
   }
 
@@ -60,11 +72,11 @@
   /* One Lumi, as SVG markup. look: {glow, outfit} (outfit may be missing). opts.mood: "idle", "ready", "happy",
      "aww", "cheer" or "deal" (game.css shows the matching eyes and extras); opts.dealer adds the uniform. */
   function lumi(look, opts) {
-    const o = opts || {}, glow = look && Object.prototype.hasOwnProperty.call(PALETTES, look.glow) ? look.glow : "rose";
+    const o = opts || {}, glow = look && Object.prototype.hasOwnProperty.call(PALETTES, look.glow) ? look.glow : "rose";   // her element; an RGB colour paints over it
     const outfit = look && look.outfit && typeof look.outfit === "object" ? look.outfit : {};
     const wear = closet(), back = wear ? wear.render(outfit, "back") : "", front = wear ? wear.render(outfit, "front") : ""; // unknown ids draw nothing
     const mood = ["idle", "ready", "happy", "aww", "cheer", "deal"].indexOf(o.mood) >= 0 ? o.mood : "idle";
-    return '<svg class="lt-lumi' + (o.dealer ? " lt-dealer" : "") + '" viewBox="0 0 320 300" data-mood="' + mood + '" style="' + paletteStyle(glow) + '" aria-hidden="true" focusable="false">' +
+    return '<svg class="lt-lumi' + (o.dealer ? " lt-dealer" : "") + '" viewBox="0 0 320 300" data-mood="' + mood + '" style="' + paletteStyle(look && custom(look) ? look : { glow: glow }) + '" aria-hidden="true" focusable="false">' +
       '<g class="lt-wings"><path d="M113 176 C8 187 25 74 79 108 C104 122 113 153 113 176Z"/><path d="M207 176 C312 187 295 74 241 108 C216 122 207 153 207 176Z"/>' +
       '<path d="M109 182 C36 174 48 238 93 215Z M211 182 C284 174 272 238 227 215Z"/></g>' +
       "<g>" + back + "</g>" +
@@ -170,6 +182,6 @@
     return state.phase === "playing" ? "deal" : state.phase === "results" ? "cheer" : "ready";
   }
 
-  return { PALETTES: PALETTES, SEAT_GLOWS: SEAT_GLOWS, glowOf: glowOf, lumi: lumi, dealer: dealer, chipCounts: chipCounts,
+  return { PALETTES: PALETTES, SEAT_GLOWS: SEAT_GLOWS, glowOf: glowOf, paletteOf: paletteOf, lumi: lumi, dealer: dealer, chipCounts: chipCounts,
     chips: chips, pony: pony, say: say, seatMood: seatMood, dealerMood: dealerMood };
 });

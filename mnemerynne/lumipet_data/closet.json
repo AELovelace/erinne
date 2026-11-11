@@ -23,7 +23,8 @@
       {"id": "acc-birthday-cake-hat", "name": "Birthday cake hat", "rarity": "uncommon", "price": 0},
       {"id": "acc-unicorn-horn", "name": "Unicorn horn headband", "rarity": "rare", "price": 0},
       {"id": "acc-teapot-hat", "name": "Teapot hat", "rarity": "rare", "price": 0},
-      {"id": "acc-moonjelly-bonnet", "name": "Moonjelly bonnet", "rarity": "epic", "price": 0}]},
+      {"id": "acc-moonjelly-bonnet", "name": "Moonjelly bonnet", "rarity": "epic", "price": 0},
+      {"id": "acc-soft-goggles", "name": "Lumi-Soft goggles", "price": 0, "prize": "lumi-soft", "how": "Clear Lumi-Soft's Story mode"}]},
     {"id": "neck", "name": "Neck", "items": [
       {"id": "acc-bell-collar", "name": "Bell collar", "rarity": "common", "price": 60},
       {"id": "acc-bowtie", "name": "Bow tie", "rarity": "common", "price": 60},

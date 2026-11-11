@@ -245,10 +245,10 @@ def test_a_new_house_is_bare_she_has_just_moved_in(conn, alice):
     assert house["pet"]["house"] == {"curtains": "curtain-none", "view": "view-city", "trophy": "trophy-none"}   # nothing, the outside, an empty bracket
     assert house["pet"]["decor"] == [] and house["boxes"] == {"left": 14, "total": 14, "next": "Mattress on the floor", "ready": True}
     spots = house["house"]["spots"]
-    sold = lambda spot: [item for item in spot["items"] if "rarity" not in item and "found" not in item and not item.get("worn")]   # noqa: E731
+    sold = lambda spot: [item for item in spot["items"] if "rarity" not in item and "found" not in item and not item.get("worn") and "prize" not in item]   # noqa: E731
     assert len(spots) == 16 and all(len(sold(spot)) == 5 for spot in spots[:15])                  # 75 pieces to buy, as before
     assert sum(item.get("worn", False) for spot in spots for item in spot["items"]) == 14            # one worn piece in each box
-    assert spots[15]["id"] == "trophy" and len(spots[15]["items"]) == 25
+    assert spots[15]["id"] == "trophy" and len(spots[15]["items"]) == 26                           # 24 found in the dungeon, an empty bracket and the Golden Star Scope
     tier_one = {spot["id"]: next(i for i in spot["items"] if not i.get("worn")) for spot in spots if spot["items"][0].get("worn")}
     assert len(tier_one) == 13 and all(item["price"] >= 40 for item in tier_one.values())          # the old free starters are bought now
 
@@ -391,6 +391,34 @@ def test_the_shipped_house_is_valid_and_bad_ones_are_refused(tmp_path):
     broken(lambda d: d["spots"][0]["items"][0].update(rarity="common"))         # a house's free first object can't be a prize
     broken(lambda d: d["spots"][0]["items"][1].update(rarity="common"))         # this one is sold, and a prize can't be
     broken(lambda d: d["spots"][0]["items"][-1].update(rarity="mythic"))
+    soft = lambda d: next(item for item in d["spots"][0]["items"] if "prize" in item)                # noqa: E731  the Lumi-Soft wallpaper
+    broken(lambda d: soft(d).update(price=50))                                  # a game prize can't also be sold
+    broken(lambda d: soft(d).pop("how"))                                        # it has to say how to win it
+    broken(lambda d: soft(d).update(how="  "))
+    broken(lambda d: soft(d).update(prize="lumi-golf"))                         # only Lumi-Soft gives prizes
+    broken(lambda d: soft(d).update(rarity="common"))                           # and no capsule can roll it
+    broken(lambda d: soft(d).update(found="moonlit-shrine"))
+    broken(lambda d: d["spots"][0]["items"][0].update(prize="lumi-soft", how="Win"))   # a spot's free first object can't be a prize
+
+
+def test_lumi_soft_decor_is_refused_until_the_game_grants_it_then_swaps_freely(conn, alice):
+    piece = lumipet._DECOR["soft-rug"]
+    assert piece["prize"] == "lumi-soft" and piece["price"] == 0 and piece not in lumipet._PRIZES   # never in a capsule
+    with pytest.raises(lumipet.PetError) as refused:
+        _act(conn, alice, "decorate", T0, item="soft-rug")
+    assert str(refused.value) == "That's a Lumi-Soft prize: Finish the Lumi-Soft Training Range."
+    assert _state(conn, alice, T0)["coins"] == 1000                             # nothing was charged
+    _state(conn, alice, T0)                                                     # her save exists (the refusal rolled back)
+    _set(conn, alice, decor=["soft-rug"])                                       # what lumisoft.py does when it is won
+    placed = _act(conn, alice, "decorate", T0, item="soft-rug")
+    assert placed["pet"]["house"]["rug"] == "soft-rug" and placed["said"] is None and placed["coins"] == 1000
+
+
+def test_every_spot_has_one_lumi_soft_prize_and_none_is_ever_sold_or_rolled():
+    for spot in lumipet.HOUSE["spots"]:
+        prizes = [item for item in spot["items"] if "prize" in item]
+        assert [item["id"] for item in prizes] == ["soft-" + spot["id"]] and prizes[0]["how"], spot["id"]
+    assert all("prize" not in prize for prize in lumipet._PRIZES)
 
 
 # --------------------------------------------------------------------------- the closet and the Star Capsule
@@ -584,6 +612,23 @@ def test_the_shipped_closet_is_valid_and_bad_ones_are_refused(tmp_path):
     broken(lambda d: d["slots"][0]["items"][0].update(rarity="mythic"))
     broken(lambda d: d["slots"][1]["items"].append(dict(d["slots"][0]["items"][0])))
     broken(lambda d: d["slots"][0].update(items=[]))
+    goggles = lambda d: next(item for item in d["slots"][0]["items"] if "prize" in item)              # noqa: E731
+    broken(lambda d: goggles(d).update(price=60))                               # a game prize can't also be sold
+    broken(lambda d: goggles(d).pop("how"))
+    broken(lambda d: goggles(d).update(rarity="rare"))                          # or rolled from a capsule
+    broken(lambda d: goggles(d).pop("prize"))                                   # without a prize it needs a rarity
+
+
+def test_the_lumi_soft_goggles_are_refused_until_the_game_grants_them_then_worn_freely(conn, alice):
+    assert lumipet._WEAR["acc-soft-goggles"] not in lumipet._PRIZES             # no capsule can give them
+    with pytest.raises(lumipet.PetError) as refused:
+        _act(conn, alice, "wear", T0, item="acc-soft-goggles")
+    assert str(refused.value) == "That's a Lumi-Soft prize: Clear Lumi-Soft's Story mode."
+    _state(conn, alice, T0)                                                     # her save exists (the refusal rolled back)
+    _set(conn, alice, closet=["acc-soft-goggles"])                              # what lumisoft.py does when they are won
+    worn = _act(conn, alice, "wear", T0, item="acc-soft-goggles")
+    assert worn["pet"]["outfit"] == {"head": "acc-soft-goggles"} and worn["said"] is None and worn["coins"] == 1000
+    assert _act(conn, alice, "wear", T0, item="acc-soft-goggles")["pet"]["outfit"] == {}    # and off again
 
 
 # --------------------------------------------------------------------------- API

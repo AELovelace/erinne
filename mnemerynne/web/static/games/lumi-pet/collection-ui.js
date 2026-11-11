@@ -23,9 +23,9 @@
     ((snap.house || {}).spots || []).forEach(function (spot) {
       spot.items.forEach(function (piece) {
         if (!piece.price && !piece.found && !piece.rarity && spot.items.indexOf(piece) === 0 && /-none$/.test(piece.id)) return; // "Empty bracket": a way to show nothing, not a thing to collect.
-        const owned = (!piece.price && !piece.found && !piece.rarity && !piece.worn) || pet.decor.indexOf(piece.id) >= 0; // A worn piece is hers once it is out of its box.
+        const owned = (!piece.price && !piece.found && !piece.rarity && !piece.worn && !piece.prize) || pet.decor.indexOf(piece.id) >= 0; // A worn piece is hers once it is out of its box; a prize once it is won.
         const item = { id: piece.id, name: piece.name, owned: owned, art: { kind: "house", id: piece.id, spot: spot.id },
-          from: spot.name + " · " + (piece.found ? "found in " + place(piece.found) : piece.rarity ? grand(piece.rarity) + " · from a capsule" : piece.worn ? "Lumi's own, from moving box " + piece.box : piece.price ? "the Home tab, " + piece.price + " coins" : "came with the house") };
+          from: spot.name + " · " + (piece.found ? "found in " + place(piece.found) : piece.prize ? "Lumi-Soft prize · " + piece.how : piece.rarity ? grand(piece.rarity) + " · from a capsule" : piece.worn ? "Lumi's own, from moving box " + piece.box : piece.price ? "the Home tab, " + piece.price + " coins" : "came with the house") };
         (piece.found ? finds : home).push(item);
       });
     });
@@ -33,7 +33,7 @@
     ((snap.closet || {}).slots || []).forEach(function (slot) {
       slot.items.forEach(function (piece) {
         clothes.push({ id: piece.id, name: piece.name, owned: pet.closet.indexOf(piece.id) >= 0, art: { kind: "closet", id: piece.id },
-          from: slot.name + " · " + grand(piece.rarity) + " · " + (piece.price ? "the Closet tab, " + piece.price + " coins" : "from a capsule") });
+          from: slot.name + " · " + (piece.prize ? "Lumi-Soft prize · " + piece.how : grand(piece.rarity) + " · " + (piece.price ? "the Closet tab, " + piece.price + " coins" : "from a capsule")) }); // A game prize has no rarity.
       });
     });
     const toys = ((snap.catalog || {}).toys || []).map(function (toy) {
@@ -58,9 +58,9 @@
       });
     });
     return [
-      { id: "home", icon: "⌂", name: "For the house", about: "Bought, or won from capsules", items: home },
+      { id: "home", icon: "⌂", name: "For the house", about: "Bought, or won from capsules and Lumi-Soft", items: home },
       { id: "finds", icon: "🏆", name: "Dungeon finds", about: "Trophies and rare pieces from each place", items: finds },
-      { id: "closet", icon: "🎀", name: "Things to wear", about: "Bought, or won from capsules", items: clothes },
+      { id: "closet", icon: "🎀", name: "Things to wear", about: "Bought, or won from capsules and Lumi-Soft", items: clothes },
       { id: "toys", icon: "🧸", name: "Toys", about: "From the Shop and from capsules", items: toys },
       { id: "mods", icon: "⚙", name: "Mods", about: "Bought, or found in dungeon vaults", items: mods },
       { id: "flowers", icon: "❀", name: "Flowers", about: "The garden's ladder, for the garden you are in", items: flowers },

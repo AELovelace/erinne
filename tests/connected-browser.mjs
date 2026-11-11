@@ -10,6 +10,7 @@ import { checkSharedTV } from "./casino-tv-browser.mjs";
 import { checkLumiPartyBrowser, checkLumiPartyCouch, checkLumiPartyFight, checkLumiPartyOnline, checkLumiPartyPuzzle } from "./lumi-party-browser.mjs";
 import { checkArcadeLumi } from "./arcade-lumi-browser.mjs";
 import { checkGameScaling } from "./game-scaling-browser.mjs";
+import { checkLumiSoft } from "./lumi-soft-browser.mjs";
 
 const modulePath = process.env.PUPPETEER_MODULE;
 const { default: puppeteer } = await import(modulePath ? pathToFileURL(modulePath).href : "puppeteer");
@@ -44,7 +45,9 @@ try {
     await page.evaluateOnNewDocument(() => { Object.defineProperty(document, "hidden", { get: () => false }); }); // Both test tabs act like visible TV screens.
   }
   await mkdir("runs/casino-browser", { recursive: true });
-  if (process.env.ARCADE_ONLY === "1") { // Focused iteration on Lumi in the arcade games.
+  if (process.env.LUMI_SOFT_ONLY === "1") { // Focused iteration on Lumi-Soft.
+    await checkLumiSoft(bob, base);
+  } else if (process.env.ARCADE_ONLY === "1") { // Focused iteration on Lumi in the arcade games.
     await checkArcadeLumi(browser, alice, base);
   } else if (process.env.LUMI_PARTY_ONLY === "1") { // Focused iteration on Lumi Dungeons parties and Who's playing?
     await checkLumiPartyOnline(alice, bob, base);
@@ -69,6 +72,7 @@ try {
   await checkLumiPetPhone(browser, alice, base);
   await checkLumiApps(browser, alice, base);
   await checkLumiPetCapsules(bob, base);
+  await checkLumiSoft(bob, base);                              // after the capsules: they count bob's purse to the coin
   await checkLumiPartyOnline(alice, bob, base);
   await checkLumiPartyPuzzle(browser, alice, base);
   await checkLumiPartyFight(browser, alice, base);
@@ -212,7 +216,7 @@ try {
   // A shelf per kind of game: Lumi's three apps, the arcade games a remote can play, the four tables. A computer also shows Mouse & keyboard.
   await alice.waitForFunction(() => document.querySelectorAll(".mc-shelf .mc-grid").length >= 3);
   assert.deepEqual(await alice.$$eval(".mc-shelf", shelves => shelves.map(shelf => [shelf.querySelector("h2, h3, .mc-shelf-title")?.textContent || "", shelf.querySelector(".mc-grid").children.length])),
-    [["Lumi", 3], ["Arcade", 4], ["Table games", 4], ["Mouse & keyboard", 1]]);
+    [["Lumi", 3], ["Arcade", 4], ["Table games", 4], ["Mouse & keyboard", 2]]);
   await checkLumiPetFrame(alice);
   await alice.evaluate(() => { // The top bar keeps controls; the remote consumes the iframe's status message.
     window.casinoTestReport = "";

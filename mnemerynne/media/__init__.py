@@ -59,7 +59,8 @@ DEFAULT_RADIO_DIRECTORY = "https://sadgirlsclub.wtf/rr/healthz"
 DEFAULTS = {"folder": LIBRARY_NAME, "hwaccel": "auto", "max_transcodes": 2, "online_metadata": False,
             "radio_directory_url": DEFAULT_RADIO_DIRECTORY, "media_group": "", "screens_group": "",
             "signage_folder": "Signage", "signage_effects": {},
-            "runner_daily_cap": 0}   # the most StickBob Runner pays one person a day (runner.py); 0: no limit
+            "runner_daily_cap": 0,   # the most StickBob Runner pays one person a day (runner.py); 0: no limit
+            "lumisoft_daily_cap": 300}   # the most Lumi-Soft pays one person a day (lumisoft.py); 0: no limit
 GROUP_SETTINGS = ("media_group", "screens_group")
 _SECRETS = ("tmdb_key_enc", "soundcloud_id_enc", "soundcloud_secret_enc")     # kept encrypted, never in DEFAULTS or the API
 
@@ -141,9 +142,9 @@ def save_settings(conn: sqlite3.Connection, settings: Settings, changes: dict, k
             raise MediaError(f"Transcoding uses one of {', '.join(HWACCELS)}.")
         if name == "max_transcodes" and not 0 <= int(value) <= 8:
             raise MediaError("At most 8 transcodes at once (0: never transcode).")
-        if name == "runner_daily_cap":
+        if name in ("runner_daily_cap", "lumisoft_daily_cap"):
             if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 1_000_000:
-                raise MediaError("StickBob Runner's daily coins are a whole number from 0 (no limit) to 1,000,000.")
+                raise MediaError(("StickBob Runner" if name == "runner_daily_cap" else "Lumi-Soft") + "'s daily coins are a whole number from 0 (no limit) to 1,000,000.")
         if name == "radio_directory_url" and value and not str(value).startswith(("http://", "https://")):
             raise MediaError("The station list is an http:// or https:// address.")
         if name in ("folder", "signage_folder"):

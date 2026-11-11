@@ -15,6 +15,7 @@
   Object.keys(GLOWS).forEach(function (k) { LOOKS[k] = { glow: GLOWS[k], outfit: {} }; });
   const DIRS = { right: 0, down: 1, left: 2, up: 3 };
   const TALL = 34;                                           // a dancer's height, a little over a square
+  const GLIDE = 0.35;                                        // share of a move spent sliding into the new square
 
   function frame(ctx, x, y) {                               // the dance floor: soft tiles in a glowing frame
     ctx.save();
@@ -58,6 +59,16 @@
     }
   }
 
+  function glide(f) {                                       // eased slide: quick into the new square, then she sits on it,
+    const u = Math.min(1, f / GLIDE);                        // so what you see is where the game has her for most of the move
+    return 1 - (1 - u) * (1 - u);
+  }
+
+  function spot(ctx, x, y, c) {                             // a soft pink tile under the leader's real square, for wall dodges
+    ctx.save(); ctx.fillStyle = "rgba(255,142,203,.30)";
+    roundRect(ctx, x + c[0] * CELL + 2, y + c[1] * CELL + 2, CELL - 4, CELL - 4, 8); ctx.fill(); ctx.restore();
+  }
+
   function centres(body, prev, f) {                         // each dancer's centre, glided between her last square and this one
     return body.map(function (c, i) {                        // dancer i steps from where she was (prev[i]) into the square ahead
       const from = prev && prev[i] ? prev[i] : c;            // one who just joined has nowhere to glide from
@@ -73,7 +84,7 @@
     },
     step: function (g, keys, events) {
       if (!g.started || !g.state.alive) return;
-      if (++g.frames % S.FRAMES_PER_MOVE) return;            // one move every eight frames
+      if (++g.frames % S.FRAMES_PER_MOVE) return;            // one move every ten frames (rules.js)
       let dir = g.state.heading;
       while (g.queue.length) {                               // the next queued turn that isn't straight back
         const next = g.queue.shift();
@@ -112,7 +123,8 @@
     drawArena: function (ctx, g, x, y, t, look) {
       frame(ctx, x, y);
       waiting(ctx, x, y, g.state.food, t);
-      const f = g.started && g.state.alive ? (g.frames % S.FRAMES_PER_MOVE) / S.FRAMES_PER_MOVE : 1;
+      const f = g.started && g.state.alive ? glide((g.frames % S.FRAMES_PER_MOVE) / S.FRAMES_PER_MOVE) : 1;
+      if (g.state.alive) spot(ctx, x, y, g.state.body[0]);   // where the leader really is, under her feet
       line(ctx, x, y, centres(g.state.body, g.prev, f), g.state.kinds, g.state.alive, look || L.PLAIN, t);
     },
 
