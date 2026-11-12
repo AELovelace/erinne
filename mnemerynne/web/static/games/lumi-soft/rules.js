@@ -43,7 +43,8 @@
     return s;
   }
 
-  function stageOf(s) { return s.data.stages[s.segs[s.seg].stage]; }
+  function current(s) { return s.segs[Math.min(s.seg, s.segs.length - 1)]; }   // the segment being played; once the run is done, the last one (the page still draws it)
+  function stageOf(s) { return s.data.stages[current(s).stage]; }
   function training(s) { return !!stageOf(s).training; }
 
   function begin(s) { // Start the current segment: its first wave, or its boss.
@@ -54,7 +55,7 @@
     s.events.push({ kind: "segment", stage: stage.id, scene: seg.scene });
   }
 
-  function scene(s) { const seg = s.segs[s.seg]; return seg.scene < 0 ? null : s.data.stages[seg.stage].scenes[seg.scene]; }
+  function scene(s) { const seg = current(s); return seg.scene < 0 ? null : s.data.stages[seg.stage].scenes[seg.scene]; }
 
   function tri(age, period) { // A triangle wave, 0 → 1 → 0 over one period: smooth enough, and exact in both languages.
     const half = period / 2, p = age % period;

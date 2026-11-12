@@ -33,11 +33,24 @@ export async function checkLumiSoft(page, base) {
   const why = await page.evaluate(() => JSON.stringify(window.LumiSoftGame.run().log.shots));   // where the pops went, if they missed
   assert.ok(trained.pops === 3 && trained.score > 0, "the cans popped: " + JSON.stringify(trained) + " " + why);
   await page.keyboard.press("r");                                             // a reload goes in the log
-  await page.keyboard.press("p");
-  await page.waitForFunction(() => !document.getElementById("ls-pause").hidden);
-  await page.click("#ls-quit");
-  await page.waitForFunction(() => window.LumiSoftGame.mode() === "results" && /Practice/.test(document.getElementById("ls-results-earned").textContent));
-  assert.equal(await page.$eval("#ls-results-score", e => Number(e.textContent.replace(/\D/g, ""))), trained.score, "the server's replay agrees with the page");
+  await wait(1300);
+  // Then clear the rest of the range, popping each creature in turn: the last pop ends the run (this once froze the game).
+  for (let tries = 0; tries < 160 && await page.evaluate(() => window.LumiSoftGame.mode()) === "play"; tries++) {
+    const at = await page.evaluate(() => {
+      const g = window.LumiSoftGame, s = g.run().s, R = window.LumiSoftRules;
+      const t = s.targets.map(t => ({ t, p: R.pose(t.def, t.age) })).find(o => o.p.ok && o.t.def.kind === "creature" && o.p.y > 300);
+      return t ? g.toScreen(t.p.x, t.p.top + t.p.h * 0.55) : null;
+    });
+    if (!at) { await wait(250); continue; }
+    await page.mouse.move(at.x, at.y); await page.mouse.down({ button: "right" }); await wait(60);
+    await page.mouse.down({ button: "left" }); await page.mouse.up({ button: "left" }); await page.mouse.up({ button: "right" }); await wait(540);
+  }
+  await page.waitForFunction(() => window.LumiSoftGame.mode() === "results" && /Practice/.test(document.getElementById("ls-results-earned").textContent), { timeout: 15000 });
+  assert.match(await page.$eval("#ls-results-title", e => e.textContent), /clear/, "the Training Range was cleared");
+  const cleared = await page.evaluate(() => window.LumiSoftGame.run().s.score);
+  assert.equal(await page.$eval("#ls-results-score", e => Number(e.textContent.replace(/\D/g, ""))), cleared, "the server's replay agrees with the page");
+  assert.match(await page.$eval("#ls-results-won", e => e.textContent), /Target-lane rug/, "clearing training wins the rug for Lumi's house");
+  await page.screenshot({ path: "runs/casino-browser/lumi-soft-training-clear.png" });
 
   // A Stardust Garden run costs its entry; pop a few things, end it, and see it pay.
   await page.click("#ls-again");

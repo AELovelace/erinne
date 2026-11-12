@@ -73,6 +73,15 @@ test("a friend costs points, time and the combo; misses break the combo too", ()
   assert.equal(out.what, "friend"); assert.equal(s.score, 750); assert.equal(s.streak, 0); assert.equal(s.clock, clock - 300);
 });
 
+test("a finished run can still be asked which stage and scene it's on (the page draws one more frame)", () => {
+  const r = RUNS.find(x => x.mode === "training"), s = R.replay(DATA, R.plan(DATA, "training"), r.log);
+  assert.equal(s.done, true);
+  assert.equal(R.stageOf(s).id, "training");                                          // the last segment, not a crash
+  assert.ok(R.scene(s)); assert.equal(R.impact(s, 10, 10).x, 10); assert.equal(R.canFire(s), false);
+  const story = RUNS.find(x => x.mode === "story"), t = R.replay(DATA, R.plan(DATA, "story"), story.log);
+  assert.equal(t.done, true); assert.equal(R.stageOf(t).id, "fair"); assert.equal(R.scene(t), null);   // ended on the Comet Drake
+});
+
 test("ranks", () => {
   assert.equal(R.rank({ hits: 9, shots: 10, lost: 0, friends: 0 }), "S");
   assert.equal(R.rank({ hits: 9, shots: 10, lost: 1, friends: 0 }), "A");

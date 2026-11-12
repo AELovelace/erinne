@@ -147,10 +147,12 @@
   function frame(now) {
     requestAnimationFrame(frame);
     const dt = Math.min(250, now - (last || now)); last = now; frameNo += 1;
-    if (mode === "play") { acc += dt; while (acc >= STEP && mode === "play") { tick(); acc -= STEP; } } else acc = 0;
+    if (mode === "play") {
+      try { acc += dt; while (acc >= STEP && mode === "play") { tick(); acc -= STEP; } }
+      catch (e) { console.error(e); acc = 0; if (run) finishRun(); }   // never freeze: a broken frame ends the run, and the server still counts it
+    } else acc = 0;
     if (said.at && now > said.at) { $("ls-spotter").hidden = true; said.at = 0; }
-    draw(now);
-    hud();
+    try { draw(now); hud(); } catch (e) { console.error(e); }               // a drawing slip never stops the loop
   }
 
   /* ---------------------------------------------------------------- drawing */

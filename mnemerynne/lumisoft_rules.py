@@ -55,8 +55,13 @@ def create(data: dict, segments: list[dict]) -> dict:
     return s
 
 
+def _current(s: dict) -> dict:
+    """The segment being played; once the run is done, the last one (as rules.js current())."""
+    return s["segs"][min(s["seg"], len(s["segs"]) - 1)]
+
+
 def _stage_of(s: dict) -> dict:
-    return s["data"]["stages"][s["segs"][s["seg"]]["stage"]]
+    return s["data"]["stages"][_current(s)["stage"]]
 
 
 def _training(s: dict) -> bool:
@@ -77,7 +82,7 @@ def _begin(s: dict) -> None:
 
 
 def _scene(s: dict) -> dict | None:
-    seg = s["segs"][s["seg"]]
+    seg = _current(s)
     return None if seg["scene"] < 0 else s["data"]["stages"][seg["stage"]]["scenes"][seg["scene"]]
 
 
