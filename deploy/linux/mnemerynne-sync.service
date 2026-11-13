@@ -1,0 +1,30 @@
+[Unit]
+Description=Mnemerynne backup API (the desktop backup app's /api/sync/, port 38201)
+# The web app applies database updates at start: start after it.
+After=network.target mnemerynne-web.service
+
+[Service]
+Type=simple
+User=mnemerynne
+Group=mnemerynne
+WorkingDirectory=/opt/mnemerynne
+EnvironmentFile=/etc/mnemerynne/mnemerynne.env
+Environment=PYTHONUNBUFFERED=1
+# Three processes (it keeps nothing in memory): the backup app's manifests and uploads get cores of their own
+# instead of queuing with Files in the web app's one. The web server sends /api/sync/ here (deploy/linux/README.md).
+ExecStart=/opt/mnemerynne/.venv/bin/mnemerynne serve --role sync --port 38201 --workers 3
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+TimeoutStopSec=30
+StateDirectory=mnemerynne
+StateDirectoryMode=0750
+NoNewPrivileges=true
+ProtectSystem=strict
+# The SMB share and its trash (MNEMERYNNE_SHARE_ROOT): the same as mnemerynne-web.service (and its drop-ins).
+ReadWritePaths=-/srv/storage
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

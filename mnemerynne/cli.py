@@ -734,8 +734,19 @@ def cmd_serve(args):
     # IPs behind nginx. timeout_graceful_shutdown: streamed answers and MCP
     # clients hold connections open, and uvicorn would otherwise wait for them
     # until systemd kills it (a 90 s stall on every restart and update).
-    uvicorn.run(create_app(settings), host=settings.host, port=settings.port, proxy_headers=True,
-                timeout_graceful_shutdown=SHUTDOWN_GRACE_SECONDS)
+    role = getattr(args, "role", None)
+    port = getattr(args, "port", None) or settings.port
+    if not role:
+        uvicorn.run(create_app(settings), host=settings.host, port=port, proxy_headers=True,
+                    timeout_graceful_shutdown=SHUTDOWN_GRACE_SECONDS)
+        return
+    # A role's process (web/app.py create_role_app): the backup API or the games, on a port of its own. Several
+    # worker processes need the app as an import path (each builds its own); the games keep live state, so one.
+    workers = max(1, getattr(args, "workers", 1) or 1)
+    if role == "games" and workers > 1:
+        raise SystemExit("The games keep their live parties and tables in one process: --workers 1 for --role games.")
+    uvicorn.run(f"mnemerynne.web.app:{role}_app", factory=True, workers=workers, host=settings.host, port=port,
+                proxy_headers=True, timeout_graceful_shutdown=SHUTDOWN_GRACE_SECONDS)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -743,7 +754,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init-db", help="Create or migrate the database").set_defaults(func=cmd_init_db)
-    sub.add_parser("serve", help="Run the web app").set_defaults(func=cmd_serve)
+    p = sub.add_parser("serve", help="Run the web app (or, with --role, one busy part of it on a port of its own)")
+    p.add_argument("--role", choices=("sync", "games"),
+                   help="Serve only the backup app's API (sync) or the games' API (games); see deploy/linux/README.md")
+    p.add_argument("--port", type=int, help="Port to listen on (default MNEMERYNNE_PORT)")
+    p.add_argument("--workers", type=int, default=1, help="Processes for --role sync (the games need exactly one)")
+    p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("worker", help="Run the ingestion worker")
     p.add_argument("--once", action="store_true", help="Exit when no jobs are due")

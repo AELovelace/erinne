@@ -175,6 +175,14 @@ main() {
     systemctl restart mnemerynne-web
     wait_healthy || fail "mnemerynne-web didn't come back healthy"
     systemctl restart mnemerynne-worker
+    # The backup API's and the games' own processes (README "Busy parts in processes of their own"), once set up.
+    # After the web app: it has applied any database update by now.
+    for unit in mnemerynne-sync mnemerynne-games; do
+        if systemctl is-enabled --quiet "$unit" 2>/dev/null; then
+            step "Restarting $unit"
+            systemctl restart "$unit"
+        fi
+    done
     trap - ERR
 
     write_status ok "$current" "$target" ""

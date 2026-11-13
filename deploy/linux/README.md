@@ -1057,6 +1057,40 @@ again (section 3), `sudo systemctl daemon-reload` and `sudo systemctl restart mn
 Live streams (Rooms, party games, TV screens, radio) hand their request's connection back as soon as
 they start (`release_db` in `mnemerynne/web/deps.py`), so open tabs no longer each pin a connection.
 
+### Busy parts in processes of their own
+
+The web app is one Python process, and Python runs one thread's Python code at a time, so it uses about
+one core however many the box has. Two busy parts can run in processes of their own, each on its own
+port, so they stop queuing with Files for that core:
+
+| Unit | Serves | Port | Processes |
+|---|---|---|---|
+| `mnemerynne-sync` | the desktop backup app's API, `/api/sync/` | 38201 | 3 (it keeps nothing in memory) |
+| `mnemerynne-games` | the built-in games' API, `/api/media/games` | 38202 | 1 (live parties live in its memory) |
+
+They share the database, the settings and the sign-in cookies with the web app. The web app still serves
+both parts too, so nothing breaks before the web server sends them over, and taking a route back out
+puts that part back in the web app.
+
+```sh
+sudo cp /opt/mnemerynne/deploy/linux/mnemerynne-sync.service /opt/mnemerynne/deploy/linux/mnemerynne-games.service /etc/systemd/system/
+# The web app's drop-ins too (say, extra ReadWritePaths for where the share and data folder live):
+for u in sync games; do
+    sudo mkdir -p /etc/systemd/system/mnemerynne-$u.service.d
+    sudo cp /etc/systemd/system/mnemerynne-web.service.d/*.conf /etc/systemd/system/mnemerynne-$u.service.d/ 2>/dev/null || true
+done
+sudo systemctl daemon-reload
+sudo systemctl enable --now mnemerynne-sync mnemerynne-games
+curl -s http://127.0.0.1:38201/healthz    # {"status":"ok","role":"sync"}   (use MNEMERYNNE_HOST if it isn't 127.0.0.1)
+curl -s http://127.0.0.1:38202/healthz    # {"status":"ok","role":"games"}
+```
+
+Then send the two paths to them in the web server: the `Caddyfile-mnemerynne*` and
+`nginx-mnemerynne.conf` files here already do (`/api/sync/` to 38201, `/api/media/games` to 38202, on
+the backup host only `/api/sync/`; sign-in refreshes stay with the web app). A web server on another
+machine needs the two ports open on this box, as for 38200. `update.sh` restarts both after the web app
+once they're enabled. `--workers` in `mnemerynne-sync.service` sets how many backup processes run.
+
 ### How Files keeps up with the share's permissions
 
 Listing a share library needs every folder's permissions from the disk (a "walk"). Mnemerynne keeps

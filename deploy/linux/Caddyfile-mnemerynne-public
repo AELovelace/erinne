@@ -33,6 +33,15 @@ erynne.example.org {
     # they come. Caddy replaces any X-Forwarded-For a client sends, and the app
     # trusts it only from 127.0.0.1 (FORWARDED_ALLOW_IPS), so rate limits and
     # login throttling count real client addresses.
+    # Busy parts in processes of their own (README "Busy parts in processes of their own"): the backup app's API
+    # and the games' API. Path matchers, so Caddy tries them before the web app's catch-all below (and after the
+    # checks above). Leave these two out on a box that doesn't run mnemerynne-sync / mnemerynne-games.
+    reverse_proxy /api/sync/* 127.0.0.1:38201 {
+        flush_interval -1
+    }
+    reverse_proxy /api/media/games* 127.0.0.1:38202 {
+        flush_interval -1
+    }
     reverse_proxy 127.0.0.1:38200 {
         flush_interval -1
     }

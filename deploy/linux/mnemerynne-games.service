@@ -1,0 +1,30 @@
+[Unit]
+Description=Mnemerynne games API (the built-in games' /api/media/games, port 38202)
+# The web app applies database updates at start: start after it.
+After=network.target mnemerynne-web.service
+
+[Service]
+Type=simple
+User=mnemerynne
+Group=mnemerynne
+WorkingDirectory=/opt/mnemerynne
+EnvironmentFile=/etc/mnemerynne/mnemerynne.env
+Environment=PYTHONUNBUFFERED=1
+# One process of its own: the games' polls and live streams get a core instead of queuing with Files in the web
+# app's. One, not more: live parties and tables are kept in its memory. The web server sends /api/media/games here.
+ExecStart=/opt/mnemerynne/.venv/bin/mnemerynne serve --role games --port 38202
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+TimeoutStopSec=30
+StateDirectory=mnemerynne
+StateDirectoryMode=0750
+NoNewPrivileges=true
+ProtectSystem=strict
+# The SMB share and its trash (MNEMERYNNE_SHARE_ROOT): the same as mnemerynne-web.service (and its drop-ins).
+ReadWritePaths=-/srv/storage
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -103,6 +103,128 @@ class Services:
     bfgguf_transport: Any = None   # the HTTP transport under BFGguf's clients (tests); None = the network
 
 
+def _guard(app: FastAPI, settings: Settings, secret_key: str) -> None:
+    """What every Mnemerynne process puts in front of its routes (create_app and create_role_app): the sign-in
+    cookie, the cross-site check, the request limits and headers, the backup host's fence, the slow-request log,
+    and the answers for "sign in first" and "the database is busy". Kept in one place so a role's process can't
+    drift from the web app's."""
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=secret_key,
+        session_cookie="mnemerynne_session",
+        max_age=settings.session_max_age,
+        same_site="lax",
+        https_only=security.https_only(settings),
+    )
+
+    @app.middleware("http")
+    async def _csrf_guard(request: Request, call_next):
+        # The session cookie is SameSite=lax, which still lets other sites'
+        # top-level form POSTs through; refuse anything cross-site that changes data.
+        if request.method not in _SAFE_METHODS and _cross_site(request) and request.url.path not in _OAUTH_API:
+            return JSONResponse({"detail": "Cross-site request refused."}, status_code=status.HTTP_403_FORBIDDEN)
+        return await call_next(request)
+
+    # Added last, so they run first: refused requests get the headers too.
+    app.add_middleware(security.GamesShed)       # games can't queue without bound or take every worker thread
+    app.add_middleware(security.PublicRateLimit)
+    app.add_middleware(security.SecurityHeaders, settings=settings)
+    # The backup host (MNEMERYNNE_BACKUP_URL) answers only the backup app's API (sync.py).
+    app.add_middleware(sync_mod.BackupHost, host=sync_mod.backup_host(settings))
+    app.add_middleware(security.SlowRequestLog)  # outermost: times every request ("Slow request" in the journal)
+
+    @app.exception_handler(LoginRequired)
+    async def _redirect_to_login(request: Request, exc: LoginRequired):
+        # Back to this page after signing in: a link opened from Claude Desktop lands where it pointed.
+        if request.method == "GET":
+            request.session["after_login"] = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    @app.exception_handler(sqlite3.OperationalError)
+    async def _database_busy(request: Request, exc: sqlite3.OperationalError):
+        """A write that waited out busy_timeout for the lock: a short JSON 503 "try again", not a plain-text 500.
+
+        Pages read a JSON refusal's status. The plain-text 500 had none, and Lumi Pet's party feed took a failure
+        without a status as "the party is over": it reloaded at once, over and over, and every reload waited on the
+        same lock. A storm that fed itself, until the app ran out of memory. Any other database error is a bug,
+        and goes on to the usual 500 with its traceback."""
+        text = str(exc).lower()
+        if "locked" not in text and "busy" not in text:
+            raise exc                                  # not a lock: the normal error path (logged with its traceback)
+        log.warning("Database busy: %s %s (%s)", request.method, request.url.path, exc)   # one line, no traceback
+        return JSONResponse({"detail": "The server is busy for a moment. Try again shortly."},
+                            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, headers={"Retry-After": "2"})
+
+
+ROLES = {
+    # role: (what it serves, the routers, as include_router takes them)
+    "sync": "the desktop backup app's API (/api/sync/): keeps nothing in memory, so it may run as several processes",
+    "games": "the built-in games' API (/api/media/games): its live parties and tables live in this one process",
+}
+
+
+def create_role_app(role: str, settings: Settings | None = None, services: Services | None = None) -> FastAPI:
+    """A process of its own for one busy part of Mnemerynne (`mnemerynne serve --role sync|games`).
+
+    The web app is one Python process, and Python runs one thread's Python code at a time: on the box the backup
+    app's manifests and uploads and the games' polls queued with Files for that one core while the others idled.
+    A role's process serves only its part, behind the same guard as the web app (_guard), on a port of its own
+    that the web server sends that part's paths to (deploy/linux/README.md). The web app still serves them too,
+    so nothing breaks before the web server is told."""
+    if role not in ROLES:
+        raise ValueError(f"No role {role!r}; the roles are: {', '.join(ROLES)}")
+    settings = settings or get_settings()
+    secret_key = security.check_secret_key(settings) or secrets.token_urlsafe(48)   # the same key: the same cookies
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        conn = db.connect(settings.db_path)
+        try:
+            version = db.migrate(conn, settings.embed_dim)   # normally the web app has: then this changes nothing
+            nodes, node_key = [], None
+            if role == "games":                               # Lumi's live tales: the answer model, via the nodes
+                cfg = balancer_mod.load_config(conn)
+                nodes, node_key = cfg["nodes"], balancer_mod.api_key(settings, cfg)
+        finally:
+            conn.close()
+        log.info("%s process ready: %s (schema v%d).", role.capitalize(), ROLES[role], version)
+        background: set[asyncio.Task] = set()
+        balancer = None
+        if role == "games":
+            balancer = services.balancer if services and services.balancer is not None else balancer_mod.Balancer()
+            balancer.configure(nodes, node_key)
+            app.state.balancer = balancer
+            background.add(asyncio.create_task(balancer.run()))
+        try:
+            yield
+        finally:
+            for task in background:
+                task.cancel()
+            await asyncio.gather(*background, return_exceptions=True)
+            app.state.db_pool.close()
+            if balancer is not None:
+                await balancer.aclose()
+
+    app = FastAPI(title=f"{ASSISTANT_NAME} {role}", lifespan=lifespan, docs_url=None, redoc_url=None)
+    app.state.settings = settings
+    app.state.role = role
+    app.state.db_pool = db.Pool(settings.db_path)
+    app.state.directory = (services.directory if services and services.directory
+                           else directory.from_settings(settings))
+    share.configure(settings, app.state.directory, services.share_checker if services else None)   # no watcher here
+    _guard(app, settings, secret_key)
+    if role == "sync":
+        app.include_router(sync_pages.router)
+    else:
+        app.include_router(game_pages.router)
+
+    @app.get("/healthz", include_in_schema=False)
+    def healthz():
+        return {"status": "ok", "role": role}       # update.sh and monitors: this role's process answers
+
+    return app
+
+
 def create_app(settings: Settings | None = None, services: Services | None = None) -> FastAPI:
     settings = settings or get_settings()
     diagnostics.install_log_capture()   # the last few hundred log lines, for the diagnose tool
@@ -220,30 +342,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     sharepoint.configure(settings)
     app.state.throttle = LoginThrottle(settings.login_max_failures, settings.login_lockout_seconds,
                                        settings.login_ip_max_failures)
-    app.add_middleware(
-        SessionMiddleware,
-        secret_key=secret_key,
-        session_cookie="mnemerynne_session",
-        max_age=settings.session_max_age,
-        same_site="lax",
-        https_only=security.https_only(settings),
-    )
-
-    @app.middleware("http")
-    async def _csrf_guard(request: Request, call_next):
-        # The session cookie is SameSite=lax, which still lets other sites'
-        # top-level form POSTs through; refuse anything cross-site that changes data.
-        if request.method not in _SAFE_METHODS and _cross_site(request) and request.url.path not in _OAUTH_API:
-            return JSONResponse({"detail": "Cross-site request refused."}, status_code=status.HTTP_403_FORBIDDEN)
-        return await call_next(request)
-
-    # Added last, so they run first: refused requests get the headers too.
-    app.add_middleware(security.GamesShed)       # games can't queue without bound or take every worker thread
-    app.add_middleware(security.PublicRateLimit)
-    app.add_middleware(security.SecurityHeaders, settings=settings)
-    # The backup host (MNEMERYNNE_BACKUP_URL) answers only the backup app's API (sync.py).
-    app.add_middleware(sync_mod.BackupHost, host=sync_mod.backup_host(settings))
-    app.add_middleware(security.SlowRequestLog)  # outermost: times every request ("Slow request" in the journal)
+    _guard(app, settings, secret_key)   # sign-in cookies, CSRF, limits, headers, error answers: every role's
 
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
 
@@ -353,28 +452,6 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                                   instance=lambda: app.state.instance)
     app.state.mcp = mcp
     app.add_route("/mcp", mcp_server.McpEndpoint(settings, mcp), methods=["GET", "POST", "DELETE"])
-
-    @app.exception_handler(LoginRequired)
-    async def _redirect_to_login(request: Request, exc: LoginRequired):
-        # Back to this page after signing in: a link opened from Claude Desktop lands where it pointed.
-        if request.method == "GET":
-            request.session["after_login"] = request.url.path + (f"?{request.url.query}" if request.url.query else "")
-        return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
-
-    @app.exception_handler(sqlite3.OperationalError)
-    async def _database_busy(request: Request, exc: sqlite3.OperationalError):
-        """A write that waited out busy_timeout for the lock: a short JSON 503 "try again", not a plain-text 500.
-
-        Pages read a JSON refusal's status. The plain-text 500 had none, and Lumi Pet's party feed took a failure
-        without a status as "the party is over": it reloaded at once, over and over, and every reload waited on the
-        same lock. A storm that fed itself, until the app ran out of memory. Any other database error is a bug,
-        and goes on to the usual 500 with its traceback."""
-        text = str(exc).lower()
-        if "locked" not in text and "busy" not in text:
-            raise exc                                  # not a lock: the normal error path (logged with its traceback)
-        log.warning("Database busy: %s %s (%s)", request.method, request.url.path, exc)   # one line, no traceback
-        return JSONResponse({"detail": "The server is busy for a moment. Try again shortly."},
-                            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, headers={"Retry-After": "2"})
 
     @app.get("/manifest.webmanifest", include_in_schema=False)
     def manifest():
@@ -546,3 +623,21 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         }
 
     return app
+
+
+def _role_logging() -> None:
+    """A worker process uvicorn starts doesn't run the CLI's logging setup: give it the same."""
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
+
+def sync_app() -> FastAPI:
+    """`mnemerynne serve --role sync`: uvicorn's factory for each backup-API worker process."""
+    _role_logging()
+    return create_role_app("sync")
+
+
+def games_app() -> FastAPI:
+    """`mnemerynne serve --role games`: uvicorn's factory for the games' process."""
+    _role_logging()
+    return create_role_app("games")

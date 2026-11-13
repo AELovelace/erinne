@@ -27,6 +27,11 @@ bkp.beepsquad.wtf {
         -Server
     }
 
+    # The backup API has a process of its own (README "Busy parts in processes of their own"); leave this out
+    # on a box that doesn't run mnemerynne-sync.
+    reverse_proxy /api/sync/* 127.0.0.1:38201 {
+        flush_interval -1
+    }
     reverse_proxy 127.0.0.1:38200 {
         flush_interval -1
     }
