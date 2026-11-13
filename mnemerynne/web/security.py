@@ -150,6 +150,43 @@ PUBLIC_LIMITS: list[tuple[str, frozenset[str] | None, int, int]] = [
 ]
 
 
+class GamesShed:
+    """At most LIMIT game API requests at once; any more get an instant JSON 503 instead of queuing.
+
+    Game requests run on the shared worker threads, and under a lock they waited there for the database. When they
+    came in faster than they finished (browser tabs polling, old pages retrying at once), they queued without
+    bound: 28,000 at a time on the box, every one keeping its request in memory until the app was killed, and
+    holding up Files and everything else behind them. A quick 503 sheds them instead; pages read it as "try again
+    next time" (old Lumi Pet pages too). Live streams (paths ending /stream) aren't counted: they stay open for long.
+
+    Pure ASGI, one event loop: the counter needs no lock."""
+
+    LIMIT = 16                                         # game requests in flight at once; the threads are shared (40)
+    PREFIX = "/api/media/games/"
+    BODY = b'{"detail":"Games are busy for a moment. Try again shortly."}'
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+        self.busy = 0                                  # game requests running right now
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        if not path.startswith(self.PREFIX) or path.endswith("/stream"):
+            await self.app(scope, receive, send)       # not a game request (or a long-lived stream): untouched
+            return
+        if self.busy >= self.LIMIT:                    # full: answer at once, don't queue
+            await send({"type": "http.response.start", "status": 503,
+                        "headers": [(b"content-type", b"application/json"), (b"retry-after", b"2"),
+                                    (b"cache-control", b"no-store"), (b"content-length", str(len(self.BODY)).encode())]})
+            await send({"type": "http.response.body", "body": self.BODY})
+            return
+        self.busy += 1
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            self.busy -= 1                             # done, failed or cancelled: the slot is free again
+
+
 class PublicRateLimit:
     """Per-client-IP limits on the endpoints anyone can reach. The client IP
     is the real one behind Caddy (uvicorn's proxy_headers + FORWARDED_ALLOW_IPS)."""

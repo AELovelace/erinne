@@ -236,6 +236,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         return await call_next(request)
 
     # Added last, so they run first: refused requests get the headers too.
+    app.add_middleware(security.GamesShed)       # games can't queue without bound or take every worker thread
     app.add_middleware(security.PublicRateLimit)
     app.add_middleware(security.SecurityHeaders, settings=settings)
     # The backup host (MNEMERYNNE_BACKUP_URL) answers only the backup app's API (sync.py).
