@@ -76,3 +76,22 @@ def test_a_cancelled_request_gives_its_slot_back():
         assert shed.busy == 0
 
     asyncio.run(scenario())
+
+
+def test_a_slow_request_is_logged_by_name_and_a_quick_one_isnt(caplog, monkeypatch):
+    """SlowRequestLog: what took over a second to start answering shows up in the journal by name."""
+    from mnemerynne.web.security import SlowRequestLog
+
+    async def app(scope, receive, send):
+        await asyncio.sleep(0.05 if scope["path"] == "/slow" else 0)
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await asyncio.sleep(0.2)                       # the body taking long isn't slowness: it's already answering
+        await send({"type": "http.response.body", "body": b"{}"})
+
+    monkeypatch.setattr(SlowRequestLog, "SLOW_SECONDS", 0.03)
+    log = SlowRequestLog(app)
+    with caplog.at_level("WARNING", logger="mnemerynne.web.slow"):
+        assert asyncio.run(_run(log, "/slow"))[0] == 200
+        assert asyncio.run(_run(log, "/quick"))[0] == 200
+    lines = [r.getMessage() for r in caplog.records if r.name == "mnemerynne.web.slow"]
+    assert len(lines) == 1 and lines[0].startswith("Slow request: GET /slow -> 200 in ")

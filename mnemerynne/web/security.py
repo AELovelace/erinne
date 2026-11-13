@@ -17,6 +17,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from mnemerynne.config import Settings
 
 log = logging.getLogger("mnemerynne.web")
+log_slow = logging.getLogger("mnemerynne.web.slow")   # SlowRequestLog: grep the journal for "Slow request"
 
 # The example env files' placeholders, and other values nobody should run with.
 _PLACEHOLDER_KEYS = {"change-me", "changeme", "change_me", "secret", "password", "mnemerynne", "test"}
@@ -148,6 +149,38 @@ PUBLIC_LIMITS: list[tuple[str, frozenset[str] | None, int, int]] = [
     ("/api/media/kiosk/redeem", frozenset({"POST"}), 30, 60),   # a screen box's helper (kiosk settings)
     ("/api/media/kiosk/screen", None, 120, 60),
 ]
+
+
+class SlowRequestLog:
+    """Logs every request that takes longer than SLOW_SECONDS to start answering (until its headers go out),
+    so slowness on the box shows up in the journal by name:
+        journalctl -u mnemerynne-web | grep "Slow request"
+    Time to the first byte, not the whole answer: a long download or a live stream isn't slow, just long."""
+
+    SLOW_SECONDS = 1.0
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        began = time.monotonic()
+        answered: dict = {}                            # the status and when the headers went out
+
+        async def timed_send(message: Message) -> None:
+            if message["type"] == "http.response.start" and "at" not in answered:
+                answered.update(at=time.monotonic(), status=message["status"])
+            await send(message)
+
+        try:
+            await self.app(scope, receive, timed_send)
+        finally:
+            took = answered.get("at", time.monotonic()) - began   # never answered (cancelled): until now
+            if took >= self.SLOW_SECONDS:
+                log_slow.warning("Slow request: %s %s -> %s in %.1f s", scope.get("method", ""), scope.get("path", ""),
+                                 answered.get("status", "no answer"), took)
 
 
 class GamesShed:

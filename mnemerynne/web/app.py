@@ -243,6 +243,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.add_middleware(security.SecurityHeaders, settings=settings)
     # The backup host (MNEMERYNNE_BACKUP_URL) answers only the backup app's API (sync.py).
     app.add_middleware(sync_mod.BackupHost, host=sync_mod.backup_host(settings))
+    app.add_middleware(security.SlowRequestLog)  # outermost: times every request ("Slow request" in the journal)
 
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
 
