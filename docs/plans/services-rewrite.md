@@ -1,5 +1,19 @@
 # Mnemerynne as one Python application per feature
 
+## Progress
+
+| Step | State | Commit |
+|---|---|---|
+| Before the plan: sync + games processes, nginx front door on the box (`front-door.sh`) | done | 4332b9f, 56d49c3 |
+| Phase 0.1: service registry + factory (`mnemerynne/services/`, `serve --service`) | done | 8435b64 |
+| Phase 0.2: event bus (`mnemerynne/events.py`, LocalBus + ValkeyBus, `MNEMERYNNE_VALKEY_URL`) | done | 4993320 |
+| Phase 0.3: a SQLite file per feature (`db.connect(feature)`, read-only core attach, per-file migrations) | next | |
+| Phase 0.4: backups and `update.sh` for every DB file; deletion events | | |
+| Phase 0.5: systemd template `mnemerynne@.service`, front door generated from the registry, Valkey on the box | | |
+| Phase 1: nginx serves `/static/` and file bytes (`X-Accel-Redirect`) | | |
+
+Tests: `.venv\Scripts\python -m pytest tests -n auto` (about 4 minutes).
+
 ## Context
 
 Mnemerynne runs as one Python process (`mnemerynne serve`, ~50k lines, 34 web routers). Python runs one
