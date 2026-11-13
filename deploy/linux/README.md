@@ -1091,6 +1091,33 @@ the backup host only `/api/sync/`; sign-in refreshes stay with the web app). A w
 machine needs the two ports open on this box, as for 38200. `update.sh` restarts both after the web app
 once they're enabled. `--workers` in `mnemerynne-sync.service` sets how many backup processes run.
 
+### nginx in front of the app processes (behind another reverse proxy)
+
+When another machine holds the certificates and proxies straight to the app's port (site-chan sending
+`beepsquad.wtf` to `192.168.1.5:38200`), nginx on the box can take that port over and split the paths
+itself, so neither that proxy nor a firewall between them changes. `nginx-mnemerynne-front.conf` is that
+config: `/api/sync/` to the backup processes (38201), `/api/media/games` to the games (38202), everything
+else to the web app, which moves to `127.0.0.1:38210`. All three then listen only on 127.0.0.1.
+
+```sh
+sudo dnf install -y nginx
+sudo cp /opt/mnemerynne/deploy/linux/nginx-mnemerynne-front.conf /etc/nginx/conf.d/mnemerynne-front.conf
+sudo semanage port -a -t http_port_t -p tcp 38200 2>/dev/null || sudo semanage port -m -t http_port_t -p tcp 38200
+sudo setsebool -P httpd_can_network_connect 1       # SELinux: let nginx reach the app processes
+# In /etc/mnemerynne/mnemerynne.env (keep a copy first):
+#   MNEMERYNNE_HOST=127.0.0.1
+#   MNEMERYNNE_PORT=38210
+#   FORWARDED_ALLOW_IPS=127.0.0.1,10.1.1.20          # this box's nginx and the reverse proxy
+sudo nginx -t
+sudo systemctl restart mnemerynne-web mnemerynne-sync mnemerynne-games
+sudo systemctl enable --now nginx
+```
+
+`FORWARDED_ALLOW_IPS` lists both proxies so the app still finds each person's own address in
+`X-Forwarded-For` (login throttling and rate limits count people, not the proxy). The reverse proxy's
+`X-Forwarded-Proto` (https) is passed on as it came. To go back: `sudo systemctl disable --now nginx`,
+put the `.env` copy back and restart `mnemerynne-web`.
+
 ### How Files keeps up with the share's permissions
 
 Listing a share library needs every folder's permissions from the disk (a "walk"). Mnemerynne keeps
