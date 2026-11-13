@@ -189,10 +189,12 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         automations_run.ACTIVE = app.state.automator   # for the MCP tools (run now, a routine's report)
         if services is None:   # tests drive it with tick() instead
             app.state.background.add(asyncio.create_task(app.state.automator.run_forever()))
+            share.start_watching()   # permission changes on the share, as they happen (does nothing without one)
         try:
             async with mcp.session_manager.run():
                 yield
         finally:
+            share.stop_watching()
             for task in list(app.state.background):
                 task.cancel()
             await asyncio.gather(*app.state.background, return_exceptions=True)

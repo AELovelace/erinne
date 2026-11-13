@@ -53,6 +53,9 @@ class Reach:
     # Share libraries: asks the share about one folder right now, (read, write). None elsewhere.
     live: Callable[[int | None], tuple[bool, bool]] | None = field(default=None, repr=False)
     narrowed: bool = False                                            # Claude's view: a recheck may only take away
+    # A big share library's first look, answered before its walk finished: folders not read yet. They count as
+    # closed until read (fs.Access.settle reads the ones a page needs); empty once the walk is done.
+    unknown: set[int] = field(default_factory=set)
 
     def recheck(self, folder_id: int | None) -> None:
         """Bring this one place up to date with the share, for acting on it now (a list may be up to
@@ -60,6 +63,8 @@ class Reach:
         if self.live is None:
             return
         read, write = self.live(folder_id)
+        if folder_id is not None:
+            self.unknown.discard(folder_id)                           # read now: known from here on
         may_read = read and (self.can_read(folder_id) or not self.narrowed)
         may_write = write and not self.narrowed
         if folder_id is None:

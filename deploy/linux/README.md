@@ -1057,14 +1057,34 @@ again (section 3), `sudo systemctl daemon-reload` and `sudo systemctl restart mn
 Live streams (Rooms, party games, TV screens, radio) hand their request's connection back as soon as
 they start (`release_db` in `mnemerynne/web/deps.py`), so open tabs no longer each pin a connection.
 
-### Files is slow only the first time after a restart
+### How Files keeps up with the share's permissions
 
-Listing a share library needs every folder's permissions from the disk (a "walk"). After the first walk,
-requests are answered from the last one and the next walk runs in the background every
-`MNEMERYNNE_SHARE_RIGHTS_SECONDS` (30). Each walk is also saved in `share-rights.db` in the data folder,
-so after a restart the first visit uses the saved walk instead of waiting for a new one. That file is
-only a cache: it can be deleted at any time (the next visit walks the share again), a damaged one is
-replaced by itself, and it doesn't need backing up. Opening a file always checks the share right then.
+Listing a share library needs every folder's permissions from the disk (a "walk"). Mnemerynne keeps
+the last walk and avoids making anyone wait for a new one:
+
+- **Watching the share.** The web app runs `inotifywait` on the share (from `inotify-tools`, which
+  `share-acl-watch.sh` needs too). When a folder's permissions change, on the box or from Windows over
+  SMB, it reads just that folder again for everyone, within a couple of seconds. A whole walk then only
+  runs every 6 hours as a safety net. `journalctl -u mnemerynne-web | grep "Share: watching"` shows it
+  started. Without it, a walk is due every `MNEMERYNNE_SHARE_RIGHTS_SECONDS` (30) and runs in the
+  background.
+- **Saved walks.** Each walk is kept in `share-rights.db` in the data folder, so after a restart the
+  first visit uses the saved walk (and a fresh walk checks it behind the scenes). That file is only a
+  cache: it can be deleted at any time, a damaged one is replaced by itself, and it doesn't need backing up.
+- **A big library's first look** (over 2,000 folders, nobody with your groups walked it yet) answers at
+  once: it reads the top level and the folder you open, and treats folders not read yet as closed
+  until the walk behind it finishes. It can show less than the share allows for a minute, never more.
+
+Opening a file always checks the share right then.
+
+The watcher needs one inotify watch per folder for the `mnemerynne` user. If the log says the watch
+limit was reached, raise it (the share's folder count plus room to grow), then restart the web app:
+
+```sh
+sysctl fs.inotify.max_user_watches                       # the current limit
+echo fs.inotify.max_user_watches=262144 | sudo tee /etc/sysctl.d/90-mnemerynne-inotify.conf
+sudo sysctl --system && sudo systemctl restart mnemerynne-web
+```
 
 ## Moving an Erinne install to Mnemerynne
 

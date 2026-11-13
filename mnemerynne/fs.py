@@ -27,7 +27,7 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from typing import Callable
+from typing import Callable, Iterable
 
 from mnemerynne import jobs, permissions, share
 from mnemerynne.config import Settings
@@ -109,6 +109,19 @@ class Access:
     def can_write(self, collection_id: int, folder_id: int | None) -> bool:
         r = self._reach(collection_id, folder_id)
         return r is not None and r.can_write(folder_id)
+
+    SETTLE_LIMIT = 500                                 # folders one page may read from the share on a first look
+
+    def settle(self, collection_id: int, folder_ids: Iterable[int | None]) -> None:
+        """A big share library's first look is answered before its walk finishes, with folders not read yet
+        counting as closed (Reach.unknown). Read these few now, the folder being opened and what it shows, so
+        the page is right; the rest follow with the walk. Nothing to do once a library has been walked."""
+        r = self.reaches.get(collection_id)
+        if r is None or not r.unknown:
+            return
+        for folder_id in list(folder_ids)[:self.SETTLE_LIMIT]:
+            if folder_id is not None and folder_id in r.unknown:
+                r.recheck(folder_id)                   # asks the share about this one folder, now
 
     def confirm(self, collection_id: int, folder_id: int | None) -> None:
         """About to open or change something here: ask the share about this one folder now, because the
@@ -402,6 +415,7 @@ def file_row(conn: sqlite3.Connection, file_id: int) -> sqlite3.Row | None:
 def browse(conn: sqlite3.Connection, access: Access, collection_id: int, folder_id: int | None) -> dict:
     """A place's subfolders and files. Someone who may only open a folder deeper
     down sees the folders on the way to it, but no files beside them."""
+    access.settle(collection_id, [folder_id])          # a big library's first look: read the folder opened, now
     access.see(collection_id, folder_id)
     require_folder(conn, collection_id, folder_id)
     rows = conn.execute(
@@ -409,6 +423,7 @@ def browse(conn: sqlite3.Connection, access: Access, collection_id: int, folder_
         "AND x.deleted_at IS NULL) + (SELECT count(*) FROM folders y WHERE y.parent_id = folders.id "
         "AND y.deleted_at IS NULL) AS items FROM folders WHERE collection_id = ? AND COALESCE(parent_id, 0) = ? "
         "AND deleted_at IS NULL ORDER BY name COLLATE NOCASE", (collection_id, folder_id or 0)).fetchall()
+    access.settle(collection_id, [r["id"] for r in rows])   # ...and the folders it shows
     visible = access.visible(collection_id, [r["id"] for r in rows])
     folders = [{**dict(r), "items": n} for r in rows if r["id"] in visible
                for n in [_visible_items(conn, access, collection_id, r["id"], visible)]]

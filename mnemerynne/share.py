@@ -19,12 +19,14 @@ import hashlib
 import json
 import logging
 import os
+import queue
 import re
 import secrets
 import shutil
 import sqlite3
 import stat as stat_mode
 import struct
+import subprocess
 import threading
 import time
 import unicodedata
@@ -66,6 +68,12 @@ class Runtime:
     checker: Checker
     rights: dict = field(default_factory=dict, repr=False)      # (library, uid, gids) -> _Rights, read from disk
     rights_walks: dict = field(default_factory=dict, repr=False)   # the same key -> the lock its walk holds
+    # A big library's first look, answered while its first walk runs: what's been read so far (library_reach).
+    provisional: dict = field(default_factory=dict, repr=False)    # the same key -> _Rights (partial)
+    watching: bool = False                  # the share watcher is up: walks only as a safety net (_due_after)
+    stopping: bool = False                  # the app is shutting down: the watcher stops for good
+    watch_proc: object = field(default=None, repr=False)          # the inotifywait process, while it runs
+    watcher: object = field(default=None, repr=False)             # the thread that runs it
 
     @property
     def root(self) -> Path:
@@ -403,6 +411,8 @@ def forget_rights() -> None:
 # on the box), while a fresh walk runs behind it. A separate file, so saving never waits on or holds the main
 # database's write lock. It's a cache: missing or damaged, it only means a walk, as before; nothing else reads it.
 _SAVED_DAYS = 30                                   # a saved walk nobody has looked at for this long is dropped
+LAZY_FROM = 2000           # libraries with more folders than this answer a first look before their walk finishes
+WATCHED_WALK_SECONDS = 6 * 3600   # with the share watcher up, a whole walk still runs this often (a safety net)
 
 
 def _saved_path(rt: Runtime) -> Path:
@@ -495,7 +505,245 @@ def _forget_saved(rt: Runtime) -> None:
         log.warning("Share: couldn't clear saved permissions in %s: %s", _saved_path(rt), exc)
 
 
-def _read_rights(rt: Runtime, key: tuple, walk) -> _Rights:
+def _saved_keys(rt: Runtime, library_id: int) -> set[tuple]:
+    """Every (library, uid, gids) with a walk saved for this library."""
+    if not _saved_path(rt).exists():
+        return set()
+    try:
+        conn = _saved_db(rt)
+        try:
+            rows = conn.execute("SELECT uid, gids FROM rights WHERE library = ?", (library_id,)).fetchall()
+        finally:
+            conn.close()
+    except Exception as exc:
+        log.warning("Share: couldn't list saved permissions in %s: %s", _saved_path(rt), exc)
+        return set()
+    return {(library_id, uid, frozenset(int(g) for g in gids.split(",") if g)) for uid, gids in rows}
+
+
+# ------------------------------------------------------------- watching the share
+# The web app watches the share for permission changes (inotify, through inotifywait, as share-acl-watch.sh
+# does): when a folder's permissions change, on the box or from Windows over SMB, just that folder is read again,
+# for everyone with a walk kept (in memory and saved). Lists then follow the share within seconds, and a whole
+# walk only runs now and then (WATCHED_WALK_SECONDS) as a safety net. Without the watcher (no inotifywait, not
+# Linux, too many folders to watch), walks are due every share_rights_seconds, as before.
+_BATCH_SECONDS = 2.0      # gather the events this long, then apply them together (a setfacl -R sends thousands)
+_BATCH_LIMIT = 2000       # more changed folders than this in a library at once: a whole walk instead
+
+
+def start_watching() -> None:
+    """Called once by the web app at start. Quietly does nothing where there's no share or no inotifywait."""
+    rt = _runtime
+    if rt is None or rt.watcher is not None or shutil.which("inotifywait") is None:
+        return
+    rt.stopping = False
+    rt.watcher = threading.Thread(target=_watch_forever, args=(rt,), name="share-watch", daemon=True)
+    rt.watcher.start()
+
+
+def stop_watching() -> None:
+    """Called by the web app on shutdown."""
+    rt = _runtime
+    if rt is None:
+        return
+    rt.stopping = True
+    proc = rt.watch_proc
+    if proc is not None and proc.poll() is None:
+        proc.terminate()
+
+
+def _watch_forever(rt: Runtime) -> None:
+    """Keep inotifywait running; if it stops (the share unmounted, a watch limit), walks go back to their timer
+    and it's tried again later, a little less often each time."""
+    delay = 5
+    while not rt.stopping:
+        began = time.monotonic()
+        try:
+            _watch_once(rt)
+        except Exception:
+            log.exception("Share: the watcher stopped")
+        rt.watching = False                        # from now until it's back: timed walks, as without it
+        if rt.stopping:
+            return
+        delay = 5 if time.monotonic() - began > 600 else min(delay * 2, 600)
+        time.sleep(delay)
+
+
+def _watch_once(rt: Runtime) -> None:
+    """One run of inotifywait over the share: folders whose permissions change (ATTRIB), hidden paths left out."""
+    if not mounted(rt):
+        return
+    proc = subprocess.Popen(
+        ["inotifywait", "-m", "-r", "-e", "attrib", "--exclude", r"/\.", "--format", "%e\t%w%f", str(rt.root)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+    rt.watch_proc = proc
+
+    def setup() -> None:
+        """inotifywait says on stderr when every folder is watched, or why it couldn't (the watch limit)."""
+        for line in proc.stderr:
+            if "Watches established" in line:
+                rt.watching = True
+                log.info("Share: watching %s for permission changes", rt.root)
+            elif line.strip() and "Setting up watches" not in line:
+                log.warning("Share watcher: %s", line.strip())
+
+    threading.Thread(target=setup, name="share-watch-setup", daemon=True).start()
+    try:
+        _watch_events(rt, proc.stdout)
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+        proc.wait()
+        rt.watch_proc = None
+
+
+def _watch_events(rt: Runtime, lines) -> None:
+    """Apply the watcher's lines in batches: everything that arrives within _BATCH_SECONDS of the first goes
+    together, so a recursive permission change is one pass, not thousands."""
+    waiting: queue.Queue = queue.Queue()
+
+    def read() -> None:
+        for line in lines:
+            waiting.put(line)
+        waiting.put(None)                          # the watcher stopped
+
+    threading.Thread(target=read, name="share-watch-read", daemon=True).start()
+    while True:
+        line = waiting.get()
+        if line is None:
+            return
+        batch, ended = [line], False
+        until = time.monotonic() + _BATCH_SECONDS
+        while (left := until - time.monotonic()) > 0:
+            try:
+                more = waiting.get(timeout=left)
+            except queue.Empty:
+                break
+            if more is None:
+                ended = True
+                break
+            batch.append(more)
+        try:
+            apply_events(rt, batch)
+        except Exception:
+            log.exception("Share: couldn't apply permission changes")
+        if ended:
+            return
+
+
+def apply_events(rt: Runtime, lines: list[str]) -> None:
+    """A batch of the watcher's lines ("EVENTS<tab>path"): folders whose permissions changed are read again; an
+    overflowed queue (the kernel dropped events) means nothing can be trusted, so every walk is due."""
+    from mnemerynne import db                       # imported late: db doesn't need the share
+
+    changed: set[Path] = set()
+    for line in lines:
+        events, _, path = line.rstrip("\n").partition("\t")
+        if "Q_OVERFLOW" in events:
+            _mark_due(rt, None)
+            return
+        if "ISDIR" in events and path:             # a file's own permissions don't change what a folder allows
+            changed.add(Path(path))
+    if not changed:
+        return
+    conn = db.connect(rt.settings.db_path)
+    try:
+        apply_changes(rt, conn, changed)
+    finally:
+        conn.close()
+
+
+def apply_changes(rt: Runtime, conn: sqlite3.Connection, paths: Iterable[Path]) -> int:
+    """These folders' permissions changed on the share: read just them again, for every walk kept of their
+    library (in memory, saved, and first looks still filling in). A library with more than _BATCH_LIMIT changes
+    at once is marked due for a whole walk instead. Returns how many folders it found in a library."""
+    libraries = sorted(((r["id"], Path(r["share_path"]).parts) for r in conn.execute(
+        "SELECT id, share_path FROM collections WHERE kind = 'library' AND share_path IS NOT NULL")),
+        key=lambda lib: -len(lib[1]))              # the deepest match wins, if one library sits inside another
+    changed: dict[int, dict[int | None, Path]] = {}
+    for path in paths:
+        try:
+            rel = Path(path).relative_to(rt.root).parts
+        except ValueError:
+            continue                               # not on the share (the trash, say)
+        for library_id, top in libraries:
+            if rel[:len(top)] == top:
+                folder_id = _folder_at(conn, library_id, rel[len(top):])
+                if folder_id is not False:         # a folder the scan hasn't added yet is read when first seen
+                    changed.setdefault(library_id, {})[folder_id] = Path(path)
+                break
+    for library_id, folders in changed.items():
+        if len(folders) > _BATCH_LIMIT:
+            _mark_due(rt, library_id)
+        else:
+            _recheck_folders(rt, library_id, folders)
+    return sum(len(folders) for folders in changed.values())
+
+
+def _folder_at(conn: sqlite3.Connection, library_id: int, parts: tuple[str, ...]) -> int | None | bool:
+    """The live folder at this path inside a library: its id, None for the library's top, False if unknown."""
+    parent = None
+    for name in parts:
+        row = conn.execute("SELECT id FROM folders WHERE collection_id = ? AND parent_id IS ? AND name = ? "
+                           "AND trash_path IS NULL", (library_id, parent, name)).fetchone()
+        if row is None:
+            return False
+        parent = row[0]
+    return parent
+
+
+def _recheck_folders(rt: Runtime, library_id: int, folders: dict[int | None, Path]) -> None:
+    """Read these folders' permissions again for everyone with a walk of this library, and save the result."""
+    def update(key: tuple, rights: _Rights) -> None:
+        _, uid, gids = key
+        for folder_id, path in folders.items():
+            try:
+                rights.folders[folder_id] = rt.checker.rights(path, uid, gids)
+            except OSError:
+                rights.folders[folder_id] = (False, False)   # gone or unreadable now: closed until the next walk
+
+    in_memory = {key for key in list(rt.rights) if key[0] == library_id}
+    for key in in_memory:
+        if (rights := rt.rights.get(key)) is not None:
+            update(key, rights)
+            _save_rights(rt, key, rights)
+    for key in _saved_keys(rt, library_id) - in_memory:   # people not here since the restart: keep theirs current
+        if (rights := _load_rights(rt, key)) is not None:
+            update(key, rights)
+            _save_rights(rt, key, rights)
+    for key in [k for k in list(rt.provisional) if k[0] == library_id]:
+        if (rights := rt.provisional.get(key)) is not None:
+            update(key, rights)                    # first looks still filling in: theirs too (read just now)
+
+
+def _mark_due(rt: Runtime, library_id: int | None) -> None:
+    """Every walk of this library (None: of every library) is due now: the next look starts a whole walk."""
+    for key in list(rt.rights):
+        if library_id is None or key[0] == library_id:
+            if (rights := rt.rights.get(key)) is not None:
+                rights.at -= 10 ** 9               # far in the past
+    if not _saved_path(rt).exists():
+        return
+    try:
+        conn = _saved_db(rt)
+        try:
+            if library_id is None:
+                conn.execute("UPDATE rights SET walked_at = 0")
+            else:
+                conn.execute("UPDATE rights SET walked_at = 0 WHERE library = ?", (library_id,))
+        finally:
+            conn.close()
+    except Exception as exc:
+        log.warning("Share: couldn't mark saved permissions due in %s: %s", _saved_path(rt), exc)
+
+
+def _due_after(rt: Runtime) -> float:
+    """Seconds until a walk is due again: share_rights_seconds, or with the share watcher up (which reads changed
+    folders as they change) only now and then, as a safety net."""
+    return WATCHED_WALK_SECONDS if rt.watching else rt.settings.share_rights_seconds
+
+
+def _read_rights(rt: Runtime, key: tuple, walk, *, wait: bool = True) -> _Rights | None:
     """This person's permissions in a library: the last walk of its folders, and a new walk when that one is due.
 
     Only the first look (since the app started, or forget_rights) waits for a walk; requests arriving during it
@@ -503,14 +751,23 @@ def _read_rights(rt: Runtime, key: tuple, walk) -> _Rights:
     and a walk that's due (share_rights_seconds) runs in the background. A walk reads every folder's permissions
     from the disk, and on the box's library of 28,789 folders a request waited for one every 30 seconds ("Files
     loads, just really slowly"). Lists may lag the share by one walk; opening a file always asks the share now.
-    After a restart, the walk saved before it (_load_rights) stands in for the first one, with a fresh walk behind."""
+    After a restart, the walk saved before it (_load_rights) stands in for the first one, with a fresh walk behind:
+    the share may have changed while the app was down.
+
+    wait=False (a big library): with nothing known yet, start the first walk in the background and return None
+    at once; the caller answers from what it reads itself meanwhile (library_reach)."""
     cached = rt.rights.get(key)
     if cached is None and (saved := _load_rights(rt, key)) is not None:
         cached = rt.rights.setdefault(key, saved)  # another request may have loaded it a moment ago: use one copy
+        if cached is saved:
+            _walk_in_background(rt, key, walk)     # saved before a restart: check it against the share now
     if cached is not None:
-        if time.monotonic() - cached.at >= rt.settings.share_rights_seconds:
+        if time.monotonic() - cached.at >= _due_after(rt):
             _walk_in_background(rt, key, walk)     # due: refresh it, without making this request wait
         return cached
+    if not wait:
+        _walk_in_background(rt, key, walk)         # the first walk, behind the scenes
+        return None
     with rt.rights_walks.setdefault(key, threading.Lock()):   # the very first look: everyone waits for one walk
         if (cached := rt.rights.get(key)) is not None:
             return cached                          # another request's walk just finished
@@ -522,6 +779,7 @@ def _walk_rights(rt: Runtime, key: tuple, walk) -> _Rights:
     began = time.monotonic()
     rights = _Rights(began, walk())
     rt.rights[key] = rights
+    rt.provisional.pop(key, None)                  # a first look's partial answer: the whole walk replaces it
     _save_rights(rt, key, rights)                  # for the first look after a restart
     for old in [k for k, r in list(rt.rights.items()) if began - r.at > 600]:   # not looked at for 10 min: free it
         rt.rights.pop(old, None)
@@ -582,7 +840,22 @@ def library_reach(conn: sqlite3.Connection, row: sqlite3.Row, user: sqlite3.Row)
         path = base if fid is None else path_of(fid) if fid in info else None
         return rt.checker.rights(path, uid, gids) if path is not None else (False, False)
 
-    rights = _read_rights(rt, (row["id"], uid, gids), lambda: {fid: check(fid) for fid in (None, *info)})
+    key = (row["id"], uid, gids)
+    walk = lambda: {fid: check(fid) for fid in (None, *info)}   # noqa: E731  every folder, from the disk
+    big = len(info) > LAZY_FROM                    # a whole walk would keep this request waiting
+    rights = _read_rights(rt, key, walk, wait=not big)
+    provisional = rights is None
+    if provisional:
+        # A big library nobody here has walked yet (a first visit, new groups): answer now like a file browser
+        # does, from the few folders read so far, while the whole walk runs behind. Folders not read yet count
+        # as closed, so this can only ever show less than the share allows, never more. The library's top and
+        # its top-level folders are read now; a page opened reads its own folder and what it shows
+        # (fs.Access.settle), and what's read is kept for the next request until the walk replaces it.
+        rights = rt.provisional.get(key)
+        if rights is None:
+            tops = [f["id"] for f in folders if f["parent_id"] is None]
+            rights = rt.provisional.setdefault(key, _Rights(time.monotonic(),
+                                                            {fid: check(fid) for fid in (None, *tops)}))
 
     def live(fid: int | None) -> tuple[bool, bool]:
         """Reach.recheck: reads the share now, and corrects the cache so the next list agrees."""
@@ -595,6 +868,9 @@ def library_reach(conn: sqlite3.Connection, row: sqlite3.Row, user: sqlite3.Row)
                   parents={f["id"]: f["parent_id"] for f in folders}, live=live)
     for fid in info:
         found = rights.folders.get(fid)
+        if found is None and provisional:
+            reach.unknown.add(fid)                 # not read yet: closed for now (Access.settle reads it on demand)
+            continue
         read, write = found if found is not None else live(fid)   # a folder made since the last walk
         if read:
             reach.read.add(fid)
@@ -603,7 +879,7 @@ def library_reach(conn: sqlite3.Connection, row: sqlite3.Row, user: sqlite3.Row)
         if write:
             reach.write.add(fid)
     if not (reach.root_read or reach.read):
-        return None
+        return None   # nothing here for them; on a first look, nothing found yet (never shown on a guess)
     return reach
 
 
