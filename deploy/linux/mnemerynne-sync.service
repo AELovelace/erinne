@@ -10,9 +10,10 @@ Group=mnemerynne
 WorkingDirectory=/opt/mnemerynne
 EnvironmentFile=/etc/mnemerynne/mnemerynne.env
 Environment=PYTHONUNBUFFERED=1
-# Three processes (it keeps nothing in memory): the backup app's manifests and uploads get cores of their own
+# Its port (38201) and processes (3 on the NAS, 6 with MNEMERYNNE_PROFILE=ryzen) come from mnemerynne/services/registry.py.
+# It keeps nothing in memory: the backup app's manifests and uploads get cores of their own
 # instead of queuing with Files in the web app's one. The web server sends /api/sync/ here (deploy/linux/README.md).
-ExecStart=/opt/mnemerynne/.venv/bin/mnemerynne serve --role sync --port 38201 --workers 3
+ExecStart=/opt/mnemerynne/.venv/bin/mnemerynne serve --service sync
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536

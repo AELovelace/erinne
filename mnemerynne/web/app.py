@@ -156,73 +156,12 @@ def _guard(app: FastAPI, settings: Settings, secret_key: str) -> None:
                             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, headers={"Retry-After": "2"})
 
 
-ROLES = {
-    # role: (what it serves, the routers, as include_router takes them)
-    "sync": "the desktop backup app's API (/api/sync/): keeps nothing in memory, so it may run as several processes",
-    "games": "the built-in games' API (/api/media/games): its live parties and tables live in this one process",
-}
-
-
 def create_role_app(role: str, settings: Settings | None = None, services: Services | None = None) -> FastAPI:
-    """A process of its own for one busy part of Mnemerynne (`mnemerynne serve --role sync|games`).
+    """One service's own app (`mnemerynne serve --service sync|games`): see mnemerynne/services/. Kept under
+    its first name for the code and tests that build it this way."""
+    from mnemerynne.services.factory import create_service   # imported late: the factory uses _guard from here
 
-    The web app is one Python process, and Python runs one thread's Python code at a time: on the box the backup
-    app's manifests and uploads and the games' polls queued with Files for that one core while the others idled.
-    A role's process serves only its part, behind the same guard as the web app (_guard), on a port of its own
-    that the web server sends that part's paths to (deploy/linux/README.md). The web app still serves them too,
-    so nothing breaks before the web server is told."""
-    if role not in ROLES:
-        raise ValueError(f"No role {role!r}; the roles are: {', '.join(ROLES)}")
-    settings = settings or get_settings()
-    secret_key = security.check_secret_key(settings) or secrets.token_urlsafe(48)   # the same key: the same cookies
-
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        conn = db.connect(settings.db_path)
-        try:
-            version = db.migrate(conn, settings.embed_dim)   # normally the web app has: then this changes nothing
-            nodes, node_key = [], None
-            if role == "games":                               # Lumi's live tales: the answer model, via the nodes
-                cfg = balancer_mod.load_config(conn)
-                nodes, node_key = cfg["nodes"], balancer_mod.api_key(settings, cfg)
-        finally:
-            conn.close()
-        log.info("%s process ready: %s (schema v%d).", role.capitalize(), ROLES[role], version)
-        background: set[asyncio.Task] = set()
-        balancer = None
-        if role == "games":
-            balancer = services.balancer if services and services.balancer is not None else balancer_mod.Balancer()
-            balancer.configure(nodes, node_key)
-            app.state.balancer = balancer
-            background.add(asyncio.create_task(balancer.run()))
-        try:
-            yield
-        finally:
-            for task in background:
-                task.cancel()
-            await asyncio.gather(*background, return_exceptions=True)
-            app.state.db_pool.close()
-            if balancer is not None:
-                await balancer.aclose()
-
-    app = FastAPI(title=f"{ASSISTANT_NAME} {role}", lifespan=lifespan, docs_url=None, redoc_url=None)
-    app.state.settings = settings
-    app.state.role = role
-    app.state.db_pool = db.Pool(settings.db_path)
-    app.state.directory = (services.directory if services and services.directory
-                           else directory.from_settings(settings))
-    share.configure(settings, app.state.directory, services.share_checker if services else None)   # no watcher here
-    _guard(app, settings, secret_key)
-    if role == "sync":
-        app.include_router(sync_pages.router)
-    else:
-        app.include_router(game_pages.router)
-
-    @app.get("/healthz", include_in_schema=False)
-    def healthz():
-        return {"status": "ok", "role": role}       # update.sh and monitors: this role's process answers
-
-    return app
+    return create_service(role, settings, services)
 
 
 def create_app(settings: Settings | None = None, services: Services | None = None) -> FastAPI:
@@ -623,21 +562,3 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         }
 
     return app
-
-
-def _role_logging() -> None:
-    """A worker process uvicorn starts doesn't run the CLI's logging setup: give it the same."""
-    if not logging.getLogger().handlers:
-        logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-
-
-def sync_app() -> FastAPI:
-    """`mnemerynne serve --role sync`: uvicorn's factory for each backup-API worker process."""
-    _role_logging()
-    return create_role_app("sync")
-
-
-def games_app() -> FastAPI:
-    """`mnemerynne serve --role games`: uvicorn's factory for the games' process."""
-    _role_logging()
-    return create_role_app("games")

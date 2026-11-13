@@ -69,9 +69,33 @@ def test_a_role_process_has_the_web_apps_guard(client, conn, settings):
         assert refused.status_code == 403
 
 
-def test_there_is_no_such_role(settings):
-    with pytest.raises(ValueError, match="No role"):
-        create_role_app("files", settings)
+def test_there_is_no_such_service(settings):
+    with pytest.raises(ValueError, match="No service 'nonsense'"):
+        create_role_app("nonsense", settings)
+
+
+def test_every_service_has_its_own_port_its_paths_and_routers_that_import():
+    """The registry drives the factory, the CLI and the deploy tools: a mistake here breaks all three."""
+    from mnemerynne.services import factory, registry
+    ports = [s.port for s in registry.SERVICES.values()]
+    assert len(ports) == len(set(ports)) and 38210 not in ports and 38200 not in ports   # the web app's, the front door's
+    for service in registry.SERVICES.values():
+        assert service.paths and all(p.startswith("/") for p in service.paths)
+        for ref in service.routers:
+            assert factory._router(ref).routes                    # imports, and has routes
+        for hook in service.hooks:
+            assert hook in factory.hooks_mod.HOOKS
+
+
+def test_processes_follow_the_profile_and_single_services_stay_single(monkeypatch):
+    from mnemerynne.services import registry
+    sync, games = registry.get("sync"), registry.get("games")
+    monkeypatch.setenv("MNEMERYNNE_PROFILE", "nas")
+    assert sync.processes() == 3 and games.processes() == 1
+    monkeypatch.setenv("MNEMERYNNE_PROFILE", "ryzen")
+    assert sync.processes() == 6 and games.processes() == 1      # live state: one, on any box
+    monkeypatch.setenv("MNEMERYNNE_PROFILE", "something-else")
+    assert sync.processes() == 3                                  # an unknown profile falls back to the NAS's
 
 
 def test_the_games_run_as_one_process(monkeypatch):

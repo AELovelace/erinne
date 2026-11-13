@@ -12,7 +12,7 @@ EnvironmentFile=/etc/mnemerynne/mnemerynne.env
 Environment=PYTHONUNBUFFERED=1
 # One process of its own: the games' polls and live streams get a core instead of queuing with Files in the web
 # app's. One, not more: live parties and tables are kept in its memory. The web server sends /api/media/games here.
-ExecStart=/opt/mnemerynne/.venv/bin/mnemerynne serve --role games --port 38202
+ExecStart=/opt/mnemerynne/.venv/bin/mnemerynne serve --service games
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
