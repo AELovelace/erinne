@@ -389,12 +389,6 @@ class _Rights:
     folders: dict[int | None, tuple[bool, bool]]    # folder id (None: the library's top) -> (read, write)
 
 
-def _fresh(rt: Runtime, key: tuple) -> _Rights | None:
-    """The cached permissions under `key`, if they are recent enough for lists and search to use."""
-    cached = rt.rights.get(key)
-    return cached if cached is not None and time.monotonic() - cached.at < rt.settings.share_rights_seconds else None
-
-
 def forget_rights() -> None:
     """Forget every cached permission: the next list reads them from the share again."""
     if _runtime is not None:
@@ -402,19 +396,50 @@ def forget_rights() -> None:
 
 
 def _read_rights(rt: Runtime, key: tuple, walk) -> _Rights:
-    """Recent permissions, or one walk of the library's folders to get them. Requests arriving during a walk
-    (a page of posters asks many times at once) wait for it instead of each doing their own."""
-    if (cached := _fresh(rt, key)) is not None:
+    """This person's permissions in a library: the last walk of its folders, and a new walk when that one is due.
+
+    Only the first look (since the app started, or forget_rights) waits for a walk; requests arriving during it
+    wait for that one instead of each doing their own. After that a request never waits: it gets the last walk,
+    and a walk that's due (share_rights_seconds) runs in the background. A walk reads every folder's permissions
+    from the disk, and on the box's library of 28,789 folders a request waited for one every 30 seconds ("Files
+    loads, just really slowly"). Lists may lag the share by one walk; opening a file always asks the share now."""
+    cached = rt.rights.get(key)
+    if cached is not None:
+        if time.monotonic() - cached.at >= rt.settings.share_rights_seconds:
+            _walk_in_background(rt, key, walk)     # due: refresh it, without making this request wait
         return cached
-    with rt.rights_walks.setdefault(key, threading.Lock()):
-        if (cached := _fresh(rt, key)) is not None:
-            return cached
-        began = time.monotonic()
-        rights = _Rights(began, walk())
-        rt.rights[key] = rights
-        for old in [k for k, r in list(rt.rights.items()) if began - r.at > 600]:   # people who left: free the memory
-            rt.rights.pop(old, None)
-        return rights
+    with rt.rights_walks.setdefault(key, threading.Lock()):   # the very first look: everyone waits for one walk
+        if (cached := rt.rights.get(key)) is not None:
+            return cached                          # another request's walk just finished
+        return _walk_rights(rt, key, walk)
+
+
+def _walk_rights(rt: Runtime, key: tuple, walk) -> _Rights:
+    """One walk of a library's folders on the share, kept under `key`. Call holding the key's walk lock."""
+    began = time.monotonic()
+    rights = _Rights(began, walk())
+    rt.rights[key] = rights
+    for old in [k for k, r in list(rt.rights.items()) if began - r.at > 600]:   # not looked at for 10 min: free it
+        rt.rights.pop(old, None)
+    return rights
+
+
+def _walk_in_background(rt: Runtime, key: tuple, walk) -> None:
+    """Start a walk for `key` on a thread of its own, unless one is running already. The walk only reads the share
+    and the folder rows it was given, never the request's database connection."""
+    lock = rt.rights_walks.setdefault(key, threading.Lock())
+    if not lock.acquire(blocking=False):
+        return                                     # a walk for this key is already under way
+
+    def run() -> None:
+        try:
+            _walk_rights(rt, key, walk)
+        except Exception:                          # the share away, a folder gone mid-walk: keep the last walk
+            log.exception("Share: refreshing permissions in the background failed")
+        finally:
+            lock.release()
+
+    threading.Thread(target=run, name="share-rights-walk", daemon=True).start()
 
 
 def library_reach(conn: sqlite3.Connection, row: sqlite3.Row, user: sqlite3.Row):

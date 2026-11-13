@@ -137,8 +137,52 @@ def test_lists_reuse_the_shares_permissions_for_a_while(conn, settings, root, ch
 
     for entry in rt.rights.values():
         entry.at -= settings.share_rights_seconds + 1
-    permissions.reach(conn, jane)
-    assert len(checker.asked) == first * 2           # too old: read again
+    permissions.reach(conn, jane)                    # too old: answered from the last walk, and read again...
+    _background_walks_done()
+    assert len(checker.asked) == first * 2           # ...in the background
+
+
+def _background_walks_done():
+    """Wait for share permission walks running on their own threads (share._walk_in_background)."""
+    import threading
+    for thread in [t for t in threading.enumerate() if t.name == "share-rights-walk"]:
+        thread.join(10)
+
+
+class SlowChecker(CountingChecker):
+    """A share whose permission reads take as long as the test says (a big library on a busy disk)."""
+
+    def __init__(self, root) -> None:
+        super().__init__(root)
+        import threading
+        self.go = threading.Event()
+        self.go.set()
+
+    def rights(self, path, uid, gids):
+        self.go.wait(10)                             # holds every read while the test keeps it cleared
+        return super().rights(path, uid, gids)
+
+
+def test_a_due_walk_never_makes_a_request_wait(conn, settings, root, rt, jane):
+    """Only the first look waits for a walk of the share. On the box (28,789 folders) every request waited for a
+    whole walk each time the 30 s were up: Files loaded, just really slowly."""
+    _write(root / "Docs" / "Guides" / "a.md")
+    share.sync(conn, settings)
+    slow = SlowChecker(root)
+    rt.checker = slow
+    before = permissions.reach(conn, jane)           # the first look: walks, and waits for it
+    assert before and slow.asked
+    for entry in rt.rights.values():
+        entry.at -= settings.share_rights_seconds + 1   # the walk is due again
+    slow.go.clear()                                  # from now on the share takes "forever" to answer
+    asked = len(slow.asked)
+    began = time.monotonic()
+    again = permissions.reach(conn, jane)            # answered from the last walk, at once
+    assert time.monotonic() - began < 2
+    assert set(again) == set(before)
+    slow.go.set()                                    # let the background walk finish
+    _background_walks_done()
+    assert len(slow.asked) > asked                   # it did read the share again, off the request's time
 
 
 def test_a_new_folder_costs_one_look_not_a_whole_walk(conn, settings, root, checker, jane):
