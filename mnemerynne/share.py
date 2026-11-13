@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import json
 import logging
 import os
 import re
@@ -390,9 +391,108 @@ class _Rights:
 
 
 def forget_rights() -> None:
-    """Forget every cached permission: the next list reads them from the share again."""
+    """Forget every cached permission, saved ones too: the next list reads them from the share again."""
     if _runtime is not None:
         _runtime.rights.clear()
+        _forget_saved(_runtime)                    # or a restart would bring back what was forgotten here
+
+
+# ------------------------------------------------------------ saved permissions
+# Each walk is also kept in a file of its own (data_dir/share-rights.db), so the first look after a restart is
+# answered from the last walk instead of walking the share again (28,789 folders' permissions read from the disk
+# on the box), while a fresh walk runs behind it. A separate file, so saving never waits on or holds the main
+# database's write lock. It's a cache: missing or damaged, it only means a walk, as before; nothing else reads it.
+_SAVED_DAYS = 30                                   # a saved walk nobody has looked at for this long is dropped
+
+
+def _saved_path(rt: Runtime) -> Path:
+    return Path(rt.settings.data_dir) / "share-rights.db"
+
+
+def _saved_db(rt: Runtime) -> sqlite3.Connection:
+    """The cache file, made on first use. Plain sqlite3: it needs none of the main database's extensions."""
+    path = _saved_path(rt)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=5, isolation_level=None)   # the web app, worker and CLI may share it
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+    except sqlite3.DatabaseError as exc:
+        if "not a database" not in str(exc) and "malformed" not in str(exc):
+            conn.close()
+            raise                                  # locked or the like: try again another time
+        conn.close()                               # damaged: it's only a cache, so start a new one
+        log.warning("Share: %s was damaged (%s); starting it afresh", path, exc)
+        for old in (path, path.with_name(path.name + "-wal"), path.with_name(path.name + "-shm")):
+            old.unlink(missing_ok=True)
+        conn = sqlite3.connect(path, timeout=5, isolation_level=None)
+        conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("CREATE TABLE IF NOT EXISTS rights ("
+                 " library INTEGER NOT NULL, uid INTEGER NOT NULL, gids TEXT NOT NULL,"   # whose walk, of what
+                 " walked_at REAL NOT NULL,"                                              # when it began (Unix time)
+                 " folders TEXT NOT NULL,"                       # JSON {folder id or "top": read 1 | write 2}
+                 " PRIMARY KEY (library, uid, gids))")
+    return conn
+
+
+def _key_columns(key: tuple) -> tuple[int, int, str]:
+    """(library, uid, gids) as the table keeps them: the groups as a sorted list, so the same set always matches."""
+    library, uid, gids = key
+    return int(library), int(uid), ",".join(str(g) for g in sorted(gids))
+
+
+def _save_rights(rt: Runtime, key: tuple, rights: _Rights) -> None:
+    """Keep this walk on disk. Never fails the walk it came from: the file is only a cache."""
+    try:
+        walked_at = time.time() - (time.monotonic() - rights.at)    # the walk's start, on the wall clock
+        folders = json.dumps({("top" if fid is None else str(fid)): int(read) | int(write) << 1
+                              for fid, (read, write) in list(rights.folders.items())},   # a copy: lists may correct it
+                             separators=(",", ":"))
+        conn = _saved_db(rt)
+        try:
+            conn.execute("INSERT OR REPLACE INTO rights VALUES (?, ?, ?, ?, ?)",
+                         (*_key_columns(key), walked_at, folders))
+            conn.execute("DELETE FROM rights WHERE walked_at < ?", (time.time() - _SAVED_DAYS * 86400,))
+        finally:
+            conn.close()
+    except Exception as exc:                       # a full disk, a locked or damaged file: just not saved this time
+        log.warning("Share: couldn't save permissions to %s: %s", _saved_path(rt), exc)
+
+
+def _load_rights(rt: Runtime, key: tuple) -> _Rights | None:
+    """The walk saved for `key` before the app (re)started, or None. Its age carries over, so a walk is due as usual."""
+    if not _saved_path(rt).exists():
+        return None                                # nothing saved yet: don't make the file just to look
+    try:
+        conn = _saved_db(rt)
+        try:
+            row = conn.execute("SELECT walked_at, folders FROM rights WHERE library = ? AND uid = ? AND gids = ?",
+                               _key_columns(key)).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        folders = {(None if fid == "top" else int(fid)): (bool(bits & 1), bool(bits & 2))
+                   for fid, bits in json.loads(row[1]).items()}
+    except Exception as exc:                       # damaged: walk the share instead
+        log.warning("Share: couldn't read saved permissions from %s: %s", _saved_path(rt), exc)
+        return None
+    if None not in folders:
+        return None                                # no entry for the library's top: not a whole walk, don't use it
+    age = max(0.0, time.time() - row[0])
+    return _Rights(time.monotonic() - age, folders)
+
+
+def _forget_saved(rt: Runtime) -> None:
+    if not _saved_path(rt).exists():
+        return
+    try:
+        conn = _saved_db(rt)
+        try:
+            conn.execute("DELETE FROM rights")
+        finally:
+            conn.close()
+    except Exception as exc:
+        log.warning("Share: couldn't clear saved permissions in %s: %s", _saved_path(rt), exc)
 
 
 def _read_rights(rt: Runtime, key: tuple, walk) -> _Rights:
@@ -402,8 +502,11 @@ def _read_rights(rt: Runtime, key: tuple, walk) -> _Rights:
     wait for that one instead of each doing their own. After that a request never waits: it gets the last walk,
     and a walk that's due (share_rights_seconds) runs in the background. A walk reads every folder's permissions
     from the disk, and on the box's library of 28,789 folders a request waited for one every 30 seconds ("Files
-    loads, just really slowly"). Lists may lag the share by one walk; opening a file always asks the share now."""
+    loads, just really slowly"). Lists may lag the share by one walk; opening a file always asks the share now.
+    After a restart, the walk saved before it (_load_rights) stands in for the first one, with a fresh walk behind."""
     cached = rt.rights.get(key)
+    if cached is None and (saved := _load_rights(rt, key)) is not None:
+        cached = rt.rights.setdefault(key, saved)  # another request may have loaded it a moment ago: use one copy
     if cached is not None:
         if time.monotonic() - cached.at >= rt.settings.share_rights_seconds:
             _walk_in_background(rt, key, walk)     # due: refresh it, without making this request wait
@@ -419,6 +522,7 @@ def _walk_rights(rt: Runtime, key: tuple, walk) -> _Rights:
     began = time.monotonic()
     rights = _Rights(began, walk())
     rt.rights[key] = rights
+    _save_rights(rt, key, rights)                  # for the first look after a restart
     for old in [k for k, r in list(rt.rights.items()) if began - r.at > 600]:   # not looked at for 10 min: free it
         rt.rights.pop(old, None)
     return rights

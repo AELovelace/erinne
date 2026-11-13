@@ -1057,6 +1057,15 @@ again (section 3), `sudo systemctl daemon-reload` and `sudo systemctl restart mn
 Live streams (Rooms, party games, TV screens, radio) hand their request's connection back as soon as
 they start (`release_db` in `mnemerynne/web/deps.py`), so open tabs no longer each pin a connection.
 
+### Files is slow only the first time after a restart
+
+Listing a share library needs every folder's permissions from the disk (a "walk"). After the first walk,
+requests are answered from the last one and the next walk runs in the background every
+`MNEMERYNNE_SHARE_RIGHTS_SECONDS` (30). Each walk is also saved in `share-rights.db` in the data folder,
+so after a restart the first visit uses the saved walk instead of waiting for a new one. That file is
+only a cache: it can be deleted at any time (the next visit walks the share again), a damaged one is
+replaced by itself, and it doesn't need backing up. Opening a file always checks the share right then.
+
 ## Moving an Erinne install to Mnemerynne
 
 A box set up before the rename (user `erinne`, `/opt/erinne`, `erinne-*`

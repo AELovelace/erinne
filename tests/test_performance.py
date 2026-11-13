@@ -284,3 +284,65 @@ def test_connections_are_reused_unless_something_is_wrong_with_them(tmp_path):
 def test_the_slow_queries_use_their_indexes(conn, sql, index):
     plan = " ".join(r["detail"] for r in conn.execute("EXPLAIN QUERY PLAN " + sql))
     assert index in plan, plan
+
+
+def _restart(settings, rt, checker):
+    """What the app does on start: a fresh share runtime, nothing in memory."""
+    return share.configure(settings, rt.directory, checker)
+
+
+def test_after_a_restart_the_first_look_uses_the_saved_walk(conn, settings, root, rt, jane):
+    """The first look after a restart used to walk the whole library (28,789 folders' permissions off the disk on
+    the box). The last walk is saved, so it answers at once; a fresh walk follows when one is due."""
+    _write(root / "Docs" / "Guides" / "a.md")
+    share.sync(conn, settings)
+    before = permissions.reach(conn, jane)                 # walks, and saves the walk
+    assert (settings.data_dir / "share-rights.db").exists()
+
+    slow = SlowChecker(root)
+    slow.go.clear()                                        # after the restart the share takes "forever" to answer
+    fresh = _restart(settings, rt, slow)
+    began = time.monotonic()
+    after = permissions.reach(conn, jane)
+    assert time.monotonic() - began < 2                    # answered from the saved walk, not a new one
+    assert set(after) == set(before)
+    assert after[next(iter(before))].read == before[next(iter(before))].read
+    assert not slow.asked                                  # still recent: no walk at all
+
+    for entry in fresh.rights.values():
+        entry.at -= settings.share_rights_seconds + 1      # now due: a walk in the background, the answer at once
+    permissions.reach(conn, jane)
+    slow.go.set()
+    _background_walks_done()
+    assert slow.asked
+
+
+def test_forgetting_permissions_also_forgets_the_saved_walk(conn, settings, root, rt, jane):
+    _write(root / "Docs" / "Guides" / "a.md")
+    share.sync(conn, settings)
+    permissions.reach(conn, jane)
+    share.forget_rights()
+    counting = CountingChecker(root)
+    _restart(settings, rt, counting)
+    permissions.reach(conn, jane)
+    assert counting.asked                                  # nothing saved to fall back on: it walked the share
+
+
+def test_a_damaged_saved_file_only_means_a_walk(conn, settings, root, rt, jane):
+    _write(root / "Docs" / "Guides" / "a.md")
+    share.sync(conn, settings)
+    permissions.reach(conn, jane)
+    saved = settings.data_dir / "share-rights.db"
+    for extra in (saved.with_name(saved.name + "-wal"), saved.with_name(saved.name + "-shm")):
+        extra.unlink(missing_ok=True)
+    saved.write_bytes(b"this is not a database")
+    counting = CountingChecker(root)
+    _restart(settings, rt, counting)
+    assert permissions.reach(conn, jane)                   # no error for the person...
+    assert counting.asked                                  # ...just a walk of the share, as before the cache
+    import sqlite3 as sqlite
+    healed = sqlite.connect(saved)                         # and the damaged file was replaced with a working one
+    try:
+        assert healed.execute("SELECT count(*) FROM rights").fetchone()[0] >= 1
+    finally:
+        healed.close()
