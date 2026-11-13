@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import gzip
+import json
 import logging
 import sqlite3
 from html import escape
@@ -10,7 +12,7 @@ from typing import Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from itsdangerous import BadData, URLSafeTimedSerializer
 from pydantic import BaseModel, Field
 
@@ -135,9 +137,20 @@ def locations(user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)
 
 
 @router.get("/api/collections/{collection_id}/folders")
-def folder_tree(collection_id: int, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def folder_tree(collection_id: int, request: Request, user=Depends(api_user),
+                conn: sqlite3.Connection = Depends(get_db)):
+    """Every folder of a collection the person may see, for the Files tree. A big share library makes this the
+    heaviest answer Files gets (28,789 folders on the box: 2 MB of JSON), so it's written straight out instead
+    of through FastAPI's per-value encoder (most of its time), and gzipped for browsers that take it (2 MB ->
+    about 0.2 MB, which matters on the way out through the proxy)."""
     access = fs.Access.of(conn, user["id"])
-    return {"folders": _fs_errors(lambda: fs.folder_tree(conn, access, collection_id))}
+    folders = _fs_errors(lambda: fs.folder_tree(conn, access, collection_id))
+    body = json.dumps({"folders": folders}, separators=(",", ":"), ensure_ascii=False).encode()
+    headers = {"Vary": "Accept-Encoding", "Cache-Control": "no-store"}
+    if len(body) > 4096 and "gzip" in request.headers.get("accept-encoding", "").lower():
+        body = gzip.compress(body, compresslevel=5)        # level 5: nearly as small as 9, much quicker
+        headers["Content-Encoding"] = "gzip"
+    return Response(body, media_type="application/json", headers=headers)
 
 
 def _claude_json(on_and_allowed: tuple[bool, bool], writable: bool) -> dict:
