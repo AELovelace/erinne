@@ -36,7 +36,7 @@ from pathlib import Path, PurePosixPath
 
 from mnemerynne import fs, jobs, permissions, share
 from mnemerynne.config import Settings
-from mnemerynne.db import transaction
+from mnemerynne.db import folder_derived, transaction
 from mnemerynne.ingest import store
 
 AGENTS = "Agents"
@@ -118,12 +118,28 @@ def ensure_all_agents(conn: sqlite3.Connection) -> int:
     return made
 
 
-def _agents_subtree(conn: sqlite3.Connection, collection_id: int) -> set[int]:
-    rows = conn.execute("SELECT id, parent_id, role FROM folders WHERE collection_id = ? AND deleted_at IS NULL",
-                        (collection_id,)).fetchall()
-    tops = {r["id"] for r in rows if r["role"] == "agents"}
-    parents = {r["id"]: r["parent_id"] for r in rows}
-    return {f for f in parents if permissions._under(f, tops, parents)}
+def _agents_subtree(conn: sqlite3.Connection, collection_id: int) -> frozenset[int]:
+    """The Agents folder and every folder inside it (not in the bin). Worked out once per change to the
+    collection's folders (db.folder_derived): on the box it ran for every Files page, walking up from every one
+    of a collection's folders each time."""
+    return folder_derived(conn, collection_id, "agents_subtree", _agents_subtree_of)
+
+
+def _agents_subtree_of(conn: sqlite3.Connection, folders: dict[int, sqlite3.Row]) -> frozenset[int]:
+    """Down from the Agents folder(s) through folders not in the bin: what's below a binned folder isn't counted,
+    as before (it isn't reached)."""
+    live = {fid: r for fid, r in folders.items() if r["deleted_at"] is None}
+    children: dict[int | None, list[int]] = {}
+    for fid, r in live.items():
+        children.setdefault(r["parent_id"], []).append(fid)      # parent -> its folders, built once
+    found: set[int] = set()
+    todo = [fid for fid, r in live.items() if r["role"] == "agents"]
+    while todo:
+        fid = todo.pop()
+        if fid not in found:
+            found.add(fid)
+            todo.extend(children.get(fid, ()))
+    return frozenset(found)
 
 
 # ---------------------------------------------------------------- access

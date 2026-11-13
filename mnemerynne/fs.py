@@ -31,7 +31,7 @@ from typing import Callable, Iterable
 
 from mnemerynne import jobs, permissions, share
 from mnemerynne.config import Settings
-from mnemerynne.db import folder_rows, transaction
+from mnemerynne.db import folder_derived, folder_rows, transaction
 from mnemerynne.ingest import store
 
 TRASH_COLLECTION = 0  # chunk/vector scope for anything in the bin
@@ -287,18 +287,31 @@ def _folders_of(conn: sqlite3.Connection, collection_id: int) -> dict[int, sqlit
     return folder_rows(conn, collection_id)
 
 
-def live_folder_ids(conn: sqlite3.Connection, collection_id: int) -> set[int]:
-    """Folders that are neither in the bin nor inside a folder in the bin."""
-    folders = _folders_of(conn, collection_id)
+def live_folder_ids(conn: sqlite3.Connection, collection_id: int) -> frozenset[int]:
+    """Folders that are neither in the bin nor inside a folder in the bin. Worked out once per change to the
+    collection's folders and shared (db.folder_derived), hence frozen."""
+    return folder_derived(conn, collection_id, "live", _live_ids)
+
+
+def _live_ids(conn: sqlite3.Connection, folders: dict[int, sqlite3.Row]) -> frozenset[int]:
     live: dict[int, bool] = {}
 
     def check(fid: int) -> bool:
         if fid not in live:
-            row = folders[fid]
-            live[fid] = row["deleted_at"] is None and (row["parent_id"] is None or check(row["parent_id"]))
+            row = folders.get(fid)
+            live[fid] = row is not None and row["deleted_at"] is None and (row["parent_id"] is None
+                                                                          or check(row["parent_id"]))
         return live[fid]
 
-    return {fid for fid in folders if check(fid)}
+    return frozenset(fid for fid in folders if check(fid))
+
+
+def _by_name(collection_id: int):
+    """make() for folder_derived: the collection's folder ids in name order, as SQLite's NOCASE sorts them."""
+    def make(conn: sqlite3.Connection, folders) -> tuple[int, ...]:
+        return tuple(r[0] for r in conn.execute(
+            "SELECT id FROM folders WHERE collection_id = ? ORDER BY name COLLATE NOCASE", (collection_id,)))
+    return make
 
 
 def is_live_folder(conn: sqlite3.Connection, folder_id: int | None) -> bool:
@@ -471,10 +484,12 @@ def folder_tree(conn: sqlite3.Connection, access: Access, collection_id: int) ->
     access.see(collection_id, None)
     live = live_folder_ids(conn, collection_id)
     shown = live & access.visible(collection_id, live)
-    return [{"id": r["id"], "parent_id": r["parent_id"], "name": r["name"],
-             "can_write": access.can_write(collection_id, r["id"]), "role": r["role"]}
-            for r in conn.execute("SELECT * FROM folders WHERE collection_id = ? ORDER BY name COLLATE NOCASE",
-                                  (collection_id,)) if r["id"] in shown]
+    rows = folder_rows(conn, collection_id)              # from memory: no re-reading every folder for the tree
+    order = folder_derived(conn, collection_id, "by_name", _by_name(collection_id))   # sorted once per change
+    reach = access.reaches.get(collection_id)
+    return [{"id": fid, "parent_id": rows[fid]["parent_id"], "name": rows[fid]["name"],
+             "can_write": reach.can_write(fid) if reach else False, "role": rows[fid]["role"]}
+            for fid in order if fid in shown and fid in rows]
 
 
 _LOOSE_RE = re.compile(r"[\s\-_.]+")

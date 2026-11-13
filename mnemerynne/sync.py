@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
-from mnemerynne import editing, fs, group_refs, jobs, permissions, share
+from mnemerynne import db, editing, fs, group_refs, jobs, permissions, share
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import pipeline, store
@@ -260,9 +260,7 @@ def manifest(conn: sqlite3.Connection, root: Root, after: int = 0, limit: int = 
     """What's in the root: folders (on the first page) and files after `after` (a file id), oldest first.
     `next` is the cursor for the following page, or None at the end."""
     limit = max(1, min(limit, MANIFEST_PAGE))
-    tree = {r["id"]: r for r in conn.execute(
-        f"WITH RECURSIVE {_TREE} SELECT id, parent_id, name FROM folders WHERE id IN (SELECT id FROM t)",
-        (root.folder_id,))}
+    tree = _subtree(conn, root)                    # the root and its folders not in the bin, from memory
     paths: dict[int, str] = {root.folder_id: ""}
 
     def path_of(fid: int) -> str:
@@ -278,6 +276,30 @@ def manifest(conn: sqlite3.Connection, root: Root, after: int = 0, limit: int = 
               "sha256": r["blob_sha256"], "version": r["blob_sha256"], "mtime_ns": r["disk_mtime_ns"]}
              for r in rows]
     return {"folders": folders, "files": files, "next": rows[-1]["id"] if len(rows) == limit else None}
+
+
+def _subtree(conn: sqlite3.Connection, root: Root) -> dict[int, sqlite3.Row]:
+    """The root's folder and every folder below it that isn't in the bin (as _TREE finds them), by id, from the
+    collection's folders kept in memory (db.folder_rows): the backup app asks for a manifest page after page, and
+    each page used to work the whole tree out again in the database."""
+    rows = db.folder_rows(conn, root.collection_id)
+    children = db.folder_derived(conn, root.collection_id, "live_children", _live_children)
+    tree, todo = {}, [root.folder_id]
+    while todo:
+        fid = todo.pop()
+        if fid not in tree and fid in rows:
+            tree[fid] = rows[fid]
+            todo.extend(children.get(fid, ()))
+    return tree
+
+
+def _live_children(conn: sqlite3.Connection, folders: dict[int, sqlite3.Row]) -> dict[int | None, tuple[int, ...]]:
+    """parent -> its folders not in the bin (db.folder_derived; shared, so tuples)."""
+    out: dict[int | None, list[int]] = {}
+    for fid, r in folders.items():
+        if r["deleted_at"] is None:
+            out.setdefault(r["parent_id"], []).append(fid)
+    return {parent: tuple(kids) for parent, kids in out.items()}
 
 
 def _manifest_files_sql(conn: sqlite3.Connection, tree: dict) -> str:

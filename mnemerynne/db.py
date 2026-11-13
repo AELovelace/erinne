@@ -94,8 +94,25 @@ def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     conn.execute("COMMIT")
 
 
-_folder_cache: dict[tuple[str, int], tuple[int, dict[int, sqlite3.Row]]] = {}   # (db file, collection) -> rows
+# (db file, collection) -> (version, rows by id, what's been worked out from those rows: name -> value)
+_folder_cache: dict[tuple[str, int], tuple[int, dict[int, sqlite3.Row], dict]] = {}
 _folder_cache_lock = threading.Lock()
+
+
+def folder_derived(conn: sqlite3.Connection, collection_id: int, name: str, make):
+    """Something worked out from a collection's folders, `make(conn, rows)`, kept with those rows until its folders
+    change (folder_rows): the name order, which folders are live, which are under the Agents folder. On the box
+    these were worked out again for every request from all 28,789 folders. The value is shared by every request:
+    make it immutable (a frozenset, a tuple, a dict nobody changes)."""
+    rows = folder_rows(conn, collection_id)
+    path = conn.execute("PRAGMA database_list").fetchone()[2]
+    entry = _folder_cache.get((path, collection_id)) if path else None
+    if entry is None or entry[1] is not rows:      # an in-memory database, or rows replaced meanwhile
+        return make(conn, rows)
+    derived = entry[2]
+    if name not in derived:
+        derived[name] = make(conn, rows)            # two requests may both work it out once: same answer
+    return derived[name]
 
 
 def folder_rows(conn: sqlite3.Connection, collection_id: int) -> dict[int, sqlite3.Row]:
@@ -118,7 +135,7 @@ def folder_rows(conn: sqlite3.Connection, collection_id: int) -> dict[int, sqlit
         return cached[1]
     rows = {r["id"]: r for r in conn.execute("SELECT * FROM folders WHERE collection_id = ?", (collection_id,))}
     with _folder_cache_lock:
-        _folder_cache[key] = (version, rows)
+        _folder_cache[key] = (version, rows, {})   # nothing worked out from the new rows yet (folder_derived)
     return rows
 
 
