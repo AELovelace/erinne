@@ -94,6 +94,19 @@ def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     conn.execute("COMMIT")
 
 
+@contextmanager
+def read_transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """BEGIN (deferred) … COMMIT: a consistent read that doesn't take the write lock. A write inside upgrades it;
+    if another writer got in first, SQLite refuses ("database is locked") rather than overwrite their change."""
+    conn.execute("BEGIN")
+    try:
+        yield conn
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    conn.execute("COMMIT")
+
+
 def _migration_files() -> list[tuple[int, Path]]:
     found = []
     for path in sorted(MIGRATIONS_DIR.iterdir()):

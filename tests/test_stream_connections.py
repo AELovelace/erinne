@@ -99,6 +99,29 @@ def test_a_cancelled_request_still_returns_its_connection(tmp_path):
         gc.enable()
 
 
+def test_a_locked_database_answers_a_json_503_that_pages_can_read(client):
+    """The plain-text 500 for "database is locked" had no status a page could read, and old Lumi Pet tabs took that
+    as "the party is over" and reloaded at once, feeding the storm that held the lock. A JSON 503 they read as a blip."""
+    import sqlite3
+
+    app = client.app                                   # the real app (conftest's client fixture), its handlers and all
+
+    @app.get("/test-locked")
+    def locked():
+        raise sqlite3.OperationalError("database is locked")
+
+    @app.get("/test-other-db-error")
+    def other():
+        raise sqlite3.OperationalError("no such table: nowhere")
+
+    reply = client.get("/test-locked")
+    assert reply.status_code == 503 and reply.headers["retry-after"] == "2"
+    assert "busy" in reply.json()["detail"]
+    import pytest
+    with pytest.raises(sqlite3.OperationalError):      # any other database error is still a bug, raised as before
+        client.get("/test-other-db-error")
+
+
 def test_a_normal_request_still_returns_its_connection_once(tmp_path):
     app = FastAPI()
     app.state.db_pool = db.Pool(tmp_path / "x.db")

@@ -547,3 +547,29 @@ def test_a_couch_party_seats_each_remote_as_its_own_account(client, conn, direct
     assert TestClient(client.app).post(base + "/tv/close").status_code == 401   # only the TV (its owner) closes it
     assert tv.post(base + "/tv/close").json()["closed"] is True
     assert tv.get(base).status_code == 404
+
+
+def test_a_look_with_nothing_due_reads_without_the_write_lock(conn, trio, settings, monkeypatch):
+    """Every open party tab and TV looks every couple of seconds. A look with nothing to catch up must not queue for
+    the one write lock (they all did: "database is locked"); one whose clocks are due still takes it."""
+    from mnemerynne import db
+    from mnemerynne.web.games import _look_party
+
+    code = _party(conn, trio)
+    monkeypatch.setattr(P, "_ms", lambda: T0 + S)            # a second later: nothing due yet
+    assert not P.due(conn, code, T0 + S)
+    other = db.connect(settings.db_path)
+    other.execute("BEGIN IMMEDIATE")                         # someone else holds the write lock
+    try:
+        conn.execute("PRAGMA busy_timeout = 200")            # would fail fast if the look wanted the lock
+        seen = _look_party(conn, code, trio[0], None)
+        assert seen["code"] == code and seen["you"] is not None
+    finally:
+        other.execute("ROLLBACK")
+        other.close()
+        conn.execute("PRAGMA busy_timeout = 10000")
+    later = T0 + P.IDLE_MS + S                               # long idle: due, so the look takes the lock and acts
+    monkeypatch.setattr(P, "_ms", lambda: later)
+    assert P.due(conn, code, later)
+    with pytest.raises(P.PartyError):                        # an idle party breaks up (written under the lock)
+        _look_party(conn, code, trio[0], None)

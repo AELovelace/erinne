@@ -1158,6 +1158,12 @@ def _member_act(conn: sqlite3.Connection, state: dict, member: dict, action: str
         raise PartyError("Your Lumi doesn't know that one.")
 
 
+def due(conn: sqlite3.Connection, code: str, now: int | None = None) -> bool:
+    """Whether a look now would write (the party's clocks are due), so the caller takes the write lock only then.
+    It doesn't mark anyone as seen first, as look() does; that only makes it say "due" a little more often."""
+    return _due(_read(conn, code), _ms() if now is None else now)
+
+
 def look(conn: sqlite3.Connection, code: str, user_id: int | None, now: int | None = None, *, display: str | None = None) -> dict:
     """The party as this member (or the couch TV) sees it now, caught up on its clocks (the write lock only when due)."""
     now = _ms() if now is None else now

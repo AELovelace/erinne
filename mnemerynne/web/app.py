@@ -357,6 +357,21 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             request.session["after_login"] = request.url.path + (f"?{request.url.query}" if request.url.query else "")
         return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
 
+    @app.exception_handler(sqlite3.OperationalError)
+    async def _database_busy(request: Request, exc: sqlite3.OperationalError):
+        """A write that waited out busy_timeout for the lock: a short JSON 503 "try again", not a plain-text 500.
+
+        Pages read a JSON refusal's status. The plain-text 500 had none, and Lumi Pet's party feed took a failure
+        without a status as "the party is over": it reloaded at once, over and over, and every reload waited on the
+        same lock. A storm that fed itself, until the app ran out of memory. Any other database error is a bug,
+        and goes on to the usual 500 with its traceback."""
+        text = str(exc).lower()
+        if "locked" not in text and "busy" not in text:
+            raise exc                                  # not a lock: the normal error path (logged with its traceback)
+        log.warning("Database busy: %s %s (%s)", request.method, request.url.path, exc)   # one line, no traceback
+        return JSONResponse({"detail": "The server is busy for a moment. Try again shortly."},
+                            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, headers={"Retry-After": "2"})
+
     @app.get("/manifest.webmanifest", include_in_schema=False)
     def manifest():
         """Makes Erynne installable (Add to Home screen), and on Android a target in the Share menu:

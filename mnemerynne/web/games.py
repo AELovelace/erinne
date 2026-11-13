@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from mnemerynne import arcade, lobby, lumisoft, runner, showdown
 from mnemerynne.rooms_bus import sse
 from mnemerynne import bfgguf, casino, casino_remote, claude_chat, coins, games, lumi_tv, lumidungeon, lumiparty, lumipet, lumitales, prism, push, users
-from mnemerynne.db import transaction
+from mnemerynne.db import read_transaction, transaction
 from mnemerynne.media import remotes, screens
 from mnemerynne.web.deps import _session_user, get_db, release_db
 from mnemerynne.web.media import _media_on, _screen, media_user, screen_device
@@ -407,6 +407,17 @@ def _party_call(fn, *args, **kwargs):
         raise HTTPException(exc.status, str(exc)) from None
 
 
+def _look_party(conn, code: str, user_id: int | None, display: str | None) -> dict:
+    """A party look, taking the write lock only when the party's clocks are due. Every open party tab and TV looks
+    every couple of seconds; with each look holding the one write lock, they queued for it ("database is locked")."""
+    now = lumiparty._ms()                              # one moment for the check and the look, so they agree
+    with read_transaction(conn):                       # no write lock: just a consistent read
+        if not lumiparty.due(conn, code, now):
+            return lumiparty.look(conn, code, user_id, now=now, display=display)   # nothing to catch up: read only
+    with transaction(conn):                            # its clocks are due: the write lock, and look again inside it
+        return lumiparty.look(conn, code, user_id, display=display)
+
+
 def _party_display(request: Request, conn, owner) -> str | None:
     """This browser's couch identity: the TV itself (its screen key), as its owner (also with its owner signed in on its top
     bar, as _tv_identity allows). None otherwise."""
@@ -442,8 +453,7 @@ def party_create(request: Request, body: PartyCreate | None = None, user=Depends
 def party_look(code: str, request: Request, user=Depends(pet_user), owner=Depends(media_user), conn=Depends(get_db)):
     """The party as this member, or its couch TV, sees it."""
     display = _party_display(request, conn, owner)
-    with transaction(conn):
-        return _party_call(lumiparty.look, conn, code, user["id"], display=display)
+    return _party_call(_look_party, conn, code, user["id"], display)   # the write lock only when due
 
 
 @router.post("/api/media/games/lumi-pet/parties/{code}")
@@ -495,8 +505,7 @@ async def party_stream(code: str, request: Request, user=Depends(pet_user), owne
     def look():
         c = pool.get()
         try:
-            with transaction(c):
-                return lumiparty.look(c, code, user["id"], display=display)
+            return _look_party(c, code, user["id"], display)      # every 2 s per open stream: lock only when due
         finally:
             pool.put(c)
 
