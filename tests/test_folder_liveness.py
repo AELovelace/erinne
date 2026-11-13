@@ -46,3 +46,40 @@ def test_it_reads_one_row_per_level_not_the_whole_collection(conn):
     finally:
         conn.set_trace_callback(None)
     assert len(reads) == 1 and "WITH RECURSIVE up" in reads[0]        # one query, walking up; no full load
+
+
+def test_folder_rows_come_from_memory_until_any_connection_changes_a_folder(settings, conn):
+    """db.folder_rows: on the box every request re-read the big library's 28,789 folder rows. Now they're read
+    once and again only after a change, whichever process made it (the worker's scan writes on its own connection)."""
+    from mnemerynne import db
+
+    cid = permissions.private_collection_id(conn, users.create_user(conn, "tess", "password123"))
+    first = _folder(conn, cid, None, "First")
+    rows = db.folder_rows(conn, cid)
+    assert set(rows) == {first}
+    assert db.folder_rows(conn, cid) is rows                          # unchanged: the very same rows, from memory
+
+    other = db.connect(settings.db_path)                              # "another process": its own connection
+    try:
+        second = _folder(other, cid, None, "Second")                  # added
+        assert set(db.folder_rows(conn, cid)) == {first, second}
+        other.execute("UPDATE folders SET name = 'Renamed' WHERE id = ?", (first,))   # changed
+        assert db.folder_rows(conn, cid)[first]["name"] == "Renamed"
+        other.execute("DELETE FROM folders WHERE id = ?", (second,))  # removed
+        assert set(db.folder_rows(conn, cid)) == {first}
+    finally:
+        other.close()
+
+
+def test_folder_rows_never_mix_up_two_databases(tmp_path):
+    from mnemerynne import db
+
+    seen = []
+    for name in ("one.db", "two.db"):                                 # same collection id, different files
+        c = db.connect(tmp_path / name)
+        db.migrate(c, 4)
+        cid = permissions.private_collection_id(c, users.create_user(c, "zed", "password123"))
+        _folder(c, cid, None, f"in-{name}")
+        seen.append({r["name"] for r in db.folder_rows(c, cid).values()})
+        c.close()
+    assert seen == [{"in-one.db"}, {"in-two.db"}]

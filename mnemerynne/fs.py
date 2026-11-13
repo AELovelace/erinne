@@ -31,7 +31,7 @@ from typing import Callable, Iterable
 
 from mnemerynne import jobs, permissions, share
 from mnemerynne.config import Settings
-from mnemerynne.db import transaction
+from mnemerynne.db import folder_rows, transaction
 from mnemerynne.ingest import store
 
 TRASH_COLLECTION = 0  # chunk/vector scope for anything in the bin
@@ -283,7 +283,8 @@ def _folder(conn: sqlite3.Connection, folder_id: int) -> sqlite3.Row:
 
 
 def _folders_of(conn: sqlite3.Connection, collection_id: int) -> dict[int, sqlite3.Row]:
-    return {r["id"]: r for r in conn.execute("SELECT * FROM folders WHERE collection_id = ?", (collection_id,))}
+    """Every folder of a collection, by id: from memory unless its folders changed (db.folder_rows). Read-only."""
+    return folder_rows(conn, collection_id)
 
 
 def live_folder_ids(conn: sqlite3.Connection, collection_id: int) -> set[int]:

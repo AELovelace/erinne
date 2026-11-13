@@ -94,6 +94,34 @@ def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     conn.execute("COMMIT")
 
 
+_folder_cache: dict[tuple[str, int], tuple[int, dict[int, sqlite3.Row]]] = {}   # (db file, collection) -> rows
+_folder_cache_lock = threading.Lock()
+
+
+def folder_rows(conn: sqlite3.Connection, collection_id: int) -> dict[int, sqlite3.Row]:
+    """Every folder row of a collection (SELECT *), by id: read from the database only when its folders changed
+    since the last read (folder_versions: a new random version on every change, set by triggers whichever
+    process wrote), otherwise from memory.
+    On the box every request re-read the 28,789 rows of the big library, a dozen requests at once, and they
+    queued behind each other. Read-only: callers must not change the dict or its rows.
+
+    The version is read before the rows, so rows read during a change are at worst newer than their version,
+    and are simply read again next time."""
+    found = conn.execute("SELECT version FROM folder_versions WHERE collection_id = ?", (collection_id,)).fetchone()
+    version = found[0] if found else 0
+    path = conn.execute("PRAGMA database_list").fetchone()[2]
+    if not path:                                   # an in-memory database (tests): no file to tell them apart by
+        return {r["id"]: r for r in conn.execute("SELECT * FROM folders WHERE collection_id = ?", (collection_id,))}
+    key = (path, collection_id)                    # this database file's collection
+    cached = _folder_cache.get(key)
+    if cached is not None and cached[0] == version:
+        return cached[1]
+    rows = {r["id"]: r for r in conn.execute("SELECT * FROM folders WHERE collection_id = ?", (collection_id,))}
+    with _folder_cache_lock:
+        _folder_cache[key] = (version, rows)
+    return rows
+
+
 @contextmanager
 def read_transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     """BEGIN (deferred) … COMMIT: a consistent read that doesn't take the write lock. A write inside upgrades it;

@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO, Iterable, Protocol
 
+from mnemerynne import db
 from mnemerynne.config import Settings
 
 log = logging.getLogger("mnemerynne.share")
@@ -634,8 +635,6 @@ def _watch_events(rt: Runtime, lines) -> None:
 def apply_events(rt: Runtime, lines: list[str]) -> None:
     """A batch of the watcher's lines ("EVENTS<tab>path"): folders whose permissions changed are read again; an
     overflowed queue (the kernel dropped events) means nothing can be trusted, so every walk is due."""
-    from mnemerynne import db                       # imported late: db doesn't need the share
-
     changed: set[Path] = set()
     for line in lines:
         events, _, path = line.rstrip("\n").partition("\t")
@@ -818,9 +817,8 @@ def library_reach(conn: sqlite3.Connection, row: sqlite3.Row, user: sqlite3.Row)
         return None
     uid, gids = ids
     base = rt.root / Path(row["share_path"])
-    folders = conn.execute("SELECT id, parent_id, name, trash_path FROM folders WHERE collection_id = ?",
-                           (row["id"],)).fetchall()
-    info = {f["id"]: f for f in folders}
+    info = db.folder_rows(conn, row["id"])        # from memory unless the library's folders changed
+    folders = list(info.values())
     paths: dict[int, Path | None] = {}
 
     def path_of(fid: int) -> Path | None:
