@@ -17,7 +17,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI
 
-from mnemerynne import db, directory, share
+from mnemerynne import db, directory, events, share
 from mnemerynne.config import Settings, get_settings
 from mnemerynne.services import hooks as hooks_mod, registry
 
@@ -47,7 +47,12 @@ def create_service(name: str, settings: Settings | None = None, services=None) -
             version = db.migrate(conn, settings.embed_dim)   # normally done already: then this changes nothing
         finally:
             conn.close()
+        bus = events.configure(settings.valkey_url)        # live events with the other services
+        if isinstance(bus, events.LocalBus):
+            log.warning("%s service: no Valkey (MNEMERYNNE_VALKEY_URL), so its live events stay in this process.",
+                        name.capitalize())
         async with AsyncExitStack() as stack:
+            stack.push_async_callback(bus.aclose)
             for hook in service.hooks:
                 await stack.enter_async_context(hooks_mod.HOOKS[hook](app, settings, services))
             log.info("%s service ready: %s (schema v%d).", name.capitalize(), service.serves, version)

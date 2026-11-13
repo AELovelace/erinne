@@ -21,7 +21,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 from starlette.middleware.sessions import SessionMiddleware
 
-from mnemerynne import (identity, sync as sync_mod, balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, feedback as feedback_mod,
+from mnemerynne import (identity, sync as sync_mod, balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, events, feedback as feedback_mod,
                         mcp_server, media as media_mod, memory,
                         diagnostics, messages as messages_mod, permissions, remote, rooms as rooms_mod, rooms_bus, share,
                         sharepoint, theme as theme_mod,
@@ -198,6 +198,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         finally:
             conn.close()
         log.info("Database ready at %s (schema v%d).", settings.db_path, version)
+        events.configure(settings.valkey_url)   # live events: Valkey when set (services), else inside this process
 
         # Balancer nodes (Settings): the answer model's requests go to the least busy one.
         balancer = (services.balancer if services and services.balancer is not None else balancer_mod.Balancer())

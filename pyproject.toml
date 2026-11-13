@@ -41,10 +41,14 @@ dependencies = [
     "segno==1.6.6",
     # Checks the installed packages for known vulnerabilities (mnemerynne/briefings.py, Settings → Updates)
     "pip-audit==2.10.1",
+    # Live events between the services, through Valkey (mnemerynne/events.py, docs/plans/services-rewrite.md)
+    "redis==8.1.0",
 ]
 
 [dependency-groups]
 dev = [
+    # A stand-in Valkey for the event bus's tests (tests/test_events.py)
+    "fakeredis==2.40.0",
     "pytest==9.1.0",
     "pytest-xdist[psutil]==3.8.0",
 ]

@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     # Web / sessions
     host: str = "127.0.0.1"
     port: int = 38200
+    # Valkey (Redis protocol) for live events between the services, e.g. unix:///run/valkey/valkey.sock or
+    # redis://127.0.0.1:6379/0 (events.py, docs/plans/services-rewrite.md). Empty: events stay inside each
+    # process, which is right for the all-in-one web app and wrong once features run as services.
+    valkey_url: str = ""
     # Signs sessions and encrypts stored credentials. A server others can reach
     # (public_url set, or host not loopback) refuses to start without a real one.
     secret_key: str = ""
