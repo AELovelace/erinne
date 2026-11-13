@@ -180,7 +180,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     async def lifespan(app: FastAPI):
         conn = db.connect(settings.db_path)
         try:
-            version = db.migrate(conn, settings.embed_dim)
+            version = db.migrate_all(settings.db_path, settings.embed_dim)["core"]   # core and every feature file
             app.state.looks = theme_mod.load_looks(conn, settings)   # the themes, as every page draws them
             app.state.instance = identity.load(conn, settings)      # which box this is, for the connector
             mcp_server.apply_identity(app.state.mcp, app.state.instance)

@@ -9,6 +9,7 @@ the web server pointed at it, one at a time.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import logging
 import os
@@ -42,11 +43,9 @@ def create_service(name: str, settings: Settings | None = None, services=None) -
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        conn = db.connect(settings.db_path)
-        try:
-            version = db.migrate(conn, settings.embed_dim)   # normally done already: then this changes nothing
-        finally:
-            conn.close()
+        # The web app migrates the database (db.migrate_all); a service waits for it, so two processes never
+        # apply the same migration.
+        version = await asyncio.to_thread(db.wait_migrated, settings.db_path)
         bus = events.configure(settings.valkey_url)        # live events with the other services
         if isinstance(bus, events.LocalBus):
             log.warning("%s service: no Valkey (MNEMERYNNE_VALKEY_URL), so its live events stay in this process.",

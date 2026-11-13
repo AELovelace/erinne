@@ -23,8 +23,8 @@ def _connect():
     from mnemerynne import directory, share
 
     settings = get_settings()
+    db.migrate_all(settings.db_path, settings.embed_dim)     # core, every feature file, and their tables
     conn = db.connect(settings.db_path)
-    db.migrate(conn, settings.embed_dim)
     share.configure(settings, directory.from_settings(settings))
     return conn
 

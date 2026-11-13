@@ -1,7 +1,9 @@
 """SQLite access: connections, transactions, migrations and the vector table.
 
-Everything lives in one database file: metadata, FTS5 keyword index,
-sqlite-vec vectors and (later) LangGraph checkpoints and memories.
+The core database file holds users, files, folders, permissions, search and settings. Features move into
+files of their own, one per feature (games.db, rooms.db, ...: FEATURE_DBS), so each has its own write lock and
+the services write in parallel (docs/plans/services-rewrite.md). A feature's connection sees core too,
+attached read-only as `core`, so its queries can still join users or files.
 
 Connections run in autocommit mode (isolation_level=None) because LangGraph's
 SQLite checkpointer and store manage their own transactions; our code opens
@@ -10,12 +12,14 @@ explicit transactions with `transaction()`.
 
 from __future__ import annotations
 
+import logging
 import re
 import sqlite3
 import threading
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator, Sequence
 
 import sqlite_vec
 
@@ -32,6 +36,45 @@ def connect(path: Path | str) -> sqlite3.Connection:
     if str(path) != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, isolation_level=None, check_same_thread=False, timeout=10.0)
+    return _configure(conn, path)
+
+
+@dataclass(frozen=True)
+class FeatureDb:
+    """A feature's own database file (<data dir>/<name>.db), next to the core one."""
+    name: str
+    moves: tuple[str, ...] = ()         # core tables whose rows move here (move_tables), in this order
+    migrations: Path | None = None      # its numbered migrations; default migrations/<name>/
+
+
+# The feature files, filled phase by phase (docs/plans/services-rewrite.md): each with its migrations under
+# migrations/<name>/ and the core tables that move into it.
+FEATURE_DBS: dict[str, FeatureDb] = {}
+
+
+def feature_path(core_path: Path | str, feature: str) -> Path:
+    """games -> <the core database's folder>/games.db"""
+    return Path(core_path).with_name(f"{feature}.db")
+
+
+def connect_feature(core_path: Path | str, feature: str) -> sqlite3.Connection:
+    """A connection to a feature's own file, with the core database attached read-only as `core`: queries find
+    core's tables by their plain names (JOIN users), and a write to one fails ("readonly database") instead of
+    spreading a transaction over two files.
+
+    Read-only for speed, not only safety: BEGIN IMMEDIATE takes the write lock on every writable database a
+    connection has attached, so a writable core would put every feature write back in line for core's lock."""
+    path = feature_path(core_path, feature)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, isolation_level=None, check_same_thread=False, timeout=10.0,
+                           uri=True)                          # uri: so ATTACH takes core's ?mode=ro
+    _configure(conn, path)
+    conn.execute("ATTACH DATABASE ? AS core", (Path(core_path).resolve().as_uri() + "?mode=ro",))
+    return conn
+
+
+def _configure(conn: sqlite3.Connection, path: Path | str) -> sqlite3.Connection:
+    """The settings every connection gets (rows by name, foreign keys, waits for the lock, WAL)."""
     conn.row_factory = sqlite3.Row
     conn.enable_load_extension(True)
     sqlite_vec.load(conn)
@@ -49,8 +92,12 @@ class Pool:
     cache of recently read pages) each time. It never makes anyone wait: with none spare, get() opens one
     more, because event streams and downloads keep theirs for as long as they run."""
 
-    def __init__(self, path: Path | str, keep: int = 8) -> None:
+    def __init__(self, path: Path | str, keep: int = 8,
+                 opener: Callable[[], sqlite3.Connection] | None = None) -> None:
+        """`opener`: how to open a new connection (a feature's: lambda: connect_feature(core, "games"));
+        default connect(path)."""
         self.path, self.keep = path, keep
+        self._open = opener or (lambda: connect(self.path))
         self._idle: list[sqlite3.Connection] = []
         self._lock = threading.Lock()
         self._closed = False
@@ -59,7 +106,7 @@ class Pool:
         with self._lock:
             if self._idle:
                 return self._idle.pop()
-        return connect(self.path)
+        return self._open()
 
     def put(self, conn: sqlite3.Connection) -> None:
         """Back for the next request; closed instead if it is mid-transaction, surplus or the app is stopping."""
@@ -152,9 +199,13 @@ def read_transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     conn.execute("COMMIT")
 
 
-def _migration_files() -> list[tuple[int, Path]]:
+def _migration_files(directory: Path | None = None) -> list[tuple[int, Path]]:
+    """The numbered migrations in a folder (core's: migrations/; a feature's: migrations/<name>/)."""
+    directory = directory or MIGRATIONS_DIR
+    if not directory.is_dir():
+        return []                                      # a feature with no migrations yet
     found = []
-    for path in sorted(MIGRATIONS_DIR.iterdir()):
+    for path in sorted(directory.iterdir()):
         match = _MIGRATION_RE.match(path.name)
         if match:
             found.append((int(match.group(1)), path))
@@ -174,7 +225,16 @@ def migrate(conn: sqlite3.Connection, embed_dim: int, *, ensure_vectors: bool = 
     Returns the schema version after migrating. `ensure_vectors=False` skips
     the vector-table check (used by re-embedding, which rebuilds it).
     """
-    files = _migration_files()
+    _apply_migrations(conn, _migration_files(), "foreign_key_check")
+    if ensure_vectors:
+        ensure_vector_table(conn, embed_dim)
+    return schema_version(conn)
+
+
+def _apply_migrations(conn: sqlite3.Connection, files: list[tuple[int, Path]], fk_check: str) -> None:
+    """Apply the files newer than the connection's main database's user_version, each in its own transaction
+    with the version bump. `fk_check`: the PRAGMA that checks references afterwards (a feature's checks only its
+    own file, not the read-only core it has attached)."""
     current = schema_version(conn)
     if current > len(files):
         raise SchemaError(
@@ -193,7 +253,7 @@ def migrate(conn: sqlite3.Connection, embed_dim: int, *, ensure_vectors: bool = 
         # the version bump in one explicit transaction of our own.
         try:
             conn.executescript(f"BEGIN IMMEDIATE;\n{sql}\nPRAGMA user_version = {number};")
-            broken = conn.execute("PRAGMA foreign_key_check").fetchall()
+            broken = conn.execute(f"PRAGMA {fk_check}").fetchall()
             if broken:
                 raise SchemaError(f"Migration {path.name} left {len(broken)} broken reference(s), "
                                   f"e.g. {tuple(broken[0])}")
@@ -207,9 +267,137 @@ def migrate(conn: sqlite3.Connection, embed_dim: int, *, ensure_vectors: bool = 
         finally:
             if no_fk:
                 conn.execute("PRAGMA foreign_keys = ON")
-    if ensure_vectors:
-        ensure_vector_table(conn, embed_dim)
+
+
+# ------------------------------------------------------------- feature files
+def _feature(feature: str) -> FeatureDb:
+    try:
+        return FEATURE_DBS[feature]
+    except KeyError:
+        raise SchemaError(f"No feature database {feature!r}; there are: {', '.join(FEATURE_DBS) or 'none yet'}")
+
+
+def _feature_files(feature: str) -> list[tuple[int, Path]]:
+    found = _feature(feature)
+    return _migration_files(found.migrations or MIGRATIONS_DIR / found.name)
+
+
+def migrate_feature(conn: sqlite3.Connection, feature: str) -> int:
+    """Apply a feature file's pending migrations on its connection (connect_feature). Returns its version.
+    Its tables may not reference core's (users, files): SQLite only follows references inside one file, so
+    those links are kept by the code (deletion events), not by the database."""
+    _apply_migrations(conn, _feature_files(feature), "main.foreign_key_check")
     return schema_version(conn)
+
+
+def _has_table(conn: sqlite3.Connection, schema: str, table: str) -> bool:
+    return conn.execute(f"SELECT 1 FROM {schema}.sqlite_master WHERE type = 'table' AND name = ?",
+                        (table,)).fetchone() is not None
+
+
+def move_tables(core: sqlite3.Connection, feature: str) -> dict[str, int]:
+    """Move a feature's tables (FeatureDb.moves) from the core database into its own file, on a core connection.
+    Its migrations must have made the tables there. Safe to run again: a table already moved is skipped, and a
+    copy left half done (a crash) is done again. Rows are counted on both sides before anything is dropped, and
+    a table still referenced by one that stays in core is refused. Returns the rows moved per table."""
+    found = _feature(feature)
+    pending = [t for t in found.moves if _has_table(core, "main", t)]
+    if not pending:
+        return {}
+    staying = [r[0] for r in core.execute("SELECT name FROM main.sqlite_master WHERE type = 'table'")
+               if r[0] not in pending]
+    for table in staying:                              # a reference into a moving table would break in core
+        for ref in core.execute(f'PRAGMA main.foreign_key_list("{table}")').fetchall():
+            if ref["table"] in pending:
+                raise SchemaError(f"Can't move {ref['table']} to {feature}.db: core's {table} refers to it.")
+    core_path = core.execute("PRAGMA database_list").fetchone()[2]
+    core.execute("ATTACH DATABASE ? AS feature", (str(feature_path(core_path, feature)),))
+    moved: dict[str, int] = {}
+    try:
+        for table in pending:
+            if not _has_table(core, "feature", table):
+                raise SchemaError(f"{feature}.db has no table {table}: add it to migrations/{feature}/ first.")
+            theirs = {r["name"] for r in core.execute(f"PRAGMA feature.table_info({table})")}
+            columns = ", ".join(f'"{r["name"]}"' for r in core.execute(f"PRAGMA main.table_info({table})")
+                                if r["name"] in theirs)
+            with transaction(core):                    # the copy, all or nothing
+                core.execute(f"DELETE FROM feature.{table}")          # anything a crashed copy left
+                core.execute(f"INSERT INTO feature.{table} ({columns}) SELECT {columns} FROM main.{table}")
+                here = core.execute(f"SELECT count(*) FROM main.{table}").fetchone()[0]
+                there = core.execute(f"SELECT count(*) FROM feature.{table}").fetchone()[0]
+                if here != there:
+                    raise SchemaError(f"Moving {table}: {here} rows in core but {there} in {feature}.db")
+            moved[table] = here
+        core.execute("PRAGMA foreign_keys = OFF")      # the moving tables refer to each other: drop in any order
+        try:
+            with transaction(core):                    # core gives them up only once every copy checked out
+                for table in pending:
+                    core.execute(f"DROP TABLE main.{table}")
+        finally:
+            core.execute("PRAGMA foreign_keys = ON")
+    finally:
+        core.execute("DETACH DATABASE feature")
+    return moved
+
+
+def migrate_all(core_path: Path | str, embed_dim: int) -> dict[str, int]:
+    """Everything, in order: core's migrations, then each feature file's, then their tables out of core. Only
+    the web app (at start) and `mnemerynne init-db` run this; the services wait for it (wait_migrated), so two
+    processes never apply the same migration. Returns each file's version ("core" for core)."""
+    core = connect(core_path)
+    try:
+        versions = {"core": migrate(core, embed_dim)}
+        for name in FEATURE_DBS:
+            conn = connect_feature(core_path, name)
+            try:
+                versions[name] = migrate_feature(conn, name)
+            finally:
+                conn.close()
+            moved = move_tables(core, name)
+            if moved:
+                logging.getLogger("mnemerynne.db").info("Moved into %s.db: %s.", name,
+                                                        ", ".join(f"{t} ({n} rows)" for t, n in moved.items()))
+    finally:
+        core.close()
+    return versions
+
+
+def wait_migrated(core_path: Path | str, timeout: float = 120.0) -> int:
+    """For a service: wait until the web app has brought core and every feature file up to this code's version
+    (it migrates; the services don't), then return core's version. Still behind at the timeout, or newer than this
+    code: SchemaError."""
+    import time
+
+    want_core = len(_migration_files())
+    want = {name: len(_feature_files(name)) for name in FEATURE_DBS}
+    until = time.monotonic() + timeout
+    while True:
+        core = connect(core_path)
+        try:
+            have_core = schema_version(core)
+        finally:
+            core.close()
+        if have_core > want_core:
+            raise SchemaError(f"Database schema v{have_core} is newer than this code (v{want_core}); "
+                              "upgrade mnemerynne.")
+        behind = [] if have_core >= want_core else [f"core v{have_core} < v{want_core}"]
+        for name, version in want.items():
+            if not feature_path(core_path, name).exists():
+                behind.append(f"{name}.db missing")
+                continue
+            conn = connect_feature(core_path, name)
+            try:
+                have = schema_version(conn)
+            finally:
+                conn.close()
+            if have < version:
+                behind.append(f"{name} v{have} < v{version}")
+        if not behind:
+            return have_core
+        if time.monotonic() >= until:
+            raise SchemaError("The database isn't up to date (" + "; ".join(behind)
+                              + "): the web app migrates it at start; is it running?")
+        time.sleep(1)
 
 
 def drop_vector_table(conn: sqlite3.Connection) -> None:
