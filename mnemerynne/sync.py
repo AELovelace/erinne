@@ -273,14 +273,34 @@ def manifest(conn: sqlite3.Connection, root: Root, after: int = 0, limit: int = 
         return paths[fid]
 
     folders = sorted(path_of(fid) for fid in tree if fid != root.folder_id) if after == 0 else []
-    rows = conn.execute(
-        f"WITH RECURSIVE {_TREE} SELECT f.id, f.folder_id, f.display_name, f.blob_sha256, f.disk_mtime_ns, b.size "
-        "FROM files f JOIN blobs b ON b.sha256 = f.blob_sha256 WHERE f.folder_id IN (SELECT id FROM t) "
-        "AND f.deleted_at IS NULL AND f.id > ? ORDER BY f.id LIMIT ?", (root.folder_id, after, limit)).fetchall()
+    rows = conn.execute(_manifest_files_sql(conn, tree), (after, json.dumps(list(tree)), limit)).fetchall()
     files = [{"path": f"{path_of(r['folder_id'])}/{r['display_name']}".lstrip("/"), "size": r["size"],
               "sha256": r["blob_sha256"], "version": r["blob_sha256"], "mtime_ns": r["disk_mtime_ns"]}
              for r in rows]
     return {"folders": folders, "files": files, "next": rows[-1]["id"] if len(rows) == limit else None}
+
+
+def _manifest_files_sql(conn: sqlite3.Connection, tree: dict) -> str:
+    """The query for one manifest page: live files in the root's folders (a JSON list of ids), after a file id,
+    in id order, `limit` of them. Parameters: (after, folder ids as JSON, limit).
+
+    Two ways to find them, and which is cheaper depends on how much of the files table is the root's:
+    - by folder (the files_folder index): finds the root's files directly, but has to gather and sort all of
+      them for every page. Best for a small root: one or two pages.
+    - in id order (the "+" keeps SQLite off the folder index): reads files from `after` on and stops once the
+      page is full, so a page costs about a page. Best for a big root: the box's root 5 had pages taking up to
+      30 s, each gathering and sorting every file in the root again (320,000 files: 95 s for the whole manifest
+      on a fast PC, under 5 s this way)."""
+    ids = "(SELECT value FROM json_each(?2))"
+    span = conn.execute("SELECT coalesce(max(id) - min(id), 0) FROM files").fetchone()[0]   # about how many files in all
+    enough = span // 8 + 1                         # the root is a good share of all files at this many
+    counted = conn.execute(f"SELECT count(*) FROM (SELECT 1 FROM files WHERE folder_id IN {ids} LIMIT ?1)",
+                           (enough, json.dumps(list(tree)))).fetchone()[0]   # index-only, and stops at `enough`
+    by_id = counted >= enough                      # a big root: read in id order
+    where = f"+f.folder_id IN {ids}" if by_id else f"f.folder_id IN {ids}"
+    return ("SELECT f.id, f.folder_id, f.display_name, f.blob_sha256, f.disk_mtime_ns, b.size "
+            "FROM files f JOIN blobs b ON b.sha256 = f.blob_sha256 "
+            f"WHERE f.id > ?1 AND f.deleted_at IS NULL AND {where} ORDER BY f.id LIMIT ?3")
 
 
 # ------------------------------------------------------------------ lookups
