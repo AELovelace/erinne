@@ -115,8 +115,11 @@
     const response = await fetch(url, { method: body === undefined ? "GET" : "POST", credentials: "same-origin",
       headers: Object.assign({}, extraHeaders, body === undefined ? {} : { "Content-Type": "application/json" }),
       body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(10000), cache: "no-store" });
-    const data = await response.json();
-    if (!response.ok) {
+    let data = {};
+    try { data = await response.json(); } catch (e) { // Not JSON: a proxy's error page (nginx's 502) or a cut-off answer.
+      if (response.ok) throw e;                        // A good answer that won't parse is still a failure, as before.
+    }
+    if (!response.ok) { // The failure always carries its status, so callers can tell "the server is struggling" from "no".
       const failure = new Error(typeof data.detail === "string" ? data.detail : "This move could not be accepted.");
       failure.status = response.status;
       throw failure;

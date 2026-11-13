@@ -1039,6 +1039,24 @@ Then in a browser: sign in, open **Files** (statuses should reach Ready),
 ask "How do I run the night audit?" on **Ask**, and click a citation: it
 should open the OPERA manual at the right page.
 
+### Sign-in works, everything after it is a 502
+
+If nginx's error log says `upstream prematurely closed connection` or `Connection reset by peer`, and
+`journalctl -u mnemerynne-web` shows `sqlite3.OperationalError: unable to open database file`, the app has
+run out of open files. Each database connection holds three (the database, `-wal`, `-shm`), and each open
+tab holds a socket. The sign-in page still loads because it reuses a spare connection.
+
+```sh
+PID=$(systemctl show -p MainPID --value mnemerynne-web)
+sudo ls /proc/$PID/fd | wc -l                 # files open now
+grep "open files" /proc/$PID/limits           # the limit: should be 65536, not 1024
+```
+
+`mnemerynne-web.service` sets `LimitNOFILE=65536`. A box set up before that needs the unit copied
+again (section 3), `sudo systemctl daemon-reload` and `sudo systemctl restart mnemerynne-web`.
+Live streams (Rooms, party games, TV screens, radio) hand their request's connection back as soon as
+they start (`release_db` in `mnemerynne/web/deps.py`), so open tabs no longer each pin a connection.
+
 ## Moving an Erinne install to Mnemerynne
 
 A box set up before the rename (user `erinne`, `/opt/erinne`, `erinne-*`

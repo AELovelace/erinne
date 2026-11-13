@@ -18,7 +18,7 @@ from mnemerynne.rooms_bus import sse
 from mnemerynne import bfgguf, casino, casino_remote, claude_chat, coins, games, lumi_tv, lumidungeon, lumiparty, lumipet, lumitales, prism, push, users
 from mnemerynne.db import transaction
 from mnemerynne.media import remotes, screens
-from mnemerynne.web.deps import _session_user, get_db
+from mnemerynne.web.deps import _session_user, get_db, release_db
 from mnemerynne.web.media import _media_on, _screen, media_user, screen_device
 
 STATIC = Path(__file__).parent / "static"
@@ -548,6 +548,7 @@ async def party_stream(code: str, request: Request, user=Depends(pet_user), owne
             lumiparty.HUB.unlisten(first["code"], wake)
             lobby.PRESENCE.closed(table, actor)
 
+    release_db(request)     # the stream's look() borrows its own connection: don't hold this one while it stays open
     return StreamingResponse(events(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 

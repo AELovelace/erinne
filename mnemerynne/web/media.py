@@ -32,7 +32,7 @@ from mnemerynne.ingest import store
 from mnemerynne.media import artwork, browse, catalog, live, probe, remotes, screens, signage, soundcloud, speakers, transcode
 from mnemerynne.web import security
 from mnemerynne.web.admin import _log
-from mnemerynne.web.deps import _session_user, admin_user, api_user, get_db, get_settings, is_admin, page_user
+from mnemerynne.web.deps import _session_user, admin_user, api_user, get_db, get_settings, is_admin, page_user, release_db
 
 log = logging.getLogger("mnemerynne.media")
 
@@ -410,11 +410,12 @@ async def watch(source_id: int, request: Request, user=Depends(media_user), conn
 
 
 @router.get("/media/radio/{key}/stream")
-async def radio_stream(key: str, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
+async def radio_stream(key: str, request: Request, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_db)):
     """A plain-http station, relayed so a page served over https may play it."""
     found = await anyio.to_thread.run_sync(live.station, conn, key)
     if found is None:
         raise _not_found()
+    release_db(request)     # a listener can keep the station on for hours: the relay needs no database
     client = httpx.AsyncClient(transport=live.TRANSPORT, timeout=httpx.Timeout(10.0, read=60.0),
                                follow_redirects=True)
     upstream = None
@@ -854,6 +855,7 @@ def _command_stream(request: Request, conn: sqlite3.Connection, screen: sqlite3.
     """A screen's (or a speaker's) commands as server-sent events, until it goes or is unpaired."""
     with transaction(conn):
         screens.seen(conn, screen["id"])
+    release_db(request)     # the last use of conn: a TV's stream stays open all day, so don't hold it
     h = hub(request)
     queue = h.listen(screen["id"])
 

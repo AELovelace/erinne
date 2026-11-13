@@ -20,7 +20,7 @@ from mnemerynne.db import transaction
 from mnemerynne.web import security
 from mnemerynne.web.admin import _log
 from mnemerynne import group_refs
-from mnemerynne.web.deps import admin_user, api_user, get_db, is_admin, page_user
+from mnemerynne.web.deps import admin_user, api_user, get_db, is_admin, page_user, release_db
 
 
 
@@ -130,6 +130,7 @@ def browse(request: Request, user=Depends(api_user), conn: sqlite3.Connection = 
 async def stream(request: Request, after: int = 0, user=Depends(api_user)):
     """Server-sent events for every room this person can see, from event `after` on."""
     bus = _bus(request)
+    release_db(request)     # _rooms_on and api_user shared one connection; the bus reads with its own, so give it back
     return StreamingResponse(bus.stream(user, after, _dir(request), request.is_disconnected),
                              media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

@@ -964,9 +964,13 @@
     effect("cuddle", "✧ ♡");
   }
 
+  var refreshFails = 0, refreshAfter = 0; // Failed asks in a row, and when the next may go (ms): a struggling server gets room to recover.
   function refresh() { // Ask the server how Lumi is; a failure keeps the last picture and tries again later.
     if (picking) return Promise.resolve(); // Nobody's Lumi is chosen yet: nothing to ask about.
-    return G.api(API + "state").then(function (data) { take(data); announceDone(); welcomeHome(); render(); }).catch(function () {
+    if (Date.now() < refreshAfter) return Promise.resolve(); // Still waiting out the last failure: keep the last picture.
+    return G.api(API + "state").then(function (data) { refreshFails = 0; refreshAfter = 0; take(data); announceDone(); welcomeHome(); render(); }).catch(function () {
+      refreshFails += 1;
+      refreshAfter = Date.now() + Math.min(30000, 1000 * Math.pow(2, refreshFails)); // 2 s, 4 s, 8 s... at most 30 s between tries.
       if (!snap) say("Lumi can't be reached just now. She'll be here when the connection is back.");
     });
   }
@@ -1345,6 +1349,7 @@
 
   function partyGone(why) { // The party broke up, or this member left it: back to their own Lumi.
     if (why && why.status && why.status !== 404 && why.status !== 403) return; // A blip: the next ask tries again.
+    if (why instanceof Error && !why.status) return; // No answer at all (connection reset, timeout): a blip too, not a goodbye. Leaving here used to reload state and reopen the feed at once, over and over.
     const was = party;
     followParty(null);
     try { sessionStorage.removeItem(COUCH_KEY); } catch (e) { /* nothing kept */ }
