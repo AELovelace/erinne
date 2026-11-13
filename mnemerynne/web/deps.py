@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Iterator
+from typing import AsyncIterator
 
+import anyio.to_thread
 from fastapi import Depends, HTTPException, Request, status
 
 from mnemerynne import accounts, users
@@ -20,9 +21,17 @@ def get_settings(request: Request) -> Settings:
     return request.app.state.settings
 
 
-def get_db(request: Request) -> Iterator[sqlite3.Connection]:
+async def get_db(request: Request) -> AsyncIterator[sqlite3.Connection]:
+    """The request's database connection, from the pool and back to it when the request is done.
+
+    Async on purpose. FastAPI runs a plain (sync) generator dependency through contextmanager_in_threadpool,
+    whose cleanup catches only Exception: a request *cancelled* midway (the client or nginx gave up, a page
+    retrying) raises CancelledError, a BaseException, so the finally below never ran and the connection was
+    left for the garbage collector. A storm of cut-off requests leaked thousands that way (10,705 open on the
+    box: "unable to open database file", "database is locked", nginx 502). An async generator's cleanup runs
+    on cancellation too."""
     pool = request.app.state.db_pool
-    conn = pool.get()
+    conn = await anyio.to_thread.run_sync(pool.get)   # off the event loop: a new connection may wait on a lock
     held = _held(request)
     held.append(conn)                      # release_db() can hand it back before the response is over
     try:

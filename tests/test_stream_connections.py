@@ -53,6 +53,52 @@ def test_without_release_the_stream_pins_its_connection(tmp_path):
     assert len(app.state.db_pool._idle) == 1               # back only once the response finished
 
 
+def test_a_cancelled_request_still_returns_its_connection(tmp_path):
+    """A client (or nginx) giving up cancels the request. get_db's cleanup must still run, by itself: with the old
+    sync generator it never did, and each cut-off request left a connection for the garbage collector."""
+    import asyncio
+    import gc
+
+    app = FastAPI()
+    app.state.db_pool = db.Pool(tmp_path / "x.db")
+    started = asyncio.Event()
+
+    @app.get("/slow")
+    async def slow(conn=Depends(get_db)):
+        conn.execute("SELECT 1")
+        started.set()                                      # the request now holds its connection
+        await asyncio.sleep(30)                            # ...and is cut off here
+
+    async def run():
+        scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",
+                 "scheme": "http", "path": "/slow", "raw_path": b"/slow", "query_string": b"", "headers": [],
+                 "client": ("test", 1), "server": ("test", 80), "root_path": "", "app": app}
+
+        async def receive():
+            await asyncio.sleep(60)                        # the body never comes; the request is cancelled first
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            pass
+
+        task = asyncio.create_task(app(scope, receive, send))   # the whole app (its middleware sets up the cleanups)
+        done, _ = await asyncio.wait({task, asyncio.create_task(started.wait())}, timeout=10,
+                                     return_when=asyncio.FIRST_COMPLETED)
+        assert started.is_set(), task.exception() if task in done else "the endpoint never started"
+        task.cancel()                                      # what a dropped connection does
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    gc.disable()                                           # only get_db's own cleanup may give it back
+    try:
+        asyncio.run(run())
+        assert len(app.state.db_pool._idle) == 1           # back in the pool, not leaked
+    finally:
+        gc.enable()
+
+
 def test_a_normal_request_still_returns_its_connection_once(tmp_path):
     app = FastAPI()
     app.state.db_pool = db.Pool(tmp_path / "x.db")
