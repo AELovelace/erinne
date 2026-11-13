@@ -288,10 +288,23 @@ def live_folder_ids(conn: sqlite3.Connection, collection_id: int) -> set[int]:
 
 
 def is_live_folder(conn: sqlite3.Connection, folder_id: int | None) -> bool:
+    """Whether this folder exists and neither it nor any folder above it is in the bin.
+
+    It walks up from the folder to the top (one row per level) instead of loading the whole collection, as
+    live_folder_ids does: it runs on every upload, every Files page (the Agents folder) and once per backup root
+    each time the backup app asks, and with a big collection those whole-collection loads filled the worker
+    threads ("Files never loads"). The depth bound stops a damaged parent chain from looping."""
     if folder_id is None:
         return True
-    row = conn.execute("SELECT collection_id FROM folders WHERE id = ?", (folder_id,)).fetchone()
-    return row is not None and folder_id in live_folder_ids(conn, row["collection_id"])
+    row = conn.execute(
+        "WITH RECURSIVE up(id, parent_id, deleted_at, depth) AS ("
+        " SELECT id, parent_id, deleted_at, 0 FROM folders WHERE id = ?"
+        " UNION ALL"
+        " SELECT f.id, f.parent_id, f.deleted_at, up.depth + 1 FROM folders f JOIN up ON f.id = up.parent_id"
+        " WHERE up.depth < 1000)"
+        " SELECT count(*) AS levels, coalesce(sum(deleted_at IS NOT NULL), 0) AS binned FROM up",
+        (folder_id,)).fetchone()
+    return row["levels"] > 0 and row["binned"] == 0       # it exists, and nothing on the way up is in the bin
 
 
 def subtree(conn: sqlite3.Connection, folder_id: int) -> list[int]:
