@@ -95,8 +95,8 @@ def settings(tmp_path, root):
 def server(settings, root, tmp_path):
     directory = FakeDirectory({"jsmith": {"Backup Users"}})
     share.configure(settings, directory, FakeShareChecker(root))
-    conn = db.connect(settings.db_path)
-    db.migrate(conn, settings.embed_dim)
+    db.migrate_all(settings.db_path, settings.embed_dim)    # as the app's start leaves it (the features' own files)
+    conn = db.connect(settings.db_path)                     # so this connection sees them, like the app's own
     with TestClient(create_app(settings, Services(llm=None, embedder=FakeEmbedder(), directory=directory,
                                                   share_checker=FakeShareChecker(root)))) as client:
         sync.save_settings(conn, {"enabled": True, "group": "Backup Users"})

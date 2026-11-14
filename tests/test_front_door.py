@@ -39,15 +39,16 @@ def test_each_service_path_goes_to_its_own_upstream_on_its_port(monkeypatch):
 
 
 def test_the_web_app_gets_websockets_and_everything_else():
-    conf = nginx.render("192.168.1.5:38200", web="127.0.0.1:39999")
-    assert "upstream mnemerynne_web { server 127.0.0.1:39999; keepalive 32; }" in conf
-    assert _location(conf, "/") == "mnemerynne_web"
-    assert _location(conf, "/remote/") == "mnemerynne_web"
-    remote = conf[conf.index("location /remote/"):]
-    remote = remote[:remote.index("}")]
-    assert "proxy_set_header Upgrade $http_upgrade;" in remote and "$front_connection_upgrade" in remote
-    assert conf.index("location /remote/") < conf.index("location / {")      # the catch-all comes last
-    assert conf.count("location / {") == 1
+    for running, upstream in (([], "mnemerynne_web"), (None, "mnemerynne_remote")):   # the remote service's, if it runs
+        conf = nginx.render("192.168.1.5:38200", web="127.0.0.1:39999", running=running)
+        assert "upstream mnemerynne_web { server 127.0.0.1:39999; keepalive 32; }" in conf
+        assert _location(conf, "/") == "mnemerynne_web"
+        assert _location(conf, "/remote/") == upstream and conf.count("location /remote/ {") == 1
+        remote = conf[conf.index("location /remote/"):]
+        remote = remote[:remote.index("}")]
+        assert "proxy_set_header Upgrade $http_upgrade;" in remote and "$front_connection_upgrade" in remote
+        assert conf.index("location /remote/") < conf.index("location / {")      # the catch-all comes last
+        assert conf.count("location / {") == 1
 
 
 def test_keepalive_follows_how_many_processes_a_service_runs(monkeypatch):

@@ -10,15 +10,12 @@ through `on(conn)`.
 from __future__ import annotations
 
 import sqlite3
-import threading
 from contextlib import contextmanager
 from typing import Iterator
 
 from mnemerynne import db
 
 FEATURE = "logs"
-_pools: dict[str, db.Pool] = {}          # one per core file, for this process: a call log write needs no new connection
-_lock = threading.Lock()
 
 
 def local(conn: sqlite3.Connection) -> bool:
@@ -27,39 +24,15 @@ def local(conn: sqlite3.Connection) -> bool:
         .fetchone() is not None
 
 
-def _core_path(conn: sqlite3.Connection) -> str:
-    files = {row[1]: row[2] for row in conn.execute("PRAGMA database_list")}
-    return files.get("core") or files["main"]
-
-
-def _pool(core: str) -> db.Pool:
-    with _lock:
-        if core not in _pools:
-            _pools[core] = db.Pool(db.feature_path(core, FEATURE), keep=4,
-                                   opener=lambda: db.connect_feature(core, FEATURE))
-        return _pools[core]
-
-
 @contextmanager
 def on(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     """A connection that can write the call logs: `conn` itself while they're in its file, else one of this process's
-    logs.db connections, lent for the block. Its writes commit on their own: a core transaction around the block
-    doesn't hold them back, and its rollback doesn't take a call's log row with it (the call happened)."""
-    if local(conn):
-        yield conn
-        return
-    pool = _pool(_core_path(conn))
-    own = pool.get()
-    try:
-        yield own
-    finally:
-        pool.put(own)
+    logs.db connections (db.lend), lent for the block. Its writes commit on their own: a core transaction around the
+    block doesn't hold them back, and its rollback doesn't take a call's log row with it (the call happened)."""
+    with db.lend(conn, FEATURE, "mcp_calls") as found:
+        yield found
 
 
 def close() -> None:
-    """Close this process's logs.db connections (tests, shutdown)."""
-    with _lock:
-        pools = list(_pools.values())
-        _pools.clear()
-    for pool in pools:
-        pool.close()
+    """Close this process's lent connections (tests, shutdown)."""
+    db.close_lent()

@@ -34,7 +34,7 @@ def directory():
 @pytest.fixture
 def conn(settings, directory, root):
     share.configure(settings, directory, FakeShareChecker(root))
-    db.migrate_all(settings.db_path, settings.embed_dim, only=("search", "assistant", "logs", "automations"))   # as the app has them
+    db.migrate_all(settings.db_path, settings.embed_dim, only=("search", "assistant", "logs", "automations", "sync"))   # as the app has them
     connection = db.connect(settings.db_path)
     yield connection
     connection.close()
@@ -375,7 +375,8 @@ def test_parts_that_dont_add_up_are_dropped_and_old_uploads_are_swept(client, co
     assert r.status_code == 400 and client.get(f"/api/sync/uploads/{up['id']}", headers=auth).status_code == 404
     up = client.post("/api/sync/uploads", json={"root_id": root_id, "path": "y.bin", "size": 5, "sha256": "b" * 64},
                      headers=auth).json()
-    conn.execute("UPDATE sync_uploads SET created_at = datetime('now', '-2 days')")
+    with db.lend(conn, "sync", "sync_uploads") as uploads:           # sync.db (Phase 10)
+        uploads.execute("UPDATE sync_uploads SET created_at = datetime('now', '-2 days')")
     (settings.tmp_dir / "sync-uploads" / "stray.part").write_bytes(b"")
     assert sync.sweep_uploads(conn, settings) == 1
     assert not list((settings.tmp_dir / "sync-uploads").glob("*.part"))

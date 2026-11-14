@@ -22,7 +22,8 @@
 | Fixes from the first run on the NAS: bare page paths past nginx's own redirect; no 20 s wait for a share walk without Valkey | on the NAS after the next update | c31422b, 5723c67 |
 | Phase 7: `assistant.db` (conversations, answers, ratings, timings, LangGraph's checkpoints and memories); the assistant service (one process); one balancer poller through Valkey | done in code (2026-11-14) | 9fb798f |
 | Phase 8: `logs.db` (mcp_calls, api_calls, agent_calls); the mcp service (`/mcp` and `/c/`, 2 processes on the NAS) | done in code (2026-11-14) | 4331bf0 |
-| Phase 9: `automations.db` (automations, runs, webhooks, feeds); the automations service (the one scheduler); runs and routine reports handed across processes | done in code (2026-11-14) | this step's commit |
+| Phase 9: `automations.db` (automations, runs, webhooks, feeds); the automations service (the one scheduler); runs and routine reports handed across processes | done in code (2026-11-14) | e160ae4 |
+| Phase 10: `sync.db` (the backup app's roots and part-by-part uploads); the remote service (the LAN apps' proxy, websockets through the front door) | done in code (2026-11-14) | this step's commit |
 
 Tests: `.venv\Scripts\python -m pytest tests -n auto` (about 4 minutes).
 
@@ -206,6 +207,18 @@ wake. A Claude routine's report reaching a process without the scheduler (the mc
 automation (paused, failed, couldn't deliver) go to core after the automation's change commits
 (`automations.tell`: `db.after_commit` + `db.core_of`). Automator's on/off and group stay core settings (meta).
 `db.table_connection` now finds core from a feature's connection too.
+
+**Phase 10 (2026-11-14):** `sync.db` holds sync_roots and sync_uploads: every part of a big backup updates its
+upload's row, and now waits for sync.db's lock, not core's. A person's roots and uploads go with them; a root whose
+folder is deleted keeps its row without one (new `FeatureDb.folder_null_columns`), and the app is asked to register
+it again. `register` and `rename_root` change the folders in core first, then the root's row. `db.lend(conn,
+feature, table)` (call_logs' pool, generalised) lends a pooled connection to a feature's file for such frequent
+writes; `move_back` closes them first. The **remote** service (port 38209, 1 process on the NAS, 2 on the Ryzen)
+serves `/remote/<app>/...` (web/remote_route.py hands HTTP and websockets to the proxy the `remote` hook builds, with
+`/remote` as its root path); the Remote page (`/remote`) and its list (`/api/remote`) stay with the web app. The
+registry's new `websockets` flag gives a service's locations the upgrade headers (and the web app's when it's off);
+each path is written once. A test race fixed on the way: Rooms' stream test posted after a fixed 0.05 s, before a
+busy machine's stream knew where it started; it now waits for the stream's hello.
 
 ## Context
 

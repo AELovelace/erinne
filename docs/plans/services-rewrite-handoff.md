@@ -199,6 +199,14 @@ Claude routine's report is delivered; pausing (by an admin, or when the owner lo
 webhooks and feeds save. Back to A: `MNEMERYNNE_SERVICES_OFF=automations` and `services` (the web app's scheduler
 comes back); before Phase 9's code: `move-back automations` with everything stopped.
 
+### Deploying Phase 10 (sync.db and the remote service)
+
+The update moves the backup app's two tables into `/var/lib/mnemerynne/sync.db`. `front-door.sh services` starts
+`mnemerynne@remote` (port 38209) and routes `/remote/` to it with websockets. Check: the desktop backup app syncs
+(a big file in parts too) and a renamed root keeps its files; each LAN app opens in the Remote tab, logs in, and its
+live parts (websockets) update; the Remote page lists the apps. Back to A: `MNEMERYNNE_SERVICES_OFF=remote` and
+`services`; before Phase 10's code: `move-back sync` with everything stopped.
+
 ## 3. Phase 0.5: done in code (2026-11-13)
 
 The front-door and Valkey work below is committed and tested with the box stood in for

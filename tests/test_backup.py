@@ -32,7 +32,7 @@ def test_backup_snapshots_db_copies_blobs_and_prunes(conn, settings, tmp_path):
     assert sorted(p.name for p in (dest / "db").iterdir()) == [   # with its index, Ask's, the logs, Automator's
         "assistant-2026-10-02.db", "assistant-2026-10-03.db", "automations-2026-10-02.db", "automations-2026-10-03.db",
         "logs-2026-10-02.db", "logs-2026-10-03.db", "mnemerynne-2026-10-02.db", "mnemerynne-2026-10-03.db",
-        "search-2026-10-02.db", "search-2026-10-03.db"]
+        "search-2026-10-02.db", "search-2026-10-03.db", "sync-2026-10-02.db", "sync-2026-10-03.db"]
 
 
 def _populated(conn, settings, tmp_path):

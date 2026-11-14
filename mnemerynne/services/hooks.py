@@ -211,5 +211,18 @@ async def automations(app, settings, services):
                 automations_run.ACTIVE = None
 
 
+@asynccontextmanager
+async def remote(app, settings, services):
+    """app.state.remote_proxy: the LAN apps' proxy (remote.RemoteProxy) for web/remote_route.py. It keeps one
+    client per app and nothing a request needs from another, so any process may answer."""
+    from mnemerynne import remote as remote_mod
+
+    app.state.remote_proxy = remote_mod.RemoteProxy(settings, lambda: app.state.directory)
+    try:
+        yield
+    finally:
+        await app.state.remote_proxy.aclose()
+
+
 HOOKS = {"balancer": balancer, "rooms": rooms, "pages": pages, "media": media, "share": share,
-         "assistant": assistant, "mcp": mcp, "automations": automations}
+         "assistant": assistant, "mcp": mcp, "automations": automations, "remote": remote}

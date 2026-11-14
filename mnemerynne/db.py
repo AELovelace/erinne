@@ -76,6 +76,7 @@ class FeatureDb:
     # message stays in its room, from "someone who has left".
     user_null_columns: tuple[tuple[str, str], ...] = ()
     folder_columns: tuple[tuple[str, str], ...] = ()     # a core folder's id: the row goes with the folder
+    folder_null_columns: tuple[tuple[str, str], ...] = ()   # a core folder's id: the row stays, without it
     # Virtual tables (no plain INSERT ... SELECT *) whose rows move after the tables, as (table, its columns to
     # copy): search's vectors. Their table must exist in the feature file first (migrate_all makes it).
     copies: tuple[tuple[str, str], ...] = ()
@@ -140,6 +141,11 @@ FEATURE_DBS: dict[str, FeatureDb] = {f.name: f for f in (
     # automation goes with its owner, its runs with it. Runs may be queued and reports saved by other processes.
     FeatureDb("automations", moves=("automations", "automation_runs", "automation_feeds", "automation_destinations"),
               user_columns=(("automations", "owner_id"),)),
+    # Phase 10: the desktop backup app's roots and part-by-part uploads (sync.py, the sync service). A person's go
+    # with them; a root whose folder was deleted keeps its row without it (the app is asked to register again).
+    FeatureDb("sync", moves=("sync_roots", "sync_uploads"),
+              user_columns=(("sync_roots", "user_id"), ("sync_uploads", "user_id")),
+              folder_null_columns=(("sync_roots", "folder_id"),)),
 )}
 
 
@@ -177,6 +183,47 @@ def core_of(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
         yield core
     finally:
         core.close()
+
+
+_lent: dict[tuple[str, str], "Pool"] = {}      # (core file, feature) -> this process's connections for lend()
+_lent_lock = threading.Lock()
+
+
+@contextmanager
+def lend(conn: sqlite3.Connection, feature: str, table: str) -> Iterator[sqlite3.Connection]:
+    """A connection that can write `table`, for code holding any connection: `conn` itself when its own file has the
+    table (core before the feature's move, or the feature's own connection), else one of this process's pooled
+    connections to the feature's file (core attached read-only), lent for the block, so a busy writer (a log row per
+    call, a backup's part per request) doesn't open a file each time. Its writes commit on their own, outside any
+    transaction open on `conn`. Before the feature's file exists the table is core's: a core connection."""
+    if _has_table(conn, "main", table):
+        yield conn
+        return
+    files = {row[1]: row[2] for row in conn.execute("PRAGMA database_list")}
+    core = files.get("core") or files["main"]
+    if not feature_path(core, feature).exists():
+        with core_of(conn) as found:
+            yield found
+        return
+    with _lent_lock:
+        pool = _lent.get((core, feature))
+        if pool is None:
+            pool = _lent[(core, feature)] = Pool(feature_path(core, feature), keep=4,
+                                                 opener=lambda: connect_feature(core, feature))
+    own = pool.get()
+    try:
+        yield own
+    finally:
+        pool.put(own)
+
+
+def close_lent() -> None:
+    """Close this process's lend() connections (tests between databases, move_back)."""
+    with _lent_lock:
+        pools = list(_lent.values())
+        _lent.clear()
+    for pool in pools:
+        pool.close()
 
 
 def connect_for(core_path: Path | str, feature: str, table: str) -> sqlite3.Connection:
@@ -573,6 +620,7 @@ def move_back(core_path: Path | str, feature: str) -> dict[str, int]:
     path = feature_path(core_path, feature)
     if not path.exists():
         return {}
+    close_lent()                                       # this process's own connections to it, before it's set aside
     core = connect(core_path, features=False)
     copied: dict[str, int] = {}
     try:
@@ -661,7 +709,8 @@ def sweep_orphans(core_path: Path | str) -> dict[str, int]:
     `mnemerynne check-orphans` on demand. Returns the rows deleted per "feature.table"."""
     deleted: dict[str, int] = {}
     for found in _features_present(core_path):
-        if not (found.user_columns or found.file_columns or found.folder_columns or found.user_null_columns):
+        if not (found.user_columns or found.file_columns or found.folder_columns or found.user_null_columns
+                or found.folder_null_columns):
             continue
         conn = connect_feature(core_path, found.name)
         try:
@@ -693,9 +742,11 @@ def _sweep(conn: sqlite3.Connection, found: FeatureDb) -> dict[str, int]:
         if n:
             key = f"{found.name}.{table}"
             deleted[key] = deleted.get(key, 0) + n
-    for table, column in found.user_null_columns:        # kept, without the name of who left
+    nulls = [(t, c, "core.users") for t, c in found.user_null_columns] + \
+            [(t, c, "core.folders") for t, c in found.folder_null_columns]
+    for table, column, parent in nulls:                  # kept, without the user (or folder) that went
         n = conn.execute(f"UPDATE main.{table} SET {column} = NULL WHERE {column} IS NOT NULL "
-                         f"AND {column} NOT IN (SELECT id FROM core.users)").rowcount
+                         f"AND {column} NOT IN (SELECT id FROM {parent})").rowcount
         if n:
             key = f"{found.name}.{table}.{column}"
             deleted[key] = deleted.get(key, 0) + n

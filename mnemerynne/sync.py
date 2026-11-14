@@ -196,13 +196,14 @@ def register(conn: sqlite3.Connection, user_id: int, computer: str, label: str) 
             folder, made = _ensure(conn, inbox, machine, label, user_id)
             if made:
                 conn.execute("UPDATE folders SET no_index = 1 WHERE id = ?", (folder,))
-            conn.execute(
-                "INSERT INTO sync_roots(user_id, computer, label, folder_id, last_seen_at) "
-                "VALUES (?, ?, ?, ?, datetime('now')) "
-                "ON CONFLICT(user_id, lower(computer), lower(label)) DO UPDATE SET folder_id = excluded.folder_id, "
-                "last_seen_at = excluded.last_seen_at", (user_id, computer, label, folder))
     except fs.FsError as exc:
         raise SyncError(str(exc), exc.status) from None
+    with _roots(conn) as roots_conn:                  # sync.db (Phase 10), once the folders are there
+        roots_conn.execute(
+            "INSERT INTO sync_roots(user_id, computer, label, folder_id, last_seen_at) "
+            "VALUES (?, ?, ?, ?, datetime('now')) "
+            "ON CONFLICT(user_id, lower(computer), lower(label)) DO UPDATE SET folder_id = excluded.folder_id, "
+            "last_seen_at = excluded.last_seen_at", (user_id, computer, label, folder))
     row = conn.execute("SELECT id FROM sync_roots WHERE user_id = ? AND lower(computer) = lower(?) "
                        "AND lower(label) = lower(?)", (user_id, computer, label)).fetchone()
     return get_root(conn, user_id, row["id"])
@@ -247,7 +248,14 @@ def all_roots(conn: sqlite3.Connection) -> list[dict]:
 
 
 def touch(conn: sqlite3.Connection, root: Root) -> None:
-    conn.execute("UPDATE sync_roots SET last_seen_at = datetime('now') WHERE id = ?", (root.id,))
+    with _roots(conn) as roots_conn:
+        roots_conn.execute("UPDATE sync_roots SET last_seen_at = datetime('now') WHERE id = ?", (root.id,))
+
+
+def _roots(conn: sqlite3.Connection):
+    """A connection that can write the backup's roots and uploads: sync.db once the web app's start moved them there
+    (docs/plans/services-rewrite.md, Phase 10), else core. They read by their plain names on any connection."""
+    return db.lend(conn, "sync", "sync_roots")
 
 
 # ---------------------------------------------------------------- manifest
@@ -590,9 +598,11 @@ def start_upload(conn: sqlite3.Connection, settings: Settings, root: Root, path:
     target.parent.mkdir(parents=True, exist_ok=True)
     with open(target, "wb") as fh:
         fh.truncate(size)                     # sparse: parts land at their place in any order
-    conn.execute("DELETE FROM sync_uploads WHERE user_id = ? AND root_id = ? AND path = ?", (root.user_id, root.id, path))
-    conn.execute("INSERT INTO sync_uploads(id, user_id, root_id, path, size, sha256) VALUES (?, ?, ?, ?, ?, ?)",
-                 (upload_id, root.user_id, root.id, path, size, sha256))
+    with _roots(conn) as uploads, transaction(uploads):
+        uploads.execute("DELETE FROM sync_uploads WHERE user_id = ? AND root_id = ? AND path = ?",
+                        (root.user_id, root.id, path))
+        uploads.execute("INSERT INTO sync_uploads(id, user_id, root_id, path, size, sha256) VALUES (?, ?, ?, ?, ?, ?)",
+                        (upload_id, root.user_id, root.id, path, size, sha256))
     return upload_status(conn, settings, root.user_id, upload_id)
 
 
@@ -630,11 +640,11 @@ def store_part(conn: sqlite3.Connection, settings: Settings, user_id: int, uploa
             out.write(block)
         out.flush()
         os.fsync(out.fileno())
-    with transaction(conn):
-        parts = set(json.loads(conn.execute("SELECT parts_received FROM sync_uploads WHERE id = ?",
-                                            (upload_id,)).fetchone()[0]))
+    with _roots(conn) as uploads, transaction(uploads):   # sync.db's lock, not core's, for every part
+        parts = set(json.loads(uploads.execute("SELECT parts_received FROM sync_uploads WHERE id = ?",
+                                               (upload_id,)).fetchone()[0]))
         parts.add(n)
-        conn.execute("UPDATE sync_uploads SET parts_received = ? WHERE id = ?", (json.dumps(sorted(parts)), upload_id))
+        uploads.execute("UPDATE sync_uploads SET parts_received = ? WHERE id = ?", (json.dumps(sorted(parts)), upload_id))
     return upload_status(conn, settings, user_id, upload_id)
 
 
@@ -659,13 +669,15 @@ def finish_upload(conn: sqlite3.Connection, settings: Settings, root_for, user_i
     root = root_for(row["root_id"])
     result = write_file(conn, settings, root, row["path"], path, row["sha256"], user_id=user_id, token_id=token_id,
                         mtime=mtime, if_match=if_match, if_none_match=if_none_match)
-    conn.execute("DELETE FROM sync_uploads WHERE id = ?", (upload_id,))
+    with _roots(conn) as uploads:
+        uploads.execute("DELETE FROM sync_uploads WHERE id = ?", (upload_id,))
     return result
 
 
 def drop_upload(conn: sqlite3.Connection, settings: Settings, user_id: int, upload_id: str) -> None:
     _upload(conn, user_id, upload_id)
-    conn.execute("DELETE FROM sync_uploads WHERE id = ?", (upload_id,))
+    with _roots(conn) as uploads:
+        uploads.execute("DELETE FROM sync_uploads WHERE id = ?", (upload_id,))
     _upload_file(settings, upload_id).unlink(missing_ok=True)
 
 
@@ -674,7 +686,8 @@ def sweep_uploads(conn: sqlite3.Connection, settings: Settings) -> int:
     old = [r[0] for r in conn.execute("SELECT id FROM sync_uploads WHERE created_at < datetime('now', ?)",
                                       (f"-{UPLOAD_DAYS} days",))]
     for upload_id in old:
-        conn.execute("DELETE FROM sync_uploads WHERE id = ?", (upload_id,))
+        with _roots(conn) as uploads:
+            uploads.execute("DELETE FROM sync_uploads WHERE id = ?", (upload_id,))
         _upload_file(settings, upload_id).unlink(missing_ok=True)
     folder = settings.tmp_dir / "sync-uploads"
     if folder.is_dir():
@@ -725,7 +738,8 @@ def rename_root(conn: sqlite3.Connection, root: Root, label: str) -> Root:
         fs.rename(conn, fs.Access.of(conn, root.user_id), fs.Item("folder", root.folder_id), label)
     except fs.FsError as exc:
         raise SyncError(str(exc), exc.status) from None
-    conn.execute("UPDATE sync_roots SET label = ? WHERE id = ?", (label, root.id))
+    with _roots(conn) as roots_conn:                   # once the folder's name changed in core
+        roots_conn.execute("UPDATE sync_roots SET label = ? WHERE id = ?", (label, root.id))
     return get_root(conn, root.user_id, root.id)
 
 

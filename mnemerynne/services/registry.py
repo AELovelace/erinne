@@ -30,6 +30,7 @@ class Service:
     # Paths under its own that stay with the web app (nginx sends them there while the service runs): another
     # router's pages under the same prefix. "= /exact/path" for one path only.
     web_paths: tuple[str, ...] = ()
+    websockets: bool = False             # its paths carry websockets: nginx passes the upgrade on (Remote's LAN apps)
 
     def processes(self, profile: str | None = None) -> int:
         """How many processes to run: one for a single-process service, else the profile's count."""
@@ -120,6 +121,17 @@ SERVICES: dict[str, Service] = {s.name: s for s in (
         port=38208,
         single=True,                       # one scheduler: two would both run what's due
         hooks=("balancer", "rooms", "automations"),   # the model's nodes, Rooms' bus for reports, then the scheduler
+    ),
+    Service(
+        name="remote",
+        serves="the LAN apps' proxy (/remote/<app>/...: pages, their requests and websockets); the Remote page and "
+               "its list stay with the web app",
+        routers=("mnemerynne.web.remote_route:router",),
+        paths=("/remote/",),
+        port=38209,
+        workers={"nas": 1, "ryzen": 2},
+        hooks=("remote",),
+        websockets=True,
     ),
     Service(
         name="share",

@@ -239,7 +239,7 @@ def test_the_stream_sends_a_persons_rooms_and_replays(settings, conn, people, di
     conn.commit()
     bus = rooms_bus.Bus(settings.db_path)
 
-    async def collect(user, after, until):
+    async def collect(user, after, until, ready=None):
         got, stop = [], asyncio.Event()
 
         async def disconnected():
@@ -250,14 +250,17 @@ def test_the_stream_sends_a_persons_rooms_and_replays(settings, conn, people, di
                 if block.startswith("id:") or block.startswith("event:"):
                     lines = dict(line.split(": ", 1) for line in block.splitlines() if ": " in line)
                     got.append((lines.get("event"), json.loads(lines.get("data", "{}")), lines.get("id")))
+            if ready is not None and any(e[0] == "hello" for e in got):
+                ready.set()                                    # it knows where it starts: post from here on
             if until(got):
                 stop.set()
                 break
         return got
 
     async def scenario():
-        reader = asyncio.create_task(collect(bob, 0, lambda g: any(e[0] == "message.new" for e in g)))
-        await asyncio.sleep(0.05)
+        ready = asyncio.Event()
+        reader = asyncio.create_task(collect(bob, 0, lambda g: any(e[0] == "message.new" for e in g), ready))
+        await asyncio.wait_for(ready.wait(), 5)                # not a fixed pause: a busy machine is slower
         assert bus.online() == {bob["id"]} and bus.presence() == {"bob": "online"}
         rooms.post(conn, carol, it, "IT only", directory)            # bob can't see #it
         rooms.post(conn, alice, desk, "Desk news", directory)

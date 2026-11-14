@@ -149,36 +149,45 @@ def render(listen: str, web: str = "127.0.0.1:38210", accel: dict[str, Path] | N
         lines += _accel_locations(accel, listen.rsplit(":", 1)[0].strip("[]"))
     for s in services:
         for path in s.paths:
-            lines += [f"    # {s.name}: {s.serves}",
-                      f"    location {path} {{", f"        proxy_pass http://{_upstream(s.name)};", "    }", ""]
+            lines += [f"    # {s.name}: {s.serves}", f"    location {path} {{",
+                      f"        proxy_pass http://{_upstream(s.name)};", *(_websocket(accel_header) if s.websockets
+                                                                            else []), "    }", ""]
     taken = {path for s in services for path in s.paths}
-    stay = [(f"{s.name} leaves this to the web app", p) for s in services for p in s.web_paths]
-    stay += [(f"{s.name} isn't running here: the web app serves it", p) for s in registry.SERVICES.values()
-             if s not in services for p in s.paths if p not in taken]
-    for why, path in stay:
-        lines += [f"    # {why}", f"    location {path} {{", f"        proxy_pass http://{_upstream('web')};", "    }", ""]
+    stay = [(f"{s.name} leaves this to the web app", p, False) for s in services for p in s.web_paths]
+    stay += [(f"{s.name} isn't running here: the web app serves it", p, s.websockets)
+             for s in registry.SERVICES.values() if s not in services for p in s.paths if p not in taken]
+    for why, path, websockets in stay:
+        lines += [f"    # {why}", f"    location {path} {{", f"        proxy_pass http://{_upstream('web')};",
+                  *(_websocket(accel_header) if websockets else []), "    }", ""]
     # A page at a slashed location's bare name (/files, /media, /remote): its own exact location, or nginx answers
     # it with a redirect to the slashed one instead of passing it on. The web app serves every page.
-    slashed = [p for s in services for p in s.paths] + [p for _, p in stay] + ["/remote/"]
+    slashed = [p for s in services for p in s.paths] + [p for _, p, _ in stay] + ["/remote/"]
     bare = sorted({p.rstrip("/") for p in slashed if p.endswith("/") and not p.startswith("=") and p != "/"})
     for path in bare:
         lines += [f"    # {path}: a page, not {path}/'s prefix", f"    location = {path} {{",
                   f"        proxy_pass http://{_upstream('web')};", "    }", ""]
-    lines += ["    # Remote's LAN apps: websockets.",
-              "    location /remote/ {",
-              f"        proxy_pass http://{_upstream('web')};",
-              *("        " + h for h in PASS + [accel_header]),
-              "        proxy_set_header Upgrade $http_upgrade;",
-              "        proxy_set_header Connection $front_connection_upgrade;",
-              "    }",
-              "",
-              "    # Everything else: the web app.",
+    if "/remote/" not in taken | {p for _, p, _ in stay}:   # no remote service in the registry: the web app's
+        lines += ["    # Remote's LAN apps: websockets.",
+                  "    location /remote/ {",
+                  f"        proxy_pass http://{_upstream('web')};",
+                  *_websocket(accel_header),
+                  "    }",
+                  ""]
+    lines += ["    # Everything else: the web app.",
               "    location / {",
               f"        proxy_pass http://{_upstream('web')};",
               "    }",
               "}",
               ""]
     return "\n".join(lines)
+
+
+def _websocket(accel_header: str) -> list[str]:
+    """A location's lines for websockets: the upgrade passed on (and, as it sets headers of its own, the server's
+    passed-on headers again: nginx doesn't merge them)."""
+    return [*("        " + h for h in PASS + [accel_header]),
+            "        proxy_set_header Upgrade $http_upgrade;",
+            "        proxy_set_header Connection $front_connection_upgrade;"]
 
 
 def accel_roots(env_file: str | None) -> dict[str, Path]:
