@@ -130,6 +130,12 @@ FEATURE_DBS: dict[str, FeatureDb] = {f.name: f for f in (
     # Proposals stay in core (they're applied with the file they change), so theirs to a message is cut.
     FeatureDb("assistant", moves=ASSISTANT_TABLES, user_columns=(("conversations", "user_id"),),
               user_null_columns=(("feedback", "user_id"),), unlink=(("agent_proposals", "message_id"),)),
+    # Phase 8: the busy call logs (call_logs.py): Claude's tool calls, internal API calls, Erynne's tool calls. An
+    # agent call goes with its person (its arguments are theirs); the others keep the row without the name. An
+    # answer's source in a core from before Phase 7 (moved back) loses its reference to its API call.
+    FeatureDb("logs", moves=("mcp_calls", "api_calls", "agent_calls"), user_columns=(("agent_calls", "user_id"),),
+              user_null_columns=(("mcp_calls", "user_id"), ("api_calls", "user_id")),
+              unlink=(("message_sources", "api_call_id"),)),
 )}
 
 

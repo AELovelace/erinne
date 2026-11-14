@@ -102,6 +102,16 @@ SERVICES: dict[str, Service] = {s.name: s for s in (
         hooks=("balancer", "rooms", "assistant"),   # the model's nodes, Rooms' bus for Erynne's answers, then Ask
     ),
     Service(
+        name="mcp",
+        serves="Claude's MCP endpoint (/mcp) and its fetch links (/c/): stateless JSON, so any of its processes "
+               "answers; each tool call is logged in logs.db",
+        routers=("mnemerynne.web.mcp_route:router", "mnemerynne.web.claude_links:router"),
+        paths=("/mcp", "/c/"),
+        port=38205,
+        workers={"nas": 2, "ryzen": 4},
+        hooks=("mcp",),
+    ),
+    Service(
         name="share",
         serves="no pages: walks the share's permissions for every process and watches the share for changes "
                "(share-rights.db, share:rights); the others stop walking while it runs (MNEMERYNNE_SHARE_WALKS)",

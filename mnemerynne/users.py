@@ -147,7 +147,8 @@ def delete_user(conn: sqlite3.Connection, username: str) -> bool:
                 if table in tables:
                     conn.execute(f"DELETE FROM {table} WHERE thread_id = ?", (thread,))
             conn.execute("DELETE FROM graph_runs WHERE conversation_id = ?", (thread,))
-        conn.execute("DELETE FROM agent_calls WHERE user_id = ?", (user_id,))
+        if "agent_calls" in tables:                       # moved to logs.db: forget_user deletes them there
+            conn.execute("DELETE FROM agent_calls WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
     if db_file:   # their rows in the features' own files (games, rooms, ...): no reference crosses the files
         db.forget_user(db_file, user_id)

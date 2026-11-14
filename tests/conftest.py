@@ -35,6 +35,14 @@ def _no_agent_model(monkeypatch):
     monkeypatch.setattr(agent.Agent, "_default_client", lambda self, cfg: _NoAgentModel())
 
 
+@pytest.fixture(autouse=True)
+def _close_call_logs():
+    """call_logs keeps a few logs.db connections per process: closed after each test, so its files can go."""
+    yield
+    from mnemerynne import call_logs
+    call_logs.close()
+
+
 @pytest.fixture
 def settings(tmp_path):
     # Small vectors keep tests fast; production uses the embedder's real size.
@@ -48,7 +56,7 @@ def conn(settings):
     box past Phases 6a and 7 (the other features' tables stay in core until the app starts: games_conn, rooms.on,
     media_conn). Opened after the move, so it reads chunks and conversations through their files' read-only
     attachments, like the app's own connections; writes to them go through search_index.on / assistant_db.on."""
-    db.migrate_all(settings.db_path, settings.embed_dim, only=("search", "assistant"))
+    db.migrate_all(settings.db_path, settings.embed_dim, only=("search", "assistant", "logs"))
     connection = db.connect(settings.db_path)
     yield connection
     connection.close()

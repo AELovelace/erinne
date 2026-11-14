@@ -17,6 +17,13 @@ from mnemerynne.web.app import Services, create_app
 from test_mcp import ACCEPT
 
 
+def _log_write(conn, sql, params=()):
+    """A call log row, written where the logs live (logs.db since Phase 8)."""
+    from mnemerynne import call_logs
+    with call_logs.on(conn) as logs:
+        logs.execute(sql, params)
+
+
 @pytest.fixture
 def people(conn):
     out = {"alice": users.create_user(conn, "alice", "password123"),
@@ -81,7 +88,7 @@ def test_calls_search_file_chunk_jobs_and_log(conn, settings, people, directory)
                                                        "audit.md", settings), lib, people["dev"])[0]
     worker.run_one(conn, settings, embedder)
 
-    conn.execute("INSERT INTO mcp_calls(user_id, token_id, tool, args, file_ids, ok, ms, error) VALUES (?, ?, ?, ?, ?, 0, 3, ?)",
+    _log_write(conn, "INSERT INTO mcp_calls(user_id, token_id, tool, args, file_ids, ok, ms, error) VALUES (?, ?, ?, ?, ?, 0, 3, ?)",
                  (people["dev"], dev.token_id, "browse_folder", '{"library": "Nope"}', "[]", "[not_found] no library"))
     calls = tools.diagnose(conn, dev, "calls", failed_only=True)[0]
     assert calls["claude"][0]["tool"] == "browse_folder" and calls["claude"][0]["error"].startswith("[not_found]")
@@ -141,7 +148,7 @@ def test_a_developer_who_is_not_an_admin_sees_only_their_own(conn, settings, peo
     worker.run_one(conn, settings, embedder)
     chunk_id = conn.execute("SELECT id FROM chunks WHERE file_id = ?", (fid,)).fetchone()[0]
     for who in (alice, dev):
-        conn.execute("INSERT INTO mcp_calls(user_id, token_id, tool, args, file_ids, ok, ms) VALUES (?, ?, 'search_documents', ?, '[]', 1, 2)",
+        _log_write(conn, "INSERT INTO mcp_calls(user_id, token_id, tool, args, file_ids, ok, ms) VALUES (?, ?, 'search_documents', ?, '[]', 1, 2)",
                      (who.user_id, who.token_id, json.dumps({"query": f"a question only {who.user_id} asked"})))
 
     mine = tools.diagnose(conn, dev, "calls")[0]["claude"]

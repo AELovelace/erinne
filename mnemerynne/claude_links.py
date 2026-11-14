@@ -171,8 +171,11 @@ def read(conn: sqlite3.Connection, base: str, link_id: str, start: int | None = 
         lines.append(f"(More of this file: {base}/c/{link_id}?from={more})")
     conn.execute("UPDATE claude_links SET fetches = fetches + 1, last_fetched_at = datetime('now') WHERE id = ?",
                  (link_id,))
-    conn.execute("INSERT INTO mcp_calls(user_id, token_id, grant_id, tool, args, file_ids, ok) "
-                 "VALUES (?, ?, ?, 'fetch_link', ?, ?, 1)",
-                 (link["user_id"], link["token_id"], link["grant_id"],
-                  json.dumps({"file_id": file["id"], "from": start}), json.dumps([file["id"]])))
+    from mnemerynne import call_logs
+
+    with call_logs.on(conn) as logs:                   # logs.db (Phase 8)
+        logs.execute("INSERT INTO mcp_calls(user_id, token_id, grant_id, tool, args, file_ids, ok) "
+                     "VALUES (?, ?, ?, 'fetch_link', ?, ?, 1)",
+                     (link["user_id"], link["token_id"], link["grant_id"],
+                      json.dumps({"file_id": file["id"], "from": start}), json.dumps([file["id"]])))
     return "\n".join(lines).rstrip() + "\n"

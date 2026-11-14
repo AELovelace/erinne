@@ -8,6 +8,12 @@ from mnemerynne.config import Settings
 DEPLOY = Path(__file__).resolve().parent.parent / "deploy" / "linux"
 
 
+def _log_write(conn, sql, params=()):
+    """A call log row, written where the logs live (logs.db since Phase 8)."""
+    from mnemerynne import call_logs
+    with call_logs.on(conn) as logs:
+        logs.execute(sql, params)
+
 def _count(conn, table):
     return conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
 
@@ -15,11 +21,11 @@ def _count(conn, table):
 def test_purge_deletes_log_rows_past_their_keep_date(conn, settings):
     uid = users.create_user(conn, "alice", "password123")
     for age in ("-100 days", "-1 day"):
-        conn.execute("INSERT INTO mcp_calls(at, user_id, tool, args) VALUES (datetime('now', ?), ?, 'search', '{}')",
+        _log_write(conn, "INSERT INTO mcp_calls(at, user_id, tool, args) VALUES (datetime('now', ?), ?, 'search', '{}')",
                      (age, uid))
-        conn.execute("INSERT INTO api_calls(at, user_id, via, api_name, operation_name, ok) "
+        _log_write(conn, "INSERT INTO api_calls(at, user_id, via, api_name, operation_name, ok) "
                      "VALUES (datetime('now', ?), ?, 'chat', 'Atera', 'Tickets', 1)", (age, uid))
-        conn.execute("INSERT INTO agent_calls(at, user_id, tool, ok) VALUES (datetime('now', ?), ?, 'search', 1)",
+        _log_write(conn, "INSERT INTO agent_calls(at, user_id, tool, ok) VALUES (datetime('now', ?), ?, 'search', 1)",
                      (age, uid))
         with assistant_db.on(conn) as chats:                       # assistant.db's (Phase 7)
             chats.execute("INSERT INTO graph_runs(started_at, node) VALUES (datetime('now', ?), 'route')", (age,))
@@ -31,7 +37,7 @@ def test_purge_deletes_log_rows_past_their_keep_date(conn, settings):
     assert retention.purge(conn, settings) == {}
 
     keep_all = settings.model_copy(update={"mcp_calls_days": 0, "graph_runs_days": 0})
-    conn.execute("INSERT INTO mcp_calls(at, tool, args) VALUES (datetime('now', '-5000 days'), 'x', '{}')")
+    _log_write(conn, "INSERT INTO mcp_calls(at, tool, args) VALUES (datetime('now', '-5000 days'), 'x', '{}')")
     with assistant_db.on(conn) as chats:
         chats.execute("INSERT INTO graph_runs(started_at, node) VALUES (datetime('now', '-5000 days'), 'x')")
     assert retention.purge(conn, keep_all) == {}
@@ -92,7 +98,7 @@ def test_delete_user_removes_conversation_history_and_memories(conn, settings):
             chats.execute("INSERT INTO conversations(id, user_id) VALUES (?, ?)", (thread, uid))
             chats.execute("INSERT INTO graph_runs(conversation_id, node) VALUES (?, 'route')", (thread,))
         saver.put({"configurable": {"thread_id": thread, "checkpoint_ns": ""}}, empty_checkpoint(), {}, {})
-        conn.execute("INSERT INTO agent_calls(user_id, conversation_id, tool, ok) VALUES (?, ?, 'search', 1)",
+        _log_write(conn, "INSERT INTO agent_calls(user_id, conversation_id, tool, ok) VALUES (?, ?, 'search', 1)",
                      (uid, thread))
     memories = SqliteStore(sqlite3.connect(graph_file, isolation_level=None, check_same_thread=False))
     memories.setup()

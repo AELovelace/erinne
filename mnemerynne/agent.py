@@ -53,7 +53,7 @@ import anthropic
 import httpx
 from mcp.server.mcpserver.exceptions import ToolError
 
-from mnemerynne import (accounts, apis, bfgguf, claude_chat, db, editing, fs, m365_mail, messages as user_messages,
+from mnemerynne import (accounts, apis, bfgguf, call_logs, claude_chat, db, editing, fs, m365_mail, messages as user_messages,
                         notices, permissions, proposals, retrieval,
                         users)
 from mnemerynne.answer import ASSISTANT_NAME
@@ -868,11 +868,12 @@ class Agent:
                 out = {"error": "That tool failed unexpectedly; try something else or tell the person."}
             return out, file_ids
         finally:
-            conn.execute("INSERT INTO agent_calls(user_id, conversation_id, tool, args, file_ids, ok, ms, error) "
-                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                         (caller.user_id, caller.conversation_id, call.name[:100],
-                          json.dumps(_loggable(call), ensure_ascii=False)[:20_000], json.dumps(file_ids), int(ok),
-                          int((time.monotonic() - started) * 1000), error))
+            with call_logs.on(conn) as logs:          # logs.db (Phase 8)
+                logs.execute("INSERT INTO agent_calls(user_id, conversation_id, tool, args, file_ids, ok, ms, error) "
+                             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                             (caller.user_id, caller.conversation_id, call.name[:100],
+                              json.dumps(_loggable(call), ensure_ascii=False)[:20_000], json.dumps(file_ids), int(ok),
+                              int((time.monotonic() - started) * 1000), error))
             conn.close()
 
     def _proposal_view(self, proposal_id: int) -> dict:

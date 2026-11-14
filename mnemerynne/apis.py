@@ -482,13 +482,16 @@ def call(conn: sqlite3.Connection, settings: Settings, op_id: int, params: dict 
                    else result.data)[:EXCERPT_CHARS]
     elif not result.cached and failed_text:
         excerpt = failed_text[:EXCERPT_CHARS]          # what the API said, for the call's page
-    cur = conn.execute(
-        "INSERT INTO api_calls(user_id, via, api_id, operation_id, api_name, operation_name, params, status_code, "
-        "ok, cached, ms, error, response_bytes, response_excerpt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-        "RETURNING id, at",
-        (user_id, via, api["id"], op["id"], api["name"], op["name"], json.dumps(params), result.status_code,
-         int(result.ok), int(result.cached), round((time.perf_counter() - started) * 1000), result.error,
-         raw_len, excerpt)).fetchone()
+    from mnemerynne import call_logs
+
+    with call_logs.on(conn) as logs:                   # logs.db (Phase 8): committed even if the caller rolls back
+        cur = logs.execute(
+            "INSERT INTO api_calls(user_id, via, api_id, operation_id, api_name, operation_name, params, status_code, "
+            "ok, cached, ms, error, response_bytes, response_excerpt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "RETURNING id, at",
+            (user_id, via, api["id"], op["id"], api["name"], op["name"], json.dumps(params), result.status_code,
+             int(result.ok), int(result.cached), round((time.perf_counter() - started) * 1000), result.error,
+             raw_len, excerpt)).fetchone()
     result.call_id, result.at = cur["id"], cur["at"]
     return result
 

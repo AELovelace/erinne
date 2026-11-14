@@ -180,6 +180,15 @@ answers in Rooms (from the web app while Valkey is off; from the assistant with 
 `MNEMERYNNE_SERVICES_OFF=assistant` and `services`. Back to the code before Phase 7: everything stopped,
 `sudo mnemerynne-admin move-back assistant`, then the older code.
 
+### Deploying Phase 8 (logs.db and the mcp service)
+
+`sudo HEALTH_TIMEOUT=1200 mnemerynne-admin update --yes` moves the three call logs into `/var/lib/mnemerynne/logs.db`
+("Moved into logs.db: mcp_calls (N rows), api_calls (N rows), agent_calls (N rows)"). `front-door.sh services` starts
+`mnemerynne@mcp` (two processes, port 38205) and routes `/mcp` and `/c/` to it. Check: Claude (claude.ai and
+Desktop) connects, searches and reads; a fetch link opens; Access → Activity lists the calls; an internal API answer
+in Ask links its call. Back to A: `MNEMERYNNE_SERVICES_OFF=mcp` and `services`; before Phase 8's code:
+`move-back logs` with everything stopped.
+
 ## 3. Phase 0.5: done in code (2026-11-13)
 
 The front-door and Valkey work below is committed and tested with the box stood in for

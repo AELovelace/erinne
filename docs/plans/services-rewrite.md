@@ -20,7 +20,8 @@
 | Phase 6a: `search.db` (chunks, their keyword index and vectors) out of core; `move-back search` for A/B | on the NAS since 2026-11-14 | c7fb12f |
 | Phase 6b: the files service (Files, the editor and the wiki; 3 processes on the NAS) | on the NAS since 2026-11-14 | 26c62f8 |
 | Fixes from the first run on the NAS: bare page paths past nginx's own redirect; no 20 s wait for a share walk without Valkey | on the NAS after the next update | c31422b, 5723c67 |
-| Phase 7: `assistant.db` (conversations, answers, ratings, timings, LangGraph's checkpoints and memories); the assistant service (one process); one balancer poller through Valkey | done in code (2026-11-14) | this step's commit |
+| Phase 7: `assistant.db` (conversations, answers, ratings, timings, LangGraph's checkpoints and memories); the assistant service (one process); one balancer poller through Valkey | done in code (2026-11-14) | 9fb798f |
+| Phase 8: `logs.db` (mcp_calls, api_calls, agent_calls); the mcp service (`/mcp` and `/c/`, 2 processes on the NAS) | done in code (2026-11-14) | this step's commit |
 
 Tests: `.venv\Scripts\python -m pytest tests -n auto` (about 4 minutes).
 
@@ -180,6 +181,17 @@ answering @Erynne in Rooms and the assistant does (`rooms:ask`); without Valkey 
 scheduler still posts automations' reports with the web app's own Erynne. Balancer: with Valkey one process
 polls the nodes (`balancer:poller`, a 6 s claim) and leaves its report (`balancer:nodes`); the others read it and
 take over when it lapses; without Valkey each polls, as before.
+
+**Phase 8 (2026-11-14):** `logs.db` holds mcp_calls, api_calls and agent_calls, written on every call from every
+process (`call_logs.on(conn)`: a small pool of logs.db connections per process; the row commits on its own, so a
+call logged inside a transaction that rolls back stays logged). api_calls ids are AUTOINCREMENT: an answer's source
+in assistant.db points at its call. An agent call goes with its person; the others keep the row without the name.
+**access_log stays in core** (the plan had it here): it's the small audit of access changes, written in the same
+transaction as the change. **apis and api_* stay in core** too: they're settings, not logs. The **mcp** service
+(port 38205, 2 processes on the NAS, 4 on the Ryzen) serves `/mcp` (web/mcp_route.py hands each request to the
+endpoint the `mcp` hook builds: the embedder, the box's identity, reloaded on "theme:changed") and Claude's fetch
+links `/c/`. OAuth (`/oauth/*`, `/.well-known/*`) stays with the web app. Its processes have no scheduler: until
+Phase 9, `run_automation` and `report_automation_run` from them say the Automator isn't reachable.
 
 ## Context
 

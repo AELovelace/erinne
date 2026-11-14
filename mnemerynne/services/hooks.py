@@ -132,5 +132,51 @@ async def assistant(app, settings, services):
                 svc.reranker.close()
 
 
+@asynccontextmanager
+async def mcp(app, settings, services):
+    """Claude's MCP endpoint (web/mcp_route.py): the embedder for searching, which box this is (its name for Claude,
+    reloaded when an admin changes the brand: "theme:changed"), the server and its stateless session manager. No
+    model: the tools search, read and propose; Automator's runs are started where the scheduler runs."""
+    from mnemerynne import db, events, identity, mcp_server
+    from mnemerynne.clients.embed import Embedder
+
+    embedder = services.embedder if services is not None else Embedder(settings)
+    app.state.embedder = embedder
+
+    def load_identity() -> None:
+        conn = db.connect(settings.db_path)
+        try:
+            app.state.instance = identity.load(conn, settings)
+        finally:
+            conn.close()
+
+    load_identity()
+    server = mcp_server.build_server(settings, lambda: app.state.embedder, lambda: app.state.directory,
+                                     instance=lambda: app.state.instance)
+    app.state.mcp = server
+    app.state.mcp_endpoint = mcp_server.McpEndpoint(settings, server)
+
+    async def follow_brand():
+        while True:
+            try:
+                async for _ in events.subscribe("theme:changed"):
+                    await asyncio.to_thread(load_identity)
+                    mcp_server.apply_identity(server, app.state.instance)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                await asyncio.sleep(5)
+
+    follower = asyncio.create_task(follow_brand())
+    try:
+        async with server.session_manager.run():
+            yield
+    finally:
+        follower.cancel()
+        await asyncio.gather(follower, return_exceptions=True)
+        if services is None:
+            embedder.close()
+
+
 HOOKS = {"balancer": balancer, "rooms": rooms, "pages": pages, "media": media, "share": share,
-         "assistant": assistant}
+         "assistant": assistant, "mcp": mcp}

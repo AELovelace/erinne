@@ -1216,7 +1216,10 @@ with the web app. It needs no Valkey either, and works best with the share servi
 of its processes reads the share's permissions for itself). The **assistant** service (`mnemerynne@assistant`,
 port 38204, one process: an answer's live events stay in the process writing it) serves Ask: questions and
 their streamed answers, conversations, ratings, memories and the tool list, from `assistant.db`. With Valkey
-it also answers @Erynne in Rooms for every process; without, the web app keeps doing that.
+it also answers @Erynne in Rooms for every process; without, the web app keeps doing that. The **mcp**
+service (`mnemerynne@mcp`, port 38205, two processes on the NAS profile) serves Claude's `/mcp` endpoint and
+its fetch links (`/c/`); sign-in for Claude (OAuth) stays with the web app. Each call is logged in
+`logs.db`.
 
 `services` writes the services it enabled to `MNEMERYNNE_SERVICES_ON` in the .env and restarts the app when
 that list changes, so the web app knows which jobs another process has taken over.

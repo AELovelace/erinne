@@ -37,7 +37,7 @@ from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
-from mnemerynne import (identity, diagnostics, messages, notices, rooms, accounts, activity, api_tokens, apis, automations,
+from mnemerynne import (identity, call_logs, diagnostics, messages, notices, rooms, accounts, activity, api_tokens, apis, automations,
                         automations_run, briefings, claude_links, comments, db, editing, editing_formats,
                         fs, m365_mail, permissions, proposals, retrieval, scratchpad, sharepoint)
 from mnemerynne.api_tokens import Caller
@@ -1788,11 +1788,12 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
                 out = claude_links.attach(conn, tools.base, caller, out)
                 return _with_directions(conn, tools, caller, name, args, out)
             finally:
-                conn.execute("INSERT INTO mcp_calls(user_id, token_id, grant_id, tool, args, file_ids, ok, ms, error) "
-                             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                             (caller.user_id, caller.token_id, caller.grant_id, name, json.dumps(logged_args(name, args)),
-                              json.dumps(file_ids), int(ok), int((time.monotonic() - started) * 1000),
-                              None if error is None else error[:2000]))
+                with call_logs.on(conn) as logs:      # logs.db (Phase 8)
+                    logs.execute("INSERT INTO mcp_calls(user_id, token_id, grant_id, tool, args, file_ids, ok, ms, "
+                                 "error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                 (caller.user_id, caller.token_id, caller.grant_id, name,
+                                  json.dumps(logged_args(name, args)), json.dumps(file_ids), int(ok),
+                                  int((time.monotonic() - started) * 1000), None if error is None else error[:2000]))
                 conn.close()
 
         return await anyio.to_thread.run_sync(work)
