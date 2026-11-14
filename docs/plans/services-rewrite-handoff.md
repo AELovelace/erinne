@@ -20,7 +20,8 @@ Uncommitted in the working tree and **not part of this work**: `lumi-codex/` (st
 
 Deployed 2026-11-14: phases 0.5 to 6b (26c62f8), on the new box (static 192.168.1.5); later the same day
 phases 7 to 11 (248eb29) on top. The games, rooms, media, search, assistant, logs, automations and sync tables
-are in their own files, and the web app runs slim. Valkey is **off**; accel is **off**.
+are in their own files, and the web app runs slim. Valkey is **on** since 17:31 that day (every process logs
+"Events: through Valkey", and mnemerynne@rooms runs); accel is **off**.
 
 **Found after the 7–11 deploy:** `/etc/nginx/conf.d/mnemerynne-front.conf` on the box was still the
 hand-copied sample (`deploy/linux/nginx-mnemerynne-front.conf`): only `/api/sync/` and the games' API
@@ -42,7 +43,8 @@ started by hand is handed to systemd, and nginx waits for the network at boot. R
 | files | `127.0.0.1:38203`, 3 processes (`mnemerynne@files`) | |
 | assistant, automations, remote | `127.0.0.1:38204`, `:38208`, `:38209` (`mnemerynne@assistant`, `@automations`, `@remote`) | one process each |
 | mcp | `127.0.0.1:38205`, 2 processes (`mnemerynne@mcp`) | Claude's connector |
-| rooms | off (needs Valkey) | the web app serves Rooms, and answers @Erynne there |
+| rooms | `127.0.0.1:38206` (`mnemerynne@rooms`) | since Valkey went on; @Erynne's asks travel to the assistant |
+| Valkey | `unix:///run/valkey/valkey.sock` (no TCP port) | `valkey-setup.sh status`; `off` then `services` puts Rooms back in the web app |
 | the .env before the front door | `/etc/mnemerynne/mnemerynne.env.before-front-door` | `front-door.sh off` puts it back |
 
 Not yet on the box: the two fixes (c31422b, 5723c67) and everything from Phase 7 on.
