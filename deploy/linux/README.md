@@ -1223,7 +1223,8 @@ process used to do its own. With `mnemerynne@share` running, `front-door.sh serv
 changes); the web app and the other services read its walks from `share-rights.db`, ask it for a library
 it hasn't walked yet, and hear when one changes (through Valkey, or by reading the file again every 30 s
 without it). If it doesn't answer within 20 s, a process walks that library itself, so a page never waits
-for good. `MNEMERYNNE_SERVICES_OFF=share` and `services` again go back to every process walking.
+for good; without Valkey the service can't hear the request, so a process walks a library nobody has walked
+at once and saves it for the others. `MNEMERYNNE_SERVICES_OFF=share` and `services` again go back to every process walking.
 
 ### Services that need Valkey
 

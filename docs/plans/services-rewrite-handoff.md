@@ -138,7 +138,8 @@ web app). Back to A: `MNEMERYNNE_SERVICES_OFF=media` in the .env and `front-door
 After the update, `sudo bash /opt/mnemerynne/deploy/linux/front-door.sh services` starts `mnemerynne@share`, sets
 `MNEMERYNNE_SHARE_WALKS=service` and restarts the app's units: from then on only the share service walks the share's
 permissions (and watches it). Best with Valkey on (requests for walks and change notices travel by it); without it
-the others re-read share-rights.db every 30 s and walk a never-walked library themselves after 20 s. Check: Files
+the others re-read share-rights.db every 30 s and walk a never-walked library themselves at once (they used to
+wait 20 s for a service that couldn't hear them: Ask and the wiki were slow until 2026-11-14's fix). Check: Files
 lists libraries as before; a permission changed on the share shows within seconds; `journalctl -u mnemerynne@share`
 shows the walks; the web app's log has no walks of its own. Back to A: `MNEMERYNNE_SERVICES_OFF=share` and
 `front-door.sh services` (it clears the setting and restarts the app).

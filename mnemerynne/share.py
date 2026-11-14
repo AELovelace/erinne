@@ -797,8 +797,9 @@ POLL_SECONDS = 0.5      # how often it looks for that walk meanwhile
 def _read_shared(rt: Runtime, key: tuple, walk, *, wait: bool) -> _Rights | None:
     """_read_rights for a process that doesn't walk: the share service's last walk of `key`, from share-rights.db
     (read again every RELOAD_SECONDS, or as soon as the service says the library changed). A key it hasn't walked
-    yet: ask it ("share:walk") and wait up to ASK_SECONDS; no walk by then (the service down, or Valkey off so it
-    never heard) and this process walks it itself, as before, so nobody waits for good. wait=False (a big library):
+    yet: ask it ("share:walk") and wait up to ASK_SECONDS; no walk by then (the service down) and this process walks
+    it itself, as before, so nobody waits for good. Without Valkey the service can't hear the ask, so there is no
+    wait: this process walks it at once and saves it, and the others read that. wait=False (a big library):
     None at once, and the caller answers provisionally (library_reach) until the walk is there."""
     now = time.monotonic()
     cached = rt.rights.get(key)
@@ -811,22 +812,24 @@ def _read_shared(rt: Runtime, key: tuple, walk, *, wait: bool) -> _Rights | None
     if cached is not None:
         return cached                              # the file couldn't be read just now: the last walk stands
     asked = rt.asked.setdefault(key, now)
-    if asked == now:
+    patience = ASK_SECONDS if events.shared() else 0   # no Valkey: the share service never hears the ask
+    if asked == now and patience:
         _ask_for_walk(key)
     if not wait:
-        if now - asked >= ASK_SECONDS:             # nobody answered: this process walks it, behind the scenes
+        if now - asked >= patience:                # nobody answered (or can't): this process walks it, behind the scenes
             _walk_in_background(rt, key, walk)
         return None
     with rt.rights_walks.setdefault(key, threading.Lock()):
-        while time.monotonic() - asked < ASK_SECONDS:
+        while time.monotonic() - asked < patience:
             if (saved := _load_rights(rt, key)) is not None:
                 rt.rights[key], rt.loaded[key] = saved, time.monotonic()
                 return saved
             time.sleep(POLL_SECONDS)
         if (cached := rt.rights.get(key)) is not None:
             return cached                          # another request's own walk finished meanwhile
-        log.info("Share: no walk from the share service for library %s within %ds; walking it here.",
-                 key[0], ASK_SECONDS)
+        if patience:
+            log.info("Share: no walk from the share service for library %s within %ds; walking it here.",
+                     key[0], patience)
         return _walk_rights(rt, key, walk)
 
 

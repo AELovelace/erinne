@@ -203,6 +203,12 @@ def current() -> LocalBus | ValkeyBus:
     return _bus
 
 
+def shared() -> bool:
+    """Whether events reach the other processes (Valkey), or only this one: a request to another process
+    (share:walk) is worth waiting on only when it can hear it."""
+    return isinstance(_bus, ValkeyBus)
+
+
 def publish_sync(channel: str, data: dict) -> int:
     return _bus.publish_sync(channel, data)
 

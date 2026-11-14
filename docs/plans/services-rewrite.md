@@ -118,7 +118,9 @@ what it needs, as before) or "service". With "service", `share.Runtime.owner` is
 service (registry; no paths; health on 38211; `single`): `_read_rights` becomes `_read_shared`, which reads the
 service's walk of a key from share-rights.db (again every `RELOAD_SECONDS`, or at once on `share:rights`, via
 `share.follow_changes` in the web app and every service), asks for a key nobody walked (`share:walk`) and waits up
-to `ASK_SECONDS`, then walks it itself (so a missing service or no Valkey never leaves a page waiting). The service
+to `ASK_SECONDS`, then walks it itself (so a missing service never leaves a page waiting). Without Valkey
+(`events.shared()` false) it doesn't ask or wait at all: the service can't hear it, and on the box that wait made
+every first look in Ask and the wiki take 20 s (fixed 2026-11-14). The service
 (`hooks.share`: `configure(owner=True)`, the watcher, `share.serve_walks`) walks requested keys from the database
 alone (`share.walk_for`: the same `_checker` library_reach uses), re-walks due ones every minute (`due_keys`), and
 announces each change (`_announce` after a walk, a watcher recheck or `forget_rights`). Only the owner watches the

@@ -57,6 +57,7 @@ def test_a_key_nobody_walked_is_asked_for_and_walked_here_if_nobody_answers(conn
     library = _library(conn, settings, root)
     monkeypatch.setattr(share, "ASK_SECONDS", 0.3)
     monkeypatch.setattr(share, "POLL_SECONDS", 0.05)
+    monkeypatch.setattr(events, "shared", lambda: True)            # Valkey on: the share service could hear it
     reader = share.configure(settings, rt.directory, CountingChecker(root), owner=False)
     started = time.monotonic()
     assert permissions.reach(conn, jane)[library].can_read(_fid(conn, "Guides"))
@@ -70,6 +71,7 @@ def test_a_walk_that_arrives_while_waiting_is_used(conn, settings, root, rt, jan
     library = _library(conn, settings, root)
     key = _key(rt, library)
     monkeypatch.setattr(share, "POLL_SECONDS", 0.05)
+    monkeypatch.setattr(events, "shared", lambda: True)            # Valkey on: the request reaches the service
     owner = rt
     reader = share.configure(settings, rt.directory, CountingChecker(root), owner=False)
     # The share service answers the request a moment later (on its own thread, as it would in its own process).
@@ -177,3 +179,16 @@ services
     result = subprocess.run([bash, "-c", script, "_", deploy, *args], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr + result.stdout
     assert "MNEMERYNNE_SHARE_WALKS" not in env.read_text()           # no share service: everyone walks again
+
+
+def test_without_valkey_a_key_nobody_walked_is_walked_here_at_once(conn, settings, root, rt, jane, heard):
+    """With events in-process the share service never hears "share:walk": waiting for it only cost every first look
+    ASK_SECONDS (Ask and the wiki took 20 s on the box). Walk here at once and save it for the others."""
+    library = _library(conn, settings, root)
+    assert not events.shared()                                     # the tests' bus: in this process only
+    reader = share.configure(settings, rt.directory, CountingChecker(root), owner=False)
+    started = time.monotonic()
+    assert permissions.reach(conn, jane)[library].can_read(_fid(conn, "Guides"))
+    assert time.monotonic() - started < share.ASK_SECONDS / 4       # no wait for an answer that can't come
+    assert reader.checker.asked and not [c for c, _ in heard if c == "share:walk"]   # walked here; nobody asked
+    assert share._load_rights(reader, _key(reader, library)) is not None   # and saved for the other processes
