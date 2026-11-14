@@ -154,6 +154,14 @@ takes a file out of Claude's answers; uploading a new PDF makes it searchable; S
 its chunks and vectors. Back to A: everything stopped, `sudo mnemerynne-admin move-back search` (chunks, vectors,
 keyword index and triggers back into core; search.db set aside), then the older code.
 
+### Deploying Phase 6b (the files service; never run on the box yet)
+
+After the update, `sudo bash /opt/mnemerynne/deploy/linux/front-door.sh services` starts `mnemerynne@files` (three
+processes on port 38203) and routes Files' paths to it. Check: Files lists, uploads (a big one too), moves, bins and
+restores; a PDF, a Markdown file and a picture open in the viewer; the editor saves; the wiki opens; a zip of several
+files downloads; `journalctl -u mnemerynne@files` shows the requests. Watch memory (`free -m`) with three more
+processes on the 8 GB box. Back to A: `MNEMERYNNE_SERVICES_OFF=files` in the .env and `front-door.sh services`.
+
 ## 3. Phase 0.5: done in code (2026-11-13)
 
 The front-door and Valkey work below is committed and tested with the box stood in for

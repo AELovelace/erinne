@@ -1210,7 +1210,10 @@ then put the older code back and start the services. The newer code's next start
 leaves them off (or turns them off) and nginx sends their paths to the web app, which serves every path
 itself anyway. Take a name out and run `services` again to bring it back. The **media** service
 (`mnemerynne@media`, port 38207) serves all of Media in one process (pages, API, TVs and remotes,
-transcoding): it needs no Valkey.
+transcoding): it needs no Valkey. The **files** service (`mnemerynne@files`, port 38203, three processes
+on the NAS profile) serves Files' API, the viewer, the editor and the wiki; the Files page itself stays
+with the web app. It needs no Valkey either, and works best with the share service on (otherwise each
+of its processes reads the share's permissions for itself).
 
 ### One process walks the share (the share service)
 

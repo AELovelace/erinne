@@ -18,7 +18,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI
 
-from mnemerynne import db, directory, events, share
+from mnemerynne import db, directory, events, share, sharepoint
 from mnemerynne.config import Settings, get_settings
 from mnemerynne.services import hooks as hooks_mod, registry
 from mnemerynne.web import deps                      # close_feature_pools at shutdown
@@ -77,6 +77,7 @@ def create_service(name: str, settings: Settings | None = None, services=None) -
                            else directory.from_settings(settings))
     share.configure(settings, app.state.directory,                 # permissions; the watcher runs elsewhere
                     services.share_checker if services is not None else None)
+    sharepoint.configure(settings)                          # fs.Access asks it which SharePoint files someone may see
     _guard(app, settings, secret_key)
     for ref in service.routers:
         app.include_router(_router(ref))

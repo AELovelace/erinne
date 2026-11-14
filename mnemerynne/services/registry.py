@@ -79,6 +79,18 @@ SERVICES: dict[str, Service] = {s.name: s for s in (
         web_paths=("/media/games/", "= /media/panel/manifest.webmanifest"),
     ),
     Service(
+        name="files",
+        serves="Files (/api/files, /api/browse, folders, moves, the bin, versions, comments, downloads and zips), the "
+               "editor and the wiki: core's files and folders; keeps nothing in memory, so it runs as several processes",
+        routers=("mnemerynne.web.files:router", "mnemerynne.web.editor:router", "mnemerynne.web.wiki:router"),
+        paths=("/api/files", "/api/folders", "/api/items/", "/api/browse", "/api/collections/", "/api/locations",
+               "/api/downloads", "/api/properties", "/api/reembed", "/api/search-names", "/api/trash",
+               "/api/markdown/", "/api/wiki", "/api/admin/settings/wiki-library", "/files/", "/edit/", "/wiki"),
+        port=38203,
+        workers={"nas": 3, "ryzen": 6},
+        hooks=("pages",),                  # its viewer, editor and wiki pages draw the web app's templates
+    ),
+    Service(
         name="share",
         serves="no pages: walks the share's permissions for every process and watches the share for changes "
                "(share-rights.db, share:rights); the others stop walking while it runs (MNEMERYNNE_SHARE_WALKS)",

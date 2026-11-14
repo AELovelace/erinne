@@ -17,7 +17,8 @@
 | Phase 4a: `media.db` (13 `media_*`/`signage_*` tables) | done in code (2026-11-14); **not yet run on the NAS** | 80fff80 |
 | Phase 4b: the media service (all of Media in one process; no Valkey needed) | done in code (2026-11-14); **not yet run on the NAS** | 43c2c4a |
 | Phase 5: the share service walks the share's permissions for every process and watches it | done in code (2026-11-14); **not yet run on the NAS** | cb7de09 |
-| Phase 6a: `search.db` (chunks, their keyword index and vectors) out of core; `move-back search` for A/B | done in code (2026-11-14); **not yet run on the NAS** | this step's commit |
+| Phase 6a: `search.db` (chunks, their keyword index and vectors) out of core; `move-back search` for A/B | done in code (2026-11-14); **not yet run on the NAS** | c7fb12f |
+| Phase 6b: the files service (Files, the editor and the wiki; 3 processes on the NAS) | done in code (2026-11-14); **not yet run on the NAS** | this step's commit |
 
 Tests: `.venv\Scripts\python -m pytest tests -n auto` (about 4 minutes).
 
@@ -139,6 +140,15 @@ the chunks right after the commit (`db.after_commit`, `search_index.sync`/`drop`
 where it no longer is; `search_index.repair` (hourly, after the orphan sweep) fixes what a crash left. `migrate_all`
 takes an OS lock (`<db>.migrate.lock`) and the worker now runs it too (it used to migrate core alone). Not yet: a
 search service of its own (the worker is already a process); the files service is Phase 6b.
+
+**Phase 6b (2026-11-14):** registry row `files` (port 38203; 3 processes on nas, 6 on ryzen; hook `pages`):
+`web.files`, `web.editor` and `web.wiki`'s routers, at `/api/files`, `/api/folders`, `/api/items/`, `/api/browse`,
+`/api/collections/`, `/api/locations`, `/api/downloads`, `/api/properties`, `/api/reembed`, `/api/search-names`,
+`/api/trash`, `/api/markdown/`, `/api/wiki`, `/api/admin/settings/wiki-library`, `/files/`, `/edit/` and `/wiki`.
+The Files page itself (`/files`) stays with the web app (its shell). Nothing is kept in one process's memory (zip
+links are signed; folder caches are version-checked; share walks come from share-rights.db or the share service),
+so any of the three answers any request. Every service now calls `sharepoint.configure` (fs.Access asks it who may
+see a SharePoint file). No Valkey needed; best with the share service on, so three processes don't each walk.
 
 ## Context
 
