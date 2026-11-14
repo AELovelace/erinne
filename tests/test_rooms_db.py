@@ -216,3 +216,22 @@ services
     assert "systemctl enable --now mnemerynne@sync" in asked
     assert "systemctl disable --now mnemerynne@rooms" in asked and "systemctl enable --now mnemerynne@rooms" not in asked
     assert "off again, as Valkey is off" in result.stdout
+
+
+def test_request_connections_read_every_feature_file_and_write_only_their_own(settings, directory):
+    """Before Phase 4: what code reads (a TV's screen from the games router, Rooms' badge from any page) is found
+    wherever its table lives; a write has to use the owner's connection, and a stray one fails loudly."""
+    import sqlite3
+    core, *_ = _core_with_rooms(settings, directory)
+    core.close()
+    db.migrate_all(settings.db_path, settings.embed_dim)
+    pool = db.Pool(settings.db_path)
+    pooled = pool.get()                                            # what a request's get_db lends
+    assert pooled.execute("SELECT count(*) FROM chat_messages").fetchone()[0] == 2
+    assert pooled.execute("SELECT count(*) FROM lumi_pets").fetchone()[0] == 0
+    with pytest.raises(sqlite3.OperationalError, match="readonly"):
+        pooled.execute("DELETE FROM chat_messages")
+    games = db.connect_feature(settings.db_path, "games")          # a feature reads the others too
+    assert games.execute("SELECT count(*) FROM chat_messages").fetchone()[0] == 2
+    pool.put(pooled)
+    pool.close()

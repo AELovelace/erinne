@@ -3,7 +3,10 @@
 The core database file holds users, files, folders, permissions, search and settings. Features move into
 files of their own, one per feature (games.db, rooms.db, ...: FEATURE_DBS), so each has its own write lock and
 the services write in parallel (docs/plans/services-rewrite.md). A feature's connection sees core too,
-attached read-only as `core`, so its queries can still join users or files.
+attached read-only as `core`, so its queries can still join users or files. Request connections (the pools) also
+attach every other feature file read-only under its own name (attach_features), so any code can *read* any table
+by its plain name wherever it lives; a write must go through the owner's connection, and a stray one fails loudly
+("attempt to write a readonly database").
 
 Connections run in autocommit mode (isolation_level=None) because LangGraph's
 SQLite checkpointer and store manage their own transactions; our code opens
@@ -31,12 +34,30 @@ class SchemaError(RuntimeError):
     """The database does not match what this version of the code expects."""
 
 
-def connect(path: Path | str) -> sqlite3.Connection:
-    """Open a connection with the settings every part of the app relies on."""
+def connect(path: Path | str, *, features: bool = False) -> sqlite3.Connection:
+    """Open a connection with the settings every part of the app relies on. `features`: also attach every feature
+    file read-only (attach_features), for request connections that read across them (the pools)."""
     if str(path) != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, isolation_level=None, check_same_thread=False, timeout=10.0)
-    return _configure(conn, path)
+    conn = sqlite3.connect(path, isolation_level=None, check_same_thread=False, timeout=10.0,
+                           uri=features)                  # uri: so ATTACH takes the feature files' ?mode=ro
+    _configure(conn, path)
+    if features and str(path) != ":memory:":
+        attach_features(conn, path)
+    return conn
+
+
+def attach_features(conn: sqlite3.Connection, core_path: Path | str, skip: str | None = None) -> None:
+    """Attach each feature file that exists, read-only, under the feature's name (games, rooms, ...): unqualified
+    names find their tables (SQLite looks in main, then the attached files in order). Read-only, so BEGIN IMMEDIATE
+    on this connection never waits for those files' write locks, and a write to one fails instead of landing in
+    the wrong transaction. A file made after the connection opened isn't seen by it (the pools open theirs after
+    the web app's migrations, and the services wait for those)."""
+    for name in FEATURE_DBS:
+        path = feature_path(core_path, name)
+        if name == skip or not path.exists():
+            continue
+        conn.execute(f'ATTACH DATABASE ? AS "{name}"', (path.resolve().as_uri() + "?mode=ro",))
 
 
 @dataclass(frozen=True)
@@ -124,6 +145,7 @@ def connect_feature(core_path: Path | str, feature: str) -> sqlite3.Connection:
                            uri=True)                          # uri: so ATTACH takes core's ?mode=ro
     _configure(conn, path)
     conn.execute("ATTACH DATABASE ? AS core", (Path(core_path).resolve().as_uri() + "?mode=ro",))
+    attach_features(conn, core_path, skip=feature)             # the other features' tables, read-only too
     return conn
 
 
@@ -151,7 +173,7 @@ class Pool:
         """`opener`: how to open a new connection (a feature's: lambda: connect_feature(core, "games"));
         default connect(path)."""
         self.path, self.keep = path, keep
-        self._open = opener or (lambda: connect(self.path))
+        self._open = opener or (lambda: connect(self.path, features=True))   # requests read across the files
         self._idle: list[sqlite3.Connection] = []
         self._lock = threading.Lock()
         self._closed = False
