@@ -144,9 +144,17 @@ def test_the_config_carries_a_stamp_only_this_box_may_ask_for():
     """front-door.sh asks the running nginx for the stamp it wrote, so a config written but never loaded shows."""
     conf = nginx.render("192.168.1.5:38200", stamp="20261114-120000-42")
     stamp = conf[conf.index(f"location = {nginx.STAMP_PATH} {{"):]
-    stamp = stamp[:stamp.index("}")]                                          # just that location
+    stamp = stamp[:stamp.index("\n    }")]                                    # just that location (its own brace)
     assert 'return 200 "20261114-120000-42";' in stamp                       # front-door.sh's sed reads this line
-    assert "allow 192.168.1.5;" in stamp and "allow 127.0.0.1;" in stamp and "deny all;" in stamp
+    # `return` runs before allow/deny (nginx's rewrite phase), so they'd never be asked: the checks are ifs ahead
+    # of it. The first version used allow/deny, and the stamp answered anyone through beepsquad.wtf.
+    assert "allow " not in stamp and "deny " not in stamp
+    checks = [line.strip() for line in stamp.splitlines() if line.strip().startswith("if ")]
+    assert [c.split(" {")[0] for c in checks] == ["if ($http_x_forwarded_for)", "if ($front_door_box = 0)"]
+    assert stamp.index("if ($front_door_box") < stamp.index("return 200")
+    geo = conf[conf.index("geo $front_door_box {"):]
+    geo = geo[:geo.index("}")]
+    assert "default 0;" in geo and "127.0.0.1 1;" in geo and "192.168.1.5 1;" in geo
     assert nginx.STAMP_PATH not in nginx.render("192.168.1.5:38200")          # no stamp asked for: no location
     with pytest.raises(ValueError):
         nginx.render("192.168.1.5:38200", stamp='x"; return 301 http://evil')  # nothing but letters, digits, dashes

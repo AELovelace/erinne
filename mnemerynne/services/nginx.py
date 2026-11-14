@@ -77,6 +77,20 @@ PROBE = ".mnemerynne-accel-probe"                      # front-door.sh writes it
 STAMP_PATH = "/_front-door/stamp"                      # which config nginx is serving: front-door.sh asks
 
 
+def _box_only(probe_from: str) -> list[str]:
+    """A location (serving a file) only this box may ask for: its address, and nothing the reverse proxy sent
+    (that always carries X-Forwarded-For; front-door.sh's own asks never do)."""
+    return ["        if ($http_x_forwarded_for) { return 404; }   # came through the reverse proxy: not this box",
+            f"        allow {probe_from};", "        allow 127.0.0.1;", "        deny all;"]
+
+
+def _box_geo(probe_from: str) -> str:
+    """$front_door_box: 1 for this box's own addresses. The stamp answers with `return`, which nginx runs in its
+    rewrite phase, before allow/deny are ever looked at, so its check has to be an `if` on this instead."""
+    return ("\n# This box's own addresses, for the stamp's check (see _stamp_location).\n"
+            "geo $front_door_box {\n    default 0;\n    127.0.0.1 1;\n" + f"    {probe_from} 1;\n" + "}\n")
+
+
 def _upstream(name: str) -> str:
     return "mnemerynne_" + name.replace("-", "_")
 
@@ -123,7 +137,7 @@ def _accel_locations(roots: dict[str, Path], probe_from: str) -> list[str]:
         if key == "static":
             continue
         lines += [f"    location = /_accel-probe/{key} {{",
-                  f"        allow {probe_from};", "        allow 127.0.0.1;", "        deny all;",
+                  *_box_only(probe_from),
                   f"        alias {_quoted(str(root).rstrip('/') + '/' + PROBE)};",
                   "    }"]
     return lines + [""]
@@ -134,9 +148,11 @@ def _stamp_location(stamp: str, probe_from: str) -> list[str]:
     one. Only this box may ask."""
     if not stamp.replace("-", "").isalnum():
         raise ValueError(f"Can't put stamp {stamp!r} in the nginx config")      # letters, digits and dashes only
-    return ["    # Which config nginx is serving (front-door.sh checks after each reload). Only this box may ask.",
+    return ["    # Which config nginx is serving (front-door.sh checks after each reload). Only this box may ask:",
+            "    # `return` runs before allow/deny would, so the checks are ifs, ahead of it.",
             f"    location = {STAMP_PATH} {{",
-            f"        allow {probe_from};", "        allow 127.0.0.1;", "        deny all;",
+            "        if ($http_x_forwarded_for) { return 404; }   # came through the reverse proxy: not this box",
+            "        if ($front_door_box = 0) { return 404; }     # from anywhere but this box",
             "        default_type text/plain;",
             f'        return 200 "{stamp}";',
             "    }", ""]
@@ -149,7 +165,8 @@ def render(listen: str, web: str = "127.0.0.1:38210", accel: dict[str, Path] | N
     their paths (front-door.sh passes the ones whose units are enabled); the rest stay with the web app. `stamp`:
     what nginx answers at STAMP_PATH, so front-door.sh can tell this config is the one being served."""
     services = [s for s in registry.SERVICES.values() if running is None or s.name in running]
-    lines = [HEADER + (ACCEL_HEADER if accel else "")]
+    probe_from = listen.rsplit(":", 1)[0].strip("[]")              # the box's own address, as nginx sees it
+    lines = [HEADER + (ACCEL_HEADER if accel else "") + (_box_geo(probe_from) if stamp else "")]
     lines.append(f"upstream {_upstream('web')} {{ server {web}; keepalive 32; }}")
     for s in services:
         lines.append(f"upstream {_upstream(s.name)} {{ server 127.0.0.1:{s.port}; keepalive {16 * s.processes()}; }}"
@@ -160,7 +177,6 @@ def render(listen: str, web: str = "127.0.0.1:38210", accel: dict[str, Path] | N
     lines += ["", "server {", f"    listen {listen};", "    server_name _;", "", SERVER_SETTINGS.rstrip("\n")]
     lines += ["    " + h for h in PASS + [accel_header]]
     lines += ['    proxy_set_header Connection "";              # keep the connections to the processes open', ""]
-    probe_from = listen.rsplit(":", 1)[0].strip("[]")              # the box's own address, as nginx sees it
     if stamp:
         lines += _stamp_location(stamp, probe_from)
     if accel:
