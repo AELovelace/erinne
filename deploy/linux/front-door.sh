@@ -237,6 +237,19 @@ services() {
         fi
         move_service "$name" "$port" || { echo "Stopped at $name; the services before it run as mnemerynne@." >&2; exit 1; }
     done <<< "$list"
+    local walks                                                 # who walks the share's permissions (Phase 5)
+    walks=$(env_get MNEMERYNNE_SHARE_WALKS)
+    if systemctl is-enabled --quiet mnemerynne@share 2>/dev/null; then
+        if [ "$walks" != service ]; then
+            env_set MNEMERYNNE_SHARE_WALKS service
+            echo "The share service walks the share for everyone now (MNEMERYNNE_SHARE_WALKS=service); restarting the app."
+            restart_app || true
+        fi
+    elif [ -n "$walks" ]; then
+        sed -i '/^MNEMERYNNE_SHARE_WALKS=/d' "$ENV"
+        echo "No share service: each process walks the share itself again; restarting the app."
+        restart_app || true
+    fi
     if [ -f "$SAVED" ]; then                                    # the front door is on: its routes from the registry
         local listen                                            # where the reverse proxy sends: the saved .env's
         listen="$(env_get MNEMERYNNE_HOST "$SAVED"):$(env_get MNEMERYNNE_PORT "$SAVED")"

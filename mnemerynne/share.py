@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO, Iterable, Protocol
 
-from mnemerynne import db
+from mnemerynne import db, events
 from mnemerynne.config import Settings
 
 log = logging.getLogger("mnemerynne.share")
@@ -75,6 +75,11 @@ class Runtime:
     stopping: bool = False                  # the app is shutting down: the watcher stops for good
     watch_proc: object = field(default=None, repr=False)          # the inotifywait process, while it runs
     watcher: object = field(default=None, repr=False)             # the thread that runs it
+    # Whether this process walks the share's permissions (Phase 5). False (settings.share_walks == "service", and
+    # not the share service itself): it reads the share service's walks from share-rights.db instead.
+    owner: bool = True
+    loaded: dict = field(default_factory=dict, repr=False)   # key -> when its rights were read from share-rights.db
+    asked: dict = field(default_factory=dict, repr=False)    # key -> when the share service was asked to walk it
 
     @property
     def root(self) -> Path:
@@ -88,10 +93,15 @@ class Runtime:
 _runtime: Runtime | None = None
 
 
-def configure(settings: Settings, directory, checker: Checker | None = None) -> Runtime | None:
-    """Called once by the web app, the worker and the CLI. No share_root = off."""
+def configure(settings: Settings, directory, checker: Checker | None = None, *,
+              owner: bool | None = None) -> Runtime | None:
+    """Called once by the web app, the worker, the CLI and each service. No share_root = off. `owner`: whether this
+    process walks the share's permissions; by default unless settings.share_walks is "service" (the share service
+    passes True)."""
     global _runtime
     _runtime = Runtime(settings, directory, checker or PosixChecker()) if settings.share_root else None
+    if _runtime is not None:
+        _runtime.owner = owner if owner is not None else settings.share_walks != "service"
     return _runtime
 
 
@@ -403,7 +413,9 @@ def forget_rights() -> None:
     """Forget every cached permission, saved ones too: the next list reads them from the share again."""
     if _runtime is not None:
         _runtime.rights.clear()
+        _runtime.loaded.clear()
         _forget_saved(_runtime)                    # or a restart would bring back what was forgotten here
+        _announce(None)                            # the other processes forget theirs too
 
 
 # ------------------------------------------------------------ saved permissions
@@ -535,8 +547,8 @@ _BATCH_LIMIT = 2000       # more changed folders than this in a library at once:
 def start_watching() -> None:
     """Called once by the web app at start. Quietly does nothing where there's no share or no inotifywait."""
     rt = _runtime
-    if rt is None or rt.watcher is not None or shutil.which("inotifywait") is None:
-        return
+    if rt is None or not rt.owner or rt.watcher is not None or shutil.which("inotifywait") is None:
+        return                                     # not the owner: the share service watches (Phase 5)
     rt.stopping = False
     rt.watcher = threading.Thread(target=_watch_forever, args=(rt,), name="share-watch", daemon=True)
     rt.watcher.start()
@@ -713,6 +725,7 @@ def _recheck_folders(rt: Runtime, library_id: int, folders: dict[int | None, Pat
     for key in [k for k in list(rt.provisional) if k[0] == library_id]:
         if (rights := rt.provisional.get(key)) is not None:
             update(key, rights)                    # first looks still filling in: theirs too (read just now)
+    _announce(library_id)                          # the processes that read the share service's walks reload them
 
 
 def _mark_due(rt: Runtime, library_id: int | None) -> None:
@@ -755,6 +768,8 @@ def _read_rights(rt: Runtime, key: tuple, walk, *, wait: bool = True) -> _Rights
 
     wait=False (a big library): with nothing known yet, start the first walk in the background and return None
     at once; the caller answers from what it reads itself meanwhile (library_reach)."""
+    if not rt.owner:
+        return _read_shared(rt, key, walk, wait=wait)
     cached = rt.rights.get(key)
     if cached is None and (saved := _load_rights(rt, key)) is not None:
         cached = rt.rights.setdefault(key, saved)  # another request may have loaded it a moment ago: use one copy
@@ -771,6 +786,174 @@ def _read_rights(rt: Runtime, key: tuple, walk, *, wait: bool = True) -> _Rights
         if (cached := rt.rights.get(key)) is not None:
             return cached                          # another request's walk just finished
         return _walk_rights(rt, key, walk)
+
+
+# ------------------------------------------------- one process walks for all (Phase 5)
+RELOAD_SECONDS = 30     # a process that doesn't walk reads share-rights.db again this often (sooner on "share:rights")
+ASK_SECONDS = 20        # how long it waits for the share service's first walk of a key before walking it itself
+POLL_SECONDS = 0.5      # how often it looks for that walk meanwhile
+
+
+def _read_shared(rt: Runtime, key: tuple, walk, *, wait: bool) -> _Rights | None:
+    """_read_rights for a process that doesn't walk: the share service's last walk of `key`, from share-rights.db
+    (read again every RELOAD_SECONDS, or as soon as the service says the library changed). A key it hasn't walked
+    yet: ask it ("share:walk") and wait up to ASK_SECONDS; no walk by then (the service down, or Valkey off so it
+    never heard) and this process walks it itself, as before, so nobody waits for good. wait=False (a big library):
+    None at once, and the caller answers provisionally (library_reach) until the walk is there."""
+    now = time.monotonic()
+    cached = rt.rights.get(key)
+    if cached is not None and now - rt.loaded.get(key, 0.0) < RELOAD_SECONDS:
+        return cached
+    if (saved := _load_rights(rt, key)) is not None:
+        rt.rights[key], rt.loaded[key] = saved, now
+        rt.provisional.pop(key, None)
+        return saved
+    if cached is not None:
+        return cached                              # the file couldn't be read just now: the last walk stands
+    asked = rt.asked.setdefault(key, now)
+    if asked == now:
+        _ask_for_walk(key)
+    if not wait:
+        if now - asked >= ASK_SECONDS:             # nobody answered: this process walks it, behind the scenes
+            _walk_in_background(rt, key, walk)
+        return None
+    with rt.rights_walks.setdefault(key, threading.Lock()):
+        while time.monotonic() - asked < ASK_SECONDS:
+            if (saved := _load_rights(rt, key)) is not None:
+                rt.rights[key], rt.loaded[key] = saved, time.monotonic()
+                return saved
+            time.sleep(POLL_SECONDS)
+        if (cached := rt.rights.get(key)) is not None:
+            return cached                          # another request's own walk finished meanwhile
+        log.info("Share: no walk from the share service for library %s within %ds; walking it here.",
+                 key[0], ASK_SECONDS)
+        return _walk_rights(rt, key, walk)
+
+
+def _ask_for_walk(key: tuple) -> None:
+    library, uid, gids = key
+    try:
+        events.publish_sync("share:walk", {"library": int(library), "uid": int(uid), "gids": sorted(int(g) for g in gids)})
+    except Exception:                              # Valkey gone: this process walks it after ASK_SECONDS
+        log.warning("Share: couldn't ask the share service for a walk.", exc_info=True)
+
+
+def _announce(library_id: int | None) -> None:
+    """Tell the other processes that a library's permissions changed (None: all of them)."""
+    try:
+        events.publish_sync("share:rights", {"library": library_id})
+    except Exception:
+        log.warning("Share: couldn't tell the other processes about changed permissions.", exc_info=True)
+
+
+def heard(library_id: int | None) -> None:
+    """The share service changed a library's permissions (None: every library): read them again at the next look."""
+    rt = _runtime
+    if rt is None:
+        return
+    for key in list(rt.loaded):
+        if library_id is None or key[0] == library_id:
+            rt.loaded.pop(key, None)
+    if library_id is None:
+        rt.rights.clear()                          # forgotten everywhere: the next look reads the file again
+
+
+async def follow_changes() -> None:
+    """For a process that doesn't walk: hear "share:rights" for as long as it runs (a background task)."""
+    import asyncio
+
+    while True:
+        try:
+            async for _, data in events.subscribe("share:rights"):
+                heard(data.get("library"))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.warning("Share: lost the event bus; reading share-rights.db every %ds meanwhile.", RELOAD_SECONDS,
+                        exc_info=True)
+            await asyncio.sleep(5)
+
+
+def walk_for(rt: Runtime, conn: sqlite3.Connection, key: tuple):
+    """The walk of `key` (library, uid, gids) built from the database alone: what library_reach builds for a request,
+    for the share service, which walks for people it has never seen a request from. None: no such share library."""
+    library, uid, gids = key
+    row = conn.execute("SELECT * FROM collections WHERE id = ? AND kind = 'library' AND share_path IS NOT NULL",
+                       (library,)).fetchone()
+    if row is None:
+        return None
+    info, check = _checker(rt, conn, row, uid, gids)
+    return lambda: {fid: check(fid) for fid in (None, *info)}
+
+
+def serve_walks_once(rt: Runtime, key: tuple) -> bool:
+    """The share service: walk `key` now (unless a walk of it is under way), save it and say so. True: walked."""
+    lock = rt.rights_walks.setdefault(key, threading.Lock())
+    if not lock.acquire(blocking=False):
+        return False
+    try:
+        conn = db.connect(rt.settings.db_path, features=True)
+        try:
+            walk = walk_for(rt, conn, key)
+            if walk is None:
+                return False
+            _walk_rights(rt, key, walk)
+        finally:
+            conn.close()
+    finally:
+        lock.release()
+    _announce(key[0])
+    return True
+
+
+def due_keys(rt: Runtime) -> list[tuple]:
+    """The share service: every saved walk that's due again (_due_after), oldest first."""
+    if not _saved_path(rt).exists():
+        return []
+    try:
+        conn = _saved_db(rt)
+        try:
+            rows = conn.execute("SELECT library, uid, gids FROM rights WHERE walked_at < ? ORDER BY walked_at",
+                                (time.time() - _due_after(rt),)).fetchall()
+        finally:
+            conn.close()
+    except Exception as exc:
+        log.warning("Share: couldn't list due walks in %s: %s", _saved_path(rt), exc)
+        return []
+    return [(lib, uid, frozenset(int(g) for g in gids.split(",") if g)) for lib, uid, gids in rows]
+
+
+async def serve_walks() -> None:
+    """The share service, for as long as it runs: walks asked for ("share:walk") as they come, and every minute
+    the saved walks that are due (the watcher keeps them current in between)."""
+    import asyncio
+
+    rt = _runtime
+    if rt is None:
+        return
+
+    async def asked() -> None:
+        while True:
+            try:
+                async for _, data in events.subscribe("share:walk"):
+                    key = (int(data["library"]), int(data["uid"]), frozenset(int(g) for g in data.get("gids") or ()))
+                    asyncio.get_running_loop().run_in_executor(None, serve_walks_once, rt, key)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.warning("Share: lost the event bus for walk requests; trying again.", exc_info=True)
+                await asyncio.sleep(5)
+
+    async def due() -> None:
+        while True:
+            await asyncio.sleep(60)
+            for key in await asyncio.to_thread(due_keys, rt):
+                try:
+                    await asyncio.to_thread(serve_walks_once, rt, key)
+                except Exception:
+                    log.exception("Share: a due walk failed")
+
+    await asyncio.gather(asked(), due())
 
 
 def _walk_rights(rt: Runtime, key: tuple, walk) -> _Rights:
@@ -803,22 +986,11 @@ def _walk_in_background(rt: Runtime, key: tuple, walk) -> None:
     threading.Thread(target=run, name="share-rights-walk", daemon=True).start()
 
 
-def library_reach(conn: sqlite3.Connection, row: sqlite3.Row, user: sqlite3.Row):
-    """What `user` may do in a share library, from the share's permissions
-    (permissions.Reach), or None for nothing. Folder rows always come fresh from the database; what the
-    share allows comes from _read_rights, and only a folder it hasn't seen yet costs a look at the disk."""
-    from mnemerynne.permissions import Reach
-
-    rt = _runtime
-    if rt is None or not user["ad_account"]:
-        return None
-    ids = rt.directory.ids_of(user["ad_account"])
-    if ids is None:
-        return None
-    uid, gids = ids
+def _checker(rt: Runtime, conn: sqlite3.Connection, row: sqlite3.Row, uid: int, gids):
+    """The library's folders (id -> row), and check(folder id or None) -> (read, write): what the share says now
+    about one folder for uid/gids. library_reach's and the share service's (walk_for)."""
     base = rt.root / Path(row["share_path"])
     info = db.folder_rows(conn, row["id"])        # from memory unless the library's folders changed
-    folders = list(info.values())
     paths: dict[int, Path | None] = {}
 
     def path_of(fid: int) -> Path | None:
@@ -837,6 +1009,25 @@ def library_reach(conn: sqlite3.Connection, row: sqlite3.Row, user: sqlite3.Row)
         """What the share says now about this one folder (None: the library's top)."""
         path = base if fid is None else path_of(fid) if fid in info else None
         return rt.checker.rights(path, uid, gids) if path is not None else (False, False)
+
+    return info, check
+
+
+def library_reach(conn: sqlite3.Connection, row: sqlite3.Row, user: sqlite3.Row):
+    """What `user` may do in a share library, from the share's permissions
+    (permissions.Reach), or None for nothing. Folder rows always come fresh from the database; what the
+    share allows comes from _read_rights, and only a folder it hasn't seen yet costs a look at the disk."""
+    from mnemerynne.permissions import Reach
+
+    rt = _runtime
+    if rt is None or not user["ad_account"]:
+        return None
+    ids = rt.directory.ids_of(user["ad_account"])
+    if ids is None:
+        return None
+    uid, gids = ids
+    info, check = _checker(rt, conn, row, uid, gids)
+    folders = list(info.values())
 
     key = (row["id"], uid, gids)
     walk = lambda: {fid: check(fid) for fid in (None, *info)}   # noqa: E731  every folder, from the disk

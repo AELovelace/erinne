@@ -78,6 +78,16 @@ SERVICES: dict[str, Service] = {s.name: s for s in (
         hooks=("pages", "media"),          # its pages draw the web app's templates; its own transcoding sessions
         web_paths=("/media/games/", "= /media/panel/manifest.webmanifest"),
     ),
+    Service(
+        name="share",
+        serves="no pages: walks the share's permissions for every process and watches the share for changes "
+               "(share-rights.db, share:rights); the others stop walking while it runs (MNEMERYNNE_SHARE_WALKS)",
+        routers=(),
+        paths=(),
+        port=38211,                        # its health only
+        single=True,                       # one watcher, one walker
+        hooks=("share",),
+    ),
 )}
 
 

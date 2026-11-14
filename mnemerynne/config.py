@@ -98,6 +98,10 @@ class Settings(BaseSettings):
     # How long lists and search may reuse one person's folder permissions read from the share. Opening a file,
     # playing it or changing something always reads that one folder's permissions again. 0: read every time.
     share_rights_seconds: int = 30
+    # Who walks the share's permissions (docs/plans/services-rewrite.md, Phase 5). "here": every process walks
+    # what it needs, as before. "service": only the share service walks (and watches); the others read its walks
+    # from share-rights.db and ask it for new ones. front-door.sh services sets it while the share service runs.
+    share_walks: str = "here"
 
     # Inference (llama-server)
     llm_url: str = "http://127.0.0.1:8081"

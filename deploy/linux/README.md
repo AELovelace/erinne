@@ -1211,6 +1211,16 @@ itself anyway. Take a name out and run `services` again to bring it back. The **
 (`mnemerynne@media`, port 38207) serves all of Media in one process (pages, API, TVs and remotes,
 transcoding): it needs no Valkey.
 
+### One process walks the share (the share service)
+
+Reading a library's folder permissions from the share (a walk) is the slow part of listing it, and every
+process used to do its own. With `mnemerynne@share` running, `front-door.sh services` sets
+`MNEMERYNNE_SHARE_WALKS=service`: only the share service walks (and watches the share for permission
+changes); the web app and the other services read its walks from `share-rights.db`, ask it for a library
+it hasn't walked yet, and hear when one changes (through Valkey, or by reading the file again every 30 s
+without it). If it doesn't answer within 20 s, a process walks that library itself, so a page never waits
+for good. `MNEMERYNNE_SERVICES_OFF=share` and `services` again go back to every process walking.
+
 ### Services that need Valkey
 
 Some services only work with Valkey on, because what happens in them must reach the other processes at

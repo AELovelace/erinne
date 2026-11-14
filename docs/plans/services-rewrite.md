@@ -15,7 +15,8 @@
 | Phase 3: `rooms.db`; Rooms' live events over the event bus; the `rooms` service (needs Valkey) | done in code (2026-11-13); **not yet run on the NAS** | 2d8b3fe |
 | Between 3 and 4: request and feature connections attach every feature file read-only | done | 041cd1a |
 | Phase 4a: `media.db` (13 `media_*`/`signage_*` tables) | done in code (2026-11-14); **not yet run on the NAS** | 80fff80 |
-| Phase 4b: the media service (all of Media in one process; no Valkey needed) | done in code (2026-11-14); **not yet run on the NAS** | this step's commit |
+| Phase 4b: the media service (all of Media in one process; no Valkey needed) | done in code (2026-11-14); **not yet run on the NAS** | 43c2c4a |
+| Phase 5: the share service walks the share's permissions for every process and watches it | done in code (2026-11-14); **not yet run on the NAS** | this step's commit |
 
 Tests: `.venv\Scripts\python -m pytest tests -n auto` (about 4 minutes).
 
@@ -109,6 +110,19 @@ folder, so the web app starting up no longer clears the service's live sessions.
 explicit web-app locations, so a shorter running prefix (`/api/media/`) can't take its paths (`/api/media/games`).
 `MNEMERYNNE_SERVICES_OFF=media,...` keeps named services off in `front-door.sh services` (the A/B switch for any
 service). The web app keeps the media router too (all-in-one).
+
+**Phase 5 (2026-11-14):** `settings.share_walks` (`MNEMERYNNE_SHARE_WALKS`): "here" (default: every process walks
+what it needs, as before) or "service". With "service", `share.Runtime.owner` is False everywhere but the `share`
+service (registry; no paths; health on 38211; `single`): `_read_rights` becomes `_read_shared`, which reads the
+service's walk of a key from share-rights.db (again every `RELOAD_SECONDS`, or at once on `share:rights`, via
+`share.follow_changes` in the web app and every service), asks for a key nobody walked (`share:walk`) and waits up
+to `ASK_SECONDS`, then walks it itself (so a missing service or no Valkey never leaves a page waiting). The service
+(`hooks.share`: `configure(owner=True)`, the watcher, `share.serve_walks`) walks requested keys from the database
+alone (`share.walk_for`: the same `_checker` library_reach uses), re-walks due ones every minute (`due_keys`), and
+announces each change (`_announce` after a walk, a watcher recheck or `forget_rights`). Only the owner watches the
+share (`start_watching`). `front-door.sh services` sets "service" while `mnemerynne@share` runs and clears it
+otherwise, restarting the app's units when it changes. **Not moved:** the share scan stays in the worker (already a
+process of its own); folding it into the share service is left for later.
 
 ## Context
 

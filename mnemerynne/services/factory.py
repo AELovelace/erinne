@@ -39,6 +39,10 @@ def create_service(name: str, settings: Settings | None = None, services=None) -
     from mnemerynne.web import security
 
     service = registry.get(name)
+
+    async def _stop(task) -> None:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
     settings = settings or get_settings()
     secret_key = security.check_secret_key(settings) or secrets.token_urlsafe(48)   # the same key: the same cookies
 
@@ -55,6 +59,8 @@ def create_service(name: str, settings: Settings | None = None, services=None) -
             stack.push_async_callback(bus.aclose)
             for hook in service.hooks:
                 await stack.enter_async_context(hooks_mod.HOOKS[hook](app, settings, services))
+            if (rt := share.current()) is not None and not rt.owner:   # the share service walks: hear its changes
+                stack.push_async_callback(_stop, asyncio.create_task(share.follow_changes()))
             log.info("%s service ready: %s (schema v%d).", name.capitalize(), service.serves, version)
             try:
                 yield

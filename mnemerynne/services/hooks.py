@@ -87,4 +87,21 @@ async def media(app, settings, services):
         await asyncio.to_thread(app.state.media_sessions.shutdown)
 
 
-HOOKS = {"balancer": balancer, "rooms": rooms, "pages": pages, "media": media}
+@asynccontextmanager
+async def share(app, settings, services):
+    """The share service: this process walks the share's permissions for everyone (share.serve_walks) and runs the
+    share watcher, which the web app leaves to it."""
+    from mnemerynne import share as share_mod
+
+    share_mod.configure(settings, app.state.directory, services.share_checker if services else None, owner=True)
+    share_mod.start_watching()
+    walker = asyncio.create_task(share_mod.serve_walks())
+    try:
+        yield
+    finally:
+        walker.cancel()
+        await asyncio.gather(walker, return_exceptions=True)
+        share_mod.stop_watching()
+
+
+HOOKS = {"balancer": balancer, "rooms": rooms, "pages": pages, "media": media, "share": share}

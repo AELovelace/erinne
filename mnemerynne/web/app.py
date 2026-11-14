@@ -352,6 +352,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         if services is None:   # tests drive it with tick() instead
             app.state.background.add(asyncio.create_task(app.state.automator.run_forever()))
             share.start_watching()   # permission changes on the share, as they happen (does nothing without one)
+        if (rt := share.current()) is not None and not rt.owner:   # the share service walks: hear its changes
+            app.state.background.add(asyncio.create_task(share.follow_changes()))
         try:
             async with mcp.session_manager.run():
                 yield
