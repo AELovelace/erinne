@@ -262,6 +262,30 @@ def test_a_config_nginx_never_loaded_is_caught(tmp_path):
     assert Path(str(paths["front.conf"]) + ".dropin").read_text().count("After=network-online.target") == 1
 
 
+def test_a_front_door_set_up_by_hand_is_adopted(tmp_path):
+    """The NAS's front door was the README's hand steps: no saved .env, so `services` never rewrote nginx."""
+    paths = _box(tmp_path)
+    paths["saved"].unlink()
+    paths["front.conf"].write_text("upstream mnemerynne_web { server 127.0.0.1:38210; }\n"
+                                   "server {\n    listen 192.168.1.5:38200;\n    server_name _;\n}\n")
+    paths["env"].write_text("MNEMERYNNE_HOST=127.0.0.1\nMNEMERYNNE_PORT=38210\nFORWARDED_ALLOW_IPS=127.0.0.1\n")
+    result = _accel(paths, "adopt_front\nfront_listen\n")
+    assert result.returncode == 0, result.stderr
+    assert "set up by hand" in result.stderr and result.stdout.strip() == "192.168.1.5:38200"
+    saved = paths["saved"].read_text()                                       # "off" gives the app that address
+    assert "MNEMERYNNE_HOST=192.168.1.5" in saved and "MNEMERYNNE_PORT=38200" in saved
+    assert "MNEMERYNNE_HOST=127.0.0.1" in paths["env"].read_text()           # the live .env is untouched
+
+
+def test_nothing_is_adopted_while_the_app_still_has_the_address(tmp_path):
+    paths = _box(tmp_path)
+    paths["saved"].unlink()
+    paths["front.conf"].write_text("server {\n    listen 192.168.1.5:38200;\n}\n")
+    paths["env"].write_text("MNEMERYNNE_HOST=192.168.1.5\nMNEMERYNNE_PORT=38200\n")   # a leftover config, not in use
+    assert _accel(paths, "adopt_front\n").returncode == 0
+    assert not paths["saved"].exists()
+
+
 def test_an_nginx_started_by_hand_is_handed_to_systemd(tmp_path):
     paths = _box(tmp_path)
     result = _accel(paths, r'''

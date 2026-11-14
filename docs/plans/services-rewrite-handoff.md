@@ -22,13 +22,16 @@ Deployed 2026-11-14: phases 0.5 to 6b (26c62f8), on the new box (static 192.168.
 phases 7 to 11 (248eb29) on top. The games, rooms, media, search, assistant, logs, automations and sync tables
 are in their own files, and the web app runs slim. Valkey is **off**; accel is **off**.
 
-**Found after the 7–11 deploy:** nginx on the box was still serving an old config: only `/api/sync/` and
-the games' API routed, and `/remote/` passed on without Host. Each `services` run had rewritten
-`/etc/nginx/conf.d/mnemerynne-front.conf`, but nginx never loaded it, most likely because it had been
-started outside systemd after the boot-time bind failure. From outside, `/remote` redirected to `:38200`,
-and `/api/files`, `/api/conversations`, `/wiki` and `/mcp` 404'd (the slim web app doesn't serve them).
-`front-door.sh` now stamps each config and checks nginx serves it. It hands a hand-started nginx to
-systemd and makes nginx wait for the network at boot. Run `front-door.sh services` again to apply it.
+**Found after the 7–11 deploy:** `/etc/nginx/conf.d/mnemerynne-front.conf` on the box was still the
+hand-copied sample (`deploy/linux/nginx-mnemerynne-front.conf`): only `/api/sync/` and the games' API
+routed, and `/remote/` passed on without Host. The front door had been set up by the README's hand
+steps, so there was no `mnemerynne.env.before-front-door`. `services` read that as "front door off" and
+never wrote nginx's routes. From outside, `/remote` redirected to `:38200`, and `/api/files`,
+`/api/conversations`, `/wiki` and `/mcp` 404'd (the slim web app doesn't serve them). Every
+`front-door.sh` command now takes over a hand-made front door (it writes the saved `.env` from nginx's
+`listen`). Each config it writes carries a stamp that is checked against what nginx serves. An nginx
+started by hand is handed to systemd, and nginx waits for the network at boot. Run `update`, then
+`front-door.sh services`.
 
 | Piece | Where | Notes |
 |---|---|---|

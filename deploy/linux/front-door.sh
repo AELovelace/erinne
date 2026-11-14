@@ -39,8 +39,9 @@ STAMP=                                          # the stamp write_conf put in th
 NGINX_DROPIN=$UNIT_DIR/nginx.service.d/mnemerynne-front.conf   # nginx waits for the LAN address at boot
 
 env_get() { grep -E "^$1=" "${2:-$ENV}" | tail -1 | cut -d= -f2- || true; }   # a setting from the .env (or $2)
-env_set() {                                                             # set (or add) one setting in the .env
-    if grep -qE "^$1=" "$ENV"; then sed -i "s#^$1=.*#$1=$2#" "$ENV"; else echo "$1=$2" >> "$ENV"; fi
+env_set() {                                                    # set (or add) one setting in the .env (or $3)
+    local file=${3:-$ENV}
+    if grep -qE "^$1=" "$file"; then sed -i "s#^$1=.*#$1=$2#" "$file"; else echo "$1=$2" >> "$file"; fi
 }
 
 app_py() { (cd "$APP" && runuser -u "$SERVICE_USER" -- "$PY" "$@"); }  # the app's Python, as the service user
@@ -335,6 +336,22 @@ status() {
 front_listen() {                            # where nginx listens: the address in the .env saved by "on"
     echo "$(env_get MNEMERYNNE_HOST "$SAVED"):$(env_get MNEMERYNNE_PORT "$SAVED")"
 }
+
+adopt_front() {                             # a front door set up by hand (README's steps): "on" from here on
+    local listen host port
+    [ ! -f "$SAVED" ] && [ -f "$CONF" ] || return 0                    # "on" made it, or there's none
+    [ "$(env_get MNEMERYNNE_HOST)" = 127.0.0.1 ] || return 0           # the app still has the address: not in use
+    listen=$(sed -n 's/^ *listen \([^ ;]*\);.*$/\1/p' "$CONF" | head -1)   # where the reverse proxy sends to
+    host=${listen%:*}; port=${listen##*:}
+    if [ -z "$listen" ] || [ "$host" = "$listen" ]; then
+        echo "nginx's $CONF has no 'listen address:port' line; leaving it alone." >&2; return 0
+    fi
+    cp -a "$ENV" "$SAVED"                                              # what "off" puts back: the app on that address
+    env_set MNEMERYNNE_HOST "$host" "$SAVED"
+    env_set MNEMERYNNE_PORT "$port" "$SAVED"
+    echo "Found a front door set up by hand (nginx on $listen): this script looks after it from now on" \
+         "($SAVED written; 'off' gives the app $listen back)." >&2
+}
 accel_roots() { app_py -m mnemerynne.services.nginx --roots --env-file - < "$ENV"; }   # "key path" per line
 
 nginx_user() {                              # nginx's workers as $1, keeping nginx.conf as it was, once
@@ -447,6 +464,7 @@ accel_off() {
 
 main() {
     [ "$(id -u)" = 0 ] || { echo "Run it with sudo." >&2; exit 1; }
+    adopt_front                                 # a front door made by hand gets its saved .env, so it's "on"
     case "${1:-}" in
         on) front_on ;;
         off) off ;;

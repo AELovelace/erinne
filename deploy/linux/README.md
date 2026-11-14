@@ -1114,10 +1114,15 @@ time `front-door.sh on` or `services` runs.
 
 Each config it writes carries a stamp (the time it was written), and nginx answers it at
 `/_front-door/stamp` to this box alone. After every reload `front-door.sh` asks for it, and fails
-loudly if nginx is still serving an older config. That happened on the NAS: an nginx started by hand
-kept its first-day routes while each run rewrote the file, so Files, Ask, Wiki, MCP and Remote 404'd
-or redirected to `:38200`. `status` prints which config nginx serves. If nginx is running outside
-systemd, `front-door.sh` stops it and starts it through systemd. It also gives nginx a drop-in
+loudly if nginx is still serving an older config. `status` prints which config nginx serves. If
+nginx is running outside systemd, `front-door.sh` stops it and starts it through systemd.
+
+A front door set up by hand (the steps below) has no saved `.env`. Before this change, `services`
+took that to mean the front door was off and never rewrote nginx's routes. That happened on the NAS:
+nginx kept this folder's two-service sample, so Files, Ask, Wiki, MCP and Remote 404'd or redirected to
+`:38200` once the web app slimmed down. Now any `front-door.sh` command takes over a hand-made front
+door. It does this when nginx's config is in place and the app is on 127.0.0.1. It writes the saved
+`.env` from nginx's `listen` line, so `off` gives the app that address back. It also gives nginx a drop-in
 (`/etc/systemd/system/nginx.service.d/mnemerynne-front.conf`) so it waits for the network at boot:
 it listens on the LAN address, which isn't there yet early in boot. `off` removes the drop-in.
 
