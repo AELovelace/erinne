@@ -1226,7 +1226,10 @@ anywhere else (the page, Claude) is queued in `automations.db` for it. The **rem
 Remote page and its list stay with the web app.
 
 `services` writes the services it enabled to `MNEMERYNNE_SERVICES_ON` in the .env and restarts the app when
-that list changes, so the web app knows which jobs another process has taken over.
+that list changes, so the web app knows which jobs another process has taken over. With services on, the web
+app slims down: it leaves out the routes those services serve and doesn't load what only they need (the model
+libraries for Ask and Automator, the MCP SDK, Media's transcoding), keeping pages, sign-in, admin and settings.
+Each service loads only the shared front and its own routes, so most take well under half the memory they did.
 
 ### One process walks the share (the share service)
 

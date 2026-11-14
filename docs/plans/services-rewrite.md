@@ -23,7 +23,8 @@
 | Phase 7: `assistant.db` (conversations, answers, ratings, timings, LangGraph's checkpoints and memories); the assistant service (one process); one balancer poller through Valkey | done in code (2026-11-14) | 9fb798f |
 | Phase 8: `logs.db` (mcp_calls, api_calls, agent_calls); the mcp service (`/mcp` and `/c/`, 2 processes on the NAS) | done in code (2026-11-14) | 4331bf0 |
 | Phase 9: `automations.db` (automations, runs, webhooks, feeds); the automations service (the one scheduler); runs and routine reports handed across processes | done in code (2026-11-14) | e160ae4 |
-| Phase 10: `sync.db` (the backup app's roots and part-by-part uploads); the remote service (the LAN apps' proxy, websockets through the front door) | done in code (2026-11-14) | this step's commit |
+| Phase 10: `sync.db` (the backup app's roots and part-by-part uploads); the remote service (the LAN apps' proxy, websockets through the front door) | done in code (2026-11-14) | e79dc52 |
+| Phase 11: the web app slims down while services run (their routers and model pieces left out, unimported); every service imports a light shared front (`web/front.py`) | done in code (2026-11-14) | this step's commit |
 
 Tests: `.venv\Scripts\python -m pytest tests -n auto` (about 4 minutes).
 
@@ -219,6 +220,26 @@ serves `/remote/<app>/...` (web/remote_route.py hands HTTP and websockets to the
 registry's new `websockets` flag gives a service's locations the upgrade headers (and the web app's when it's off);
 each path is written once. A test race fixed on the way: Rooms' stream test posted after a fixed 0.05 s, before a
 busy machine's stream knew where it started; it now waits for the stream's hello.
+
+**Phase 11 (2026-11-14):** the shared front (`_guard`, `make_templates`, `Services`, the cross-site check) moved to
+`web/front.py`, and the factory imports that instead of the whole web app: every service used to load LangGraph,
+the agent and the MCP SDK through it (about 186 MB of imports each); now the light ones load 62 to 91 MB (measured
+on Windows: sync 66, files 68, games 79, media 71, share 62, remote 64, mcp 91; assistant and automations, which
+run the model, 186). The web app's routers are a list of refs (`WEB_ROUTERS`) imported as they're mounted; while a
+service runs (`MNEMERYNNE_SERVICES_ON`) the routers wholly behind its paths are left out (`registry.web_drops`:
+its routers but `web_keeps`, the ones with a page that stays: /media, /rooms, /automations, the backups' pages,
+/memories, the Claude-links settings), and a test checks each dropped router is wholly behind its service's paths
+and each kept one isn't. LangGraph, the agent and Erynne are built only while Ask, Automator or Rooms' answers still
+run in the web app; Media's transcoding sessions, `/mcp` and the Remote proxy only while their service doesn't run.
+Lazy imports on the way: `memory_namespace` lives in memory.py (graph re-exports it), the agent module, the MCP
+SDK (OAuth's public address, the brand rename) and Anthropic's SDK (checking a Claude key) load where they're
+used, and `THEME_COOKIE` moved to theme.py. The slim web app loads about 89 MB of imports instead of 186 (the full
+one 145): none of LangGraph, the agent, the MCP SDK or Anthropic's SDK. All-in-one (nothing in
+`MNEMERYNNE_SERVICES_ON`) is unchanged: every router, every piece.
+
+**The rewrite's code is done (2026-11-14).** What stays as the plan had it: the portal keeps pages, sign-in, admin
+and settings; everything else is a service's. What differs: `agent_proposals`, `access_log` and the API settings
+stay in core (see Phases 7 and 8); the assistant runs as one process, not two; the scratchpad stays in core.
 
 ## Context
 

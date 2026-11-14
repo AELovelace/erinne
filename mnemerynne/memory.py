@@ -14,9 +14,14 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from mnemerynne.graph import memory_namespace
 
 log = logging.getLogger("mnemerynne.memory")
+
+
+def memory_namespace(user_id: int) -> tuple[str, ...]:
+    """Where LangGraph's store keeps a person's memories. Here, not in graph.py, so the pages listing and deleting
+    memories don't load LangGraph (docs/plans/services-rewrite.md, Phase 11)."""
+    return ("user", str(user_id), "memories")
 
 MEMORY_SCHEMA = {
     "type": "object",

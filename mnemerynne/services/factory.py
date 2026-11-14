@@ -35,7 +35,7 @@ def _router(ref: str):
 
 def create_service(name: str, settings: Settings | None = None, services=None) -> FastAPI:
     """The app for one service. `services` is web.app.Services in tests (fakes), None in production."""
-    from mnemerynne.web.app import ASSISTANT_NAME, _guard   # the web app's front, shared (imported late: it imports us)
+    from mnemerynne.web.front import ASSISTANT_NAME, _guard   # the shared front (not the whole web app)
     from mnemerynne.web import security
 
     service = registry.get(name)

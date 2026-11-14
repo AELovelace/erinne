@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import accounts, agent as agent_mod, apis, bfgguf, claude_chat, editing, group_refs, proposals
+from mnemerynne import accounts, apis, bfgguf, claude_chat, editing, group_refs, proposals
 from mnemerynne.db import transaction
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import admin_user, api_user, get_db, is_admin, page_user
@@ -140,6 +140,7 @@ class AgentModelBody(BaseModel):
 async def _status(request: Request, conn: sqlite3.Connection) -> dict:
     """The agent settings plus whether its model (balancer nodes, then MNEMERYNNE_LLM_URL) answers now."""
     directory = request.app.state.directory
+    from mnemerynne import agent as agent_mod     # the agent module only where its settings are read (Phase 11)
     cfg = agent_mod.model_config(conn)
     agent = getattr(request.app.state, "agent", None)
     reachable = await agent.reachable(cfg) if agent is not None else None
@@ -184,6 +185,7 @@ async def set_agent_model(body: AgentModelBody, request: Request, user=Depends(a
     changes = body.model_dump()
     try:
         with transaction(conn):
+            from mnemerynne import agent as agent_mod
             cfg = agent_mod.save_model_config(conn, request.app.state.settings, changes)
             what = ", ".join(f"{k} {v}" for k, v in changes.items() if v is not None)
             _log(conn, user, "settings.agent_model", "limits", what)

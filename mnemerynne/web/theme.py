@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, 
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import db, events, identity, mcp_server, theme
+from mnemerynne import db, events, identity, theme
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.web.admin import _log
@@ -55,7 +55,8 @@ def _identity(request: Request, conn: sqlite3.Connection) -> None:
     """A brand change renames the box to Claude as well (identity.py), from the next initialize on."""
     app = request.app
     app.state.instance = identity.load(conn, app.state.settings)
-    if getattr(app.state, "mcp", None) is not None:
+    if getattr(app.state, "mcp", None) is not None:   # this process serves /mcp (not while the mcp service does)
+        from mnemerynne import mcp_server                  # the MCP SDK only where there's an endpoint to rename
         mcp_server.apply_identity(app.state.mcp, app.state.instance)
 
 

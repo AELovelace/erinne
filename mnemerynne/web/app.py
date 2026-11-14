@@ -6,30 +6,22 @@ import asyncio
 import logging
 import secrets
 import sqlite3
-from contextlib import AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass
+from contextlib import AsyncExitStack, asynccontextmanager, nullcontext
 from pathlib import Path
-from typing import Any
-from urllib.parse import urlsplit
+
+import importlib
 
 import aiosqlite
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.store.sqlite.aio import AsyncSqliteStore
-from starlette.middleware.sessions import SessionMiddleware
 
 from mnemerynne import (identity, sync as sync_mod, balancer as balancer_mod, bfgguf, claude_chat, db, directory, editing, events, feedback as feedback_mod,
-                        mcp_server, media as media_mod, memory,
-                        diagnostics, messages as messages_mod, permissions, remote, rooms as rooms_mod, rooms_bus, share,
+                        diagnostics, permissions, remote, rooms_bus, share,
                         sharepoint, theme as theme_mod,
                         users)
-from mnemerynne.agent import Agent
 from mnemerynne.media import screens as media_screens, transcode as media_transcode
-from mnemerynne.rooms_erynne import RoomErynne
-from mnemerynne import assistant_db, automations as automations_mod, automations_run
+from mnemerynne import assistant_db, automations_run
 from mnemerynne import games   # the built-in games' registry: Lumi's three apps each get a manifest (lumi_manifest)
 from mnemerynne import health
 from mnemerynne.automations_run import Scheduler
@@ -39,71 +31,41 @@ from mnemerynne.clients.embed import Embedder
 from mnemerynne.clients.llm import LLM
 from mnemerynne.clients.rerank import Reranker
 from mnemerynne.config import Settings, get_settings
-from mnemerynne.graph import Deps, build_graph
-from mnemerynne.router import load_router
-from mnemerynne.web import (admin, admin_apis, admin_notices, admin_remote, agent as agent_pages, apis as api_pages,
-                            automations as automation_pages, balancer as balancer_pages,
-                            bfgguf as bfgguf_pages, chat,
-                            claude_links as claude_link_pages, editor as editor_pages, files, games as game_pages,
-                            help as help_pages,
-                            kiosk as kiosk_pages, soundcloud as soundcloud_pages,
-                            m365 as m365_pages, media as media_pages, memories, messages as message_pages, oauth as oauth_pages, remote as remote_pages,
-                            rooms as room_pages, scratchpad as scratchpad_pages, security, sendfile,
-                            settings as settings_pages, sync as sync_pages, theme as theme_pages, tokens, wiki as wiki_pages)
-from mnemerynne.web.deps import LoginRequired, api_user, get_db, is_admin, page_user
+from mnemerynne.services import registry
+from mnemerynne.web import security, theme as theme_pages
+from mnemerynne.web.deps import api_user, get_db, is_admin, page_user
 from mnemerynne.web import deps                      # close_feature_pools at shutdown
+from mnemerynne.web.front import (_OAUTH_API, _SAFE_METHODS, Services, _cross_site, _guard,  # noqa: F401  (the
+                                  _safe_return, make_templates)                             # shared front)
 
 log = logging.getLogger("mnemerynne.web")
 
+# The web app's routers, in the order they're mounted ("module:attribute", imported when mounted). While a service
+# runs as its own process (MNEMERYNNE_SERVICES_ON) the routers wholly behind its paths are left out and never
+# imported (registry.web_drops): the web app slims down to pages, sign-in, admin and settings (Phase 11).
+WEB_ROUTERS = (
+    "mnemerynne.web.files:router", "mnemerynne.web.chat:router", "mnemerynne.web.memories:router",
+    "mnemerynne.web.scratchpad:router",           # the Scratchpad page: the agents' boards, and directions to them
+    "mnemerynne.web.admin:router", "mnemerynne.web.tokens:router", "mnemerynne.web.apis:router",
+    "mnemerynne.web.admin_apis:router", "mnemerynne.web.agent:router", "mnemerynne.web.m365:router",
+    "mnemerynne.web.oauth:router", "mnemerynne.web.balancer:router", "mnemerynne.web.bfgguf:router",
+    "mnemerynne.web.settings:router", "mnemerynne.web.theme:router", "mnemerynne.web.theme:admin_router",
+    "mnemerynne.web.claude_links:router", "mnemerynne.web.help:router", "mnemerynne.web.editor:router",
+    "mnemerynne.web.wiki:router", "mnemerynne.web.messages:router", "mnemerynne.web.rooms:router",
+    "mnemerynne.web.rooms:admin_router", "mnemerynne.web.automations:router", "mnemerynne.web.automations:admin_router",
+    "mnemerynne.web.media:router", "mnemerynne.web.media:admin_router", "mnemerynne.web.media:share_router",
+    "mnemerynne.web.kiosk:router", "mnemerynne.web.soundcloud:router",   # Media → SoundCloud
+    "mnemerynne.web.admin_notices:router", "mnemerynne.web.remote:router", "mnemerynne.web.admin_remote:router",
+    "mnemerynne.web.sync:router", "mnemerynne.web.sync:admin_router",   # the desktop backup app (sync.py)
+    "mnemerynne.web.games:router",                # Media → Games: the built-in games (games.py)
+)
+
+
+def _router(ref: str):
+    module, _, attribute = ref.partition(":")
+    return getattr(importlib.import_module(module), attribute)
+
 _HERE = Path(__file__).parent
-_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-# Called by Claude's servers with OAuth credentials, never with the session cookie.
-_OAUTH_API = {"/oauth/token", "/oauth/register", "/oauth/revoke"}
-
-
-def _safe_return(after: str) -> bool:
-    """A place sign-in may send someone back to: the page on this site they were opening (a link from
-    Claude, Claude's consent page, a remote app); never another site (open redirect), the sign-in pages
-    themselves, or anything with a scheme, a backslash or control characters."""
-    if not after.startswith("/") or urlsplit(after).path in ("/login", "/logout"):
-        return False
-    parts = urlsplit(after)
-    return not (after.startswith("//") or "\\" in after or parts.scheme or parts.netloc
-                or any(ord(c) < 32 or c == "\x7f" for c in after))
-
-
-def _cross_site(request: Request) -> bool:
-    """True for a state-changing request another site's page made the browser send.
-
-    Browsers label requests with Sec-Fetch-Site and Origin; requests without
-    either (curl, scripts) can't ride on someone's session cookie anyway.
-    Hostnames only: nginx forwards Host without the port.
-    """
-    fetch_site = request.headers.get("sec-fetch-site")
-    if fetch_site and fetch_site not in ("same-origin", "none"):
-        return True
-    origin = request.headers.get("origin")
-    if origin:
-        host = (request.headers.get("host") or "").rsplit(":", 1)[0].strip("[]").lower()
-        return (urlsplit(origin).hostname or "") != host
-    return False
-
-
-@dataclass
-class Services:
-    """Model clients; tests pass fakes."""
-    llm: Any
-    embedder: Any
-    reranker: Any = None
-    router: Any = None
-    directory: Any = None   # the AD domain (mnemerynne.directory); None = from settings
-    share_checker: Any = None   # share permission checks (share.Checker); None = the real POSIX ACLs
-    agent_llm: Any = None   # the agent's model client; None = the balancer nodes, then MNEMERYNNE_LLM_URL
-    claude_llm: Any = None  # Claude's client in chat (tests); None = the Anthropic API with each person's key
-    balancer: Any = None    # balancer.Balancer (tests pass one with a fake transport); None = a real one
-    bfgguf_transport: Any = None   # the HTTP transport under BFGguf's clients (tests); None = the network
-
-
 async def _answer_rooms_asks(app: FastAPI) -> None:
     """Erynne's answers for messages the rooms service took (web/rooms.py publishes "rooms:ask"): for as long as
     the web app runs. Only another process's asks come this way; the web app's own posts ask her directly."""
@@ -139,6 +101,17 @@ async def assistant_parts(app: FastAPI, settings: Settings, svc: Services, balan
     .background, .embedder and .directory set first. `answer_rooms`: this process answers @Erynne in Rooms (its own
     posts directly, other processes' through "rooms:ask"); otherwise app.state.rooms_erynne is None and Rooms hands
     its asks on. Yields Erynne for Rooms either way: the scheduler posts automations' reports with her."""
+    # Imported here: LangGraph and the agent are the heaviest of the app, and a slim web app (Phase 11) or a service
+    # without Ask never loads them.
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from langgraph.store.sqlite.aio import AsyncSqliteStore
+
+    from mnemerynne import memory
+    from mnemerynne.agent import Agent
+    from mnemerynne.graph import Deps, build_graph
+    from mnemerynne.rooms_erynne import RoomErynne
+    from mnemerynne.router import load_router
+
     # LangGraph's checkpointer (conversation state) and store (long-term memories) live in assistant.db with the
     # conversations, on their own connections. Autocommit (isolation_level=None): they issue their own
     # BEGIN/COMMIT, and Python's implicit transactions would otherwise hold the write lock.
@@ -177,140 +150,12 @@ async def assistant_parts(app: FastAPI, settings: Settings, svc: Services, balan
         await store_conn.close()
 
 
-def _guard(app: FastAPI, settings: Settings, secret_key: str) -> None:
-    """What every Mnemerynne process puts in front of its routes (create_app and create_role_app): the sign-in
-    cookie, the cross-site check, the request limits and headers, the backup host's fence, the slow-request log,
-    and the answers for "sign in first" and "the database is busy". Kept in one place so a role's process can't
-    drift from the web app's."""
-    app.add_middleware(
-        SessionMiddleware,
-        secret_key=secret_key,
-        session_cookie="mnemerynne_session",
-        max_age=settings.session_max_age,
-        same_site="lax",
-        https_only=security.https_only(settings),
-    )
-
-    @app.middleware("http")
-    async def _csrf_guard(request: Request, call_next):
-        # The session cookie is SameSite=lax, which still lets other sites'
-        # top-level form POSTs through; refuse anything cross-site that changes data.
-        if request.method not in _SAFE_METHODS and _cross_site(request) and request.url.path not in _OAUTH_API:
-            return JSONResponse({"detail": "Cross-site request refused."}, status_code=status.HTTP_403_FORBIDDEN)
-        return await call_next(request)
-
-    # Behind the front door with MNEMERYNNE_ACCEL: files go out through nginx (send_file), not Python.
-    app.add_middleware(sendfile.Accel, settings=settings)
-
-    # Added last, so they run first: refused requests get the headers too.
-    app.add_middleware(security.GamesShed)       # games can't queue without bound or take every worker thread
-    app.add_middleware(security.PublicRateLimit)
-    app.add_middleware(security.SecurityHeaders, settings=settings)
-    # The backup host (MNEMERYNNE_BACKUP_URL) answers only the backup app's API (sync.py).
-    app.add_middleware(sync_mod.BackupHost, host=sync_mod.backup_host(settings))
-    app.add_middleware(security.SlowRequestLog)  # outermost: times every request ("Slow request" in the journal)
-
-    @app.exception_handler(LoginRequired)
-    async def _redirect_to_login(request: Request, exc: LoginRequired):
-        # Back to this page after signing in: a link opened from Claude Desktop lands where it pointed.
-        if request.method == "GET":
-            request.session["after_login"] = request.url.path + (f"?{request.url.query}" if request.url.query else "")
-        return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
-
-    @app.exception_handler(sqlite3.OperationalError)
-    async def _database_busy(request: Request, exc: sqlite3.OperationalError):
-        """A write that waited out busy_timeout for the lock: a short JSON 503 "try again", not a plain-text 500.
-
-        Pages read a JSON refusal's status. The plain-text 500 had none, and Lumi Pet's party feed took a failure
-        without a status as "the party is over": it reloaded at once, over and over, and every reload waited on the
-        same lock. A storm that fed itself, until the app ran out of memory. Any other database error is a bug,
-        and goes on to the usual 500 with its traceback."""
-        text = str(exc).lower()
-        if "locked" not in text and "busy" not in text:
-            raise exc                                  # not a lock: the normal error path (logged with its traceback)
-        log.warning("Database busy: %s %s (%s)", request.method, request.url.path, exc)   # one line, no traceback
-        return JSONResponse({"detail": "The server is busy for a moment. Try again shortly."},
-                            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, headers={"Retry-After": "2"})
-
-
 def create_role_app(role: str, settings: Settings | None = None, services: Services | None = None) -> FastAPI:
     """One service's own app (`mnemerynne serve --service sync|games`): see mnemerynne/services/. Kept under
     its first name for the code and tests that build it this way."""
     from mnemerynne.services.factory import create_service   # imported late: the factory uses _guard from here
 
     return create_service(role, settings, services)
-
-
-def make_templates(app: FastAPI) -> Jinja2Templates:
-    """The pages' templates with every page's top bar (the look, the badge, Rooms, Media, Remote; on a TV its
-    screen): the web app's, and a service's that serves pages of its own (the media service, services/hooks.py)."""
-    settings = app.state.settings
-
-    def _tv(request: Request, conn: sqlite3.Connection) -> dict | None:
-        """This browser is a screen (the TV, by its key): its underscan and text size on every page, and on a
-        screen box the small bar and the remote (base.html). A built-in game frame inherits text size only."""
-        framed = request.headers.get("sec-fetch-dest") == "iframe"
-        if framed and not request.url.path.startswith("/media/games/"):
-            return None
-        screen = media_screens.by_token(conn, request.cookies.get(media_screens.COOKIE))
-        if screen is None:
-            return None
-        return {"id": screen["id"], "name": screen["name"],
-                "safe_x": 0 if framed else screen["safe_x"], "safe_y": 0 if framed else screen["safe_y"],
-                "ui_scale": screen["ui_scale"], "box": bool(screen["is_box"]) and not framed, "framed": framed}
-
-    def _nav_context(request: Request) -> dict:
-        """What every page's top bar needs beyond its own context: the badge on the Messages button
-        (unread notes, and with Rooms on, mentions and unread DMs), whether Rooms and Remote are there;
-        and on a screen, the screen (tv)."""
-        session = request.scope.get("session", {}) if "session" in request.scope else {}
-        user_id = session.get("user_id")
-        # The look (theme) and the brand: every page, signed in or not (the sign-in page follows the cookie).
-        looks = theme_pages.looks_for(app)
-        cookie = request.cookies.get(settings_pages.THEME_COOKIE)
-        out = {"look": looks.resolve(None, cookie), "brand": looks.brand,
-               "product_name": looks.brand.get("name") or ASSISTANT_NAME}
-        if not user_id and not request.cookies.get(media_screens.COOKIE):
-            return out
-        conn = app.state.db_pool.get()
-        try:
-            out["tv"] = _tv(request, conn)
-            user = users.get_user_by_id(conn, user_id) if user_id else None
-            if user is None:
-                return out
-            out["look"] = looks.resolve(user["theme"] or None, cookie)
-            admin = is_admin(request, conn, user)
-            rooms_pool = deps.feature_pool(app, "rooms")   # Rooms' unread counts live in rooms.db (Phase 3)
-            rooms_conn = rooms_pool.get()
-            try:
-                unread_rooms = rooms_mod.unread_summary(rooms_conn, user, app.state.directory)
-            finally:
-                rooms_pool.put(rooms_conn)
-            return out | {"nav_unread": messages_mod.unread_count(conn, user_id) + unread_rooms["mentions"] + unread_rooms["dms"],
-                    "has_rooms": rooms_mod.enabled(conn), "has_media": media_mod.enabled(conn) and media_mod.may_use(conn, user, app.state.directory),
-                    "has_screens": media_mod.enabled(conn) and media_screens.may_use(conn, user, app.state.directory),
-                    "message_max_chars": messages_mod.MAX_CHARS,
-                    "has_remote": bool(remote.apps_for(conn, user, app.state.directory, admin)),
-                    "has_automations": automations_mod.may_use(conn, settings, user, app.state.directory),
-                    # Signed in on a screen box's TV (its top bar): back to the TV page, which signs out.
-                    "kiosk_back": bool(session.get("kiosk_screen"))}
-        except sqlite3.Error:
-            return out
-        finally:
-            app.state.db_pool.put(conn)
-
-    templates = Jinja2Templates(directory=_HERE / "templates", context_processors=[_nav_context])
-    templates.env.globals["assistant_name"] = ASSISTANT_NAME
-
-    def static(name: str) -> str:
-        # The file's mtime in the URL: browsers fetch the new copy after an update
-        # instead of reusing a cached one.
-        path = _HERE / "static" / name
-        version = int(path.stat().st_mtime) if path.exists() else 0
-        return f"/static/{name}?v={version}"
-
-    templates.env.globals["static"] = static
-    return templates
 
 
 def create_app(settings: Settings | None = None, services: Services | None = None) -> FastAPI:
@@ -332,7 +177,9 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             version = db.migrate_all(settings.db_path, settings.embed_dim)["core"]   # core and every feature file
             app.state.looks = theme_mod.load_looks(conn, settings)   # the themes, as every page draws them
             app.state.instance = identity.load(conn, settings)      # which box this is, for the connector
-            mcp_server.apply_identity(app.state.mcp, app.state.instance)
+            if app.state.mcp is not None:
+                from mnemerynne import mcp_server
+                mcp_server.apply_identity(app.state.mcp, app.state.instance)
             # Every inbox has an Agents folder for Claude; inboxes on an
             # unavailable share get theirs on first use.
             made = editing.ensure_all_agents(conn)
@@ -367,11 +214,17 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         # builds. While that service runs and Valkey carries Rooms' asks to it, Erynne answers Rooms from there.
         rooms_here = not (settings.runs_elsewhere("assistant") and events.shared())
         stack = AsyncExitStack()
-        erynne = await stack.enter_async_context(
-            assistant_parts(app, settings, svc, balancer, testing=services is not None, answer_rooms=rooms_here))
-        # Media's ffmpeg sessions (media/transcode.py): none survive a restart.
-        app.state.media_sessions = media_transcode.Manager(settings)
-        await asyncio.to_thread(app.state.media_sessions.startup)
+        erynne = app.state.rooms_erynne = None
+        if rooms_here or not settings.runs_elsewhere("assistant") or not settings.runs_elsewhere("automations"):
+            erynne = await stack.enter_async_context(
+                assistant_parts(app, settings, svc, balancer, testing=services is not None, answer_rooms=rooms_here))
+        else:                                  # Ask, Automator and Rooms' answers all run elsewhere: no model here
+            log.info("Ask, Automator and Erynne's Rooms answers run in their services: none of them loaded here.")
+        # Media's ffmpeg sessions (media/transcode.py): none survive a restart. The media service has its own.
+        app.state.media_sessions = None
+        if not settings.runs_elsewhere("media"):
+            app.state.media_sessions = media_transcode.Manager(settings)
+            await asyncio.to_thread(app.state.media_sessions.startup)
         poller = asyncio.create_task(balancer.run())
         app.state.background.add(poller)
         # Rooms: other processes' new messages, typing and presence, to this process's streams (rooms_bus.listen).
@@ -379,7 +232,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         # Automator: scheduled automations run here, where the agent and its model path live, unless the
         # automations service runs them (Phase 9): then runs started here are queued for it (automations_run.start).
         app.state.automator = None
-        if not settings.runs_elsewhere("automations"):
+        if erynne is not None and not settings.runs_elsewhere("automations"):
             app.state.automator = Scheduler(settings, app.state.agent, erynne, app.state.rooms_bus,
                                             lambda: app.state.directory, app.state.background)
         automations_run.ACTIVE = app.state.automator   # for start() and the MCP tools (run now, a routine's report)
@@ -390,7 +243,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         if (rt := share.current()) is not None and not rt.owner:   # the share service walks: hear its changes
             app.state.background.add(asyncio.create_task(share.follow_changes()))
         try:
-            async with mcp.session_manager.run():
+            async with (app.state.mcp.session_manager.run() if app.state.mcp is not None else nullcontext()):
                 yield
         finally:
             share.stop_watching()
@@ -402,9 +255,11 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             await stack.aclose()                   # LangGraph's connections, the agent's clients
             app.state.db_pool.close()
             deps.close_feature_pools(app)          # games.db's and the other feature files'
-            await app.state.remote_proxy.aclose()
+            if app.state.remote_proxy is not None:
+                await app.state.remote_proxy.aclose()
             await balancer.aclose()
-            await asyncio.to_thread(app.state.media_sessions.shutdown)
+            if app.state.media_sessions is not None:
+                await asyncio.to_thread(app.state.media_sessions.shutdown)
             if services is None:
                 svc.embedder.close()
                 await svc.llm.aclose()
@@ -426,52 +281,25 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
 
     app.state.templates = templates = make_templates(app)   # pages, and every page's top bar
     static = templates.env.globals["static"]                # versioned /static/ addresses (the manifests use it)
-    app.include_router(files.router)
-    app.include_router(chat.router)
-    app.include_router(memories.router)
-    app.include_router(scratchpad_pages.router)   # the Scratchpad page: the agents' boards, and directions to them
-    app.include_router(admin.router)
-    app.include_router(tokens.router)
-    app.include_router(api_pages.router)
-    app.include_router(admin_apis.router)
-    app.include_router(agent_pages.router)
-    app.include_router(m365_pages.router)
-    app.include_router(oauth_pages.router)
-    app.include_router(balancer_pages.router)
-    app.include_router(bfgguf_pages.router)
-    app.include_router(settings_pages.router)
-    app.include_router(theme_pages.router)
-    app.include_router(theme_pages.admin_router)
-    app.include_router(claude_link_pages.router)
-    app.include_router(help_pages.router)
-    app.include_router(editor_pages.router)
-    app.include_router(wiki_pages.router)
-    app.include_router(message_pages.router)
-    app.include_router(room_pages.router)
-    app.include_router(room_pages.admin_router)
-    app.include_router(automation_pages.router)
-    app.include_router(automation_pages.admin_router)
-    app.include_router(media_pages.router)
-    app.include_router(media_pages.admin_router)
-    app.include_router(media_pages.share_router)
-    app.include_router(kiosk_pages.router)
-    app.include_router(soundcloud_pages.router)   # Media → SoundCloud
-    app.include_router(admin_notices.router)
-    app.include_router(remote_pages.router)
-    app.include_router(admin_remote.router)
-    app.include_router(sync_pages.router)          # the desktop backup app (sync.py)
-    app.include_router(sync_pages.admin_router)
-    app.include_router(game_pages.router)          # Media → Games: the built-in games (games.py)
+    dropped = registry.web_drops(settings.services_on.split(","))   # behind services running elsewhere
+    for ref in WEB_ROUTERS:
+        if ref not in dropped:
+            app.include_router(_router(ref))
     # LAN apps served at /remote/<slug>/... (mnemerynne/remote.py); after the routers, so /remote itself is the page.
-    app.state.remote_proxy = remote.RemoteProxy(settings, lambda: app.state.directory)
-    app.mount(remote.PREFIX, app.state.remote_proxy, name="remote")
+    app.state.remote_proxy = None
+    if not settings.runs_elsewhere("remote"):      # the remote service proxies them while it runs
+        app.state.remote_proxy = remote.RemoteProxy(settings, lambda: app.state.directory)
+        app.mount(remote.PREFIX, app.state.remote_proxy, name="remote")
 
     # MCP for Claude Desktop: bearer-token auth, read-only tools (mnemerynne/mcp_server.py).
     app.state.instance = identity.from_settings(settings)   # the brand name joins once the database is open
-    mcp = mcp_server.build_server(settings, lambda: app.state.embedder, lambda: app.state.directory,
-                                  instance=lambda: app.state.instance)
-    app.state.mcp = mcp
-    app.add_route("/mcp", mcp_server.McpEndpoint(settings, mcp), methods=["GET", "POST", "DELETE"])
+    app.state.mcp = None
+    if not settings.runs_elsewhere("mcp"):         # the mcp service answers Claude while it runs
+        from mnemerynne import mcp_server          # the MCP SDK only where /mcp is served
+        mcp = mcp_server.build_server(settings, lambda: app.state.embedder, lambda: app.state.directory,
+                                      instance=lambda: app.state.instance)
+        app.state.mcp = mcp
+        app.add_route("/mcp", mcp_server.McpEndpoint(settings, mcp), methods=["GET", "POST", "DELETE"])
 
     @app.get("/manifest.webmanifest", include_in_schema=False)
     def manifest():

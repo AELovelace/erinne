@@ -207,6 +207,28 @@ The update moves the backup app's two tables into `/var/lib/mnemerynne/sync.db`.
 live parts (websockets) update; the Remote page lists the apps. Back to A: `MNEMERYNNE_SERVICES_OFF=remote` and
 `services`; before Phase 10's code: `move-back sync` with everything stopped.
 
+### Deploying Phase 11 (the slim web app)
+
+Nothing to switch on: once `front-door.sh services` has written `MNEMERYNNE_SERVICES_ON` and restarted the app, the
+web app leaves out what those services serve. Check after the restart: every page still opens (Ask, Files, Media,
+Rooms, Automator, Remote, Preferences, Access, Help); `ps -o rss,cmd -C mnemerynne` (or `systemctl status
+'mnemerynne@*'`) shows the services far smaller than before; `free -m` on the box. Back to A: clearing
+`MNEMERYNNE_SERVICES_ON` (`MNEMERYNNE_SERVICES_OFF` for all, or `front-door.sh services` after stopping them) gives
+the web app everything back at its next start.
+
+### Deploying phases 7 to 11 together (from 6b on the box)
+
+```sh
+sudo HEALTH_TIMEOUT=1200 mnemerynne-admin update --yes     # moves Ask's, the logs', Automator's and the backups' tables
+sudo bash /opt/mnemerynne/deploy/linux/front-door.sh services   # starts assistant, mcp, automations, remote; writes
+sudo bash /opt/mnemerynne/deploy/linux/front-door.sh status     # MNEMERYNNE_SERVICES_ON and restarts the app (slim)
+```
+
+Then the checks of each phase above. Turning Valkey on (`valkey-setup.sh on`, then `services` again) adds the
+rooms service, Erynne's Rooms answers from the assistant, the shared balancer poller and instant automation runs.
+The four new move-backs, newest first, if a phase misbehaves: `move-back sync`, `move-back automations`,
+`move-back logs`, `move-back assistant` (everything stopped, then the older code).
+
 ## 3. Phase 0.5: done in code (2026-11-13)
 
 The front-door and Valkey work below is committed and tested with the box stood in for

@@ -52,7 +52,7 @@ async def pages(app, settings, services):
     """app.state.templates: the web app's pages with their top bar (web/app.make_templates), for a service that
     serves pages. A theme saved in the web app ("theme:changed") is picked up here at the next page."""
     from mnemerynne import events
-    from mnemerynne.web.app import make_templates
+    from mnemerynne.web.front import make_templates
 
     app.state.templates = make_templates(app)
 

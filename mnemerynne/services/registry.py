@@ -31,6 +31,10 @@ class Service:
     # router's pages under the same prefix. "= /exact/path" for one path only.
     web_paths: tuple[str, ...] = ()
     websockets: bool = False             # its paths carry websockets: nginx passes the upgrade on (Remote's LAN apps)
+    # Its routers the web app keeps while it runs (Phase 11): ones with a page that stays with the web app (/media,
+    # /rooms, /automations, the backups' pages). The others, every route behind this service's paths, the web app
+    # leaves out and doesn't import (web_drops).
+    web_keeps: tuple[str, ...] = ()
 
     def processes(self, profile: str | None = None) -> int:
         """How many processes to run: one for a single-process service, else the profile's count."""
@@ -47,6 +51,7 @@ SERVICES: dict[str, Service] = {s.name: s for s in (
         paths=("/api/sync/",),
         port=38201,
         workers={"nas": 3, "ryzen": 6},
+        web_keeps=("mnemerynne.web.sync:router",),   # Preferences → Backups, the app's download
     ),
     Service(
         name="games",
@@ -56,6 +61,7 @@ SERVICES: dict[str, Service] = {s.name: s for s in (
         port=38202,
         single=True,
         hooks=("balancer",),               # Lumi's live tales reach the answer model through the balancer nodes
+        web_keeps=("mnemerynne.web.games:router",),  # the games' own pages (/media/games/...)
     ),
     Service(
         name="rooms",
@@ -66,6 +72,7 @@ SERVICES: dict[str, Service] = {s.name: s for s in (
         workers={"nas": 1, "ryzen": 2},
         hooks=("rooms",),                  # its live bus; Erynne's answers stay with the web app (rooms:ask)
         needs_valkey=True,
+        web_keeps=("mnemerynne.web.rooms:router",),  # the Rooms page
     ),
     Service(
         name="media",
@@ -78,6 +85,7 @@ SERVICES: dict[str, Service] = {s.name: s for s in (
         single=True,                       # the hub, the pairings and the ffmpeg sessions are this process's memory
         hooks=("pages", "media"),          # its pages draw the web app's templates; its own transcoding sessions
         web_paths=("/media/games/", "= /media/panel/manifest.webmanifest"),
+        web_keeps=("mnemerynne.web.media:router",),  # the Media page (/media)
     ),
     Service(
         name="files",
@@ -101,6 +109,7 @@ SERVICES: dict[str, Service] = {s.name: s for s in (
         port=38204,
         single=True,                       # runs (an answer's events) are this process's memory
         hooks=("balancer", "rooms", "assistant"),   # the model's nodes, Rooms' bus for Erynne's answers, then Ask
+        web_keeps=("mnemerynne.web.memories:router",),   # /memories: an old link to Preferences
     ),
     Service(
         name="mcp",
@@ -111,6 +120,7 @@ SERVICES: dict[str, Service] = {s.name: s for s in (
         port=38205,
         workers={"nas": 2, "ryzen": 4},
         hooks=("mcp",),
+        web_keeps=("mnemerynne.web.claude_links:router",),   # its admin settings
     ),
     Service(
         name="automations",
@@ -121,6 +131,7 @@ SERVICES: dict[str, Service] = {s.name: s for s in (
         port=38208,
         single=True,                       # one scheduler: two would both run what's due
         hooks=("balancer", "rooms", "automations"),   # the model's nodes, Rooms' bus for reports, then the scheduler
+        web_keeps=("mnemerynne.web.automations:router",),   # the Automator page
     ),
     Service(
         name="remote",
@@ -144,6 +155,13 @@ SERVICES: dict[str, Service] = {s.name: s for s in (
         hooks=("share",),
     ),
 )}
+
+
+def web_drops(running: set[str] | list[str]) -> set[str]:
+    """The routers ("module:attribute") the web app leaves out while these services run as processes of their own:
+    each one's routers but those it keeps (Service.web_keeps)."""
+    return {ref for name in running if name in SERVICES
+            for ref in SERVICES[name].routers if ref not in SERVICES[name].web_keeps}
 
 
 def get(name: str) -> Service:

@@ -334,3 +334,33 @@ Run `.venv/Scripts/python.exe -m pytest tests/test_search_db.py tests/test_db.py
 Run `.venv/Scripts/python.exe -m pytest tests/test_files_service.py tests/test_files_api.py -q -p no:cacheprovider`. The files process answers its health with its name, accepts the web app's sign-in, uploads and lists files the web app sees too, draws the viewer, the editor and the wiki with the web app's top bar, and serves nothing else (the Files page, Rooms, Media). A zip link asked for in one process downloads from another. The registry runs it as three processes on the NAS (six on the Ryzen) on a port of its own, and nginx sends Files' paths to it while it runs and to the web app when it doesn't.
 
 **Not covered: the box.** On the NAS with `mnemerynne@files` running: Files lists, uploads (a big one), moves, bins and restores; the viewer, editor and wiki; a zip download; memory with three more processes; `MNEMERYNNE_SERVICES_OFF=files` puts it all back in the web app.
+
+## assistant.db and the assistant service (services rewrite, Phase 7)
+
+Run `.venv/Scripts/python.exe -m pytest tests/test_assistant_db.py tests/test_chat.py tests/test_balancer.py -q -p no:cacheprovider`. Ask's conversations, answers, sources, ratings and timings, and LangGraph's checkpoints and memories, move from core into assistant.db with every row; the proposal an answer drafted stays in core, still pointing at it, and LangGraph opens assistant.db afterwards with nothing left to set up. Deleting a conversation takes its LangGraph state and timings with it, deleting a person takes their conversations and memories and keeps the ratings archive, a message id is never handed out twice, and `move-back assistant` puts it all back into core (the newer code moves it out again). The assistant process answers a question for the web app's sign-in and the web app sees the conversation; it serves Ask's paths and nothing else, as one process, and nginx sends asks and ratings to it (the inbox's `/api/messages` stays). With the assistant running and Valkey, the web app leaves Erynne's Rooms answers to it; without Valkey it keeps them. With Valkey, one process polls the balancer nodes for all and another takes over when it stops.
+
+**Not covered: the box.** The first start's move of the real conversations and checkpoints (time it), an answer streaming through nginx from `mnemerynne@assistant`, picking an answer up again after closing the page, @Erynne in Rooms with Valkey on and off.
+
+## logs.db and the mcp service (services rewrite, Phase 8)
+
+Run `.venv/Scripts/python.exe -m pytest tests/test_logs_db.py tests/test_mcp.py tests/test_retention.py tests/test_diagnostics.py -q -p no:cacheprovider`. The three call logs move into logs.db (an old answer's API source keeps its id); deleting a person deletes their agent calls and keeps the others without the name; an API call's id is never reused; a call logged inside a transaction that rolls back stays logged. The mcp process answers Claude (sign-in refused without a token, search found) and each call lands in logs.db; it runs as two processes and nginx sends `/mcp` and `/c/` to it.
+
+**Not covered: the box.** Claude (claude.ai and Desktop) through `mnemerynne@mcp`; Access → Activity listing its calls; a brand change renaming the connector without a restart.
+
+## automations.db and the automations service (services rewrite, Phase 9)
+
+Run `.venv/Scripts/python.exe -m pytest tests/test_automations_db.py tests/test_automations.py tests/test_automation_tools.py -q -p no:cacheprovider`. Automator's tables move into automations.db and go with their owner (the admins' feeds stay). A run started in a process without the scheduler is queued, counts as running, and the scheduler's process claims and runs it once; a Claude routine's report reaching such a process is saved and delivered by the scheduler (a second report is refused). With the automations service running, the web app starts no scheduler and the page's Run now queues the run. The automations process holds the one scheduler, serves Automator's API for the web app's sign-in, and lets go of it when it stops.
+
+**Not covered: the box.** A scheduled automation running once on time with the service on; Claude's `run_automation` and a routine's report through `mnemerynne@mcp`; the wake through Valkey (runs start within seconds) and without it (within 30 s).
+
+## sync.db and the remote service (services rewrite, Phase 10)
+
+Run `.venv/Scripts/python.exe -m pytest tests/test_sync_db.py tests/test_sync.py tests/test_remote_service.py tests/test_remote.py tests/test_front_door.py -q -p no:cacheprovider`. The backup app's roots and uploads move into sync.db; a root whose folder is deleted keeps its row without it, and a deleted person's roots and uploads go. A big backup's parts are recorded in sync.db, the finished file lands on the share and a renamed root keeps it. The remote process proxies a LAN app for the web app's sign-in (sending people to sign in first) and leaves the Remote page to the web app; nginx carries its websockets and writes each path once.
+
+**Not covered: the box.** The desktop app backing up through the new file (a big file in parts); each LAN app in the Remote tab through `mnemerynne@remote`, with its live parts (websockets).
+
+## The slim web app (services rewrite, Phase 11)
+
+Run `.venv/Scripts/python.exe -m pytest tests/test_portal.py tests/test_roles.py -q -p no:cacheprovider`. With every service running, a fresh web app loads none of LangGraph, the agent, the MCP SDK or Anthropic's SDK, and neither do the files, sync, media and share services; it serves the pages (Files, Media, Rooms, Automator, Remote, Preferences) and leaves out the services' routes, transcoding, `/mcp` and the Remote proxy. With Ask and Automator elsewhere it builds the model only while it still answers Rooms (no Valkey). Each router the web app drops is wholly behind its service's paths, and each it keeps has a page of its own.
+
+**Not covered: the box.** Memory per process before and after (`ps -o rss,cmd -C mnemerynne`); every page opening with all services on; turning services off giving the web app everything back.

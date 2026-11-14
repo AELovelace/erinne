@@ -43,8 +43,7 @@ HISTORY_TURNS = 4          # earlier turns the condense step sees
 MAX_MEMORIES = 10
 
 
-def memory_namespace(user_id: int) -> tuple[str, ...]:
-    return ("user", str(user_id), "memories")
+from mnemerynne.memory import memory_namespace  # noqa: E402,F401  (its home is memory.py; the name stays here too)
 
 
 class State(TypedDict, total=False):

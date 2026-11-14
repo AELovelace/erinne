@@ -16,8 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import accounts, api_tokens, apis, auth, claude_chat, memory, scratchpad, sync, users
-from mnemerynne.clients import claude as claude_client
+from mnemerynne import accounts, api_tokens, apis, auth, claude_chat, memory, scratchpad, sync, theme as theme_mod, users
 from mnemerynne.db import transaction
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import api_user, get_db, is_admin, page_user
@@ -93,7 +92,7 @@ def change_password(body: PasswordChange, request: Request, user=Depends(api_use
     return {"status": "changed"}
 
 
-THEME_COOKIE = "erynne_theme"   # so the sign-in page matches (web/app.py _nav_context)
+THEME_COOKIE = theme_mod.THEME_COOKIE   # so the sign-in page matches (web/front.py _nav_context)
 
 
 class ThemeBody(BaseModel):
@@ -154,6 +153,7 @@ async def set_claude(body: ClaudeKeyBody, request: Request, user=Depends(api_use
         model = claude_chat.check_model(body.model)
         key = claude_chat.check_shape(body.key) if body.key else None
         if key:
+            from mnemerynne.clients import claude as claude_client   # Anthropic's SDK only when a key is checked
             await claude_client.check_key(key, model)
     except ValueError as exc:   # ClaudeKeyError too
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None

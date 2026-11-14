@@ -15,7 +15,6 @@ from pydantic import BaseModel
 
 from mnemerynne import oauth, permissions, sync
 from mnemerynne.db import transaction
-from mnemerynne.mcp_server import public_base
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import _session_user, admin_user, api_user, get_db
 
@@ -25,6 +24,7 @@ NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
 
 def _base(request: Request) -> str:
     headers = {k.lower(): v for k, v in request.headers.items()}
+    from mnemerynne.mcp_server import public_base   # the MCP SDK only when an address is worked out (Phase 11)
     return public_base(request.app.state.settings, headers, {"scheme": request.url.scheme})
 
 

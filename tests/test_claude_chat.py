@@ -128,7 +128,7 @@ def test_keys_are_each_persons_own_and_never_shown(client, conn, settings, world
         checked.append((key, model))
         if key.endswith("bad"):
             raise claude_client.ClaudeKeyError("Anthropic didn't accept that key.")
-    monkeypatch.setattr(settings_pages.claude_client, "check_key", check)
+    monkeypatch.setattr(claude_client, "check_key", check)            # imported where a key is checked
     _login(client, "alice")
     assert client.get("/api/me/claude").json()["key"] == "missing"
     assert client.put("/api/me/claude", json={"model": "claude-sonnet-5-5"}).json()["detail"] == \

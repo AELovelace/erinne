@@ -29,6 +29,7 @@ class ThemeError(ValueError):
 
 BASES = ("sakura", "neon", "plain")
 SETTINGS_KEY = "theme_settings"
+THEME_COOKIE = "erynne_theme"   # the viewer's own theme, for pages before sign-in (web/settings.py sets it)
 PACK_FORMAT = "mnemerynne-theme/1"
 MAX_CUSTOM_CSS = 20 * 1024
 MAX_PACK_BYTES = 16 * 1024 * 1024
