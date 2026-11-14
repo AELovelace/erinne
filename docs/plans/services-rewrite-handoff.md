@@ -125,6 +125,14 @@ the next share scan's catalog pass adds a new file and drops a deleted one; TV g
 (the games read TVs and remotes from media.db now). Back to A: `sudo mnemerynne-admin move-back media` with
 everything stopped, then the older code.
 
+### Deploying Phase 4b (the media service; never run on the box yet)
+
+After the update, `sudo bash /opt/mnemerynne/deploy/linux/front-door.sh services` starts `mnemerynne@media` and
+routes Media's paths to it (no Valkey needed). Check: the Media page and a TV's page draw as before (theme,
+top bar); a film plays and seeks (an HLS one too); a TV pairs and takes a remote's commands; a phone pairs as a
+remote; signage commands reach a screen; Settings → Media saves; Lumi's game pages still open (they stay with the
+web app). Back to A: `MNEMERYNNE_SERVICES_OFF=media` in the .env and `front-door.sh services` again.
+
 ## 3. Phase 0.5: done in code (2026-11-13)
 
 The front-door and Valkey work below is committed and tested with the box stood in for

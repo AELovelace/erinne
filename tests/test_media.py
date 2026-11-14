@@ -1,4 +1,3 @@
-from conftest import FeatureConn
 import io
 import json
 import os
@@ -12,6 +11,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import FeatureConn
 from fakes import FakeDirectory, FakeEmbedder, FakeShareChecker
 from mnemerynne import accounts, db, media, share, users
 from mnemerynne.config import Settings

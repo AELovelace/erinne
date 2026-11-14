@@ -27,6 +27,9 @@ class Service:
     # Only works with Valkey (MNEMERYNNE_VALKEY_URL): what it does has to reach the other processes at once (Rooms'
     # live events, Erynne's answers). Without Valkey, front-door.sh leaves it off and its paths with the web app.
     needs_valkey: bool = False
+    # Paths under its own that stay with the web app (nginx sends them there while the service runs): another
+    # router's pages under the same prefix. "= /exact/path" for one path only.
+    web_paths: tuple[str, ...] = ()
 
     def processes(self, profile: str | None = None) -> int:
         """How many processes to run: one for a single-process service, else the profile's count."""
@@ -62,6 +65,18 @@ SERVICES: dict[str, Service] = {s.name: s for s in (
         workers={"nas": 1, "ryzen": 2},
         hooks=("rooms",),                  # its live bus; Erynne's answers stay with the web app (rooms:ask)
         needs_valkey=True,
+    ),
+    Service(
+        name="media",
+        serves="Media (/media/, /api/media/, its admin and signage): the TV and speaker hub, pairing codes and "
+               "transcoding sessions live in this one process, so every path that touches them comes here",
+        routers=("mnemerynne.web.media:router", "mnemerynne.web.media:admin_router", "mnemerynne.web.kiosk:router",
+                 "mnemerynne.web.soundcloud:router"),
+        paths=("/api/media/", "/media/", "/api/admin/media", "/api/admin/signage", "/api/admin/settings/media"),
+        port=38207,
+        single=True,                       # the hub, the pairings and the ffmpeg sessions are this process's memory
+        hooks=("pages", "media"),          # its pages draw the web app's templates; its own transcoding sessions
+        web_paths=("/media/games/", "= /media/panel/manifest.webmanifest"),
     ),
 )}
 

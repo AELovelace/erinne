@@ -1203,6 +1203,14 @@ sudo mnemerynne-admin move-back media      # and for Media
 
 then put the older code back and start the services. The newer code's next start moves them out again.
 
+### Turning a service off (A/B)
+
+`MNEMERYNNE_SERVICES_OFF=media,rooms` in the .env keeps those services off: `front-door.sh services`
+leaves them off (or turns them off) and nginx sends their paths to the web app, which serves every path
+itself anyway. Take a name out and run `services` again to bring it back. The **media** service
+(`mnemerynne@media`, port 38207) serves all of Media in one process (pages, API, TVs and remotes,
+transcoding): it needs no Valkey.
+
 ### Services that need Valkey
 
 Some services only work with Valkey on, because what happens in them must reach the other processes at

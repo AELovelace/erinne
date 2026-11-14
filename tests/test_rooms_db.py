@@ -175,7 +175,8 @@ def test_an_ask_taken_by_the_rooms_service_is_answered_by_the_web_app(monkeypatc
 def test_the_rooms_service_waits_for_valkey_and_only_running_services_get_paths():
     assert registry.SERVICES["rooms"].needs_valkey and registry.SERVICES["rooms"].paths == ("/api/rooms",)
     conf = nginx.render("192.168.1.5:38200", running=["sync", "games"])
-    assert "location /api/rooms" not in conf and "mnemerynne_rooms" not in conf      # the web app keeps them
+    assert "mnemerynne_rooms" not in conf                                           # the web app keeps them:
+    assert "location /api/rooms {\n        proxy_pass http://mnemerynne_web;" in conf  # said outright
     assert "location /api/rooms {\n        proxy_pass http://mnemerynne_rooms;" in nginx.render("192.168.1.5:38200")
 
 

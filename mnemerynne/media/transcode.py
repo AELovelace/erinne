@@ -88,9 +88,11 @@ def _scale(hw: bool) -> str:
 class Manager:
     """Every running session of this web app (one uvicorn process, so in memory)."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, owner: str = "web") -> None:
+        """`owner`: the process (web, or the media service): each has its own folder of sessions, so one starting up
+        and clearing its leftovers never takes away another's (docs/plans/services-rewrite.md, Phase 4b)."""
         self.settings = settings
-        self.root = settings.media_dir / "sessions"
+        self.root = settings.media_dir / "sessions" / owner
         self._lock = threading.Lock()
         self._sessions: dict[str, Session] = {}
         self._resolved: str | None = None

@@ -5,6 +5,7 @@ loaded once and rebuilt after every write here, so rendering never touches the d
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from typing import Any
 
@@ -13,12 +14,14 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, 
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import db, identity, mcp_server, theme
+from mnemerynne import db, events, identity, mcp_server, theme
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import admin_user, get_db, get_settings
 from mnemerynne.web.sendfile import send_file
+
+log = logging.getLogger("mnemerynne.web")
 
 router = APIRouter()         # public
 admin_router = APIRouter()   # admins
@@ -41,6 +44,10 @@ def looks_for(app) -> theme.Looks:
 
 def _refresh(request: Request, conn: sqlite3.Connection) -> theme.Looks:
     request.app.state.looks = theme.load_looks(conn, request.app.state.settings)
+    try:
+        events.publish_sync("theme:changed", {})       # the media service's pages reload theirs (services/hooks.py)
+    except Exception:
+        log.warning("Couldn't tell the other processes about the new theme.", exc_info=True)
     return request.app.state.looks
 
 

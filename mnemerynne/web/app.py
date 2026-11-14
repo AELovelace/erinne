@@ -185,6 +185,78 @@ def create_role_app(role: str, settings: Settings | None = None, services: Servi
     return create_service(role, settings, services)
 
 
+def make_templates(app: FastAPI) -> Jinja2Templates:
+    """The pages' templates with every page's top bar (the look, the badge, Rooms, Media, Remote; on a TV its
+    screen): the web app's, and a service's that serves pages of its own (the media service, services/hooks.py)."""
+    settings = app.state.settings
+
+    def _tv(request: Request, conn: sqlite3.Connection) -> dict | None:
+        """This browser is a screen (the TV, by its key): its underscan and text size on every page, and on a
+        screen box the small bar and the remote (base.html). A built-in game frame inherits text size only."""
+        framed = request.headers.get("sec-fetch-dest") == "iframe"
+        if framed and not request.url.path.startswith("/media/games/"):
+            return None
+        screen = media_screens.by_token(conn, request.cookies.get(media_screens.COOKIE))
+        if screen is None:
+            return None
+        return {"id": screen["id"], "name": screen["name"],
+                "safe_x": 0 if framed else screen["safe_x"], "safe_y": 0 if framed else screen["safe_y"],
+                "ui_scale": screen["ui_scale"], "box": bool(screen["is_box"]) and not framed, "framed": framed}
+
+    def _nav_context(request: Request) -> dict:
+        """What every page's top bar needs beyond its own context: the badge on the Messages button
+        (unread notes, and with Rooms on, mentions and unread DMs), whether Rooms and Remote are there;
+        and on a screen, the screen (tv)."""
+        session = request.scope.get("session", {}) if "session" in request.scope else {}
+        user_id = session.get("user_id")
+        # The look (theme) and the brand: every page, signed in or not (the sign-in page follows the cookie).
+        looks = theme_pages.looks_for(app)
+        cookie = request.cookies.get(settings_pages.THEME_COOKIE)
+        out = {"look": looks.resolve(None, cookie), "brand": looks.brand,
+               "product_name": looks.brand.get("name") or ASSISTANT_NAME}
+        if not user_id and not request.cookies.get(media_screens.COOKIE):
+            return out
+        conn = app.state.db_pool.get()
+        try:
+            out["tv"] = _tv(request, conn)
+            user = users.get_user_by_id(conn, user_id) if user_id else None
+            if user is None:
+                return out
+            out["look"] = looks.resolve(user["theme"] or None, cookie)
+            admin = is_admin(request, conn, user)
+            rooms_pool = deps.feature_pool(app, "rooms")   # Rooms' unread counts live in rooms.db (Phase 3)
+            rooms_conn = rooms_pool.get()
+            try:
+                unread_rooms = rooms_mod.unread_summary(rooms_conn, user, app.state.directory)
+            finally:
+                rooms_pool.put(rooms_conn)
+            return out | {"nav_unread": messages_mod.unread_count(conn, user_id) + unread_rooms["mentions"] + unread_rooms["dms"],
+                    "has_rooms": rooms_mod.enabled(conn), "has_media": media_mod.enabled(conn) and media_mod.may_use(conn, user, app.state.directory),
+                    "has_screens": media_mod.enabled(conn) and media_screens.may_use(conn, user, app.state.directory),
+                    "message_max_chars": messages_mod.MAX_CHARS,
+                    "has_remote": bool(remote.apps_for(conn, user, app.state.directory, admin)),
+                    "has_automations": automations_mod.may_use(conn, settings, user, app.state.directory),
+                    # Signed in on a screen box's TV (its top bar): back to the TV page, which signs out.
+                    "kiosk_back": bool(session.get("kiosk_screen"))}
+        except sqlite3.Error:
+            return out
+        finally:
+            app.state.db_pool.put(conn)
+
+    templates = Jinja2Templates(directory=_HERE / "templates", context_processors=[_nav_context])
+    templates.env.globals["assistant_name"] = ASSISTANT_NAME
+
+    def static(name: str) -> str:
+        # The file's mtime in the URL: browsers fetch the new copy after an update
+        # instead of reusing a cached one.
+        path = _HERE / "static" / name
+        version = int(path.stat().st_mtime) if path.exists() else 0
+        return f"/static/{name}?v={version}"
+
+    templates.env.globals["static"] = static
+    return templates
+
+
 def create_app(settings: Settings | None = None, services: Services | None = None) -> FastAPI:
     settings = settings or get_settings()
     diagnostics.install_log_capture()   # the last few hundred log lines, for the diagnose tool
@@ -315,71 +387,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
 
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
 
-    def _tv(request: Request, conn: sqlite3.Connection) -> dict | None:
-        """This browser is a screen (the TV, by its key): its underscan and text size on every page, and on a
-        screen box the small bar and the remote (base.html). A built-in game frame inherits text size only."""
-        framed = request.headers.get("sec-fetch-dest") == "iframe"
-        if framed and not request.url.path.startswith("/media/games/"):
-            return None
-        screen = media_screens.by_token(conn, request.cookies.get(media_screens.COOKIE))
-        if screen is None:
-            return None
-        return {"id": screen["id"], "name": screen["name"],
-                "safe_x": 0 if framed else screen["safe_x"], "safe_y": 0 if framed else screen["safe_y"],
-                "ui_scale": screen["ui_scale"], "box": bool(screen["is_box"]) and not framed, "framed": framed}
-
-    def _nav_context(request: Request) -> dict:
-        """What every page's top bar needs beyond its own context: the badge on the Messages button
-        (unread notes, and with Rooms on, mentions and unread DMs), whether Rooms and Remote are there;
-        and on a screen, the screen (tv)."""
-        session = request.scope.get("session", {}) if "session" in request.scope else {}
-        user_id = session.get("user_id")
-        # The look (theme) and the brand: every page, signed in or not (the sign-in page follows the cookie).
-        looks = theme_pages.looks_for(app)
-        cookie = request.cookies.get(settings_pages.THEME_COOKIE)
-        out = {"look": looks.resolve(None, cookie), "brand": looks.brand,
-               "product_name": looks.brand.get("name") or ASSISTANT_NAME}
-        if not user_id and not request.cookies.get(media_screens.COOKIE):
-            return out
-        conn = app.state.db_pool.get()
-        try:
-            out["tv"] = _tv(request, conn)
-            user = users.get_user_by_id(conn, user_id) if user_id else None
-            if user is None:
-                return out
-            out["look"] = looks.resolve(user["theme"] or None, cookie)
-            admin = is_admin(request, conn, user)
-            rooms_pool = deps.feature_pool(app, "rooms")   # Rooms' unread counts live in rooms.db (Phase 3)
-            rooms_conn = rooms_pool.get()
-            try:
-                unread_rooms = rooms_mod.unread_summary(rooms_conn, user, app.state.directory)
-            finally:
-                rooms_pool.put(rooms_conn)
-            return out | {"nav_unread": messages_mod.unread_count(conn, user_id) + unread_rooms["mentions"] + unread_rooms["dms"],
-                    "has_rooms": rooms_mod.enabled(conn), "has_media": media_mod.enabled(conn) and media_mod.may_use(conn, user, app.state.directory),
-                    "has_screens": media_mod.enabled(conn) and media_screens.may_use(conn, user, app.state.directory),
-                    "message_max_chars": messages_mod.MAX_CHARS,
-                    "has_remote": bool(remote.apps_for(conn, user, app.state.directory, admin)),
-                    "has_automations": automations_mod.may_use(conn, settings, user, app.state.directory),
-                    # Signed in on a screen box's TV (its top bar): back to the TV page, which signs out.
-                    "kiosk_back": bool(session.get("kiosk_screen"))}
-        except sqlite3.Error:
-            return out
-        finally:
-            app.state.db_pool.put(conn)
-
-    templates = Jinja2Templates(directory=_HERE / "templates", context_processors=[_nav_context])
-    templates.env.globals["assistant_name"] = ASSISTANT_NAME
-
-    def static(name: str) -> str:
-        # The file's mtime in the URL: browsers fetch the new copy after an update
-        # instead of reusing a cached one.
-        path = _HERE / "static" / name
-        version = int(path.stat().st_mtime) if path.exists() else 0
-        return f"/static/{name}?v={version}"
-
-    templates.env.globals["static"] = static
-    app.state.templates = templates
+    app.state.templates = templates = make_templates(app)   # pages, and every page's top bar
+    static = templates.env.globals["static"]                # versioned /static/ addresses (the manifests use it)
     app.include_router(files.router)
     app.include_router(chat.router)
     app.include_router(memories.router)

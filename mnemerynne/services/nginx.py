@@ -148,6 +148,12 @@ def render(listen: str, web: str = "127.0.0.1:38210", accel: dict[str, Path] | N
         for path in s.paths:
             lines += [f"    # {s.name}: {s.serves}",
                       f"    location {path} {{", f"        proxy_pass http://{_upstream(s.name)};", "    }", ""]
+    taken = {path for s in services for path in s.paths}
+    stay = [(f"{s.name} leaves this to the web app", p) for s in services for p in s.web_paths]
+    stay += [(f"{s.name} isn't running here: the web app serves it", p) for s in registry.SERVICES.values()
+             if s not in services for p in s.paths if p not in taken]
+    for why, path in stay:
+        lines += [f"    # {why}", f"    location {path} {{", f"        proxy_pass http://{_upstream('web')};", "    }", ""]
     lines += ["    # Remote's LAN apps: websockets.",
               "    location /remote/ {",
               f"        proxy_pass http://{_upstream('web')};",

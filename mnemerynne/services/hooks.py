@@ -47,4 +47,44 @@ async def rooms(app, settings, services):
         await asyncio.gather(listener, return_exceptions=True)
 
 
-HOOKS = {"balancer": balancer, "rooms": rooms}
+@asynccontextmanager
+async def pages(app, settings, services):
+    """app.state.templates: the web app's pages with their top bar (web/app.make_templates), for a service that
+    serves pages. A theme saved in the web app ("theme:changed") is picked up here at the next page."""
+    from mnemerynne import events
+    from mnemerynne.web.app import make_templates
+
+    app.state.templates = make_templates(app)
+
+    async def follow_themes():
+        while True:
+            try:
+                async for _ in events.subscribe("theme:changed"):
+                    app.state.looks = None                  # reloaded by the next page (theme.looks_for)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                await asyncio.sleep(5)
+
+    follower = asyncio.create_task(follow_themes())
+    try:
+        yield
+    finally:
+        follower.cancel()
+        await asyncio.gather(follower, return_exceptions=True)
+
+
+@asynccontextmanager
+async def media(app, settings, services):
+    """app.state.media_sessions: this process's transcoding sessions (its own folder, cleared at start)."""
+    from mnemerynne.media import transcode
+
+    app.state.media_sessions = transcode.Manager(settings, "media")
+    await asyncio.to_thread(app.state.media_sessions.startup)
+    try:
+        yield
+    finally:
+        await asyncio.to_thread(app.state.media_sessions.shutdown)
+
+
+HOOKS = {"balancer": balancer, "rooms": rooms, "pages": pages, "media": media}

@@ -100,7 +100,8 @@ _MIME = {".mkv": "video/x-matroska", ".mka": "audio/x-matroska", ".webm": "video
 def sessions(request: Request) -> transcode.Manager:
     """The app's transcoding sessions (made at startup; on first use in tests without one)."""
     if getattr(request.app.state, "media_sessions", None) is None:
-        request.app.state.media_sessions = transcode.Manager(request.app.state.settings)
+        request.app.state.media_sessions = transcode.Manager(request.app.state.settings,
+                                                             getattr(request.app.state, "role", None) or "web")
     return request.app.state.media_sessions
 
 

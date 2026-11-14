@@ -216,8 +216,16 @@ services() {
         fi
     done
     systemctl daemon-reload
+    local off
+    off=",$(env_get MNEMERYNNE_SERVICES_OFF | tr -d ' '),"      # e.g. media,rooms: kept off here (A/B)
     while read -r name port needs; do
         [ -n "$name" ] || continue
+        if [[ $off == *",$name,"* ]]; then
+            if systemctl is-enabled --quiet "mnemerynne@$name" 2>/dev/null; then systemctl disable --now "mnemerynne@$name" || true; fi
+            if systemctl is-enabled --quiet "mnemerynne-$name" 2>/dev/null; then systemctl disable --now "mnemerynne-$name" || true; fi
+            echo "mnemerynne@$name: off (MNEMERYNNE_SERVICES_OFF); the web app serves its paths."
+            continue
+        fi
         if [ "${needs:-0}" = 1 ] && ! valkey_set; then          # it would miss the other processes' events
             if systemctl is-enabled --quiet "mnemerynne@$name" 2>/dev/null; then
                 systemctl disable --now "mnemerynne@$name" || true

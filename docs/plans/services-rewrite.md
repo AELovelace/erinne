@@ -14,8 +14,8 @@
 | Phase 2: `games.db` (18 tables: coins, Lumi, arcade, casino, Lumi-Soft, push) out of core; `mnemerynne move-back games` for A/B | done in code (2026-11-13); **not yet run on the NAS** | 2f33d9d |
 | Phase 3: `rooms.db`; Rooms' live events over the event bus; the `rooms` service (needs Valkey) | done in code (2026-11-13); **not yet run on the NAS** | 2d8b3fe |
 | Between 3 and 4: request and feature connections attach every feature file read-only | done | 041cd1a |
-| Phase 4a: `media.db` (13 `media_*`/`signage_*` tables) | done in code (2026-11-14); **not yet run on the NAS** | this step's commit |
-| Phase 4b: the media service (hub on Valkey, pages, HLS sessions in it) | not started | |
+| Phase 4a: `media.db` (13 `media_*`/`signage_*` tables) | done in code (2026-11-14); **not yet run on the NAS** | 80fff80 |
+| Phase 4b: the media service (all of Media in one process; no Valkey needed) | done in code (2026-11-14); **not yet run on the NAS** | this step's commit |
 
 Tests: `.venv\Scripts\python -m pytest tests -n auto` (about 4 minutes).
 
@@ -95,6 +95,20 @@ hub on the event bus (`screen:{id}` channels; the TV's SSE listens wherever it i
 Valkey or media.db, (2) every path touching an HLS session in the one process that started it (`/api/media/` and
 `/media/sessions/`), and (3) either the pages kept in the web app (nginx: `/media/games/` and the page paths to the
 web app) or a templates hook. Until then the web app serves all of Media, on media.db.
+
+**Phase 4b (2026-11-14), as built:** the second way. The `media` service (port 38207, `single`) mounts Media's
+router, its admin router, the kiosk and SoundCloud, and nginx sends it every path that can touch the hub, the
+pairings, the speaker tickets or an HLS session: `/api/media/`, `/media/`, `/api/admin/media`,
+`/api/admin/signage`, `/api/admin/settings/media` (it stops the sessions when Media goes off). So those stay one
+process's memory and the service needs no Valkey. Its pages: `web/app.make_templates(app)` (lifted out of
+`create_app`, unchanged) through a `pages` hook, which also drops its cached themes on `theme:changed` (published
+by `web/theme._refresh`; with Valkey off a theme change reaches the service's pages at its next restart). Its
+sessions: a `media` hook with `transcode.Manager(settings, "media")`: each process has its own `sessions/<owner>`
+folder, so the web app starting up no longer clears the service's live sessions. nginx: `Service.web_paths`
+(`/media/games/`, `= /media/panel/manifest.webmanifest`) stay with the web app, and a service that isn't running gets
+explicit web-app locations, so a shorter running prefix (`/api/media/`) can't take its paths (`/api/media/games`).
+`MNEMERYNNE_SERVICES_OFF=media,...` keeps named services off in `front-door.sh services` (the A/B switch for any
+service). The web app keeps the media router too (all-in-one).
 
 ## Context
 
