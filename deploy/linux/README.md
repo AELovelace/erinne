@@ -1110,7 +1110,18 @@ sudo bash /opt/mnemerynne/deploy/linux/front-door.sh off       # the web app get
 The config it writes comes from the service registry (`mnemerynne/services/registry.py`), not from a
 file here: `python -m mnemerynne.services.nginx --listen 192.168.1.5:38200` prints it, with one
 upstream and one `location` per service path. A service added to the registry gets its route the next
-time `front-door.sh on` or `services` runs. `nginx-mnemerynne-front.conf` is the same config written by
+time `front-door.sh on` or `services` runs.
+
+Each config it writes carries a stamp (the time it was written), and nginx answers it at
+`/_front-door/stamp` to this box alone. After every reload `front-door.sh` asks for it, and fails
+loudly if nginx is still serving an older config. That happened on the NAS: an nginx started by hand
+kept its first-day routes while each run rewrote the file, so Files, Ask, Wiki, MCP and Remote 404'd
+or redirected to `:38200`. `status` prints which config nginx serves. If nginx is running outside
+systemd, `front-door.sh` stops it and starts it through systemd. It also gives nginx a drop-in
+(`/etc/systemd/system/nginx.service.d/mnemerynne-front.conf`) so it waits for the network at boot:
+it listens on the LAN address, which isn't there yet early in boot. `off` removes the drop-in.
+
+`nginx-mnemerynne-front.conf` is the same config written by
 hand for two services; by hand, it goes like this:
 
 ```sh

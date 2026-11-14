@@ -22,6 +22,14 @@ Deployed 2026-11-14: phases 0.5 to 6b (26c62f8), on the new box (static 192.168.
 phases 7 to 11 (248eb29) on top. The games, rooms, media, search, assistant, logs, automations and sync tables
 are in their own files, and the web app runs slim. Valkey is **off**; accel is **off**.
 
+**Found after the 7–11 deploy:** nginx on the box was still serving an old config: only `/api/sync/` and
+the games' API routed, and `/remote/` passed on without Host. Each `services` run had rewritten
+`/etc/nginx/conf.d/mnemerynne-front.conf`, but nginx never loaded it, most likely because it had been
+started outside systemd after the boot-time bind failure. From outside, `/remote` redirected to `:38200`,
+and `/api/files`, `/api/conversations`, `/wiki` and `/mcp` 404'd (the slim web app doesn't serve them).
+`front-door.sh` now stamps each config and checks nginx serves it. It hands a hand-started nginx to
+systemd and makes nginx wait for the network at boot. Run `front-door.sh services` again to apply it.
+
 | Piece | Where | Notes |
 |---|---|---|
 | nginx front door | `192.168.1.5:38200` (`/etc/nginx/conf.d/mnemerynne-front.conf`) | site-chan still sends everything here; the firewall only lets 38200 through |

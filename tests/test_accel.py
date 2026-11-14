@@ -140,6 +140,18 @@ def test_without_accel_nobody_can_claim_the_header():
     assert "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;" in remote[:remote.index("}")]
 
 
+def test_the_config_carries_a_stamp_only_this_box_may_ask_for():
+    """front-door.sh asks the running nginx for the stamp it wrote, so a config written but never loaded shows."""
+    conf = nginx.render("192.168.1.5:38200", stamp="20261114-120000-42")
+    stamp = conf[conf.index(f"location = {nginx.STAMP_PATH} {{"):]
+    stamp = stamp[:stamp.index("}")]                                          # just that location
+    assert 'return 200 "20261114-120000-42";' in stamp                       # front-door.sh's sed reads this line
+    assert "allow 192.168.1.5;" in stamp and "allow 127.0.0.1;" in stamp and "deny all;" in stamp
+    assert nginx.STAMP_PATH not in nginx.render("192.168.1.5:38200")          # no stamp asked for: no location
+    with pytest.raises(ValueError):
+        nginx.render("192.168.1.5:38200", stamp='x"; return 301 http://evil')  # nothing but letters, digits, dashes
+
+
 def test_a_path_nginx_could_not_read_back_is_refused(tmp_path):
     with pytest.raises(ValueError):
         nginx.render("192.168.1.5:38200", accel={"data": Path('/srv/a"b')})
@@ -157,6 +169,7 @@ def test_the_roots_come_from_the_services_env_file(tmp_path, capsys):
 
 BOX = r'''
 LOG=$1; ENV=$2; SAVED=$3; CONF=$4; NGINX_CONF=$5; DATA=$6; STATIC=$7; WAIT=2
+NGINX_DROPIN=$CONF.dropin                          # nginx's boot order, kept in the test's folder
 sleep() { :; }
 journalctl() { :; }
 usermod() { echo "usermod $*" >> "$LOG"; }
@@ -178,6 +191,7 @@ curl() {
         *healthz*) echo '{"status":"ok","role":"web"}' ;;
         *_accel-probe/data*) [ -n "${NGINX_CANT_READ:-}" ] || cat "$DATA/.mnemerynne-accel-probe" ;;
         *icon-192.png*) echo 200 ;;
+        *_front-door/stamp*) printf %s "$STAMP" ;;       # nginx serves the config just written
     esac
 }
 '''
@@ -236,6 +250,31 @@ def test_accel_off_hands_the_files_back_to_the_app(tmp_path):
     assert "MNEMERYNNE_ACCEL" not in paths["env"].read_text()
     assert paths["front.conf"].read_text() == "plain config\n"
     assert paths["nginx.conf"].read_text().startswith("user nginx;")
+
+
+def test_a_config_nginx_never_loaded_is_caught(tmp_path):
+    """The NAS's nginx served a first-day config for days while each run rewrote the file: now it's said and fails."""
+    paths = _box(tmp_path)
+    result = _accel(paths, 'served_stamp() { echo 20261113-000000-1; }\nwrite_conf 192.168.1.5:38200\n'
+                           'nginx_live 192.168.1.5:38200\n')
+    assert result.returncode == 1
+    assert "still serving an older config" in result.stderr and "20261113-000000-1" in result.stderr
+    assert Path(str(paths["front.conf"]) + ".dropin").read_text().count("After=network-online.target") == 1
+
+
+def test_an_nginx_started_by_hand_is_handed_to_systemd(tmp_path):
+    paths = _box(tmp_path)
+    result = _accel(paths, r'''
+systemctl() { echo "systemctl $*" >> "$LOG"; case "$1" in is-active) return 3 ;; esac; }
+HAND=1; pgrep() { [ -n "$HAND" ]; }
+nginx() { echo "nginx $*" >> "$LOG"; [ "$1" != -s ] || HAND=; }   # "nginx -s quit": the hand-started one goes
+write_conf 192.168.1.5:38200
+nginx_live 192.168.1.5:38200
+''')
+    assert result.returncode == 0, result.stderr
+    assert "running outside systemd" in result.stderr
+    asked = paths["log"].read_text().splitlines()
+    assert asked.index("nginx -s quit") < asked.index("systemctl enable --now nginx")
 
 
 def test_selinux_lets_nginx_read_exactly_the_types_found(tmp_path):

@@ -165,7 +165,10 @@ port 38200 (now an exact location per bare page, and `absolute_redirect off`); a
 at a library waited 20 s for a share service that couldn't hear the ask (now it walks at once). A/B on the new
 box showed little difference: it's fast either way. Phases 7 to 11 followed the same day (`update`, then
 `front-door.sh services`): assistant, mcp, automations and remote came up beside the others, every service
-answered its health check, and 38206 (rooms) stays silent until Valkey is on.
+answered its health check, and 38206 (rooms) stays silent until Valkey is on. But nginx itself was still
+serving an old config, which it had never reloaded (the handoff has the details), so the bare-page fix and
+every service path after the first two never reached it. `front-door.sh` now stamps each config, checks that
+nginx serves it, and makes nginx wait for the network at boot.
 
 **Phase 7 (2026-11-14):** `assistant.db` holds conversations, messages, message_sources, feedback,
 feedback_archive and graph_runs, and LangGraph's checkpoints, writes, store and store_migrations (its migration

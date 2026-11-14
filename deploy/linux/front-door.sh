@@ -34,6 +34,9 @@ NGINX_CONF=/etc/nginx/nginx.conf
 SEMODULE=mnemerynne_accel                        # SELinux: nginx may read the folders the app hands it
 PROBE=.mnemerynne-accel-probe                    # written in each folder, fetched through nginx, removed
 STATIC_PROBE=/static/icons/icon-192.png
+STAMP_PATH=/_front-door/stamp                   # nginx answers the stamp of the config it loaded
+STAMP=                                          # the stamp write_conf put in the config it wrote
+NGINX_DROPIN=$UNIT_DIR/nginx.service.d/mnemerynne-front.conf   # nginx waits for the LAN address at boot
 
 env_get() { grep -E "^$1=" "${2:-$ENV}" | tail -1 | cut -d= -f2- || true; }   # a setting from the .env (or $2)
 env_set() {                                                             # set (or add) one setting in the .env
@@ -91,15 +94,48 @@ gen_conf() {                                # print the config for listen addres
     running=$(enabled_services)
     if [ "$2" = accel ]; then
         app_py -m mnemerynne.services.nginx --listen "$1" --web "127.0.0.1:$WEB_PORT" --accel --env-file - \
-            --services "$running" < "$ENV"
+            --services "$running" --stamp "$STAMP" < "$ENV"
     else
-        app_py -m mnemerynne.services.nginx --listen "$1" --web "127.0.0.1:$WEB_PORT" --services "$running"
+        app_py -m mnemerynne.services.nginx --listen "$1" --web "127.0.0.1:$WEB_PORT" --services "$running" \
+            --stamp "$STAMP"
     fi
+}
+conf_stamp() { sed -n 's/^ *return 200 "\([A-Za-z0-9-]*\)";$/\1/p' "$CONF" 2>/dev/null | head -1; }  # the file's
+served_stamp() { curl -s --max-time 3 "http://$1$STAMP_PATH" || true; }   # the stamp nginx on $1 serves
+nginx_boot_order() {                        # nginx waits for the network at boot: it listens on the LAN address
+    [ -f "$NGINX_DROPIN" ] && return 0
+    mkdir -p "$(dirname "$NGINX_DROPIN")"
+    printf '%s\n' "# Written by mnemerynne's front-door.sh: nginx listens on the box's LAN address, so it waits for it." \
+        "[Unit]" "Wants=network-online.target" "After=network-online.target" > "$NGINX_DROPIN"
+    systemctl daemon-reload
+    echo "nginx now waits for the network at boot ($NGINX_DROPIN)."
+}
+nginx_live() {                              # nginx on $1 serving the config just written ($2 = restart: a restart)
+    local listen=$1 tries
+    nginx_boot_order
+    if systemctl is-active --quiet nginx; then
+        if [ "${2:-}" = restart ]; then systemctl restart nginx; else systemctl reload nginx; fi
+    else
+        if pgrep -x nginx >/dev/null; then              # an nginx systemd doesn't know (started by hand): stop it
+            echo "nginx is running outside systemd (started by hand?): stopping it so systemd runs it." >&2
+            nginx -s quit 2>/dev/null || pkill -x nginx || true
+            for tries in $(seq 1 20); do pgrep -x nginx >/dev/null || break; sleep 0.5; done
+        fi
+        systemctl enable --now nginx
+    fi
+    for tries in $(seq 1 20); do                        # a reload swaps workers over a moment
+        [ "$(served_stamp "$listen")" = "$STAMP" ] && return 0
+        sleep 0.5
+    done
+    echo "nginx on $listen is still serving an older config (answers '$(served_stamp "$listen")', wrote '$STAMP')." >&2
+    echo "Look with: systemctl status nginx; ps -o pid,lstart,cmd -C nginx; sudo nginx -T | grep -n listen" >&2
+    return 1
 }
 write_conf() {                              # the nginx config for listen address $1, checked; $2: accel | plain |
     local new old mode=${2:-auto}           # auto (the default: accel when MNEMERYNNE_ACCEL is set)
     if [ "$mode" = auto ]; then if accel_set; then mode=accel; else mode=plain; fi; fi
     new=$(mktemp); old=$(mktemp)
+    STAMP=$(date +%Y%m%d-%H%M%S)-$$                                                   # nginx_live checks for it
     if ! gen_conf "$1" "$mode" > "$new" || [ ! -s "$new" ]; then
         rm -f "$new" "$old"; echo "Couldn't write the nginx config from the registry; nothing changed." >&2; return 1
     fi
@@ -115,6 +151,7 @@ write_conf() {                              # the nginx config for listen addres
 
 off() {
     systemctl disable --now nginx 2>/dev/null || true
+    if [ -f "$NGINX_DROPIN" ]; then rm -f "$NGINX_DROPIN"; systemctl daemon-reload; fi    # nginx's boot order as it was
     if [ -f "$SAVED" ]; then
         cp -a "$SAVED" "$ENV"
         rm -f "$SAVED"
@@ -171,7 +208,7 @@ front_on() {
         [ -n "$unit" ] || continue
         up "http://127.0.0.1:$port/healthz" "$name" || fail "$name on 127.0.0.1:$port" "$unit"
     done < <(services_or_default)
-    systemctl enable --now nginx || fail "starting nginx" nginx
+    nginx_live "$HOST:$PORT" || fail "starting nginx" nginx
     up "http://$HOST:$PORT/healthz" || fail "nginx answering on $HOST:$PORT" nginx
     echo "Done: nginx on $HOST:$PORT -> each service's paths to its port, everything else to 127.0.0.1:$WEB_PORT."
 }
@@ -264,8 +301,8 @@ services() {
         local listen                                            # where the reverse proxy sends: the saved .env's
         listen="$(env_get MNEMERYNNE_HOST "$SAVED"):$(env_get MNEMERYNNE_PORT "$SAVED")"
         write_conf "$listen" || exit 1
-        systemctl reload nginx
-        echo "nginx on $listen: routes rewritten from the registry and reloaded."
+        nginx_live "$listen" || exit 1
+        echo "nginx on $listen: routes rewritten from the registry, and nginx serves them."
     fi
     echo "Done: $(echo "$list" | awk '{printf "mnemerynne@%s ", $1}')run from the template unit."
 }
@@ -277,6 +314,13 @@ status() {
     host=$(local_host "$(env_get MNEMERYNNE_HOST)")
     echo "nginx: $(systemctl is-active nginx || true)   saved .env: $([ -f "$SAVED" ] && echo yes || echo no)" \
          "  accel: $(accel_set && echo on || echo off)$(grep -q '/_accel/' "$CONF" 2>/dev/null && echo ' (nginx has its locations)')"
+    if [ -f "$SAVED" ]; then                    # the front door is on: is nginx serving the config on disk?
+        local wrote served
+        wrote=$(conf_stamp); served=$(served_stamp "$(front_listen)")
+        if [ -n "$wrote" ] && [ "$wrote" = "$served" ]; then echo "nginx config: the one on disk ($wrote)"
+        else echo "nginx config: NOT the one on disk (wrote '${wrote:-no stamp}', nginx answers '${served:-nothing}'):" \
+                  "run 'services' again"; fi
+    fi
     echo "running: $(running | tr '\n' ' ')"
     ss -ltnp | grep -E ":(38200|$WEB_PORT$ports) " || true
     while read -r name port _; do
@@ -364,7 +408,7 @@ restart_app() {                             # the running app units, then the we
 accel_undo() {                              # nginx back to proxying only (the app sends the files)
     write_conf "$1" plain || true
     nginx_user_back
-    systemctl restart nginx || true
+    nginx_live "$1" restart || true
     selinux_back
 }
 
@@ -378,7 +422,7 @@ accel_on() {
     nginx_user "$SERVICE_USER"
     selinux_allow $(echo "$roots" | awk '{print $2}') || { accel_undo "$listen"; exit 1; }
     write_conf "$listen" accel || { accel_undo "$listen"; exit 1; }
-    systemctl restart nginx || { echo "nginx didn't restart." >&2; accel_undo "$listen"; exit 1; }
+    nginx_live "$listen" restart || { echo "nginx didn't restart." >&2; accel_undo "$listen"; exit 1; }
     while read -r key path; do
         [ -n "$key" ] || continue
         probe "$listen" "$key" "$path" || failed=yes

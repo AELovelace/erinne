@@ -74,6 +74,7 @@ CSP = {
 }
 PERMISSIONS = "camera=(), microphone=(), geolocation=(), payment=()"
 PROBE = ".mnemerynne-accel-probe"                      # front-door.sh writes it, asks nginx for it, removes it
+STAMP_PATH = "/_front-door/stamp"                      # which config nginx is serving: front-door.sh asks
 
 
 def _upstream(name: str) -> str:
@@ -128,11 +129,25 @@ def _accel_locations(roots: dict[str, Path], probe_from: str) -> list[str]:
     return lines + [""]
 
 
+def _stamp_location(stamp: str, probe_from: str) -> list[str]:
+    """The address front-door.sh asks to learn which config the running nginx loaded: the stamp it wrote into this
+    one. Only this box may ask."""
+    if not stamp.replace("-", "").isalnum():
+        raise ValueError(f"Can't put stamp {stamp!r} in the nginx config")      # letters, digits and dashes only
+    return ["    # Which config nginx is serving (front-door.sh checks after each reload). Only this box may ask.",
+            f"    location = {STAMP_PATH} {{",
+            f"        allow {probe_from};", "        allow 127.0.0.1;", "        deny all;",
+            "        default_type text/plain;",
+            f'        return 200 "{stamp}";',
+            "    }", ""]
+
+
 def render(listen: str, web: str = "127.0.0.1:38210", accel: dict[str, Path] | None = None,
-           running: list[str] | None = None) -> str:
+           running: list[str] | None = None, stamp: str | None = None) -> str:
     """The whole nginx config: one upstream per service and the web app, one location per service path, and with
     `accel` (folder key -> path, web/sendfile.roots) nginx's own file locations. `running`: only these services get
-    their paths (front-door.sh passes the ones whose units are enabled); the rest stay with the web app."""
+    their paths (front-door.sh passes the ones whose units are enabled); the rest stay with the web app. `stamp`:
+    what nginx answers at STAMP_PATH, so front-door.sh can tell this config is the one being served."""
     services = [s for s in registry.SERVICES.values() if running is None or s.name in running]
     lines = [HEADER + (ACCEL_HEADER if accel else "")]
     lines.append(f"upstream {_upstream('web')} {{ server {web}; keepalive 32; }}")
@@ -145,8 +160,11 @@ def render(listen: str, web: str = "127.0.0.1:38210", accel: dict[str, Path] | N
     lines += ["", "server {", f"    listen {listen};", "    server_name _;", "", SERVER_SETTINGS.rstrip("\n")]
     lines += ["    " + h for h in PASS + [accel_header]]
     lines += ['    proxy_set_header Connection "";              # keep the connections to the processes open', ""]
+    probe_from = listen.rsplit(":", 1)[0].strip("[]")              # the box's own address, as nginx sees it
+    if stamp:
+        lines += _stamp_location(stamp, probe_from)
     if accel:
-        lines += _accel_locations(accel, listen.rsplit(":", 1)[0].strip("[]"))
+        lines += _accel_locations(accel, probe_from)
     for s in services:
         for path in s.paths:
             lines += [f"    # {s.name}: {s.serves}", f"    location {path} {{",
@@ -208,6 +226,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--roots", action="store_true", help="Print the folders nginx sends files from, and stop")
     parser.add_argument("--env-file", help="The service's .env (MNEMERYNNE_DATA_DIR, SHARE_ROOT...); - for stdin")
     parser.add_argument("--services", help="Comma-separated: only these services get their paths (default: all)")
+    parser.add_argument("--stamp", help=f"What nginx answers at {STAMP_PATH} (front-door.sh's check)")
     args = parser.parse_args(argv)
     if args.roots:
         for key, path in accel_roots(args.env_file).items():
@@ -217,7 +236,7 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("--listen is required")
     accel = accel_roots(args.env_file) if args.accel else None
     running = None if args.services is None else [n for n in args.services.split(",") if n]
-    sys.stdout.write(render(args.listen, args.web, accel, running))
+    sys.stdout.write(render(args.listen, args.web, accel, running, args.stamp))
 
 
 if __name__ == "__main__":
