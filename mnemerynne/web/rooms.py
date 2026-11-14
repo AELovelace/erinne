@@ -12,7 +12,7 @@ from typing import Literal
 
 import anyio
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from mnemerynne import messages as user_messages, rooms
@@ -21,6 +21,7 @@ from mnemerynne.web import security
 from mnemerynne.web.admin import _log
 from mnemerynne import group_refs
 from mnemerynne.web.deps import admin_user, api_user, get_db, is_admin, page_user, release_db
+from mnemerynne.web.sendfile import send_file
 
 
 
@@ -96,9 +97,9 @@ def get_file(file_id: int, request: Request, user=Depends(api_user), conn: sqlit
     except rooms.RoomError as exc:
         raise _refuse(exc) from None
     inline = row["mime"] in rooms.INLINE
-    return FileResponse(path, media_type=row["mime"] if inline else "application/octet-stream",
-                        filename=row["name"], content_disposition_type="inline" if inline else "attachment",
-                        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600"})
+    return send_file(path, media_type=row["mime"] if inline else "application/octet-stream",
+                     filename=row["name"], content_disposition_type="inline" if inline else "attachment",
+                     headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600"})
 
 
 @router.post("/api/rooms/files/{file_id}/save")

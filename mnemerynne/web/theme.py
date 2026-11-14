@@ -10,7 +10,7 @@ from typing import Any
 
 import anyio
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from mnemerynne import db, identity, mcp_server, theme
@@ -18,6 +18,7 @@ from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import admin_user, get_db, get_settings
+from mnemerynne.web.sendfile import send_file
 
 router = APIRouter()         # public
 admin_router = APIRouter()   # admins
@@ -72,7 +73,7 @@ def _file(path, mime: str):
     headers = {"X-Content-Type-Options": "nosniff", "Cache-Control": _IMMUTABLE}
     if mime == "image/svg+xml":
         headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
-    return FileResponse(path, media_type=mime, headers=headers)
+    return send_file(path, media_type=mime, headers=headers)
 
 
 @router.get("/theme/brand/mark-{size}.png", include_in_schema=False)

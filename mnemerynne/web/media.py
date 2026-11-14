@@ -22,7 +22,7 @@ import anyio
 import httpx
 import segno
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from mnemerynne import group_refs, media, users
@@ -33,6 +33,7 @@ from mnemerynne.media import artwork, browse, catalog, live, probe, remotes, scr
 from mnemerynne.web import security
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import _session_user, admin_user, api_user, get_db, get_settings, is_admin, page_user, release_db
+from mnemerynne.web.sendfile import send_file
 
 log = logging.getLogger("mnemerynne.media")
 
@@ -214,7 +215,7 @@ def art(artwork_id: int, user=Depends(media_user), conn: sqlite3.Connection = De
     path = artwork.path_of(settings, row["rel_path"])
     if not path.is_file():
         raise _not_found()
-    return FileResponse(path, media_type="image/jpeg", headers={
+    return send_file(path, media_type="image/jpeg", headers={
         "Cache-Control": "private, max-age=604800, immutable", "X-Content-Type-Options": "nosniff"})
 
 
@@ -241,7 +242,7 @@ def stream_file(file_id: int, user=Depends(media_user), conn: sqlite3.Connection
     name = row["display_name"]
     suffix = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
     mime = _MIME.get(suffix) or mimetypes.guess_type(name)[0] or "application/octet-stream"
-    return FileResponse(path, media_type=mime, filename=name, content_disposition_type="inline", headers={
+    return send_file(path, media_type=mime, filename=name, content_disposition_type="inline", headers={
         "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox",
         "Cache-Control": "private, max-age=3600"})
 
@@ -326,7 +327,7 @@ async def subtitle(file_id: int, n: int, user=Depends(media_user), conn: sqlite3
         vtt = await anyio.to_thread.run_sync(transcode.subtitle_vtt, settings, path, n)
     except transcode.TranscodeError as exc:
         raise HTTPException(exc.status, str(exc)) from None
-    return FileResponse(vtt, media_type="text/vtt; charset=utf-8", headers={
+    return send_file(vtt, media_type="text/vtt; charset=utf-8", headers={
         "Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"})
 
 
@@ -338,7 +339,7 @@ def session_file(sid: str, name: str, request: Request, user=Depends(media_user)
     path = sessions(request).file(session, name)
     if path is None:
         raise _not_found()
-    return FileResponse(path, media_type=transcode.media_type_of(name), headers={
+    return send_file(path, media_type=transcode.media_type_of(name), headers={
         "Cache-Control": "no-cache" if name.endswith(".m3u8") else "private, max-age=3600",
         "X-Content-Type-Options": "nosniff"})
 
@@ -952,7 +953,7 @@ def _signage_file(conn: sqlite3.Connection, settings: Settings, allowed: set[int
     if found is None:
         raise _not_found()
     path, mime = found
-    return FileResponse(path, media_type=mime, headers={
+    return send_file(path, media_type=mime, headers={
         "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox",
         "Cache-Control": "private, max-age=604800, immutable"})   # the address changes with the content
 
@@ -1200,7 +1201,7 @@ async def speaker_audio(name: str, request: Request, conn: sqlite3.Connection = 
                                                   settings.media_dir / "speaker", ticket.file_id, path)
         except speakers.SpeakerError as exc:
             raise HTTPException(exc.status, str(exc)) from None
-    return FileResponse(path, media_type=speakers.MIME[ticket.ext], headers={
+    return send_file(path, media_type=speakers.MIME[ticket.ext], headers={
         "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
 
@@ -1471,7 +1472,7 @@ def admin_signage_art(artwork_id: int, user=Depends(admin_user), conn: sqlite3.C
     path = artwork.path_of(settings, row["rel_path"]) if row else None
     if path is None or not path.is_file():
         raise _not_found()
-    return FileResponse(path, media_type="image/jpeg", headers={
+    return send_file(path, media_type="image/jpeg", headers={
         "Cache-Control": "private, max-age=604800, immutable", "X-Content-Type-Options": "nosniff"})
 
 

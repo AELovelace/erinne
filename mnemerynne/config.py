@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     # redis://127.0.0.1:6379/0 (events.py, docs/plans/services-rewrite.md). Empty: events stay inside each
     # process, which is right for the all-in-one web app and wrong once features run as services.
     valkey_url: str = ""
+    # nginx sends file bytes (X-Accel-Redirect, web/sendfile.py) for requests that came through the box's front
+    # door with its accel locations (`front-door.sh accel on` sets both). Off: Python sends every file itself.
+    accel: bool = False
     # Signs sessions and encrypts stored credentials. A server others can reach
     # (public_url set, or host not loopback) refuses to start without a real one.
     secret_key: str = ""

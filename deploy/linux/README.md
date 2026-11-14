@@ -1158,6 +1158,32 @@ If the web app's drop-in limits `ReadWritePaths` to several separate paths (bin 
 "Invalid cross-device link"), fix it before running `services`, so the copy is right too, or fix
 `mnemerynne@.service.d/` the same way afterwards.
 
+### nginx sends the files (accel)
+
+Behind the front door, nginx can serve `/static/` straight from disk and send every file the app hands
+it: downloads, previews, films and music, artwork, HLS segments, theme files, room attachments and the
+backup app's downloads. The app still checks who may see each file, then answers with an empty response
+and an `X-Accel-Redirect` header naming the file, and nginx sends the bytes (sendfile, Range) without
+holding a Python thread for the whole film. It's a switch, so A and B can be compared:
+
+```sh
+sudo bash /opt/mnemerynne/deploy/linux/front-door.sh accel on    # B: nginx sends the files
+sudo bash /opt/mnemerynne/deploy/linux/front-door.sh accel off   # A: the app sends them again
+```
+
+`accel on` needs the front door on. It runs nginx's workers as `mnemerynne` (the share's ACL names only
+that user; `nginx.conf` is kept once as `nginx.conf.before-accel`), lets SELinux's nginx read the file
+types it finds in the app's folders (a module called `mnemerynne_accel`), and writes the config with an
+internal location per folder: the data folder, the share, the media cache when it lives elsewhere, and
+`/static/`. It then writes a probe file in each folder, asks nginx for it and removes it. Only when every
+folder answers does it set `MNEMERYNNE_ACCEL=1` and restart the app; otherwise it puts nginx back and the
+app never notices. nginx restarts once on the way (a second's gap).
+
+Files people uploaded keep their `sandbox` policy: nginx adds the same security headers as the app, with
+a separate internal location for sandboxed files. A request that didn't come through this nginx, or a
+file outside those folders, is still sent by the app. With Valkey on, the app's rate limits (sign-in,
+OAuth, pairing, room posts) are counted across all processes too.
+
 ### Valkey (live events between the processes)
 
 Each process keeps its live events to itself until `MNEMERYNNE_VALKEY_URL` is set; that's fine while

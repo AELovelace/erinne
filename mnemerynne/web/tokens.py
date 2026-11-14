@@ -7,12 +7,13 @@ from __future__ import annotations
 import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from mnemerynne import api_tokens, editing, fs, permissions
 from mnemerynne.config import Settings
 from mnemerynne.web.deps import api_user, get_db, get_settings, page_user
+from mnemerynne.web.sendfile import send_file
 
 router = APIRouter()
 
@@ -34,7 +35,7 @@ def download_extension(user=Depends(page_user), settings: Settings = Depends(get
     path = extension_path(settings)
     if path is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "The extension hasn't been published yet.")
-    return FileResponse(path, media_type="application/octet-stream", filename="mnemerynne.mcpb")
+    return send_file(path, media_type="application/octet-stream", filename="mnemerynne.mcpb")
 
 
 @router.get("/api/tokens")

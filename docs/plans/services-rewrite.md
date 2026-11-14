@@ -10,7 +10,7 @@
 | Phase 0.3: a SQLite file per feature (`db.connect_feature`, read-only core attach, per-file migrations, `move_tables`, `migrate_all` / `wait_migrated`) | done | 1e18225 |
 | Phase 0.4: backups, restores and `update.sh` undo for every DB file; users' and files' rows cleaned across files (`forget_user`, `sweep_orphans`, `check-orphans`) | done | afe0ec2 |
 | Phase 0.5: systemd template `mnemerynne@.service`, front door generated from the registry, Valkey on the box | done in code (2026-11-13); **not yet run on the NAS** | 340f24c + this step's commit |
-| Phase 1: nginx serves `/static/` and file bytes (`X-Accel-Redirect`) | | |
+| Phase 1: nginx serves `/static/` and file bytes (`X-Accel-Redirect`); rate limits shared through Valkey | done in code (2026-11-13); **not yet run on the NAS** | this step's commit |
 
 Tests: `.venv\Scripts\python -m pytest tests -n auto` (about 4 minutes).
 
@@ -28,6 +28,18 @@ Tests: `.venv\Scripts\python -m pytest tests -n auto` (about 4 minutes).
   service user before the app is touched, the URL in both `.env` files); README sections "One unit for every
   service" and "Valkey"; the nginx renderer's tests.
 - Not done: running it on the NAS (handoff §2 "Deploying Phase 0.5"). Fedora's Valkey paths are unverified.
+
+**Phase 1 (2026-11-13):** `mnemerynne/web/sendfile.py`: every file route calls `send_file` (FileResponse's
+arguments); with `MNEMERYNNE_ACCEL` on and the front door's `X-Mnemerynne-Accel: 1` header it answers with
+`X-Accel-Redirect: /_accel/<plain|sandbox>/<folder>/<path>` instead (folders: `sendfile.roots`: static, data,
+media when outside data, share; any other policy or folder stays a FileResponse). `services/nginx.py --accel`
+writes `/static/` from disk, the internal locations with the app's security headers, and local-only probes;
+`front-door.sh accel on|off` is the A/B switch (nginx workers as the service user, an SELinux module for the
+types found, every folder probed before the app's setting flips). `/remote/` now repeats the forwarded headers
+(nginx drops server-level `proxy_set_header`s in a location that sets its own). Rate limits: nginx `limit_req`
+was dropped in favour of `RateLimiter` counting through Valkey when it's on (behind site-chan, nginx would need
+`real_ip`, which rewrites the `X-Forwarded-For` chain the app trusts). Tests: `tests/test_accel.py`. Not tried
+with a real nginx: on the NAS `nginx -t` and the probes check it.
 
 ## Context
 

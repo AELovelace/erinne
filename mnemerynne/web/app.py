@@ -48,7 +48,7 @@ from mnemerynne.web import (admin, admin_apis, admin_notices, admin_remote, agen
                             help as help_pages,
                             kiosk as kiosk_pages, soundcloud as soundcloud_pages,
                             m365 as m365_pages, media as media_pages, memories, messages as message_pages, oauth as oauth_pages, remote as remote_pages,
-                            rooms as room_pages, scratchpad as scratchpad_pages, security,
+                            rooms as room_pages, scratchpad as scratchpad_pages, security, sendfile,
                             settings as settings_pages, sync as sync_pages, theme as theme_pages, tokens, wiki as wiki_pages)
 from mnemerynne.web.deps import LoginRequired, api_user, get_db, is_admin, page_user
 
@@ -124,6 +124,9 @@ def _guard(app: FastAPI, settings: Settings, secret_key: str) -> None:
         if request.method not in _SAFE_METHODS and _cross_site(request) and request.url.path not in _OAUTH_API:
             return JSONResponse({"detail": "Cross-site request refused."}, status_code=status.HTTP_403_FORBIDDEN)
         return await call_next(request)
+
+    # Behind the front door with MNEMERYNNE_ACCEL: files go out through nginx (send_file), not Python.
+    app.add_middleware(sendfile.Accel, settings=settings)
 
     # Added last, so they run first: refused requests get the headers too.
     app.add_middleware(security.GamesShed)       # games can't queue without bound or take every worker thread

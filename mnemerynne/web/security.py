@@ -14,6 +14,7 @@ from functools import lru_cache
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from mnemerynne import events
 from mnemerynne.config import Settings
 
 log = logging.getLogger("mnemerynne.web")
@@ -105,7 +106,9 @@ class SecurityHeaders:
 
 # -------------------------------------------------------------- rate limits
 class RateLimiter:
-    """Sliding-window counter per key, in memory (the web app is one process)."""
+    """Counts per key. With Valkey (MNEMERYNNE_VALKEY_URL) the count is shared by every process, so a limit holds
+    however many processes serve the path (docs/plans/services-rewrite.md, Phase 1); there it's a fixed window
+    started by the first hit. Without it, or when Valkey stops answering, a sliding window in this process."""
 
     def __init__(self) -> None:
         self._hits: dict[str, list[float]] = {}
@@ -114,6 +117,12 @@ class RateLimiter:
 
     def allow(self, key: str, limit: int, window: float) -> bool:
         """Count one hit for `key`; False when it already had `limit` within `window` seconds."""
+        bus = events.current()
+        if isinstance(bus, events.ValkeyBus):
+            try:
+                return bus.count(f"rate:{key}", window) <= limit
+            except Exception:                          # Valkey gone: this process keeps counting on its own
+                log.warning("Rate limits: Valkey isn't answering; counting in this process.", exc_info=True)
         now = time.monotonic()
         with self._lock:
             if now - self._last_sweep > 600:   # forget idle keys so the table can't grow forever

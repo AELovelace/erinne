@@ -12,7 +12,7 @@ from typing import Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from itsdangerous import BadData, URLSafeTimedSerializer
 from pydantic import BaseModel, Field
 
@@ -21,6 +21,7 @@ from mnemerynne.config import Settings
 from mnemerynne.ingest import markdown, store
 from mnemerynne.media import screens as media_screens
 from mnemerynne.web.deps import api_user, get_db, get_settings, is_admin, page_user
+from mnemerynne.web.sendfile import send_file
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -548,8 +549,8 @@ def download_version(file_id: int, version_id: int, user=Depends(page_user),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "That version's content is gone (it may have expired).")
     stem, dot, ext = row["display_name"].rpartition(".")
     name = f"{stem or ext} (before {v['created_at'][:16].replace(':', '.')}){dot}{ext if stem else ''}"
-    return FileResponse(path, media_type="application/octet-stream", filename=name,
-                        content_disposition_type="attachment", headers={"X-Content-Type-Options": "nosniff"})
+    return send_file(path, media_type="application/octet-stream", filename=name,
+                     content_disposition_type="attachment", headers={"X-Content-Type-Options": "nosniff"})
 
 
 class CommentBody(BaseModel):
@@ -631,7 +632,7 @@ def view_pdf(request: Request, file_id: int, user=Depends(page_user), conn: sqli
     if (tv := _tv_frame(request, conn, file_id, "pdf")) is not None:
         return tv
     # Serve the OCR'd copy when there is one, so its text is selectable too.
-    return FileResponse(
+    return send_file(
         _blob_file(settings, row, prefer_ocr=True, conn=conn), media_type="application/pdf",
         filename=row["display_name"], content_disposition_type="inline",
         headers={"X-Content-Type-Options": "nosniff"},
@@ -694,8 +695,8 @@ def view_inline(request: Request, file_id: int, user=Depends(page_user), conn: s
         return tv
     headers = {"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox"}
     if preview == "image":
-        return FileResponse(_blob_file(settings, row, prefer_ocr=False, conn=conn), media_type=row["mime"],
-                            content_disposition_type="inline", filename=row["display_name"], headers=headers)
+        return send_file(_blob_file(settings, row, prefer_ocr=False, conn=conn), media_type=row["mime"],
+                         content_disposition_type="inline", filename=row["display_name"], headers=headers)
     if preview == "text":
         with open(_blob_file(settings, row, prefer_ocr=False, conn=conn), "rb") as fh:
             data = fh.read(_TEXT_PREVIEW_BYTES)
@@ -711,9 +712,9 @@ def download_raw(file_id: int, user=Depends(page_user), conn: sqlite3.Connection
     row = _readable_file(conn, fs.Access.of(conn, user["id"]), file_id)
     media = {"pdf": "application/pdf", "md": "text/markdown; charset=utf-8",
              "txt": "text/plain; charset=utf-8"}.get(row["kind"], "application/octet-stream")
-    return FileResponse(_blob_file(settings, row, prefer_ocr=False, conn=conn), media_type=media,
-                        filename=row["display_name"], content_disposition_type="attachment",
-                        headers={"X-Content-Type-Options": "nosniff"})
+    return send_file(_blob_file(settings, row, prefer_ocr=False, conn=conn), media_type=media,
+                     filename=row["display_name"], content_disposition_type="attachment",
+                     headers={"X-Content-Type-Options": "nosniff"})
 
 
 # ------------------------------------------------------------ zip downloads

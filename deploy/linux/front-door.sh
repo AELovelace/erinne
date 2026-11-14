@@ -3,6 +3,7 @@
 #   sudo bash /opt/mnemerynne/deploy/linux/front-door.sh on        take the app's address, split the paths
 #   sudo bash /opt/mnemerynne/deploy/linux/front-door.sh off       give the address back to the web app
 #   sudo bash /opt/mnemerynne/deploy/linux/front-door.sh services  run every service as mnemerynne@<name>
+#   sudo bash /opt/mnemerynne/deploy/linux/front-door.sh accel on|off   nginx sends /static/ and file bytes itself
 #   sudo bash /opt/mnemerynne/deploy/linux/front-door.sh status    what listens where, and who answers
 #
 # "on" keeps the address and port the web app has now (MNEMERYNNE_HOST/PORT: where the reverse proxy sends to),
@@ -12,6 +13,10 @@
 # and puts everything back.
 # "services" moves each registry service from its first named unit (mnemerynne-sync, ...) to the template unit
 # mnemerynne@.service, one at a time, and puts the old unit back if the new one doesn't answer.
+# "accel on" (Phase 1) has nginx serve /static/ from disk and send the files the app hands it (X-Accel-Redirect,
+# mnemerynne/web/sendfile.py): nginx's workers run as the service user (the share's ACL names only it), SELinux is
+# told nginx may read those folders, each folder is probed through nginx, and only then is MNEMERYNNE_ACCEL set.
+# "accel off" is the B-to-A switch: the app sends every file itself again.
 # A script rather than pasted lines: long pasted lines got cut short in the terminal.
 set -euo pipefail
 
@@ -25,6 +30,10 @@ UNIT_DIR=/etc/systemd/system
 TEMPLATE=$APP/deploy/linux/mnemerynne@.service
 WEB_PORT=38210
 WAIT=90                                          # seconds to wait for a health answer
+NGINX_CONF=/etc/nginx/nginx.conf
+SEMODULE=mnemerynne_accel                        # SELinux: nginx may read the folders the app hands it
+PROBE=.mnemerynne-accel-probe                    # written in each folder, fetched through nginx, removed
+STATIC_PROBE=/static/icons/icon-192.png
 
 env_get() { grep -E "^$1=" "${2:-$ENV}" | tail -1 | cut -d= -f2- || true; }   # a setting from the .env (or $2)
 env_set() {                                                             # set (or add) one setting in the .env
@@ -66,10 +75,19 @@ up() {                                      # wait for a health answer from $1 (
     return 1
 }
 
-write_conf() {                              # the nginx config from the registry, listening on $1; checked
-    local new old
+accel_set() { case "$(env_get MNEMERYNNE_ACCEL)" in 1|true|True|TRUE|yes|on) return 0 ;; esac; return 1; }
+gen_conf() {                                # print the config for listen address $1; $2 = accel | plain
+    if [ "$2" = accel ]; then
+        app_py -m mnemerynne.services.nginx --listen "$1" --web "127.0.0.1:$WEB_PORT" --accel --env-file - < "$ENV"
+    else
+        app_py -m mnemerynne.services.nginx --listen "$1" --web "127.0.0.1:$WEB_PORT"
+    fi
+}
+write_conf() {                              # the nginx config for listen address $1, checked; $2: accel | plain |
+    local new old mode=${2:-auto}           # auto (the default: accel when MNEMERYNNE_ACCEL is set)
+    if [ "$mode" = auto ]; then if accel_set; then mode=accel; else mode=plain; fi; fi
     new=$(mktemp); old=$(mktemp)
-    if ! app_py -m mnemerynne.services.nginx --listen "$1" --web "127.0.0.1:$WEB_PORT" > "$new" || [ ! -s "$new" ]; then
+    if ! gen_conf "$1" "$mode" > "$new" || [ ! -s "$new" ]; then
         rm -f "$new" "$old"; echo "Couldn't write the nginx config from the registry; nothing changed." >&2; return 1
     fi
     if [ -f "$CONF" ]; then cp -a "$CONF" "$old"; else rm -f "$old"; fi                # the one that worked
@@ -204,7 +222,8 @@ status() {
     list=$(services_or_default)
     ports=$(echo "$list" | awk '{printf "|%s", $2}')
     host=$(local_host "$(env_get MNEMERYNNE_HOST)")
-    echo "nginx: $(systemctl is-active nginx || true)   saved .env: $([ -f "$SAVED" ] && echo yes || echo no)"
+    echo "nginx: $(systemctl is-active nginx || true)   saved .env: $([ -f "$SAVED" ] && echo yes || echo no)" \
+         "  accel: $(accel_set && echo on || echo off)$(grep -q '/_accel/' "$CONF" 2>/dev/null && echo ' (nginx has its locations)')"
     echo "running: $(running | tr '\n' ' ')"
     ss -ltnp | grep -E ":(38200|$WEB_PORT$ports) " || true
     while read -r name port; do
@@ -215,14 +234,133 @@ status() {
     done
 }
 
+front_listen() {                            # where nginx listens: the address in the .env saved by "on"
+    echo "$(env_get MNEMERYNNE_HOST "$SAVED"):$(env_get MNEMERYNNE_PORT "$SAVED")"
+}
+accel_roots() { app_py -m mnemerynne.services.nginx --roots --env-file - < "$ENV"; }   # "key path" per line
+
+nginx_user() {                              # nginx's workers as $1, keeping nginx.conf as it was, once
+    [ -f "$NGINX_CONF.before-accel" ] || cp -a "$NGINX_CONF" "$NGINX_CONF.before-accel"
+    if grep -qE '^[[:space:]]*user[[:space:]]' "$NGINX_CONF"; then
+        sed -i -E "s/^[[:space:]]*user[[:space:]][^;]*;/user $1;/" "$NGINX_CONF"
+    else
+        sed -i "1i user $1;" "$NGINX_CONF"
+    fi
+}
+nginx_user_back() {                         # nginx.conf as it was before "accel on"
+    if [ -f "$NGINX_CONF.before-accel" ]; then cp -a "$NGINX_CONF.before-accel" "$NGINX_CONF"; fi
+}
+
+selinux_allow() {                           # SELinux: let nginx (httpd_t) read the file types in folders $@
+    command -v getenforce >/dev/null && [ "$(getenforce)" != Disabled ] || return 0
+    local types t dir
+    types=$(for p in "$@"; do find "$p" -maxdepth 4 \( -type d -o -type f -o -type l \) -printf '%Z\n' 2>/dev/null; done \
+            | awk -F: 'NF >= 3 {print $3}' | sort -u)
+    [ -n "$types" ] || { echo "SELinux: no file types found under $*." >&2; return 1; }
+    command -v checkmodule >/dev/null || dnf install -y checkpolicy >/dev/null
+    dir=$(mktemp -d)
+    {
+        echo "module $SEMODULE 1.0;"
+        echo "require {"
+        echo "    type httpd_t;"
+        for t in $types; do echo "    type $t;"; done
+        echo "    class file { getattr open read map ioctl };"
+        echo "    class dir { getattr open read search };"
+        echo "    class lnk_file { getattr read };"
+        echo "}"
+        for t in $types; do
+            echo "allow httpd_t $t:file { getattr open read map ioctl };"
+            echo "allow httpd_t $t:dir { getattr open read search };"
+            echo "allow httpd_t $t:lnk_file { getattr read };"
+        done
+    } > "$dir/$SEMODULE.te"
+    if ! { checkmodule -M -m -o "$dir/$SEMODULE.mod" "$dir/$SEMODULE.te" >/dev/null \
+           && semodule_package -o "$dir/$SEMODULE.pp" -m "$dir/$SEMODULE.mod" \
+           && semodule -i "$dir/$SEMODULE.pp"; }; then
+        rm -rf "$dir"; echo "SELinux: couldn't install $SEMODULE." >&2; return 1
+    fi
+    rm -rf "$dir"
+    echo "SELinux: nginx may read $(echo $types | tr ' ' ',') ($SEMODULE)."
+}
+selinux_back() { if command -v semodule >/dev/null; then semodule -r "$SEMODULE" >/dev/null 2>&1 || true; fi; }
+
+probe() {                                   # can nginx on $1 send from folder $3 (key $2)?
+    local listen=$1 key=$2 root=$3 got
+    if [ "$key" = static ]; then
+        got=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$listen$STATIC_PROBE" || true)
+        [ "$got" = 200 ] && return 0
+        echo "nginx couldn't send $STATIC_PROBE from $root (HTTP $got)." >&2; return 1
+    fi
+    runuser -u "$SERVICE_USER" -- sh -c 'echo mnemerynne accel probe > "$1"' _ "$root/$PROBE" \
+        || { echo "The $SERVICE_USER user can't write in $root." >&2; return 1; }
+    got=$(curl -s --max-time 5 "http://$listen/_accel-probe/$key" || true)
+    rm -f "$root/$PROBE"
+    [ "$got" = "mnemerynne accel probe" ] && return 0
+    echo "nginx couldn't read $root (key $key): ${got:-no answer}" >&2
+    return 1
+}
+
+restart_app() {                             # the running app units, then the web app's answer
+    local run
+    run=$(running)
+    systemctl restart ${run:-mnemerynne-web}
+    up "http://127.0.0.1:$WEB_PORT/healthz" || { echo "The web app didn't come back on 127.0.0.1:$WEB_PORT." >&2; return 1; }
+}
+
+accel_undo() {                              # nginx back to proxying only (the app sends the files)
+    write_conf "$1" plain || true
+    nginx_user_back
+    systemctl restart nginx || true
+    selinux_back
+}
+
+accel_on() {
+    [ -f "$SAVED" ] || { echo "The front door is off: run 'on' first." >&2; exit 1; }
+    local listen roots key path failed=no
+    listen=$(front_listen)
+    roots=$(accel_roots) || { echo "Couldn't read the app's folders from $ENV." >&2; exit 1; }
+    echo "nginx will send files from:"; echo "$roots" | sed 's/^/  /'
+    usermod -aG nginx "$SERVICE_USER" 2>/dev/null || true             # nginx's temp folders, for its workers
+    nginx_user "$SERVICE_USER"
+    selinux_allow $(echo "$roots" | awk '{print $2}') || { accel_undo "$listen"; exit 1; }
+    write_conf "$listen" accel || { accel_undo "$listen"; exit 1; }
+    systemctl restart nginx || { echo "nginx didn't restart." >&2; accel_undo "$listen"; exit 1; }
+    while read -r key path; do
+        [ -n "$key" ] || continue
+        probe "$listen" "$key" "$path" || failed=yes
+    done <<< "$roots"
+    if [ "$failed" = yes ]; then
+        if command -v ausearch >/dev/null; then echo "SELinux denials, if any: sudo ausearch -m avc -c nginx -ts recent" >&2; fi
+        echo "Putting nginx back; the app still sends every file." >&2
+        accel_undo "$listen"
+        exit 1
+    fi
+    env_set MNEMERYNNE_ACCEL 1
+    restart_app || { echo "Turning accel off again." >&2; accel_off; exit 1; }
+    echo "Done: nginx sends /static/ and the app's files on $listen. 'accel off' hands them back to the app."
+}
+
+accel_off() {
+    sed -i '/^MNEMERYNNE_ACCEL=/d' "$ENV"
+    restart_app || true
+    if [ -f "$SAVED" ]; then accel_undo "$(front_listen)"; else nginx_user_back; selinux_back; fi
+    echo "Accel is off: the app sends every file itself."
+}
+
 main() {
     [ "$(id -u)" = 0 ] || { echo "Run it with sudo." >&2; exit 1; }
     case "${1:-}" in
         on) front_on ;;
         off) off ;;
         services) services ;;
+        accel)
+            case "${2:-}" in
+                on) accel_on ;;
+                off) accel_off ;;
+                *) echo "Usage: sudo bash $0 accel on|off" >&2; exit 2 ;;
+            esac ;;
         status) status ;;
-        *) echo "Usage: sudo bash $0 on|off|services|status" >&2; exit 2 ;;
+        *) echo "Usage: sudo bash $0 on|off|services|accel on|off|status" >&2; exit 2 ;;
     esac
 }
 

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import anyio
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from mnemerynne import api_tokens, db, group_refs, oauth, sync, users
@@ -21,6 +21,7 @@ from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import admin_user, api_user, get_db, get_settings, page_user
+from mnemerynne.web.sendfile import send_file
 
 router = APIRouter()
 admin_router = APIRouter()
@@ -263,13 +264,13 @@ def get_file(root_id: int, path: str = Query(..., max_length=sync.MAX_PATH), ver
         v = conn.execute("SELECT * FROM file_versions WHERE id = ? AND file_id = ?", (version, row["id"])).fetchone()
         if v is None or not editing.version_path(settings, v["rel_path"]).is_file():
             raise HTTPException(status.HTTP_404_NOT_FOUND, "That version isn't kept any more.")
-        return FileResponse(editing.version_path(settings, v["rel_path"]), media_type="application/octet-stream")
+        return send_file(editing.version_path(settings, v["rel_path"]), media_type="application/octet-stream")
     try:
         disk = share.file_path(conn, row["id"])
     except share.ShareError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from None
     headers = {"X-Mtime": f"{row['disk_mtime_ns'] / 1e9:.6f}"} if row["disk_mtime_ns"] else {}
-    return FileResponse(disk, media_type="application/octet-stream", headers=headers)
+    return send_file(disk, media_type="application/octet-stream", headers=headers)
 
 
 @router.get("/api/sync/roots/{root_id}/versions")
@@ -434,7 +435,7 @@ def download_client(name: str, request: Request, user=Depends(page_user), conn: 
     path = sync.client_file(settings, name)
     if path is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "There's no such download.")
-    return FileResponse(path, media_type="application/octet-stream", filename=name)
+    return send_file(path, media_type="application/octet-stream", filename=name)
 
 
 # -------------------------------------------------------------------- admin

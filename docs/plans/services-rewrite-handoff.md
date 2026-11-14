@@ -67,6 +67,19 @@ sudo bash /opt/mnemerynne/deploy/linux/valkey-setup.sh status
 on `mnemerynne@`. Rolling a moved one back by hand: `systemctl disable --now mnemerynne@sync && systemctl enable
 --now mnemerynne-sync`.
 
+### Deploying Phase 1 (after 0.5; never run on the box yet)
+
+```sh
+sudo mnemerynne-admin update --yes
+sudo bash /opt/mnemerynne/deploy/linux/front-door.sh accel on      # B
+sudo bash /opt/mnemerynne/deploy/linux/front-door.sh status        # "accel: on (nginx has its locations)"
+sudo bash /opt/mnemerynne/deploy/linux/front-door.sh accel off     # back to A at any time
+```
+
+If `accel on` stops at a folder nginx can't read, it puts nginx back by itself; `sudo ausearch -m avc -c nginx
+-ts recent` shows an SELinux denial. Compare A and B with the set-top box's audio start, a film seek, a big
+download, and `journalctl -u mnemerynne-web | grep "Slow request"`.
+
 ## 3. Phase 0.5: done in code (2026-11-13)
 
 The front-door and Valkey work below is committed and tested with the box stood in for
