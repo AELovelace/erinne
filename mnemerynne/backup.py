@@ -187,6 +187,12 @@ def running_services() -> list[str]:
             continue
         if out.stdout.strip() in ("active", "activating", "reloading"):
             running.append(unit)
+    try:                                              # and the template's instances (mnemerynne@rooms, ...)
+        out = subprocess.run(["systemctl", "list-units", "--type=service", "--state=active", "--no-legend", "--plain",
+                              "mnemerynne@*.service"], capture_output=True, text=True, timeout=10)
+        running += [line.split()[0] for line in out.stdout.splitlines() if line.strip()]
+    except (OSError, subprocess.TimeoutExpired):
+        pass
     return running
 
 

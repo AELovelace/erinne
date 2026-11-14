@@ -184,11 +184,9 @@ main() {
     systemctl restart mnemerynne-worker
     # The backup API's and the games' own processes (README "Busy parts in processes of their own"), once set up.
     # After the web app: it has applied any database update by now.
-    for unit in mnemerynne-sync mnemerynne-games; do
-        if systemctl is-enabled --quiet "$unit" 2>/dev/null; then
-            step "Restarting $unit"
-            systemctl restart "$unit"
-        fi
+    for unit in $(service_units); do
+        step "Restarting $unit"
+        systemctl restart "$unit"
     done
     trap - ERR
 
@@ -214,6 +212,16 @@ run_py() {  # CODE ARGS...: run Python from the app's venv as the service user
     else
         runuser -u "$SERVICE_USER" -- "$APP/.venv/bin/python" -c "$code" "$@"
     fi
+}
+
+service_units() {  # the services' own units set up on this box: the first named ones, and mnemerynne@ instances
+    local unit
+    for unit in mnemerynne-sync mnemerynne-games \
+                $(systemctl list-units --type=service --all --no-legend --plain 'mnemerynne@*.service' 2>/dev/null \
+                  | awk '{print $1}'); do
+        # Enabled only: one someone turned off stays off.
+        if systemctl is-enabled --quiet "$unit" 2>/dev/null; then printf '%s\n' "$unit"; fi
+    done
 }
 
 feature_db_files() {  # each feature's own database file in the data folder (not core's, not the rights cache)
@@ -373,7 +381,7 @@ undo() {
     # only the feature's version says so.
     if [ "$(schema_version)" != "$schema_before" ] || [ "$(feature_versions)" != "$features_before" ]; then
         echo "  The database was updated; putting back $snapshot (and its feature files)"
-        systemctl stop mnemerynne-worker mnemerynne-web mnemerynne-sync mnemerynne-games 2>/dev/null || true
+        systemctl stop mnemerynne-worker mnemerynne-web $(service_units) 2>/dev/null || true
         rm -f "$DB-wal" "$DB-shm"
         put_back "$snapshot" "$DB"
         restore_features "${snapshot%.db}"
@@ -382,9 +390,7 @@ undo() {
     systemctl restart mnemerynne-web
     if wait_healthy; then
         systemctl restart mnemerynne-worker
-        for unit in mnemerynne-sync mnemerynne-games; do
-            if systemctl is-enabled --quiet "$unit" 2>/dev/null; then systemctl restart "$unit"; fi
-        done
+        for unit in $(service_units); do systemctl restart "$unit"; done
         echo "  Back on $(git_ log -1 --format=%h HEAD); Mnemerynne is running."
         write_status failed "$current" "$target" "failed while $phase; undone"
     else

@@ -298,3 +298,26 @@ esac
     finally:
         conn.close()
     assert (data / "share-rights.db").exists()                    # never touched
+
+
+def test_update_restarts_only_the_services_set_up_and_enabled_here(tmp_path):
+    """service_units: the first named units and any mnemerynne@ instance, but only enabled ones."""
+    bash = find_bash()
+    if not bash:
+        pytest.skip("needs bash")
+    updater = Path(__file__).resolve().parents[1] / "deploy" / "linux" / "update.sh"
+    script = '''
+set -e
+source <(sed '$d' "$1")
+systemctl() {                      # a box with the old games unit, and two template instances, one turned off
+    case "$*" in
+        "is-enabled --quiet mnemerynne-games"|"is-enabled --quiet mnemerynne@sync.service") return 0 ;;
+        is-enabled*) return 1 ;;
+        list-units*) printf 'mnemerynne@sync.service loaded active running x\nmnemerynne@rooms.service loaded inactive dead x\n' ;;
+    esac
+}
+service_units
+'''
+    result = subprocess.run([bash, "-c", script, "_", str(updater)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == ["mnemerynne-games", "mnemerynne@sync.service"]   # not the one turned off

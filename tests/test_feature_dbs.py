@@ -319,7 +319,12 @@ def test_a_restore_waits_for_the_services_too(monkeypatch):
     from mnemerynne import backup
     asked = []
     monkeypatch.setattr(backup.shutil, "which", lambda name: "/usr/bin/systemctl")
-    monkeypatch.setattr(backup.subprocess, "run", lambda cmd, **kw: asked.append(cmd[-1]) or
-                        subprocess.CompletedProcess(cmd, 0, stdout="active\n" if cmd[-1] == "mnemerynne-games" else "inactive\n"))
-    assert backup.running_services() == ["mnemerynne-games"]
+    def systemctl(cmd, **kw):
+        asked.append(cmd[-1])
+        if cmd[1] == "list-units":                            # the template's instances that are running
+            return subprocess.CompletedProcess(cmd, 0, stdout="mnemerynne@rooms.service loaded active running x\n")
+        return subprocess.CompletedProcess(cmd, 0, stdout="active\n" if cmd[-1] == "mnemerynne-games" else "inactive\n")
+
+    monkeypatch.setattr(backup.subprocess, "run", systemctl)
+    assert backup.running_services() == ["mnemerynne-games", "mnemerynne@rooms.service"]
     assert {"mnemerynne-web", "mnemerynne-sync", "mnemerynne-games"} <= set(asked)

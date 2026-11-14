@@ -1,0 +1,32 @@
+[Unit]
+# One unit for every service (mnemerynne/services/registry.py): mnemerynne@sync, mnemerynne@games, ...
+# deploy/linux/front-door.sh services sets them up. Drop-ins in /etc/systemd/system/mnemerynne@.service.d/
+# apply to every service; mnemerynne@<name>.service.d/ to one.
+Description=Mnemerynne %i service
+# The web app migrates the database at start (the services wait for it): start after it.
+After=network.target mnemerynne-web.service valkey.service
+
+[Service]
+Type=simple
+User=mnemerynne
+Group=mnemerynne
+WorkingDirectory=/opt/mnemerynne
+EnvironmentFile=/etc/mnemerynne/mnemerynne.env
+Environment=PYTHONUNBUFFERED=1
+# The port and how many processes (MNEMERYNNE_PROFILE: nas | ryzen) come from the registry.
+ExecStart=/opt/mnemerynne/.venv/bin/mnemerynne serve --service %i
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+TimeoutStopSec=30
+StateDirectory=mnemerynne
+StateDirectoryMode=0750
+NoNewPrivileges=true
+ProtectSystem=strict
+# The SMB share and its trash (MNEMERYNNE_SHARE_ROOT): the same as mnemerynne-web.service (and its drop-ins).
+ReadWritePaths=-/srv/storage
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
