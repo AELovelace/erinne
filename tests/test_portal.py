@@ -75,6 +75,42 @@ def test_the_model_is_built_only_while_something_here_still_asks_it(settings, co
         assert c.app.state.automator is None                          # the automations service's
 
 
+def test_with_valkey_and_every_service_on_signed_in_pages_still_open(settings, conn, monkeypatch):
+    """The NAS: Valkey on and every service running, so the web app builds no agent. Ask's page and /api/me
+    asked that agent who may use Erynne's tools and answered 500 to everyone signed in."""
+    from mnemerynne import users
+    monkeypatch.setattr(events, "shared", lambda: True)
+    users.create_user(conn, "alice", "password123")
+    every = settings.model_copy(update={"services_on": ",".join(registry.SERVICES)})
+    with TestClient(create_app(every, Services(llm=None, embedder=FakeEmbedder()))) as c:
+        assert not hasattr(c.app.state, "agent")                      # nothing here asks the model
+        c.post("/login", data={"username": "alice", "password": "password123"})
+        assert c.get("/").status_code == 200                          # Ask's page
+        me = c.get("/api/me")
+        assert me.status_code == 200 and me.json()["agent"] is True and me.json()["agent_full"] is False
+        for page in ("/files", "/media", "/rooms", "/automations", "/remote", "/preferences", "/memories"):
+            assert c.get(page).status_code < 500, page                # open, or off in these settings: never a crash
+
+
+def test_the_files_service_offers_erynnes_edit_column_without_an_agent(settings, conn):
+    """/api/browse's AI edit column: every active account, Claude or not. It asked app.state.agent, which the
+    files service never builds, so only people with Claude connected saw it there."""
+    from mnemerynne import users
+    alice = users.create_user(conn, "alice", "password123")
+    library = conn.execute("SELECT id FROM collections WHERE kind = 'private' AND owner_user_id = ?",
+                           (alice,)).fetchone()[0]                   # her own File box
+    from mnemerynne import db
+    db.migrate_all(settings.db_path, settings.embed_dim)              # as the web app's start leaves it
+    with TestClient(create_app(settings, Services(llm=None, embedder=FakeEmbedder()))) as web:
+        web.post("/login", data={"username": "alice", "password": "password123"})   # sign-in is the web app's
+        cookies = dict(web.cookies)
+    with TestClient(factory.create_service("files", settings, Services(llm=None, embedder=FakeEmbedder())),
+                    cookies=cookies) as c:
+        browse = c.get("/api/browse", params={"collection_id": library})
+        assert browse.status_code == 200, browse.text
+        assert browse.json()["ai"] is True
+
+
 def _covered(path: str, paths: tuple[str, ...]) -> bool:
     for p in paths:
         if p.startswith("= ") and path == p[2:]:

@@ -36,7 +36,7 @@ PROBE=.mnemerynne-accel-probe                    # written in each folder, fetch
 STATIC_PROBE=/static/icons/icon-192.png
 STAMP_PATH=/_front-door/stamp                   # nginx answers the stamp of the config it loaded
 STAMP=                                          # the stamp write_conf put in the config it wrote
-NGINX_DROPIN=$UNIT_DIR/nginx.service.d/mnemerynne-front.conf   # nginx waits for the LAN address at boot
+NGINX_DROPIN=                                   # set to put nginx's boot-order drop-in elsewhere (dropin())
 
 env_get() { grep -E "^$1=" "${2:-$ENV}" | tail -1 | cut -d= -f2- || true; }   # a setting from the .env (or $2)
 env_set() {                                                    # set (or add) one setting in the .env (or $3)
@@ -103,13 +103,14 @@ gen_conf() {                                # print the config for listen addres
 }
 conf_stamp() { sed -n 's/^ *return 200 "\([A-Za-z0-9-]*\)";$/\1/p' "$CONF" 2>/dev/null | head -1; }  # the file's
 served_stamp() { curl -s --max-time 3 "http://$1$STAMP_PATH" || true; }   # the stamp nginx on $1 serves
+dropin() { echo "${NGINX_DROPIN:-$UNIT_DIR/nginx.service.d/mnemerynne-front.conf}"; }   # nginx's boot-order drop-in, under UNIT_DIR
 nginx_boot_order() {                        # nginx waits for the network at boot: it listens on the LAN address
-    [ -f "$NGINX_DROPIN" ] && return 0
-    mkdir -p "$(dirname "$NGINX_DROPIN")"
+    [ -f "$(dropin)" ] && return 0
+    mkdir -p "$(dirname "$(dropin)")"
     printf '%s\n' "# Written by mnemerynne's front-door.sh: nginx listens on the box's LAN address, so it waits for it." \
-        "[Unit]" "Wants=network-online.target" "After=network-online.target" > "$NGINX_DROPIN"
+        "[Unit]" "Wants=network-online.target" "After=network-online.target" > "$(dropin)"
     systemctl daemon-reload
-    echo "nginx now waits for the network at boot ($NGINX_DROPIN)."
+    echo "nginx now waits for the network at boot ($(dropin))."
 }
 nginx_live() {                              # nginx on $1 serving the config just written ($2 = restart: a restart)
     local listen=$1 tries
@@ -152,7 +153,7 @@ write_conf() {                              # the nginx config for listen addres
 
 off() {
     systemctl disable --now nginx 2>/dev/null || true
-    if [ -f "$NGINX_DROPIN" ]; then rm -f "$NGINX_DROPIN"; systemctl daemon-reload; fi    # nginx's boot order as it was
+    if [ -f "$(dropin)" ]; then rm -f "$(dropin)"; systemctl daemon-reload; fi    # nginx's boot order as it was
     if [ -f "$SAVED" ]; then
         cp -a "$SAVED" "$ENV"
         rm -f "$SAVED"

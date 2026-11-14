@@ -9,8 +9,10 @@ the LangGraph store under ("user", <id>, "memories").
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
+import sqlite3
 import uuid
 from datetime import datetime, timezone
 
@@ -108,6 +110,28 @@ def make_writer(settings, llm, store, background: set):
                 background.discard(task)
 
     return write
+
+
+def read_memories(conn: sqlite3.Connection, user_id: int, limit: int = 100) -> list[dict]:
+    """A person's memories read straight from the store's table (assistant.db, attached read-only to every request
+    connection), for pages in a process that builds no LangGraph store: the slim web app with Valkey on. The same
+    rows and order as list_memories (LangGraph keys the table by the namespace joined with dots, newest first)."""
+    prefix = ".".join(memory_namespace(user_id))
+    try:
+        rows = conn.execute(
+            "SELECT key, value FROM store WHERE (prefix = ? OR prefix LIKE ?) "
+            "AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP) ORDER BY updated_at DESC LIMIT ?",
+            (prefix, prefix + ".%", limit)).fetchall()
+    except sqlite3.OperationalError:
+        return []                                     # no store yet (a database Ask has never run on)
+    out = []
+    for key, value in rows:
+        try:
+            item = json.loads(value)
+        except (TypeError, ValueError):
+            continue                                  # a row LangGraph wouldn't read either
+        out.append({"id": key, "text": item.get("text", ""), "created_at": item.get("created_at")})
+    return out
 
 
 async def list_memories(store, user_id: int, limit: int = 100) -> list[dict]:

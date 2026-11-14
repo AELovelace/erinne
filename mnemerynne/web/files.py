@@ -170,8 +170,9 @@ def browse(request: Request, collection_id: int, folder_id: int | None = None, u
     files = [_file_json(r, access) for r in listing["files"]]
     # The Claude column, for people who have Claude connected (Claude page).
     claude = api_tokens.has_active(conn, user["id"])
-    agent = getattr(request.app.state, "agent", None)
-    ai = claude or (agent is not None and agent.allowed(conn, user))
+    # Erynne's tools are every active account's (Agent.allowed), asked without the agent: the files service
+    # builds none, and asking it hid the AI edit column from everyone without Claude there.
+    ai = claude or bool(user["active"])
     reach = access.reaches.get(collection_id)
     if claude and reach is not None:
         for out, row in zip(folders, listing["folders"]):

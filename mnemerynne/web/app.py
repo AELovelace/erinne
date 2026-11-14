@@ -21,7 +21,7 @@ from mnemerynne import (identity, sync as sync_mod, balancer as balancer_mod, bf
                         sharepoint, theme as theme_mod,
                         users)
 from mnemerynne.media import screens as media_screens, transcode as media_transcode
-from mnemerynne import assistant_db, automations_run
+from mnemerynne import accounts, assistant_db, automations_run
 from mnemerynne import games   # the built-in games' registry: Lumi's three apps each get a manifest (lumi_manifest)
 from mnemerynne import health
 from mnemerynne.automations_run import Scheduler
@@ -434,6 +434,15 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         request.session.clear()
         return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
 
+    def _agent_allowed(user) -> bool:
+        """Erynne's tools: every active account (Agent.allowed). Asked without the agent, which the web app doesn't
+        build while Ask, Automator and Rooms' answers all run in services of their own (Valkey on)."""
+        return bool(user["active"])
+
+    def _agent_full(conn: sqlite3.Connection, user) -> bool:
+        """May change files anywhere they may edit (the agent group; Agent.full), asked without the agent."""
+        return accounts.is_agent_user(conn, user, app.state.directory)
+
     def _page(request: Request, template: str, user, conn, **extra):
         return templates.TemplateResponse(request, template, {
             "user": user, "is_admin": is_admin(request, conn, user), **extra})
@@ -446,7 +455,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             "LIMIT 1").fetchone() is not None
         claude = claude_chat.is_claude_user(conn, user, app.state.directory)
         return _page(request, "chat.html", user, conn, active="chat", has_files=has_files,
-                     agent=app.state.agent.allowed(conn, user), agent_full=app.state.agent.full(conn, user),
+                     agent=_agent_allowed(user), agent_full=_agent_full(conn, user),
                      claude=claude, bfgguf=bfgguf.available(conn, user, app.state.directory) == "ok",
                      claude_key=claude and claude_chat.status(conn, settings, user["id"])["key"] == "set")
 
@@ -464,8 +473,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             "collections": [dict(c) for c in permissions.readable_collections(conn, user["id"])],
             # Erynne's tools (everyone), and whether they may change files anywhere (the agent group);
             # the server checks again on every question.
-            "agent": app.state.agent.allowed(conn, user),
-            "agent_full": app.state.agent.full(conn, user),
+            "agent": _agent_allowed(user),
+            "agent_full": _agent_full(conn, user),
             # The experimental group, with BFGguf set up: chat offers the BFGguf toggle.
             "bfgguf": bfgguf.available(conn, user, app.state.directory) == "ok",
         }

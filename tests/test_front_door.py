@@ -163,11 +163,12 @@ def test_services_moves_each_service_and_rewrites_nginx_for_the_saved_address(tm
     log = tmp_path / "log"
     result = _run("front-door.sh", SYSTEMCTL_LOG + '''
 LOG=$1; ENV=$2; SAVED=$3; UNIT_DIR=$4; TEMPLATE=$5; CONF=$6; WAIT=2
-ENABLED="mnemerynne-sync mnemerynne-games"; ACTIVE="$ENABLED"
+ENABLED="mnemerynne-sync mnemerynne-games"; ACTIVE="$ENABLED nginx"
 app_py() {                          # the registry, and the generator echoing where it was told to listen
     if [ "$1" = -c ]; then printf 'sync 38201\\ngames 38202\\n'; else echo "listen $4 web $6"; fi
 }
-curl() { case "$*" in *38201*) echo '{"status":"ok","role":"sync"}' ;; *38202*) echo '{"status":"ok","role":"games"}' ;; esac; }
+curl() { case "$*" in *38201*) echo '{"status":"ok","role":"sync"}' ;; *38202*) echo '{"status":"ok","role":"games"}' ;;
+                      *_front-door/stamp*) printf %s "$STAMP" ;; esac; }   # nginx serves the config just written
 nginx() { echo "nginx $*" >> "$LOG"; }
 services
 ''', *(_posix(p) for p in (log, env, saved, units, template, conf)))
@@ -181,6 +182,8 @@ services
     assert asked.index("systemctl daemon-reload") < asked.index("systemctl enable --now mnemerynne@sync")
     assert conf.read_text() == "listen 192.168.1.5:38200 web 127.0.0.1:38210\n"     # not the live 127.0.0.1:38210
     assert "nginx -t" in asked and "systemctl reload nginx" in asked
+    # nginx's boot-order drop-in lands under UNIT_DIR (never the real /etc/systemd from a test)
+    assert "After=network-online.target" in (units / "nginx.service.d" / "mnemerynne-front.conf").read_text()
 
 
 def test_services_keeps_a_drop_in_already_there(tmp_path):

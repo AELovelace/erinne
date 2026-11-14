@@ -44,6 +44,31 @@ def _memories(path, user_id: int) -> list:
     return store.search(memory_namespace(user_id))
 
 
+def test_memories_read_from_the_table_match_langgraphs_own_search(tmp_path):
+    """Preferences reads memories straight from the table (the slim web app builds no LangGraph store): the same
+    keys, texts and order as LangGraph's search, and only that person's."""
+    from langgraph.store.sqlite import SqliteStore
+    from mnemerynne import memory
+
+    path = tmp_path / "assistant.db"
+    store = SqliteStore(sqlite3.connect(path, isolation_level=None, check_same_thread=False))
+    store.setup()
+    for key, text in (("k1", "Works nights."), ("k2", "Prefers short answers."), ("k3", "Has a cat.")):
+        store.put(memory_namespace(7), key, {"text": text, "created_at": "2026-11-14T10:00:00Z"})
+    store.put(memory_namespace(7), "k1", {"text": "Works days now."})        # an update: the new text
+    store.put(memory_namespace(8), "other", {"text": "Someone else's."})
+    expected = [{"id": i.key, "text": i.value["text"], "created_at": i.value.get("created_at")}
+                for i in store.search(memory_namespace(7))]
+    conn = sqlite3.connect(path)
+
+    def by_id(items):                     # updated_at counts whole seconds: rows written together tie in order
+        return sorted(items, key=lambda m: m["id"])
+    assert by_id(memory.read_memories(conn, 7)) == by_id(expected) and len(expected) == 3
+    assert {m["text"] for m in memory.read_memories(conn, 7)} == {"Works days now.", "Prefers short answers.",
+                                                                  "Has a cat."}
+    assert memory.read_memories(sqlite3.connect(tmp_path / "empty.db"), 7) == []   # no store table: nothing
+
+
 def _before_phase_7(settings):
     """A box from before Phase 7: Ask's tables and LangGraph's in core, with a conversation, an answer citing a
     source, a rating and its archive copy, a trace, a checkpoint, a memory, and a proposal drafted in that answer."""

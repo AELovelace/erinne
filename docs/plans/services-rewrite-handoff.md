@@ -34,6 +34,14 @@ never wrote nginx's routes. From outside, `/remote` redirected to `:38200`, and 
 started by hand is handed to systemd, and nginx waits for the network at boot. Run `update`, then
 `front-door.sh services`.
 
+**Found after Valkey went on:** with Valkey on and every service running, the slim web app builds no agent and no
+LangGraph store. Ask's page (`/`) and `/api/me` still asked the agent who may use Erynne's tools, and
+`/preferences` asked the store for memories, so all three answered 500 to everyone signed in. They now ask
+directly: an active account, the agent group, and memories read from `assistant.db`'s `store` table
+(`memory.read_memories`). The same check in the files service had hidden Files' AI edit column from everyone
+without Claude since Phase 6b. Admin → agent settings shows the model as "not checked" in the slim web app
+(only the services that answer hold a model client).
+
 | Piece | Where | Notes |
 |---|---|---|
 | nginx front door | `192.168.1.5:38200` (`/etc/nginx/conf.d/mnemerynne-front.conf`) | site-chan still sends everything here; the firewall only lets 38200 through |

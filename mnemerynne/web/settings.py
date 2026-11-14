@@ -48,7 +48,8 @@ async def preferences_page(request: Request, user=Depends(page_user), conn: sqli
         "user": user, "is_admin": is_admin(request, conn, user), "active": "preferences",
         "themes": looks.pickable(), "theme_enforced": bool(looks.settings.get("enforce")),
         "current_theme": looks.resolve(user["theme"] or None, None).slug,
-        "memories": await memory.list_memories(state.store, user["id"]), "memory_mode": state.settings.memory_mode,
+        # Read from the table, not LangGraph's store: the slim web app builds none while Ask runs elsewhere.
+        "memories": memory.read_memories(conn, user["id"]), "memory_mode": state.settings.memory_mode,
         "scratchpad": scratchpad.summary(conn, user["id"], state.settings.scratchpad_claim_minutes),   # the agents' notes
         "admin_via": ADMIN_VIA.get(via or ""), "groups": groups, "domain": state.settings.ad_domain,
         "tokens": api_tokens.has_active(conn, user["id"]), "min_password": auth.MIN_PASSWORD_LENGTH,
