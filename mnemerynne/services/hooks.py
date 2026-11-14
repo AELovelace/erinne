@@ -32,4 +32,19 @@ async def balancer(app, settings, services):
         await found.aclose()
 
 
-HOOKS = {"balancer": balancer}
+@asynccontextmanager
+async def rooms(app, settings, services):
+    """app.state.rooms_bus: Rooms' live streams in this process, hearing the other processes' new messages, typing
+    and presence (rooms_bus.Bus.listen). No Erynne here: a message that asks her goes to the web app ("rooms:ask")."""
+    from mnemerynne import rooms_bus
+
+    app.state.rooms_bus = rooms_bus.Bus(settings.db_path)
+    listener = asyncio.create_task(app.state.rooms_bus.listen())
+    try:
+        yield
+    finally:
+        listener.cancel()
+        await asyncio.gather(listener, return_exceptions=True)
+
+
+HOOKS = {"balancer": balancer, "rooms": rooms}

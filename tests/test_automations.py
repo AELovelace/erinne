@@ -212,7 +212,8 @@ def test_a_room_automation_posts_as_erynne_reading_only_what_the_room_may(settin
                                              "deliver": {"inbox": False, "room_id": room_id}}).json()
         run = _wait(c, c.post(f"/api/automations/{a['id']}/run").json()["run_id"])
         assert run["status"] == "done" and run["delivered"] == [{"to": "room", "ok": True, "room_id": room_id}]
-        posted = rooms.history(conn, alice, room_id, directory)[-1]
+        with rooms.on(conn) as rooms_conn:                                  # moved to rooms.db at the app's start
+            posted = rooms.history(rooms_conn, alice, room_id, directory)[-1]
         assert posted["who"] == "Erynne" and posted["body"].startswith("**Ops check**") and "All systems normal." in posted["body"]
         assert set(llm.calls[0][1]) <= {"search_documents", "read_passage", "list_libraries", "browse_folder",
                                         "find_files", "open_file", "list_versions"}      # the room's reading tools

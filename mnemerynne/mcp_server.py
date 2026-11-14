@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import functools
 import io
 import json
 import logging
@@ -1158,6 +1159,15 @@ class Tools:
                         "it isn't an email."}, []
 
     # ------------------------------------------------------------- rooms
+    def _on_rooms(method):                                  # a room tool's `conn` becomes rooms.db's (Phase 3)
+        @functools.wraps(method)
+        def tool(self, conn, *args, **kwargs):
+            with rooms.on(conn) as rooms_conn:
+                if rooms_conn is None:
+                    raise Refused("Rooms isn't turned on in this organisation's Mnemerynne.", "not_allowed")
+                return method(self, rooms_conn, *args, **kwargs)
+        return tool
+
     def _room_user(self, conn, caller: Caller) -> sqlite3.Row:
         if not rooms.enabled(conn):
             raise Refused("Rooms isn't turned on in this organisation's Mnemerynne.", "not_allowed")
@@ -1176,6 +1186,7 @@ class Tools:
             out["files"] = [a["name"] for a in m["attachments"]]
         return out
 
+    @_on_rooms
     def list_rooms(self, conn, caller: Caller) -> tuple[dict, list[int]]:
         """The person's channels and direct messages, with what's unread (rooms.py)."""
         listed = rooms.rooms_for(conn, self._room_user(conn, caller), self.get_directory())
@@ -1185,6 +1196,7 @@ class Tools:
         return {"rooms": out, "link": f"{self.base}/rooms",
                 **({} if out else {"note": "No rooms yet; the person joins or starts them under Rooms."})}, []
 
+    @_on_rooms
     def read_room(self, conn, caller: Caller, room: int | str, limit: int = 30, before: int | None = None,
                   thread: int | None = None) -> tuple[dict, list[int]]:
         user, directory = self._room_user(conn, caller), self.get_directory()
@@ -1205,6 +1217,7 @@ class Tools:
             out["note"] = f"Older messages: call again with before={listed[0]['id']}."
         return out, []
 
+    @_on_rooms
     def post_to_room(self, conn, caller: Caller, room: int | str, text: str,
                      thread: int | None = None) -> tuple[dict, list[int]]:
         """Write in a room as "Claude for <name>" (rooms.post)."""
@@ -1221,6 +1234,7 @@ class Tools:
         return {"message_id": message["id"], "room_id": r["id"], "link": f"{self.base}/rooms#room={r['id']}",
                 "note": "Posted. Everyone in the room sees it, marked as written by Claude for the person."}, []
 
+    @_on_rooms
     def react_in_room(self, conn, caller: Caller, message_id: int, emoji: str) -> tuple[dict, list[int]]:
         user = self._room_user(conn, caller)
         if not caller.can_edit:

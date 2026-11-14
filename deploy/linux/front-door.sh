@@ -41,13 +41,23 @@ env_set() {                                                             # set (o
 }
 
 app_py() { (cd "$APP" && runuser -u "$SERVICE_USER" -- "$PY" "$@"); }  # the app's Python, as the service user
-registry_services() {                                                   # "name port" per registry service
+registry_services() {                       # "name port needs_valkey(0|1)" per registry service
     app_py -c 'from mnemerynne.services import registry
-for s in registry.SERVICES.values(): print(s.name, s.port)'
+for s in registry.SERVICES.values(): print(s.name, s.port, int(s.needs_valkey))'
 }
 services_or_default() {                     # the registry's services; the first two if the app can't be asked
-    registry_services 2>/dev/null || printf 'sync 38201\ngames 38202\n'
+    registry_services 2>/dev/null || printf 'sync 38201 0\ngames 38202 0\n'
 }
+enabled_services() {                        # comma-separated: the registry services whose unit is enabled here
+    local name port needs out=""
+    while read -r name port needs; do
+        [ -n "$name" ] || continue
+        if systemctl is-enabled --quiet "mnemerynne@$name" 2>/dev/null \
+           || systemctl is-enabled --quiet "mnemerynne-$name" 2>/dev/null; then out="$out${out:+,}$name"; fi
+    done < <(services_or_default)
+    echo "$out"
+}
+valkey_set() { [ -n "$(env_get MNEMERYNNE_VALKEY_URL)" ]; }
 
 running() {                                 # which of the app's services run: named units and mnemerynne@ ones
     systemctl list-units --type=service --state=active --no-legend --plain \
@@ -77,10 +87,13 @@ up() {                                      # wait for a health answer from $1 (
 
 accel_set() { case "$(env_get MNEMERYNNE_ACCEL)" in 1|true|True|TRUE|yes|on) return 0 ;; esac; return 1; }
 gen_conf() {                                # print the config for listen address $1; $2 = accel | plain
+    local running                           # only services that run get their paths; the rest stay with the web app
+    running=$(enabled_services)
     if [ "$2" = accel ]; then
-        app_py -m mnemerynne.services.nginx --listen "$1" --web "127.0.0.1:$WEB_PORT" --accel --env-file - < "$ENV"
+        app_py -m mnemerynne.services.nginx --listen "$1" --web "127.0.0.1:$WEB_PORT" --accel --env-file - \
+            --services "$running" < "$ENV"
     else
-        app_py -m mnemerynne.services.nginx --listen "$1" --web "127.0.0.1:$WEB_PORT"
+        app_py -m mnemerynne.services.nginx --listen "$1" --web "127.0.0.1:$WEB_PORT" --services "$running"
     fi
 }
 write_conf() {                              # the nginx config for listen address $1, checked; $2: accel | plain |
@@ -153,7 +166,7 @@ front_on() {
     RUN=$(running); systemctl restart ${RUN:-mnemerynne-web} || fail "restarting the app" mnemerynne-web
     up "http://127.0.0.1:$WEB_PORT/healthz" || fail "the web app on 127.0.0.1:$WEB_PORT" mnemerynne-web
     local name port unit
-    while read -r name port; do                                 # every service that runs answers on its port
+    while read -r name port _; do                               # every service that runs answers on its port
         unit=$(unit_of "$name")
         [ -n "$unit" ] || continue
         up "http://127.0.0.1:$port/healthz" "$name" || fail "$name on 127.0.0.1:$port" "$unit"
@@ -203,8 +216,17 @@ services() {
         fi
     done
     systemctl daemon-reload
-    while read -r name port; do
+    while read -r name port needs; do
         [ -n "$name" ] || continue
+        if [ "${needs:-0}" = 1 ] && ! valkey_set; then          # it would miss the other processes' events
+            if systemctl is-enabled --quiet "mnemerynne@$name" 2>/dev/null; then
+                systemctl disable --now "mnemerynne@$name" || true
+                echo "mnemerynne@$name: off again, as Valkey is off; the web app serves its paths."
+            else
+                echo "mnemerynne@$name: left off until Valkey is on (valkey-setup.sh on); the web app serves its paths."
+            fi
+            continue
+        fi
         move_service "$name" "$port" || { echo "Stopped at $name; the services before it run as mnemerynne@." >&2; exit 1; }
     done <<< "$list"
     if [ -f "$SAVED" ]; then                                    # the front door is on: its routes from the registry
@@ -226,7 +248,7 @@ status() {
          "  accel: $(accel_set && echo on || echo off)$(grep -q '/_accel/' "$CONF" 2>/dev/null && echo ' (nginx has its locations)')"
     echo "running: $(running | tr '\n' ' ')"
     ss -ltnp | grep -E ":(38200|$WEB_PORT$ports) " || true
-    while read -r name port; do
+    while read -r name port _; do
         printf "%-45s %s\n" "http://$host:$port/healthz" "$(curl -s --max-time 3 "http://$host:$port/healthz" || echo '(no answer)')"
     done <<< "$list"
     for url in "http://127.0.0.1:$WEB_PORT/healthz" "http://$(env_get MNEMERYNNE_HOST):$(env_get MNEMERYNNE_PORT)/healthz"; do

@@ -84,9 +84,10 @@ async def list_automations(request: Request, user=Depends(_on), conn: sqlite3.Co
     tools = (await request.app.state.agent.tool_list(user["id"], automation=True))["tools"]
     directory = _dir(request)
     room_list = []
-    if rooms.enabled(conn):
-        room_list = [{"id": r["id"], "name": r["name"], "kind": r["kind"]}
-                     for r in rooms.rooms_for(conn, user, directory) if r.get("erynne", True)]
+    with rooms.on(conn) as rooms_conn:
+        if rooms_conn is not None and rooms.enabled(rooms_conn):
+            room_list = [{"id": r["id"], "name": r["name"], "kind": r["kind"]}
+                         for r in rooms.rooms_for(rooms_conn, user, directory) if r.get("erynne", True)]
     return {"automations": [auto.view(conn, r) for r in auto.for_user(conn, user["id"])],
             "tools": tools, "rooms": room_list,
             "destinations": [{"id": d["id"], "name": d["name"], "format": d["format"]}

@@ -116,7 +116,7 @@ class RoomErynne:
 
     def _prepare(self, user_id: int, message: dict, use_bfgguf: bool) -> dict:
         """Everything the answer needs, read in one go (runs in a thread)."""
-        conn = db.connect(self.settings.db_path)
+        conn = db.connect_for(self.settings.db_path, "rooms", "chat_rooms")   # rooms.db; core's read through it
         try:
             directory = self.get_directory()
             asker = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
@@ -200,7 +200,7 @@ class RoomErynne:
         return (text or "").strip() or "I couldn't put an answer together for that.", sources.items
 
     def _post(self, room_id: int, body: str, message: dict) -> None:
-        conn = db.connect(self.settings.db_path)
+        conn = db.connect_for(self.settings.db_path, "rooms", "chat_rooms")
         try:
             with db.transaction(conn):
                 rooms.post(conn, None, room_id, body[:rooms.MAX_CHARS], self.get_directory(), via="erynne",

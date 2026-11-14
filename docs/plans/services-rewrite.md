@@ -11,7 +11,8 @@
 | Phase 0.4: backups, restores and `update.sh` undo for every DB file; users' and files' rows cleaned across files (`forget_user`, `sweep_orphans`, `check-orphans`) | done | afe0ec2 |
 | Phase 0.5: systemd template `mnemerynne@.service`, front door generated from the registry, Valkey on the box | done in code (2026-11-13); **not yet run on the NAS** | 340f24c + this step's commit |
 | Phase 1: nginx serves `/static/` and file bytes (`X-Accel-Redirect`); rate limits shared through Valkey | done in code (2026-11-13); **not yet run on the NAS** | 1267fc9 |
-| Phase 2: `games.db` (18 tables: coins, Lumi, arcade, casino, Lumi-Soft, push) out of core; `mnemerynne move-back games` for A/B | done in code (2026-11-13); **not yet run on the NAS** | this step's commit |
+| Phase 2: `games.db` (18 tables: coins, Lumi, arcade, casino, Lumi-Soft, push) out of core; `mnemerynne move-back games` for A/B | done in code (2026-11-13); **not yet run on the NAS** | 2f33d9d |
+| Phase 3: `rooms.db`; Rooms' live events over the event bus; the `rooms` service (needs Valkey) | done in code (2026-11-13); **not yet run on the NAS** | this step's commit |
 
 Tests: `.venv\Scripts\python -m pytest tests -n auto` (about 4 minutes).
 
@@ -53,6 +54,22 @@ clears their games rows (`user_columns`); a start sweeps orphans. **A/B:** `mnem
 stopped) copies the tables back into core and sets games.db aside, for the code before this phase; the next start of
 this code moves them out again. The games router stays mounted in the web app too (all-in-one, tests); taking it out of
 the portal waits for a soak on the box. New games tables go in `migrations/games/`, never core's.
+
+**Phase 3 (2026-11-13):** `db.FEATURE_DBS["rooms"]` (`migrations/rooms/0001_rooms.sql`, the 7 `chat_*` tables). New
+`FeatureDb.user_null_columns`: a message, attachment, pin or room keeps its row when its user goes, losing only the
+id, as core's `ON DELETE SET NULL` did (forget_user and sweep_orphans). Connections: `deps.get_rooms_db` for every
+route in `web/rooms.py` (core's `access_log` and saving an attachment into Files take `core=Depends(get_db)`; the
+audit row is written after the rooms change, no longer in one transaction with it); the nav badge (`web/app.py`'s
+page context, `web/messages.notify`) borrows from the rooms pool; `rooms.on(conn)` for code holding a core
+connection (MCP's four room tools via `_on_rooms`, briefings, automations, retention); `db.connect_for` where code
+holds a path (rooms_bus's streams, Erynne's answers, automation posts). **Events:** `rooms_bus.Bus.wake/push` also
+publish `rooms:wake` / `rooms:push` (with the Bus's id, so its own come back to nobody); `Bus.listen()` hands the
+other processes' to this one's streams; each open stream keeps `rooms:online:<id>` alive for @here and presence; the
+5 s poll still covers a bus that drops. **The rooms service** (registry, port 38206, `needs_valkey`): `front-door.sh
+services` leaves it off (and turns it off) while `MNEMERYNNE_VALKEY_URL` is unset, and nginx gets only the services
+whose units are enabled (`--services`), so its paths stay with the web app until then. Erynne stays in the web app:
+a message the service takes that asks her is published as `rooms:ask` and answered there. The Rooms page (`/rooms`)
+and Settings → Rooms stay in the web app.
 
 ## Context
 

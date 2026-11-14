@@ -104,6 +104,23 @@ class Services:
     bfgguf_transport: Any = None   # the HTTP transport under BFGguf's clients (tests); None = the network
 
 
+async def _answer_rooms_asks(app: FastAPI) -> None:
+    """Erynne's answers for messages the rooms service took (web/rooms.py publishes "rooms:ask"): for as long as
+    the web app runs. Only another process's asks come this way; the web app's own posts ask her directly."""
+    while True:
+        try:
+            async for _, asked in events.subscribe("rooms:ask"):
+                try:
+                    app.state.rooms_erynne.ask(int(asked["user_id"]), asked["message"], bfgguf=bool(asked.get("bfgguf")))
+                except Exception:
+                    log.exception("Rooms: couldn't start Erynne's answer for another process's message")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.warning("Rooms: lost the event bus for Erynne's asks; trying again.", exc_info=True)
+            await asyncio.sleep(5)
+
+
 def _guard(app: FastAPI, settings: Settings, secret_key: str) -> None:
     """What every Mnemerynne process puts in front of its routes (create_app and create_role_app): the sign-in
     cookie, the cross-site check, the request limits and headers, the backup host's fence, the slow-request log,
@@ -252,6 +269,10 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         app.state.embedder = svc.embedder
         poller = asyncio.create_task(balancer.run())
         app.state.background.add(poller)
+        # Rooms: other processes' new messages, typing and presence, to this process's streams (rooms_bus.listen),
+        # and the messages asking Erynne that the rooms service posted (she answers from here, where the agent is).
+        app.state.background.add(asyncio.create_task(app.state.rooms_bus.listen()))
+        app.state.background.add(asyncio.create_task(_answer_rooms_asks(app)))
         # Automator: scheduled automations run here, where the agent and its model path live.
         app.state.automator = Scheduler(settings, app.state.agent, app.state.rooms_erynne, app.state.rooms_bus,
                                         lambda: app.state.directory, app.state.background)
@@ -328,7 +349,12 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                 return out
             out["look"] = looks.resolve(user["theme"] or None, cookie)
             admin = is_admin(request, conn, user)
-            unread_rooms = rooms_mod.unread_summary(conn, user, app.state.directory)
+            rooms_pool = deps.feature_pool(app, "rooms")   # Rooms' unread counts live in rooms.db (Phase 3)
+            rooms_conn = rooms_pool.get()
+            try:
+                unread_rooms = rooms_mod.unread_summary(rooms_conn, user, app.state.directory)
+            finally:
+                rooms_pool.put(rooms_conn)
             return out | {"nav_unread": messages_mod.unread_count(conn, user_id) + unread_rooms["mentions"] + unread_rooms["dms"],
                     "has_rooms": rooms_mod.enabled(conn), "has_media": media_mod.enabled(conn) and media_mod.may_use(conn, user, app.state.directory),
                     "has_screens": media_mod.enabled(conn) and media_screens.may_use(conn, user, app.state.directory),

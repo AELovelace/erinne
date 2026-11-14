@@ -212,13 +212,14 @@ def _deliver(conn: sqlite3.Connection, settings: Settings, user: sqlite3.Row, di
         if runner != "erynne":
             raise AutomationError("Only Erynne posts in rooms: everyone there reads it, so she reads only what "
                                   "they all may. Pick Erynne, or send Claude's answer to your Inbox.")
-        if not rooms.enabled(conn):
-            raise AutomationError("Rooms is turned off.")
-        try:
-            r = rooms.room(conn, int(room_id))
-            rooms._writable(conn, user, r, directory)
-        except (rooms.RoomError, TypeError, ValueError):
-            raise AutomationError("You can't post in that room.") from None
+        with rooms.on(conn) as rooms_conn:
+            if rooms_conn is None or not rooms.enabled(rooms_conn):
+                raise AutomationError("Rooms is turned off.")
+            try:
+                r = rooms.room(rooms_conn, int(room_id))
+                rooms._writable(rooms_conn, user, r, directory)
+            except (rooms.RoomError, TypeError, ValueError):
+                raise AutomationError("You can't post in that room.") from None
         if not r["erynne"]:
             raise AutomationError("Erynne is turned off in that room.")
         out["room_id"] = r["id"]

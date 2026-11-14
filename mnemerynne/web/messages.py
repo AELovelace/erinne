@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from mnemerynne import messages, notices, rooms
-from mnemerynne.web.deps import api_user, get_db, is_admin, page_user
+from mnemerynne.web.deps import api_user, get_db, get_rooms_db, is_admin, page_user
 
 router = APIRouter()
 
@@ -68,10 +68,11 @@ def read_message(message_id: int, user=Depends(api_user), conn: sqlite3.Connecti
 
 # ------------------------------------------------------------ the top bar
 @router.get("/api/notify")
-def notify(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def notify(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db),
+           rooms_conn: sqlite3.Connection = Depends(get_rooms_db)):
     """What the badge and the announcement cards need; polled by notify.js on every page."""
     return {"unread": messages.unread_count(conn, user["id"]),
-            "rooms": rooms.unread_summary(conn, user, request.app.state.directory),
+            "rooms": rooms.unread_summary(rooms_conn, user, request.app.state.directory),
             "announcements": notices.pending_for(conn, user, request.app.state.directory)}
 
 

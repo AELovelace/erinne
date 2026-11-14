@@ -49,6 +49,9 @@ class FeatureDb:
     # another file, so these are what forget_user and sweep_orphans clean when that user or file goes.
     user_columns: tuple[tuple[str, str], ...] = ()
     file_columns: tuple[tuple[str, str], ...] = ()
+    # Columns that keep their row when that user goes, only losing the name (core's ON DELETE SET NULL): a
+    # message stays in its room, from "someone who has left".
+    user_null_columns: tuple[tuple[str, str], ...] = ()
 
 
 # The feature files, filled phase by phase (docs/plans/services-rewrite.md): each with its migrations under
@@ -57,12 +60,19 @@ GAMES_TABLES = ("coin_accounts", "coin_transactions", "lumi_pets", "lumi_gardens
                 "lumi_push_events", "lumi_parties", "lumi_party_members", "push_subscriptions", "arcade_rooms",
                 "arcade_runs", "casino_rooms", "prism_runs", "runner_runs", "lumisoft_progress", "lumisoft_bests",
                 "lumisoft_runs")
+ROOMS_TABLES = ("chat_rooms", "chat_members", "chat_messages", "chat_reactions", "chat_attachments", "chat_mentions",
+                "chat_events")
 FEATURE_DBS: dict[str, FeatureDb] = {f.name: f for f in (
     # Phase 2: the built-in games, their coins and Lumi's reminders (web/games.py, the games service). A new games
     # table goes in migrations/games/, never in core's migrations.
     FeatureDb("games", moves=GAMES_TABLES,
               user_columns=tuple((t, "user_id") for t in GAMES_TABLES
                                  if t not in ("coin_transactions", "lumi_parties", "arcade_rooms", "casino_rooms"))),
+    # Phase 3: Rooms (rooms.py, rooms_bus.py, web/rooms.py, the rooms service). A message outlives its author.
+    FeatureDb("rooms", moves=ROOMS_TABLES,
+              user_columns=(("chat_members", "user_id"), ("chat_reactions", "user_id"), ("chat_mentions", "user_id")),
+              user_null_columns=(("chat_rooms", "created_by"), ("chat_messages", "user_id"),
+                                 ("chat_messages", "pinned_by"), ("chat_attachments", "user_id"))),
 )}
 
 
@@ -83,6 +93,17 @@ def table_connection(core: sqlite3.Connection, feature: str, table: str) -> Iter
         yield conn if _has_table(conn, "main", table) else None
     finally:
         conn.close()
+
+
+def connect_for(core_path: Path | str, feature: str, table: str) -> sqlite3.Connection:
+    """A new connection that holds `table`, from the core database's path: the feature's file once its tables have
+    moved there, else core (code that keeps a path, not a connection: rooms_bus's streams). The caller closes it."""
+    if feature_path(core_path, feature).exists():
+        conn = connect_feature(core_path, feature)
+        if _has_table(conn, "main", table):
+            return conn
+        conn.close()
+    return connect(core_path)
 
 
 def feature_path(core_path: Path | str, feature: str) -> Path:
@@ -431,13 +452,16 @@ def forget_user(core_path: Path | str, user_id: int) -> int:
     since no reference crosses the files. Returns how many rows went. users.delete_user calls it."""
     gone = 0
     for found in _features_present(core_path):
-        if not found.user_columns:
+        if not found.user_columns and not found.user_null_columns:
             continue
         conn = connect_feature(core_path, found.name)
         try:
             with transaction(conn):
                 for table, column in found.user_columns:
                     gone += conn.execute(f"DELETE FROM main.{table} WHERE {column} = ?", (user_id,)).rowcount
+                for table, column in found.user_null_columns:     # kept, without their name
+                    gone += conn.execute(f"UPDATE main.{table} SET {column} = NULL WHERE {column} = ?",
+                                         (user_id,)).rowcount
         finally:
             conn.close()
     return gone
@@ -451,7 +475,7 @@ def sweep_orphans(core_path: Path | str) -> dict[str, int]:
     for found in _features_present(core_path):
         checks = [(t, c, "core.users") for t, c in found.user_columns] + \
                  [(t, c, "core.files") for t, c in found.file_columns]
-        if not checks:
+        if not checks and not found.user_null_columns:
             continue
         conn = connect_feature(core_path, found.name)
         try:
@@ -461,6 +485,12 @@ def sweep_orphans(core_path: Path | str) -> dict[str, int]:
                                      f"AND {column} NOT IN (SELECT id FROM {parent})").rowcount
                     if n:
                         key = f"{found.name}.{table}"
+                        deleted[key] = deleted.get(key, 0) + n
+                for table, column in found.user_null_columns:        # kept, without the name of who left
+                    n = conn.execute(f"UPDATE main.{table} SET {column} = NULL WHERE {column} IS NOT NULL "
+                                     f"AND {column} NOT IN (SELECT id FROM core.users)").rowcount
+                    if n:
+                        key = f"{found.name}.{table}.{column}"
                         deleted[key] = deleted.get(key, 0) + n
         finally:
             conn.close()

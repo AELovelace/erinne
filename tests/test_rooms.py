@@ -222,7 +222,8 @@ def test_files_and_previews(settings, conn, people, directory):
         # carol can't read the manual: the preview hides it.
         assert c.post("/api/rooms/previews", json={"links": [f"/files/{fid}/view"]}).json()["previews"] == {
             f"/files/{fid}/view": {"hidden": True}}
-    rooms.delete(conn, alice, m["id"], directory)
+    with rooms.on(conn) as rooms_conn:                                      # rooms.db, since the app started
+        rooms.delete(rooms_conn, alice, m["id"], directory)
     with _web(settings, "carol", directory) as c:
         assert c.get(f"/api/rooms/files/{f['id']}").status_code == 404
     assert retention.purge(conn, settings).get("chat_attachments") == 1

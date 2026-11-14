@@ -15,17 +15,17 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import messages as user_messages, rooms
+from mnemerynne import events, messages as user_messages, rooms
 from mnemerynne.db import transaction
 from mnemerynne.web import security
 from mnemerynne.web.admin import _log
 from mnemerynne import group_refs
-from mnemerynne.web.deps import admin_user, api_user, get_db, is_admin, page_user, release_db
+from mnemerynne.web.deps import admin_user, api_user, get_db, get_rooms_db, is_admin, page_user, release_db
 from mnemerynne.web.sendfile import send_file
 
 
 
-def _rooms_on(conn: sqlite3.Connection = Depends(get_db)) -> None:
+def _rooms_on(conn: sqlite3.Connection = Depends(get_rooms_db)) -> None:
     """Every Rooms route but the admin settings: not there at all while Rooms is turned off."""
     if not rooms.enabled(conn):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
@@ -63,14 +63,14 @@ def _done(request: Request) -> None:
 
 # --------------------------------------------------------------------- page
 @router.get("/rooms", response_class=HTMLResponse)
-def rooms_page(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db)):
+def rooms_page(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_rooms_db)):
     return request.app.state.templates.TemplateResponse(request, "rooms.html", {
         "user": user, "is_admin": is_admin(request, conn, user), "active": "rooms", "max_chars": rooms.MAX_CHARS})
 
 
 # -------------------------------------------------------------------- rooms
 @router.get("/api/rooms")
-def list_rooms(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def list_rooms(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_rooms_db)):
     """The sidebar (with the Inbox's unread notes), who's online, and the event id to start the stream from."""
     bus = _bus(request)
     return {"rooms": rooms.rooms_for(conn, user, _dir(request)), "presence": bus.presence(),
@@ -84,13 +84,13 @@ class PreviewBody(BaseModel):
 
 
 @router.post("/api/rooms/previews")
-def link_previews(body: PreviewBody, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def link_previews(body: PreviewBody, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_rooms_db)):
     """Cards for Mnemerynne links in messages, as this person may see them."""
     return {"previews": rooms.previews(conn, user, [link[:500] for link in body.links])}
 
 
 @router.get("/api/rooms/files/{file_id}")
-def get_file(file_id: int, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def get_file(file_id: int, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_rooms_db)):
     try:
         row, path = rooms.attachment(conn, request.app.state.settings, user, file_id, _dir(request),
                                      admin=is_admin(request, conn, user))
@@ -103,7 +103,8 @@ def get_file(file_id: int, request: Request, user=Depends(api_user), conn: sqlit
 
 
 @router.post("/api/rooms/files/{file_id}/save")
-def save_file(file_id: int, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def save_file(file_id: int, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_rooms_db),
+              core: sqlite3.Connection = Depends(get_db)):
     """Copy an attachment into the person's own File box (Agents folder's parent: the top of it)."""
     from mnemerynne import permissions
     from mnemerynne.ingest import store
@@ -113,16 +114,16 @@ def save_file(file_id: int, request: Request, user=Depends(api_user), conn: sqli
         row, path = rooms.attachment(conn, settings, user, file_id, _dir(request))
     except rooms.RoomError as exc:
         raise _refuse(exc) from None
-    inbox = permissions.private_collection_id(conn, user["id"])
+    inbox = permissions.private_collection_id(core, user["id"])
     if inbox is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "You don't have a File box yet.")
     with path.open("rb") as stream:
-        new_id, _ = store.add_file(conn, settings, store.receive(stream, row["name"], settings), inbox, user["id"])
+        new_id, _ = store.add_file(core, settings, store.receive(stream, row["name"], settings), inbox, user["id"])
     return {"file_id": new_id, "url": f"/files#c={inbox}"}
 
 
 @router.get("/api/rooms/browse")
-def browse(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def browse(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_rooms_db)):
     return {"channels": rooms.browse(conn, user, _dir(request))}
 
 
@@ -146,7 +147,7 @@ class ChannelBody(BaseModel):
 
 @router.post("/api/rooms", status_code=status.HTTP_201_CREATED)
 def create_channel(body: ChannelBody, request: Request, user=Depends(api_user),
-                   conn: sqlite3.Connection = Depends(get_db)):
+                   conn: sqlite3.Connection = Depends(get_rooms_db)):
     if not rooms.may_create(conn, user, _dir(request), admin=is_admin(request, conn, user)):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only some people may make channels here; ask an admin, "
                                                        "or message people directly.")
@@ -165,7 +166,7 @@ class DmBody(BaseModel):
 
 
 @router.post("/api/rooms/dm")
-def open_dm(body: DmBody, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def open_dm(body: DmBody, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_rooms_db)):
     try:
         with transaction(conn):
             room_id = rooms.open_dm(conn, user, body.people)
@@ -176,7 +177,7 @@ def open_dm(body: DmBody, request: Request, user=Depends(api_user), conn: sqlite
 
 
 @router.get("/api/rooms/{room_id}")
-def get_room(room_id: int, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def get_room(room_id: int, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_rooms_db)):
     admin = is_admin(request, conn, user)
     try:
         r = rooms.visible(conn, user, room_id, _dir(request), admin=admin)
@@ -196,8 +197,9 @@ class RoomPatch(BaseModel):
 
 @router.patch("/api/rooms/{room_id}")
 def patch_room(room_id: int, body: RoomPatch, request: Request, user=Depends(api_user),
-               conn: sqlite3.Connection = Depends(get_db)):
+               conn: sqlite3.Connection = Depends(get_rooms_db), core: sqlite3.Connection = Depends(get_db)):
     admin = is_admin(request, conn, user)
+    moderated = None
     try:
         with transaction(conn):
             if body.notify is not None:
@@ -209,9 +211,11 @@ def patch_room(room_id: int, body: RoomPatch, request: Request, user=Depends(api
                                      (room_id, user["id"])).fetchone()
                 rooms.update(conn, user, room_id, _dir(request), admin=admin, **changes)
                 if admin and r["kind"] == "channel" and not (owner and owner["role"] == "owner"):
-                    _log(conn, user, "rooms.moderate", f"#{r['name']}", ", ".join(f"{k}={v}" for k, v in changes.items()))
+                    moderated = (f"#{r['name']}", ", ".join(f"{k}={v}" for k, v in changes.items()))
     except rooms.RoomError as exc:
         raise _refuse(exc) from None
+    if moderated:                                         # core's audit log, once the change is in rooms.db
+        _log(core, user, "rooms.moderate", *moderated)
     _done(request)
     return {"room": rooms.view_room(conn, rooms.room(conn, room_id), user)}
 
@@ -223,7 +227,7 @@ class MemberBody(BaseModel):
 
 @router.post("/api/rooms/{room_id}/members")
 def members(room_id: int, body: MemberBody, request: Request, user=Depends(api_user),
-            conn: sqlite3.Connection = Depends(get_db)):
+            conn: sqlite3.Connection = Depends(get_rooms_db)):
     d = _dir(request)
     try:
         with transaction(conn):
@@ -243,7 +247,7 @@ def members(room_id: int, body: MemberBody, request: Request, user=Depends(api_u
 
 @router.post("/api/rooms/{room_id}/files", status_code=status.HTTP_201_CREATED)
 async def upload(room_id: int, request: Request, file: UploadFile = File(...), user=Depends(api_user),
-                 conn: sqlite3.Connection = Depends(get_db)):
+                 conn: sqlite3.Connection = Depends(get_rooms_db)):
     """Keep a file to attach to the next message in this room."""
     settings = request.app.state.settings
     try:
@@ -260,7 +264,7 @@ class ReadBody(BaseModel):
 
 @router.post("/api/rooms/{room_id}/read")
 def read(room_id: int, body: ReadBody, request: Request, user=Depends(api_user),
-         conn: sqlite3.Connection = Depends(get_db)):
+         conn: sqlite3.Connection = Depends(get_rooms_db)):
     try:
         with transaction(conn):
             rooms.mark_read(conn, user, room_id, body.message_id, _dir(request))
@@ -271,7 +275,7 @@ def read(room_id: int, body: ReadBody, request: Request, user=Depends(api_user),
 
 
 @router.post("/api/rooms/{room_id}/typing")
-def typing(room_id: int, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def typing(room_id: int, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_rooms_db)):
     """Says the person is typing to everyone the room reaches (only to open streams; not stored)."""
     if not _limiter(request).allow(f"typing:{user['id']}", TYPING_PER_MINUTE, 60):
         return {"ok": False}
@@ -291,7 +295,7 @@ def typing(room_id: int, request: Request, user=Depends(api_user), conn: sqlite3
 # ----------------------------------------------------------------- messages
 @router.get("/api/rooms/{room_id}/messages")
 def messages(room_id: int, request: Request, before: int | None = None, limit: int = rooms.PAGE,
-             user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+             user=Depends(api_user), conn: sqlite3.Connection = Depends(get_rooms_db)):
     try:
         listed = rooms.history(conn, user, room_id, _dir(request), before=before, limit=limit,
                                admin=is_admin(request, conn, user))
@@ -309,7 +313,7 @@ class PostBody(BaseModel):
 
 @router.post("/api/rooms/{room_id}/messages", status_code=status.HTTP_201_CREATED)
 def post_message(room_id: int, body: PostBody, request: Request, user=Depends(api_user),
-                 conn: sqlite3.Connection = Depends(get_db)):
+                 conn: sqlite3.Connection = Depends(get_rooms_db)):
     if not _limiter(request).allow(f"post:{user['id']}", POSTS_PER_MINUTE, 60):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "That's a lot of messages; wait a moment.")
     bus = _bus(request)
@@ -324,11 +328,13 @@ def post_message(room_id: int, body: PostBody, request: Request, user=Depends(ap
     erynne = getattr(request.app.state, "rooms_erynne", None)
     if asked and erynne is not None:
         erynne.ask(user["id"], message, bfgguf=body.bfgguf)
+    elif asked:                                           # the rooms service: Erynne lives in the web app
+        events.publish_sync("rooms:ask", {"user_id": user["id"], "message": message, "bfgguf": body.bfgguf})
     return {"message": message}
 
 
 @router.get("/api/rooms/messages/{message_id}/thread")
-def get_thread(message_id: int, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def get_thread(message_id: int, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_rooms_db)):
     try:
         return {"messages": rooms.thread(conn, user, message_id, _dir(request))}
     except rooms.RoomError as exc:
@@ -336,7 +342,7 @@ def get_thread(message_id: int, request: Request, user=Depends(api_user), conn: 
 
 
 @router.get("/api/rooms/{room_id}/pins")
-def get_pins(room_id: int, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):
+def get_pins(room_id: int, request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_rooms_db)):
     try:
         return {"messages": rooms.pins(conn, user, room_id, _dir(request))}
     except rooms.RoomError as exc:
@@ -349,7 +355,7 @@ class EditBody(BaseModel):
 
 @router.patch("/api/rooms/messages/{message_id}")
 def edit_message(message_id: int, body: EditBody, request: Request, user=Depends(api_user),
-                 conn: sqlite3.Connection = Depends(get_db)):
+                 conn: sqlite3.Connection = Depends(get_rooms_db)):
     try:
         with transaction(conn):
             out = rooms.edit(conn, user, message_id, body.text, _dir(request))
@@ -361,16 +367,16 @@ def edit_message(message_id: int, body: EditBody, request: Request, user=Depends
 
 @router.delete("/api/rooms/messages/{message_id}")
 def delete_message(message_id: int, request: Request, user=Depends(api_user),
-                   conn: sqlite3.Connection = Depends(get_db)):
+                   conn: sqlite3.Connection = Depends(get_rooms_db), core: sqlite3.Connection = Depends(get_db)):
     admin = is_admin(request, conn, user)
     try:
         with transaction(conn):
             row = conn.execute("SELECT user_id, room_id FROM chat_messages WHERE id = ?", (message_id,)).fetchone()
             out = rooms.delete(conn, user, message_id, _dir(request), admin=admin)
-            if admin and row and row["user_id"] != user["id"]:
-                _log(conn, user, "rooms.delete_message", f"room {row['room_id']}", f"message {message_id}")
     except rooms.RoomError as exc:
         raise _refuse(exc) from None
+    if admin and row and row["user_id"] != user["id"]:   # core's audit log, once the message is gone
+        _log(core, user, "rooms.delete_message", f"room {row['room_id']}", f"message {message_id}")
     _done(request)
     return {"message": out}
 
@@ -382,7 +388,7 @@ class ReactBody(BaseModel):
 
 @router.post("/api/rooms/messages/{message_id}/react")
 def react(message_id: int, body: ReactBody, request: Request, user=Depends(api_user),
-          conn: sqlite3.Connection = Depends(get_db)):
+          conn: sqlite3.Connection = Depends(get_rooms_db)):
     try:
         with transaction(conn):
             out = rooms.react(conn, user, message_id, body.emoji, body.on, _dir(request))
@@ -398,7 +404,7 @@ class PinBody(BaseModel):
 
 @router.post("/api/rooms/messages/{message_id}/pin")
 def pin(message_id: int, body: PinBody, request: Request, user=Depends(api_user),
-        conn: sqlite3.Connection = Depends(get_db)):
+        conn: sqlite3.Connection = Depends(get_rooms_db)):
     try:
         with transaction(conn):
             out = rooms.pin(conn, user, message_id, body.pinned, _dir(request))
@@ -421,13 +427,14 @@ def _admin_status(request: Request, conn: sqlite3.Connection) -> dict:
 
 
 @admin_router.get("/api/admin/settings/rooms")
-def admin_rooms(request: Request, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+def admin_rooms(request: Request, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_rooms_db)):
     return _admin_status(request, conn)
 
 
 @admin_router.put("/api/admin/settings/rooms")
 async def admin_settings(body: CreatorsBody, request: Request, user=Depends(admin_user),
-                         conn: sqlite3.Connection = Depends(get_db)):
+                         conn: sqlite3.Connection = Depends(get_db),
+                         rooms_conn: sqlite3.Connection = Depends(get_rooms_db)):
     """Rooms on or off for this organisation, and who may make channels (a group, or everyone)."""
     name = None
     if body.group is not None:
@@ -447,4 +454,4 @@ async def admin_settings(body: CreatorsBody, request: Request, user=Depends(admi
     if body.enabled is False:
         # Open Rooms tabs: tell them to stop (their streams end on the next look anyway).
         _bus(request).push(None, "end", {"reason": "Rooms was turned off"})
-    return _admin_status(request, conn)
+    return _admin_status(request, rooms_conn)

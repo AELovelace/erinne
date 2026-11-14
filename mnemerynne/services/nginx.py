@@ -125,10 +125,12 @@ def _accel_locations(roots: dict[str, Path], probe_from: str) -> list[str]:
     return lines + [""]
 
 
-def render(listen: str, web: str = "127.0.0.1:38210", accel: dict[str, Path] | None = None) -> str:
+def render(listen: str, web: str = "127.0.0.1:38210", accel: dict[str, Path] | None = None,
+           running: list[str] | None = None) -> str:
     """The whole nginx config: one upstream per service and the web app, one location per service path, and with
-    `accel` (folder key -> path, web/sendfile.roots) nginx's own file locations."""
-    services = list(registry.SERVICES.values())
+    `accel` (folder key -> path, web/sendfile.roots) nginx's own file locations. `running`: only these services get
+    their paths (front-door.sh passes the ones whose units are enabled); the rest stay with the web app."""
+    services = [s for s in registry.SERVICES.values() if running is None or s.name in running]
     lines = [HEADER + (ACCEL_HEADER if accel else "")]
     lines.append(f"upstream {_upstream('web')} {{ server {web}; keepalive 32; }}")
     for s in services:
@@ -180,6 +182,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--accel", action="store_true", help="nginx serves /static/ and the app's file bytes")
     parser.add_argument("--roots", action="store_true", help="Print the folders nginx sends files from, and stop")
     parser.add_argument("--env-file", help="The service's .env (MNEMERYNNE_DATA_DIR, SHARE_ROOT...); - for stdin")
+    parser.add_argument("--services", help="Comma-separated: only these services get their paths (default: all)")
     args = parser.parse_args(argv)
     if args.roots:
         for key, path in accel_roots(args.env_file).items():
@@ -188,7 +191,8 @@ def main(argv: list[str] | None = None) -> None:
     if not args.listen:
         parser.error("--listen is required")
     accel = accel_roots(args.env_file) if args.accel else None
-    sys.stdout.write(render(args.listen, args.web, accel))
+    running = None if args.services is None else [n for n in args.services.split(",") if n]
+    sys.stdout.write(render(args.listen, args.web, accel, running))
 
 
 if __name__ == "__main__":

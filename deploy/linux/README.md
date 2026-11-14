@@ -1186,8 +1186,9 @@ OAuth, pairing, room posts) are counted across all processes too.
 
 ### A database file per feature
 
-The games, their coins and Lumi keep their tables in `/var/lib/mnemerynne/games.db`, next to
-`mnemerynne.db`, so a game's write never waits for the core database's lock (or the other way round).
+The games, their coins and Lumi keep their tables in `/var/lib/mnemerynne/games.db`, and Rooms in
+`rooms.db`, next to `mnemerynne.db`, so a game's or a room's write never waits for the core database's
+lock (or the other way round).
 The web app's first start after the update moves them over (its log says
 "Moved into games.db: ..." with the rows per table); backups, restores and the updater's snapshots
 take every such file with the core one. Going back to code from before that move:
@@ -1195,9 +1196,19 @@ take every such file with the core one. Going back to code from before that move
 ```sh
 sudo systemctl stop mnemerynne-web mnemerynne-worker 'mnemerynne@*' mnemerynne-sync mnemerynne-games
 sudo mnemerynne-admin move-back games      # the rows back into core; games.db set aside, not deleted
+sudo mnemerynne-admin move-back rooms      # the same for Rooms
 ```
 
 then put the older code back and start the services. The newer code's next start moves them out again.
+
+### Services that need Valkey
+
+Some services only work with Valkey on, because what happens in them must reach the other processes at
+once: **rooms** (`/api/rooms`: new messages, typing, presence, and messages that ask Erynne, who answers
+from the web app). `front-door.sh services` leaves such a service off while `MNEMERYNNE_VALKEY_URL` isn't
+set, and turns it off again if Valkey goes; nginx only routes paths to services whose units are enabled,
+so the web app keeps serving them meanwhile. After `valkey-setup.sh on`, run `front-door.sh services`
+again to start them.
 
 ### Valkey (live events between the processes)
 

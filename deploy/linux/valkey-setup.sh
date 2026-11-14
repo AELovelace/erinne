@@ -106,6 +106,7 @@ valkey_on() {
     [ -f "$SAVED" ] && env_set MNEMERYNNE_VALKEY_URL "$URL" "$SAVED"                 # survives front-door.sh off
     restart_app
     echo "Done: the app's processes share their events through Valkey. Each one logs which bus it uses at start."
+    echo "Services that need Valkey (Rooms) start with: sudo bash $APP/deploy/linux/front-door.sh services"
 }
 
 valkey_off() {
@@ -113,6 +114,8 @@ valkey_off() {
     [ -f "$SAVED" ] && env_unset MNEMERYNNE_VALKEY_URL "$SAVED"
     restart_app
     echo "The app keeps events in each process again. Valkey itself is still installed and running."
+    echo "Turn off the services that need it (their paths go back to the web app):"
+    echo "  sudo bash $APP/deploy/linux/front-door.sh services"
 }
 
 valkey_status() {

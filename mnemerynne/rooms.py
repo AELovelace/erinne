@@ -26,10 +26,11 @@ import mimetypes
 import re
 import secrets
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Iterator
 
-from mnemerynne import comments, group_refs
+from mnemerynne import comments, db, group_refs
 from mnemerynne.config import Settings
 from mnemerynne.ingest import markdown
 
@@ -58,6 +59,15 @@ class Forbidden(RoomError):
 
 
 # ------------------------------------------------------------------- access
+
+@contextmanager
+def on(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection | None]:
+    """Rooms' tables for code that holds a core connection (briefings, automations, retention, MCP): rooms.db once
+    they've moved there (docs/plans/services-rewrite.md, Phase 3), else core. None: there are no Rooms tables yet,
+    which callers treat as Rooms being off."""
+    with db.table_connection(conn, "rooms", "chat_rooms") as found:
+        yield found
+
 def room(conn: sqlite3.Connection, room_id: int) -> sqlite3.Row:
     row = conn.execute("SELECT * FROM chat_rooms WHERE id = ?", (room_id,)).fetchone()
     if row is None:

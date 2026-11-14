@@ -100,6 +100,22 @@ sudo systemctl start mnemerynne-web mnemerynne-worker                           
 `move-back` refuses while the services run. To return to B: `sudo git -C /opt/mnemerynne checkout main` and
 `sudo mnemerynne-admin update --yes`; its start moves the rows out again.
 
+### Deploying Phase 3 (rooms.db and the rooms service; never run on the box yet)
+
+`sudo mnemerynne-admin update --yes` moves Rooms' tables into `/var/lib/mnemerynne/rooms.db` at the web app's
+start ("Moved into rooms.db: ..."). Nothing else changes until Valkey is on; Rooms keeps working from the web app.
+Then, for B:
+
+```sh
+sudo bash /opt/mnemerynne/deploy/linux/valkey-setup.sh on
+sudo bash /opt/mnemerynne/deploy/linux/front-door.sh services    # starts mnemerynne@rooms, routes /api/rooms to it
+```
+
+Check: two people in a channel see each other's messages and typing at once, @here reaches both, @Erynne answers,
+an automation posts into a room, Claude's `post_to_room` and `read_room` work. Back to A for the service only:
+`valkey-setup.sh off` then `front-door.sh services` (rooms off, its paths back to the web app). Back to the code
+before Phase 3: as for games, `sudo mnemerynne-admin move-back rooms` with everything stopped, then the older code.
+
 ## 3. Phase 0.5: done in code (2026-11-13)
 
 The front-door and Valkey work below is committed and tested with the box stood in for

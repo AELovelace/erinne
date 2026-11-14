@@ -301,7 +301,7 @@ class Scheduler:
     def _to_room(self, room_id: int, name: str, body: str) -> dict:
         from mnemerynne import rooms
 
-        conn = db.connect(self.settings.db_path)
+        conn = db.connect_for(self.settings.db_path, "rooms", "chat_rooms")   # rooms.db once moved there
         try:
             with db.transaction(conn):
                 if not rooms.enabled(conn):

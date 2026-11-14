@@ -58,10 +58,11 @@ def briefing(conn: sqlite3.Connection, user: sqlite3.Row, directory, claim_minut
     pending = notices.pending_for(conn, user, directory)
     out: dict = {"unread_notes": [{"from": n["from"], "at": n["at"], "text": n["text"][:300]} for n in notes],
                  "announcements": [{"title": a["title"], "must_acknowledge": bool(a.get("must_ack"))} for a in pending]}
-    if rooms.enabled(conn):
-        listed = rooms.rooms_for(conn, user, directory)
-        out["rooms"] = [{"room": ("#" if r["kind"] == "channel" else "") + r["name"], "unread": r["unread"],
-                         "mentions": r["mentions"]} for r in listed if r["unread"] or r["mentions"]]
+    with rooms.on(conn) as rooms_conn:
+        if rooms_conn is not None and rooms.enabled(rooms_conn):
+            listed = rooms.rooms_for(rooms_conn, user, directory)
+            out["rooms"] = [{"room": ("#" if r["kind"] == "channel" else "") + r["name"], "unread": r["unread"],
+                             "mentions": r["mentions"]} for r in listed if r["unread"] or r["mentions"]]
     waiting = conn.execute("SELECT COUNT(*) FROM agent_proposals WHERE user_id = ? AND status = 'pending'",
                            (user["id"],)).fetchone()[0] if _has_table(conn, "agent_proposals") else 0
     out["proposals_waiting"] = waiting

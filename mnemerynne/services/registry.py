@@ -24,6 +24,9 @@ class Service:
     workers: dict[str, int] = field(default_factory=lambda: {"nas": 1, "ryzen": 1})   # processes per profile
     single: bool = False                 # keeps live state in memory: exactly one process, whatever the profile
     hooks: tuple[str, ...] = ()          # start-up pieces from services/hooks.py (in order)
+    # Only works with Valkey (MNEMERYNNE_VALKEY_URL): what it does has to reach the other processes at once (Rooms'
+    # live events, Erynne's answers). Without Valkey, front-door.sh leaves it off and its paths with the web app.
+    needs_valkey: bool = False
 
     def processes(self, profile: str | None = None) -> int:
         """How many processes to run: one for a single-process service, else the profile's count."""
@@ -49,6 +52,16 @@ SERVICES: dict[str, Service] = {s.name: s for s in (
         port=38202,
         single=True,
         hooks=("balancer",),               # Lumi's live tales reach the answer model through the balancer nodes
+    ),
+    Service(
+        name="rooms",
+        serves="Rooms' API and live stream (/api/rooms): rooms.db; new messages, typing and presence travel by Valkey",
+        routers=("mnemerynne.web.rooms:router",),
+        paths=("/api/rooms",),
+        port=38206,
+        workers={"nas": 1, "ryzen": 2},
+        hooks=("rooms",),                  # its live bus; Erynne's answers stay with the web app (rooms:ask)
+        needs_valkey=True,
     ),
 )}
 

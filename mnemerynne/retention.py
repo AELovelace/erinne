@@ -52,8 +52,10 @@ def purge(conn: sqlite3.Connection, settings: Settings) -> dict[str, int]:
     if n:
         out["scratchpad_notes"] = n
 
-    from mnemerynne import rooms   # messages with files on disk, and the live-delivery log
-    out.update(rooms.purge(conn, settings))
+    from mnemerynne import rooms   # messages with files on disk, and the live-delivery log (rooms.db once moved)
+    with rooms.on(conn) as rooms_conn:
+        if rooms_conn is not None:
+            out.update(rooms.purge(rooms_conn, settings))
 
     # Codes and tokens past their expiry are useless; a day's grace keeps refresh-token
     # reuse detection working around the boundary.

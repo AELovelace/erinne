@@ -123,3 +123,9 @@ The games' tables live in their own database file, `games.db`, next to the core 
 - **Routes** in `web/games.py` take `conn=Depends(get_games_db)`, and live streams borrow from `feature_pool(request.app, "games")`. That connection still reads core's tables (`users`, `groups`, `media_screens`, `meta`) by their plain names, attached read-only, but can't write them: a route that must write a core table takes `core=Depends(get_db)` as well.
 - **Outside a request** (the worker, retention), open the right file with `db.table_connection(core, "games", "<table>")`: core while the tables haven't moved (tests that only ran core's migrations), else games.db.
 - **Tests** that start the app (`client`) and then read a games table directly use the `games_conn` fixture; tests that only use `conn` keep the tables in core and need nothing.
+
+Rooms' tables (`chat_*`, `db.ROOMS_TABLES`) live in `rooms.db` the same way (Phase 3):
+
+- **A new Rooms table** goes in `mnemerynne/migrations/rooms/`. A column naming a user goes in `db.FEATURE_DBS["rooms"]`: `user_columns` when the row should go with the user, `user_null_columns` when it should stay without their name (a message from someone who has left).
+- **Routes** in `web/rooms.py` take `conn=Depends(get_rooms_db)`; one that also writes core (the audit log, a copy into Files) takes `core=Depends(get_db)` and writes core after the rooms change. Code holding a core connection uses `with rooms.on(conn) as rooms_conn:` (None means Rooms has no tables yet: treat it as off); code holding only the database path uses `db.connect_for(path, "rooms", "chat_rooms")`.
+- **Live events** go through `rooms_bus.Bus` (`wake()`, `push()`): they reach the streams of every process through the event bus. Don't call a Bus's listeners directly from other code.

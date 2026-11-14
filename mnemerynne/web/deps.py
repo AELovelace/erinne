@@ -84,6 +84,7 @@ def feature_db(feature: str) -> Callable[[Request], AsyncIterator[sqlite3.Connec
 
 
 get_games_db = feature_db("games")   # the games, their coins and Lumi (docs/plans/services-rewrite.md, Phase 2)
+get_rooms_db = feature_db("rooms")   # Rooms: channels, messages and their live events (Phase 3)
 
 
 def _held(request: Request) -> list[tuple[db.Pool, sqlite3.Connection]]:
