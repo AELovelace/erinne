@@ -163,7 +163,9 @@ services`: sync, games, media, files and share as `mnemerynne@`; rooms off, as V
 fixes: nginx answered `/remote` (and would `/files`, `/media`) itself with a redirect to the slashed path on
 port 38200 (now an exact location per bare page, and `absolute_redirect off`); and without Valkey every first look
 at a library waited 20 s for a share service that couldn't hear the ask (now it walks at once). A/B on the new
-box showed little difference: it's fast either way.
+box showed little difference: it's fast either way. Phases 7 to 11 followed the same day (`update`, then
+`front-door.sh services`): assistant, mcp, automations and remote came up beside the others, every service
+answered its health check, and 38206 (rooms) stays silent until Valkey is on.
 
 **Phase 7 (2026-11-14):** `assistant.db` holds conversations, messages, message_sources, feedback,
 feedback_archive and graph_runs, and LangGraph's checkpoints, writes, store and store_migrations (its migration

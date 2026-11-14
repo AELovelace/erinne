@@ -18,8 +18,9 @@ Uncommitted in the working tree and **not part of this work**: `lumi-codex/` (st
 
 ## 2. What's live on the NAS right now
 
-Deployed 2026-11-14: phases 0.5 to 6b (26c62f8), on the new box (static 192.168.1.5). The games, rooms, media
-and search tables are in their own files. Valkey is **off**; accel is **off**.
+Deployed 2026-11-14: phases 0.5 to 6b (26c62f8), on the new box (static 192.168.1.5); later the same day
+phases 7 to 11 (248eb29) on top. The games, rooms, media, search, assistant, logs, automations and sync tables
+are in their own files, and the web app runs slim. Valkey is **off**; accel is **off**.
 
 | Piece | Where | Notes |
 |---|---|---|
@@ -28,7 +29,9 @@ and search tables are in their own files. Valkey is **off**; accel is **off**.
 | backup API | `127.0.0.1:38201`, 3 processes (`mnemerynne@sync`) | the template unit; drop-in `mnemerynne@.service.d/home-nas.conf` |
 | games, media, share | `127.0.0.1:38202`, `:38207`, `:38211` (`mnemerynne@games`, `@media`, `@share`) | one process each; `MNEMERYNNE_SHARE_WALKS=service` |
 | files | `127.0.0.1:38203`, 3 processes (`mnemerynne@files`) | |
-| rooms | off (needs Valkey) | the web app serves Rooms |
+| assistant, automations, remote | `127.0.0.1:38204`, `:38208`, `:38209` (`mnemerynne@assistant`, `@automations`, `@remote`) | one process each |
+| mcp | `127.0.0.1:38205`, 2 processes (`mnemerynne@mcp`) | Claude's connector |
+| rooms | off (needs Valkey) | the web app serves Rooms, and answers @Erynne there |
 | the .env before the front door | `/etc/mnemerynne/mnemerynne.env.before-front-door` | `front-door.sh off` puts it back |
 
 Not yet on the box: the two fixes (c31422b, 5723c67) and everything from Phase 7 on.

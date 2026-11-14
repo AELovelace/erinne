@@ -282,7 +282,8 @@ status() {
     while read -r name port _; do
         printf "%-45s %s\n" "http://$host:$port/healthz" "$(curl -s --max-time 3 "http://$host:$port/healthz" || echo '(no answer)')"
     done <<< "$list"
-    for url in "http://127.0.0.1:$WEB_PORT/healthz" "http://$(env_get MNEMERYNNE_HOST):$(env_get MNEMERYNNE_PORT)/healthz"; do
+    for url in $(printf "%s\n" "http://127.0.0.1:$WEB_PORT/healthz" \
+                 "http://$(env_get MNEMERYNNE_HOST):$(env_get MNEMERYNNE_PORT)/healthz" | awk '!seen[$0]++'); do  # the same address once
         printf "%-45s %s\n" "$url" "$(curl -s --max-time 3 "$url" || echo '(no answer)')"
     done
 }
