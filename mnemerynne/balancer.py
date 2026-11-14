@@ -12,6 +12,14 @@ nodes set, or none answering, requests go to MNEMERYNNE_LLM_URL as before.
 The balancers don't know about each other: each one balances only its own
 cards, and this module spreads requests between boxes.
 
+Every process that asks the model (the web app, the assistant, the games) has a
+Balancer. With Valkey, one of them polls the nodes for all (it holds
+"balancer:poller" for a few seconds at a time) and leaves its report under
+"balancer:nodes"; the others read that instead of asking each node every 2 s
+themselves, and one of them takes over when the poller goes quiet. What a
+process sent since the last report, and a node it saw fail, stay its own.
+Without Valkey each process polls, as before.
+
 Each node also reports its role: "balancer" (small models, one per card) or
 "bfgguf" (one big model over all its cards, bfgguf.py). Only balancer nodes
 take the answer model's requests; BFGguf nodes take BFGguf's (BfgTransport),
@@ -24,6 +32,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import re
 import sqlite3
 import time
@@ -32,7 +41,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from mnemerynne import apis
+from mnemerynne import apis, events
 from mnemerynne.config import Settings
 
 log = logging.getLogger("mnemerynne.balancer")
@@ -45,6 +54,11 @@ DOWN_SECONDS = 30.0
 MAX_NODES = 16
 ROLES = ("balancer", "bfgguf")
 ROLE_TIMEOUT = 300.0     # a role swap stops one set of models and loads the other
+POLLER_KEY = "balancer:poller"     # Valkey: which process polls the nodes for everyone (shared_round)
+REPORT_KEY = "balancer:nodes"      # Valkey: its last report, for the others
+SHARED_SECONDS = POLL_SECONDS * 3  # how long the poller's claim and its report last without a fresh round
+# What a report carries per node: what _poll learns. Pending answers and sitting out stay each process's own.
+_REPORTED = ("reachable", "error", "ready", "models", "in_flight", "slots", "role", "switching", "polled_at")
 _NODE = re.compile(r"^https?://[A-Za-z0-9.\-\[\]:]+$")
 
 
@@ -139,6 +153,8 @@ class Balancer:
         self.key = ""
         self.clock, self.wall = clock, wall
         self._client = httpx.AsyncClient(transport=transport, timeout=POLL_TIMEOUT)
+        self.me = f"{os.getpid()}-{id(self):x}"   # this process's name as the shared poller
+        self.polling = True                       # whether this one polled the last round (or reads the report)
 
     def configure(self, urls: list[str], key: str) -> None:
         """Replace the list; nodes that stay keep their numbers."""
@@ -201,10 +217,48 @@ class Balancer:
         while True:
             try:
                 if self.nodes:
-                    await self.poll_once()
+                    if events.shared():
+                        await self.shared_round()
+                    else:
+                        await self.poll_once()
             except Exception:   # the poller must never die
                 log.exception("Polling the balancer nodes failed")
             await asyncio.sleep(POLL_SECONDS)
+
+    async def shared_round(self) -> None:
+        """One round with Valkey: poll and leave the report if this process is the poller (or nobody is), else
+        take the poller's report. A claim lasts SHARED_SECONDS, so a poller that stops is replaced within that."""
+        holder = await asyncio.to_thread(events.expiring_get, POLLER_KEY)
+        if holder in (None, self.me):
+            await asyncio.to_thread(events.expiring_set, POLLER_KEY, self.me, SHARED_SECONDS)
+            if not self.polling:
+                log.info("Balancer: this process polls the nodes for everyone now.")
+            self.polling = True
+            await self.poll_once()
+            await asyncio.to_thread(events.expiring_set, REPORT_KEY, json.dumps(self.report()), SHARED_SECONDS)
+            return
+        self.polling = False
+        raw = await asyncio.to_thread(events.expiring_get, REPORT_KEY)
+        if raw:
+            self.take(json.loads(raw))
+
+    def report(self) -> dict:
+        """What the last poll learned about each node, by address (for the processes that don't poll)."""
+        return {n.url: {k: getattr(n, k) for k in _REPORTED} for n in self.nodes}
+
+    def take(self, report: dict) -> None:
+        """Another process's poll: its view of each node this process knows. A fresher report also counts what
+        this process sent since (the node's in-flight includes it), as a poll of its own would."""
+        for n in self.nodes:
+            seen = report.get(n.url)
+            if not isinstance(seen, dict):
+                continue
+            fresh = seen.get("polled_at") != n.polled_at
+            for k in _REPORTED:
+                if k in seen:
+                    setattr(n, k, seen[k])
+            if fresh:
+                n.pending = 0
 
     def candidates(self, role: str = "balancer") -> list[Node]:
         """Ready nodes in this role that aren't sitting out or swapping roles, least busy first (ties:

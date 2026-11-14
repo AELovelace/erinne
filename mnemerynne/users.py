@@ -104,12 +104,14 @@ def set_active(conn: sqlite3.Connection, username: str, active: bool) -> bool:
 
 
 def forget_memories(db_path, user_id: int) -> int:
-    """Delete everything Erynne remembers about a user (LangGraph's store). Returns the count."""
+    """Delete everything Erynne remembers about a user (LangGraph's store, in assistant.db once it moved there).
+    Returns the count."""
     from langgraph.store.sqlite import SqliteStore
 
+    from mnemerynne import assistant_db
     from mnemerynne.graph import memory_namespace
 
-    store_conn = sqlite3.connect(db_path, isolation_level=None, check_same_thread=False)
+    store_conn = sqlite3.connect(assistant_db.path(db_path), isolation_level=None, check_same_thread=False)
     try:
         store = SqliteStore(store_conn)
         store.setup()
@@ -122,9 +124,11 @@ def forget_memories(db_path, user_id: int) -> int:
 
 
 def delete_user(conn: sqlite3.Connection, username: str) -> bool:
-    """Delete a user. Their private collection, files and conversations cascade away; their
-    memories, the conversations' LangGraph checkpoints and the traces kept per conversation
-    live outside those cascades and are deleted here (a new user may get this id again)."""
+    """Delete a user. Their private collection and files cascade away; their memories are deleted
+    here (a new user may get this id again). Their conversations are in assistant.db: forget_user
+    deletes them there, and each takes its LangGraph checkpoints and timings with it (a trigger).
+    Before that move (core's tables) they cascade from users, and the checkpoints and traces kept
+    per conversation are deleted here."""
     row = conn.execute("SELECT id FROM users WHERE username = ?", (username.strip().lower(),)).fetchone()
     if row is None:
         return False
@@ -132,8 +136,10 @@ def delete_user(conn: sqlite3.Connection, username: str) -> bool:
     db_file = conn.execute("PRAGMA database_list").fetchone()[2]
     if db_file:  # "" for an in-memory database
         forget_memories(db_file, user_id)
-    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    threads = [r[0] for r in conn.execute("SELECT id FROM conversations WHERE user_id = ?", (user_id,))]
+    tables = {r[0] for r in conn.execute("SELECT name FROM main.sqlite_master WHERE type = 'table'")}
+    threads = []                                          # moved to assistant.db: its trigger does this
+    if "conversations" in tables:
+        threads = [r[0] for r in conn.execute("SELECT id FROM main.conversations WHERE user_id = ?", (user_id,))]
     with transaction(conn):
         for thread in threads:
             # conversations.id is the LangGraph thread_id; as SqliteSaver.delete_thread does.

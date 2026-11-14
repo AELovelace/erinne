@@ -2,7 +2,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-from mnemerynne import retention, users
+from mnemerynne import assistant_db, retention, users
 from mnemerynne.config import Settings
 
 DEPLOY = Path(__file__).resolve().parent.parent / "deploy" / "linux"
@@ -21,7 +21,8 @@ def test_purge_deletes_log_rows_past_their_keep_date(conn, settings):
                      "VALUES (datetime('now', ?), ?, 'chat', 'Atera', 'Tickets', 1)", (age, uid))
         conn.execute("INSERT INTO agent_calls(at, user_id, tool, ok) VALUES (datetime('now', ?), ?, 'search', 1)",
                      (age, uid))
-        conn.execute("INSERT INTO graph_runs(started_at, node) VALUES (datetime('now', ?), 'route')", (age,))
+        with assistant_db.on(conn) as chats:                       # assistant.db's (Phase 7)
+            chats.execute("INSERT INTO graph_runs(started_at, node) VALUES (datetime('now', ?), 'route')", (age,))
 
     out = retention.purge(conn, settings)
     assert out == {"mcp_calls": 1, "api_calls": 1, "agent_calls": 1, "graph_runs": 1}
@@ -31,7 +32,8 @@ def test_purge_deletes_log_rows_past_their_keep_date(conn, settings):
 
     keep_all = settings.model_copy(update={"mcp_calls_days": 0, "graph_runs_days": 0})
     conn.execute("INSERT INTO mcp_calls(at, tool, args) VALUES (datetime('now', '-5000 days'), 'x', '{}')")
-    conn.execute("INSERT INTO graph_runs(started_at, node) VALUES (datetime('now', '-5000 days'), 'x')")
+    with assistant_db.on(conn) as chats:
+        chats.execute("INSERT INTO graph_runs(started_at, node) VALUES (datetime('now', '-5000 days'), 'x')")
     assert retention.purge(conn, keep_all) == {}
 
 
@@ -82,15 +84,17 @@ def test_delete_user_removes_conversation_history_and_memories(conn, settings):
 
     alice = users.create_user(conn, "alice", "password123")
     bob = users.create_user(conn, "bob", "password123")
-    saver = SqliteSaver(sqlite3.connect(settings.db_path, check_same_thread=False))
+    graph_file = assistant_db.path(settings.db_path)              # assistant.db (Phase 7)
+    saver = SqliteSaver(sqlite3.connect(graph_file, check_same_thread=False))
     saver.setup()
     for uid, thread in ((alice, "conv-a"), (bob, "conv-b")):
-        conn.execute("INSERT INTO conversations(id, user_id) VALUES (?, ?)", (thread, uid))
+        with assistant_db.on(conn) as chats:
+            chats.execute("INSERT INTO conversations(id, user_id) VALUES (?, ?)", (thread, uid))
+            chats.execute("INSERT INTO graph_runs(conversation_id, node) VALUES (?, 'route')", (thread,))
         saver.put({"configurable": {"thread_id": thread, "checkpoint_ns": ""}}, empty_checkpoint(), {}, {})
-        conn.execute("INSERT INTO graph_runs(conversation_id, node) VALUES (?, 'route')", (thread,))
         conn.execute("INSERT INTO agent_calls(user_id, conversation_id, tool, ok) VALUES (?, ?, 'search', 1)",
                      (uid, thread))
-    memories = SqliteStore(sqlite3.connect(settings.db_path, isolation_level=None, check_same_thread=False))
+    memories = SqliteStore(sqlite3.connect(graph_file, isolation_level=None, check_same_thread=False))
     memories.setup()
     memories.put(memory_namespace(alice), "k1", {"text": "Works nights."})
 

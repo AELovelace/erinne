@@ -81,7 +81,7 @@ def test_every_service_has_its_own_port_its_paths_and_routers_that_import():
     assert len(ports) == len(set(ports)) and 38210 not in ports and 38200 not in ports   # the web app's, the front door's
     for service in registry.SERVICES.values():
         assert bool(service.paths) == bool(service.routers)        # a background service (share) has neither
-        assert all(p.startswith(("/", "= /")) for p in service.paths + service.web_paths)
+        assert all(p.startswith(("/", "= /", "~ ^/")) for p in service.paths + service.web_paths)   # prefix, exact, regex
         for ref in service.routers:
             assert factory._router(ref).routes                    # imports, and has routes
         for hook in service.hooks:

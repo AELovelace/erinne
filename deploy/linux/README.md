@@ -1213,7 +1213,13 @@ itself anyway. Take a name out and run `services` again to bring it back. The **
 transcoding): it needs no Valkey. The **files** service (`mnemerynne@files`, port 38203, three processes
 on the NAS profile) serves Files' API, the viewer, the editor and the wiki; the Files page itself stays
 with the web app. It needs no Valkey either, and works best with the share service on (otherwise each
-of its processes reads the share's permissions for itself).
+of its processes reads the share's permissions for itself). The **assistant** service (`mnemerynne@assistant`,
+port 38204, one process: an answer's live events stay in the process writing it) serves Ask: questions and
+their streamed answers, conversations, ratings, memories and the tool list, from `assistant.db`. With Valkey
+it also answers @Erynne in Rooms for every process; without, the web app keeps doing that.
+
+`services` writes the services it enabled to `MNEMERYNNE_SERVICES_ON` in the .env and restarts the app when
+that list changes, so the web app knows which jobs another process has taken over.
 
 ### One process walks the share (the share service)
 

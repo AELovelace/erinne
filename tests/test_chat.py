@@ -220,13 +220,14 @@ def test_feedback_and_delete(chat_client, conn):
 
 
 def test_feedback_from_before_the_archive_is_archived_once(chat_client, conn):
-    from mnemerynne import feedback
+    from mnemerynne import assistant_db, feedback
     _login(chat_client, "alice")
     message_id = _final(_ask(chat_client, "night audit"))["message_id"]
     user_id = conn.execute("SELECT id FROM users WHERE username = 'alice'").fetchone()[0]
-    conn.execute("INSERT INTO feedback(message_id, user_id, rating) VALUES (?, ?, 1)", (message_id, user_id))
-    assert feedback.backfill(conn) == 1
-    assert feedback.backfill(conn) == 0   # start-up runs it every time
+    with assistant_db.on(conn) as chats:                  # ratings live in assistant.db (Phase 7)
+        chats.execute("INSERT INTO feedback(message_id, user_id, rating) VALUES (?, ?, 1)", (message_id, user_id))
+        assert feedback.backfill(chats) == 1
+        assert feedback.backfill(chats) == 0   # start-up runs it every time
     row = conn.execute("SELECT * FROM feedback_archive").fetchone()
     assert row["rating"] == 1 and row["question"] == "night audit" and json.loads(row["tool_calls"]) == []
 

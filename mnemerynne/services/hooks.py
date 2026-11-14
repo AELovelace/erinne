@@ -104,4 +104,33 @@ async def share(app, settings, services):
         share_mod.stop_watching()
 
 
-HOOKS = {"balancer": balancer, "rooms": rooms, "pages": pages, "media": media, "share": share}
+@asynccontextmanager
+async def assistant(app, settings, services):
+    """Ask in a process of its own: the model clients, then the same pieces the web app builds (web/app.py
+    assistant_parts: LangGraph on assistant.db, the agent, the graph, memories, Erynne for Rooms). Needs the
+    balancer and rooms hooks first. With Valkey it answers @Erynne for every process's Rooms ("rooms:ask"), and the
+    web app stops (front-door.sh tells it, MNEMERYNNE_SERVICES_ON); without, the web app keeps answering Rooms."""
+    from mnemerynne import events
+    from mnemerynne.web.app import assistant_parts, model_clients
+
+    app.state.background = set()                   # answers being written, memories being saved
+    app.state.bfgguf_transport = services.bfgguf_transport if services is not None else None
+    svc = services if services is not None else model_clients(settings, app.state.balancer)
+    app.state.embedder = svc.embedder
+    try:
+        async with assistant_parts(app, settings, svc, app.state.balancer, testing=services is not None,
+                                   answer_rooms=events.shared()):
+            yield
+    finally:
+        for task in list(app.state.background):
+            task.cancel()
+        await asyncio.gather(*app.state.background, return_exceptions=True)
+        if services is None:
+            svc.embedder.close()
+            await svc.llm.aclose()
+            if svc.reranker:
+                svc.reranker.close()
+
+
+HOOKS = {"balancer": balancer, "rooms": rooms, "pages": pages, "media": media, "share": share,
+         "assistant": assistant}

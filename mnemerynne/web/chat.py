@@ -5,7 +5,12 @@ HTTP request: the browser watches its events, and if the page is closed or
 the connection drops (a long agent turn), the answer is still finished and
 saved, and the page picks the events up again from where it was
 (/api/runs/{id}/events?after=n). Runs live in memory; a restart ends the
-ones in progress, like it always has.
+ones in progress, like it always has. So the assistant service is one process:
+a run's events must come from the process that runs it.
+
+Conversations, answers and ratings are written to assistant.db (the request's
+get_assistant_db, or assistant_db.on); they read by their plain names on any
+connection. The proposals an answer drafted stay in core.
 """
 
 from __future__ import annotations
@@ -23,8 +28,8 @@ from pydantic import BaseModel, Field
 
 from mnemerynne import answer as answer_mod
 from mnemerynne import bfgguf as bfgguf_mod
-from mnemerynne import db, feedback as feedback_mod, fs, graph as graph_mod, proposals
-from mnemerynne.web.deps import api_user, get_db
+from mnemerynne import assistant_db, db, feedback as feedback_mod, fs, graph as graph_mod, proposals
+from mnemerynne.web.deps import api_user, get_assistant_db, get_db
 
 log = logging.getLogger("mnemerynne.chat")
 router = APIRouter()
@@ -119,7 +124,8 @@ def _own_conversation(conn: sqlite3.Connection, user_id: int, conversation_id: s
 
 @router.post("/api/ask")
 async def ask(body: AskBody, request: Request, user=Depends(api_user),
-              conn: sqlite3.Connection = Depends(get_db)):
+              conn: sqlite3.Connection = Depends(get_db),
+              chats: sqlite3.Connection = Depends(get_assistant_db)):   # where the question is written
     settings = request.app.state.settings
     question = body.question.strip()
     if not question:
@@ -145,10 +151,10 @@ async def ask(body: AskBody, request: Request, user=Depends(api_user),
             raise HTTPException(status.HTTP_409_CONFLICT, "Erynne is still answering the last question here.")
     else:
         conversation_id = uuid.uuid4().hex
-        conn.execute("INSERT INTO conversations(id, user_id, title) VALUES (?, ?, ?)",
-                     (conversation_id, user["id"], question[:80]))
-    conn.execute("INSERT INTO messages(conversation_id, role, content, scope) VALUES (?, 'user', ?, ?)",
-                 (conversation_id, question, scope_json))
+        chats.execute("INSERT INTO conversations(id, user_id, title) VALUES (?, ?, ?)",
+                      (conversation_id, user["id"], question[:80]))
+    chats.execute("INSERT INTO messages(conversation_id, role, content, scope) VALUES (?, 'user', ?, ?)",
+                  (conversation_id, question, scope_json))
     user_id = user["id"]
     app = request.app
     # BFGguf: decided here (the group and its settings), checked to answer in work().
@@ -229,6 +235,12 @@ def _background(app, coro) -> None:
     task.add_done_callback(app.state.background.discard)
 
 
+@router.get("/api/me/tools")
+async def my_tools(request: Request, user=Depends(api_user)):
+    """The tools Ask's Advanced settings lists for this person (switching one on never adds access)."""
+    return await request.app.state.agent.tool_list(user["id"])
+
+
 @router.get("/api/runs/{run_id}/events")
 async def run_events(run_id: str, request: Request, after: int = 0, user=Depends(api_user)):
     """A question's events from number `after` on: to pick up an answer again
@@ -247,10 +259,12 @@ def _external(source: dict) -> tuple:
 
 
 def _save_answer(settings, conversation_id: str, final: dict) -> int:
+    """The answer, its sources and the graph's timings in assistant.db (one transaction there); then the
+    proposals it drafted, in core, are pointed at it."""
     tokens = final.get("tokens") or {}
-    conn = db.connect(settings.db_path)
+    core = db.connect(settings.db_path)
     try:
-        with db.transaction(conn):
+        with assistant_db.on(core) as conn, db.transaction(conn):
             message_id = conn.execute(
                 "INSERT INTO messages(conversation_id, role, content, status, model, prompt_version, latency_ms, "
                 "route, tokens_in, tokens_out, tokens_external, tokens_estimated) "
@@ -268,10 +282,12 @@ def _save_answer(settings, conversation_id: str, final: dict) -> int:
             )
             conn.execute("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?", (conversation_id,))
             graph_mod.log_trace(conn, conversation_id, final.get("trace") or [])
-            proposals.attach(conn, final.get("proposals") or [], message_id)
+        if final.get("proposals"):
+            with db.transaction(core):                      # agent_proposals: core's
+                proposals.attach(core, final["proposals"], message_id)
         return message_id
     finally:
-        conn.close()
+        core.close()
 
 
 @router.get("/api/conversations")
@@ -331,16 +347,17 @@ def _source_url(s: dict) -> str | None:
 
 @router.delete("/api/conversations/{conversation_id}")
 async def delete_conversation(conversation_id: str, request: Request, user=Depends(api_user),
-                              conn: sqlite3.Connection = Depends(get_db)):
+                              conn: sqlite3.Connection = Depends(get_db),
+                              chats: sqlite3.Connection = Depends(get_assistant_db)):
     _own_conversation(conn, user["id"], conversation_id)
-    conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+    chats.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))   # its checkpoints go too (trigger)
     await request.app.state.checkpointer.adelete_thread(conversation_id)
     return {"status": "deleted"}
 
 
 @router.post("/api/messages/{message_id}/feedback")
 def feedback(message_id: int, body: FeedbackBody, user=Depends(api_user),
-             conn: sqlite3.Connection = Depends(get_db)):
+             conn: sqlite3.Connection = Depends(get_assistant_db)):   # the rating and its archive copy: assistant.db
     if body.rating not in (1, -1):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Rating must be 1 or -1.")
     row = conn.execute("SELECT c.user_id FROM messages m JOIN conversations c ON c.id = m.conversation_id "

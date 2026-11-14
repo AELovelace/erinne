@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from mnemerynne import apis, db, users
+from mnemerynne import apis, assistant_db, db, users
 from mnemerynne.backup import BackupError, RestoreError, backup, env_secret_key, restore
 from mnemerynne.cli import main
 from mnemerynne.ingest import store
@@ -29,8 +29,9 @@ def test_backup_snapshots_db_copies_blobs_and_prunes(conn, settings, tmp_path):
     assert again["blobs_copied"] == 0  # unchanged files are not copied twice
     third = backup(settings, dest, keep=2, today=date(2026, 10, 1) + timedelta(days=2))
     assert third["pruned"] == ["mnemerynne-2026-10-01.db"]
-    assert sorted(p.name for p in (dest / "db").iterdir()) == ["mnemerynne-2026-10-02.db", "mnemerynne-2026-10-03.db",
-                                                               "search-2026-10-02.db", "search-2026-10-03.db"]  # its index
+    assert sorted(p.name for p in (dest / "db").iterdir()) == [   # with its index and Ask's conversations
+        "assistant-2026-10-02.db", "assistant-2026-10-03.db", "mnemerynne-2026-10-02.db", "mnemerynne-2026-10-03.db",
+        "search-2026-10-02.db", "search-2026-10-03.db"]
 
 
 def _populated(conn, settings, tmp_path):
@@ -180,7 +181,8 @@ def test_forget_memories_cli(conn, settings, monkeypatch, capsys):
     from mnemerynne.graph import memory_namespace
 
     uid = users.create_user(conn, "alice", "password123")
-    s = SqliteStore(sqlite3.connect(settings.db_path, isolation_level=None, check_same_thread=False))
+    s = SqliteStore(sqlite3.connect(assistant_db.path(settings.db_path), isolation_level=None,
+                                    check_same_thread=False))           # assistant.db's store
     s.setup()
     s.put(memory_namespace(uid), "k1", {"text": "Works nights."})
     monkeypatch.setattr("mnemerynne.cli.get_settings", lambda: settings)
@@ -195,7 +197,8 @@ def test_delete_user_cli_wipes_memories_and_inbox(conn, settings, monkeypatch, c
     from mnemerynne.graph import memory_namespace
 
     uid = users.create_user(conn, "alice", "password123")
-    s = SqliteStore(sqlite3.connect(settings.db_path, isolation_level=None, check_same_thread=False))
+    s = SqliteStore(sqlite3.connect(assistant_db.path(settings.db_path), isolation_level=None,
+                                    check_same_thread=False))           # assistant.db's store
     s.setup()
     s.put(memory_namespace(uid), "k1", {"text": "Works nights."})
     monkeypatch.setattr("mnemerynne.cli.get_settings", lambda: settings)

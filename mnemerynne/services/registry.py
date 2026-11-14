@@ -19,7 +19,7 @@ class Service:
     name: str
     serves: str                          # what it is, in a sentence (logs, health, docs)
     routers: tuple[str, ...]             # "module:attribute" of each APIRouter it mounts, imported when built
-    paths: tuple[str, ...]               # the URL prefixes the web server sends to it (nginx `location`)
+    paths: tuple[str, ...]               # the URL prefixes the web server sends to it (nginx `location`; "~ ^/..." a regex)
     port: int                            # on MNEMERYNNE_HOST
     workers: dict[str, int] = field(default_factory=lambda: {"nas": 1, "ryzen": 1})   # processes per profile
     single: bool = False                 # keeps live state in memory: exactly one process, whatever the profile
@@ -89,6 +89,17 @@ SERVICES: dict[str, Service] = {s.name: s for s in (
         port=38203,
         workers={"nas": 3, "ryzen": 6},
         hooks=("pages",),                  # its viewer, editor and wiki pages draw the web app's templates
+    ),
+    Service(
+        name="assistant",
+        serves="Ask (/api/ask and its answers' events, conversations, ratings, memories, the tool list): "
+               "assistant.db and LangGraph's state; an answer's events live in the process writing it, so one process",
+        routers=("mnemerynne.web.chat:router", "mnemerynne.web.memories:router"),
+        paths=("/api/ask", "/api/runs/", "/api/conversations", "~ ^/api/messages/[0-9]+/feedback$", "/api/memories",
+               "/api/me/tools"),
+        port=38204,
+        single=True,                       # runs (an answer's events) are this process's memory
+        hooks=("balancer", "rooms", "assistant"),   # the model's nodes, Rooms' bus for Erynne's answers, then Ask
     ),
     Service(
         name="share",

@@ -237,17 +237,27 @@ services() {
         fi
         move_service "$name" "$port" || { echo "Stopped at $name; the services before it run as mnemerynne@." >&2; exit 1; }
     done <<< "$list"
-    local walks                                                 # who walks the share's permissions (Phase 5)
+    local walks changed=0 on                                    # who walks the share's permissions (Phase 5)
     walks=$(env_get MNEMERYNNE_SHARE_WALKS)
     if systemctl is-enabled --quiet mnemerynne@share 2>/dev/null; then
         if [ "$walks" != service ]; then
             env_set MNEMERYNNE_SHARE_WALKS service
-            echo "The share service walks the share for everyone now (MNEMERYNNE_SHARE_WALKS=service); restarting the app."
-            restart_app || true
+            echo "The share service walks the share for everyone now (MNEMERYNNE_SHARE_WALKS=service)."
+            changed=1
         fi
     elif [ -n "$walks" ]; then
         sed -i '/^MNEMERYNNE_SHARE_WALKS=/d' "$ENV"
-        echo "No share service: each process walks the share itself again; restarting the app."
+        echo "No share service: each process walks the share itself again."
+        changed=1
+    fi
+    on=$(enabled_services)                                      # the app leaves these services' jobs to them
+    if [ "$(env_get MNEMERYNNE_SERVICES_ON)" != "$on" ]; then
+        if [ -n "$on" ]; then env_set MNEMERYNNE_SERVICES_ON "$on"; else sed -i '/^MNEMERYNNE_SERVICES_ON=/d' "$ENV"; fi
+        echo "Running as services of their own: ${on:-none} (MNEMERYNNE_SERVICES_ON)."
+        changed=1
+    fi
+    if [ "$changed" = 1 ]; then
+        echo "Restarting the app, so every process knows."
         restart_app || true
     fi
     if [ -f "$SAVED" ]; then                                    # the front door is on: its routes from the registry

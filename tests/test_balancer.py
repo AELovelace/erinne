@@ -226,3 +226,40 @@ def test_saved_nodes_are_used_after_a_restart(settings, conn):
     b = bal.Balancer(Nodes().transport())
     with TestClient(create_app(settings, Services(llm=None, embedder=FakeEmbedder(), balancer=b))):
         assert [n.url for n in b.nodes] == [A] and b.key == KEY
+
+
+def test_with_valkey_one_process_polls_the_nodes_for_all(monkeypatch):
+    """Phase 7 (docs/plans/services-rewrite.md): the web app, the assistant and the games each have a Balancer; with
+    Valkey only the one holding "balancer:poller" asks the nodes, and the others take its report. When it stops, one
+    of the others takes over."""
+    from mnemerynne import events
+
+    bus = events.LocalBus()                              # stands in for Valkey: one store for both "processes"
+    monkeypatch.setattr(events, "_bus", bus)
+    monkeypatch.setattr(events, "shared", lambda: True)
+    first_nodes, second_nodes = Nodes(load={A: (1, 4), B: (3, 4)}), Nodes(load={A: (1, 4), B: (3, 4)})
+    first, second = bal.Balancer(first_nodes.transport()), bal.Balancer(second_nodes.transport())
+    for b in (first, second):
+        b.configure([A, B], KEY)
+
+    async def go():
+        await first.shared_round()                       # nobody polls yet: the first takes it
+        await second.shared_round()                      # the second reads its report
+        assert first.polling and not second.polling
+        assert len(first_nodes.seen) == 2 and second_nodes.seen == []
+        assert [n.url for n in second.candidates()] == [A, B] and second.nodes[1].in_flight == 3
+        second.sent_to(second.nodes[0])                  # its own sends count until a fresher report
+        await second.shared_round()
+        assert second.nodes[0].pending == 1
+        first.nodes[0].polled_at = None                  # the next report is a fresh one
+        await first.shared_round()
+        await second.shared_round()
+        assert second.nodes[0].pending == 0              # counted in the node's own in-flight now
+        bus.forget(bal.POLLER_KEY)                       # the poller stopped (its claim ran out)
+        await second.shared_round()
+        assert second.polling and len(second_nodes.seen) == 2
+        await first.shared_round()
+        assert not first.polling                         # and the first reads the second's now
+        for b in (first, second):
+            await b.aclose()
+    run(go())

@@ -54,12 +54,6 @@ def apply_proposal(proposal_id: int, request: Request, body: ApplyBody | None = 
     return out
 
 
-@router.get("/api/me/tools")
-async def my_tools(request: Request, user=Depends(api_user)):
-    """The tools chat's Advanced settings lists for this person (switching one on never adds access)."""
-    return await request.app.state.agent.tool_list(user["id"])
-
-
 @router.get("/proposals", response_class=HTMLResponse)
 def proposals_page(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db)):
     """Where Claude's connector sends people to apply what it proposed (chat shows them under answers)."""

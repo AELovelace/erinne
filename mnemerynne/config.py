@@ -102,6 +102,11 @@ class Settings(BaseSettings):
     # what it needs, as before. "service": only the share service walks (and watches); the others read its walks
     # from share-rights.db and ask it for new ones. front-door.sh services sets it while the share service runs.
     share_walks: str = "here"
+    # The services running as processes of their own on this box (comma-separated registry names: "assistant,
+    # automations"). front-door.sh services writes it from the enabled mnemerynne@ units and restarts the app, so
+    # the web app leaves those services' one-of-a-kind jobs to them (Erynne's Rooms answers, the scheduler) and,
+    # slimmed (Phase 11), doesn't build what only they use. Empty: the web app does everything, as before.
+    services_on: str = ""
 
     # Inference (llama-server)
     llm_url: str = "http://127.0.0.1:8081"
@@ -272,6 +277,10 @@ class Settings(BaseSettings):
     def theme_dir(self) -> Path:
         # Branding (brand/) and each theme's own files (<slug>/): mnemerynne/theme.py.
         return self.data_dir / "theme"
+
+    def runs_elsewhere(self, service: str) -> bool:
+        """Whether `service` runs as its own process here (services_on), so the web app leaves its jobs to it."""
+        return service in {part.strip() for part in self.services_on.split(",") if part.strip()}
 
     @property
     def share_trash_dir(self) -> Path | None:

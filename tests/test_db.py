@@ -36,7 +36,9 @@ def _add_file_with_chunk(conn, collection_id, text="Checkout time is 11am.", sha
 def test_migrate_from_empty(conn, settings):
     assert db.schema_version(conn) == LATEST
     tables = {r[0] for r in conn.execute("SELECT name FROM main.sqlite_master WHERE type IN ('table','view')")}
-    assert {"users", "collections", "files", "jobs", "messages"} <= tables
+    assert {"users", "collections", "files", "jobs"} <= tables
+    assistant = {r[0] for r in conn.execute("SELECT name FROM assistant.sqlite_master WHERE type = 'table'")}
+    assert {"conversations", "messages", "checkpoints", "store"} <= assistant and "messages" not in tables
     search = {r[0] for r in conn.execute("SELECT name FROM search.sqlite_master WHERE type = 'table'")}
     assert {"chunks", "chunks_fts", "chunk_vec"} <= search and not {"chunks", "chunk_vec"} & tables   # search.db's
     assert conn.execute("SELECT value FROM search_meta WHERE key='embed_dim'").fetchone()[0] == "4"

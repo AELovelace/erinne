@@ -6,7 +6,7 @@ import asyncio
 import logging
 import secrets
 import sqlite3
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,7 +29,7 @@ from mnemerynne import (identity, sync as sync_mod, balancer as balancer_mod, bf
 from mnemerynne.agent import Agent
 from mnemerynne.media import screens as media_screens, transcode as media_transcode
 from mnemerynne.rooms_erynne import RoomErynne
-from mnemerynne import automations as automations_mod, automations_run
+from mnemerynne import assistant_db, automations as automations_mod, automations_run
 from mnemerynne import games   # the built-in games' registry: Lumi's three apps each get a manifest (lumi_manifest)
 from mnemerynne import health
 from mnemerynne.automations_run import Scheduler
@@ -119,6 +119,62 @@ async def _answer_rooms_asks(app: FastAPI) -> None:
         except Exception:
             log.warning("Rooms: lost the event bus for Erynne's asks; trying again.", exc_info=True)
             await asyncio.sleep(5)
+
+
+def model_clients(settings: Settings, balancer) -> Services:
+    """The model clients for a process that answers (the web app, the assistant service): the answer model through
+    the balancer nodes (then MNEMERYNNE_LLM_URL), the embedder on this box, and the reranker if there is one."""
+    return Services(
+        llm=LLM.from_settings(settings, transport=balancer_mod.BalancedTransport(balancer, settings.llm_url)),
+        embedder=Embedder(settings),
+        reranker=Reranker(settings.rerank_url) if settings.rerank_url else None,
+    )
+
+
+@asynccontextmanager
+async def assistant_parts(app: FastAPI, settings: Settings, svc: Services, balancer, *, testing: bool,
+                          answer_rooms: bool):
+    """Ask's pieces on app.state, for the web app and the assistant service alike: LangGraph's checkpointer and
+    store (assistant.db), the agent, the graph, the memory writer, and Erynne for Rooms. Needs app.state.rooms_bus,
+    .background, .embedder and .directory set first. `answer_rooms`: this process answers @Erynne in Rooms (its own
+    posts directly, other processes' through "rooms:ask"); otherwise app.state.rooms_erynne is None and Rooms hands
+    its asks on. Yields Erynne for Rooms either way: the scheduler posts automations' reports with her."""
+    # LangGraph's checkpointer (conversation state) and store (long-term memories) live in assistant.db with the
+    # conversations, on their own connections. Autocommit (isolation_level=None): they issue their own
+    # BEGIN/COMMIT, and Python's implicit transactions would otherwise hold the write lock.
+    graph_file = assistant_db.path(settings.db_path)
+    saver_conn = await aiosqlite.connect(graph_file, timeout=10, isolation_level=None)
+    store_conn = await aiosqlite.connect(graph_file, timeout=10, isolation_level=None)
+    try:
+        checkpointer = AsyncSqliteSaver(saver_conn)
+        await checkpointer.setup()                     # nothing to do on assistant.db: its migration made them
+        store = AsyncSqliteStore(store_conn)
+        await store.setup()
+        app.state.checkpointer, app.state.store = checkpointer, store
+        router = svc.router if testing else load_router(settings)
+        log.info("Routing: %s.", f"{', '.join(router.labels)}" if router else "no router trained; everything is search")
+        # Erynne with tools, for the agent group (agent.py); same model path as the answers.
+        app.state.agent = Agent(settings, lambda: app.state.embedder, lambda: app.state.directory,
+                                (lambda cfg: svc.agent_llm) if svc.agent_llm is not None else None, balancer,
+                                (lambda key, model, timeout: svc.claude_llm) if svc.claude_llm is not None else None)
+        try:
+            app.state.graph = build_graph(Deps(settings, svc.llm, svc.embedder, svc.reranker, router,
+                                               app.state.directory, app.state.agent), checkpointer, store)
+            # Erynne answering @mentions in Rooms, reading only what everyone in the room may read.
+            erynne = RoomErynne(
+                settings, app.state.agent, app.state.rooms_bus, app.state.background, lambda: app.state.embedder,
+                lambda: app.state.directory, balancer, getattr(app.state, "bfgguf_transport", None),
+                (lambda cfg: svc.agent_llm) if svc.agent_llm is not None else None)
+            app.state.rooms_erynne = erynne if answer_rooms else None
+            app.state.memory_writer = memory.make_writer(settings, svc.llm, store, app.state.background)
+            if answer_rooms:                           # the messages asking Erynne that another process took
+                app.state.background.add(asyncio.create_task(_answer_rooms_asks(app)))
+            yield erynne
+        finally:
+            await app.state.agent.aclose()
+    finally:
+        await saver_conn.close()
+        await store_conn.close()
 
 
 def _guard(app: FastAPI, settings: Settings, secret_key: str) -> None:
@@ -282,8 +338,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             made = editing.ensure_all_agents(conn)
             if made:
                 log.info("Made the Agents folder in %d inbox(es).", made)
-            with db.transaction(conn):
-                archived = feedback_mod.backfill(conn)
+            with assistant_db.on(conn) as chats, db.transaction(chats):   # ratings live in assistant.db
+                archived = feedback_mod.backfill(chats)
             if archived:
                 log.info("Archived %d rating(s) given before the feedback archive.", archived)
             cfg = balancer_mod.load_config(conn)
@@ -304,49 +360,24 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         app.state.bfgguf_transport = services.bfgguf_transport if services else None
         if nodes:
             log.info("Answer model: %d balancer node(s), %s when none answers.", len(nodes), settings.llm_url)
-        svc = services or Services(
-            llm=LLM.from_settings(settings, transport=balancer_mod.BalancedTransport(balancer, settings.llm_url)),
-            embedder=Embedder(settings),
-            reranker=Reranker(settings.rerank_url) if settings.rerank_url else None,
-        )
-        # LangGraph's checkpointer (conversation state) and store (long-term
-        # memories) live in the same database file, on their own connections.
-        # Autocommit (isolation_level=None): they issue their own BEGIN/COMMIT,
-        # and Python's implicit transactions would otherwise hold the write lock.
-        saver_conn = await aiosqlite.connect(settings.db_path, timeout=10, isolation_level=None)
-        store_conn = await aiosqlite.connect(settings.db_path, timeout=10, isolation_level=None)
-        checkpointer = AsyncSqliteSaver(saver_conn)
-        await checkpointer.setup()
-        store = AsyncSqliteStore(store_conn)
-        await store.setup()
-        app.state.checkpointer, app.state.store = checkpointer, store
-        router = svc.router if services is not None else load_router(settings)
-        log.info("Routing: %s.", f"{', '.join(router.labels)}" if router else "no router trained; everything is search")
-        # Erynne with tools, for the agent group (agent.py); same model path as the answers.
-        app.state.agent = Agent(settings, lambda: app.state.embedder, lambda: app.state.directory,
-                                (lambda cfg: svc.agent_llm) if svc.agent_llm is not None else None, balancer,
-                                (lambda key, model, timeout: svc.claude_llm) if svc.claude_llm is not None else None)
-        app.state.graph = build_graph(Deps(settings, svc.llm, svc.embedder, svc.reranker, router,
-                                           app.state.directory, app.state.agent), checkpointer, store)
+        svc = services or model_clients(settings, balancer)
         app.state.background = set()
-        # Erynne answering @mentions in Rooms, reading only what everyone in the room may read.
-        app.state.rooms_erynne = RoomErynne(
-            settings, app.state.agent, app.state.rooms_bus, app.state.background, lambda: app.state.embedder,
-            lambda: app.state.directory, balancer, app.state.bfgguf_transport,
-            (lambda cfg: svc.agent_llm) if svc.agent_llm is not None else None)
-        app.state.memory_writer = memory.make_writer(settings, svc.llm, store, app.state.background)
+        app.state.embedder = svc.embedder
+        # Ask (LangGraph, the agent, the graph, Erynne in Rooms, memories): the same pieces the assistant service
+        # builds. While that service runs and Valkey carries Rooms' asks to it, Erynne answers Rooms from there.
+        rooms_here = not (settings.runs_elsewhere("assistant") and events.shared())
+        stack = AsyncExitStack()
+        erynne = await stack.enter_async_context(
+            assistant_parts(app, settings, svc, balancer, testing=services is not None, answer_rooms=rooms_here))
         # Media's ffmpeg sessions (media/transcode.py): none survive a restart.
         app.state.media_sessions = media_transcode.Manager(settings)
         await asyncio.to_thread(app.state.media_sessions.startup)
-        app.state.embedder = svc.embedder
         poller = asyncio.create_task(balancer.run())
         app.state.background.add(poller)
-        # Rooms: other processes' new messages, typing and presence, to this process's streams (rooms_bus.listen),
-        # and the messages asking Erynne that the rooms service posted (she answers from here, where the agent is).
+        # Rooms: other processes' new messages, typing and presence, to this process's streams (rooms_bus.listen).
         app.state.background.add(asyncio.create_task(app.state.rooms_bus.listen()))
-        app.state.background.add(asyncio.create_task(_answer_rooms_asks(app)))
         # Automator: scheduled automations run here, where the agent and its model path live.
-        app.state.automator = Scheduler(settings, app.state.agent, app.state.rooms_erynne, app.state.rooms_bus,
+        app.state.automator = Scheduler(settings, app.state.agent, erynne, app.state.rooms_bus,
                                         lambda: app.state.directory, app.state.background)
         automations_run.ACTIVE = app.state.automator   # for the MCP tools (run now, a routine's report)
         if services is None:   # tests drive it with tick() instead
@@ -362,11 +393,9 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             for task in list(app.state.background):
                 task.cancel()
             await asyncio.gather(*app.state.background, return_exceptions=True)
-            await saver_conn.close()
-            await store_conn.close()
+            await stack.aclose()                   # LangGraph's connections, the agent's clients
             app.state.db_pool.close()
             deps.close_feature_pools(app)          # games.db's and the other feature files'
-            await app.state.agent.aclose()
             await app.state.remote_proxy.aclose()
             await balancer.aclose()
             await asyncio.to_thread(app.state.media_sessions.shutdown)

@@ -9,16 +9,18 @@
 | Phase 0.2: event bus (`mnemerynne/events.py`, LocalBus + ValkeyBus, `MNEMERYNNE_VALKEY_URL`) | done | 4993320 |
 | Phase 0.3: a SQLite file per feature (`db.connect_feature`, read-only core attach, per-file migrations, `move_tables`, `migrate_all` / `wait_migrated`) | done | 1e18225 |
 | Phase 0.4: backups, restores and `update.sh` undo for every DB file; users' and files' rows cleaned across files (`forget_user`, `sweep_orphans`, `check-orphans`) | done | afe0ec2 |
-| Phase 0.5: systemd template `mnemerynne@.service`, front door generated from the registry, Valkey on the box | done in code (2026-11-13); **not yet run on the NAS** | 340f24c + this step's commit |
-| Phase 1: nginx serves `/static/` and file bytes (`X-Accel-Redirect`); rate limits shared through Valkey | done in code (2026-11-13); **not yet run on the NAS** | 1267fc9 |
-| Phase 2: `games.db` (18 tables: coins, Lumi, arcade, casino, Lumi-Soft, push) out of core; `mnemerynne move-back games` for A/B | done in code (2026-11-13); **not yet run on the NAS** | 2f33d9d |
-| Phase 3: `rooms.db`; Rooms' live events over the event bus; the `rooms` service (needs Valkey) | done in code (2026-11-13); **not yet run on the NAS** | 2d8b3fe |
+| Phase 0.5: systemd template `mnemerynne@.service`, front door generated from the registry, Valkey on the box | on the NAS since 2026-11-14 | 340f24c + this step's commit |
+| Phase 1: nginx serves `/static/` and file bytes (`X-Accel-Redirect`); rate limits shared through Valkey | on the NAS since 2026-11-14 | 1267fc9 |
+| Phase 2: `games.db` (18 tables: coins, Lumi, arcade, casino, Lumi-Soft, push) out of core; `mnemerynne move-back games` for A/B | on the NAS since 2026-11-14 | 2f33d9d |
+| Phase 3: `rooms.db`; Rooms' live events over the event bus; the `rooms` service (needs Valkey) | on the NAS since 2026-11-14 | 2d8b3fe |
 | Between 3 and 4: request and feature connections attach every feature file read-only | done | 041cd1a |
-| Phase 4a: `media.db` (13 `media_*`/`signage_*` tables) | done in code (2026-11-14); **not yet run on the NAS** | 80fff80 |
-| Phase 4b: the media service (all of Media in one process; no Valkey needed) | done in code (2026-11-14); **not yet run on the NAS** | 43c2c4a |
-| Phase 5: the share service walks the share's permissions for every process and watches it | done in code (2026-11-14); **not yet run on the NAS** | cb7de09 |
-| Phase 6a: `search.db` (chunks, their keyword index and vectors) out of core; `move-back search` for A/B | done in code (2026-11-14); **not yet run on the NAS** | c7fb12f |
-| Phase 6b: the files service (Files, the editor and the wiki; 3 processes on the NAS) | done in code (2026-11-14); **not yet run on the NAS** | this step's commit |
+| Phase 4a: `media.db` (13 `media_*`/`signage_*` tables) | on the NAS since 2026-11-14 | 80fff80 |
+| Phase 4b: the media service (all of Media in one process; no Valkey needed) | on the NAS since 2026-11-14 | 43c2c4a |
+| Phase 5: the share service walks the share's permissions for every process and watches it | on the NAS since 2026-11-14 | cb7de09 |
+| Phase 6a: `search.db` (chunks, their keyword index and vectors) out of core; `move-back search` for A/B | on the NAS since 2026-11-14 | c7fb12f |
+| Phase 6b: the files service (Files, the editor and the wiki; 3 processes on the NAS) | on the NAS since 2026-11-14 | 26c62f8 |
+| Fixes from the first run on the NAS: bare page paths past nginx's own redirect; no 20 s wait for a share walk without Valkey | on the NAS after the next update | c31422b, 5723c67 |
+| Phase 7: `assistant.db` (conversations, answers, ratings, timings, LangGraph's checkpoints and memories); the assistant service (one process); one balancer poller through Valkey | done in code (2026-11-14) | this step's commit |
 
 Tests: `.venv\Scripts\python -m pytest tests -n auto` (about 4 minutes).
 
@@ -151,6 +153,33 @@ The Files page itself (`/files`) stays with the web app (its shell). Nothing is 
 links are signed; folder caches are version-checked; share walks come from share-rights.db or the share service),
 so any of the three answers any request. Every service now calls `sharepoint.configure` (fs.Access asks it who may
 see a SharePoint file). No Valkey needed; best with the share service on, so three processes don't each walk.
+
+**First run on the NAS (2026-11-14):** phases 0.5 to 6b went on together (`update`, then `front-door.sh
+services`: sync, games, media, files and share as `mnemerynne@`; rooms off, as Valkey is off; accel off). Two
+fixes: nginx answered `/remote` (and would `/files`, `/media`) itself with a redirect to the slashed path on
+port 38200 (now an exact location per bare page, and `absolute_redirect off`); and without Valkey every first look
+at a library waited 20 s for a share service that couldn't hear the ask (now it walks at once). A/B on the new
+box showed little difference: it's fast either way.
+
+**Phase 7 (2026-11-14):** `assistant.db` holds conversations, messages, message_sources, feedback,
+feedback_archive and graph_runs, and LangGraph's checkpoints, writes, store and store_migrations (its migration
+makes them as LangGraph would, with all five store migrations recorded, so `setup()` does nothing there). A trigger
+deletes a conversation's checkpoints, writes and timings when the conversation goes, whoever deletes it;
+`forget_user` deletes a person's conversations, ratings keep their row without the name, the archive keeps its
+copy. messages and feedback ids are AUTOINCREMENT: core's `agent_proposals.message_id` (its reference cut) points
+across. **agent_proposals stays in core** (the plan had it here): applying one writes a file and marks the proposal
+in one transaction, from four places (Erynne, MCP, automations, the admin queue), so splitting it would cost that
+for little. Writes: `get_assistant_db` in requests, `assistant_db.on(conn)` elsewhere; LangGraph opens
+`assistant_db.path()`. The **assistant** service (port 38204, **one process**, not two: an answer's events live in
+the process writing it, and `/api/runs/{id}/events` must reach it) serves `/api/ask`, `/api/runs/`,
+`/api/conversations`, `/api/messages/<n>/feedback` (a regex location: the inbox's `/api/messages` stays),
+`/api/memories` and `/api/me/tools` (moved from the proposals router to chat's). Ask's start-up is one function
+for both (`web.app.assistant_parts`). `front-door.sh services` now writes `MNEMERYNNE_SERVICES_ON` (the enabled
+services) and restarts the app once if it changed; with `assistant` in it **and Valkey**, the web app stops
+answering @Erynne in Rooms and the assistant does (`rooms:ask`); without Valkey the web app keeps answering. The
+scheduler still posts automations' reports with the web app's own Erynne. Balancer: with Valkey one process
+polls the nodes (`balancer:poller`, a 6 s claim) and leaves its report (`balancer:nodes`); the others read it and
+take over when it lapses; without Valkey each polls, as before.
 
 ## Context
 

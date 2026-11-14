@@ -97,6 +97,10 @@ MEDIA_TABLES = ("signage_groups", "media_artwork", "media_screens", "media_remot
 SEARCH_VECTOR_COLUMNS = "rowid, embedding, collection_id, folder_id, claude_hidden"
 ROOMS_TABLES = ("chat_rooms", "chat_members", "chat_messages", "chat_reactions", "chat_attachments", "chat_mentions",
                 "chat_events")
+# Ask's conversations and what hangs off them, then LangGraph's own tables (its checkpoints and the store holding
+# Erynne's memories): parents before the tables that refer to them.
+ASSISTANT_TABLES = ("conversations", "messages", "message_sources", "feedback", "feedback_archive", "graph_runs",
+                    "checkpoints", "writes", "store_migrations", "store")
 FEATURE_DBS: dict[str, FeatureDb] = {f.name: f for f in (
     # Phase 2: the built-in games, their coins and Lumi's reminders (web/games.py, the games service). A new games
     # table goes in migrations/games/, never in core's migrations.
@@ -121,6 +125,11 @@ FEATURE_DBS: dict[str, FeatureDb] = {f.name: f for f in (
     # (retrieval.py) on any connection. Big indexing bursts no longer hold core's write lock.
     FeatureDb("search", moves=("chunks",), copies=(("chunk_vec", SEARCH_VECTOR_COLUMNS),), drops=("chunks_fts",),
               file_columns=(("chunks", "file_id"),), unlink=(("message_sources", "chunk_id"),)),
+    # Phase 7: Ask (web/chat.py, graph.py, memory.py, the assistant service). A conversation goes with its person
+    # (its LangGraph state and timings with it: the conversations_gone trigger); a rating stays, without the name.
+    # Proposals stay in core (they're applied with the file they change), so theirs to a message is cut.
+    FeatureDb("assistant", moves=ASSISTANT_TABLES, user_columns=(("conversations", "user_id"),),
+              user_null_columns=(("feedback", "user_id"),), unlink=(("agent_proposals", "message_id"),)),
 )}
 
 
