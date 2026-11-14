@@ -6,6 +6,10 @@
 Layout:
     <dest>/db/mnemerynne-YYYY-MM-DD.db   one snapshot per day (SQLite backup API,
                                      safe while the app is running)
+    <dest>/db/<feature>-YYYY-MM-DD.db    the same day's snapshot of each feature's own
+                                     database file (games.db, rooms.db, ...: db.FEATURE_DBS),
+                                     taken right after core's. No transaction spans two files,
+                                     so each snapshot is whole on its own.
     <dest>/config/YYYY-MM-DD/        that day's settings file (it holds the secret
                                      key that API credentials and Microsoft 365
                                      tokens are encrypted with), router.json,
@@ -32,6 +36,7 @@ import subprocess
 from datetime import date, datetime
 from pathlib import Path
 
+from mnemerynne import db as db_mod
 from mnemerynne.config import Settings
 
 log = logging.getLogger("mnemerynne.backup")
@@ -39,7 +44,25 @@ log = logging.getLogger("mnemerynne.backup")
 # Kept beside each snapshot when present in data_dir.
 DATA_FILES = ("router.json", "synonyms.txt", "mnemerynne.mcpb")
 ENV_NAME = "mnemerynne.env"
-SERVICES = ("mnemerynne-web", "mnemerynne-worker")
+SERVICES = ("mnemerynne-web", "mnemerynne-worker")   # plus each service's unit (running_services)
+
+
+def _snapshot(source: Path, target: Path) -> None:
+    """A consistent copy of a live database (the SQLite backup API), owner-only, written whole or not at all."""
+    tmp = target.with_suffix(".tmp")
+    src = sqlite3.connect(source)
+    dst = sqlite3.connect(tmp)
+    try:
+        src.backup(dst)
+    finally:
+        dst.close()
+        src.close()
+    _private_file(tmp)
+    tmp.replace(target)
+
+
+def _feature_names() -> list[str]:
+    return list(db_mod.FEATURE_DBS)
 
 
 class RestoreError(Exception):
@@ -95,16 +118,13 @@ def backup(settings: Settings, dest: Path, keep: int = 14, today: date | None = 
     db_dir = dest / "db"
     _private_dir(db_dir)
     snapshot = db_dir / f"mnemerynne-{today.isoformat()}.db"
-    tmp = snapshot.with_suffix(".tmp")
-    src = sqlite3.connect(settings.db_path)
-    dst = sqlite3.connect(tmp)
-    try:
-        src.backup(dst)
-    finally:
-        dst.close()
-        src.close()
-    _private_file(tmp)
-    tmp.replace(snapshot)
+    _snapshot(settings.db_path, snapshot)
+    features = []
+    for name in _feature_names():                       # each feature's own file, right after core
+        path = db_mod.feature_path(settings.db_path, name)
+        if path.exists():
+            _snapshot(path, db_dir / f"{name}-{today.isoformat()}.db")
+            features.append(name)
 
     config_dir = dest / "config" / today.isoformat()
     _private_dir(dest / "config")
@@ -137,11 +157,14 @@ def backup(settings: Settings, dest: Path, keep: int = 14, today: date | None = 
     snapshots = sorted(db_dir.glob("mnemerynne-*.db"))
     removed = []
     for old in snapshots[:-keep] if keep > 0 else []:
+        day = old.stem.removeprefix("mnemerynne-")
         old.unlink()
-        shutil.rmtree(dest / "config" / old.stem.removeprefix("mnemerynne-"), ignore_errors=True)
+        for name in _feature_names():                   # that day's feature snapshots go with it
+            (db_dir / f"{name}-{day}.db").unlink(missing_ok=True)
+        shutil.rmtree(dest / "config" / day, ignore_errors=True)
         removed.append(old.name)
-    return {"snapshot": str(snapshot), "blobs_copied": copied, "pruned": removed, "config": kept,
-            "warnings": warnings}
+    return {"snapshot": str(snapshot), "features": features, "blobs_copied": copied, "pruned": removed,
+            "config": kept, "warnings": warnings}
 
 
 # ------------------------------------------------------------------- restore
@@ -154,8 +177,10 @@ def running_services() -> list[str]:
     """The Mnemerynne services systemd reports as running (none where there's no systemctl)."""
     if shutil.which("systemctl") is None:
         return []
+    from mnemerynne.services import registry          # the services' own units (mnemerynne-sync, ...)
+
     running = []
-    for unit in SERVICES:
+    for unit in (*SERVICES, *(f"mnemerynne-{name}" for name in registry.SERVICES)):
         try:
             out = subprocess.run(["systemctl", "is-active", unit], capture_output=True, text=True, timeout=10)
         except (OSError, subprocess.TimeoutExpired):
@@ -207,26 +232,40 @@ def restore(settings: Settings, source: Path, when: str | None = None, *, force:
     if up:
         raise RestoreError(f"Stop {' and '.join(up)} first: sudo systemctl stop {' '.join(up)}")
     snapshot = source / "db" / f"mnemerynne-{when}.db"
-    check = _integrity(snapshot)
-    if check != "ok":
-        raise RestoreError(f"The snapshot for {when} is damaged ({check}); pick another date.")
+    # Every snapshot of that day is checked before anything here is touched: core's and each feature's.
+    feature_snaps = {name: source / "db" / f"{name}-{when}.db" for name in _feature_names()
+                     if (source / "db" / f"{name}-{when}.db").is_file()}
+    for label, path in (("core", snapshot), *feature_snaps.items()):
+        check = _integrity(path)
+        if check != "ok":
+            raise RestoreError(f"The {label} snapshot for {when} is damaged ({check}); pick another date.")
 
     data = settings.data_dir
     db_path = settings.db_path
     moved_aside = None
-    existing = [p for p in (db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm")) if p.exists()]
+    targets = [Path(db_path)] + [db_mod.feature_path(db_path, name) for name in _feature_names()]
+    existing = [p for target in targets
+                for p in (target, Path(f"{target}-wal"), Path(f"{target}-shm")) if p.exists()]
     if existing:
         if not force:
             raise RestoreError(f"{db_path} already exists. Add --force to replace it (the current "
                                f"database is moved aside, not deleted).")
         moved_aside = data / f"pre-restore-{datetime.now():%Y%m%d-%H%M%S}"
         moved_aside.mkdir(parents=True)
-        for path in existing:  # -wal/-shm belong to the old database: never pair them with the snapshot
+        # -wal/-shm belong to the old database: never pair them with the snapshot. A feature file with no
+        # snapshot that day goes aside too: it would be newer than the core put back (the web app's
+        # migrate_all then takes its tables out of that core again).
+        for path in existing:
             path.replace(moved_aside / path.name)
     data.mkdir(parents=True, exist_ok=True)
     tmp = data / "mnemerynne.db.restoring"
     shutil.copyfile(snapshot, tmp)
     tmp.replace(db_path)
+    for name, path in feature_snaps.items():
+        target = db_mod.feature_path(db_path, name)
+        tmp = data / f"{name}.db.restoring"
+        shutil.copyfile(path, tmp)
+        tmp.replace(target)
 
     copied = 0
     for name, target in (("blobs", settings.blob_dir), ("versions", data / "versions")):
@@ -258,6 +297,7 @@ def restore(settings: Settings, source: Path, when: str | None = None, *, force:
         key = "matches"
     else:
         key = "differs"
-    return {"date": when, "database": str(db_path), "blobs_copied": copied, "missing_blobs": missing,
+    return {"date": when, "database": str(db_path), "features": sorted(feature_snaps), "blobs_copied": copied,
+            "missing_blobs": missing,
             "files": restored_files, "moved_aside": str(moved_aside) if moved_aside else None,
             "env_backup": str(env_copy) if env_copy.is_file() else None, "secret_key": key}

@@ -235,3 +235,66 @@ MNEMERYNNE_UPDATE_HEALTH_TIMEOUT=''' + deadline + ''' main check-updates
     assert result.returncode == 1
     assert "must be 1..3600 seconds" in result.stderr
     assert "UNEXPECTED" not in result.stdout + result.stderr
+
+
+def test_update_snapshots_and_undoes_each_feature_database_file(tmp_path):
+    """A failed update puts back core and every feature's own file (games.db, ...) together, and removes a feature
+    file the update had made; the share-rights cache is no feature and is left alone."""
+    import sqlite3
+
+    bash = find_bash()
+    if not bash:
+        pytest.skip("needs bash")
+    data = tmp_path / "data"
+    data.mkdir()
+
+    def make(name, version, rows=()):
+        conn = sqlite3.connect(data / f"{name}.db")
+        conn.execute("CREATE TABLE IF NOT EXISTS t (x)")
+        conn.executemany("INSERT INTO t VALUES (?)", [(r,) for r in rows])
+        conn.execute(f"PRAGMA user_version = {version}")
+        conn.commit()
+        conn.close()
+
+    make("mnemerynne", 75)
+    make("share-rights", 0)
+    make("toys", 1, ["before"])
+    updater = Path(__file__).resolve().parents[1] / "deploy" / "linux" / "update.sh"
+    script = '''
+set -e
+source <(sed '$d' "$1")
+DATA_DIR=$2
+SERVICE_USER=$(id -un)
+run_py() { local code=$1; shift; "$MNEM_TEST_PYTHON" -c "$code" "$@"; }
+put_back() { cp "$1" "$2"; }
+case $3 in
+  versions) feature_versions ;;
+  snapshot) mkdir -p "$DATA_DIR/update"; snapshot_features "$DATA_DIR/update/before-1-abc" ;;
+  restore)  restore_features "$DATA_DIR/update/before-1-abc" ;;
+esac
+'''
+
+    def run(step):
+        result = subprocess.run([bash, "-c", script, "_", str(updater), str(data).replace("\\", "/"), step],
+                                capture_output=True, text=True, env={**os.environ, "MNEM_TEST_PYTHON": sys.executable})
+        assert result.returncode == 0, result.stdout + result.stderr
+        return result.stdout
+
+    assert run("versions").split("\n")[0] == "toys 1"           # core and the rights cache aren't features
+    run("snapshot")
+    assert (data / "update" / "before-1-abc.feature.toys.db").exists()
+    assert (data / "update" / "before-1-abc.features").read_text().split() == ["toys"]
+    (data / "toys.db.restoring").write_text("a restore's temporary file")   # names with a dot: never features
+    (data / "old.toys.db").write_text("a copy someone left")
+    make("toys", 2, ["made by the update"])                       # the update migrated toys...
+    make("newthing", 1)                                           # ...and made a new feature's file
+    assert run("versions").split() == ["newthing", "1", "toys", "2"]
+    run("restore")
+    assert not (data / "newthing.db").exists()                    # gone again
+    conn = sqlite3.connect(data / "toys.db")
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert [r[0] for r in conn.execute("SELECT x FROM t")] == ["before"]
+    finally:
+        conn.close()
+    assert (data / "share-rights.db").exists()                    # never touched

@@ -43,6 +43,16 @@ def cmd_init_db(args):
     print(f"Database ready at {get_settings().db_path} (schema v{db.schema_version(conn)}).")
 
 
+def cmd_check_orphans(args):
+    """Delete feature rows (games, rooms, ...) whose user or file is gone from core (db.sweep_orphans)."""
+    _connect()
+    swept = db.sweep_orphans(get_settings().db_path)
+    if not swept:
+        print("Nothing to remove: every feature row's user and file still exists.")
+    for where, count in swept.items():
+        print(f"Removed {count} row(s) from {where}.")
+
+
 def cmd_create_user(args):
     conn = _connect()
     users.create_user(conn, args.username, _read_password(args), role=args.role)
@@ -761,6 +771,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init-db", help="Create or migrate the database").set_defaults(func=cmd_init_db)
+    sub.add_parser("check-orphans", help="Remove feature rows whose user or file is gone").set_defaults(
+        func=cmd_check_orphans)
     p = sub.add_parser("serve", help="Run the web app (or, with --service, one feature of it as its own process)")
     p.add_argument("--service", help="Serve only this feature (mnemerynne/services/registry.py); see "
                                      "deploy/linux/README.md")

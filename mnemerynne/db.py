@@ -45,6 +45,10 @@ class FeatureDb:
     name: str
     moves: tuple[str, ...] = ()         # core tables whose rows move here (move_tables), in this order
     migrations: Path | None = None      # its numbered migrations; default migrations/<name>/
+    # Its columns holding a core user's or file's id, as (table, column). SQLite can't follow a reference into
+    # another file, so these are what forget_user and sweep_orphans clean when that user or file goes.
+    user_columns: tuple[tuple[str, str], ...] = ()
+    file_columns: tuple[tuple[str, str], ...] = ()
 
 
 # The feature files, filled phase by phase (docs/plans/services-rewrite.md): each with its migrations under
@@ -338,6 +342,51 @@ def move_tables(core: sqlite3.Connection, feature: str) -> dict[str, int]:
     finally:
         core.execute("DETACH DATABASE feature")
     return moved
+
+
+def _features_present(core_path: Path | str) -> list[FeatureDb]:
+    return [f for f in FEATURE_DBS.values() if feature_path(core_path, f.name).exists()]
+
+
+def forget_user(core_path: Path | str, user_id: int) -> int:
+    """A user was deleted from core: delete their rows in every feature file (their pets, their coins, ...),
+    since no reference crosses the files. Returns how many rows went. users.delete_user calls it."""
+    gone = 0
+    for found in _features_present(core_path):
+        if not found.user_columns:
+            continue
+        conn = connect_feature(core_path, found.name)
+        try:
+            with transaction(conn):
+                for table, column in found.user_columns:
+                    gone += conn.execute(f"DELETE FROM main.{table} WHERE {column} = ?", (user_id,)).rowcount
+        finally:
+            conn.close()
+    return gone
+
+
+def sweep_orphans(core_path: Path | str) -> dict[str, int]:
+    """Delete feature rows whose user or file is no longer in core: what forget_user didn't catch (a file
+    deleted inside someone else's transaction, a crash in between). The web app runs it at start;
+    `mnemerynne check-orphans` on demand. Returns the rows deleted per "feature.table"."""
+    deleted: dict[str, int] = {}
+    for found in _features_present(core_path):
+        checks = [(t, c, "core.users") for t, c in found.user_columns] + \
+                 [(t, c, "core.files") for t, c in found.file_columns]
+        if not checks:
+            continue
+        conn = connect_feature(core_path, found.name)
+        try:
+            with transaction(conn):
+                for table, column, parent in checks:
+                    n = conn.execute(f"DELETE FROM main.{table} WHERE {column} IS NOT NULL "
+                                     f"AND {column} NOT IN (SELECT id FROM {parent})").rowcount
+                    if n:
+                        key = f"{found.name}.{table}"
+                        deleted[key] = deleted.get(key, 0) + n
+        finally:
+            conn.close()
+    return deleted
 
 
 def migrate_all(core_path: Path | str, embed_dim: int) -> dict[str, int]:

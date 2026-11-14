@@ -115,8 +115,15 @@ main() {
     run_py "import sqlite3, sys; d = sqlite3.connect(sys.argv[2]); sqlite3.connect(sys.argv[1]).backup(d); d.close()" \
         "$DB" "$snapshot"
     schema_before=$(schema_version)
-    # Keep the last five snapshots.
-    ls -1t "$STATE_DIR"/before-*.db 2>/dev/null | tail -n +6 | xargs -r rm -f
+    # Each feature's own database file too (games.db, ...: docs/plans/services-rewrite.md), and their versions.
+    local features_before
+    features_before=$(feature_versions)
+    snapshot_features "${snapshot%.db}"
+    # Keep the last five snapshots (a core snapshot and its feature files go together).
+    local old
+    for old in $(ls -1t "$STATE_DIR"/before-*.db 2>/dev/null | grep -v '\.feature\.' | tail -n +6); do
+        rm -f "$old" "${old%.db}".feature.*.db "${old%.db}.features"
+    done
 
     # Unit files about to be replaced, kept for an undo.
     local saved_units="$STATE_DIR/units-$stamp"
@@ -207,6 +214,52 @@ run_py() {  # CODE ARGS...: run Python from the app's venv as the service user
     else
         runuser -u "$SERVICE_USER" -- "$APP/.venv/bin/python" -c "$code" "$@"
     fi
+}
+
+feature_db_files() {  # each feature's own database file in the data folder (not core's, not the rights cache)
+    local f
+    for f in "$DATA_DIR"/*.db; do
+        [ -e "$f" ] || continue
+        case $(basename "$f" .db) in *.*|mnemerynne|share-rights) continue ;; esac   # *.*: snapshots and such
+        printf '%s\n' "$f"
+    done
+}
+
+feature_versions() {  # "name version", a line per feature database file: did an update change any?
+    local f
+    for f in $(feature_db_files); do
+        printf '%s %s\n' "$(basename "$f" .db)" \
+            "$(run_py "import sqlite3, sys; print(sqlite3.connect(sys.argv[1]).execute('PRAGMA user_version').fetchone()[0])" "$f")"
+    done
+}
+
+snapshot_features() {  # PREFIX: copy each feature file to PREFIX.feature.NAME.db, their names to PREFIX.features
+    local f name
+    : > "$1.features"
+    for f in $(feature_db_files); do
+        name=$(basename "$f" .db)
+        run_py "import sqlite3, sys; d = sqlite3.connect(sys.argv[2]); sqlite3.connect(sys.argv[1]).backup(d); d.close()" \
+            "$f" "$1.feature.$name.db"
+        printf '%s\n' "$name" >> "$1.features"
+    done
+}
+
+restore_features() {  # PREFIX: put back the feature files snapshot_features copied; remove ones made since
+    local f name
+    for f in $(feature_db_files); do
+        name=$(basename "$f" .db)
+        rm -f "$f-wal" "$f-shm"                     # they belong to the file being replaced
+        if grep -qx "$name" "$1.features" 2>/dev/null; then
+            put_back "$1.feature.$name.db" "$f"
+        else
+            rm -f "$f"                               # made by the update being undone
+        fi
+    done
+}
+
+put_back() {  # SRC DEST: a database file back in place, the service user's (and SELinux's label)
+    install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 640 "$1" "$2"
+    if command -v restorecon >/dev/null; then restorecon "$2"; fi
 }
 
 schema_version() {
@@ -316,17 +369,22 @@ undo() {
         restored=1
     done
     [ "$restored" = 1 ] && systemctl daemon-reload
-    if [ "$(schema_version)" != "$schema_before" ]; then
-        echo "  The database was updated; putting back $snapshot"
-        systemctl stop mnemerynne-worker mnemerynne-web
+    # Core and the feature files go back together: moving a feature's tables out of core changes both, and
+    # only the feature's version says so.
+    if [ "$(schema_version)" != "$schema_before" ] || [ "$(feature_versions)" != "$features_before" ]; then
+        echo "  The database was updated; putting back $snapshot (and its feature files)"
+        systemctl stop mnemerynne-worker mnemerynne-web mnemerynne-sync mnemerynne-games 2>/dev/null || true
         rm -f "$DB-wal" "$DB-shm"
-        install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 640 "$snapshot" "$DB"
-        if command -v restorecon >/dev/null; then restorecon "$DB"; fi
+        put_back "$snapshot" "$DB"
+        restore_features "${snapshot%.db}"
     fi
     [ ${#restart_extra[@]} -gt 0 ] && systemctl restart "${restart_extra[@]}"
     systemctl restart mnemerynne-web
     if wait_healthy; then
         systemctl restart mnemerynne-worker
+        for unit in mnemerynne-sync mnemerynne-games; do
+            if systemctl is-enabled --quiet "$unit" 2>/dev/null; then systemctl restart "$unit"; fi
+        done
         echo "  Back on $(git_ log -1 --format=%h HEAD); Mnemerynne is running."
         write_status failed "$current" "$target" "failed while $phase; undone"
     else

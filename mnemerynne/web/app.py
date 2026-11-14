@@ -199,6 +199,9 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             conn.close()
         log.info("Database ready at %s (schema v%d).", settings.db_path, version)
         events.configure(settings.valkey_url)   # live events: Valkey when set (services), else inside this process
+        swept = await asyncio.to_thread(db.sweep_orphans, settings.db_path)   # feature rows whose user/file went
+        if swept:
+            log.info("Removed rows whose user or file is gone: %s.", ", ".join(f"{k} ({n})" for k, n in swept.items()))
 
         # Balancer nodes (Settings): the answer model's requests go to the least busy one.
         balancer = (services.balancer if services and services.balancer is not None else balancer_mod.Balancer())

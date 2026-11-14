@@ -212,3 +212,114 @@ def test_a_database_newer_than_the_code_stops_a_service(core_path, toys):
     core.execute(f"PRAGMA user_version = {len(db._migration_files()) + 1}")
     with pytest.raises(db.SchemaError, match="newer than this code"):
         db.wait_migrated(path, timeout=0.5)
+
+
+# ------------------------------------------------ links into core: users and files
+@pytest.fixture
+def linked_toys(toys, monkeypatch):
+    """toys whose rows name a core user (toys.user_id) and a core file (toy_photos.file_id)."""
+    (toys / "0002_photos.sql").write_text(
+        "CREATE TABLE toy_photos (id INTEGER PRIMARY KEY, toy_id INTEGER NOT NULL, file_id INTEGER NOT NULL);",
+        encoding="utf-8")
+    monkeypatch.setitem(db.FEATURE_DBS, "toys", db.FeatureDb(
+        "toys", migrations=toys, user_columns=(("toys", "user_id"),), file_columns=(("toy_photos", "file_id"),)))
+
+
+def test_deleting_a_user_deletes_their_rows_in_the_feature_files(core_path, linked_toys):
+    path, core = core_path
+    db.migrate_all(path, 4)
+    mina = users.create_user(core, "mina", "password123")
+    conn = db.connect_feature(path, "toys")
+    conn.execute("INSERT INTO toys(user_id, name) VALUES (1, 'kite'), (?, 'yoyo')", (mina,))
+    conn.close()
+    assert users.delete_user(core, "mina")
+    conn = db.connect_feature(path, "toys")
+    try:
+        assert [r[0] for r in conn.execute("SELECT name FROM toys")] == ["kite"]   # only jane's is left
+    finally:
+        conn.close()
+
+
+def test_the_sweep_removes_rows_whose_user_or_file_is_gone(core_path, linked_toys):
+    path, core = core_path
+    db.migrate_all(path, 4)
+    conn = db.connect_feature(path, "toys")
+    conn.execute("INSERT INTO toys(id, user_id, name) VALUES (1, 1, 'kite'), (2, 999, 'nobody''s')")
+    conn.execute("INSERT INTO toy_photos(toy_id, file_id) VALUES (1, 424242)")   # no such file
+    conn.close()
+    assert db.sweep_orphans(path) == {"toys.toys": 1, "toys.toy_photos": 1}
+    assert db.sweep_orphans(path) == {}                       # nothing left to do
+
+
+# ------------------------------------------------------------ backups and restores
+def _settings(path):
+    from mnemerynne.config import Settings
+    return Settings(_env_file=None, data_dir=path.parent, secret_key="test-secret-key-for-the-test-suite-only",
+                    embed_dim=4)
+
+
+def test_a_backup_takes_each_feature_file_and_prunes_it_with_its_day(core_path, toys, tmp_path):
+    from datetime import date
+
+    from mnemerynne import backup
+    path, core = core_path
+    db.migrate_all(path, 4)
+    settings, dest = _settings(path), tmp_path / "backups"
+    result = backup.backup(settings, dest, keep=1, today=date(2026, 11, 1))
+    assert result["features"] == ["toys"] and (dest / "db" / "toys-2026-11-01.db").exists()
+    backup.backup(settings, dest, keep=1, today=date(2026, 11, 2))
+    assert not (dest / "db" / "toys-2026-11-01.db").exists()   # pruned with core's snapshot of that day
+    assert (dest / "db" / "toys-2026-11-02.db").exists()
+
+
+def test_a_restore_puts_back_each_feature_file_of_that_day(core_path, toys, tmp_path):
+    from datetime import date
+
+    from mnemerynne import backup
+    path, core = core_path
+    db.migrate_all(path, 4)
+    conn = db.connect_feature(path, "toys")
+    conn.execute("INSERT INTO toys(user_id, name) VALUES (1, 'kite')")
+    conn.close()
+    settings, dest = _settings(path), tmp_path / "backups"
+    backup.backup(settings, dest, today=date(2026, 11, 1))
+    conn = db.connect_feature(path, "toys")
+    conn.execute("INSERT INTO toys(user_id, name) VALUES (1, 'made after the backup')")
+    conn.close()
+    core.close()
+    result = backup.restore(settings, dest, force=True, running=lambda: [])
+    assert result["features"] == ["toys"]
+    assert (path.parent / result["moved_aside"] / "toys.db").exists()   # the current one kept, aside
+    conn = db.connect_feature(path, "toys")
+    try:
+        assert [r[0] for r in conn.execute("SELECT name FROM toys")] == ["kite"]
+    finally:
+        conn.close()
+
+
+def test_a_damaged_feature_snapshot_stops_the_restore_before_anything_changes(core_path, toys, tmp_path):
+    from datetime import date
+
+    from mnemerynne import backup
+    path, core = core_path
+    db.migrate_all(path, 4)
+    settings, dest = _settings(path), tmp_path / "backups"
+    backup.backup(settings, dest, today=date(2026, 11, 1))
+    (dest / "db" / "toys-2026-11-01.db").write_bytes(b"not a database")
+    core.close()
+    with pytest.raises(backup.RestoreError, match="toys snapshot"):
+        backup.restore(settings, dest, force=True, running=lambda: [])
+    assert path.exists()                                      # the current core never moved
+
+
+def test_a_restore_waits_for_the_services_too(monkeypatch):
+    """Their units hold the database files open as well (mnemerynne-sync, mnemerynne-games, ...)."""
+    import subprocess
+
+    from mnemerynne import backup
+    asked = []
+    monkeypatch.setattr(backup.shutil, "which", lambda name: "/usr/bin/systemctl")
+    monkeypatch.setattr(backup.subprocess, "run", lambda cmd, **kw: asked.append(cmd[-1]) or
+                        subprocess.CompletedProcess(cmd, 0, stdout="active\n" if cmd[-1] == "mnemerynne-games" else "inactive\n"))
+    assert backup.running_services() == ["mnemerynne-games"]
+    assert {"mnemerynne-web", "mnemerynne-sync", "mnemerynne-games"} <= set(asked)

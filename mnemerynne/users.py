@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from mnemerynne import auth, share
+from mnemerynne import auth, db, share
 from mnemerynne.db import transaction
 
 ROLES = ("user", "admin")
@@ -143,6 +143,8 @@ def delete_user(conn: sqlite3.Connection, username: str) -> bool:
             conn.execute("DELETE FROM graph_runs WHERE conversation_id = ?", (thread,))
         conn.execute("DELETE FROM agent_calls WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    if db_file:   # their rows in the features' own files (games, rooms, ...): no reference crosses the files
+        db.forget_user(db_file, user_id)
     return True
 
 
