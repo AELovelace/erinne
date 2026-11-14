@@ -320,18 +320,18 @@ def test_lumi_pets_visit_ignores_anything_the_page_claims(on, conn):
     assert on.post("/api/media/games/lumi-pet/visit").json()["paid"] == 0
 
 
-def test_reading_coins_brings_home_expired_stakes(on, conn):
+def test_reading_coins_brings_home_expired_stakes(on, conn, games_conn):
     s = on.post("/api/media/games/roulette/rooms", json={"mode": "individual"}).json()
     assert on.post(f"/api/media/games/roulette/rooms/{s['code']}", json={"action": "bet", "amount": 50, "choice": "red", "revision": s["revision"]}).status_code == 200
     assert on.get("/api/media/games/coins").json() == {"coins": 950}
-    _age(conn, s["code"])
+    _age(games_conn, s["code"])
     assert on.get("/api/media/games/coins").json() == {"coins": 1000}
 
 
-def test_a_signed_in_browser_spends_its_account(on, conn):
+def test_a_signed_in_browser_spends_its_account(on, conn, games_conn):
     s = on.post("/api/media/games/slots/rooms", json={"mode": "individual"}).json()
     moved = on.post(f"/api/media/games/slots/rooms/{s['code']}", json={"action": "bet", "amount": 10, "revision": s["revision"]})
-    assert moved.json()["players"][0]["chips"] == 970 and coins.peek(conn, _uid(conn)) == 970
+    assert moved.json()["players"][0]["chips"] == 970 and coins.peek(games_conn, _uid(conn)) == 970
 
 
 def _tv(client, key):
@@ -340,35 +340,35 @@ def _tv(client, key):
     return tv
 
 
-def test_a_tv_at_an_online_table_spends_the_account_its_paired_to(on, conn):
+def test_a_tv_at_an_online_table_spends_the_account_its_paired_to(on, conn, games_conn):
     _, key = _pair(on)
     tv = _tv(on, key)
     s = tv.post("/api/media/games/roulette/rooms", json={"mode": "individual"}).json()
     assert s["players"][0]["chips"] == 1000
     moved = tv.post(f"/api/media/games/roulette/rooms/{s['code']}", json={"action": "bet", "amount": 50, "choice": "red", "revision": s["revision"]})
     assert moved.status_code == 200, moved.text
-    assert coins.peek(conn, _uid(conn)) == 950 and tv.get("/api/media/games/coins").json() == {"coins": 950}
-    saved = json.loads(conn.execute("SELECT state FROM casino_rooms WHERE code = ?", (s["code"],)).fetchone()[0])
+    assert coins.peek(games_conn, _uid(conn)) == 950 and tv.get("/api/media/games/coins").json() == {"coins": 950}
+    saved = json.loads(games_conn.execute("SELECT state FROM casino_rooms WHERE code = ?", (s["code"],)).fetchone()[0])
     assert saved["players"][0]["actor"].startswith("screen:")
 
 
-def test_a_local_tv_table_leaves_the_owners_coins_alone(on, conn):
+def test_a_local_tv_table_leaves_the_owners_coins_alone(on, conn, games_conn):
     _screens_for(on)
     _, key = _pair(on)
     tv = _tv(on, key)
     s = tv.post("/api/media/games/roulette/rooms", json={"mode": "tv"})
     assert s.status_code == 200, s.text
     assert s.json()["couch"] is True and s.json()["players"] == []
-    assert coins.peek(conn, _uid(conn)) == 1000
-    assert conn.execute("SELECT count(*) FROM coin_transactions").fetchone()[0] == 0
+    assert coins.peek(games_conn, _uid(conn)) == 1000
+    assert games_conn.execute("SELECT count(*) FROM coin_transactions").fetchone()[0] == 0
 
 
-def test_a_tvs_prism_game_pays_its_owner(on, conn):
+def test_a_tvs_prism_game_pays_its_owner(on, conn, games_conn):
     _, key = _pair(on)
     tv = _tv(on, key)
     for _ in range(prism.DROPS):
         out = tv.post("/api/media/games/prism-drop/drop", json={"pick": 5}).json()
-    assert out["over"] and coins.peek(conn, _uid(conn)) == 1000 + out["paid"]
+    assert out["over"] and coins.peek(games_conn, _uid(conn)) == 1000 + out["paid"]
 
 
 def test_coins_need_someone_who_may_use_media(client):

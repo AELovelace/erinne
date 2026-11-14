@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from mnemerynne import db, directory, events, share
 from mnemerynne.config import Settings, get_settings
 from mnemerynne.services import hooks as hooks_mod, registry
+from mnemerynne.web import deps                      # close_feature_pools at shutdown
 
 log = logging.getLogger("mnemerynne.services")
 ENV_SERVICE = "MNEMERYNNE_SERVICE"       # which service uvicorn's worker processes build (service_app)
@@ -59,6 +60,7 @@ def create_service(name: str, settings: Settings | None = None, services=None) -
                 yield
             finally:
                 app.state.db_pool.close()
+                deps.close_feature_pools(app)          # games.db's and the other feature files'
 
     app = FastAPI(title=f"{ASSISTANT_NAME} {name}", lifespan=lifespan, docs_url=None, redoc_url=None)
     app.state.settings = settings

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from mnemerynne import db
 from mnemerynne.config import Settings
 
 # (table, column, setting): rows whose column is older than the setting's days go. Messages and
@@ -18,8 +19,9 @@ LOGS = (("mcp_calls", "at", "mcp_calls_days"),
         ("graph_runs", "started_at", "graph_runs_days"),
         ("user_messages", "created_at", "message_days"),
         ("announcements", "expires_at", "announcement_days"),
-        ("automation_runs", "started_at", "automation_run_days"),
-        ("coin_transactions", "created_at", "coin_ledger_days"))
+        ("automation_runs", "started_at", "automation_run_days"))
+# The same, for tables in a feature's own file (db.FEATURE_DBS): (feature, table, column, setting).
+FEATURE_LOGS = (("games", "coin_transactions", "created_at", "coin_ledger_days"),)
 
 
 def _older(days: int) -> str:
@@ -35,6 +37,15 @@ def purge(conn: sqlite3.Connection, settings: Settings) -> dict[str, int]:
             n = conn.execute(f"DELETE FROM {table} WHERE {column} < datetime('now', ?)", (_older(days),)).rowcount
             if n:
                 out[table] = n
+    for feature, table, column, setting in FEATURE_LOGS:     # games.db's coin ledger (or core's, before the move)
+        days = getattr(settings, setting)
+        if days > 0:
+            with db.table_connection(conn, feature, table) as there:
+                if there is not None:
+                    n = there.execute(f"DELETE FROM main.{table} WHERE {column} < datetime('now', ?)",
+                                      (_older(days),)).rowcount
+                    if n:
+                        out[table] = n
 
     from mnemerynne import scratchpad   # notes nobody touched in that long: into the archive, not away
     n = scratchpad.expire(conn, settings.scratchpad_days)

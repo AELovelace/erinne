@@ -53,6 +53,22 @@ def cmd_check_orphans(args):
         print(f"Removed {count} row(s) from {where}.")
 
 
+def cmd_move_back(args):
+    """A phase's tables back into core for the code before it (db.move_back): the B-to-A step of an A/B test."""
+    from mnemerynne import backup
+    running = backup.running_services()
+    if running:
+        raise SystemExit(f"Stop the services first ({', '.join(running)}): the files can't change under them.")
+    copied = db.move_back(get_settings().db_path, args.feature)      # no migrate first: the files stay as they are
+    if not copied:
+        print(f"Nothing to move back: there is no {args.feature}.db, or it has none of its tables.")
+        return
+    for table, count in copied.items():
+        print(f"{table}: {count} row(s) back in core.")
+    print(f"{args.feature}.db is set aside as {args.feature}.moved-back-<time>.db. "
+          "Now put the code from before this phase back, and start the services.")
+
+
 def cmd_create_user(args):
     conn = _connect()
     users.create_user(conn, args.username, _read_password(args), role=args.role)
@@ -773,6 +789,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init-db", help="Create or migrate the database").set_defaults(func=cmd_init_db)
     sub.add_parser("check-orphans", help="Remove feature rows whose user or file is gone").set_defaults(
         func=cmd_check_orphans)
+    p = sub.add_parser("move-back", help="Put a feature's tables back into core, for older code (stop the services first)")
+    p.add_argument("feature", choices=sorted(db.FEATURE_DBS), help="Which feature file, e.g. games")
+    p.set_defaults(func=cmd_move_back)
     p = sub.add_parser("serve", help="Run the web app (or, with --service, one feature of it as its own process)")
     p.add_argument("--service", help="Serve only this feature (mnemerynne/services/registry.py); see "
                                      "deploy/linux/README.md")

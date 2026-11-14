@@ -80,6 +80,26 @@ If `accel on` stops at a folder nginx can't read, it puts nginx back by itself; 
 -ts recent` shows an SELinux denial. Compare A and B with the set-top box's audio start, a film seek, a big
 download, and `journalctl -u mnemerynne-web | grep "Slow request"`.
 
+### Deploying Phase 2 (games.db; never run on the box yet)
+
+`sudo mnemerynne-admin update --yes`. The web app's start copies the 18 games tables into
+`/var/lib/mnemerynne/games.db` (rows counted on both sides) and drops them from core; the log says
+"Moved into games.db: coin_accounts (N rows), ...". The updater's snapshot (`update/before-*.db` and its
+`.feature.*` files) is taken first. Check: coins and Lumi look the same, a Lumi party plays, a casino table
+deals, reminders still arrive.
+
+**Back to A** (the code before Phase 2), if it misbehaves:
+
+```sh
+sudo systemctl stop mnemerynne-web mnemerynne-worker 'mnemerynne@*' mnemerynne-sync mnemerynne-games
+sudo mnemerynne-admin move-back games                                               # rows back into core, games.db set aside
+sudo git -C /opt/mnemerynne checkout 1267fc9                                       # Phase 1's code
+sudo systemctl start mnemerynne-web mnemerynne-worker                               # then the services
+```
+
+`move-back` refuses while the services run. To return to B: `sudo git -C /opt/mnemerynne checkout main` and
+`sudo mnemerynne-admin update --yes`; its start moves the rows out again.
+
 ## 3. Phase 0.5: done in code (2026-11-13)
 
 The front-door and Valkey work below is committed and tested with the box stood in for

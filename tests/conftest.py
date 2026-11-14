@@ -51,6 +51,16 @@ def conn(settings):
 
 
 @pytest.fixture
+def games_conn(settings, conn):
+    """games.db as the app has it once it started: db.migrate_all moved the games' tables out of core there
+    (docs/plans/services-rewrite.md, Phase 2). Core's tables (users...) are still readable through it."""
+    db.migrate_all(settings.db_path, settings.embed_dim)
+    connection = db.connect_feature(settings.db_path, "games")
+    yield connection
+    connection.close()
+
+
+@pytest.fixture
 def client(settings, conn):
     with TestClient(create_app(settings)) as test_client:
         yield test_client

@@ -35,7 +35,7 @@ def _couch(client, conn, directory):
     return owner_id, wife_id, tv, press, screen_id, remote_id
 
 
-def test_a_guests_ok_press_plays_her_own_lumi_on_the_owners_tv(client, conn, directory):
+def test_a_guests_ok_press_plays_her_own_lumi_on_the_owners_tv(client, conn, directory, games_conn):
     owner_id, wife_id, tv, press, screen_id, remote_id = _couch(client, conn, directory)
     assert 'data-who="1"' in tv.get("/media/games/lumi-pet").text   # the TV asks Who's playing?
     assert 'data-who="1"' not in client.get("/media/games/lumi-pet").text   # a signed-in browser doesn't
@@ -47,8 +47,8 @@ def test_a_guests_ok_press_plays_her_own_lumi_on_the_owners_tv(client, conn, dir
 
     paid = tv.post(API + "visit", json={}, headers=header).json()           # today's visit pays HER purse
     assert paid["paid"] > 0
-    assert coins.peek(conn, wife_id) == paid["coins"] and coins.peek(conn, owner_id) == coins.START
-    assert tv.get(API + "state", headers=header).json()["coins"] == coins.peek(conn, wife_id)
+    assert coins.peek(games_conn, wife_id) == paid["coins"] and coins.peek(games_conn, owner_id) == coins.START
+    assert tv.get(API + "state", headers=header).json()["coins"] == coins.peek(games_conn, wife_id)
     assert tv.get(API + "state").json()["coins"] == coins.START             # without the pass: the TV owner's Lumi
 
     # Her pass ends the moment she stops being a guest: refused, never swapped for the owner's pet.

@@ -53,7 +53,36 @@ class FeatureDb:
 
 # The feature files, filled phase by phase (docs/plans/services-rewrite.md): each with its migrations under
 # migrations/<name>/ and the core tables that move into it.
-FEATURE_DBS: dict[str, FeatureDb] = {}
+GAMES_TABLES = ("coin_accounts", "coin_transactions", "lumi_pets", "lumi_gardens", "lumi_runs", "lumi_battles",
+                "lumi_push_events", "lumi_parties", "lumi_party_members", "push_subscriptions", "arcade_rooms",
+                "arcade_runs", "casino_rooms", "prism_runs", "runner_runs", "lumisoft_progress", "lumisoft_bests",
+                "lumisoft_runs")
+FEATURE_DBS: dict[str, FeatureDb] = {f.name: f for f in (
+    # Phase 2: the built-in games, their coins and Lumi's reminders (web/games.py, the games service). A new games
+    # table goes in migrations/games/, never in core's migrations.
+    FeatureDb("games", moves=GAMES_TABLES,
+              user_columns=tuple((t, "user_id") for t in GAMES_TABLES
+                                 if t not in ("coin_transactions", "lumi_parties", "arcade_rooms", "casino_rooms"))),
+)}
+
+
+@contextmanager
+def table_connection(core: sqlite3.Connection, feature: str, table: str) -> Iterator[sqlite3.Connection | None]:
+    """A connection that holds `table`: core itself while the feature's tables are still there (a database only
+    core's migrations ran on: the worker before the web app's first start, many tests), else the feature's own
+    file, opened for the block. None when neither has it yet. For code outside a request (the worker's sweeps)."""
+    if _has_table(core, "main", table):
+        yield core
+        return
+    core_path = core.execute("PRAGMA database_list").fetchone()[2]
+    if not core_path or not feature_path(core_path, feature).exists():
+        yield None
+        return
+    conn = connect_feature(core_path, feature)
+    try:
+        yield conn if _has_table(conn, "main", table) else None
+    finally:
+        conn.close()
 
 
 def feature_path(core_path: Path | str, feature: str) -> Path:
@@ -342,6 +371,55 @@ def move_tables(core: sqlite3.Connection, feature: str) -> dict[str, int]:
     finally:
         core.execute("DETACH DATABASE feature")
     return moved
+
+
+def move_back(core_path: Path | str, feature: str) -> dict[str, int]:
+    """The way back from a phase (docs/plans/services-rewrite.md: A/B on the box): copy a feature's tables from its
+    own file back into core, for the code from before that phase. Rows are counted on both sides; then the
+    feature file is set aside as <name>.moved-back-<time>.db (with its -wal/-shm), never deleted, so a
+    migrate_all later (the newer code again) makes a fresh one and moves the rows out once more. Stop every
+    process first. The tables come back without their references to core's users (they couldn't cross files),
+    so until the newer code returns, deleting a user leaves their game rows for sweep_orphans to clean then.
+    Returns the rows copied per table."""
+    import time
+
+    found = _feature(feature)
+    path = feature_path(core_path, feature)
+    if not path.exists():
+        return {}
+    core = connect(core_path)
+    copied: dict[str, int] = {}
+    try:
+        core.execute("ATTACH DATABASE ? AS feature", (str(path),))
+        try:
+            here = [t for t in found.moves if _has_table(core, "feature", t)]
+            clash = [t for t in here if _has_table(core, "main", t)]
+            if clash:
+                raise SchemaError(f"Core already has {', '.join(clash)}: nothing to move back.")
+            with transaction(core):                    # all or nothing: the tables, their indexes, their rows
+                for table in here:
+                    sql = core.execute("SELECT sql FROM feature.sqlite_master WHERE type = 'table' AND name = ?",
+                                       (table,)).fetchone()[0]
+                    core.execute(sql)
+                    for (index,) in core.execute("SELECT sql FROM feature.sqlite_master WHERE type = 'index' "
+                                                 "AND tbl_name = ? AND sql IS NOT NULL", (table,)).fetchall():
+                        core.execute(index)
+                    core.execute(f"INSERT INTO main.{table} SELECT * FROM feature.{table}")
+                    there = core.execute(f"SELECT count(*) FROM feature.{table}").fetchone()[0]
+                    back = core.execute(f"SELECT count(*) FROM main.{table}").fetchone()[0]
+                    if there != back:
+                        raise SchemaError(f"Moving {table} back: {there} rows in {feature}.db but {back} in core")
+                    copied[table] = back
+        finally:
+            core.execute("DETACH DATABASE feature")
+    finally:
+        core.close()
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    for suffix in ("", "-wal", "-shm"):
+        part = Path(str(path) + suffix)
+        if part.exists():
+            part.rename(path.with_name(f"{feature}.moved-back-{stamp}.db{suffix}"))
+    return copied
 
 
 def _features_present(core_path: Path | str) -> list[FeatureDb]:

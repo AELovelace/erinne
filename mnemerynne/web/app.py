@@ -51,6 +51,7 @@ from mnemerynne.web import (admin, admin_apis, admin_notices, admin_remote, agen
                             rooms as room_pages, scratchpad as scratchpad_pages, security, sendfile,
                             settings as settings_pages, sync as sync_pages, theme as theme_pages, tokens, wiki as wiki_pages)
 from mnemerynne.web.deps import LoginRequired, api_user, get_db, is_admin, page_user
+from mnemerynne.web import deps                      # close_feature_pools at shutdown
 
 log = logging.getLogger("mnemerynne.web")
 
@@ -269,6 +270,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             await saver_conn.close()
             await store_conn.close()
             app.state.db_pool.close()
+            deps.close_feature_pools(app)          # games.db's and the other feature files'
             await app.state.agent.aclose()
             await app.state.remote_proxy.aclose()
             await balancer.aclose()

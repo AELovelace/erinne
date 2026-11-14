@@ -38,7 +38,8 @@ def toys(tmp_path, monkeypatch):
     folder = tmp_path / "migrations-toys"
     folder.mkdir()
     (folder / "0001_toys.sql").write_text(TOYS, encoding="utf-8")
-    monkeypatch.setitem(db.FEATURE_DBS, "toys", db.FeatureDb("toys", moves=("toys", "toy_parts"), migrations=folder))
+    # Toys only: the real feature files (games.db, ...) have tests of their own (test_games_db.py).
+    monkeypatch.setattr(db, "FEATURE_DBS", {"toys": db.FeatureDb("toys", moves=("toys", "toy_parts"), migrations=folder)})
     return folder
 
 

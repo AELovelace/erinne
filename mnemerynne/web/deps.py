@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import AsyncIterator
+import threading
+from typing import AsyncIterator, Callable
 
 import anyio.to_thread
 from fastapi import Depends, HTTPException, Request, status
 
-from mnemerynne import accounts, users
+from mnemerynne import accounts, db, users
 from mnemerynne.config import Settings
 from mnemerynne.web import security
 
@@ -30,20 +31,64 @@ async def get_db(request: Request) -> AsyncIterator[sqlite3.Connection]:
     left for the garbage collector. A storm of cut-off requests leaked thousands that way (10,705 open on the
     box: "unable to open database file", "database is locked", nginx 502). An async generator's cleanup runs
     on cancellation too."""
-    pool = request.app.state.db_pool
+    async for conn in _lend(request, request.app.state.db_pool):
+        yield conn
+
+
+async def _lend(request: Request, pool: db.Pool) -> AsyncIterator[sqlite3.Connection]:
+    """A connection from `pool` for this request, back to it when the request is done (or at release_db)."""
     conn = await anyio.to_thread.run_sync(pool.get)   # off the event loop: a new connection may wait on a lock
     held = _held(request)
-    held.append(conn)                      # release_db() can hand it back before the response is over
+    held.append((pool, conn))              # release_db() can hand it back before the response is over
     try:
         yield conn
     finally:
-        if conn in held:                   # still ours: not handed back early by release_db()
-            held.remove(conn)
+        if (pool, conn) in held:           # still ours: not handed back early by release_db()
+            held.remove((pool, conn))
             pool.put(conn)
 
 
-def _held(request: Request) -> list[sqlite3.Connection]:
-    """The connections get_db lent this request (request.state is shared by every dependency of one request)."""
+_pools_lock = threading.Lock()
+
+
+def feature_pool(app, feature: str) -> db.Pool:
+    """The pool of connections to a feature's own file (db.connect_feature: core attached read-only), made on
+    first use, so the web app and every service that serves the feature get one without setting it up."""
+    pools = getattr(app.state, "feature_pools", None)
+    if pools is None or feature not in pools:
+        with _pools_lock:
+            pools = getattr(app.state, "feature_pools", None)
+            if pools is None:
+                pools = app.state.feature_pools = {}
+            if feature not in pools:
+                core_path = app.state.settings.db_path
+                pools[feature] = db.Pool(db.feature_path(core_path, feature),
+                                         opener=lambda: db.connect_feature(core_path, feature))
+    return pools[feature]
+
+
+def close_feature_pools(app) -> None:
+    """At shutdown, with the core pool."""
+    for pool in (getattr(app.state, "feature_pools", None) or {}).values():
+        pool.close()
+
+
+def feature_db(feature: str) -> Callable[[Request], AsyncIterator[sqlite3.Connection]]:
+    """A dependency like get_db for a feature's own database file: `conn=Depends(get_games_db)`. Its queries still
+    find core's tables (users, groups, media_screens...) by their plain names, read-only."""
+    async def get_feature_db(request: Request) -> AsyncIterator[sqlite3.Connection]:
+        async for conn in _lend(request, feature_pool(request.app, feature)):
+            yield conn
+    get_feature_db.__name__ = f"get_{feature}_db"
+    return get_feature_db
+
+
+get_games_db = feature_db("games")   # the games, their coins and Lumi (docs/plans/services-rewrite.md, Phase 2)
+
+
+def _held(request: Request) -> list[tuple[db.Pool, sqlite3.Connection]]:
+    """The connections get_db (and the feature dependencies) lent this request, with the pool each came from
+    (request.state is shared by every dependency of one request)."""
     held = getattr(request.state, "db_held", None)
     if held is None:
         held = request.state.db_held = []
@@ -59,9 +104,9 @@ def release_db(request: Request) -> None:
     of open files ("unable to open database file", nginx 502). A stream calls this just before returning its
     StreamingResponse, and must not touch that `conn` afterwards: its generator borrows its own from the pool."""
     held = _held(request)
-    pool = request.app.state.db_pool
     while held:
-        pool.put(held.pop())               # back to the pool (or closed, if the pool already has enough spares)
+        pool, conn = held.pop()
+        pool.put(conn)                     # back to its pool (or closed, if the pool already has enough spares)
 
 
 def _session_user(request: Request, conn: sqlite3.Connection) -> sqlite3.Row | None:

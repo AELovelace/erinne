@@ -274,17 +274,17 @@ def on(client, conn, directory):
     return client
 
 
-def test_a_browser_subscribes_and_unsubscribes_through_the_page(on, conn):
+def test_a_browser_subscribes_and_unsubscribes_through_the_page(on, conn, games_conn):
     device = Phone()
     key = on.get("/api/media/games/lumi-pet/push").json()["key"]
     assert len(_unb64(key)) == 65
     body = {"endpoint": ENDPOINT, "p256dh": device.p256dh, "auth": device.auth, "utc_offset": -300}
     assert on.post("/api/media/games/lumi-pet/push", json=body).json() == {"on": True}
-    assert conn.execute("SELECT utc_offset FROM push_subscriptions").fetchone()[0] == -300
+    assert games_conn.execute("SELECT utc_offset FROM push_subscriptions").fetchone()[0] == -300
     assert on.post("/api/media/games/lumi-pet/push", json={**body, "endpoint": "https://192.168.1.5/internal"}).status_code == 400
     assert on.post("/api/media/games/lumi-pet/push", json={**body, "utc_offset": 99999}).status_code == 422
     assert on.post("/api/media/games/lumi-pet/push/off", json={"endpoint": ENDPOINT}).json() == {"on": False}
-    assert conn.execute("SELECT COUNT(*) FROM push_subscriptions").fetchone()[0] == 0
+    assert games_conn.execute("SELECT COUNT(*) FROM push_subscriptions").fetchone()[0] == 0
     on.cookies.clear()
     assert on.post("/api/media/games/lumi-pet/push", json=body).status_code == 401
 

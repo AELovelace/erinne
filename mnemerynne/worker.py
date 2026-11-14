@@ -147,7 +147,9 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
                 last_pets = time.monotonic()
                 try:
                     contact = settings.public_url if settings.public_url.startswith("https://") else "mailto:push@mnemerynne.invalid"
-                    pet_cursor = lumipet.sweep(conn, settings.data_dir, contact, pet_cursor)
+                    with db.table_connection(conn, "games", "lumi_pets") as games:   # games.db, once moved there
+                        if games is not None:
+                            pet_cursor = lumipet.sweep(games, settings.data_dir, contact, pet_cursor)
                 except Exception:  # never let a reminder stop ingestion
                     if conn.in_transaction:
                         conn.execute("ROLLBACK")

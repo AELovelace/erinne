@@ -300,7 +300,7 @@ def test_seats_let_go_when_a_page_goes_away(conn, people, clock):
 
 
 # ---------------------------------------------------------------------- API
-def test_the_page_plays_a_solo_run(client, conn, directory):
+def test_the_page_plays_a_solo_run(client, conn, directory, games_conn):
     uid = _login(client, conn, directory)
     _turn_on(client)
     run = client.post("/api/media/games/snake/run").json()
@@ -310,7 +310,7 @@ def test_the_page_plays_a_solo_run(client, conn, directory):
     assert client.post(finish, json={"run": run["run"], "moves": "10", "died": True}).status_code == 422
     assert client.post(finish, json={"run": run["run"], "moves": 9, "died": True}).status_code == 422   # it didn't die there
     out = client.post(finish, json={"run": run["run"], "moves": 10, "died": True}).json()
-    assert out["score"] == 0 and out["paid"] == 0 and coins.peek(conn, uid) == 1000 - arcade.ENTRY
+    assert out["score"] == 0 and out["paid"] == 0 and coins.peek(games_conn, uid) == 1000 - arcade.ENTRY
     assert client.post("/api/media/games/prism-drop/run").status_code == 404
     client.cookies.clear()
     assert client.post("/api/media/games/snake/run").status_code == 401
@@ -352,10 +352,10 @@ def test_every_showdown_seat_carries_its_racer_s_lumi(conn, people, clock):
     assert looks == {"alice": {"glow": "rose", "outfit": {}}, f"P{people['bob']}": {"glow": "umbra", "outfit": {}}}
 
 
-def test_the_page_asks_for_its_lumi_and_sends_the_conga_s_colours(client, conn, directory):
+def test_the_page_asks_for_its_lumi_and_sends_the_conga_s_colours(client, conn, directory, games_conn):
     uid = _login(client, conn, directory)
     _turn_on(client)
-    conn.execute("INSERT INTO lumi_pets(user_id, data) VALUES (?, ?)", (uid, json.dumps({"glow": "wisp", "outfit": {}})))
+    games_conn.execute("INSERT INTO lumi_pets(user_id, data) VALUES (?, ?)", (uid, json.dumps({"glow": "wisp", "outfit": {}})))
     assert client.get("/api/media/games/lumi-look").json() == {"glow": "wisp", "outfit": {}}
     code = client.post("/api/media/games/snake/tables").json()["code"]
     board = {"score": 1, "length": 4, "alive": True, "points": [0.5, 0.5], "food": [1, 2, 3], "kinds": "1223"}

@@ -10,7 +10,8 @@
 | Phase 0.3: a SQLite file per feature (`db.connect_feature`, read-only core attach, per-file migrations, `move_tables`, `migrate_all` / `wait_migrated`) | done | 1e18225 |
 | Phase 0.4: backups, restores and `update.sh` undo for every DB file; users' and files' rows cleaned across files (`forget_user`, `sweep_orphans`, `check-orphans`) | done | afe0ec2 |
 | Phase 0.5: systemd template `mnemerynne@.service`, front door generated from the registry, Valkey on the box | done in code (2026-11-13); **not yet run on the NAS** | 340f24c + this step's commit |
-| Phase 1: nginx serves `/static/` and file bytes (`X-Accel-Redirect`); rate limits shared through Valkey | done in code (2026-11-13); **not yet run on the NAS** | this step's commit |
+| Phase 1: nginx serves `/static/` and file bytes (`X-Accel-Redirect`); rate limits shared through Valkey | done in code (2026-11-13); **not yet run on the NAS** | 1267fc9 |
+| Phase 2: `games.db` (18 tables: coins, Lumi, arcade, casino, Lumi-Soft, push) out of core; `mnemerynne move-back games` for A/B | done in code (2026-11-13); **not yet run on the NAS** | this step's commit |
 
 Tests: `.venv\Scripts\python -m pytest tests -n auto` (about 4 minutes).
 
@@ -40,6 +41,18 @@ types found, every folder probed before the app's setting flips). `/remote/` now
 was dropped in favour of `RateLimiter` counting through Valkey when it's on (behind site-chan, nginx would need
 `real_ip`, which rewrites the `X-Forwarded-For` chain the app trusts). Tests: `tests/test_accel.py`. Not tried
 with a real nginx: on the NAS `nginx -t` and the probes check it.
+
+**Phase 2 (2026-11-13):** `db.FEATURE_DBS["games"]` with `migrations/games/0001_games.sql` (core's 18 games tables,
+columns identical, without references to users; checked by `test_the_games_migration_has_cores_columns_exactly`).
+The web app's start (`migrate_all`) moves the rows. Requests: `deps.get_games_db` / `deps.feature_pool(app, "games")`
+(a pool per feature file, made on first use, closed with core's; `release_db` hands back both); every route in
+`web/games.py` and its two live streams use it, and their core reads (users, groups, media_screens, meta) go through
+the read-only attach. Outside requests: `db.table_connection(core, "games", table)` finds the table in core (not moved
+yet) or games.db: the worker's Lumi reminders and the coin-ledger pruning (`retention.FEATURE_LOGS`). Deleting a user
+clears their games rows (`user_columns`); a start sweeps orphans. **A/B:** `mnemerynne move-back games` (services
+stopped) copies the tables back into core and sets games.db aside, for the code before this phase; the next start of
+this code moves them out again. The games router stays mounted in the web app too (all-in-one, tests); taking it out of
+the portal waits for a soak on the box. New games tables go in `migrations/games/`, never core's.
 
 ## Context
 

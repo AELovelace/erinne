@@ -114,3 +114,12 @@ The casino lobby on a paired, non-speaker TV offers **One TV, multiple remotes**
 ## TV game scaling
 
 `web/app.py` gives built-in game iframe requests the TV's text-size context, with zero extra underscan and no kiosk toolbar/listener. Other embedded pages retain their existing behavior. Games reuse `erynne.css`'s root `--ui-scale`, including automatic 1×/1.5×/2× sizing and saved manual sizes. `media.js` sends the current scale on iframe load, window resize and live Text size adjustments; `games/common.js` accepts it only from its same-origin parent on a TV, then asks canvas games to resize. Use rem for layout caps (casino 100rem; Lumi Pet 112.5rem wide, room 47.5rem tall) so controls and artwork grow together. Keep SVG viewBox/canvas world coordinates fixed; redraw canvas pixels from its CSS size and device pixel ratio.
+
+## Where a table lives (services rewrite)
+
+The games' tables live in their own database file, `games.db`, next to the core one (docs/plans/services-rewrite.md, Phase 2): coins (`coin_accounts`, `coin_transactions`), everything `lumi_*` and `lumisoft_*`, `arcade_*`, `casino_rooms`, `prism_runs`, `runner_runs` and `push_subscriptions` (`db.GAMES_TABLES`).
+
+- **A new games table** goes in `mnemerynne/migrations/games/` (the next `NNNN_*.sql` there), never in core's migrations. It may reference other games tables, but not `users`, `files` or `folders`: SQLite can't follow a reference into another file. Add a `user_id` column to `db.FEATURE_DBS["games"].user_columns` instead, so deleting a user clears it.
+- **Routes** in `web/games.py` take `conn=Depends(get_games_db)`, and live streams borrow from `feature_pool(request.app, "games")`. That connection still reads core's tables (`users`, `groups`, `media_screens`, `meta`) by their plain names, attached read-only, but can't write them: a route that must write a core table takes `core=Depends(get_db)` as well.
+- **Outside a request** (the worker, retention), open the right file with `db.table_connection(core, "games", "<table>")`: core while the tables haven't moved (tests that only ran core's migrations), else games.db.
+- **Tests** that start the app (`client`) and then read a games table directly use the `games_conn` fixture; tests that only use `conn` keep the tables in core and need nothing.

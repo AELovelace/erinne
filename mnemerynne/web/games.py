@@ -18,7 +18,7 @@ from mnemerynne.rooms_bus import sse
 from mnemerynne import bfgguf, casino, casino_remote, claude_chat, coins, games, lumi_tv, lumidungeon, lumiparty, lumipet, lumitales, prism, push, users
 from mnemerynne.db import read_transaction, transaction
 from mnemerynne.media import remotes, screens
-from mnemerynne.web.deps import _session_user, get_db, release_db
+from mnemerynne.web.deps import _session_user, feature_pool, get_games_db, release_db
 from mnemerynne.web.media import _media_on, _screen, media_user, screen_device
 
 STATIC = Path(__file__).parent / "static"
@@ -39,13 +39,13 @@ def media_games(user=Depends(media_user)):
 
 
 @router.get("/api/media/games/lumi-look")
-def lumi_look(user=Depends(media_user), conn=Depends(get_db)):
+def lumi_look(user=Depends(media_user), conn=Depends(get_games_db)):
     """How this account's Lumi looks (glow and outfit), for the arcade games to draw her. Only reads her save."""
     return arcade.lumi_look(conn, user["id"])
 
 
 @router.get("/api/media/games/coins")
-def coin_balance(user=Depends(media_user), conn=Depends(get_db)):
+def coin_balance(user=Depends(media_user), conn=Depends(get_games_db)):
     """This account's coins (a paired TV shows its owner's). Also brings home stakes from any table that has expired."""
     casino.sweep(conn)
     return {"coins": coins.peek(conn, user["id"])}
@@ -75,7 +75,7 @@ def _pass_holder(request: Request, conn, token: str):
     return users.get_user_by_id(conn, held["user"])
 
 
-def pet_user(request: Request, user=Depends(media_user), conn=Depends(get_db)):
+def pet_user(request: Request, user=Depends(media_user), conn=Depends(get_games_db)):
     """Whose Lumi this request is about: the signed-in person or the TV's owner (media_user), unless the TV page
     sends a play pass (lumi_tv.HEADER), when it's the person holding the remote. A pass that no longer holds is
     refused (403), never quietly swapped for the TV owner's pet: the page then asks Who's playing? again."""
@@ -95,7 +95,7 @@ class PlayerPick(BaseModel):
 
 
 @router.post("/api/media/games/lumi-pet/tv/player")
-def pet_tv_player(body: PlayerPick, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+def pet_tv_player(body: PlayerPick, request: Request, user=Depends(media_user), conn=Depends(get_games_db)):
     """Who's playing? The TV page hands over a remote's OK press; the person holding that remote (the TV's owner, or
     one of their TV guests) gets a play pass for their own Lumi on this TV."""
     screen = screen_device(request, conn)
@@ -125,13 +125,13 @@ class PrismDrop(BaseModel):
 
 
 @router.get("/api/media/games/prism-drop/run")
-def prism_run(user=Depends(media_user), conn=Depends(get_db)):
+def prism_run(user=Depends(media_user), conn=Depends(get_games_db)):
     """The game in progress, so a reload or another device picks it up."""
     return prism.current(conn, user["id"])
 
 
 @router.post("/api/media/games/prism-drop/drop")
-def prism_drop(body: PrismDrop, user=Depends(media_user), conn=Depends(get_db)):
+def prism_drop(body: PrismDrop, user=Depends(media_user), conn=Depends(get_games_db)):
     """One drop; the tenth finishes the game and pays its coins."""
     return prism.play(conn, user["id"], body.pick)
 
@@ -145,14 +145,14 @@ class RunnerFinish(BaseModel):
 
 
 @router.post("/api/media/games/stickbob-runner/start")
-def runner_start(user=Depends(media_user), conn=Depends(get_db)):
+def runner_start(user=Depends(media_user), conn=Depends(get_games_db)):
     """A ticket for the run that's starting; the server notes the time."""
     with transaction(conn):
         return {"run": runner.start(conn, user["id"])}
 
 
 @router.post("/api/media/games/stickbob-runner/finish")
-def runner_finish(body: RunnerFinish, user=Depends(media_user), conn=Depends(get_db)):
+def runner_finish(body: RunnerFinish, user=Depends(media_user), conn=Depends(get_games_db)):
     """Game over: pay the run's coins once, if its distance and kills fit the time it took."""
     with transaction(conn):
         return runner.finish(conn, user["id"], body.run, body.meters, body.kills)
@@ -193,34 +193,34 @@ class SoftFinish(BaseModel):
 
 
 @router.get("/api/media/games/lumi-soft/state")
-def soft_state(user=Depends(media_user), conn=Depends(get_db)):
+def soft_state(user=Depends(media_user), conn=Depends(get_games_db)):
     """The title screen: the stages, prices, this person's bests and prizes, and today's Daily Range with its board."""
     return lumisoft.state(conn, user["id"])
 
 
 @router.post("/api/media/games/lumi-soft/start")
-def soft_start(body: SoftStart, user=Depends(media_user), conn=Depends(get_db)):
+def soft_start(body: SoftStart, user=Depends(media_user), conn=Depends(get_games_db)):
     """A ticket for a new run (it costs lumisoft.ENTRY coins unless it's free practice)."""
     with transaction(conn):
         return _soft_call(lumisoft.start, conn, user["id"], body.mode, body.stage)
 
 
 @router.post("/api/media/games/lumi-soft/continue")
-def soft_continue(body: SoftRun, user=Depends(media_user), conn=Depends(get_db)):
+def soft_continue(body: SoftRun, user=Depends(media_user), conn=Depends(get_games_db)):
     """Game over: pay for a continue (each costs more; the score stays)."""
     with transaction(conn):
         return _soft_call(lumisoft.carry_on, conn, user["id"], body.run)
 
 
 @router.post("/api/media/games/lumi-soft/finish")
-def soft_finish(body: SoftFinish, user=Depends(media_user), conn=Depends(get_db)):
+def soft_finish(body: SoftFinish, user=Depends(media_user), conn=Depends(get_games_db)):
     """The run is over: the server replays its shots, pays its score once, keeps bests and gives any prizes it won."""
     with transaction(conn):
         return _soft_call(lumisoft.finish, conn, user["id"], body.run, body.model_dump())
 
 
 @router.post("/api/media/games/lumi-pet/visit")
-def pet_visit(user=Depends(pet_user), conn=Depends(get_db)):
+def pet_visit(user=Depends(pet_user), conn=Depends(get_games_db)):
     """The first time someone spends a moment with Lumi today. Takes no numbers from the page, so there's nothing to fake."""
     with transaction(conn):
         paid = coins.pet_visit(conn, user["id"])
@@ -243,14 +243,14 @@ class PetAction(BaseModel):
 
 
 @router.get("/api/media/games/lumi-pet/state")
-def pet_state(user=Depends(pet_user), conn=Depends(get_db)):
+def pet_state(user=Depends(pet_user), conn=Depends(get_games_db)):
     """Lumi as she is right now, caught up from the last time anyone looked. A paired TV shows its owner's pet."""
     with transaction(conn):
         return lumipet.state(conn, user["id"])
 
 
 @router.post("/api/media/games/lumi-pet/act")
-def pet_act(body: PetAction, user=Depends(pet_user), conn=Depends(get_db)):
+def pet_act(body: PetAction, user=Depends(pet_user), conn=Depends(get_games_db)):
     """One care action or purchase. A refusal (too soon, not enough coins) changes nothing and says why."""
     try:
         with transaction(conn):
@@ -275,7 +275,7 @@ class FightTurn(BaseModel):
 
 
 @router.post("/api/media/games/lumi-pet/battle")
-def pet_fight(body: FightStart, user=Depends(pet_user), conn=Depends(get_db)):
+def pet_fight(body: FightStart, user=Depends(pet_user), conn=Depends(get_games_db)):
     """Start a fight. One at a time; it waits for as long as it takes."""
     try:
         with transaction(conn):
@@ -285,7 +285,7 @@ def pet_fight(body: FightStart, user=Depends(pet_user), conn=Depends(get_db)):
 
 
 @router.post("/api/media/games/lumi-pet/battle/act")
-def pet_fight_turn(body: FightTurn, user=Depends(pet_user), conn=Depends(get_db)):
+def pet_fight_turn(body: FightTurn, user=Depends(pet_user), conn=Depends(get_games_db)):
     """Play one turn. A stale or repeated press is refused and changes nothing."""
     try:
         with transaction(conn):
@@ -311,7 +311,7 @@ class DungeonStep(BaseModel):
 
 
 @router.post("/api/media/games/lumi-pet/dungeon")
-def pet_dungeon(body: DungeonStart, user=Depends(pet_user), conn=Depends(get_db)):
+def pet_dungeon(body: DungeonStart, user=Depends(pet_user), conn=Depends(get_games_db)):
     """Set out on a dungeon trip. One at a time; it waits for as long as it takes."""
     try:
         with transaction(conn):
@@ -333,7 +333,7 @@ class GardenStep(BaseModel):
 
 
 @router.post("/api/media/games/lumi-pet/garden")
-def pet_garden(body: GardenStep, user=Depends(pet_user), conn=Depends(get_db)):
+def pet_garden(body: GardenStep, user=Depends(pet_user), conn=Depends(get_games_db)):
     """Tend the garden or work the press."""
     try:
         with transaction(conn):
@@ -343,7 +343,7 @@ def pet_garden(body: GardenStep, user=Depends(pet_user), conn=Depends(get_db)):
 
 
 @router.post("/api/media/games/lumi-pet/dungeon/act")
-def pet_dungeon_step(body: DungeonStep, user=Depends(pet_user), conn=Depends(get_db)):
+def pet_dungeon_step(body: DungeonStep, user=Depends(pet_user), conn=Depends(get_games_db)):
     """Take one step, or make one choice, in the dungeon."""
     try:
         with transaction(conn):
@@ -428,7 +428,7 @@ def _party_display(request: Request, conn, owner) -> str | None:
 
 
 @router.get("/api/media/games/lumi-pet/parties")
-def party_list(user=Depends(pet_user), conn=Depends(get_db)):
+def party_list(user=Depends(pet_user), conn=Depends(get_games_db)):
     """Parties waiting in their lobby, and this person's own."""
     with transaction(conn):
         lumiparty.sweep(conn)
@@ -437,7 +437,7 @@ def party_list(user=Depends(pet_user), conn=Depends(get_db)):
 
 @router.post("/api/media/games/lumi-pet/parties")
 def party_create(request: Request, body: PartyCreate | None = None, user=Depends(pet_user), owner=Depends(media_user),
-                 conn=Depends(get_db)):
+                 conn=Depends(get_games_db)):
     """A new party: online with this person as its host, or a couch party owned by this TV."""
     now = lumipet.now_ms()
     with transaction(conn):
@@ -450,14 +450,14 @@ def party_create(request: Request, body: PartyCreate | None = None, user=Depends
 
 
 @router.get("/api/media/games/lumi-pet/parties/{code}")
-def party_look(code: str, request: Request, user=Depends(pet_user), owner=Depends(media_user), conn=Depends(get_db)):
+def party_look(code: str, request: Request, user=Depends(pet_user), owner=Depends(media_user), conn=Depends(get_games_db)):
     """The party as this member, or its couch TV, sees it."""
     display = _party_display(request, conn, owner)
     return _party_call(_look_party, conn, code, user["id"], display)   # the write lock only when due
 
 
 @router.post("/api/media/games/lumi-pet/parties/{code}")
-def party_move(code: str, body: PartyMove, user=Depends(pet_user), conn=Depends(get_db)):
+def party_move(code: str, body: PartyMove, user=Depends(pet_user), conn=Depends(get_games_db)):
     """One thing this member does at the party (or joining it)."""
     with transaction(conn):
         return _party_call(lumiparty.act, conn, code, user["id"], body.action, name=user["username"], way=body.way,
@@ -466,7 +466,7 @@ def party_move(code: str, body: PartyMove, user=Depends(pet_user), conn=Depends(
 
 
 @router.post("/api/media/games/lumi-pet/parties/{code}/tv/input")
-def party_tv_input(code: str, body: PartyPress, request: Request, owner=Depends(media_user), conn=Depends(get_db)):
+def party_tv_input(code: str, body: PartyPress, request: Request, owner=Depends(media_user), conn=Depends(get_games_db)):
     """A couch remote's press. The proof says which remote pressed, for this very TV; the remote's own account (the
     TV owner's, or one of their TV guests') is the member who acts, with their own Lumi."""
     screen, display = _tv_identity(request, conn, owner)
@@ -487,7 +487,7 @@ def party_tv_input(code: str, body: PartyPress, request: Request, owner=Depends(
 
 
 @router.post("/api/media/games/lumi-pet/parties/{code}/tv/close")
-def party_tv_close(code: str, request: Request, owner=Depends(media_user), conn=Depends(get_db)):
+def party_tv_close(code: str, request: Request, owner=Depends(media_user), conn=Depends(get_games_db)):
     """The couch TV ends its party (a trip still out is given up)."""
     _, display = _tv_identity(request, conn, owner)
     with transaction(conn):
@@ -495,12 +495,12 @@ def party_tv_close(code: str, request: Request, owner=Depends(media_user), conn=
 
 
 @router.get("/api/media/games/lumi-pet/parties/{code}/stream")
-async def party_stream(code: str, request: Request, user=Depends(pet_user), owner=Depends(media_user), conn=Depends(get_db)):
+async def party_stream(code: str, request: Request, user=Depends(pet_user), owner=Depends(media_user), conn=Depends(get_games_db)):
     """The party, live: "party" whenever it changes (and every few seconds while its clocks run), a ping every 15 s,
     and "end" once it has broken up or this member has left. While it's open the member (or the couch TV) counts
     as there."""
     display = _party_display(request, conn, owner)
-    pool = request.app.state.db_pool
+    pool = feature_pool(request.app, "games")
 
     def look():
         c = pool.get()
@@ -578,14 +578,14 @@ def _storyteller(request: Request, conn, user) -> tuple[str, object] | None:
 
 
 @router.get("/api/media/games/lumi-pet/dungeon/tale")
-def pet_tale_source(request: Request, user=Depends(pet_user), conn=Depends(get_db)):
+def pet_tale_source(request: Request, user=Depends(pet_user), conn=Depends(get_games_db)):
     """Whether a live storyteller is there for this person, and which, so Settings can say."""
     found = _storyteller(request, conn, user)
     return {"live": found[0] if found else None}
 
 
 @router.post("/api/media/games/lumi-pet/dungeon/tale")
-async def pet_tale(request: Request, user=Depends(pet_user), conn=Depends(get_db)):
+async def pet_tale(request: Request, user=Depends(pet_user), conn=Depends(get_games_db)):
     """A freshly written line for the moment Lumi is in, in live mode. Takes nothing from the page: the moment is the
     run's own. Answers {"line": null} whenever there is nothing new to say (the library line simply stays)."""
     run = lumidungeon.current(conn, user["id"])
@@ -630,7 +630,7 @@ def pet_push_key(request: Request, user=Depends(media_user)):
 
 
 @router.post("/api/media/games/lumi-pet/push")
-def pet_push_on(body: PushDevice, user=Depends(media_user), conn=Depends(get_db)):
+def pet_push_on(body: PushDevice, user=Depends(media_user), conn=Depends(get_games_db)):
     """Lumi may send this device reminders. Asking again from the same browser refreshes it."""
     try:
         with transaction(conn):
@@ -641,7 +641,7 @@ def pet_push_on(body: PushDevice, user=Depends(media_user), conn=Depends(get_db)
 
 
 @router.post("/api/media/games/lumi-pet/push/off")
-def pet_push_off(body: PushDevice, user=Depends(media_user), conn=Depends(get_db)):
+def pet_push_off(body: PushDevice, user=Depends(media_user), conn=Depends(get_games_db)):
     """No more reminders on this device."""
     with transaction(conn):
         push.unsubscribe(conn, user["id"], body.endpoint)
@@ -656,7 +656,7 @@ def service_worker():
 
 
 @router.get("/media/games/{slug}", response_class=HTMLResponse)
-def game_page(slug: str, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+def game_page(slug: str, request: Request, user=Depends(media_user), conn=Depends(get_games_db)):
     """A game's page: its canvas and its scripts (static/games/<slug>/), in the person's theme. No `user` in the
     template, so the page carries none of the app's own scripts (messages, notifications) inside the game frame."""
     game = games.get(slug)
@@ -749,7 +749,7 @@ def _casino_call(fn, *args, **kwargs):
 
 
 @router.get("/api/media/games/{slug}/rooms")
-def table_list(slug: str, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+def table_list(slug: str, request: Request, user=Depends(media_user), conn=Depends(get_games_db)):
     _casino_game(slug)
     actor, _ = _table_identity(request, conn, user)
     paired = _screen(request, conn)
@@ -761,7 +761,7 @@ def table_list(slug: str, request: Request, user=Depends(media_user), conn=Depen
 
 @router.post("/api/media/games/{slug}/rooms")
 def table_create(slug: str, request: Request, body: TableCreate | None = None,
-                 user=Depends(media_user), conn=Depends(get_db)):
+                 user=Depends(media_user), conn=Depends(get_games_db)):
     _casino_game(slug)
     if body is not None and body.mode == "tv":
         screen, actor = _tv_identity(request, conn, user)
@@ -771,7 +771,7 @@ def table_create(slug: str, request: Request, body: TableCreate | None = None,
 
 
 @router.get("/api/media/games/{slug}/rooms/{code}")
-def table_state(slug: str, code: str, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+def table_state(slug: str, code: str, request: Request, user=Depends(media_user), conn=Depends(get_games_db)):
     _casino_game(slug)
     actor, name = _table_identity(request, conn, user)
     return _casino_call(casino.room, conn, slug, code, actor, name, account=user["id"])
@@ -779,21 +779,21 @@ def table_state(slug: str, code: str, request: Request, user=Depends(media_user)
 
 @router.post("/api/media/games/{slug}/rooms/{code}")
 def table_move(slug: str, code: str, body: TableMove, request: Request,
-               user=Depends(media_user), conn=Depends(get_db)):
+               user=Depends(media_user), conn=Depends(get_games_db)):
     _casino_game(slug)
     actor, name = _table_identity(request, conn, user)
     return _casino_call(casino.room, conn, slug, code, actor, name, account=user["id"], **body.model_dump())
 
 
 @router.get("/api/media/games/{slug}/rooms/{code}/tv")
-def tv_table(slug: str, code: str, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+def tv_table(slug: str, code: str, request: Request, user=Depends(media_user), conn=Depends(get_games_db)):
     _casino_game(slug)
     _, actor = _tv_identity(request, conn, user)
     return _casino_call(casino.couch, conn, slug, code, actor)
 
 
 @router.post("/api/media/games/{slug}/rooms/{code}/tv/input")
-def tv_input(slug: str, code: str, body: TVInput, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+def tv_input(slug: str, code: str, body: TVInput, request: Request, user=Depends(media_user), conn=Depends(get_games_db)):
     _casino_game(slug)
     screen, display = _tv_identity(request, conn, user)
     try:
@@ -809,7 +809,7 @@ def tv_input(slug: str, code: str, body: TVInput, request: Request, user=Depends
 
 
 @router.post("/api/media/games/{slug}/rooms/{code}/tv/manage")
-def tv_manage(slug: str, code: str, body: TVManage, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+def tv_manage(slug: str, code: str, body: TVManage, request: Request, user=Depends(media_user), conn=Depends(get_games_db)):
     _casino_game(slug)
     _, actor = _tv_identity(request, conn, user)
     return _casino_call(casino.couch, conn, slug, code, actor, close=body.action == "close",
@@ -848,7 +848,7 @@ class RunFinish(BaseModel):
 
 
 @router.post("/api/media/games/{slug}/run")
-def arcade_run(slug: str, user=Depends(media_user), conn=Depends(get_db)):
+def arcade_run(slug: str, user=Depends(media_user), conn=Depends(get_games_db)):
     """Start a solo run: it costs arcade.ENTRY coins, and hands back the seed the game is built from."""
     _arcade_game(slug)
     with transaction(conn):
@@ -857,7 +857,7 @@ def arcade_run(slug: str, user=Depends(media_user), conn=Depends(get_db)):
 
 
 @router.post("/api/media/games/{slug}/run/finish")
-def arcade_finish(slug: str, body: RunFinish, user=Depends(media_user), conn=Depends(get_db)):
+def arcade_finish(slug: str, body: RunFinish, user=Depends(media_user), conn=Depends(get_games_db)):
     """A run ended: the server checks it and pays a solo run its score; a race's result goes to its table."""
     _arcade_game(slug)
     with transaction(conn):
@@ -898,7 +898,7 @@ class Board(BaseModel):
 
 
 @router.get("/api/media/games/{slug}/tables")
-def showdown_list(slug: str, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+def showdown_list(slug: str, request: Request, user=Depends(media_user), conn=Depends(get_games_db)):
     """This game's showdown tables."""
     _arcade_game(slug)
     actor, _ = _table_identity(request, conn, user)
@@ -906,7 +906,7 @@ def showdown_list(slug: str, request: Request, user=Depends(media_user), conn=De
 
 
 @router.post("/api/media/games/{slug}/tables")
-def showdown_create(slug: str, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+def showdown_create(slug: str, request: Request, user=Depends(media_user), conn=Depends(get_games_db)):
     """A new table, with whoever opened it in the P1 seat."""
     _arcade_game(slug)
     actor, name = _table_identity(request, conn, user)
@@ -914,7 +914,7 @@ def showdown_create(slug: str, request: Request, user=Depends(media_user), conn=
 
 
 @router.get("/api/media/games/{slug}/tables/{code}")
-def showdown_look(slug: str, code: str, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+def showdown_look(slug: str, code: str, request: Request, user=Depends(media_user), conn=Depends(get_games_db)):
     """A table as this player sees it."""
     _arcade_game(slug)
     actor, _ = _table_identity(request, conn, user)
@@ -923,7 +923,7 @@ def showdown_look(slug: str, code: str, request: Request, user=Depends(media_use
 
 @router.post("/api/media/games/{slug}/tables/{code}")
 def showdown_move(slug: str, code: str, body: ShowdownMove, request: Request, user=Depends(media_user),
-                  conn=Depends(get_db)):
+                  conn=Depends(get_games_db)):
     """One thing a player does at the table."""
     _arcade_game(slug)
     actor, name = _table_identity(request, conn, user)
@@ -932,7 +932,7 @@ def showdown_move(slug: str, code: str, body: ShowdownMove, request: Request, us
 
 
 @router.post("/api/media/games/{slug}/tables/{code}/board", status_code=status.HTTP_204_NO_CONTENT)
-def showdown_board(slug: str, code: str, body: Board, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+def showdown_board(slug: str, code: str, body: Board, request: Request, user=Depends(media_user), conn=Depends(get_games_db)):
     """A racer's live board, a few times a second. Kept in memory only; refused once their race is over for them."""
     _arcade_game(slug)
     actor, _ = _table_identity(request, conn, user)
@@ -945,13 +945,13 @@ def showdown_board(slug: str, code: str, body: Board, request: Request, user=Dep
 
 
 @router.get("/api/media/games/{slug}/tables/{code}/stream")
-async def showdown_stream(slug: str, code: str, request: Request, user=Depends(media_user), conn=Depends(get_db)):
+async def showdown_stream(slug: str, code: str, request: Request, user=Depends(media_user), conn=Depends(get_games_db)):
     """The table, live, for a seated player: "table" whenever it changes, "boards" as the racers play (at most about
     eight times a second), a ping every 15 s, and "end" if the seat is gone. While it's open the player counts as
     there; once it closes they have showdown.DROP_SECONDS to come back."""
     _arcade_game(slug)
     actor, _ = _table_identity(request, conn, user)
-    pool = request.app.state.db_pool
+    pool = feature_pool(request.app, "games")
 
     def look():
         c = pool.get()
