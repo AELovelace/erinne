@@ -1,36 +1,85 @@
 #!/usr/bin/env bash
 # nginx as the box's front door (README "nginx in front of the app processes"):
-#   sudo bash /opt/mnemerynne/deploy/linux/front-door.sh on       take the app's address, split the paths
-#   sudo bash /opt/mnemerynne/deploy/linux/front-door.sh off      give the address back to the web app
-#   sudo bash /opt/mnemerynne/deploy/linux/front-door.sh status   what listens where, and who answers
+#   sudo bash /opt/mnemerynne/deploy/linux/front-door.sh on        take the app's address, split the paths
+#   sudo bash /opt/mnemerynne/deploy/linux/front-door.sh off       give the address back to the web app
+#   sudo bash /opt/mnemerynne/deploy/linux/front-door.sh services  run every service as mnemerynne@<name>
+#   sudo bash /opt/mnemerynne/deploy/linux/front-door.sh status    what listens where, and who answers
 #
 # "on" keeps the address and port the web app has now (MNEMERYNNE_HOST/PORT: where the reverse proxy sends to),
-# moves the web app to 127.0.0.1:38210 (the backup and games processes follow MNEMERYNNE_HOST to 127.0.0.1) and
-# has nginx listen there instead. If anything doesn't come up, it says which step and puts everything back.
+# moves the web app to 127.0.0.1:38210 (the services follow MNEMERYNNE_HOST to 127.0.0.1) and has nginx listen
+# there instead. The nginx config is written from the service registry (mnemerynne/services/nginx.py), so a
+# service added there gets its paths the next time this runs. If anything doesn't come up, it says which step
+# and puts everything back.
+# "services" moves each registry service from its first named unit (mnemerynne-sync, ...) to the template unit
+# mnemerynne@.service, one at a time, and puts the old unit back if the new one doesn't answer.
 # A script rather than pasted lines: long pasted lines got cut short in the terminal.
 set -euo pipefail
 
+APP=/opt/mnemerynne
+PY=$APP/.venv/bin/python
+SERVICE_USER=mnemerynne
 ENV=/etc/mnemerynne/mnemerynne.env
 SAVED=$ENV.before-front-door                     # the .env as it was before "on": "off" puts it back
-SRC=/opt/mnemerynne/deploy/linux/nginx-mnemerynne-front.conf
 CONF=/etc/nginx/conf.d/mnemerynne-front.conf
+UNIT_DIR=/etc/systemd/system
+TEMPLATE=$APP/deploy/linux/mnemerynne@.service
 WEB_PORT=38210
-ROLES=(mnemerynne-web mnemerynne-sync mnemerynne-games)
+WAIT=90                                          # seconds to wait for a health answer
 
-[ "$(id -u)" = 0 ] || { echo "Run it with sudo." >&2; exit 1; }
-
-env_get() { grep -E "^$1=" "$ENV" | tail -1 | cut -d= -f2- || true; }   # a setting from the .env, or empty
+env_get() { grep -E "^$1=" "${2:-$ENV}" | tail -1 | cut -d= -f2- || true; }   # a setting from the .env (or $2)
 env_set() {                                                             # set (or add) one setting in the .env
     if grep -qE "^$1=" "$ENV"; then sed -i "s#^$1=.*#$1=$2#" "$ENV"; else echo "$1=$2" >> "$ENV"; fi
 }
-running() { systemctl list-units --type=service --state=active --no-legend "${ROLES[@]/%/.service}" \
-            | awk '{print $1}' | sed 's/\.service$//'; }                # which of the app's services run
-up() {                                                                  # wait up to 90 s for a health answer
-    for _ in $(seq 1 90); do
-        curl -s --max-time 3 "$1" | grep -q '"ok"' && return 0
+
+app_py() { (cd "$APP" && runuser -u "$SERVICE_USER" -- "$PY" "$@"); }  # the app's Python, as the service user
+registry_services() {                                                   # "name port" per registry service
+    app_py -c 'from mnemerynne.services import registry
+for s in registry.SERVICES.values(): print(s.name, s.port)'
+}
+services_or_default() {                     # the registry's services; the first two if the app can't be asked
+    registry_services 2>/dev/null || printf 'sync 38201\ngames 38202\n'
+}
+
+running() {                                 # which of the app's services run: named units and mnemerynne@ ones
+    systemctl list-units --type=service --state=active --no-legend --plain \
+        mnemerynne-web.service mnemerynne-sync.service mnemerynne-games.service 'mnemerynne@*.service' \
+        | awk '{print $1}' | sed 's/\.service$//'
+}
+unit_of() {                                 # the unit running service $1 now (template first), or nothing
+    local unit
+    for unit in "mnemerynne@$1" "mnemerynne-$1"; do
+        if systemctl is-active --quiet "$unit"; then echo "$unit"; return 0; fi
+    done
+}
+local_host() {                              # where the services listen, as seen from this box
+    case "${1:-}" in ""|0.0.0.0|"::"|"[::]") echo 127.0.0.1 ;; *) echo "$1" ;; esac
+}
+up() {                                      # wait for a health answer from $1 (and, given $2, from that role)
+    local body
+    for _ in $(seq 1 "$WAIT"); do
+        body=$(curl -s --max-time 3 "$1" || true)
+        if [[ $body == *'"ok"'* ]] && { [ -z "${2:-}" ] || [[ $body == *"\"role\":\"$2\""* ]]; }; then
+            return 0                        # {"status":"ok","role":"sync"}: the right process, not a leftover
+        fi
         sleep 1
     done
     return 1
+}
+
+write_conf() {                              # the nginx config from the registry, listening on $1; checked
+    local new old
+    new=$(mktemp); old=$(mktemp)
+    if ! app_py -m mnemerynne.services.nginx --listen "$1" --web "127.0.0.1:$WEB_PORT" > "$new" || [ ! -s "$new" ]; then
+        rm -f "$new" "$old"; echo "Couldn't write the nginx config from the registry; nothing changed." >&2; return 1
+    fi
+    if [ -f "$CONF" ]; then cp -a "$CONF" "$old"; else rm -f "$old"; fi                # the one that worked
+    install -m 644 "$new" "$CONF"; rm -f "$new"
+    command -v restorecon >/dev/null && restorecon "$CONF" 2>/dev/null || true        # SELinux label for nginx
+    if ! nginx -t; then                                                                 # put the old one back
+        if [ -f "$old" ]; then cp -a "$old" "$CONF"; else rm -f "$CONF"; fi
+        rm -f "$old"; echo "nginx didn't accept the new config; the old one is back." >&2; return 1
+    fi
+    rm -f "$old"
 }
 
 off() {
@@ -51,8 +100,7 @@ fail() {                                                                # say wh
     exit 1
 }
 
-case "${1:-}" in
-on)
+front_on() {
     if [ -f "$SAVED" ]; then echo "Already on (run 'off' first to start again)."; exit 0; fi
     HOST=$(env_get MNEMERYNNE_HOST); PORT=$(env_get MNEMERYNNE_PORT)
     HOST=${HOST:-127.0.0.1}; PORT=${PORT:-38200}
@@ -64,13 +112,12 @@ on)
 
     command -v nginx >/dev/null || dnf install -y nginx >/dev/null
     command -v semanage >/dev/null || dnf install -y policycoreutils-python-utils >/dev/null
-    sed "s#192\.168\.1\.5:38200#$HOST:$PORT#" "$SRC" > "$CONF"                  # nginx takes the app's address
     if command -v getenforce >/dev/null && [ "$(getenforce)" != Disabled ]; then   # SELinux: nginx on this port,
         semanage port -a -t http_port_t -p tcp "$PORT" 2>/dev/null \
             || semanage port -m -t http_port_t -p tcp "$PORT"
         setsebool -P httpd_can_network_connect 1                                     # and reaching the app
     fi
-    nginx -t || { rm -f "$CONF"; echo "nginx didn't accept the config; nothing changed." >&2; exit 1; }
+    write_conf "$HOST:$PORT" || exit 1                                              # nginx takes the app's address
 
     cp -a "$ENV" "$SAVED"
     TRUST=$(env_get FORWARDED_ALLOW_IPS)                    # the reverse proxy trusted now, plus this box's nginx
@@ -87,29 +134,96 @@ on)
 
     RUN=$(running); systemctl restart ${RUN:-mnemerynne-web} || fail "restarting the app" mnemerynne-web
     up "http://127.0.0.1:$WEB_PORT/healthz" || fail "the web app on 127.0.0.1:$WEB_PORT" mnemerynne-web
-    if systemctl is-active --quiet mnemerynne-sync; then
-        up http://127.0.0.1:38201/healthz || fail "the backup processes on 127.0.0.1:38201" mnemerynne-sync
-    fi
-    if systemctl is-active --quiet mnemerynne-games; then
-        up http://127.0.0.1:38202/healthz || fail "the games process on 127.0.0.1:38202" mnemerynne-games
-    fi
+    local name port unit
+    while read -r name port; do                                 # every service that runs answers on its port
+        unit=$(unit_of "$name")
+        [ -n "$unit" ] || continue
+        up "http://127.0.0.1:$port/healthz" "$name" || fail "$name on 127.0.0.1:$port" "$unit"
+    done < <(services_or_default)
     systemctl enable --now nginx || fail "starting nginx" nginx
     up "http://$HOST:$PORT/healthz" || fail "nginx answering on $HOST:$PORT" nginx
-    echo "Done: nginx on $HOST:$PORT -> the web app (127.0.0.1:$WEB_PORT), /api/sync/ -> 38201, games -> 38202."
-    ;;
-off)
-    off
-    ;;
-status)
-    echo "nginx: $(systemctl is-active nginx)   saved .env: $([ -f "$SAVED" ] && echo yes || echo no)"
-    ss -ltnp | grep -E ":(38200|38201|38202|$WEB_PORT) " || true
-    for url in "http://127.0.0.1:$WEB_PORT/healthz" http://127.0.0.1:38201/healthz http://127.0.0.1:38202/healthz \
-               "http://$(env_get MNEMERYNNE_HOST):$(env_get MNEMERYNNE_PORT)/healthz"; do
+    echo "Done: nginx on $HOST:$PORT -> each service's paths to its port, everything else to 127.0.0.1:$WEB_PORT."
+}
+
+move_service() {          # service $1 (port $2) from mnemerynne-$1 to mnemerynne@$1; the old unit back on failure
+    local name=$1 port=$2 old="mnemerynne-$1" new="mnemerynne@$1" host had_old=no
+    host=$(local_host "$(env_get MNEMERYNNE_HOST)")
+    if systemctl is-enabled --quiet "$new" 2>/dev/null && systemctl is-active --quiet "$new"; then
+        echo "$new: already running."; return 0
+    fi
+    if systemctl is-enabled --quiet "$old" 2>/dev/null; then
+        had_old=yes
+        systemctl disable --now "$old"
+    fi
+    echo "$new: starting (waits for the web app's migrations, then answers on $host:$port)."
+    if systemctl enable --now "$new" && up "http://$host:$port/healthz" "$name"; then
+        echo "$new: answering."; return 0
+    fi
+    echo "$new didn't answer on $host:$port:" >&2
+    journalctl -u "$new" -n 15 --no-pager >&2 || true
+    systemctl disable --now "$new" || true
+    if [ "$had_old" = yes ]; then
+        systemctl enable --now "$old" || true
+        echo "$old is back on." >&2
+    fi
+    return 1
+}
+
+services() {
+    [ -f "$TEMPLATE" ] || { echo "No $TEMPLATE: update the app first (mnemerynne-admin update)." >&2; exit 1; }
+    local list name port f
+    list=$(registry_services) || { echo "Couldn't read the service registry with $PY." >&2; exit 1; }
+    install -m 644 "$TEMPLATE" "$UNIT_DIR/mnemerynne@.service"
+    mkdir -p "$UNIT_DIR/mnemerynne@.service.d"
+    for f in "$UNIT_DIR"/mnemerynne-web.service.d/*.conf; do   # the web app's drop-ins (paths, limits) for all
+        [ -e "$f" ] || continue
+        if [ -e "$UNIT_DIR/mnemerynne@.service.d/$(basename "$f")" ]; then
+            echo "Kept the existing mnemerynne@.service.d/$(basename "$f")."
+        else
+            cp -a "$f" "$UNIT_DIR/mnemerynne@.service.d/"
+            echo "Copied the web app's drop-in $(basename "$f") to mnemerynne@.service.d/."
+        fi
+    done
+    systemctl daemon-reload
+    while read -r name port; do
+        [ -n "$name" ] || continue
+        move_service "$name" "$port" || { echo "Stopped at $name; the services before it run as mnemerynne@." >&2; exit 1; }
+    done <<< "$list"
+    if [ -f "$SAVED" ]; then                                    # the front door is on: its routes from the registry
+        local listen                                            # where the reverse proxy sends: the saved .env's
+        listen="$(env_get MNEMERYNNE_HOST "$SAVED"):$(env_get MNEMERYNNE_PORT "$SAVED")"
+        write_conf "$listen" || exit 1
+        systemctl reload nginx
+        echo "nginx on $listen: routes rewritten from the registry and reloaded."
+    fi
+    echo "Done: $(echo "$list" | awk '{printf "mnemerynne@%s ", $1}')run from the template unit."
+}
+
+status() {
+    local list ports host name port
+    list=$(services_or_default)
+    ports=$(echo "$list" | awk '{printf "|%s", $2}')
+    host=$(local_host "$(env_get MNEMERYNNE_HOST)")
+    echo "nginx: $(systemctl is-active nginx || true)   saved .env: $([ -f "$SAVED" ] && echo yes || echo no)"
+    echo "running: $(running | tr '\n' ' ')"
+    ss -ltnp | grep -E ":(38200|$WEB_PORT$ports) " || true
+    while read -r name port; do
+        printf "%-45s %s\n" "http://$host:$port/healthz" "$(curl -s --max-time 3 "http://$host:$port/healthz" || echo '(no answer)')"
+    done <<< "$list"
+    for url in "http://127.0.0.1:$WEB_PORT/healthz" "http://$(env_get MNEMERYNNE_HOST):$(env_get MNEMERYNNE_PORT)/healthz"; do
         printf "%-45s %s\n" "$url" "$(curl -s --max-time 3 "$url" || echo '(no answer)')"
     done
-    ;;
-*)
-    echo "Usage: sudo bash $0 on|off|status" >&2
-    exit 2
-    ;;
-esac
+}
+
+main() {
+    [ "$(id -u)" = 0 ] || { echo "Run it with sudo." >&2; exit 1; }
+    case "${1:-}" in
+        on) front_on ;;
+        off) off ;;
+        services) services ;;
+        status) status ;;
+        *) echo "Usage: sudo bash $0 on|off|services|status" >&2; exit 2 ;;
+    esac
+}
+
+main "$@"

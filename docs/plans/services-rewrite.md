@@ -9,27 +9,25 @@
 | Phase 0.2: event bus (`mnemerynne/events.py`, LocalBus + ValkeyBus, `MNEMERYNNE_VALKEY_URL`) | done | 4993320 |
 | Phase 0.3: a SQLite file per feature (`db.connect_feature`, read-only core attach, per-file migrations, `move_tables`, `migrate_all` / `wait_migrated`) | done | 1e18225 |
 | Phase 0.4: backups, restores and `update.sh` undo for every DB file; users' and files' rows cleaned across files (`forget_user`, `sweep_orphans`, `check-orphans`) | done | afe0ec2 |
-| Phase 0.5: systemd template `mnemerynne@.service`, front door generated from the registry, Valkey on the box | **in progress (paused 2026-11-13)** | see below |
+| Phase 0.5: systemd template `mnemerynne@.service`, front door generated from the registry, Valkey on the box | done in code (2026-11-13); **not yet run on the NAS** | 340f24c + this step's commit |
 | Phase 1: nginx serves `/static/` and file bytes (`X-Accel-Redirect`) | | |
 
 Tests: `.venv\Scripts\python -m pytest tests -n auto` (about 4 minutes).
 
-**Where 0.5 stopped (resume here; full handoff with the NAS state and commands: `docs/plans/services-rewrite-handoff.md`):**
+**Phase 0.5 (full handoff with the NAS state and commands: `docs/plans/services-rewrite-handoff.md`):**
 - Done and tested: `deploy/linux/mnemerynne@.service` (template unit); `mnemerynne/services/nginx.py`
   (`python -m mnemerynne.services.nginx --listen HOST:PORT` prints the front-door config from the registry);
-  `update.sh` `service_units` (restarts/stops the named units and enabled `mnemerynne@` instances, tested);
-  `backup.running_services` also sees running `mnemerynne@` instances (tested).
-- Not done yet: `deploy/linux/front-door.sh` still writes nginx from the static `nginx-mnemerynne-front.conf` (sed).
-  Next: (1) `on` writes the config with the generator (cd /opt/mnemerynne; .venv/bin/python -m
-  mnemerynne.services.nginx); (2) a `services` subcommand: install the template, copy
-  `mnemerynne-web.service.d/*.conf` to `mnemerynne@.service.d/`, for each registry service disable the old
-  `mnemerynne-<name>` unit, enable `mnemerynne@<name>`, check `/healthz` on its port (re-enable the old unit if
-  it fails), then regenerate nginx using the listen address from `$ENV.before-front-door` and reload;
-  (3) `running()` and `status` include `mnemerynne@*` instances; (4) `deploy/linux/valkey-setup.sh on|status`
-  (dnf install valkey, unix socket /run/valkey/valkey.sock with 770, mnemerynne in the valkey group,
-  MNEMERYNNE_VALKEY_URL=unix:///run/valkey/valkey.sock, ping as the service user); (5) README sections;
-  (6) a test for the nginx renderer (every service's paths and upstream, web catch-all, /remote/ websockets).
-- Nothing in 0.5 needs doing on the NAS yet; the box runs fine on what's deployed.
+  `update.sh` `service_units` (restarts/stops the named units and enabled `mnemerynne@` instances);
+  `backup.running_services` also sees running `mnemerynne@` instances.
+- Done and tested 2026-11-13 (`tests/test_front_door.py`, with systemctl/curl/nginx stood in for):
+  `front-door.sh` `on` writes nginx with the generator (checked with `nginx -t`, the old config back if refused);
+  `running`/`status` include `mnemerynne@*` instances and every registry service's port; new `services`
+  subcommand (template + the web app's drop-ins, each service moved to `mnemerynne@<name>` with a `/healthz`
+  check that its own role answers, the old unit back if not, nginx rewritten for the address in
+  `$ENV.before-front-door` and reloaded); `deploy/linux/valkey-setup.sh on|off|status` (socket only, ping as the
+  service user before the app is touched, the URL in both `.env` files); README sections "One unit for every
+  service" and "Valkey"; the nginx renderer's tests.
+- Not done: running it on the NAS (handoff §2 "Deploying Phase 0.5"). Fedora's Valkey paths are unverified.
 
 ## Context
 

@@ -48,11 +48,31 @@ Deployed: everything up to the front door (commit 56d49c3). Nothing from Phase 0
    sudo systemctl daemon-reload && sudo systemctl restart mnemerynne-web mnemerynne-sync mnemerynne-games
    ```
 2. Optional memory cap (was discussed, not applied): `MemoryHigh=2G`, `MemoryMax=3G` in a `mnemerynne-web.service.d/memory.conf`.
-3. Valkey: not needed until a phase uses events (Phase 3 Rooms at the latest). Step 0.5 adds a script for it.
+3. Valkey: not needed until a phase uses events (Phase 3 Rooms at the latest). `valkey-setup.sh` is ready for it.
 
-## 3. Where the code stopped: Phase 0.5
+### Deploying Phase 0.5 (after Phase 0; never run on the box yet)
 
-Done and tested (committed in "Services rewrite, phase 0 step 5 (paused)"):
+Do item 1 above (the `ReadWritePaths` fix) first, so the drop-in copied to the template is the fixed one.
+
+```sh
+sudo mnemerynne-admin update --yes
+sudo bash /opt/mnemerynne/deploy/linux/front-door.sh services     # sync and games move to mnemerynne@
+sudo bash /opt/mnemerynne/deploy/linux/front-door.sh status
+# Only when a phase needs live events between processes (or to try it now; `off` undoes it):
+sudo bash /opt/mnemerynne/deploy/linux/valkey-setup.sh on
+sudo bash /opt/mnemerynne/deploy/linux/valkey-setup.sh status
+```
+
+`services` stops at the first service that doesn't answer and puts its old unit back; the ones before it stay
+on `mnemerynne@`. Rolling a moved one back by hand: `systemctl disable --now mnemerynne@sync && systemctl enable
+--now mnemerynne-sync`.
+
+## 3. Phase 0.5: done in code (2026-11-13)
+
+The front-door and Valkey work below is committed and tested with the box stood in for
+(`tests/test_front_door.py`); it hasn't run on the NAS. Next is **Phase 1** (end of this section).
+
+Done and tested first (committed in "Services rewrite, phase 0 step 5 (paused)"):
 - `deploy/linux/mnemerynne@.service`: one template unit for every service (`mnemerynne@sync`, ...).
   Drop-ins in `/etc/systemd/system/mnemerynne@.service.d/` apply to all of them.
 - `mnemerynne/services/nginx.py`: `python -m mnemerynne.services.nginx --listen 192.168.1.5:38200` prints the
@@ -62,8 +82,9 @@ Done and tested (committed in "Services rewrite, phase 0 step 5 (paused)"):
   (disabled ones stay off); used in the normal restart and in undo. Test: `test_update_restarts_only_...`.
 - `backup.running_services` also sees running `mnemerynne@` instances.
 
-Next, in this order:
-1. **`deploy/linux/front-door.sh`** (read it whole first; it's ~115 lines):
+Then done 2026-11-13, as listed here (kept as the record of what each piece was asked to do; `valkey-setup.sh`
+also got `off`, and `services` checks that `/healthz` answers with the service's own role, not just "ok"):
+1. **`deploy/linux/front-door.sh`**:
    - `on`: replace the `sed ... "$SRC" > "$CONF"` line with the generator:
      `(cd /opt/mnemerynne && .venv/bin/python -m mnemerynne.services.nginx --listen "$HOST:$PORT") > "$CONF"`.
    - `running()` and `status`: include `mnemerynne@*.service` instances (`systemctl list-units --plain ...`).

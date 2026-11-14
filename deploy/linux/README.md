@@ -1095,9 +1095,23 @@ once they're enabled. `--workers` in `mnemerynne-sync.service` sets how many bac
 
 When another machine holds the certificates and proxies straight to the app's port (site-chan sending
 `beepsquad.wtf` to `192.168.1.5:38200`), nginx on the box can take that port over and split the paths
-itself, so neither that proxy nor a firewall between them changes. `nginx-mnemerynne-front.conf` is that
-config: `/api/sync/` to the backup processes (38201), `/api/media/games` to the games (38202), everything
-else to the web app, which moves to `127.0.0.1:38210`. All three then listen only on 127.0.0.1.
+itself, so neither that proxy nor a firewall between them changes: `/api/sync/` to the backup processes
+(38201), `/api/media/games` to the games (38202), everything else to the web app, which moves to
+`127.0.0.1:38210`. All of them then listen only on 127.0.0.1.
+
+`front-door.sh` does all of it, checks each step, and puts everything back if a step fails:
+
+```sh
+sudo bash /opt/mnemerynne/deploy/linux/front-door.sh on        # nginx takes MNEMERYNNE_HOST:PORT
+sudo bash /opt/mnemerynne/deploy/linux/front-door.sh status    # who listens where, and who answers
+sudo bash /opt/mnemerynne/deploy/linux/front-door.sh off       # the web app gets its address back
+```
+
+The config it writes comes from the service registry (`mnemerynne/services/registry.py`), not from a
+file here: `python -m mnemerynne.services.nginx --listen 192.168.1.5:38200` prints it, with one
+upstream and one `location` per service path. A service added to the registry gets its route the next
+time `front-door.sh on` or `services` runs. `nginx-mnemerynne-front.conf` is the same config written by
+hand for two services; by hand, it goes like this:
 
 ```sh
 sudo dnf install -y nginx
@@ -1116,7 +1130,54 @@ sudo systemctl enable --now nginx
 `FORWARDED_ALLOW_IPS` lists both proxies so the app still finds each person's own address in
 `X-Forwarded-For` (login throttling and rate limits count people, not the proxy). The reverse proxy's
 `X-Forwarded-Proto` (https) is passed on as it came. To go back: `sudo systemctl disable --now nginx`,
-put the `.env` copy back and restart `mnemerynne-web`.
+put the `.env` copy back and restart `mnemerynne-web` (`front-door.sh off` does that).
+
+### One unit for every service (`mnemerynne@`)
+
+`mnemerynne@.service` is a template: `mnemerynne@sync`, `mnemerynne@games` and every service added to
+the registry later run from it (`mnemerynne serve --service <name>`; the port and the number of
+processes come from the registry and `MNEMERYNNE_PROFILE`). Drop-ins in
+`/etc/systemd/system/mnemerynne@.service.d/` apply to all of them, `mnemerynne@<name>.service.d/` to one.
+Moving from the first named units (`mnemerynne-sync`, `mnemerynne-games`):
+
+```sh
+sudo mnemerynne-admin update --yes                                   # the template and the registry
+sudo bash /opt/mnemerynne/deploy/linux/front-door.sh services
+sudo bash /opt/mnemerynne/deploy/linux/front-door.sh status
+```
+
+`services` installs the template, copies the web app's drop-ins (`mnemerynne-web.service.d/*.conf`) to
+`mnemerynne@.service.d/` (one already there is kept), and then, one service at a time, turns the old
+unit off, starts `mnemerynne@<name>` and waits for its `/healthz` to answer with its own name. If it
+doesn't, the log is shown, the new instance is turned off, the old unit comes back on, and it stops
+there. When the front door is on, nginx is rewritten from the registry for the address saved before
+the front door went on (where the reverse proxy sends) and reloaded. `update.sh` restarts enabled
+`mnemerynne@` instances after the web app; one that's turned off stays off.
+
+If the web app's drop-in limits `ReadWritePaths` to several separate paths (bin moves then fail with
+"Invalid cross-device link"), fix it before running `services`, so the copy is right too, or fix
+`mnemerynne@.service.d/` the same way afterwards.
+
+### Valkey (live events between the processes)
+
+Each process keeps its live events to itself until `MNEMERYNNE_VALKEY_URL` is set; that's fine while
+only the web app holds live features. Before a live feature (Rooms at the latest) moves into a process
+of its own, put Valkey on the box:
+
+```sh
+sudo bash /opt/mnemerynne/deploy/linux/valkey-setup.sh on       # install, socket only, tell the app
+sudo bash /opt/mnemerynne/deploy/linux/valkey-setup.sh status
+sudo bash /opt/mnemerynne/deploy/linux/valkey-setup.sh off      # the app stops using it
+```
+
+`on` installs `valkey`, keeps the package's config once as `valkey.conf.before-mnemerynne`, and sets
+`unixsocket /run/valkey/valkey.sock`, `unixsocketperm 770` and `port 0` (no TCP port at all). The
+`mnemerynne` user joins the `valkey` group, and the script checks it can ping Valkey as that user before
+it touches the app: only then does it set `MNEMERYNNE_VALKEY_URL=unix:///run/valkey/valkey.sock` (in the
+`.env` and in the copy `front-door.sh off` would restore) and restart the app's running units. Each
+process then logs `Events: through Valkey at ...` at start. Fedora's paths are checked rather than
+assumed; the script says which one it didn't find. If the socket never appears, look for SELinux
+denials with `sudo ausearch -m avc -ts recent`.
 
 ### How Files keeps up with the share's permissions
 
