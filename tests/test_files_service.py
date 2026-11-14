@@ -65,6 +65,7 @@ def test_files_runs_as_several_processes_and_nginx_sends_files_paths_to_it():
         return part[part.index("proxy_pass http://") + 18:part.index(";")]
     for path in ("/api/files", "/api/browse", "/api/items/", "/files/", "/edit/", "/wiki", "/api/wiki"):
         assert upstream(path) == "mnemerynne_files", path
-    assert "location /files {" not in conf and "location = /files {" not in conf   # the Files page: the web app's
+    assert "location /files {" not in conf                                # the Files page: the web app's,
+    assert upstream("= /files") == "mnemerynne_web"                       # exactly, or nginx redirects it to /files/
     stopped = nginx.render("192.168.1.5:38200", running=[])
     assert "mnemerynne_files;" not in stopped                             # off: every path back to the web app

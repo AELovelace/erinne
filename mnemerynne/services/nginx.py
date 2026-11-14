@@ -51,6 +51,9 @@ SERVER_SETTINGS = """\
     proxy_http_version 1.1;
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
+    # nginx's own redirects (it answers "/remote" with "/remote/" when only "/remote/" has a location) stay
+    # relative: an absolute one names this box's port (:38200), which nobody outside can reach.
+    absolute_redirect off;
     # What the reverse proxy said, passed on: the site's name, https, and the client's address with the reverse
     # proxy's after it. The app trusts this box and the reverse proxy (FORWARDED_ALLOW_IPS), so it still sees
     # each person's own address for login throttling and rate limits.
@@ -154,6 +157,13 @@ def render(listen: str, web: str = "127.0.0.1:38210", accel: dict[str, Path] | N
              if s not in services for p in s.paths if p not in taken]
     for why, path in stay:
         lines += [f"    # {why}", f"    location {path} {{", f"        proxy_pass http://{_upstream('web')};", "    }", ""]
+    # A page at a slashed location's bare name (/files, /media, /remote): its own exact location, or nginx answers
+    # it with a redirect to the slashed one instead of passing it on. The web app serves every page.
+    slashed = [p for s in services for p in s.paths] + [p for _, p in stay] + ["/remote/"]
+    bare = sorted({p.rstrip("/") for p in slashed if p.endswith("/") and not p.startswith("=") and p != "/"})
+    for path in bare:
+        lines += [f"    # {path}: a page, not {path}/'s prefix", f"    location = {path} {{",
+                  f"        proxy_pass http://{_upstream('web')};", "    }", ""]
     lines += ["    # Remote's LAN apps: websockets.",
               "    location /remote/ {",
               f"        proxy_pass http://{_upstream('web')};",

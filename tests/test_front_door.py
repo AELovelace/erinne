@@ -293,3 +293,14 @@ valkey_on
     assert result.returncode == 1
     assert "No Valkey config" in result.stderr
     assert "VALKEY" not in env.read_text()
+
+
+def test_bare_page_paths_reach_the_web_app_instead_of_an_nginx_redirect():
+    """nginx answers "/remote" with a 301 to "/remote/" when only "/remote/" has a location, and writes it as
+    http://host:38200/remote/, a port nobody outside reaches. Every slashed location's bare page gets an exact one."""
+    conf = nginx.render("192.168.1.5:38200", running=["media", "files"])
+    assert "absolute_redirect off;" in conf                               # any redirect nginx still makes: relative
+    for page in ("/remote", "/files", "/media"):
+        part = conf[conf.index(f"location = {page} {{"):]
+        assert part[part.index("proxy_pass http://") + 18:part.index(";")] == "mnemerynne_web", page
+    assert "location = /api/media {" in conf and "location = / {" not in conf   # only slashed paths, never the root
