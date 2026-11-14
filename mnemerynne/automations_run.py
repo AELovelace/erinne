@@ -1,9 +1,15 @@
-"""Automator's runner: the scheduler in the web process, the three runners, and delivery.
+"""Automator's runner: the scheduler, the three runners, and delivery.
 
-The Scheduler lives in the web app's lifespan, beside the balancer poller, because Erynne's agent and its
-model path exist only there. Every TICK it claims due automations (automations.claim: a row moves to its
-next time in one UPDATE, so two web workers never run one twice) and runs them, at most MAX_AT_ONCE at
-a time. Run now (the page, MCP) goes through the same path from any thread.
+The Scheduler lives in one process: the automations service when it runs (docs/plans/services-rewrite.md,
+Phase 9), else the web app, beside the balancer poller, with Erynne's agent and its model path. Every TICK
+(or at once on "automations:wake") it claims due automations (automations.claim: a row moves to its next
+time in one UPDATE, so two schedulers never run one twice) and runs them, at most MAX_AT_ONCE at a time.
+
+Run now (the page, MCP) goes through start(): in the scheduler's own process straight to it; from another
+process (the mcp service, the web app while the automations service runs) the run is saved as 'queued' and
+the scheduler claims it. A Claude routine's report is the same: saved as 'reported' where it arrived, and
+delivered by the scheduler. Automator's tables live in automations.db; the Inbox notes go to core after
+the change they're about commits (automations.tell).
 
 - erynne / claude_key: Agent.run with the automation's prompt as the question, the owner's access, and
   every tool the automation didn't pick switched off (write tools too unless it may propose). With a room
@@ -28,7 +34,7 @@ from typing import Any, Callable
 
 import httpx
 
-from mnemerynne import apis, automations as auto, db, messages
+from mnemerynne import apis, automations as auto, db, events, messages
 from mnemerynne.config import Settings
 
 log = logging.getLogger("mnemerynne.automations")
@@ -50,8 +56,71 @@ ROUTINE_TEXT = ("Mnemerynne automation “{name}” for {user}, run {run_id}.\n\
 
 # Tests: an httpx transport for webhooks and routine fires.
 TRANSPORT: httpx.AsyncBaseTransport | None = None
-# The web app's scheduler, for the MCP tools (run now, a routine's report); None outside the web app.
+# This process's scheduler (the automations service's, or the web app's), for start() and the MCP tools; None in a
+# process without one: those hand runs and reports on through automations.db.
 ACTIVE: "Scheduler | None" = None
+WAKE = "automations:wake"       # tells the scheduler's process there's a queued run or a report to deliver
+
+
+def connect(settings: Settings) -> "db.sqlite3.Connection":
+    """A connection to Automator's tables: automations.db once they've moved there, else core."""
+    return db.connect_for(settings.db_path, "automations", "automations")
+
+
+def unfit(conn, settings: Settings, row, directory) -> str:
+    """Why this automation can't run now ("" if it can)."""
+    user = auto.owner(conn, row)
+    if user is None or not user["active"]:
+        return "its owner's account is off."
+    if not auto.may_use(conn, settings, user, directory):
+        return "its owner can no longer use Automator."
+    return ""
+
+
+def _wake() -> None:
+    try:
+        events.publish_sync(WAKE, {})
+    except Exception:                      # Valkey gone: the scheduler finds it at its next tick
+        log.warning("Couldn't wake the scheduler; it picks the run up within %d s.", int(TICK))
+
+
+def start(conn, row, trigger: str, settings: Settings, directory) -> int:
+    """Run an automation now, from any process, inside the caller's transaction on Automator's tables (`conn`);
+    its run id. With the scheduler here, it runs at once; else it's queued for the scheduler's process."""
+    if ACTIVE is not None:
+        return ACTIVE.run_now(conn, row, trigger)
+    reason = unfit(conn, settings, row, directory)
+    if reason:
+        raise auto.AutomationError(reason[0].upper() + reason[1:])
+    if conn.execute("SELECT 1 FROM automation_runs WHERE automation_id = ? AND status IN "
+                    "('queued', 'running', 'waiting', 'reported')", (row["id"],)).fetchone():
+        raise auto.AutomationError("It's running already.")
+    run_id = auto.start_run(conn, row, trigger, status="queued")
+    db.after_commit(conn, _wake)           # once it's there to be claimed
+    return run_id
+
+
+def save_report(conn, run_id: int, text: str) -> bool:
+    """A Claude routine's report, in a process without the scheduler: saved as 'reported' for the scheduler to
+    deliver (False: the run wasn't waiting for one any more). `conn` holds Automator's tables."""
+    saved = conn.execute("UPDATE automation_runs SET status = 'reported', output = ?, model = 'claude routine' "
+                         "WHERE id = ? AND status = 'waiting'", (text, run_id)).rowcount == 1
+    if saved:
+        db.after_commit(conn, _wake)
+    return saved
+
+
+def fail(settings: Settings, run_id: int, text: str, error: str) -> None:
+    """Record a failed run and tell its owner (any process)."""
+    conn = connect(settings)
+    try:
+        with db.transaction(conn):
+            auto.finish_run(conn, run_id, "failed", output=text, sources=[], error=error, model="claude routine")
+            run = auto.get_run(conn, run_id)
+            auto.tell(conn, run["owner_id"], f"Your automation “{run['name']}” failed: {error}",
+                      f"/automations#run={run_id}")
+    finally:
+        conn.close()
 
 
 class Scheduler:
@@ -64,29 +133,66 @@ class Scheduler:
 
     # -------------------------------------------------------------- timing
     async def run_forever(self) -> None:
-        while True:
-            try:
-                await self.tick()
-            except Exception:
-                log.exception("Automator's scheduler tick failed")
-            await asyncio.sleep(TICK)
+        woken = asyncio.Event()
+
+        async def listen() -> None:        # another process queued a run or saved a report
+            while True:
+                try:
+                    async for _ in events.subscribe(WAKE):
+                        woken.set()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    await asyncio.sleep(5)
+
+        listener = asyncio.create_task(listen())
+        try:
+            while True:
+                try:
+                    await self.tick()
+                except Exception:
+                    log.exception("Automator's scheduler tick failed")
+                try:
+                    await asyncio.wait_for(woken.wait(), TICK)
+                except asyncio.TimeoutError:
+                    pass
+                woken.clear()
+        finally:
+            listener.cancel()
+            await asyncio.gather(listener, return_exceptions=True)
 
     async def tick(self) -> list[int]:
-        """Claim what's due and start it; the run ids started."""
-        claimed = await asyncio.to_thread(self._claim_due)
+        """Claim what's due (and what other processes queued) and start it, and deliver the reports they saved;
+        the run ids started."""
+        claimed, reported = await asyncio.to_thread(self._claim_due)
         for run_id in claimed:
             self._spawn(run_id)
+        for run_id in reported:
+            self._spawn(run_id, self._deliver_report(run_id))
         return claimed
 
-    def _claim_due(self) -> list[int]:
-        conn = db.connect(self.settings.db_path)
+    def _claim_handed_on(self, conn) -> tuple[list[int], list[int]]:
+        """Runs queued and reports saved by processes without the scheduler: claimed here, one UPDATE each, so
+        nothing runs or is delivered twice."""
+        started, reported = [], []
+        for status, into, out in (("queued", "running", started), ("reported", "running", reported)):
+            for (run_id,) in conn.execute("SELECT id FROM automation_runs WHERE status = ? ORDER BY id",
+                                          (status,)).fetchall():
+                with db.transaction(conn):
+                    if conn.execute("UPDATE automation_runs SET status = ? WHERE id = ? AND status = ?",
+                                    (into, run_id, status)).rowcount:
+                        out.append(run_id)
+        return started, reported
+
+    def _claim_due(self) -> tuple[list[int], list[int]]:
+        conn = connect(self.settings)
         try:
             at = auto.now()
             with db.transaction(conn):
                 auto.expire_waiting(conn, at)
+            started, reported = self._claim_handed_on(conn)
             if not auto.enabled(conn):
-                return []
-            started = []
+                return started, reported
             for row in auto.due(conn, at):
                 with db.transaction(conn):
                     if not auto.claim(conn, row, at):
@@ -96,17 +202,12 @@ class Scheduler:
                         auto.pause(conn, row["id"], reason)
                         continue
                     started.append(auto.start_run(conn, row, "schedule"))
-            return started
+            return started, reported
         finally:
             conn.close()
 
     def _unfit(self, conn, row) -> str:
-        user = auto.owner(conn, row)
-        if user is None or not user["active"]:
-            return "its owner's account is off."
-        if not auto.may_use(conn, self.settings, user, self.get_directory()):
-            return "its owner can no longer use Automator."
-        return ""
+        return unfit(conn, self.settings, row, self.get_directory())
 
     def run_now(self, conn, row, trigger: str) -> int:
         """Start a run now (from any thread, inside the caller's transaction); its id."""
@@ -120,15 +221,30 @@ class Scheduler:
         self.loop.call_soon_threadsafe(self._spawn, run_id)
         return run_id
 
-    def _spawn(self, run_id: int) -> None:
-        task = self.loop.create_task(self.execute(run_id))
+    def _spawn(self, run_id: int, work=None) -> None:
+        task = self.loop.create_task(work if work is not None else self.execute(run_id))
         self.background.add(task)
         task.add_done_callback(self.background.discard)
 
     # ------------------------------------------------------------- running
+    async def _deliver_report(self, run_id: int) -> None:
+        """A routine's report another process saved: recorded as done (or quiet) and delivered from here."""
+        conn = connect(self.settings)
+        try:
+            run = auto.get_run(conn, run_id)
+        finally:
+            conn.close()
+        if run is not None:
+            try:
+                await self.complete(run_id, run["output"], [], run["model"] or "claude routine")
+            except Exception:
+                log.exception("Delivering run %s's report failed", run_id)
+                await asyncio.to_thread(self._finish, run_id, "failed", run["output"], [], "claude routine",
+                                        "Delivering it failed.")
+
     async def execute(self, run_id: int) -> None:
         async with self.slots:
-            conn = db.connect(self.settings.db_path)
+            conn = connect(self.settings)
             try:
                 run = auto.get_run(conn, run_id)
                 row = auto.get(conn, run["automation_id"]) if run else None
@@ -203,14 +319,14 @@ class Scheduler:
         return {"status": status, "delivered": delivered}
 
     def _finish(self, run_id, status, text, sources, model, error) -> None:
-        conn = db.connect(self.settings.db_path)
+        conn = connect(self.settings)
         try:
             with db.transaction(conn):
                 auto.finish_run(conn, run_id, status, output=text, sources=sources, error=error, model=model)
                 if status == "failed":
                     run = auto.get_run(conn, run_id)
-                    messages.system(conn, run["owner_id"], f"Your automation “{run['name']}” failed: {error}",
-                                    link=f"/automations#run={run_id}")
+                    auto.tell(conn, run["owner_id"], f"Your automation “{run['name']}” failed: {error}",
+                              f"/automations#run={run_id}")
         finally:
             conn.close()
 
@@ -244,7 +360,7 @@ class Scheduler:
             session = str(got.json().get("claude_code_session_url") or "")
         except ValueError:
             session = ""
-        conn = db.connect(self.settings.db_path)
+        conn = connect(self.settings)
         try:
             with db.transaction(conn):
                 conn.execute("UPDATE automation_runs SET status = 'waiting', claude_session_url = ? WHERE id = ?",
@@ -254,7 +370,7 @@ class Scheduler:
 
     # ------------------------------------------------------------- delivery
     async def deliver(self, run_id: int) -> list[dict]:
-        conn = db.connect(self.settings.db_path)
+        conn = connect(self.settings)
         try:
             run = auto.get_run(conn, run_id)
             row = auto.get(conn, run["automation_id"])
@@ -276,14 +392,14 @@ class Scheduler:
         for hook in hooks:
             if hook is not None:
                 done.append(await self._to_webhook(hook, row, run, body, link))
-        conn = db.connect(self.settings.db_path)
+        conn = connect(self.settings)
         try:
             with db.transaction(conn):
                 conn.execute("UPDATE automation_runs SET delivered = ? WHERE id = ?", (json.dumps(done), run_id))
                 failed = [d for d in done if not d["ok"]]
                 if failed and not deliver.get("inbox"):
-                    messages.system(conn, user["id"], f"Your automation “{row['name']}” ran, but couldn't be "
-                                    f"delivered to {', '.join(d['to'] for d in failed)}.", link=link)
+                    auto.tell(conn, user["id"], f"Your automation “{row['name']}” ran, but couldn't be "
+                              f"delivered to {', '.join(d['to'] for d in failed)}.", link)
         finally:
             conn.close()
         return done

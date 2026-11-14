@@ -376,12 +376,16 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         app.state.background.add(poller)
         # Rooms: other processes' new messages, typing and presence, to this process's streams (rooms_bus.listen).
         app.state.background.add(asyncio.create_task(app.state.rooms_bus.listen()))
-        # Automator: scheduled automations run here, where the agent and its model path live.
-        app.state.automator = Scheduler(settings, app.state.agent, erynne, app.state.rooms_bus,
-                                        lambda: app.state.directory, app.state.background)
-        automations_run.ACTIVE = app.state.automator   # for the MCP tools (run now, a routine's report)
+        # Automator: scheduled automations run here, where the agent and its model path live, unless the
+        # automations service runs them (Phase 9): then runs started here are queued for it (automations_run.start).
+        app.state.automator = None
+        if not settings.runs_elsewhere("automations"):
+            app.state.automator = Scheduler(settings, app.state.agent, erynne, app.state.rooms_bus,
+                                            lambda: app.state.directory, app.state.background)
+        automations_run.ACTIVE = app.state.automator   # for start() and the MCP tools (run now, a routine's report)
         if services is None:   # tests drive it with tick() instead
-            app.state.background.add(asyncio.create_task(app.state.automator.run_forever()))
+            if app.state.automator is not None:
+                app.state.background.add(asyncio.create_task(app.state.automator.run_forever()))
             share.start_watching()   # permission changes on the share, as they happen (does nothing without one)
         if (rt := share.current()) is not None and not rt.owner:   # the share service walks: hear its changes
             app.state.background.add(asyncio.create_task(share.follow_changes()))
@@ -390,6 +394,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                 yield
         finally:
             share.stop_watching()
+            if automations_run.ACTIVE is app.state.automator:
+                automations_run.ACTIVE = None      # nothing reaches this scheduler once it's stopped
             for task in list(app.state.background):
                 task.cancel()
             await asyncio.gather(*app.state.background, return_exceptions=True)

@@ -1219,7 +1219,9 @@ their streamed answers, conversations, ratings, memories and the tool list, from
 it also answers @Erynne in Rooms for every process; without, the web app keeps doing that. The **mcp**
 service (`mnemerynne@mcp`, port 38205, two processes on the NAS profile) serves Claude's `/mcp` endpoint and
 its fetch links (`/c/`); sign-in for Claude (OAuth) stays with the web app. Each call is logged in
-`logs.db`.
+`logs.db`. The **automations** service (`mnemerynne@automations`, port 38208, one process) holds Automator's
+one scheduler and serves its API; while it runs the web app starts no scheduler of its own, and a run started
+anywhere else (the page, Claude) is queued in `automations.db` for it.
 
 `services` writes the services it enabled to `MNEMERYNNE_SERVICES_ON` in the .env and restarts the app when
 that list changes, so the web app knows which jobs another process has taken over.

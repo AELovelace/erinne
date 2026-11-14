@@ -213,8 +213,11 @@ def _cached_items(conn: sqlite3.Connection, row: sqlite3.Row) -> list[dict]:
     if fresh and row["cache"]:
         return json.loads(row["cache"])
     items = fetch_feed(row["url"], row["kind"], row["keywords"])
-    conn.execute("UPDATE automation_feeds SET cache = ?, fetched_at = strftime('%Y-%m-%dT%H:%M:%S', 'now') WHERE id = ?",
-                 (json.dumps(items), row["id"]))
+    from mnemerynne import automations
+
+    with automations.on(conn) as feeds:              # automations.db (Phase 9)
+        feeds.execute("UPDATE automation_feeds SET cache = ?, fetched_at = strftime('%Y-%m-%dT%H:%M:%S', 'now') "
+                      "WHERE id = ?", (json.dumps(items), row["id"]))
     return items
 
 

@@ -103,44 +103,46 @@ def test_schedules_follow_the_clock_and_the_days():
         auto.zone("Mars/Olympus")
 
 
-def test_a_due_automation_is_claimed_once_and_long_missed_runs_are_skipped(conn, settings, people, directory):
+def test_a_due_automation_is_claimed_once_and_long_missed_runs_are_skipped(conn, settings, people, directory, automations_conn):
+    runs = automations_conn                     # automations.db (Phase 9)
     alice = users.get_user(conn, "alice")
-    a = auto.create(conn, settings, alice, directory, {"name": "Brief", "prompt": "Brief me",
+    a = auto.create(runs, settings, alice, directory, {"name": "Brief", "prompt": "Brief me",
                                                        "schedule": {"every": "hours", "n": 1}})
-    conn.execute("UPDATE automations SET next_run_at = '2026-10-30 08:00:00' WHERE id = ?", (a,))
-    row = auto.get(conn, a)
-    assert [r["id"] for r in auto.due(conn, _at("2026-10-30 08:10"))] == [a]
-    assert auto.claim(conn, row, _at("2026-10-30 08:10")) is True
-    assert auto.claim(conn, row, _at("2026-10-30 08:10")) is False          # the other scheduler lost
-    assert auto.get(conn, a)["next_run_at"] == "2026-10-30 09:10:00"
-    row = auto.get(conn, a)
-    assert auto.claim(conn, row, _at("2026-10-30 12:00")) is False          # missed by hours: skipped
-    assert auto.get(conn, a)["next_run_at"] == "2026-10-30 13:00:00"
+    runs.execute("UPDATE automations SET next_run_at = '2026-10-30 08:00:00' WHERE id = ?", (a,))
+    row = auto.get(runs, a)
+    assert [r["id"] for r in auto.due(runs, _at("2026-10-30 08:10"))] == [a]
+    assert auto.claim(runs, row, _at("2026-10-30 08:10")) is True
+    assert auto.claim(runs, row, _at("2026-10-30 08:10")) is False          # the other scheduler lost
+    assert auto.get(runs, a)["next_run_at"] == "2026-10-30 09:10:00"
+    row = auto.get(runs, a)
+    assert auto.claim(runs, row, _at("2026-10-30 12:00")) is False          # missed by hours: skipped
+    assert auto.get(runs, a)["next_run_at"] == "2026-10-30 13:00:00"
 
 
-def test_who_may_use_it_and_what_an_automation_may_be(conn, settings, people, directory):
+def test_who_may_use_it_and_what_an_automation_may_be(conn, settings, people, directory, automations_conn):
+    runs = automations_conn                     # automations.db (Phase 9)
     alice, bob, boss = (users.get_user(conn, n) for n in ("alice", "bob", "boss"))
     assert auto.may_use(conn, settings, alice, directory) and auto.may_use(conn, settings, boss, directory)
     assert not auto.may_use(conn, settings, bob, directory)
     body = {"name": "Brief", "prompt": "Brief me", "schedule": {"every": "day", "at": "07:30"}}
     with pytest.raises(auto.AutomationError, match="routine"):
-        auto.create(conn, settings, alice, directory, {**body, "runner": "claude_routine"})
+        auto.create(runs, settings, alice, directory, {**body, "runner": "claude_routine"})
     with pytest.raises(auto.AutomationError, match="routine's address"):
-        auto.create(conn, settings, alice, directory, {**body, "runner": "claude_routine",
+        auto.create(runs, settings, alice, directory, {**body, "runner": "claude_routine",
                                                        "routine_url": "https://evil.example/fire", "routine_token": "sk-ant-x"})
     with pytest.raises(auto.AutomationError, match="somewhere"):
-        auto.create(conn, settings, alice, directory, {**body, "deliver": {"inbox": False}})
-    made = auto.create(conn, settings, alice, directory, {**body, "runner": "claude_routine", "routine_url": ROUTINE,
+        auto.create(runs, settings, alice, directory, {**body, "deliver": {"inbox": False}})
+    made = auto.create(runs, settings, alice, directory, {**body, "runner": "claude_routine", "routine_url": ROUTINE,
                                                           "routine_token": "sk-ant-oat01-secret"})
-    assert apis.decrypt_secret(settings, auto.get(conn, made)["routine_token_enc"]) == "sk-ant-oat01-secret"
-    assert auto.view(conn, auto.get(conn, made))["routine_token"] == "saved"
+    assert apis.decrypt_secret(settings, auto.get(runs, made)["routine_token_enc"]) == "sk-ant-oat01-secret"
+    assert auto.view(runs, auto.get(runs, made))["routine_token"] == "saved"
     with pytest.raises(auto.AutomationError, match="already"):
-        auto.create(conn, settings, alice, directory, {**body, "name": "brief"})
+        auto.create(runs, settings, alice, directory, {**body, "name": "brief"})
     # Rooms: only Erynne posts there.
     rooms.set_enabled(conn, True)
     room_id = rooms.create_channel(conn, alice, "ops")
     with pytest.raises(auto.AutomationError, match="Only Erynne"):
-        auto.update(conn, settings, alice, directory, made, {"deliver": {"room_id": room_id}})
+        auto.update(runs, settings, alice, directory, made, {"deliver": {"room_id": room_id}})
     auto.set_enabled(conn, False)
     assert not auto.may_use(conn, settings, boss, directory)
 
@@ -180,11 +182,12 @@ def test_erynne_runs_it_with_the_tools_it_picked_and_the_answer_reaches_the_inbo
         assert 'href="/automations"' not in c.get("/").text
 
 
-def test_the_scheduler_runs_what_is_due_and_pauses_what_its_owner_lost(settings, conn, people, directory):
+def test_the_scheduler_runs_what_is_due_and_pauses_what_its_owner_lost(settings, conn, people, directory, automations_conn):
+    runs = automations_conn                     # automations.db (Phase 9)
     llm = AgentLLM()
     with _web(settings, "alice", directory, agent_llm=llm) as c:
         a = c.post("/api/automations", json={"name": "Hourly", "prompt": "Check", "schedule": {"every": "hours", "n": 1}}).json()
-        conn.execute("UPDATE automations SET next_run_at = datetime('now', '-1 minute') WHERE id = ?", (a["id"],))
+        runs.execute("UPDATE automations SET next_run_at = datetime('now', '-1 minute') WHERE id = ?", (a["id"],))
         started = c.portal.call(c.app.state.automator.tick)
         assert len(started) == 1 and _wait(c, started[0])["status"] == "done"
         assert c.portal.call(c.app.state.automator.tick) == []                # moved on an hour
@@ -193,7 +196,7 @@ def test_the_scheduler_runs_what_is_due_and_pauses_what_its_owner_lost(settings,
         assert "create_file" not in offered                                   # it may not propose
         # Alice leaves the group: the next due run pauses it and tells her.
         directory.members["alice"] = {"staff"}
-        conn.execute("UPDATE automations SET next_run_at = datetime('now', '-1 minute') WHERE id = ?", (a["id"],))
+        runs.execute("UPDATE automations SET next_run_at = datetime('now', '-1 minute') WHERE id = ?", (a["id"],))
         assert c.portal.call(c.app.state.automator.tick) == []
     row = auto.get(conn, a["id"])
     assert row["enabled"] == 0 and "no longer use Automator" in row["paused_reason"]
@@ -270,21 +273,23 @@ def test_a_claude_routine_is_fired_and_its_report_is_delivered(settings, conn, p
         assert json.loads(body)["attachments"][0]["content"]["body"][0]["text"] == "Digest"
 
 
-def test_a_routine_that_never_reports_times_out(settings, conn, people, directory):
+def test_a_routine_that_never_reports_times_out(settings, conn, people, directory, automations_conn):
+    runs = automations_conn                     # automations.db (Phase 9)
     alice = users.get_user(conn, "alice")
-    a = auto.create(conn, settings, alice, directory, {"name": "Slow", "prompt": "x", "schedule": {"every": "hours", "n": 1}})
-    run_id = auto.start_run(conn, auto.get(conn, a), "manual")
-    conn.execute("UPDATE automation_runs SET status = 'waiting', started_at = datetime('now', '-3 hours') WHERE id = ?",
+    a = auto.create(runs, settings, alice, directory, {"name": "Slow", "prompt": "x", "schedule": {"every": "hours", "n": 1}})
+    run_id = auto.start_run(runs, auto.get(runs, a), "manual")
+    runs.execute("UPDATE automation_runs SET status = 'waiting', started_at = datetime('now', '-3 hours') WHERE id = ?",
                  (run_id,))
-    assert auto.expire_waiting(conn, auto.now()) == 1
-    assert auto.get_run(conn, run_id)["status"] == "timed_out"
+    assert auto.expire_waiting(runs, auto.now()) == 1
+    assert auto.get_run(runs, run_id)["status"] == "timed_out"
 
 
-def test_admins_turn_it_on_and_off_and_pause_any_automation(settings, conn, people, directory):
+def test_admins_turn_it_on_and_off_and_pause_any_automation(settings, conn, people, directory, automations_conn):
+    runs = automations_conn                     # automations.db (Phase 9)
     alice = users.get_user(conn, "alice")
-    a = auto.create(conn, settings, alice, directory, {"name": "Brief", "prompt": "x", "schedule": {"every": "hours", "n": 1}})
-    if conn.in_transaction:
-        conn.commit()
+    a = auto.create(runs, settings, alice, directory, {"name": "Brief", "prompt": "x", "schedule": {"every": "hours", "n": 1}})
+    if runs.in_transaction:
+        runs.commit()
     with _web(settings, "alice", directory) as c:
         assert c.get("/api/admin/automations").status_code == 403
     with _web(settings, "boss", directory) as c:

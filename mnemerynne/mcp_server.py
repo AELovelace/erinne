@@ -1387,13 +1387,10 @@ class Tools:
         self._automator_user(conn, caller)
         if not caller.can_edit:
             raise ToolError("This connection can only search; running an automation needs one that may edit.")
-        scheduler = automations_run.ACTIVE
-        if scheduler is None:
-            raise Refused("Automator isn't running on the server right now.", "unavailable")
         try:
-            with db.transaction(conn):
-                row = automations.find(conn, caller.user_id, automation)
-                run_id = scheduler.run_now(conn, row, "mcp")
+            with automations.on(conn) as runs, db.transaction(runs):   # automations.db (Phase 9)
+                row = automations.find(runs, caller.user_id, automation)
+                run_id = automations_run.start(runs, row, "mcp", self.settings, self.get_directory())
         except automations.AutomationError as exc:
             raise Refused(str(exc), "invalid") from None
         return {"run_id": run_id, "status": "running", "link": f"{self.base}/automations#run={run_id}",
@@ -1431,11 +1428,24 @@ class Tools:
         if not text or len(text) > 50_000:
             raise Refused("Report the result as Markdown (up to 50,000 characters).", "invalid")
         scheduler = automations_run.ACTIVE
-        if scheduler is None:
-            raise Refused("Automator isn't running on the server right now.", "unavailable")
+        if scheduler is None:                         # the scheduler is another process's (Phase 9)
+            with automations.on(conn) as runs:
+                if status == "failed":
+                    if not runs.execute("UPDATE automation_runs SET status = 'running' WHERE id = ? "
+                                        "AND status = 'waiting'", (run_id,)).rowcount:
+                        raise Refused("That run was just reported.", "conflict")
+                    automations_run.fail(self.settings, run_id, "", text[:2000])
+                    return {"run_id": run_id, "status": "failed"}, []
+                with db.transaction(runs):
+                    saved = automations_run.save_report(runs, run_id, text)
+            if not saved:
+                raise Refused("That run was just reported.", "conflict")
+            return {"run_id": run_id, "status": "reported", "link": f"{self.base}/automations#run={run_id}",
+                    "note": "Saved. It's delivered where the automation sends it within a few seconds."}, []
         # Claim it first, so a second report can't deliver twice.
-        claimed = conn.execute("UPDATE automation_runs SET status = 'running' WHERE id = ? AND status = 'waiting'",
-                               (run_id,)).rowcount
+        with automations.on(conn) as runs:
+            claimed = runs.execute("UPDATE automation_runs SET status = 'running' WHERE id = ? AND status = 'waiting'",
+                                   (run_id,)).rowcount
         if not claimed:
             raise Refused("That run was just reported.", "conflict")
         if status == "failed":

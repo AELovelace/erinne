@@ -189,6 +189,16 @@ Desktop) connects, searches and reads; a fetch link opens; Access → Activity l
 in Ask links its call. Back to A: `MNEMERYNNE_SERVICES_OFF=mcp` and `services`; before Phase 8's code:
 `move-back logs` with everything stopped.
 
+### Deploying Phase 9 (automations.db and the automations service)
+
+The update moves Automator's four tables into `/var/lib/mnemerynne/automations.db`. `front-door.sh services` starts
+`mnemerynne@automations` (one process, port 38208), routes `/api/automations` and `/api/admin/automations` to it,
+and the web app's restart leaves its own scheduler off. Check: a scheduled automation runs on time (only once);
+Run now on the page starts at once; Claude's `run_automation` starts one (queued, then run within seconds); a
+Claude routine's report is delivered; pausing (by an admin, or when the owner loses access) tells the owner;
+webhooks and feeds save. Back to A: `MNEMERYNNE_SERVICES_OFF=automations` and `services` (the web app's scheduler
+comes back); before Phase 9's code: `move-back automations` with everything stopped.
+
 ## 3. Phase 0.5: done in code (2026-11-13)
 
 The front-door and Valkey work below is committed and tested with the box stood in for

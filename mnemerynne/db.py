@@ -136,6 +136,10 @@ FEATURE_DBS: dict[str, FeatureDb] = {f.name: f for f in (
     FeatureDb("logs", moves=("mcp_calls", "api_calls", "agent_calls"), user_columns=(("agent_calls", "user_id"),),
               user_null_columns=(("mcp_calls", "user_id"), ("api_calls", "user_id")),
               unlink=(("message_sources", "api_call_id"),)),
+    # Phase 9: Automator (automations.py, automations_run.py, web/automations.py, the automations service). An
+    # automation goes with its owner, its runs with it. Runs may be queued and reports saved by other processes.
+    FeatureDb("automations", moves=("automations", "automation_runs", "automation_feeds", "automation_destinations"),
+              user_columns=(("automations", "owner_id"),)),
 )}
 
 
@@ -147,7 +151,8 @@ def table_connection(core: sqlite3.Connection, feature: str, table: str) -> Iter
     if _has_table(core, "main", table):
         yield core
         return
-    core_path = core.execute("PRAGMA database_list").fetchone()[2]
+    files = {row[1]: row[2] for row in core.execute("PRAGMA database_list")}
+    core_path = files.get("core") or files.get("main")   # handed another feature's connection: its core
     if not core_path or not feature_path(core_path, feature).exists():
         yield None
         return

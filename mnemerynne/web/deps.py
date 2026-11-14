@@ -87,6 +87,7 @@ get_games_db = feature_db("games")   # the games, their coins and Lumi (docs/pla
 get_rooms_db = feature_db("rooms")   # Rooms: channels, messages and their live events (Phase 3)
 get_media_db = feature_db("media")   # Media: its catalog, TVs, remotes, speakers and signage (Phase 4)
 get_assistant_db = feature_db("assistant")   # Ask: conversations, answers, ratings, LangGraph's state (Phase 7)
+get_automations_db = feature_db("automations")   # Automator: automations, runs, webhooks, feeds (Phase 9)
 
 
 def _held(request: Request) -> list[tuple[db.Pool, sqlite3.Connection]]:

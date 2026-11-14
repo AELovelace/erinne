@@ -21,7 +21,8 @@
 | Phase 6b: the files service (Files, the editor and the wiki; 3 processes on the NAS) | on the NAS since 2026-11-14 | 26c62f8 |
 | Fixes from the first run on the NAS: bare page paths past nginx's own redirect; no 20 s wait for a share walk without Valkey | on the NAS after the next update | c31422b, 5723c67 |
 | Phase 7: `assistant.db` (conversations, answers, ratings, timings, LangGraph's checkpoints and memories); the assistant service (one process); one balancer poller through Valkey | done in code (2026-11-14) | 9fb798f |
-| Phase 8: `logs.db` (mcp_calls, api_calls, agent_calls); the mcp service (`/mcp` and `/c/`, 2 processes on the NAS) | done in code (2026-11-14) | this step's commit |
+| Phase 8: `logs.db` (mcp_calls, api_calls, agent_calls); the mcp service (`/mcp` and `/c/`, 2 processes on the NAS) | done in code (2026-11-14) | 4331bf0 |
+| Phase 9: `automations.db` (automations, runs, webhooks, feeds); the automations service (the one scheduler); runs and routine reports handed across processes | done in code (2026-11-14) | this step's commit |
 
 Tests: `.venv\Scripts\python -m pytest tests -n auto` (about 4 minutes).
 
@@ -192,6 +193,19 @@ transaction as the change. **apis and api_* stay in core** too: they're settings
 endpoint the `mcp` hook builds: the embedder, the box's identity, reloaded on "theme:changed") and Claude's fetch
 links `/c/`. OAuth (`/oauth/*`, `/.well-known/*`) stays with the web app. Its processes have no scheduler: until
 Phase 9, `run_automation` and `report_automation_run` from them say the Automator isn't reachable.
+
+**Phase 9 (2026-11-14):** `automations.db` holds automations, automation_runs, automation_feeds and
+automation_destinations (the scratchpad stays in core). An automation goes with its owner, its runs with it. The
+**automations** service (port 38208, one process: one scheduler) serves `/api/automations` and
+`/api/admin/automations` and runs the Scheduler with its own agent and Erynne for Rooms (the services' shared
+`_answering` hook); the web app starts no scheduler while it runs (`MNEMERYNNE_SERVICES_ON`). Runs cross processes
+through the file: `automations_run.start` runs at once where the scheduler is, else saves the run as **queued**
+(new status) and publishes `automations:wake`; the scheduler claims queued runs at its next tick, or at once on the
+wake. A Claude routine's report reaching a process without the scheduler (the mcp service) is saved as
+**reported** and delivered by the scheduler the same way, so this also fixes Phase 8's gap. Inbox notes about an
+automation (paused, failed, couldn't deliver) go to core after the automation's change commits
+(`automations.tell`: `db.after_commit` + `db.core_of`). Automator's on/off and group stay core settings (meta).
+`db.table_connection` now finds core from a feature's connection too.
 
 ## Context
 

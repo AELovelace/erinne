@@ -18,10 +18,12 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, time as dtime, timedelta, timezone, tzinfo
+from typing import Iterator
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from mnemerynne import accounts, apis, group_refs, users
+from mnemerynne import accounts, apis, db, group_refs, users
 from mnemerynne.config import Settings
 
 ENABLED_KEY = "automations_enabled"
@@ -334,15 +336,33 @@ def delete(conn: sqlite3.Connection, user_id: int, automation_id: int) -> None:
 
 
 def pause(conn: sqlite3.Connection, automation_id: int, reason: str) -> None:
-    from mnemerynne import messages
-
+    """Switch it off and tell its owner (their Inbox, in core: once this change commits, so a rollback tells
+    nobody)."""
     row = get(conn, automation_id)
     if row is None or not row["enabled"]:
         return
     conn.execute("UPDATE automations SET enabled = 0, next_run_at = NULL, paused_reason = ?, "
                  "updated_at = datetime('now') WHERE id = ?", (reason, automation_id))
-    messages.system(conn, row["owner_id"], f"Your automation “{row['name']}” was paused: {reason}",
-                    link=f"/automations#a={automation_id}")
+    tell(conn, row["owner_id"], f"Your automation “{row['name']}” was paused: {reason}", f"/automations#a={automation_id}")
+
+
+def tell(conn: sqlite3.Connection, user_id: int, text: str, link: str) -> None:
+    """A note in someone's Inbox (core's user_messages) about an automation, once the transaction open on `conn`
+    commits (now, if none is): `conn` may be automations.db's, which can't write core."""
+    from mnemerynne import messages
+
+    def send() -> None:
+        with db.core_of(conn) as core:
+            messages.system(core, user_id, text, link=link)
+    db.after_commit(conn, send)
+
+
+@contextmanager
+def on(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """A connection that can write Automator's tables: automations.db once the web app's start moved them there
+    (docs/plans/services-rewrite.md, Phase 9), else core; `conn` itself when it's that one."""
+    with db.table_connection(conn, "automations", "automations") as found:
+        yield found if found is not None else conn
 
 
 def due(conn: sqlite3.Connection, at: datetime) -> list[sqlite3.Row]:
@@ -374,9 +394,10 @@ def view(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
 
 
 # -------------------------------------------------------------------- runs
-def start_run(conn: sqlite3.Connection, row: sqlite3.Row, trigger: str) -> int:
-    run_id = conn.execute("INSERT INTO automation_runs(automation_id, trigger) VALUES (?, ?)",
-                          (row["id"], trigger)).lastrowid
+def start_run(conn: sqlite3.Connection, row: sqlite3.Row, trigger: str, status: str = "running") -> int:
+    """A new run: 'running' for the scheduler that runs it, 'queued' for one started in another process."""
+    run_id = conn.execute("INSERT INTO automation_runs(automation_id, trigger, status) VALUES (?, ?, ?)",
+                          (row["id"], trigger, status)).lastrowid
     conn.execute("UPDATE automations SET last_run_id = ? WHERE id = ?", (run_id, row["id"]))
     return run_id
 

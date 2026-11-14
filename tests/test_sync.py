@@ -34,7 +34,7 @@ def directory():
 @pytest.fixture
 def conn(settings, directory, root):
     share.configure(settings, directory, FakeShareChecker(root))
-    db.migrate_all(settings.db_path, settings.embed_dim, only=("search", "assistant", "logs"))   # as the app has them
+    db.migrate_all(settings.db_path, settings.embed_dim, only=("search", "assistant", "logs", "automations"))   # as the app has them
     connection = db.connect(settings.db_path)
     yield connection
     connection.close()

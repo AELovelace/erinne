@@ -14,14 +14,14 @@ from mnemerynne.config import Settings
 # (table, column, setting): rows whose column is older than the setting's days go. Messages and
 # expired announcements are kept this way too (an announcement with no expiry never matches).
 LOGS = (("user_messages", "created_at", "message_days"),
-        ("announcements", "expires_at", "announcement_days"),
-        ("automation_runs", "started_at", "automation_run_days"))
+        ("announcements", "expires_at", "announcement_days"))
 # The same, for tables in a feature's own file (db.FEATURE_DBS): (feature, table, column, setting).
 FEATURE_LOGS = (("logs", "mcp_calls", "at", "mcp_calls_days"),
                 ("logs", "api_calls", "at", "api_calls_days"),
                 ("logs", "agent_calls", "at", "agent_calls_days"),
                 ("games", "coin_transactions", "created_at", "coin_ledger_days"),
-                ("assistant", "graph_runs", "started_at", "graph_runs_days"))
+                ("assistant", "graph_runs", "started_at", "graph_runs_days"),
+                ("automations", "automation_runs", "started_at", "automation_run_days"))
 
 
 def _older(days: int) -> str:
@@ -37,7 +37,7 @@ def purge(conn: sqlite3.Connection, settings: Settings) -> dict[str, int]:
             n = conn.execute(f"DELETE FROM {table} WHERE {column} < datetime('now', ?)", (_older(days),)).rowcount
             if n:
                 out[table] = n
-    for feature, table, column, setting in FEATURE_LOGS:     # logs.db's, games.db's and assistant.db's (or core's)
+    for feature, table, column, setting in FEATURE_LOGS:     # the features' own files (or core, before a move)
         days = getattr(settings, setting)
         if days > 0:
             with db.table_connection(conn, feature, table) as there:

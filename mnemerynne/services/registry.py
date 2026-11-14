@@ -112,6 +112,16 @@ SERVICES: dict[str, Service] = {s.name: s for s in (
         hooks=("mcp",),
     ),
     Service(
+        name="automations",
+        serves="Automator's scheduler and API (/api/automations, its admin): automations.db; runs started elsewhere "
+               "are queued for it, so exactly one process ticks",
+        routers=("mnemerynne.web.automations:router", "mnemerynne.web.automations:admin_router"),
+        paths=("/api/automations", "/api/admin/automations"),
+        port=38208,
+        single=True,                       # one scheduler: two would both run what's due
+        hooks=("balancer", "rooms", "automations"),   # the model's nodes, Rooms' bus for reports, then the scheduler
+    ),
+    Service(
         name="share",
         serves="no pages: walks the share's permissions for every process and watches the share for changes "
                "(share-rights.db, share:rights); the others stop walking while it runs (MNEMERYNNE_SHARE_WALKS)",

@@ -1,5 +1,10 @@
 """Automator's page and API (mnemerynne/automations.py), and its admin settings: on/off, who may use it,
-the webhooks results may go to and the security feeds Erynne may read."""
+the webhooks results may go to and the security feeds Erynne may read.
+
+The routes that change automations, runs, webhooks or feeds hold automations.db's connection
+(get_automations_db, Phase 9; core's tables still read by their plain names through it). Automator's on/off
+and group are core's settings (meta), so those keep core's. The page itself stays with the web app; the API
+is the automations service's while it runs."""
 
 from __future__ import annotations
 
@@ -11,12 +16,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import apis, automations as auto, group_refs, rooms
+from mnemerynne import apis, automations as auto, automations_run, group_refs, rooms
 from mnemerynne.automations_run import footnotes
 from mnemerynne.db import transaction
 from mnemerynne.ingest import markdown
 from mnemerynne.web.admin import _log
-from mnemerynne.web.deps import admin_user, api_user, get_db, is_admin, page_user
+from mnemerynne.web.deps import admin_user, api_user, get_automations_db, get_db, is_admin, page_user
 
 TEMPLATES = (
     {"key": "briefing", "name": "Morning briefing", "runner": "erynne",
@@ -57,13 +62,6 @@ def _page_on(request: Request, user=Depends(page_user), conn: sqlite3.Connection
     return user
 
 
-def _scheduler(request: Request):
-    scheduler = getattr(request.app.state, "automator", None)
-    if scheduler is None:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Automator isn't running yet; try again shortly.")
-    return scheduler
-
-
 def _refuse(exc: auto.AutomationError):
     return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
 
@@ -97,7 +95,7 @@ async def list_automations(request: Request, user=Depends(_on), conn: sqlite3.Co
 
 
 @router.post("/api/automations", status_code=status.HTTP_201_CREATED)
-async def create_automation(request: Request, user=Depends(_on), conn: sqlite3.Connection = Depends(get_db)):
+async def create_automation(request: Request, user=Depends(_on), conn: sqlite3.Connection = Depends(get_automations_db)):
     body = await request.json()
     try:
         with transaction(conn):
@@ -109,7 +107,7 @@ async def create_automation(request: Request, user=Depends(_on), conn: sqlite3.C
 
 @router.patch("/api/automations/{automation_id}")
 async def update_automation(automation_id: int, request: Request, user=Depends(_on),
-                            conn: sqlite3.Connection = Depends(get_db)):
+                            conn: sqlite3.Connection = Depends(get_automations_db)):
     body = await request.json()
     try:
         with transaction(conn):
@@ -121,7 +119,7 @@ async def update_automation(automation_id: int, request: Request, user=Depends(_
 
 
 @router.delete("/api/automations/{automation_id}")
-def delete_automation(automation_id: int, user=Depends(_on), conn: sqlite3.Connection = Depends(get_db)):
+def delete_automation(automation_id: int, user=Depends(_on), conn: sqlite3.Connection = Depends(get_automations_db)):
     try:
         with transaction(conn):
             auto.delete(conn, user["id"], automation_id)
@@ -131,12 +129,12 @@ def delete_automation(automation_id: int, user=Depends(_on), conn: sqlite3.Conne
 
 
 @router.post("/api/automations/{automation_id}/run")
-def run_automation(automation_id: int, request: Request, user=Depends(_on), conn: sqlite3.Connection = Depends(get_db)):
-    scheduler = _scheduler(request)
+def run_automation(automation_id: int, request: Request, user=Depends(_on),
+                   conn: sqlite3.Connection = Depends(get_automations_db)):
     try:
-        with transaction(conn):
+        with transaction(conn):            # here, or queued for the scheduler's process (automations_run.start)
             row = auto.owned(conn, user["id"], automation_id)
-            run_id = scheduler.run_now(conn, row, "manual")
+            run_id = automations_run.start(conn, row, "manual", request.app.state.settings, _dir(request))
     except auto.AutomationError as exc:
         raise _refuse(exc) from None
     return {"run_id": run_id}
@@ -212,7 +210,7 @@ async def admin_settings(body: SettingsBody, request: Request, user=Depends(admi
 
 
 @admin_router.post("/{automation_id}/pause")
-def admin_pause(automation_id: int, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+def admin_pause(automation_id: int, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_automations_db)):
     row = auto.get(conn, automation_id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such automation")
@@ -232,7 +230,7 @@ class DestinationBody(BaseModel):
 
 @admin_router.post("/destinations", status_code=status.HTTP_201_CREATED)
 async def add_destination(body: DestinationBody, request: Request, user=Depends(admin_user),
-                          conn: sqlite3.Connection = Depends(get_db)):
+                          conn: sqlite3.Connection = Depends(get_automations_db)):
     url = body.url.strip()
     if not url.startswith("https://") or " " in url:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "A webhook's address must start with https://.")
@@ -254,7 +252,7 @@ async def add_destination(body: DestinationBody, request: Request, user=Depends(
 
 
 @admin_router.delete("/destinations/{destination_id}")
-def delete_destination(destination_id: int, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+def delete_destination(destination_id: int, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_automations_db)):
     with transaction(conn):
         row = conn.execute("SELECT name FROM automation_destinations WHERE id = ?", (destination_id,)).fetchone()
         if row is None:
@@ -279,7 +277,7 @@ class FeedBody(BaseModel):
 
 
 @admin_router.post("/feeds", status_code=status.HTTP_201_CREATED)
-def add_feed(body: FeedBody, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+def add_feed(body: FeedBody, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_automations_db)):
     url = body.url.strip()
     if not url.startswith("https://") or " " in url:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "A feed's address must start with https://.")
@@ -296,7 +294,7 @@ def add_feed(body: FeedBody, user=Depends(admin_user), conn: sqlite3.Connection 
 
 
 @admin_router.delete("/feeds/{feed_id}")
-def delete_feed(feed_id: int, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+def delete_feed(feed_id: int, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_automations_db)):
     with transaction(conn):
         row = conn.execute("SELECT name FROM automation_feeds WHERE id = ?", (feed_id,)).fetchone()
         if row is None:

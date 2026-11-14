@@ -56,7 +56,7 @@ def conn(settings):
     box past Phases 6a and 7 (the other features' tables stay in core until the app starts: games_conn, rooms.on,
     media_conn). Opened after the move, so it reads chunks and conversations through their files' read-only
     attachments, like the app's own connections; writes to them go through search_index.on / assistant_db.on."""
-    db.migrate_all(settings.db_path, settings.embed_dim, only=("search", "assistant", "logs"))
+    db.migrate_all(settings.db_path, settings.embed_dim, only=("search", "assistant", "logs", "automations"))
     connection = db.connect(settings.db_path)
     yield connection
     connection.close()
@@ -86,6 +86,15 @@ class FeatureConn:
     def close_own(self) -> None:
         if self._own is not None:
             self._own.close()
+
+
+@pytest.fixture
+def automations_conn(conn):
+    """Automator's tables (automations.db, as the conn fixture leaves them: Phase 9), for tests that write them;
+    core's tables still read through it."""
+    found = FeatureConn(conn, "automations", "automations")
+    yield found
+    found.close_own()
 
 
 @pytest.fixture

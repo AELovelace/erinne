@@ -95,7 +95,8 @@ def test_m365_security_reads_with_the_apps_token_and_names_a_missing_permission(
         world["tools"].m365_security(conn, world["callers"]["boss"], "everything")
 
 
-def test_security_feeds_parse_rss_kev_and_nvd_and_keep_to_their_keywords(conn, world):
+def test_security_feeds_parse_rss_kev_and_nvd_and_keep_to_their_keywords(conn, world, automations_conn):
+    runs = automations_conn                     # automations.db (Phase 9)
     recent = (datetime.now(timezone.utc) - timedelta(days=2))
     old = (datetime.now(timezone.utc) - timedelta(days=40))
     rss = (f'<?xml version="1.0"?><rss><channel>'
@@ -123,7 +124,7 @@ def test_security_feeds_parse_rss_kev_and_nvd_and_keep_to_their_keywords(conn, w
     for name, url, kind, words in (("Fortinet", "https://rss.example/feed", "rss", "fortios"),
                                    ("KEV", "https://kev.example/kev.json", "json_kev", "exchange, opera"),
                                    ("NVD", "https://nvd.example/rest/json/cves/2.0", "nvd", "opera")):
-        conn.execute("INSERT INTO automation_feeds(name, url, kind, keywords) VALUES (?, ?, ?, ?)", (name, url, kind, words))
+        runs.execute("INSERT INTO automation_feeds(name, url, kind, keywords) VALUES (?, ?, ?, ?)", (name, url, kind, words))
     out, _ = world["tools"].security_feeds(conn, world["callers"]["alice"], since_days=7)
     by = {f["feed"]: f for f in out["feeds"]}
     assert [i["title"] for i in by["Fortinet"]["items"]] == ["FortiOS SSL-VPN flaw"]
