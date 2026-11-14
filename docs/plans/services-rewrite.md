@@ -24,7 +24,7 @@
 | Phase 8: `logs.db` (mcp_calls, api_calls, agent_calls); the mcp service (`/mcp` and `/c/`, 2 processes on the NAS) | done in code (2026-11-14) | 4331bf0 |
 | Phase 9: `automations.db` (automations, runs, webhooks, feeds); the automations service (the one scheduler); runs and routine reports handed across processes | done in code (2026-11-14) | e160ae4 |
 | Phase 10: `sync.db` (the backup app's roots and part-by-part uploads); the remote service (the LAN apps' proxy, websockets through the front door) | done in code (2026-11-14) | e79dc52 |
-| Phase 11: the web app slims down while services run (their routers and model pieces left out, unimported); every service imports a light shared front (`web/front.py`) | done in code (2026-11-14) | this step's commit |
+| Phase 11: the web app slims down while services run (their routers and model pieces left out, unimported); every service imports a light shared front (`web/front.py`) | done in code (2026-11-14) | 6b1a000 |
 
 Tests: `.venv\Scripts\python -m pytest tests -n auto` (about 4 minutes).
 
