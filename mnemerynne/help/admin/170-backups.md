@@ -6,7 +6,7 @@
 
 | Folder | Contents |
 |---|---|
-| `db/` | One consistent database snapshot per day (SQLite's backup API, safe while the app runs): users, libraries, grants, the search index, conversations, memories, tokens, settings. |
+| `db/` | One consistent database snapshot per day (SQLite's backup API, safe while the app runs): users, libraries, grants, conversations, memories, tokens, settings, and beside it each feature file's (`search-<date>.db` for the search index, `games-`, `rooms-`, `media-`). |
 | `config/YYYY-MM-DD/` | That day's copy of the settings file (it holds the secret key), plus `router.json`, `synonyms.txt` and `mnemerynne.mcpb`. |
 | `blobs/` | Uploaded files stored inside Mnemerynne; content-addressed and never modified, so only new ones are copied each night. |
 | `versions/` | Earlier versions of edited files, copied the same way. |

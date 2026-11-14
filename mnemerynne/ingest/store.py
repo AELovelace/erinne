@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
-from mnemerynne import jobs, share
+from mnemerynne import jobs, search_index, share
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import documents, markdown, pdf
@@ -298,15 +298,17 @@ def add_path(conn: sqlite3.Connection, settings: Settings, path: Path, collectio
 
 
 def delete_record(conn: sqlite3.Connection, settings: Settings, file_id: int) -> bool:
-    """Delete a file's record (its chunks, vectors and jobs cascade) and its
-    blob once nothing uses it, inside the caller's transaction. Bytes on the
-    share are the caller's business."""
+    """Delete a file's record (its jobs cascade; its chunks and vectors go with it,
+    or right after the commit once they live in search.db) and its blob once
+    nothing uses it, inside the caller's transaction. Bytes on the share are the
+    caller's business."""
     row = conn.execute(
         "SELECT f.blob_sha256, b.rel_path, b.ocr_rel_path FROM files f "
         "JOIN blobs b ON b.sha256 = f.blob_sha256 WHERE f.id = ?", (file_id,)
     ).fetchone()
     if row is None:
         return False
+    search_index.drop(conn, [file_id])
     conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
     if not conn.execute("SELECT 1 FROM files WHERE blob_sha256 = ? LIMIT 1", (row["blob_sha256"],)).fetchone():
         conn.execute("DELETE FROM blobs WHERE sha256 = ?", (row["blob_sha256"],))

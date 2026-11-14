@@ -44,8 +44,11 @@ def settings(tmp_path):
 
 @pytest.fixture
 def conn(settings):
+    """Core, migrated, with search's index already in search.db as on a box past Phase 6a (the other features'
+    tables stay in core until the app starts: games_conn, rooms.on, media_conn). Opened after the move, so it
+    reads chunks through search.db's read-only attachment, like the app's own connections."""
+    db.migrate_all(settings.db_path, settings.embed_dim, only=("search",))
     connection = db.connect(settings.db_path)
-    db.migrate(connection, settings.embed_dim)
     yield connection
     connection.close()
 

@@ -10,6 +10,8 @@ An uploaded or discovered file goes through the worker:
 4. **Embed**: vectors from the embedder in batches of `EMBED_BATCH_SIZE`.
 5. **Ready**: the file's status; the FTS5 index and the vector table now include it. Failures retry up to `JOB_MAX_ATTEMPTS`; a job stuck longer than `JOB_STALE_MINUTES` is retried.
 
+The passages, their keyword index and their vectors live in `<data_dir>/search.db`, so indexing a big file never holds up the rest of the app's writes. Each passage carries a copy of where its file is and whether Claude may see it; when a file moves, goes to the bin or is hidden from Claude, the copy follows a moment later, and search leaves the file's passages out until it has. The hourly housekeeping repairs any copy that didn't catch up.
+
 Limits: `MAX_FILE_BYTES` (kept), `MAX_PDF_BYTES`/`MAX_PDF_PAGES`, `MAX_MD_BYTES`, `MAX_DOC_BYTES` (indexed). Bigger files are stored only.
 
 ## Search

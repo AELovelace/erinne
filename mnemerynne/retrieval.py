@@ -215,15 +215,21 @@ def vector_search(conn: sqlite3.Connection, query_vector: list[float], allowed, 
     return sorted(found, key=lambda r: r[1])[:k]
 
 
-def _load_hits(conn: sqlite3.Connection, chunk_ids: list[int]) -> dict[int, Hit]:
+def _load_hits(conn: sqlite3.Connection, chunk_ids: list[int], *, current: bool = False) -> dict[int, Hit]:
+    """Chunks by id, with their file's name and kind; a chunk whose file is gone is left out. `current` (search):
+    also leave out a chunk whose copy of its file's place or Claude flag disagrees with the file (chunks live in
+    search.db and catch up just after a move commits in core: search_index.py), so the scope a search filtered
+    on is the file's own."""
     if not chunk_ids:
         return {}
     marks, ids = _in(chunk_ids)
+    same = (" AND f.deleted_at IS NULL AND c.collection_id = f.collection_id AND c.folder_id = IFNULL(f.folder_id, 0) "
+            "AND c.claude_hidden = f.claude_hidden") if current else ""
     rows = conn.execute(
         f"SELECT c.id, c.file_id, c.collection_id, c.page_start, c.page_end, c.anchor, c.section_path, "
         f"c.text, c.tokens, f.display_name, b.kind FROM chunks c "
         f"JOIN files f ON f.id = c.file_id JOIN blobs b ON b.sha256 = f.blob_sha256 "
-        f"WHERE c.id IN ({marks})", ids,
+        f"WHERE c.id IN ({marks}){same}", ids,
     ).fetchall()
     return {r["id"]: Hit(r["id"], r["file_id"], r["collection_id"], r["display_name"], r["kind"],
                          r["page_start"], r["page_end"], r["anchor"], r["section_path"], r["text"],
@@ -279,14 +285,19 @@ def search(conn: sqlite3.Connection, settings: Settings, embedder, question: str
         for chunk_id, score in per_query.items():
             fused[chunk_id] = max(fused.get(chunk_id, 0.0), score)
 
-    hits_by_id = _load_hits(conn, list(fused))
+    hits_by_id = _load_hits(conn, list(fused), current=True)
+    fused = {chunk_id: score for chunk_id, score in fused.items() if chunk_id in hits_by_id}   # gone or moving
     for ranked in lexical_lists:  # best rank across query variants
         for rank, chunk_id in enumerate(ranked, start=1):
-            hit = hits_by_id[chunk_id]
+            hit = hits_by_id.get(chunk_id)
+            if hit is None:
+                continue
             hit.fts_rank = rank if hit.fts_rank is None else min(hit.fts_rank, rank)
     for ranked in vector_lists:
         for rank, (chunk_id, distance) in enumerate(ranked, start=1):
-            hit = hits_by_id[chunk_id]
+            hit = hits_by_id.get(chunk_id)
+            if hit is None:
+                continue
             hit.vector_rank = rank if hit.vector_rank is None else min(hit.vector_rank, rank)
             hit.distance = distance if hit.distance is None else min(hit.distance, distance)
     for chunk_id, score in fused.items():

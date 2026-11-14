@@ -16,7 +16,8 @@
 | Between 3 and 4: request and feature connections attach every feature file read-only | done | 041cd1a |
 | Phase 4a: `media.db` (13 `media_*`/`signage_*` tables) | done in code (2026-11-14); **not yet run on the NAS** | 80fff80 |
 | Phase 4b: the media service (all of Media in one process; no Valkey needed) | done in code (2026-11-14); **not yet run on the NAS** | 43c2c4a |
-| Phase 5: the share service walks the share's permissions for every process and watches it | done in code (2026-11-14); **not yet run on the NAS** | this step's commit |
+| Phase 5: the share service walks the share's permissions for every process and watches it | done in code (2026-11-14); **not yet run on the NAS** | cb7de09 |
+| Phase 6a: `search.db` (chunks, their keyword index and vectors) out of core; `move-back search` for A/B | done in code (2026-11-14); **not yet run on the NAS** | this step's commit |
 
 Tests: `.venv\Scripts\python -m pytest tests -n auto` (about 4 minutes).
 
@@ -123,6 +124,21 @@ announces each change (`_announce` after a walk, a watcher recheck or `forget_ri
 share (`start_watching`). `front-door.sh services` sets "service" while `mnemerynne@share` runs and clears it
 otherwise, restarting the app's units when it changes. **Not moved:** the share scan stays in the worker (already a
 process of its own); folding it into the share service is left for later.
+
+**Phase 6a (2026-11-14):** `db.FEATURE_DBS["search"]` (`migrations/search/0001_search.sql`): `chunks` (ids now
+AUTOINCREMENT, no reference to `files`), `chunks_fts` and its triggers, `search_meta` (the vectors' size and layout,
+from core's `meta`); `chunk_vec` made there by `ensure_vector_table` before the move. `FeatureDb` grew `copies`
+(virtual tables copied by column: the vectors), `drops` (the keyword index, rebuilt by the triggers as the rows
+arrive) and `unlink` (core's `message_sources.chunk_id` loses its reference to chunks: the table is rebuilt without
+it, rows kept). `db.connect` now attaches every feature file by default (`features=False` for core alone), so
+every core connection (agent, graph, MCP, CLI, worker) reads chunks by their plain name. Writes: the worker's swap
+runs on search.db with core read through the read-only attachment, then marks the file ready in core
+(`ingest/pipeline._swap`); a move, the bin, Claude-hide, a delete or an unsearchable backup changes core first and
+the chunks right after the commit (`db.after_commit`, `search_index.sync`/`drop`/`resync`). Until that lands,
+`retrieval._load_hits(current=True)` drops a chunk whose copy disagrees with its file, so search never finds a file
+where it no longer is; `search_index.repair` (hourly, after the orphan sweep) fixes what a crash left. `migrate_all`
+takes an OS lock (`<db>.migrate.lock`) and the worker now runs it too (it used to migrate core alone). Not yet: a
+search service of its own (the worker is already a process); the files service is Phase 6b.
 
 ## Context
 

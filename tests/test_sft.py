@@ -4,7 +4,7 @@ import json
 import re
 
 from mnemerynne import graph as graph_mod
-from mnemerynne import memory, permissions, users, worker
+from mnemerynne import memory, permissions, search_index, users, worker
 from mnemerynne.answer import ANSWER_SCHEMA
 from mnemerynne.evaluation import GoldItem, Support
 from mnemerynne.evaluation.answer_eval import JUDGE_SCHEMA
@@ -71,7 +71,8 @@ def test_generate_produces_every_task_from_production_prompts(conn, settings, tm
     out = tmp_path / "sft.jsonl"
 
     # tokens >= 60 filter: make chunks long enough to be sampled.
-    conn.execute("UPDATE chunks SET tokens = 80")
+    with search_index.on(conn) as search:            # chunks live in search.db
+        search.execute("UPDATE chunks SET tokens = 80")
     counts = asyncio.run(generate(conn, settings, embedder, FakeTeacher(), gold, out, n_answer=3, n_near_miss=2,
                                   n_offtopic=1, n_condense=2, n_memory=2, n_general=5,
                                   router_messages=router_messages, progress=lambda *_: None))

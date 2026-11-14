@@ -10,7 +10,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from mnemerynne import db
+from mnemerynne import db, search_index
 from mnemerynne.clients.embed import pack_vector
 from mnemerynne.config import Settings
 from mnemerynne.ingest import Chunk, chunk
@@ -20,7 +20,13 @@ log = logging.getLogger("mnemerynne.reembed")
 
 def reembed_all(conn: sqlite3.Connection, settings: Settings, embedder, batch: int = 512,
                 progress=print) -> int:
-    """Re-embed all chunks; returns the number of vectors written."""
+    """Re-embed all chunks; returns the number of vectors written. On the connection that holds them (core's, or
+    search.db's once they moved there: search_index.on)."""
+    with search_index.on(conn) as search:
+        return _reembed(search, settings, embedder, batch, progress)
+
+
+def _reembed(conn: sqlite3.Connection, settings: Settings, embedder, batch: int, progress) -> int:
     db.drop_vector_table(conn)
     db.ensure_vector_table(conn, settings.embed_dim)
     rows = conn.execute(

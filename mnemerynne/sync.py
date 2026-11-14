@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
-from mnemerynne import db, editing, fs, group_refs, jobs, permissions, share
+from mnemerynne import db, editing, fs, group_refs, jobs, permissions, search_index, share
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import pipeline, store
@@ -704,7 +704,7 @@ def set_searchable(conn: sqlite3.Connection, root: Root, on: bool) -> int:
                              "WHERE id = ? AND status = 'stored'", (file_id,))
                 jobs.enqueue(conn, "ingest", file_id)
             else:
-                conn.execute("DELETE FROM chunks WHERE file_id = ?", (file_id,))   # vectors follow (trigger)
+                search_index.drop(conn, [file_id])             # its chunks (vectors follow), here or in search.db
                 conn.execute("UPDATE files SET status = 'stored', notes = ?, progress = NULL WHERE id = ?",
                              (pipeline.NOT_INDEXED_NOTE, file_id))
             changed += 1

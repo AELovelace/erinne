@@ -2,7 +2,7 @@ import io
 
 import pytest
 
-from mnemerynne import db, permissions, retrieval, users, worker
+from mnemerynne import db, permissions, retrieval, search_index, users, worker
 from mnemerynne.ingest import reembed, store
 from fakes import FakeReranker, KeywordEmbedder
 from pdfgen import make_pdf
@@ -113,10 +113,11 @@ def test_reembed_changes_dimension(conn, settings, world):
     settings.embed_dim = 6
     six = KeywordEmbedder(dim=6)
     assert reembed.reembed_all(conn, settings, six, progress=lambda *_: None) == before
-    assert conn.execute("SELECT value FROM meta WHERE key='embed_dim'").fetchone()[0] == "6"
-    assert db.migrate(conn, 6) >= 2  # consistent now
+    assert conn.execute("SELECT value FROM search_meta WHERE key='embed_dim'").fetchone()[0] == "6"   # search.db
+    assert db.migrate_all(settings.db_path, 6)["search"] >= 1  # consistent now
     result = retrieval.search_for_user(conn, settings, six, world["alice"], "parking lot")
     assert result.hits[0].section_path == "Parking"
     # Deleting still cleans up vectors through the recreated trigger.
-    conn.execute("DELETE FROM chunks")
+    with search_index.on(conn) as search:
+        search.execute("DELETE FROM chunks")
     assert conn.execute("SELECT count(*) FROM chunk_vec").fetchone()[0] == 0

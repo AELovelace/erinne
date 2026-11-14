@@ -91,8 +91,8 @@ def scan_asked(conn: sqlite3.Connection) -> bool:
 
 
 def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) -> None:
-    conn = db.connect(settings.db_path)
-    db.migrate(conn, settings.embed_dim)
+    db.migrate_all(settings.db_path, settings.embed_dim)    # core and every feature file (one process at a time)
+    conn = db.connect(settings.db_path)                      # after it: sees search.db and the other feature files
     embedder = Embedder(settings)
     stopping = False
 

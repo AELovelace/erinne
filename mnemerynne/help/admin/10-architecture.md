@@ -15,7 +15,7 @@ Mnemerynne is the server behind Erynne. Everything runs on one box your organisa
 
 ## Storage
 
-- **One SQLite database** (`<data_dir>/mnemerynne.db`): users, collections, folders, files, passages with FTS5 full-text index and sqlite-vec vectors, conversations and memories (LangGraph's checkpointer and store), tokens, proposals, logs and settings stored in the `meta` table.
+- **SQLite databases** in `<data_dir>`: the core one (`mnemerynne.db`: users, collections, folders, files, conversations and memories (LangGraph's checkpointer and store), tokens, proposals, logs and settings stored in the `meta` table), and one file per feature beside it, each with its own write lock: `search.db` (passages with their FTS5 full-text index and sqlite-vec vectors), `games.db`, `rooms.db` and `media.db`. Every connection reads them all by their table names; each is written only through its own.
 - **File bytes**: either content-addressed blobs under `<data_dir>/blobs` (no share), or the files themselves on the SMB share (`MNEMERYNNE_SHARE_ROOT`), where the share is the source of truth and the database mirrors it.
 - **Versions** under `<data_dir>/versions`, **proposals** under `<data_dir>/proposals`, the settings file at `/etc/mnemerynne/mnemerynne.env`.
 

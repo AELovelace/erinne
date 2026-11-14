@@ -218,8 +218,10 @@ def chunk_state(conn: sqlite3.Connection, chunk_id: int) -> dict:
         return {"chunk_id": chunk_id, "found": False}
     out = dict(row)
     out["has_vector"] = conn.execute("SELECT count(*) FROM chunk_vec WHERE rowid = ?", (chunk_id,)).fetchone()[0] == 1
-    out["fts_rows"] = conn.execute("SELECT count(*) FROM chunks_fts WHERE rowid = ?", (chunk_id,)).fetchone()[0] \
-        if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'chunks_fts'").fetchone() else None
+    try:                                   # the keyword index: core's before Phase 6a, search.db's (attached) after
+        out["fts_rows"] = conn.execute("SELECT count(*) FROM chunks_fts WHERE rowid = ?", (chunk_id,)).fetchone()[0]
+    except sqlite3.OperationalError:       # no keyword index here at all
+        out["fts_rows"] = None
     return {"found": True, **out}
 
 

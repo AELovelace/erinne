@@ -10,6 +10,8 @@ Search scope travels with each file's chunks and vectors (collection_id,
 folder_id), so every operation that changes where a file lives, or whether
 it is in the bin, calls `_sync_scope` in the same transaction. A file in the
 bin, or under a folder in the bin, gets collection 0, which no search allows.
+Once the chunks live in search.db (search_index.py) the copy follows right
+after that transaction commits.
 
 Only the item that was put in the bin gets `deleted_at`; its contents keep
 their place and are hidden because an ancestor is in the bin, so restoring a
@@ -29,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Callable, Iterable
 
-from mnemerynne import jobs, permissions, share
+from mnemerynne import jobs, permissions, search_index, share
 from mnemerynne.config import Settings
 from mnemerynne.db import folder_derived, folder_rows, transaction
 from mnemerynne.ingest import store
@@ -537,21 +539,9 @@ def search_names(conn: sqlite3.Connection, access: Access, q: str, limit: int = 
 
 # ------------------------------------------------------------- search scope
 def _sync_scope(conn: sqlite3.Connection, file_ids: list[int]) -> None:
-    """Point each file's chunks and vectors at where the file now is."""
-    live_cache: dict[int, set[int]] = {}
-    for file_id in file_ids:
-        row = conn.execute("SELECT collection_id, folder_id, deleted_at FROM files WHERE id = ?",
-                           (file_id,)).fetchone()
-        if row is None:
-            continue
-        cid, fid = row["collection_id"], row["folder_id"]
-        if cid not in live_cache:
-            live_cache[cid] = live_folder_ids(conn, cid)
-        hidden = row["deleted_at"] is not None or (fid is not None and fid not in live_cache[cid])
-        scope = (TRASH_COLLECTION if hidden else cid, fid or 0)
-        conn.execute("UPDATE chunks SET collection_id = ?, folder_id = ? WHERE file_id = ?", (*scope, file_id))
-        conn.execute("UPDATE chunk_vec SET collection_id = ?, folder_id = ? "
-                     "WHERE rowid IN (SELECT id FROM chunks WHERE file_id = ?)", (*scope, file_id))
+    """Point each file's chunks and vectors at where the file now is (and whether Claude may see it): in this
+    transaction while chunks are in core, right after it commits once they're in search.db (search_index.sync)."""
+    search_index.sync(conn, file_ids)
 
 
 def claude_hidden(conn: sqlite3.Connection, file_id: int) -> int:
@@ -571,9 +561,7 @@ def set_file_claude(conn: sqlite3.Connection, access: Access, file_id: int, visi
     hidden = 0 if visible else 1
     with transaction(conn):
         conn.execute("UPDATE files SET claude_hidden = ? WHERE id = ?", (hidden, file_id))
-        conn.execute("UPDATE chunks SET claude_hidden = ? WHERE file_id = ?", (hidden, file_id))
-        conn.execute("UPDATE chunk_vec SET claude_hidden = ? WHERE rowid IN (SELECT id FROM chunks WHERE file_id = ?)",
-                     (hidden, file_id))
+        search_index.sync(conn, [file_id])                # its chunks and vectors follow
 
 
 def set_folder_claude(conn: sqlite3.Connection, access: Access, collection_id: int, folder_id: int,

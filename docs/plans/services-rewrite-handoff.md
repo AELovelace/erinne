@@ -143,6 +143,17 @@ lists libraries as before; a permission changed on the share shows within second
 shows the walks; the web app's log has no walks of its own. Back to A: `MNEMERYNNE_SERVICES_OFF=share` and
 `front-door.sh services` (it clears the setting and restarts the app).
 
+### Deploying Phase 6a (search.db; never run on the box yet)
+
+`sudo mnemerynne-admin update --yes`: the first of the web app and the worker to start moves search's index into
+`/var/lib/mnemerynne/search.db` (the other waits on `mnemerynne.db.migrate.lock`): "Moved into search.db: chunks
+(N rows), chunk_vec (N rows)". The keyword index is rebuilt there as the rows arrive, so that first start can take a
+few minutes on the box's ~100k chunks; the web app answers once it's done. Check: Ask and the MCP `search_documents`
+find what they did; a file moved into a folder bob can't read stops showing in his searches at once; Claude-hide
+takes a file out of Claude's answers; uploading a new PDF makes it searchable; Settings → Diagnose on a file shows
+its chunks and vectors. Back to A: everything stopped, `sudo mnemerynne-admin move-back search` (chunks, vectors,
+keyword index and triggers back into core; search.db set aside), then the older code.
+
 ## 3. Phase 0.5: done in code (2026-11-13)
 
 The front-door and Valkey work below is committed and tested with the box stood in for

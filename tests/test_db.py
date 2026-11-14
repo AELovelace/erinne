@@ -2,7 +2,8 @@ import struct
 
 import pytest
 
-from mnemerynne import db, users
+from mnemerynne import db, search_index, users
+from mnemerynne.ingest import store
 
 LATEST = len(db._migration_files())
 
@@ -19,23 +20,26 @@ def _add_file_with_chunk(conn, collection_id, text="Checkout time is 11am.", sha
         "INSERT INTO files(collection_id, blob_sha256, display_name) VALUES (?, ?, 'Guide.pdf')",
         (collection_id, sha),
     ).lastrowid
-    chunk_id = conn.execute(
-        "INSERT INTO chunks(file_id, collection_id, ord, page_start, page_end, section_path, text) "
-        "VALUES (?, ?, 0, 1, 1, 'Front Desk > Checkout', ?)",
-        (file_id, collection_id, text),
-    ).lastrowid
-    conn.execute(
-        "INSERT INTO chunk_vec(rowid, embedding, collection_id, folder_id, claude_hidden) VALUES (?, ?, ?, 0, 0)",
-        (chunk_id, _vec(1, 0, 0, 0), collection_id),
-    )
+    with search_index.on(conn) as search:            # search.db (core's own connection before the move)
+        chunk_id = search.execute(
+            "INSERT INTO chunks(file_id, collection_id, ord, page_start, page_end, section_path, text) "
+            "VALUES (?, ?, 0, 1, 1, 'Front Desk > Checkout', ?)",
+            (file_id, collection_id, text),
+        ).lastrowid
+        search.execute(
+            "INSERT INTO chunk_vec(rowid, embedding, collection_id, folder_id, claude_hidden) VALUES (?, ?, ?, 0, 0)",
+            (chunk_id, _vec(1, 0, 0, 0), collection_id),
+        )
     return file_id, chunk_id
 
 
 def test_migrate_from_empty(conn, settings):
     assert db.schema_version(conn) == LATEST
-    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table','view')")}
-    assert {"users", "collections", "files", "chunks", "chunks_fts", "chunk_vec", "jobs", "messages"} <= tables
-    assert conn.execute("SELECT value FROM meta WHERE key='embed_dim'").fetchone()[0] == "4"
+    tables = {r[0] for r in conn.execute("SELECT name FROM main.sqlite_master WHERE type IN ('table','view')")}
+    assert {"users", "collections", "files", "jobs", "messages"} <= tables
+    search = {r[0] for r in conn.execute("SELECT name FROM search.sqlite_master WHERE type = 'table'")}
+    assert {"chunks", "chunks_fts", "chunk_vec"} <= search and not {"chunks", "chunk_vec"} & tables   # search.db's
+    assert conn.execute("SELECT value FROM search_meta WHERE key='embed_dim'").fetchone()[0] == "4"
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
@@ -44,9 +48,13 @@ def test_migrate_is_idempotent(conn, settings):
     assert db.migrate(conn, settings.embed_dim) == LATEST
 
 
-def test_embed_dim_mismatch_is_refused(conn):
+def test_embed_dim_mismatch_is_refused(conn, settings, tmp_path):
     with pytest.raises(db.SchemaError, match="re-index"):
-        db.migrate(conn, 1024)
+        db.migrate_all(settings.db_path, 1024)               # search.db's vectors were made 4 wide
+    before = db.connect(tmp_path / "before.db")             # and before the move, core's
+    db.migrate(before, 4)
+    with pytest.raises(db.SchemaError, match="re-index"):
+        db.migrate(before, 1024)
 
 
 def test_failed_migration_rolls_back(tmp_path, monkeypatch):
@@ -65,7 +73,7 @@ def test_failed_migration_rolls_back(tmp_path, monkeypatch):
     assert conn.execute("SELECT count(*) FROM sqlite_master WHERE name='half_done'").fetchone()[0] == 0
 
 
-def test_fts_and_vectors_follow_chunk_lifecycle(conn):
+def test_fts_and_vectors_follow_chunk_lifecycle(conn, settings):
     users.create_user(conn, "alice", "correct horse")
     inbox = conn.execute("SELECT id FROM collections WHERE kind='private'").fetchone()[0]
     file_id, chunk_id = _add_file_with_chunk(conn, inbox)
@@ -74,7 +82,7 @@ def test_fts_and_vectors_follow_chunk_lifecycle(conn):
     # Porter stemming: "times" matches "time".
     assert conn.execute("SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH 'times'").fetchone()[0] == 1
 
-    conn.execute("DELETE FROM files WHERE id = ?", (file_id,))  # cascades to chunks
+    store.delete_file(conn, settings, file_id)                  # its chunks go just after (search.db)
     assert conn.execute("SELECT count(*) FROM chunks").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH 'checkout'").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM chunk_vec").fetchone()[0] == 0

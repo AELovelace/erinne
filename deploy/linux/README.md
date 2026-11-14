@@ -1187,9 +1187,9 @@ OAuth, pairing, room posts) are counted across all processes too.
 ### A database file per feature
 
 The games, their coins and Lumi keep their tables in `/var/lib/mnemerynne/games.db`, Rooms in
-`rooms.db` and Media (its catalog, TVs, remotes and signage) in `media.db`, next to `mnemerynne.db`, so a
-game's, a room's or a catalog pass's write never waits for the core database's lock (or the other way
-round).
+`rooms.db`, Media (its catalog, TVs, remotes and signage) in `media.db` and search's index (passages, their
+keyword index and vectors) in `search.db`, next to `mnemerynne.db`, so a game's, a room's, a catalog pass's or
+an indexing burst's write never waits for the core database's lock (or the other way round).
 The web app's first start after the update moves them over (its log says
 "Moved into games.db: ..." with the rows per table); backups, restores and the updater's snapshots
 take every such file with the core one. Going back to code from before that move:
@@ -1199,6 +1199,7 @@ sudo systemctl stop mnemerynne-web mnemerynne-worker 'mnemerynne@*' mnemerynne-s
 sudo mnemerynne-admin move-back games      # the rows back into core; games.db set aside, not deleted
 sudo mnemerynne-admin move-back rooms      # the same for Rooms
 sudo mnemerynne-admin move-back media      # and for Media
+sudo mnemerynne-admin move-back search     # and search's index (vectors and keyword index included)
 ```
 
 then put the older code back and start the services. The newer code's next start moves them out again.

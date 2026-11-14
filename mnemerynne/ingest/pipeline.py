@@ -6,7 +6,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from mnemerynne import fs
+from mnemerynne import fs, search_index
 from mnemerynne.clients.embed import Embedder, pack_vector
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
@@ -106,6 +106,29 @@ def _extract(conn, settings: Settings, blob: sqlite3.Row, file_id: int) -> tuple
 
 
 # ------------------------------------------------------------------ indexing
+def _swap(conn: sqlite3.Connection, file_id: int, write) -> bool:
+    """Swap a file's chunks for new ones atomically: search sees either the old chunks or the new ones.
+    `write(search, collection_id, folder_id, hidden)` inserts them; the file's scope is read inside the swap,
+    as the file may have been moved or binned while it was embedding. On the connection that holds the chunks
+    (search_index.on): core's own transaction before the move, with the file marked ready in it; search.db's
+    after it (core read there, through its read-only attachment), and the file marked ready in core just after.
+    False: the file was deleted for good meanwhile."""
+    with search_index.on(conn) as search:
+        with transaction(search):
+            if search.execute("SELECT 1 FROM files WHERE id = ?", (file_id,)).fetchone() is None:
+                return False
+            collection_id, folder_id = fs.search_scope(search, file_id)
+            hidden = fs.claude_hidden(search, file_id)
+            search.execute("DELETE FROM chunks WHERE file_id = ?", (file_id,))      # vectors follow (trigger)
+            write(search, collection_id, folder_id, hidden)
+            if search is conn:
+                _set(conn, file_id, status="ready", progress=None, error=None)
+    if search is not conn:
+        with transaction(conn):
+            _set(conn, file_id, status="ready", progress=None, error=None)
+    return True
+
+
 def _copy_from_twin(conn, file_id: int, sha256: str) -> bool:
     """Reuse chunks+vectors from the same blob already indexed for another file."""
     twin = conn.execute(
@@ -115,23 +138,21 @@ def _copy_from_twin(conn, file_id: int, sha256: str) -> bool:
     ).fetchone()
     if twin is None:
         return False
-    with transaction(conn):
-        collection_id, folder_id = fs.search_scope(conn, file_id)
-        hidden = fs.claude_hidden(conn, file_id)
-        conn.execute("DELETE FROM chunks WHERE file_id = ?", (file_id,))
-        for row in conn.execute("SELECT * FROM chunks WHERE file_id = ? ORDER BY ord", (twin["id"],)).fetchall():
-            new_id = conn.execute(
+
+    def write(search, collection_id, folder_id, hidden):
+        for row in search.execute("SELECT * FROM chunks WHERE file_id = ? ORDER BY ord", (twin["id"],)).fetchall():
+            new_id = search.execute(
                 "INSERT INTO chunks(file_id, collection_id, folder_id, ord, page_start, page_end, anchor, "
                 "section_path, text, tokens, claude_hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (file_id, collection_id, folder_id, row["ord"], row["page_start"], row["page_end"], row["anchor"],
                  row["section_path"], row["text"], row["tokens"], hidden),
             ).lastrowid
-            vector = conn.execute("SELECT embedding FROM chunk_vec WHERE rowid = ?", (row["id"],)).fetchone()
-            conn.execute(
+            vector = search.execute("SELECT embedding FROM chunk_vec WHERE rowid = ?", (row["id"],)).fetchone()
+            search.execute(
                 "INSERT INTO chunk_vec(rowid, embedding, collection_id, folder_id, claude_hidden) VALUES (?, ?, ?, ?, ?)",
                 (new_id, vector["embedding"], collection_id, folder_id, hidden),
             )
-        _set(conn, file_id, status="ready", progress=None, error=None)
+    _swap(conn, file_id, write)
     return True
 
 
@@ -177,25 +198,18 @@ def process_file(conn: sqlite3.Connection, settings: Settings, embedder: Embedde
         on_batch=lambda done, total: _set(conn, file_id, progress=f"Embedding {done}/{total}"),
     )
 
-    # Swap in atomically: search sees either the old chunks or the new ones.
-    # The file may have been moved or put in the bin while it was embedding,
-    # so its scope is read inside the swap.
-    with transaction(conn):
-        if conn.execute("SELECT 1 FROM files WHERE id = ?", (file_id,)).fetchone() is None:
-            return  # deleted for good meanwhile
-        collection_id, folder_id = fs.search_scope(conn, file_id)
-        hidden = fs.claude_hidden(conn, file_id)
-        conn.execute("DELETE FROM chunks WHERE file_id = ?", (file_id,))
+    def write(search, collection_id, folder_id, hidden):
         for ord_, (c, vector) in enumerate(zip(chunks, vectors)):
-            chunk_id = conn.execute(
+            chunk_id = search.execute(
                 "INSERT INTO chunks(file_id, collection_id, folder_id, ord, page_start, page_end, anchor, "
                 "section_path, text, tokens, claude_hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (file_id, collection_id, folder_id, ord_, c.page_start, c.page_end, c.anchor,
                  c.section_path, c.text, c.tokens, hidden),
             ).lastrowid
-            conn.execute(
+            search.execute(
                 "INSERT INTO chunk_vec(rowid, embedding, collection_id, folder_id, claude_hidden) VALUES (?, ?, ?, ?, ?)",
                 (chunk_id, pack_vector(vector), collection_id, folder_id, hidden),
             )
-        _set(conn, file_id, status="ready", progress=None, error=None)
+    if not _swap(conn, file_id, write):
+        return  # deleted for good meanwhile
     log.info("File %s: %d chunks indexed.", file_id, len(chunks))

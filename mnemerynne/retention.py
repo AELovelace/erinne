@@ -51,6 +51,10 @@ def purge(conn: sqlite3.Connection, settings: Settings) -> dict[str, int]:
     if core_path:                                                     # went since (core can't cascade into them)
         for where, n in db.sweep_orphans(core_path).items():
             out[f"orphans:{where}"] = n
+        from mnemerynne import search_index      # chunks whose copy of their file's place didn't catch up
+        fixed = search_index.repair(core_path)
+        if fixed:
+            out["search_repaired"] = fixed
 
     from mnemerynne import scratchpad   # notes nobody touched in that long: into the archive, not away
     n = scratchpad.expire(conn, settings.scratchpad_days)

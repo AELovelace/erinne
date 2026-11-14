@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from mnemerynne import permissions, users, worker
+from mnemerynne import permissions, search_index, users, worker
 from mnemerynne.clients.llm import LLM, BadModelOutput, ThinkFilter, strict_schema
 from mnemerynne.ingest import store
 from mnemerynne.sft import generate
@@ -204,7 +204,8 @@ def test_remote_teacher_never_sees_disallowed_library_text(conn, settings, tmp_p
     store.add_file(conn, settings, store.receive(io.BytesIO(bwh_pdf), "bwh-standards.pdf", settings), bwh, None)
     while worker.run_one(conn, settings, embedder):
         pass
-    conn.execute("UPDATE chunks SET tokens = 80")
+    with search_index.on(conn) as search:            # chunks live in search.db
+        search.execute("UPDATE chunks SET tokens = 80")
     settings.vector_max_distance = settings.vector_max_distance_no_keywords = 99.0
     settings.teacher_allowed_libraries = "Oracle"
 

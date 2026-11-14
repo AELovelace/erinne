@@ -145,6 +145,7 @@ def delete_user(conn: sqlite3.Connection, username: str) -> bool:
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
     if db_file:   # their rows in the features' own files (games, rooms, ...): no reference crosses the files
         db.forget_user(db_file, user_id)
+        db.sweep_orphans(db_file)   # and what their files left there (search's chunks of their inbox's files)
     return True
 
 

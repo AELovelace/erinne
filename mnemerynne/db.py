@@ -16,6 +16,7 @@ explicit transactions with `transaction()`.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import sqlite3
 import threading
@@ -34,9 +35,10 @@ class SchemaError(RuntimeError):
     """The database does not match what this version of the code expects."""
 
 
-def connect(path: Path | str, *, features: bool = False) -> sqlite3.Connection:
-    """Open a connection with the settings every part of the app relies on. `features`: also attach every feature
-    file read-only (attach_features), for request connections that read across them (the pools)."""
+def connect(path: Path | str, *, features: bool = True) -> sqlite3.Connection:
+    """Open a connection with the settings every part of the app relies on. `features` (the default): also attach
+    every feature file read-only (attach_features), so code holding a core connection still reads any table by its
+    plain name (search's chunks, the games', ...). False: core alone (migrations, moves, core-only writes)."""
     if str(path) != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, isolation_level=None, check_same_thread=False, timeout=10.0,
@@ -74,6 +76,13 @@ class FeatureDb:
     # message stays in its room, from "someone who has left".
     user_null_columns: tuple[tuple[str, str], ...] = ()
     folder_columns: tuple[tuple[str, str], ...] = ()     # a core folder's id: the row goes with the folder
+    # Virtual tables (no plain INSERT ... SELECT *) whose rows move after the tables, as (table, its columns to
+    # copy): search's vectors. Their table must exist in the feature file first (migrate_all makes it).
+    copies: tuple[tuple[str, str], ...] = ()
+    drops: tuple[str, ...] = ()        # core tables that just go with the move (an index the triggers rebuild there)
+    # (core table, column) whose reference into a moving table is cut as it moves (the core table is rebuilt
+    # without it): a reference can't cross files, and the rows that use it stay in core for now.
+    unlink: tuple[tuple[str, str], ...] = ()
 
 
 # The feature files, filled phase by phase (docs/plans/services-rewrite.md): each with its migrations under
@@ -85,6 +94,7 @@ GAMES_TABLES = ("coin_accounts", "coin_transactions", "lumi_pets", "lumi_gardens
 MEDIA_TABLES = ("signage_groups", "media_artwork", "media_screens", "media_remotes", "media_screen_guests",
                 "media_sources", "media_albums", "media_items", "media_tv_shows", "media_progress", "signage_shows",
                 "signage_schedule", "signage_screens")       # parents before the tables that refer to them
+SEARCH_VECTOR_COLUMNS = "rowid, embedding, collection_id, folder_id, claude_hidden"
 ROOMS_TABLES = ("chat_rooms", "chat_members", "chat_messages", "chat_reactions", "chat_attachments", "chat_mentions",
                 "chat_events")
 FEATURE_DBS: dict[str, FeatureDb] = {f.name: f for f in (
@@ -106,6 +116,11 @@ FEATURE_DBS: dict[str, FeatureDb] = {f.name: f for f in (
                                  ("signage_shows", "updated_by")),
               file_columns=(("media_items", "file_id"), ("media_progress", "file_id")),
               folder_columns=(("media_tv_shows", "folder_id"),)),
+    # Phase 6a: search's index (chunks, their keyword index and vectors), written by the ingest worker
+    # (ingest/pipeline.py) and by search_index.py when a file moves, hides from Claude or goes; read by search
+    # (retrieval.py) on any connection. Big indexing bursts no longer hold core's write lock.
+    FeatureDb("search", moves=("chunks",), copies=(("chunk_vec", SEARCH_VECTOR_COLUMNS),), drops=("chunks_fts",),
+              file_columns=(("chunks", "file_id"),), unlink=(("message_sources", "chunk_id"),)),
 )}
 
 
@@ -137,7 +152,7 @@ def core_of(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     if "core" not in files:
         yield conn
         return
-    core = connect(files["core"])
+    core = connect(files["core"], features=False)
     try:
         yield core
     finally:
@@ -235,14 +250,38 @@ class Pool:
 
 @contextmanager
 def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
-    """BEGIN IMMEDIATE … COMMIT, rolling back on any exception."""
+    """BEGIN IMMEDIATE … COMMIT, rolling back on any exception. Work queued with after_commit runs once the
+    COMMIT is through, and is dropped by a ROLLBACK."""
     conn.execute("BEGIN IMMEDIATE")
     try:
         yield conn
     except BaseException:
         conn.execute("ROLLBACK")
+        _after.pop(id(conn), None)                     # what was queued for a commit that never came
         raise
     conn.execute("COMMIT")
+    for work in _after.pop(id(conn), ()):              # in the order queued
+        work()
+
+
+# id(connection) -> work to run after its transaction commits (after_commit).
+_after: dict[int, list[Callable[[], None]]] = {}
+
+
+def after_commit(conn: sqlite3.Connection, work: Callable[[], None]) -> None:
+    """Run `work` once the transaction open on `conn` (transaction()) commits, or now if none is open. For a
+    change in another database file that must follow core's (search's chunks after a file moves): done after
+    core's commit, it never reads a state that might still roll back, and it never holds core's lock while
+    waiting for the other file's. Work that fails is logged; the hourly repair (search_index.repair) catches up."""
+    def guarded() -> None:
+        try:
+            work()
+        except Exception:
+            logging.getLogger("mnemerynne.db").exception("Work after a commit failed; the repair pass will redo it.")
+    if conn.in_transaction:
+        _after.setdefault(id(conn), []).append(guarded)
+    else:
+        guarded()
 
 
 # (db file, collection) -> (version, rows by id, what's been worked out from those rows: name -> value)
@@ -330,7 +369,7 @@ def migrate(conn: sqlite3.Connection, embed_dim: int, *, ensure_vectors: bool = 
     the vector-table check (used by re-embedding, which rebuilds it).
     """
     _apply_migrations(conn, _migration_files(), "foreign_key_check")
-    if ensure_vectors:
+    if ensure_vectors and _has_table(conn, "main", "chunks"):   # not once search's tables moved to search.db
         ensure_vector_table(conn, embed_dim)
     return schema_version(conn)
 
@@ -408,6 +447,8 @@ def move_tables(core: sqlite3.Connection, feature: str) -> dict[str, int]:
     pending = [t for t in found.moves if _has_table(core, "main", t)]
     if not pending:
         return {}
+    for table, column in found.unlink:                 # references the move cuts (FeatureDb.unlink)
+        _unlink(core, table, column, pending)
     staying = [r[0] for r in core.execute("SELECT name FROM main.sqlite_master WHERE type = 'table'")
                if r[0] not in pending]
     for table in staying:                              # a reference into a moving table would break in core
@@ -432,16 +473,70 @@ def move_tables(core: sqlite3.Connection, feature: str) -> dict[str, int]:
                 if here != there:
                     raise SchemaError(f"Moving {table}: {here} rows in core but {there} in {feature}.db")
             moved[table] = here
+        for table, columns in found.copies:            # virtual tables (vectors): their columns, by name
+            if not _has_table(core, "main", table):
+                continue
+            with transaction(core):
+                core.execute(f"DELETE FROM feature.{table}")
+                core.execute(f"INSERT INTO feature.{table} ({columns}) SELECT {columns} FROM main.{table}")
+                here = core.execute(f"SELECT count(*) FROM main.{table}").fetchone()[0]
+                there = core.execute(f"SELECT count(*) FROM feature.{table}").fetchone()[0]
+                if here != there:
+                    raise SchemaError(f"Moving {table}: {here} rows in core but {there} in {feature}.db")
+            moved[table] = here
+        going = pending + [t for t, _ in found.copies] + list(found.drops)
         core.execute("PRAGMA foreign_keys = OFF")      # the moving tables refer to each other: drop in any order
         try:
             with transaction(core):                    # core gives them up only once every copy checked out
-                for table in pending:
-                    core.execute(f"DROP TABLE main.{table}")
+                for table in going:
+                    if _has_table(core, "main", table):
+                        core.execute(f"DROP TABLE main.{table}")
         finally:
             core.execute("PRAGMA foreign_keys = ON")
     finally:
         core.execute("DETACH DATABASE feature")
     return moved
+
+
+_REFERENCE = (r'\s+REFERENCES\s+"?{table}"?\s*\([^)]*\)'
+              r'(\s+ON\s+(DELETE|UPDATE)\s+(SET\s+NULL|SET\s+DEFAULT|CASCADE|RESTRICT|NO\s+ACTION))*')
+
+
+def _unlink(core: sqlite3.Connection, table: str, column: str, moving: list[str]) -> None:
+    """Rebuild core's `table` without its `column`'s reference into a moving table (the usual SQLite rebuild:
+    new table, copy, drop, rename, indexes again), keeping every row. Nothing to do once it has none."""
+    if not _has_table(core, "main", table):
+        return
+    refs = [r for r in core.execute(f'PRAGMA main.foreign_key_list("{table}")').fetchall()
+            if r["from"] == column and r["table"] in moving]
+    if not refs:
+        return
+    sql = core.execute("SELECT sql FROM main.sqlite_master WHERE type = 'table' AND name = ?", (table,)).fetchone()[0]
+    for ref in refs:                                   # the column's definition loses its REFERENCES clause
+        pattern = re.compile(rf'(\b{column}\b[^,]*?)' + _REFERENCE.format(table=re.escape(ref["table"])),
+                             re.IGNORECASE)
+        sql, n = pattern.subn(r"\1", sql, count=1)
+        if not n:
+            raise SchemaError(f"Couldn't cut {table}.{column}'s reference to {ref['table']}.")
+    new_sql = re.sub(rf'^CREATE TABLE\s+"?{re.escape(table)}"?', f'CREATE TABLE "{table}_unlinked"', sql, count=1)
+    indexes = [r[0] for r in core.execute("SELECT sql FROM main.sqlite_master WHERE type = 'index' AND tbl_name = ? "
+                                          "AND sql IS NOT NULL", (table,))]
+    columns = ", ".join(f'"{r["name"]}"' for r in core.execute(f'PRAGMA main.table_info("{table}")'))
+    core.execute("PRAGMA foreign_keys = OFF")
+    try:
+        with transaction(core):
+            core.execute(f'DROP TABLE IF EXISTS main."{table}_unlinked"')
+            core.execute(new_sql)
+            core.execute(f'INSERT INTO main."{table}_unlinked" ({columns}) SELECT {columns} FROM main."{table}"')
+            core.execute(f'DROP TABLE main."{table}"')
+            core.execute(f'ALTER TABLE main."{table}_unlinked" RENAME TO "{table}"')
+            for index in indexes:
+                core.execute(index)
+            broken = core.execute("PRAGMA main.foreign_key_check").fetchall()
+            if broken:
+                raise SchemaError(f"Rebuilding {table} left {len(broken)} broken reference(s).")
+    finally:
+        core.execute("PRAGMA foreign_keys = ON")
 
 
 def move_back(core_path: Path | str, feature: str) -> dict[str, int]:
@@ -458,7 +553,7 @@ def move_back(core_path: Path | str, feature: str) -> dict[str, int]:
     path = feature_path(core_path, feature)
     if not path.exists():
         return {}
-    core = connect(core_path)
+    core = connect(core_path, features=False)
     copied: dict[str, int] = {}
     try:
         core.execute("ATTACH DATABASE ? AS feature", (str(path),))
@@ -481,6 +576,7 @@ def move_back(core_path: Path | str, feature: str) -> dict[str, int]:
                     if there != back:
                         raise SchemaError(f"Moving {table} back: {there} rows in {feature}.db but {back} in core")
                     copied[table] = back
+                _move_back_extras(core, found, here, copied)
         finally:
             core.execute("DETACH DATABASE feature")
     finally:
@@ -491,6 +587,28 @@ def move_back(core_path: Path | str, feature: str) -> dict[str, int]:
         if part.exists():
             part.rename(path.with_name(f"{feature}.moved-back-{stamp}.db{suffix}"))
     return copied
+
+
+def _move_back_extras(core: sqlite3.Connection, found: FeatureDb, tables: list[str], copied: dict[str, int]) -> None:
+    """What move_back brings along with the plain tables (inside its transaction): the virtual tables (search's
+    vectors, copied; its keyword index, rebuilt from the rows), the triggers that keep them in step, and the
+    vector table's size and layout in core's meta."""
+    for table, columns in found.copies:
+        if not _has_table(core, "feature", table):
+            continue
+        core.execute(core.execute("SELECT sql FROM feature.sqlite_master WHERE name = ?", (table,)).fetchone()[0])
+        core.execute(f"INSERT INTO main.{table} ({columns}) SELECT {columns} FROM feature.{table}")
+        copied[table] = core.execute(f"SELECT count(*) FROM main.{table}").fetchone()[0]
+    for table in found.drops:
+        if _has_table(core, "feature", table):
+            core.execute(core.execute("SELECT sql FROM feature.sqlite_master WHERE name = ?", (table,)).fetchone()[0])
+            core.execute(f"INSERT INTO main.{table}({table}) VALUES ('rebuild')")    # FTS5: from its content table
+    for table in tables:
+        for (trigger,) in core.execute("SELECT sql FROM feature.sqlite_master WHERE type = 'trigger' AND tbl_name = ?",
+                                       (table,)).fetchall():
+            core.execute(trigger)
+    if _has_table(core, "feature", f"{found.name}_meta"):
+        core.execute(f"INSERT OR REPLACE INTO main.meta(key, value) SELECT key, value FROM feature.{found.name}_meta")
 
 
 def _features_present(core_path: Path | str) -> list[FeatureDb]:
@@ -564,26 +682,77 @@ def _sweep(conn: sqlite3.Connection, found: FeatureDb) -> dict[str, int]:
     return deleted
 
 
-def migrate_all(core_path: Path | str, embed_dim: int) -> dict[str, int]:
+def migrate_all(core_path: Path | str, embed_dim: int, only: tuple[str, ...] | None = None) -> dict[str, int]:
     """Everything, in order: core's migrations, then each feature file's, then their tables out of core. Only
     the web app (at start) and `mnemerynne init-db` run this; the services wait for it (wait_migrated), so two
-    processes never apply the same migration. Returns each file's version ("core" for core)."""
-    core = connect(core_path)
-    try:
-        versions = {"core": migrate(core, embed_dim)}
-        for name in FEATURE_DBS:
-            conn = connect_feature(core_path, name)
-            try:
-                versions[name] = migrate_feature(conn, name)
-            finally:
-                conn.close()
-            moved = move_tables(core, name)
-            if moved:
-                logging.getLogger("mnemerynne.db").info("Moved into %s.db: %s.", name,
-                                                        ", ".join(f"{t} ({n} rows)" for t, n in moved.items()))
-    finally:
-        core.close()
+    processes never apply the same migration. `only`: just these feature files (tests that keep the others'
+    tables in core for a while). Returns each file's version ("core" for core)."""
+    with _migration_lock(core_path):
+        core = connect(core_path, features=False)
+        try:
+            versions = {"core": migrate(core, embed_dim)}
+            for name in FEATURE_DBS:
+                if only is not None and name not in only:
+                    continue
+                conn = connect_feature(core_path, name)
+                try:
+                    versions[name] = migrate_feature(conn, name)
+                    if name == "search":               # the vectors' table, sized by the settings, before the move
+                        ensure_vector_table(conn, embed_dim)
+                finally:
+                    conn.close()
+                moved = move_tables(core, name)
+                if moved:
+                    logging.getLogger("mnemerynne.db").info("Moved into %s.db: %s.", name,
+                                                            ", ".join(f"{t} ({n} rows)" for t, n in moved.items()))
+                if name == "search" and not _has_table(core, "main", "chunk_vec"):
+                    core.execute("DELETE FROM meta WHERE key IN ('embed_dim', 'vec_layout')")   # search_meta's now
+        finally:
+            core.close()
     return versions
+
+
+@contextmanager
+def _migration_lock(core_path: Path | str) -> Iterator[None]:
+    """One process migrates at a time (the web app and the worker both start after an update, and the CLI
+    migrates too): an OS lock on <core>.migrate.lock, waited for. No lock file to be had (another user made it,
+    read-only data dir): go ahead unlocked, as before."""
+    if str(core_path) == ":memory:":
+        yield
+        return
+    lock = Path(str(core_path) + ".migrate.lock")
+    try:
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o660)
+    except OSError:
+        yield
+        return
+    try:
+        _lock_file(fd, True)
+        try:
+            yield
+        finally:
+            _lock_file(fd, False)
+    finally:
+        os.close(fd)
+
+
+def _lock_file(fd: int, take: bool) -> None:
+    """Take (waiting for it) or give back an exclusive lock on an open file: flock, or msvcrt on Windows."""
+    if os.name == "nt":
+        import msvcrt
+        os.lseek(fd, 0, os.SEEK_SET)
+        if not take:
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            return
+        while True:
+            try:
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)          # tries for ~10 s, then raises: wait on
+                return
+            except OSError:
+                continue
+    import fcntl
+    fcntl.flock(fd, fcntl.LOCK_EX if take else fcntl.LOCK_UN)
 
 
 def wait_migrated(core_path: Path | str, timeout: float = 120.0) -> int:
@@ -596,7 +765,7 @@ def wait_migrated(core_path: Path | str, timeout: float = 120.0) -> int:
     want = {name: len(_feature_files(name)) for name in FEATURE_DBS}
     until = time.monotonic() + timeout
     while True:
-        core = connect(core_path)
+        core = connect(core_path, features=False)
         try:
             have_core = schema_version(core)
         finally:
@@ -624,12 +793,17 @@ def wait_migrated(core_path: Path | str, timeout: float = 120.0) -> int:
         time.sleep(1)
 
 
+def _vec_meta(conn: sqlite3.Connection) -> str:
+    """Where the vector table's size and layout are kept: search.db's search_meta, or core's meta before the move."""
+    return "search_meta" if _has_table(conn, "main", "search_meta") else "meta"
+
+
 def drop_vector_table(conn: sqlite3.Connection) -> None:
-    """Remove chunk_vec so it can be rebuilt with another dimension."""
+    """Remove chunk_vec so it can be rebuilt with another dimension (on the connection that holds chunks)."""
     with transaction(conn):
         conn.execute("DROP TRIGGER IF EXISTS chunks_vec_ad")
         conn.execute("DROP TABLE IF EXISTS chunk_vec")
-        conn.execute("DELETE FROM meta WHERE key IN ('embed_dim', 'vec_layout')")
+        conn.execute(f"DELETE FROM {_vec_meta(conn)} WHERE key IN ('embed_dim', 'vec_layout')")
 
 
 def ensure_vector_table(conn: sqlite3.Connection, embed_dim: int) -> None:
@@ -639,20 +813,21 @@ def ensure_vector_table(conn: sqlite3.Connection, embed_dim: int) -> None:
     numbered migrations. Changing embedder dimension requires a re-index
     (`mnemerynne reset-vectors`, added with the ingestion pipeline).
     """
-    row = conn.execute("SELECT value FROM meta WHERE key = 'embed_dim'").fetchone()
+    meta = _vec_meta(conn)
+    row = conn.execute(f"SELECT value FROM {meta} WHERE key = 'embed_dim'").fetchone()
     if row is not None:
         if int(row["value"]) != embed_dim:
             raise SchemaError(
                 f"chunk_vec was built for {row['value']}-dim embeddings but MNEMERYNNE_EMBED_DIM="
                 f"{embed_dim}; re-index or restore the previous embedder setting."
             )
-        layout = conn.execute("SELECT value FROM meta WHERE key = 'vec_layout'").fetchone()
+        layout = conn.execute(f"SELECT value FROM {meta} WHERE key = 'vec_layout'").fetchone()
         if layout is None or int(layout["value"]) < VEC_LAYOUT:
             _upgrade_vector_table(conn, embed_dim)
         return
     with transaction(conn):
         _create_vector_table(conn, embed_dim)
-        conn.execute("INSERT INTO meta(key, value) VALUES ('embed_dim', ?)", (str(embed_dim),))
+        conn.execute(f"INSERT INTO {meta}(key, value) VALUES ('embed_dim', ?)", (str(embed_dim),))
 
 
 # 2: vectors carry folder_id as well as collection_id (folder-scoped search).
@@ -673,7 +848,8 @@ def _create_vector_table(conn: sqlite3.Connection, embed_dim: int) -> None:
         "CREATE TRIGGER chunks_vec_ad AFTER DELETE ON chunks BEGIN "
         "DELETE FROM chunk_vec WHERE rowid = old.id; END"
     )
-    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('vec_layout', ?)", (str(VEC_LAYOUT),))
+    conn.execute(f"INSERT OR REPLACE INTO {_vec_meta(conn)}(key, value) VALUES ('vec_layout', ?)",
+                 (str(VEC_LAYOUT),))
 
 
 def _upgrade_vector_table(conn: sqlite3.Connection, embed_dim: int) -> None:

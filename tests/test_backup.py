@@ -29,7 +29,8 @@ def test_backup_snapshots_db_copies_blobs_and_prunes(conn, settings, tmp_path):
     assert again["blobs_copied"] == 0  # unchanged files are not copied twice
     third = backup(settings, dest, keep=2, today=date(2026, 10, 1) + timedelta(days=2))
     assert third["pruned"] == ["mnemerynne-2026-10-01.db"]
-    assert sorted(p.name for p in (dest / "db").iterdir()) == ["mnemerynne-2026-10-02.db", "mnemerynne-2026-10-03.db"]
+    assert sorted(p.name for p in (dest / "db").iterdir()) == ["mnemerynne-2026-10-02.db", "mnemerynne-2026-10-03.db",
+                                                               "search-2026-10-02.db", "search-2026-10-03.db"]  # its index
 
 
 def _populated(conn, settings, tmp_path):
