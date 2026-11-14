@@ -122,13 +122,13 @@ def test_an_admin_opens_a_tvs_kiosk_settings_and_turns_on_its_top_bar(client, co
     assert box.get("/api/media/kiosk/screen", headers=headers).status_code == 401
 
 
-def test_a_sign_in_on_the_tv_ends_when_it_goes_back_to_the_tv(client, conn, directory):
+def test_a_sign_in_on_the_tv_ends_when_it_goes_back_to_the_tv(client, conn, directory, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     screen_id, key = _pair(client)
     tv = _tv(client, key)
     assert "Back to TV" not in tv.get("/login").text                # top bar off: nothing to go back to
-    kiosk.set_top_bar(conn, screen_id, True)
+    kiosk.set_top_bar(media_conn, screen_id, True)
     conn.commit()
     assert "Back to TV" in tv.get("/login").text
 
@@ -150,7 +150,7 @@ def test_a_sign_in_on_the_tv_ends_when_it_goes_back_to_the_tv(client, conn, dire
 
 
 # ------------------------------------------------------------- screen boxes
-def test_a_box_gets_the_small_bar_and_its_underscan_on_every_page(client, conn, directory):
+def test_a_box_gets_the_small_bar_and_its_underscan_on_every_page(client, conn, directory, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     screen_id, key = _pair(client)
@@ -162,7 +162,7 @@ def test_a_box_gets_the_small_bar_and_its_underscan_on_every_page(client, conn, 
     page = tv.get("/media/screen?kiosk=1").text                               # the box's start page opens it so
     assert 'id="mc-kiosk" data-local-only hidden' in page                     # Kiosk settings: not from a remote
     assert 'class="tv tv-box tv-page"' in page and "screen_link.js" not in page and "tv-strip" not in page
-    assert conn.execute("SELECT is_box FROM media_screens WHERE id = ?", (screen_id,)).fetchone()[0] == 1
+    assert media_conn.execute("SELECT is_box FROM media_screens WHERE id = ?", (screen_id,)).fetchone()[0] == 1
 
     # Any other page: the underscan, the small bar (Back to TV, ‹ ›) and the remote.
     page = tv.get("/login").text
@@ -177,7 +177,7 @@ def test_a_box_gets_the_small_bar_and_its_underscan_on_every_page(client, conn, 
     assert 'class="tv' not in TestClient(client.app).get("/login").text      # not a screen at all
 
     # With its top bar on: one Back to TV on the sign-in page, and ‹ › in the TV page's bar.
-    kiosk.set_top_bar(conn, screen_id, True)
+    kiosk.set_top_bar(media_conn, screen_id, True)
     conn.commit()
     assert tv.get("/login").text.count("Back to TV") == 1
     assert "tv-history" in tv.get("/media/screen").text

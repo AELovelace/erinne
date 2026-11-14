@@ -119,7 +119,7 @@ def save_seen(db_path: Path | str, remote_id: int) -> None:
     """last_seen_at, run after the panel has its answer, on a connection of its own. It waits at most a
     second for the write lock and otherwise skips this time: polls used to queue behind other writers for
     longer than the panel waits (7 s)."""
-    conn = db.connect(db_path)
+    conn = db.connect_for(db_path, "media", "media_remotes")   # media.db once moved there (Phase 4)
     try:
         conn.execute("PRAGMA busy_timeout = 1000")
         conn.execute("UPDATE media_remotes SET last_seen_at = datetime('now') WHERE id = ?", (remote_id,))

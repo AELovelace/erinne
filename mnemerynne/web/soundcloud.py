@@ -17,7 +17,7 @@ from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.media import soundcloud
 from mnemerynne.web.admin import _log
-from mnemerynne.web.deps import _session_user, api_user, get_db, get_settings
+from mnemerynne.web.deps import _session_user, api_user, get_db, get_media_db, get_settings
 from mnemerynne.web.media import _castable, _media_on, _screen, media_user, screens_user
 
 router = APIRouter(dependencies=[Depends(_media_on)])
@@ -158,7 +158,7 @@ def track_stream(body: StreamBody, user=Depends(media_user), conn: sqlite3.Conne
 
 @router.put("/api/media/screens/{screen_id}/soundcloud")
 def set_screen_profile(screen_id: int, body: ProfileBody, request: Request, user=Depends(screens_user),
-                       conn: sqlite3.Connection = Depends(get_db)):
+                       conn: sqlite3.Connection = Depends(get_media_db)):
     """The profile a screen shows (Media → Screens; on a box, Kiosk settings as well). Empty: its owner's."""
     row = _castable(request, conn, user, screen_id)
     try:

@@ -3,6 +3,7 @@ folder or the Media library, text, web pages, YouTube, announcements), schedule 
 a group or one screen, and see each screen's state; the screen fetches its ranked programme and only
 the files those playlists name, by its own key."""
 
+from conftest import FeatureConn
 import io
 import json
 
@@ -28,12 +29,13 @@ def _file_id(conn, name):
 
 
 def _as_video(conn, settings, name, new_name, playback="direct"):
+    media_conn = FeatureConn(conn, "media", "media_items")   # media.db once the app moved it
     """A catalogued picture made into a video of the library (no ffmpeg needed for the test)."""
     from mnemerynne.ingest import store
     file_id = _file_id(conn, name)
     path = store.content_path(conn, settings, file_id)
     path.rename(path.with_name(new_name))
-    conn.execute("UPDATE media_items SET media_type = 'video', playback = ? WHERE file_id = ?", (playback, file_id))
+    media_conn.execute("UPDATE media_items SET media_type = 'video', playback = ? WHERE file_id = ?", (playback, file_id))
     conn.execute("UPDATE files SET display_name = ? WHERE id = ?", (new_name, file_id))
     conn.commit()
     return file_id
@@ -209,7 +211,7 @@ def test_a_playlist_plays_on_the_screens_its_schedule_names(client, conn, settin
     _hub(client).unlisten(lobby["screen"], queue)
 
 
-def test_groups_rank_the_programme_and_screens_report_in(client, conn, lobby):
+def test_groups_rank_the_programme_and_screens_report_in(client, conn, lobby, media_conn):
     everyone, bar = _show(client, "Everyone"), _show(client, "Bar")
     r = client.post("/api/admin/signage/groups", json={"name": "Bar screens"})
     assert r.status_code == 201, r.text
@@ -238,7 +240,7 @@ def test_groups_rank_the_programme_and_screens_report_in(client, conn, lobby):
     screen = next(s for s in client.get("/api/admin/signage").json()["screens"] if s["id"] == lobby["screen"])
     assert screen["online"] is True and screen["state"]["title"] == "Playlist: Bar" and screen["player_version"] == "0.2.0"
     assert screen["last_state"]["errors"] == ["clip.mp4"] and screen["last_state_at"]
-    conn.execute("UPDATE media_screens SET last_seen_at = '2020-01-01 00:00:00' WHERE id = ?", (lobby["screen"],))
+    media_conn.execute("UPDATE media_screens SET last_seen_at = '2020-01-01 00:00:00' WHERE id = ?", (lobby["screen"],))
     conn.commit()
     screen = next(s for s in client.get("/api/admin/signage").json()["screens"] if s["id"] == lobby["screen"])
     assert screen["online"] is False and screen["state"]["title"] == "Playlist: Bar"   # the hub's copy still fresh

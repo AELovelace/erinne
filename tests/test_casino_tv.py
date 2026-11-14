@@ -114,7 +114,7 @@ def test_shared_blackjack_hands_host_transfer_refills_and_empty_table(conn, monk
     assert state["players"][0]["chips"] == 1000 and state["players"][0]["bet"] == 0
 
 
-def test_tv_requires_signed_live_remote_proof_for_its_own_screen(client, conn, directory, monkeypatch):
+def test_tv_requires_signed_live_remote_proof_for_its_own_screen(client, conn, directory, monkeypatch, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     screen_id, screen_key = _pair(client)
@@ -157,14 +157,14 @@ def test_tv_requires_signed_live_remote_proof_for_its_own_screen(client, conn, d
     assert other.post(other_path, json=body).status_code == 403  # A valid proof cannot be redirected to another TV.
 
     token = issued("up")
-    remotes.create(conn, remotes.get(conn, remote_id)["user_id"], "Pink remote")  # Rotating the pairing invalidates old proofs.
+    remotes.create(media_conn, remotes.get(media_conn, remote_id)["user_id"], "Pink remote")  # Rotating the pairing invalidates old proofs.
     assert tv.post(path + "/input", json=body | {"token": token}).status_code == 403
     assert panel.get("/api/media/remote", headers=auth).status_code == 401
     with monkeypatch.context() as patch:
         import itsdangerous.timed
         patch.setattr(itsdangerous.timed.TimestampSigner, "get_timestamp", lambda self: 0)
-        expired = casino_remote.issue(client.app.state.settings.secret_key, remotes.get(conn, remote_id),
-                                     conn.execute("SELECT * FROM media_screens WHERE id=?", (screen_id,)).fetchone(), "enter")
+        expired = casino_remote.issue(client.app.state.settings.secret_key, remotes.get(media_conn, remote_id),
+                                     media_conn.execute("SELECT * FROM media_screens WHERE id=?", (screen_id,)).fetchone(), "enter")
     assert tv.post(path + "/input", json=body | {"token": expired}).status_code == 403
     client.delete(f"/api/media/screens/{screen_id}")
     assert tv.get(path).status_code == 401

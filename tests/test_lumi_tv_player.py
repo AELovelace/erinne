@@ -57,7 +57,7 @@ def test_a_guests_ok_press_plays_her_own_lumi_on_the_owners_tv(client, conn, dir
     assert refused.status_code == 403 and "Who's playing" in refused.json()["detail"]
 
 
-def test_a_pass_only_works_on_its_own_tv_and_pairing(client, conn, directory):
+def test_a_pass_only_works_on_its_own_tv_and_pairing(client, conn, directory, media_conn):
     owner_id, wife_id, tv, press, screen_id, remote_id = _couch(client, conn, directory)
     header = {"X-Lumi-Player": tv.post(API + "tv/player", json={"controller": press()}).json()["pass"]}
     assert tv.get(API + "state", headers=header).status_code == 200
@@ -69,7 +69,7 @@ def test_a_pass_only_works_on_its_own_tv_and_pairing(client, conn, directory):
     assert client.get(API + "state", headers=header).status_code == 200     # a signed-in browser ignores it
 
     assert tv.get(API + "state", headers={"X-Lumi-Player": header["X-Lumi-Player"] + "x"}).status_code == 403
-    remotes.create(conn, wife_id, "Jane's phone")                           # re-pairing her remote ends old passes
+    remotes.create(media_conn, wife_id, "Jane's phone")                           # re-pairing her remote ends old passes
     assert tv.get(API + "state", headers=header).status_code == 403
 
 

@@ -116,6 +116,15 @@ an automation posts into a room, Claude's `post_to_room` and `read_room` work. B
 `valkey-setup.sh off` then `front-door.sh services` (rooms off, its paths back to the web app). Back to the code
 before Phase 3: as for games, `sudo mnemerynne-admin move-back rooms` with everything stopped, then the older code.
 
+### Deploying Phase 4a (media.db; never run on the box yet)
+
+`sudo mnemerynne-admin update --yes`: the web app's start moves Media's 13 tables into
+`/var/lib/mnemerynne/media.db` ("Moved into media.db: ..."). Nothing else changes: the web app still serves Media.
+Check: films, TV, music and pictures list and play; TVs and remotes pair and take commands; signage shows play;
+the next share scan's catalog pass adds a new file and drops a deleted one; TV guests and Who's playing? still work
+(the games read TVs and remotes from media.db now). Back to A: `sudo mnemerynne-admin move-back media` with
+everything stopped, then the older code.
+
 ## 3. Phase 0.5: done in code (2026-11-13)
 
 The front-door and Valkey work below is committed and tested with the box stood in for

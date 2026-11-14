@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from mnemerynne.db import transaction
 from mnemerynne.media import kiosk, screens, soundcloud
 from mnemerynne.web.admin import _log
-from mnemerynne.web.deps import _session_user, admin_user, get_db, is_admin
+from mnemerynne.web.deps import _session_user, admin_user, get_db, get_media_db, is_admin
 from mnemerynne.web.media import _media_on, screen_device
 
 router = APIRouter(dependencies=[Depends(_media_on)])
@@ -56,7 +56,7 @@ def poll_unlock(request: Request, secret: str = "", screen=Depends(screen_device
 
 # ---------------------------------------------------------- the admin's phone
 @router.get("/media/kiosk", response_class=HTMLResponse)
-def approve_page(request: Request, code: str = "", conn: sqlite3.Connection = Depends(get_db)):
+def approve_page(request: Request, code: str = "", conn: sqlite3.Connection = Depends(get_media_db)):
     """The TV's QR code: approve opening that screen's Kiosk settings. Signed out, sign in first."""
     user = _session_user(request, conn)
     if user is None:
@@ -72,7 +72,7 @@ class ApproveBody(BaseModel):
 
 
 @router.post("/api/media/kiosk/approve")
-def approve(body: ApproveBody, request: Request, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_db)):
+def approve(body: ApproveBody, request: Request, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_media_db)):
     """An admin opens Kiosk settings on the TV showing this code."""
     u = unlocks(request)
     try:
@@ -101,7 +101,7 @@ def _screen_row(conn: sqlite3.Connection, screen_id: int) -> sqlite3.Row:
 
 
 @router.post("/api/media/kiosk/redeem")
-def redeem(body: RedeemBody, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+def redeem(body: RedeemBody, request: Request, conn: sqlite3.Connection = Depends(get_media_db)):
     """The helper hands in the TV's grant (once) and gets a session for that screen's settings."""
     try:
         token, info = unlocks(request).redeem(body.grant)
@@ -119,7 +119,7 @@ def kiosk_session(request: Request, x_kiosk_session: str = Header("", max_length
 
 
 @router.get("/api/media/kiosk/screen")
-def screen_settings(session=Depends(kiosk_session), conn: sqlite3.Connection = Depends(get_db)):
+def screen_settings(session=Depends(kiosk_session), conn: sqlite3.Connection = Depends(get_media_db)):
     return {"screen": kiosk.settings_of(_screen_row(conn, session["screen"])), "admin": session["admin"]["name"]}
 
 
@@ -129,7 +129,7 @@ class ScreenSettings(BaseModel):
 
 
 @router.put("/api/media/kiosk/screen")
-def change_screen(body: ScreenSettings, session=Depends(kiosk_session), conn: sqlite3.Connection = Depends(get_db)):
+def change_screen(body: ScreenSettings, session=Depends(kiosk_session), conn: sqlite3.Connection = Depends(get_media_db)):
     """What the box's settings page may change on the server: the top bar and the SoundCloud profile."""
     row = _screen_row(conn, session["screen"])
     admin = {"id": session["admin"]["id"], "username": session["admin"]["name"]}

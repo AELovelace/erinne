@@ -50,6 +50,40 @@ def conn(settings):
     connection.close()
 
 
+class FeatureConn:
+    """A feature's tables for a test, wherever they are at the moment of each call: core's own connection until the
+    app (db.migrate_all at its start) has moved them, the feature's file after. Tests write some rows before
+    starting the app and read others after, so the choice is made per call. Stands in for a sqlite3.Connection."""
+
+    def __init__(self, core, feature: str, table: str) -> None:
+        self._core, self._feature, self._table = core, feature, table
+        self._own = None
+
+    def _target(self):
+        if self._core.execute("SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = ?",
+                              (self._table,)).fetchone():
+            return self._core
+        if self._own is None:
+            core_path = self._core.execute("PRAGMA database_list").fetchone()[2]
+            self._own = db.connect_feature(core_path, self._feature)
+        return self._own
+
+    def __getattr__(self, name):
+        return getattr(self._target(), name)
+
+    def close_own(self) -> None:
+        if self._own is not None:
+            self._own.close()
+
+
+@pytest.fixture
+def media_conn(conn):
+    """Media's tables (media.db once the app has started; Phase 4), for tests that read or write them directly."""
+    found = FeatureConn(conn, "media", "media_items")
+    yield found
+    found.close_own()
+
+
 @pytest.fixture
 def games_conn(settings, conn):
     """games.db as the app has it once it started: db.migrate_all moved the games' tables out of core there

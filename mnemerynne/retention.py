@@ -47,6 +47,11 @@ def purge(conn: sqlite3.Connection, settings: Settings) -> dict[str, int]:
                     if n:
                         out[table] = n
 
+    core_path = conn.execute("PRAGMA database_list").fetchone()[2]   # feature rows whose user, file or folder
+    if core_path:                                                     # went since (core can't cascade into them)
+        for where, n in db.sweep_orphans(core_path).items():
+            out[f"orphans:{where}"] = n
+
     from mnemerynne import scratchpad   # notes nobody touched in that long: into the archive, not away
     n = scratchpad.expire(conn, settings.scratchpad_days)
     if n:

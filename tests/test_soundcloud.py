@@ -475,13 +475,13 @@ def test_a_search_cast_to_a_screen_is_rebuilt_from_its_words(on, fake):
         assert on.post(f"/api/media/screens/{screen_id}/command", json={"action": "play_soundcloud", "key": bad}).status_code == 422, bad
 
 
-def test_what_a_screen_reports_about_soundcloud_isnt_written_down(on, conn, fake):
+def test_what_a_screen_reports_about_soundcloud_isnt_written_down(on, conn, fake, media_conn):
     screen_id, key = _pair(on)
     tv = _tv(on, key)
     r = tv.put("/api/media/screen/state", json={"kind": "audio", "title": "Song 1", "sub": "Aedith", "external": True})
     assert r.status_code == 200, r.text
     assert _hub(on).state(screen_id)["title"] == "Song 1"        # in memory, for the phone's remote
-    row = conn.execute("SELECT last_state FROM media_screens WHERE id = ?", (screen_id,)).fetchone()
+    row = media_conn.execute("SELECT last_state FROM media_screens WHERE id = ?", (screen_id,)).fetchone()
     assert "Song 1" not in row["last_state"] and "Aedith" not in row["last_state"] and json.loads(row["last_state"])["title"] == "SoundCloud"
 
 

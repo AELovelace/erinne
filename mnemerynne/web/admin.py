@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import (accounts, api_tokens, diagnostics, fs, group_refs, m365_mail, messages, permissions, share,
+from mnemerynne import (accounts, api_tokens, db, diagnostics, fs, group_refs, m365_mail, messages, permissions, share,
                         updates, users)
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
@@ -26,8 +26,11 @@ router = APIRouter()
 
 
 def _log(conn: sqlite3.Connection, actor: sqlite3.Row, action: str, target: str, detail: str = "") -> None:
-    conn.execute("INSERT INTO access_log(actor_id, actor_name, action, target, detail) VALUES (?, ?, ?, ?, ?)",
-                 (actor["id"], actor["username"], action, target, detail))
+    """One row in core's access_log. A route holding a feature's connection (media.db, ...) still gets it: written
+    through core on its own (db.core_of), not inside that route's transaction."""
+    with db.core_of(conn) as core:
+        core.execute("INSERT INTO access_log(actor_id, actor_name, action, target, detail) VALUES (?, ?, ?, ?, ?)",
+                     (actor["id"], actor["username"], action, target, detail))
 
 
 def _library(conn: sqlite3.Connection, library_id: int) -> sqlite3.Row:

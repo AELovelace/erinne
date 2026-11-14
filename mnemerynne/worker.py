@@ -72,7 +72,9 @@ def m365_sync(conn: sqlite3.Connection, settings: Settings) -> None:
 def media_catalog(conn: sqlite3.Connection, settings: Settings) -> None:
     """After each share scan, with Media on: catalog what's new in Media (time-boxed, media/catalog.py)."""
     try:
-        catalog.run_pass(conn, settings)
+        with db.table_connection(conn, "media", "media_items") as media_conn:   # media.db once moved there
+            if media_conn is not None:
+                catalog.run_pass(media_conn, settings, core=conn)
     except Exception:  # never let a bad file or ffprobe stop ingestion
         if conn.in_transaction:
             conn.execute("ROLLBACK")

@@ -73,6 +73,7 @@ class FeatureDb:
     # Columns that keep their row when that user goes, only losing the name (core's ON DELETE SET NULL): a
     # message stays in its room, from "someone who has left".
     user_null_columns: tuple[tuple[str, str], ...] = ()
+    folder_columns: tuple[tuple[str, str], ...] = ()     # a core folder's id: the row goes with the folder
 
 
 # The feature files, filled phase by phase (docs/plans/services-rewrite.md): each with its migrations under
@@ -81,6 +82,9 @@ GAMES_TABLES = ("coin_accounts", "coin_transactions", "lumi_pets", "lumi_gardens
                 "lumi_push_events", "lumi_parties", "lumi_party_members", "push_subscriptions", "arcade_rooms",
                 "arcade_runs", "casino_rooms", "prism_runs", "runner_runs", "lumisoft_progress", "lumisoft_bests",
                 "lumisoft_runs")
+MEDIA_TABLES = ("signage_groups", "media_artwork", "media_screens", "media_remotes", "media_screen_guests",
+                "media_sources", "media_albums", "media_items", "media_tv_shows", "media_progress", "signage_shows",
+                "signage_schedule", "signage_screens")       # parents before the tables that refer to them
 ROOMS_TABLES = ("chat_rooms", "chat_members", "chat_messages", "chat_reactions", "chat_attachments", "chat_mentions",
                 "chat_events")
 FEATURE_DBS: dict[str, FeatureDb] = {f.name: f for f in (
@@ -94,6 +98,14 @@ FEATURE_DBS: dict[str, FeatureDb] = {f.name: f for f in (
               user_columns=(("chat_members", "user_id"), ("chat_reactions", "user_id"), ("chat_mentions", "user_id")),
               user_null_columns=(("chat_rooms", "created_by"), ("chat_messages", "user_id"),
                                  ("chat_messages", "pinned_by"), ("chat_attachments", "user_id"))),
+    # Phase 4: Media (media/, web/media.py, kiosk, SoundCloud's TV profiles, signage, the worker's catalog).
+    FeatureDb("media", moves=MEDIA_TABLES,
+              user_columns=(("media_progress", "user_id"), ("media_remotes", "user_id"), ("media_screens", "user_id"),
+                            ("media_screen_guests", "guest_id"), ("media_screen_guests", "owner_id")),
+              user_null_columns=(("media_sources", "created_by"), ("signage_shows", "created_by"),
+                                 ("signage_shows", "updated_by")),
+              file_columns=(("media_items", "file_id"), ("media_progress", "file_id")),
+              folder_columns=(("media_tv_shows", "folder_id"),)),
 )}
 
 
@@ -114,6 +126,22 @@ def table_connection(core: sqlite3.Connection, feature: str, table: str) -> Iter
         yield conn if _has_table(conn, "main", table) else None
     finally:
         conn.close()
+
+
+@contextmanager
+def core_of(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """A connection that can write core's tables: `conn` itself when it is core's, else (a feature's connection,
+    which has core attached read-only as `core`) a new one to that core file, for the block. Its writes are their
+    own: not part of a transaction open on `conn` (the audit log of a feature's change, a setting kept in meta)."""
+    files = {row["name"]: row["file"] for row in conn.execute("PRAGMA database_list")}
+    if "core" not in files:
+        yield conn
+        return
+    core = connect(files["core"])
+    try:
+        yield core
+    finally:
+        core.close()
 
 
 def connect_for(core_path: Path | str, feature: str, table: str) -> sqlite3.Connection:
@@ -495,27 +523,44 @@ def sweep_orphans(core_path: Path | str) -> dict[str, int]:
     `mnemerynne check-orphans` on demand. Returns the rows deleted per "feature.table"."""
     deleted: dict[str, int] = {}
     for found in _features_present(core_path):
-        checks = [(t, c, "core.users") for t, c in found.user_columns] + \
-                 [(t, c, "core.files") for t, c in found.file_columns]
-        if not checks and not found.user_null_columns:
+        if not (found.user_columns or found.file_columns or found.folder_columns or found.user_null_columns):
             continue
         conn = connect_feature(core_path, found.name)
         try:
             with transaction(conn):
-                for table, column, parent in checks:
-                    n = conn.execute(f"DELETE FROM main.{table} WHERE {column} IS NOT NULL "
-                                     f"AND {column} NOT IN (SELECT id FROM {parent})").rowcount
-                    if n:
-                        key = f"{found.name}.{table}"
-                        deleted[key] = deleted.get(key, 0) + n
-                for table, column in found.user_null_columns:        # kept, without the name of who left
-                    n = conn.execute(f"UPDATE main.{table} SET {column} = NULL WHERE {column} IS NOT NULL "
-                                     f"AND {column} NOT IN (SELECT id FROM core.users)").rowcount
-                    if n:
-                        key = f"{found.name}.{table}.{column}"
-                        deleted[key] = deleted.get(key, 0) + n
+                deleted.update(_sweep(conn, found))
         finally:
             conn.close()
+    return deleted
+
+
+def sweep_feature(conn: sqlite3.Connection, feature: str) -> dict[str, int]:
+    """sweep_orphans for one feature, on its own connection (core attached as `core`), inside the caller's
+    transaction: Media's catalog pass runs it first, so a file or folder deleted from the share since leaves no
+    catalog row behind (core used to cascade that). A connection without `core` (the tables are still in core, where
+    references cascade) needs nothing: returns {}."""
+    if not any(row["name"] == "core" for row in conn.execute("PRAGMA database_list")):
+        return {}
+    return _sweep(conn, _feature(feature))
+
+
+def _sweep(conn: sqlite3.Connection, found: FeatureDb) -> dict[str, int]:
+    deleted: dict[str, int] = {}
+    checks = [(t, c, "core.users") for t, c in found.user_columns] + \
+             [(t, c, "core.files") for t, c in found.file_columns] + \
+             [(t, c, "core.folders") for t, c in found.folder_columns]
+    for table, column, parent in checks:
+        n = conn.execute(f"DELETE FROM main.{table} WHERE {column} IS NOT NULL "
+                         f"AND {column} NOT IN (SELECT id FROM {parent})").rowcount
+        if n:
+            key = f"{found.name}.{table}"
+            deleted[key] = deleted.get(key, 0) + n
+    for table, column in found.user_null_columns:        # kept, without the name of who left
+        n = conn.execute(f"UPDATE main.{table} SET {column} = NULL WHERE {column} IS NOT NULL "
+                         f"AND {column} NOT IN (SELECT id FROM core.users)").rowcount
+        if n:
+            key = f"{found.name}.{table}.{column}"
+            deleted[key] = deleted.get(key, 0) + n
     return deleted
 
 

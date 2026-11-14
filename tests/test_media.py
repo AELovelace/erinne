@@ -1,3 +1,4 @@
+from conftest import FeatureConn
 import io
 import json
 import os
@@ -126,8 +127,9 @@ def _screens_for(client, group="Domain Users"):
 
 
 def _scan(conn, settings):
+    media_conn = FeatureConn(conn, "media", "media_items")   # media.db once the app moved it
     share.sync(conn, settings)
-    return catalog.run_pass(conn, settings, budget_s=120)
+    return catalog.run_pass(media_conn, settings, budget_s=120, core=conn)
 
 
 # ------------------------------------------------------------------ switch
@@ -216,7 +218,7 @@ def test_media_needs_the_share(tmp_path):
 
 
 # ----------------------------------------------------------------- catalog
-def test_pictures_are_catalogued_with_exif_and_thumbnails(client, conn, directory, root, settings):
+def test_pictures_are_catalogued_with_exif_and_thumbnails(client, conn, directory, root, settings, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     album = root / "Media" / "Pictures" / "Japan 2026"
@@ -236,18 +238,18 @@ def test_pictures_are_catalogued_with_exif_and_thumbnails(client, conn, director
     assert (pic["width"], pic["height"]) == (64, 96)
     assert client.get(pic["art"]).headers["content-type"] == "image/jpeg"
     assert client.get(pic["stream"]).content == (album / "fuji.jpg").read_bytes()
-    assert not catalog.run_pass(conn, settings).read             # nothing changed: nothing read
+    assert not catalog.run_pass(media_conn, settings, core=conn).read             # nothing changed: nothing read
 
     thumbs = list((settings.media_dir / "art").rglob("*.jpg"))
     (album / "fuji.jpg").unlink()
     _scan(conn, settings)
-    assert conn.execute("SELECT count(*) FROM media_items").fetchone()[0] == 0
-    assert conn.execute("SELECT count(*) FROM media_artwork").fetchone()[0] == 0
+    assert media_conn.execute("SELECT count(*) FROM media_items").fetchone()[0] == 0
+    assert media_conn.execute("SELECT count(*) FROM media_artwork").fetchone()[0] == 0
     assert thumbs and not any(t.exists() for t in thumbs)
 
 
 @needs_ffmpeg
-def test_music_and_movies_are_catalogued(client, conn, directory, root, settings):
+def test_music_and_movies_are_catalogued(client, conn, directory, root, settings, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     disc = root / "Media" / "Music" / "Daft Punk" / "Discovery"
@@ -279,7 +281,7 @@ def test_music_and_movies_are_catalogued(client, conn, directory, root, settings
     assert set(movies) == {"Alien", "Blade Runner"}
     assert movies["Blade Runner"]["year"] == 1982 and movies["Blade Runner"]["playback"] == "transcode"
     assert movies["Alien"]["playback"] == "direct" and movies["Alien"]["art"]
-    art = conn.execute("SELECT a.source FROM media_items mi JOIN media_artwork a ON a.id = mi.artwork_id "
+    art = media_conn.execute("SELECT a.source FROM media_items mi JOIN media_artwork a ON a.id = mi.artwork_id "
                        "WHERE mi.title = 'Blade Runner'").fetchone()
     assert art["source"] == "frame"                                # no poster beside it: a frame of the film
     assert client.get("/api/media/pictures").json()["items"] == []
@@ -287,7 +289,7 @@ def test_music_and_movies_are_catalogued(client, conn, directory, root, settings
 
 
 def test_unreadable_files_are_reported_and_tried_again_when_they_change(client, conn, directory, root, settings,
-                                                                         monkeypatch):
+                                                                         monkeypatch, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     bad = root / "Media" / "Pictures" / "broken.jpg"
@@ -304,7 +306,7 @@ def test_unreadable_files_are_reported_and_tried_again_when_they_change(client, 
     assert _scan(conn, settings).failed == 1
     status = client.get("/api/admin/settings/media").json()["catalog"]
     assert status["errors"][0]["name"] == "broken.jpg" and "exploded" in status["errors"][0]["error"]
-    assert catalog.run_pass(conn, settings).failed == 0 and len(calls) == 1   # not again until it changes
+    assert catalog.run_pass(media_conn, settings, core=conn).failed == 0 and len(calls) == 1   # not again until it changes
     monkeypatch.setattr(catalog, "_read", real)
     bad.write_bytes(_jpeg())
     _aged(bad, age=30)
@@ -313,7 +315,7 @@ def test_unreadable_files_are_reported_and_tried_again_when_they_change(client, 
 
 
 # ------------------------------------------------------------------ access
-def test_media_follows_share_permissions(client, conn, directory, root, settings, checker):
+def test_media_follows_share_permissions(client, conn, directory, root, settings, checker, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     (root / "Media" / "Movies" / "Alien (1979).mkv").write_bytes(b"\x1a\x45\xdf\xa3 not a real film")
@@ -321,8 +323,8 @@ def test_media_follows_share_permissions(client, conn, directory, root, settings
     for p in (root / "Media" / "Movies" / "Alien (1979).mkv", root / "Media" / "Pictures" / "cat.jpg"):
         _aged(p)
     _scan(conn, settings)
-    film = conn.execute("SELECT file_id, artwork_id FROM media_items WHERE section = 'movies'").fetchone()
-    pic = conn.execute("SELECT file_id, artwork_id FROM media_items WHERE section = 'pictures'").fetchone()
+    film = media_conn.execute("SELECT file_id, artwork_id FROM media_items WHERE section = 'movies'").fetchone()
+    pic = media_conn.execute("SELECT file_id, artwork_id FROM media_items WHERE section = 'pictures'").fetchone()
 
     checker.rules = {"Media/Movies": (False, False)}
     _login(client, conn, directory, "jane", "jsmith")
@@ -341,7 +343,7 @@ def test_media_follows_share_permissions(client, conn, directory, root, settings
     assert client.get(f"/media/art/{pic['artwork_id']}").status_code == 404
 
 
-def test_streams_answer_range_requests(client, conn, directory, root, settings):
+def test_streams_answer_range_requests(client, conn, directory, root, settings, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     clip = root / "Media" / "Pictures" / "clip.jpg"
@@ -349,7 +351,7 @@ def test_streams_answer_range_requests(client, conn, directory, root, settings):
     clip.write_bytes(body)
     _aged(clip)
     _scan(conn, settings)
-    file_id = conn.execute("SELECT file_id FROM media_items").fetchone()[0]
+    file_id = media_conn.execute("SELECT file_id FROM media_items").fetchone()[0]
     r = client.get(f"/media/files/{file_id}/stream", headers={"Range": "bytes=10-19"})
     assert r.status_code == 206 and r.content == body[10:20]
     assert r.headers["content-disposition"].startswith("inline")
@@ -387,7 +389,7 @@ def test_film_names(stem, expected):
 
 
 @needs_ffmpeg
-def test_films_the_browser_cant_play_are_transcoded_into_hls(client, conn, directory, root, settings):
+def test_films_the_browser_cant_play_are_transcoded_into_hls(client, conn, directory, root, settings, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     client.put("/api/admin/settings/media", json={"hwaccel": "software", "max_transcodes": 1})
@@ -396,7 +398,7 @@ def test_films_the_browser_cant_play_are_transcoded_into_hls(client, conn, direc
             "-c:v", "mpeg4", "-c:a", "libmp3lame", str(films / "Old (1999).avi"))
     _aged(films / "Old (1999).avi")
     _scan(conn, settings)
-    file_id = conn.execute("SELECT file_id FROM media_items").fetchone()[0]
+    file_id = media_conn.execute("SELECT file_id FROM media_items").fetchone()[0]
 
     r = client.post(f"/api/media/play/{file_id}", json={"start": 2})
     assert r.status_code == 200, r.text
@@ -543,7 +545,7 @@ def test_track_commands_keep_the_picked_sound_and_burn_in_picture_subtitles(sett
 
 
 @needs_ffmpeg
-def test_films_offer_their_sound_and_subtitle_tracks(client, conn, directory, root, settings, tmp_path):
+def test_films_offer_their_sound_and_subtitle_tracks(client, conn, directory, root, settings, tmp_path, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     srt = tmp_path / "subs.srt"
@@ -558,7 +560,7 @@ def test_films_offer_their_sound_and_subtitle_tracks(client, conn, directory, ro
             "-metadata:s:s:0", "language=eng", str(film))
     _aged(film)
     _scan(conn, settings)
-    file_id = conn.execute("SELECT file_id FROM media_items").fetchone()[0]
+    file_id = media_conn.execute("SELECT file_id FROM media_items").fetchone()[0]
 
     # The first sound plays straight from the file; the answer lists every track.
     play = client.post(f"/api/media/play/{file_id}", json={}).json()
@@ -585,13 +587,13 @@ def test_films_offer_their_sound_and_subtitle_tracks(client, conn, directory, ro
 
 
 # ---------------------------------------------------------- progress, home
-def test_resume_positions_feed_continue_watching(client, conn, directory, root, settings):
+def test_resume_positions_feed_continue_watching(client, conn, directory, root, settings, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     (root / "Media" / "Movies" / "Heat (1995).mkv").write_bytes(b"\x1a\x45\xdf\xa3 not a real film")
     _aged(root / "Media" / "Movies" / "Heat (1995).mkv")
     _scan(conn, settings)
-    file_id = conn.execute("SELECT file_id FROM media_items").fetchone()[0]
+    file_id = media_conn.execute("SELECT file_id FROM media_items").fetchone()[0]
     assert client.put(f"/api/media/progress/{file_id}", json={"position": 1234.5, "duration": 6000}).status_code == 200
     home = client.get("/api/media/home").json()
     assert home["continue"][0]["title"] == "Heat" and home["continue"][0]["progress"]["position"] == 1234.5
@@ -712,7 +714,7 @@ def test_http_stations_are_relayed_through_the_server(client, conn, directory):
 
 
 # ---------------------------------------------------------------- online
-def test_films_and_albums_are_looked_up_online(client, conn, directory, root, settings):
+def test_films_and_albums_are_looked_up_online(client, conn, directory, root, settings, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     client.put("/api/admin/settings/media", json={"online_metadata": True, "tmdb_key": "0123456789abcdef0123456789abcdef"})
@@ -739,7 +741,7 @@ def test_films_and_albums_are_looked_up_online(client, conn, directory, root, se
     _scan(conn, settings)
     movie = client.get("/api/media/movies").json()["movies"][0]
     assert movie["overview"].startswith("In space") and movie["tmdb_id"] == 348 and movie["fanart"]
-    sources = {r["source"] for r in conn.execute("SELECT source FROM media_artwork")}
+    sources = {r["source"] for r in media_conn.execute("SELECT source FROM media_artwork")}
     assert "tmdb" in sources
 
     # An album (tags written straight into the catalog, as if read from files).
@@ -747,14 +749,14 @@ def test_films_and_albums_are_looked_up_online(client, conn, directory, root, se
     pic.write_bytes(b"not audio")
     _aged(pic)
     share.sync(conn, settings)
-    catalog.run_pass(conn, settings)
+    catalog.run_pass(media_conn, settings, core=conn)
     key = catalog.album_key("Daft Punk", "Discovery")
     with db.transaction(conn):
-        conn.execute("UPDATE media_items SET album = 'Discovery', album_artist = 'Daft Punk', album_key = ? "
+        media_conn.execute("UPDATE media_items SET album = 'Discovery', album_artist = 'Daft Punk', album_key = ? "
                      "WHERE section = 'music'", (key,))
-        conn.execute("INSERT OR IGNORE INTO media_albums(album_key) VALUES (?)", (key,))
-    catalog.run_pass(conn, settings)
-    row = conn.execute("SELECT a.mbid, w.source FROM media_albums a JOIN media_artwork w ON w.id = a.artwork_id "
+        media_conn.execute("INSERT OR IGNORE INTO media_albums(album_key) VALUES (?)", (key,))
+    catalog.run_pass(media_conn, settings, core=conn)
+    row = media_conn.execute("SELECT a.mbid, w.source FROM media_albums a JOIN media_artwork w ON w.id = a.artwork_id "
                        "WHERE a.album_key = ?", (key,)).fetchone()
     assert (row["mbid"], row["source"]) == ("mbid-1", "caa")
     assert client.get("/api/media/music/albums").json()["albums"][0]["art"]
@@ -799,14 +801,14 @@ def test_a_paired_screen_keeps_media_only(client, conn, directory, root, setting
     assert stranger.get("/api/media/home").status_code == 401
 
 
-def test_casting_to_a_screen(client, conn, directory, root, settings):
+def test_casting_to_a_screen(client, conn, directory, root, settings, media_conn):
     live.TRANSPORT = _relay_transport()
     _login(client, conn, directory)
     _turn_on(client)
     (root / "Media" / "Movies" / "Heat (1995).mkv").write_bytes(b"\x1a\x45\xdf\xa3 not a real film")
     _aged(root / "Media" / "Movies" / "Heat (1995).mkv")
     _scan(conn, settings)
-    film = conn.execute("SELECT file_id FROM media_items").fetchone()[0]
+    film = media_conn.execute("SELECT file_id FROM media_items").fetchone()[0]
     screen_id, key = _pair(client)
 
     off = client.post(f"/api/media/screens/{screen_id}/command", json={"action": "toggle"})
@@ -853,7 +855,7 @@ def test_casting_to_a_screen(client, conn, directory, root, settings):
     _hub(client).unlisten(screen_id, queue)
 
 
-def test_the_screen_stream_and_unpairing(client, conn, directory, monkeypatch):
+def test_the_screen_stream_and_unpairing(client, conn, directory, monkeypatch, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     screen_id, key = _pair(client)
@@ -871,7 +873,7 @@ def test_the_screen_stream_and_unpairing(client, conn, directory, monkeypatch):
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
     assert "event: hello" in r.text and '"name": "Living room"' in r.text and '"action": "unpaired"' in r.text
     assert "mnemerynne_screen=" in r.headers["set-cookie"] and "HttpOnly" in r.headers["set-cookie"]
-    assert conn.execute("SELECT last_seen_at FROM media_screens").fetchone()[0]
+    assert media_conn.execute("SELECT last_seen_at FROM media_screens").fetchone()[0]
 
     assert client.delete(f"/api/media/screens/{screen_id}").status_code == 200
     assert tv.get("/media/screen/stream").status_code == 401
@@ -890,7 +892,7 @@ def test_screen_names_are_checked_and_pairing_again_replaces(client, conn, direc
     assert [s["name"] for s in client.get("/api/media/screens").json()["screens"]] == ["living room"]
 
 
-def test_a_screen_keeps_its_underscan(client, conn, directory):
+def test_a_screen_keeps_its_underscan(client, conn, directory, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     screen_id, key = _pair(client)
@@ -919,10 +921,10 @@ def test_a_screen_keeps_its_underscan(client, conn, directory):
 
     # Pairing it again keeps it (it's the same TV).
     _pair(client)
-    assert conn.execute("SELECT safe_x, safe_y FROM media_screens WHERE id = ?", (screen_id,)).fetchone()[:] == (3.0, 2.5)
+    assert media_conn.execute("SELECT safe_x, safe_y FROM media_screens WHERE id = ?", (screen_id,)).fetchone()[:] == (3.0, 2.5)
 
 
-def test_a_screen_keeps_its_text_size(client, conn, directory):
+def test_a_screen_keeps_its_text_size(client, conn, directory, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     screen_id, key = _pair(client)
@@ -944,7 +946,7 @@ def test_a_screen_keeps_its_text_size(client, conn, directory):
     assert tv.put("/media/screen/ui-scale", json={"scale": None}).json() == {"scale": None}
     assert 'data-tv-scale="auto"' in tv.get("/media/screen").text
     with pytest.raises(Exception):                                                # the database holds the limits too
-        conn.execute("UPDATE media_screens SET ui_scale = 5 WHERE id = ?", (screen_id,))
+        media_conn.execute("UPDATE media_screens SET ui_scale = 5 WHERE id = ?", (screen_id,))
 
     # The phone drives the TV's Text size screen; the underscan's steps aren't its.
     queue = _hub(client).listen(screen_id)
@@ -960,16 +962,16 @@ def test_a_screen_keeps_its_text_size(client, conn, directory):
     # Pairing it again keeps it.
     tv.put("/media/screen/ui-scale", json={"scale": 2})
     _pair(client)
-    assert conn.execute("SELECT ui_scale FROM media_screens WHERE id = ?", (screen_id,)).fetchone()[0] == 2.0
+    assert media_conn.execute("SELECT ui_scale FROM media_screens WHERE id = ?", (screen_id,)).fetchone()[0] == 2.0
 
 
-def test_game_frames_inherit_tv_scale_without_kiosk_chrome_or_double_underscan(client, conn, directory):
+def test_game_frames_inherit_tv_scale_without_kiosk_chrome_or_double_underscan(client, conn, directory, media_conn):
     """The real iframe fetch header must retain game text sizing, while ordinary embedded pages remain unchanged."""
     from mnemerynne import games
     _login(client, conn, directory)
     _turn_on(client)
     screen_id, key = _pair(client)
-    conn.execute("UPDATE media_screens SET is_box=1, safe_x=3, safe_y=2 WHERE id=?", (screen_id,))
+    media_conn.execute("UPDATE media_screens SET is_box=1, safe_x=3, safe_y=2 WHERE id=?", (screen_id,))
     tv = TestClient(client.app)
     tv.cookies.set("mnemerynne_screen", key)
     for game in games.GAMES:
@@ -1079,7 +1081,7 @@ def _remote(client, name="Kitchen tablet"):
     return panel, {"Authorization": "Bearer " + got["key"]}, r.json()["id"]
 
 
-def test_a_remote_pairs_with_a_code_and_controls_only_its_owners_screens(client, conn, directory):
+def test_a_remote_pairs_with_a_code_and_controls_only_its_owners_screens(client, conn, directory, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     screen_id, key = _pair(client)
@@ -1092,7 +1094,7 @@ def test_a_remote_pairs_with_a_code_and_controls_only_its_owners_screens(client,
     assert seen["screens"] == [{"id": screen_id, "name": "Living room", "online": False, "speaker": False, "state": None,
                                 "guest": False, "host": None}]
     assert seen["speaker"] is None                                          # paired without a speaker
-    assert conn.execute("SELECT last_seen_at FROM media_remotes").fetchone()[0]
+    assert media_conn.execute("SELECT last_seen_at FROM media_remotes").fetchone()[0]
     off = panel.post(f"/api/media/remote/screens/{screen_id}/command", json={"action": "toggle"}, headers=auth)
     assert off.status_code == 409
 
@@ -1143,24 +1145,24 @@ def test_a_remote_pairs_with_a_code_and_controls_only_its_owners_screens(client,
     _hub(client).unlisten(screen_id, queue)
 
 
-def test_a_remotes_poll_never_waits_on_the_write_lock(client, conn, directory, settings):
+def test_a_remotes_poll_never_waits_on_the_write_lock(client, conn, directory, settings, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     _pair(client)
     panel, auth, _ = _remote(client)
-    writer = db.connect(settings.db_path)               # another writer, holding the lock (a catalog pass, say)
+    writer = db.connect_feature(settings.db_path, "media")   # another writer on media.db (a catalog pass, say)
     writer.execute("BEGIN IMMEDIATE")
     started = time.monotonic()
     assert panel.get("/api/media/remote", headers=auth).status_code == 200
     assert time.monotonic() - started < 5               # it used to wait out the 10 s busy timeout
     writer.execute("ROLLBACK")
     writer.close()
-    assert conn.execute("SELECT last_seen_at FROM media_remotes").fetchone()[0] is None  # skipped while locked
+    assert media_conn.execute("SELECT last_seen_at FROM media_remotes").fetchone()[0] is None  # skipped while locked
     assert panel.get("/api/media/remote", headers=auth).status_code == 200
-    assert conn.execute("SELECT last_seen_at FROM media_remotes").fetchone()[0]           # so the next poll saves it
-    conn.execute("UPDATE media_remotes SET last_seen_at = NULL")
+    assert media_conn.execute("SELECT last_seen_at FROM media_remotes").fetchone()[0]           # so the next poll saves it
+    media_conn.execute("UPDATE media_remotes SET last_seen_at = NULL")
     assert panel.get("/api/media/remote", headers=auth).status_code == 200
-    assert conn.execute("SELECT last_seen_at FROM media_remotes").fetchone()[0] is None  # then once a minute at most
+    assert media_conn.execute("SELECT last_seen_at FROM media_remotes").fetchone()[0] is None  # then once a minute at most
 
 
 # ---- built-in games (mnemerynne/games.py)
@@ -1250,7 +1252,7 @@ def test_game_rules_pass_in_node():
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
 
 
-def test_multiplayer_games_authentication_screens_and_moves(client, conn, directory):
+def test_multiplayer_games_authentication_screens_and_moves(client, conn, directory, media_conn):
     from mnemerynne import casino
     anonymous = TestClient(client.app)
     _login(client, conn, directory)
@@ -1277,8 +1279,8 @@ def test_multiplayer_games_authentication_screens_and_moves(client, conn, direct
     from mnemerynne.media import screens
     _screens_for(client)
     with db.transaction(conn):
-        _, first_key = screens.create(conn, s_user := users.get_user(conn, "boss")["id"], "Lounge")
-        _, second_key = screens.create(conn, s_user, "Bedroom")
+        _, first_key = screens.create(media_conn, s_user := users.get_user(conn, "boss")["id"], "Lounge")
+        _, second_key = screens.create(media_conn, s_user, "Bedroom")
     first, second = TestClient(client.app), TestClient(client.app)
     first.cookies.set(screens.COOKIE, first_key)
     second.cookies.set(screens.COOKIE, second_key)
@@ -1298,7 +1300,7 @@ def test_multiplayer_games_authentication_screens_and_moves(client, conn, direct
     assert client.get(path).status_code == 404
 
 
-def test_a_remote_starts_channels_forgets_itself_and_follows_the_group(client, conn, directory):
+def test_a_remote_starts_channels_forgets_itself_and_follows_the_group(client, conn, directory, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     client.put("/api/admin/settings/media", json={"radio_directory_url": ""})
@@ -1335,10 +1337,10 @@ def test_a_remote_starts_channels_forgets_itself_and_follows_the_group(client, c
 
     assert panel.delete("/api/media/remote", headers=auth).status_code == 200      # the panel's Forget
     assert panel.get("/api/media/remote", headers=auth).status_code == 401
-    assert conn.execute("SELECT count(*) FROM media_remotes").fetchone()[0] == 0
+    assert media_conn.execute("SELECT count(*) FROM media_remotes").fetchone()[0] == 0
 
 
-def test_a_phone_pairs_itself_as_a_remote_and_gets_a_panels_powers(client, conn, directory):
+def test_a_phone_pairs_itself_as_a_remote_and_gets_a_panels_powers(client, conn, directory, media_conn):
     uid = _login(client, conn, directory)
     _turn_on(client)
     screen_id, _ = _pair(client)
@@ -1388,7 +1390,7 @@ def test_a_phone_pairs_itself_as_a_remote_and_gets_a_panels_powers(client, conn,
     assert client.post("/api/media/panel/pair", json={"name": "   "}).status_code == 422
     _screens_for(client, "")
     assert client.post("/api/media/panel/pair", json={"name": "Other"}).status_code == 403
-    assert conn.execute("SELECT count(*) FROM media_remotes WHERE user_id = ?", (uid,)).fetchone()[0] == 1
+    assert media_conn.execute("SELECT count(*) FROM media_remotes WHERE user_id = ?", (uid,)).fetchone()[0] == 1
 
 
 def test_rescan_media_asks_the_worker_to_scan_now(client, conn, directory, settings, monkeypatch):
@@ -1439,7 +1441,7 @@ def _speaker(client, name="Bedroom speaker"):
 
 
 @needs_ffmpeg
-def test_a_speaker_plays_only_what_is_cast_to_it_through_tickets(client, conn, directory, root, settings):
+def test_a_speaker_plays_only_what_is_cast_to_it_through_tickets(client, conn, directory, root, settings, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     _screens_for(client)
@@ -1510,7 +1512,7 @@ def test_a_speaker_plays_only_what_is_cast_to_it_through_tickets(client, conn, d
     assert client.delete(f"/api/media/remotes/{remote_id}").status_code == 200
     assert queue.get_nowait()["action"] == "unpaired"
     assert panel.get("/media/speaker/audio/" + tracks[0]["ticket"]).status_code == 404
-    assert conn.execute("SELECT count(*) FROM media_screens WHERE speaker = 1").fetchone()[0] == 0
+    assert media_conn.execute("SELECT count(*) FROM media_screens WHERE speaker = 1").fetchone()[0] == 0
     _hub(client).unlisten(speaker_id, queue)
 
 
@@ -1642,7 +1644,7 @@ def test_episode_names(stem, folder, expected):
     assert probe.episode_name(stem, folder) == expected
 
 
-def test_tv_shows_are_catalogued_by_show_folder(client, conn, directory, root, settings):
+def test_tv_shows_are_catalogued_by_show_folder(client, conn, directory, root, settings, media_conn):
     from mnemerynne.media import signage
     _login(client, conn, directory)
     _turn_on(client)
@@ -1652,7 +1654,7 @@ def test_tv_shows_are_catalogued_by_show_folder(client, conn, directory, root, s
 
     shows = client.get("/api/media/tv").json()["shows"]
     assert [(s["name"], s["episodes"], s["seasons"]) for s in shows] == [("Bluey", 4, 2)]   # empty folders left out
-    poster = conn.execute("SELECT a.source, a.kind FROM media_tv_shows t JOIN media_artwork a ON a.id = t.artwork_id"
+    poster = media_conn.execute("SELECT a.source, a.kind FROM media_tv_shows t JOIN media_artwork a ON a.id = t.artwork_id"
                           ).fetchone()
     assert tuple(poster) == ("local", "poster") and client.get(shows[0]["art"]).status_code == 200
 
@@ -1671,13 +1673,13 @@ def test_tv_shows_are_catalogued_by_show_folder(client, conn, directory, root, s
     assert client.get(f"/api/media/tv/{tv_root}").status_code == 404     # TV itself is no show
     assert client.get("/api/admin/settings/media").json()["catalog"]["counts"]["tv"] == 4
     assert client.get("/api/media/home").json()["tv"][0]["name"] == "Bluey"
-    assert "tv" in signage._sections(conn).values()                      # signage may pick episode clips
+    assert "tv" in signage._sections(media_conn).values()                      # signage may pick episode clips
 
     # The show's folder removed: its episodes and its poster go.
     shutil.rmtree(root / "Media" / "TV" / "Bluey")
     _scan(conn, settings)
     assert client.get("/api/media/tv").json()["shows"] == []
-    assert conn.execute("SELECT count(*) FROM media_tv_shows").fetchone()[0] == 0
+    assert media_conn.execute("SELECT count(*) FROM media_tv_shows").fetchone()[0] == 0
 
 
 def test_tv_next_up_and_continue_watching(client, conn, directory, root, settings):
@@ -1709,14 +1711,14 @@ def test_tv_next_up_and_continue_watching(client, conn, directory, root, setting
     assert client.get("/api/media/home").json()["continue"] == []
 
 
-def test_tv_shows_follow_share_permissions(client, conn, directory, root, settings, checker):
+def test_tv_shows_follow_share_permissions(client, conn, directory, root, settings, checker, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     _bluey(root)
     _fake_video(root / "Media" / "TV" / "Bluey" / "Season 3" / "Bluey S03E01 Housework.mkv")
     _scan(conn, settings)
     show = client.get("/api/media/tv").json()["shows"][0]
-    poster = conn.execute("SELECT artwork_id FROM media_tv_shows").fetchone()[0]
+    poster = media_conn.execute("SELECT artwork_id FROM media_tv_shows").fetchone()[0]
 
     checker.rules = {"Media/TV/Bluey/Season 3": (False, False)}
     _login(client, conn, directory, "jane", "jsmith")
@@ -1770,7 +1772,7 @@ def test_a_screen_browses_and_is_sent_tv_shows(client, conn, directory, root, se
     _hub(client).unlisten(screen_id, queue)
 
 
-def test_tv_shows_are_looked_up_online(client, conn, directory, root, settings):
+def test_tv_shows_are_looked_up_online(client, conn, directory, root, settings, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     client.put("/api/admin/settings/media", json={"online_metadata": True, "tmdb_key": "0123456789abcdef0123456789abcdef"})
@@ -1807,8 +1809,8 @@ def test_tv_shows_are_looked_up_online(client, conn, directory, root, settings):
         ("Rose", "Rose meets the Doctor."),                                  # TMDB names an unnamed episode
         ("The End of the World", "Year five billion.")]                      # the file's own name is kept
     assert seen.count("/3/tv/57243/season/1") == 1                          # one request a season
-    assert conn.execute("SELECT count(*) FROM media_items WHERE section = 'tv' AND scraped_at IS NULL").fetchone()[0] == 0
-    sources = conn.execute("SELECT a.source FROM media_tv_shows t JOIN media_artwork a ON a.id = t.artwork_id").fetchone()
+    assert media_conn.execute("SELECT count(*) FROM media_items WHERE section = 'tv' AND scraped_at IS NULL").fetchone()[0] == 0
+    sources = media_conn.execute("SELECT a.source FROM media_tv_shows t JOIN media_artwork a ON a.id = t.artwork_id").fetchone()
     assert sources["source"] == "tmdb"
     assert client.get("/api/media/tv", params={"q": "travels in"}).json()["shows"][0]["name"] == "Doctor Who (2005)"
 
@@ -1817,7 +1819,7 @@ def test_tv_shows_are_looked_up_online(client, conn, directory, root, settings):
     (show / "poster.jpg").write_bytes(_jpeg((9, 9, 9), (200, 300)))
     _aged(show / "poster.jpg")
     _scan(conn, settings)
-    assert conn.execute("SELECT a.source FROM media_tv_shows t JOIN media_artwork a ON a.id = t.artwork_id"
+    assert media_conn.execute("SELECT a.source FROM media_tv_shows t JOIN media_artwork a ON a.id = t.artwork_id"
                         ).fetchone()["source"] == "local"
     assert len(seen) == calls
 
@@ -1840,7 +1842,7 @@ def test_a_shows_poster_is_found_after_its_episodes(client, conn, directory, roo
     assert found["art"] and detail["fanart"] and client.get(detail["fanart"]).status_code == 200
 
 
-def test_tv_shows_can_be_searched_and_sorted(client, conn, directory, root, settings):
+def test_tv_shows_can_be_searched_and_sorted(client, conn, directory, root, settings, media_conn):
     _login(client, conn, directory)
     _turn_on(client)
     _bluey(root)
@@ -1856,7 +1858,7 @@ def test_tv_shows_can_be_searched_and_sorted(client, conn, directory, root, sett
     assert names(q="BLU") == ["Bluey"] and names(q="nothing like it") == []
     with db.transaction(conn):   # Archer's episode added last; Bluey the newer show
         conn.execute("UPDATE files SET created_at = '2030-01-01 00:00:00' WHERE display_name LIKE 'Archer%'")
-        conn.execute("UPDATE media_tv_shows SET year = CASE WHEN folder_id = (SELECT id FROM folders WHERE name = 'Bluey') "
+        media_conn.execute("UPDATE media_tv_shows SET year = CASE WHEN folder_id = (SELECT id FROM folders WHERE name = 'Bluey') "
                      "THEN 2018 ELSE 2009 END")
     assert names(sort="added") == ["Archer", "Bluey"]
     assert names(sort="year") == ["Bluey", "Archer"]
@@ -1904,7 +1906,8 @@ def test_the_track_picker_doesnt_restyle_the_episode_and_album_lists():
 
 
 def _track(conn, file_id, album):
-    conn.execute("INSERT INTO media_items(file_id, section, media_type, title, sort_title, artist, album, album_key, "
+    media_conn = FeatureConn(conn, "media", "media_items")   # media.db once the app moved it
+    media_conn.execute("INSERT INTO media_items(file_id, section, media_type, title, sort_title, artist, album, album_key, "
                  "disk_mtime_ns, playback) VALUES (?, 'music', 'audio', 't', 't', 'A', ?, ?, 1, 'direct')",
                  (file_id, album, album.lower()))
 

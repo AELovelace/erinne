@@ -12,7 +12,10 @@
 | Phase 0.5: systemd template `mnemerynne@.service`, front door generated from the registry, Valkey on the box | done in code (2026-11-13); **not yet run on the NAS** | 340f24c + this step's commit |
 | Phase 1: nginx serves `/static/` and file bytes (`X-Accel-Redirect`); rate limits shared through Valkey | done in code (2026-11-13); **not yet run on the NAS** | 1267fc9 |
 | Phase 2: `games.db` (18 tables: coins, Lumi, arcade, casino, Lumi-Soft, push) out of core; `mnemerynne move-back games` for A/B | done in code (2026-11-13); **not yet run on the NAS** | 2f33d9d |
-| Phase 3: `rooms.db`; Rooms' live events over the event bus; the `rooms` service (needs Valkey) | done in code (2026-11-13); **not yet run on the NAS** | this step's commit |
+| Phase 3: `rooms.db`; Rooms' live events over the event bus; the `rooms` service (needs Valkey) | done in code (2026-11-13); **not yet run on the NAS** | 2d8b3fe |
+| Between 3 and 4: request and feature connections attach every feature file read-only | done | 041cd1a |
+| Phase 4a: `media.db` (13 `media_*`/`signage_*` tables) | done in code (2026-11-14); **not yet run on the NAS** | this step's commit |
+| Phase 4b: the media service (hub on Valkey, pages, HLS sessions in it) | not started | |
 
 Tests: `.venv\Scripts\python -m pytest tests -n auto` (about 4 minutes).
 
@@ -70,6 +73,28 @@ services` leaves it off (and turns it off) while `MNEMERYNNE_VALKEY_URL` is unse
 whose units are enabled (`--services`), so its paths stay with the web app until then. Erynne stays in the web app:
 a message the service takes that asks her is published as `rooms:ask` and answered there. The Rooms page (`/rooms`)
 and Settings → Rooms stay in the web app.
+
+**Read-only attach (041cd1a):** `db.attach_features` attaches each feature file read-only under its name to every
+request connection (`connect(..., features=True)`, the pools) and every `connect_feature`. Reading any table works
+wherever it lives; only writes need the owner's connection.
+
+**Phase 4a (2026-11-14):** `db.FEATURE_DBS["media"]` (`migrations/media/0001_media.sql`, 13 tables in FK order). New
+`FeatureDb.folder_columns` (`media_tv_shows.folder_id`); `media_items.file_id` and `media_progress.file_id` are
+`file_columns`. Core used to cascade a deleted file or folder into the catalog at once; now each catalog pass runs
+`db.sweep_feature(conn, "media")` first, and the hourly retention purge runs `sweep_orphans` for every feature. Routes:
+`web/media.py` on `get_media_db` except Settings → Media, Rescan media and new Signage folders (core: meta,
+collections, folders) and the shared guards (`media_user`, `screen_device`, `screens_user`, `_media_on`: read only);
+`web/kiosk.py` all, `web/soundcloud.py` only a TV's profile. `web/admin._log` writes core's `access_log` through
+`db.core_of(conn)` whatever connection it's given. The worker's catalog pass: `run_pass(media_conn, settings, core=conn)`
+(its status and new section folders are core's meta). `remotes.save_seen` opens media.db (`db.connect_for`).
+
+**Phase 4b, why it's separate:** the TV/speaker command hub (`web/media.py hub()`, SSE listeners per screen), the
+pairing codes, speaker tickets and the HLS session manager live in one process's memory, and Media's pages
+(`/media`, `/media/screen`, `/media/remote`...) render the web app's templates and nav. A media service needs (1) the
+hub on the event bus (`screen:{id}` channels; the TV's SSE listens wherever it is), pairing codes and tickets in
+Valkey or media.db, (2) every path touching an HLS session in the one process that started it (`/api/media/` and
+`/media/sessions/`), and (3) either the pages kept in the web app (nginx: `/media/games/` and the page paths to the
+web app) or a templates hook. Until then the web app serves all of Media, on media.db.
 
 ## Context
 

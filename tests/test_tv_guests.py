@@ -53,13 +53,13 @@ def test_a_guest_remote_drives_the_owners_tv_as_the_owner(client, conn, director
         _hub(client).unlisten(screen_id, queue)
 
 
-def test_guests_are_added_by_name_and_only_people_who_may_use_screens(client, conn, directory):
+def test_guests_are_added_by_name_and_only_people_who_may_use_screens(client, conn, directory, media_conn):
     owner_id = _login(client, conn, directory)
     _turn_on(client)
     _pair(client)
     assert client.post("/api/media/screens/guests", json={"username": "nobody"}).status_code == 404
     assert client.post("/api/media/screens/guests", json={"username": "boss"}).status_code == 422   # not their own guest
-    assert screens.guests(conn, owner_id) == []
+    assert screens.guests(media_conn, owner_id) == []
 
 
 def test_a_guests_remote_takes_a_casino_couch_seat(client, conn, directory):
@@ -89,10 +89,10 @@ def test_a_guests_remote_takes_a_casino_couch_seat(client, conn, directory):
         _hub(client).unlisten(screen_id, queue)
 
 
-def test_a_guest_never_drives_the_owners_speaker(client, conn, directory):
+def test_a_guest_never_drives_the_owners_speaker(client, conn, directory, media_conn):
     owner_id, wife_id, wife, screen_id, _key, panel, auth, remote_id = _household(client, conn, directory)
     client.post("/api/media/screens/guests", json={"username": "jane"})
-    speaker_id = conn.execute("INSERT INTO media_screens(user_id, name, token_hash, speaker) VALUES (?, 'Kitchen', 'x', 1)",
+    speaker_id = media_conn.execute("INSERT INTO media_screens(user_id, name, token_hash, speaker) VALUES (?, 'Kitchen', 'x', 1)",
                               (owner_id,)).lastrowid                         # one of boss's speakers
     assert [s["id"] for s in panel.get("/api/media/remote", headers=auth).json()["screens"]] == [screen_id]
     assert panel.post(f"/api/media/remote/screens/{speaker_id}/command", headers=auth,

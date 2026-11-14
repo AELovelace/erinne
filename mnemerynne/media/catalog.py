@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mnemerynne import media, share
+from mnemerynne import db, media, share
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
@@ -147,14 +147,20 @@ def _failed(conn: sqlite3.Connection, file_id: int, mtime_ns: int | None, sectio
 SCAN_REQUEST_KEY = "media_scan_requested"   # meta: an admin pressed Rescan media and the worker hasn't started yet
 
 
-def run_pass(conn: sqlite3.Connection, settings: Settings, budget_s: float = 20.0) -> Stats:
-    """Catalog what's new or changed, for at most budget_s seconds. Does nothing while Media is off."""
+def run_pass(conn: sqlite3.Connection, settings: Settings, budget_s: float = 20.0, *,
+             core: sqlite3.Connection | None = None) -> Stats:
+    """Catalog what's new or changed, for at most budget_s seconds. Does nothing while Media is off. `conn` holds
+    the catalog (media.db); `core`, when that's another connection, gets the scan's status and new section folders
+    (meta), which are core's."""
+    core = core or conn
     stats = Stats()
     if not media.enabled(conn):
         return stats
+    with transaction(conn):              # media.db: items and shows whose file or folder has gone since the last pass
+        db.sweep_feature(conn, "media")
     try:
-        with transaction(conn):
-            media.ensure_section_folders(conn)   # TV, in a Media folder made before there was one
+        with transaction(core):
+            media.ensure_section_folders(core)   # TV, in a Media folder made before there was one
     except (OSError, media.MediaError):
         log.info("Media: couldn't add the new section folders yet", exc_info=True)
     roots = media.catalog_roots(conn)
@@ -174,7 +180,7 @@ def run_pass(conn: sqlite3.Connection, settings: Settings, budget_s: float = 20.
                 conn.execute("ROLLBACK")
             log.exception("Media: online lookups failed")
     _prune_art(conn, settings)
-    _record(conn, stats)
+    _record(core, stats)
     if stats.read or stats.failed or stats.scraped:
         log.info("Media catalog: %d read, %d failed, %d looked up online, %d waiting.",
                  stats.read, stats.failed, stats.scraped, stats.pending)
