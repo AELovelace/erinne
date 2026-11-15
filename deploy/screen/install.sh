@@ -637,15 +637,18 @@ enable_service() {
 ok() { printf '   ok    %s\n' "$*"; }
 bad() { printf '   FAIL  %s\n' "$*"; FAILED=1; }
 
+# Every outside command in the check runs under `timeout`: the check ends each update (Kiosk settings' job),
+# and one command that never returns holds that job open, the TV on "Updating the screen…" (0.4.0: bluetoothctl
+# waits forever for a bluetoothd that isn't running, as on a box with no Bluetooth adapter).
 check() {
     FAILED=0
-    local url sample render
+    local url sample render LIMIT=${SCREEN_CHECK_LIMIT:-10}   # seconds for a quick question (bluetoothctl, pactl…)
     url=$(conf_value MNEMERYNNE_URL)
     step "Codecs and video decoding"
     if rpm -q ffmpeg-libs >/dev/null 2>&1; then ok "RPM Fusion FFmpeg"; else bad "RPM Fusion FFmpeg isn't installed: H.264 won't play"; fi
     sample=$(mktemp --suffix=.mp4)
-    if ffmpeg -v error -y -f lavfi -i testsrc2=size=1920x1080:rate=30 -t 2 -c:v libx264 -profile:v high \
-            -pix_fmt yuv420p "$sample" && ffmpeg -v error -i "$sample" -f null -; then
+    if timeout 120 ffmpeg -v error -y -f lavfi -i testsrc2=size=1920x1080:rate=30 -t 2 -c:v libx264 -profile:v high \
+            -pix_fmt yuv420p "$sample" && timeout 60 ffmpeg -v error -i "$sample" -f null -; then
         ok "H.264 (High) decodes"
     else
         bad "H.264 doesn't decode"
@@ -653,8 +656,8 @@ check() {
     render=$(ls /dev/dri/renderD* 2>/dev/null | head -n 1 || true)
     if [[ -z $render ]]; then
         bad "no GPU render device (/dev/dri/renderD*)"
-    elif ffmpeg -v error -hwaccel vaapi -hwaccel_device "$render" -hwaccel_output_format vaapi -i "$sample" -f null -; then
-        ok "the GPU decodes H.264 (VA-API, $(vainfo --display drm --device "$render" 2>/dev/null | sed -n 's/.*Driver version: //p' | head -n 1))"
+    elif timeout 60 ffmpeg -v error -hwaccel vaapi -hwaccel_device "$render" -hwaccel_output_format vaapi -i "$sample" -f null -; then
+        ok "the GPU decodes H.264 (VA-API, $(timeout "$LIMIT" vainfo --display drm --device "$render" 2>/dev/null | sed -n 's/.*Driver version: //p' | head -n 1))"
     else
         bad "the GPU doesn't decode H.264: video plays on the CPU (fine at 1080p on a Core i5, but warmer)"
     fi
@@ -673,15 +676,15 @@ check() {
     fi
 
     step "The screen"
-    if systemctl is-active --quiet mnemerynne-screen.service; then ok "running on tty1"; else bad "not running: journalctl -u mnemerynne-screen -b"; fi
+    if timeout "$LIMIT" systemctl is-active --quiet mnemerynne-screen.service; then ok "running on tty1"; else bad "not running: journalctl -u mnemerynne-screen -b"; fi
     if curl -fsS -o /dev/null --max-time 3 http://127.0.0.1:9187/api/status; then ok "start page and Kiosk settings running"; else bad "the helper isn't answering: journalctl -u mnemerynne-screen-wifi -b"; fi
     if [[ $(conf_value WIFI_SETUP) == yes ]]; then
-        if iw list 2>/dev/null | grep -A10 "Supported interface modes" | grep -qw AP; then ok "the Wi-Fi card can be a hotspot"; else note "no Wi-Fi card that can be a hotspot: setting up Wi-Fi needs a cable or SSH"; fi
+        if timeout "$LIMIT" iw list 2>/dev/null | grep -A10 "Supported interface modes" | grep -qw AP; then ok "the Wi-Fi card can be a hotspot"; else note "no Wi-Fi card that can be a hotspot: setting up Wi-Fi needs a cable or SSH"; fi
     fi
-    if bluetoothctl show 2>/dev/null | grep -q "^Controller"; then
-        ok "Bluetooth, $(bluetoothctl devices Paired 2>/dev/null | grep -c '^Device') paired (🎮 Controllers on the TV)"
+    if timeout "$LIMIT" bluetoothctl show 2>/dev/null | grep -q "^Controller"; then
+        ok "Bluetooth, $(timeout "$LIMIT" bluetoothctl devices Paired 2>/dev/null | grep -c '^Device') paired (🎮 Controllers on the TV)"
     else
-        note "no Bluetooth adapter: game controllers need one (a small USB Bluetooth adapter works)"
+        note "no Bluetooth adapter (or Bluetooth isn't running): game controllers need one (a small USB Bluetooth adapter works)"
     fi
     if [[ -d $SOURCE_DIR/.git ]]; then
         ok "release $(git -C "$SOURCE_DIR" describe --tags --always --match 'screen-v*' HEAD 2>/dev/null) ($SOURCE_DIR)"
@@ -693,7 +696,7 @@ check() {
     local tv_mode uid connector
     uid=$(id -u "$SCREEN_USER" 2>/dev/null || true)
     if [[ -n $uid ]]; then
-        tv_mode=$(runuser -u "$SCREEN_USER" -- env XDG_RUNTIME_DIR="/run/user/$uid" \
+        tv_mode=$(timeout "$LIMIT" runuser -u "$SCREEN_USER" -- env XDG_RUNTIME_DIR="/run/user/$uid" \
             /usr/local/bin/mnemerynne-screen-display --now 2>/dev/null || true)
     fi
     if [[ -z ${tv_mode:-} ]]; then
@@ -709,7 +712,7 @@ check() {
         note "picture: no TV connected right now (or it's off)"
     fi
     local sink output
-    sink=$(pactl --server "unix:/run/user/$(id -u "$SCREEN_USER" 2>/dev/null || echo 0)/pulse/native" get-default-sink 2>/dev/null || true)
+    sink=$(timeout "$LIMIT" pactl --server "unix:/run/user/$(id -u "$SCREEN_USER" 2>/dev/null || echo 0)/pulse/native" get-default-sink 2>/dev/null || true)
     output=$(conf_value AUDIO_OUTPUT)
     case ${output:-hdmi} in
         hdmi) if [[ $sink == *hdmi* ]]; then ok "sound goes to HDMI"; else note "sound: not on HDMI yet (is the TV on? it switches within 30 s)"; fi ;;

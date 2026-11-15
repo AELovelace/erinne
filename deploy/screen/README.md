@@ -157,7 +157,9 @@ the TV can change it, so set a PIN once the box is in place.
 
 Updates, address changes and system updates run in their own systemd unit (`mnemerynne-screen-update`,
 `-config`, `-osupdate`). The TV shows "Updating the screen…" until they finish, and the settings page shows
-their last lines. In full: `journalctl -u mnemerynne-screen-update`.
+their last lines. In full: `journalctl -u mnemerynne-screen-update`. A job that runs for two hours is stopped
+(systemd's `RuntimeMaxSec`), so a step that hangs can't keep the TV on "Updating" for good; the settings page
+then says it didn't finish.
 
 **On other pages** (Ask, Files, the Wiki, a document): the TV keeps its screen size, has a small bar (**📺
 Back to TV**, **‹ ›**), and still hears the remote. A phone's command gives whoever is using the TV 10 seconds
@@ -226,6 +228,7 @@ The drivers are the kernel's own (`hid-playstation` for the DualSense, `hid-micr
 | No setup hotspot | `journalctl -u mnemerynne-screen-wifi -b`. `sudo bash install.sh --check` says whether the Wi-Fi card can be a hotspot. |
 | Kiosk settings: "no copy of the repository" | The box was installed from copied files. Clone the repository onto it and run the installer from the clone once. |
 | An update didn't finish | **Kiosk settings → Updates** shows its last lines; `journalctl -u mnemerynne-screen-update` the rest. **Roll back** returns to the release before. |
+| Stuck on **Updating the screen…** | `systemctl status mnemerynne-screen-update` shows the step it's on. If it's in the check at the end (everything else is done), `sudo systemctl stop mnemerynne-screen-update`, or reboot the box. 0.4.0's check waited forever on `bluetoothctl` on boxes where Bluetooth isn't running; 0.4.1 has time limits on it. |
 | Forgot the kiosk PIN | Approve from an admin's phone instead, then set a new one. Or over SSH: `sudo rm /etc/mnemerynne-screen.pin`. |
 | A 404 page | Media is off, or the screens group isn't set (Settings → Entertainment → Media). |
 | No sound | Is the TV's input on this box, and is its volume up? `sudo bash install.sh --check` says whether sound goes to HDMI. `--audio auto` leaves the choice to PipeWire. |

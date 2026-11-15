@@ -307,6 +307,25 @@ def test_updates_move_between_screen_releases_and_roll_back(tmp_path):
     assert r.returncode != 0 and "local changes" in r.stderr
 
 
+def test_the_check_gives_up_on_a_command_that_never_answers(tmp_path):
+    """The check ends every update; 0.4.0's waited forever on bluetoothctl (no bluetoothd on a box without an
+    adapter) and left the TVs on "Updating the screen…" all night. Each outside command now has a time limit."""
+    root = _root(tmp_path)
+    (root / "etc" / "mnemerynne-screen.conf").write_text("AUDIO_OUTPUT=hdmi\n")
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    for name in ("bluetoothctl", "pactl", "runuser", "vainfo", "iw"):   # every one of them hangs
+        (fake / name).write_text("#!/bin/bash\nexec sleep 600\n")
+    for name in ("rpm", "ffmpeg", "curl", "systemctl"):                    # the rest answer at once
+        (fake / name).write_text("#!/bin/bash\nexit 1\n")
+    script = f'export PATH="{posix(fake)}:$PATH" SCREEN_CHECK_LIMIT=1; check && s=0 || s=$?; echo "== checked: $s"'
+    env = {**os.environ, "SCREEN_SOURCE_ONLY": "1", "SCREEN_ROOT": posix(root)}
+    r = subprocess.run([BASH, "-c", f'source "{posix(INSTALL)}"; {script}'], capture_output=True, text=True,
+                       env=env, timeout=60)                                # the check finishes: not killed here
+    assert "== checked: 1" in r.stdout, r.stdout + r.stderr                # it failed some things, and ended
+    assert "no Bluetooth adapter (or Bluetooth isn't running)" in r.stdout
+
+
 def test_it_is_for_fedora_and_needs_an_address(tmp_path):
     root = _root(tmp_path)
     r = run("--no-packages", root=root, check=False)

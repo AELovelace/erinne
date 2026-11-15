@@ -76,6 +76,9 @@ DISPLAY_SCALES = (100, 150, 200, 300)    # percent, as install.sh's valid_scale
 JOBS = {"update": "mnemerynne-screen-update", "config": "mnemerynne-screen-config",
         "system": "mnemerynne-screen-osupdate"}
 JOB_NAMES = {"update": "updating the screen", "config": "changing the address", "system": "installing system updates"}
+# The longest a job may run (systemd stops it then): a step that never returns can't leave the TV on
+# "Updating the screen…" for good. dnf on a slow line takes a while, so it's generous.
+JOB_LIMIT_SECONDS = 2 * 3600
 
 # The restart keys (RestartKeys, below)
 INPUT_DIR = "/dev/input"
@@ -841,6 +844,7 @@ class Kiosk:
         # The last line in the journal says how it ended (jobs() reads it).
         script = " ".join(shlex.quote(c) for c in cmd) + '; echo "== finished: $?"'
         code, _, err = self.run(["systemd-run", f"--unit={JOBS[kind]}", "--collect", "--quiet",
+                                 f"--property=RuntimeMaxSec={JOB_LIMIT_SECONDS}",
                                  f"--description=Mnemerynne screen: {JOB_NAMES[kind]}", "--", "bash", "-c", script], 30)
         if code != 0:
             raise KioskError(f"Couldn't start {JOB_NAMES[kind]}: {err.strip()}", 500)
@@ -851,8 +855,12 @@ class Kiosk:
             _, log, _ = self.run(["journalctl", "-u", unit, "-n", "12", "-o", "cat", "--no-pager"], 10)
             lines = [l for l in log.splitlines() if l.strip()]
             finished = next((l for l in reversed(lines) if l.startswith("== finished: ")), None)
-            out[kind] = {"name": JOB_NAMES[kind], "active": self.job_active(kind), "log": lines[-8:],
-                         "ok": None if finished is None else finished.endswith(": 0")}
+            active = self.job_active(kind)
+            if finished is not None:
+                ok = finished.endswith(": 0")
+            else:                     # still going, never ran, or stopped before its last line (the time limit,
+                ok = None if active or not lines else False     # a reboot, systemctl stop): it didn't finish
+            out[kind] = {"name": JOB_NAMES[kind], "active": active, "log": lines[-8:], "ok": ok}
         return out
 
     def restart(self, token: str | None, what: str) -> None:

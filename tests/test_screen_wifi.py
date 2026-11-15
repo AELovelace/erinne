@@ -477,6 +477,18 @@ def test_releases_newer_than_the_installed_one_update_and_roll_back(kiosk, tmp_p
     assert jobs["system"]["ok"] is False and jobs["system"]["log"][-1] == "== finished: 1" and jobs["update"]["ok"] is None
 
 
+def test_a_job_has_a_time_limit_and_one_stopped_early_shows_as_unfinished(kiosk):
+    """0.4.0's updates hung in the installer's check and held the TVs on "Updating the screen…" all night."""
+    k, run, server, clock, setup, conf = kiosk
+    k.system_update(k.unlock_grant("good-grant"))
+    assert f"--property=RuntimeMaxSec={ws.JOB_LIMIT_SECONDS}" in _started(run)   # systemd stops it then
+    # Stopped before its last line (the time limit, a reboot, systemctl stop): Kiosk settings says it didn't finish.
+    run.journal["mnemerynne-screen-update"] = "== The screen\n   ok    running on tty1\nStopped Mnemerynne screen: updating the screen.\n"
+    assert k.jobs()["update"]["ok"] is False
+    run.active.add("mnemerynne-screen-update")                 # while it's still going: no verdict yet
+    assert k.jobs()["update"]["ok"] is None
+
+
 def test_kiosk_settings_answer_on_the_box_only(kiosk):
     k, run, server, clock, setup, conf = kiosk
     srv = ws.Server(("127.0.0.1", 0), setup, local=True, kiosk=k)
