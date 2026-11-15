@@ -92,7 +92,7 @@ RESTART_MODIFIERS = ((29, 97), (42, 54), (56, 100))   # Ctrl, Shift and Alt: the
 BT_SCAN_SECONDS = 20                         # one "Find controllers": as long as a controller's pairing light flashes
 BT_PAIR_SECONDS = 20                         # one `bluetoothctl pair` attempt
 BT_PAIR_TRIES = 2                            # a Bluetooth LE Xbox pad often refuses the first attempt
-BT_SEE_SECONDS = 15                          # how long Pair waits to see the pad advertising before trying anyway
+BT_SEE_SECONDS = 30                          # how long Pair waits to hear the pad (time to press its pair button)
 BT_MAX_DEVICES = 40                          # a busy street can show dozens of phones; only so many are looked at
 CONTROLLERS_SECONDS = 600                    # the TV's Controllers page, once opened, renewed while it's used
 CONTROLLERS_HEADER = "X-Controllers"
@@ -929,13 +929,14 @@ def pair_problem(why: str) -> str:
     if low.startswith("paired; connect:"):
         return "It paired, but didn't connect. Press its Xbox / PS button to wake it, or Forget it and pair again." + tail
     if "not available" in low or "notavailable" in low:
-        return "The box can't see it any more. Put it in pairing mode, press Find controllers, then Pair." + tail
+        return ("The box can't see it any more. Put it in pairing mode and press Find controllers: it pairs as soon "
+                "as it's heard." + tail)
     if any(k in (tag or "").lower() for k in ("authentication", "rejected", "canceled")):
         return ("It refused the pairing. Forget it on anything else it was paired to (or hold its pairing button "
                 "until it flashes fast) and press Pair again." + tail)
     if low.startswith("not heard") and not tag:
-        return ("The box never heard it. Hold the pairing button until its light flashes fast, keep it near the box, "
-                "and press Pair while it's flashing.")
+        return ("The box never heard it. Press Pair, then hold the controller's pairing button until its light "
+                "flashes fast, near the box.")
     if "no answer" in low and not tag:
         return "It was heard, but didn't answer the pairing. Put it back in pairing mode and press Pair again."
     if tag:
@@ -1101,11 +1102,29 @@ class Controllers:
             try:
                 self.bt.power_on()
                 self.forget_unpaired()                 # each Find starts afresh: only what's heard this round
-                self.bt.scan()
+                self.thread(self.bt.scan)              # the Find window (BT_SCAN_SECONDS), beside the watch below
+                self.pair_as_heard()                   # each controller pairs the moment it's heard
             finally:
                 with self.lock:
                     self.scanning = False
         self.thread(go)
+
+    def pair_as_heard(self) -> None:
+        """While Find scans, pair every controller heard in pairing mode straight away, as an Xbox console does
+        (its pair button is Find) and as Doll-OS's DS-Slave connects straight from a scan result. A Bluetooth LE
+        Xbox pad only answers while it's advertising, and that stops soon after Find does, so waiting for the Pair
+        button lost it. Each controller is tried once per Find; a failure shows its reason and Pair tries again."""
+        tried: set[str] = set()
+        for _ in range(BT_SCAN_SECONDS):
+            for address in self.bt.addresses():
+                if address in tried or address in self.busy:
+                    continue
+                info = self.bt.info(address)
+                # heard this round (BlueZ has its RSSI only while a scan hears it), a controller, not paired yet
+                if info and "RSSI" in info and is_gamepad(info) and info.get("Paired") != "yes":
+                    tried.add(address)
+                    self._start_pair(address)
+            self.bt.sleep(1)
 
     def forget_unpaired(self) -> None:
         """Drop the game controllers an earlier Find turned up and nobody paired (BlueZ keeps them, so the list
@@ -1122,14 +1141,19 @@ class Controllers:
             raise KioskError("That isn't a controller this box can see.", 422)
         info = self.bt.info(address)
         if not info:
-            raise KioskError("That controller isn't nearby any more. Press Find controllers again.", 404)
+            raise KioskError("That controller isn't nearby any more. Put it in pairing mode and press Find "
+                             "controllers: it pairs as soon as it's heard.", 404)
         if not is_gamepad(info):
             raise KioskError("Only game controllers can be paired here.", 403)
         return {"address": address, "info": info}
 
     def pair(self, token: str | None, address: str) -> None:
+        """The Pair button: another try for one Find didn't manage (it scans again and waits to hear the pad)."""
         self.need(token)
-        found = self._known(address)["address"]
+        self._start_pair(self._known(address)["address"])
+
+    def _start_pair(self, found: str) -> None:
+        """Pair `found` in the background; the TV's list shows it busy, then paired or what went wrong."""
         with self.lock:
             if found in self.busy:
                 return

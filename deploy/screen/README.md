@@ -196,9 +196,10 @@ Any remote that may drive the TV opens it; so does the box's own keyboard or a c
 
 1. **Pairing mode:** on an Xbox controller, hold the pair button on its top until the Xbox button flashes fast. On a
    DualSense, hold **Create** and **PS** until the light bar flashes.
-2. **Find controllers**, then **Pair** beside it while it's still flashing (put it back in pairing mode first if it
-   stopped). It shows **Connected** and its battery. Each Find starts a fresh list: controllers an earlier Find
-   turned up that nobody paired are dropped. When a pairing fails, the TV says at which step (never heard, heard
+2. **Find controllers**: like an Xbox console's pair button, each controller it hears in pairing mode is paired
+   straight away (once per Find), and shows **Connected** and its battery. **Pair** beside one is another try
+   for one that failed: press it, then put the controller back in pairing mode within 30 seconds. Each Find starts
+   a fresh list: controllers an earlier Find turned up that nobody paired are dropped. When a pairing fails, the TV says at which step (never heard, heard
    but didn't answer, refused, paired but didn't connect) and BlueZ's own reason, like `(BlueZ: AuthenticationFailed)`.
 3. Next time, its middle button turns it on and it reconnects by itself. **Forget** (twice) unpairs it.
 
@@ -212,8 +213,9 @@ How it's kept safe:
 - Pairing uses no PIN (Just Works), then trusts the controller so it reconnects.
 
 **Bluetooth LE pads** (an Xbox One S on its 2021 firmware, Series X|S) pair the way Doll-OS's DS-Slave pairs them:
-only while the box is scanning and the pad is heard advertising. So **Pair** scans alongside, waits up to 15 seconds
-to hear the pad, then pairs (twice if the first try is refused). It counts as paired only when BlueZ says so:
+only while the box is scanning and the pad is heard advertising. It stops advertising soon after Find stops, so up
+to 0.4.3 a pad Find listed was gone by the time Pair was pressed; since 0.4.4 Find pairs it the moment it's heard.
+**Pair** scans alongside too, waits up to 30 seconds to hear the pad, then pairs (twice if the first try is refused). It counts as paired only when BlueZ says so:
 `bluetoothctl pair --timeout` exits 0 having printed nothing when it gives up, which 0.4.0 took for a pairing.
 
 A paired controller is the box's own input, like its keyboard: the D-pad moves, A presses, B goes back, Start plays

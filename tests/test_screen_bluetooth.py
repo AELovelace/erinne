@@ -217,6 +217,31 @@ def test_each_find_starts_afresh(pads):
     assert ["bluetoothctl", "remove", KEYBOARD] not in bt.calls               # only game controllers are touched
 
 
+def test_find_pairs_a_controller_the_moment_its_heard(pads):
+    """Doll's Xbox One S pads were listed by Find but gone by the time Pair was pressed (an LE pad stops
+    advertising soon after): so Find pairs each controller it hears in pairing mode straight away, once per Find.
+    Never a keyboard or phone, never one already paired, and a failure is left for the Pair button."""
+    c, bt, server, clock, setup = pads
+    token = c.open("good-pass")
+    bt.nearby[KEYBOARD] = dict(bt.devices[KEYBOARD])                          # a keyboard in pairing mode too
+    c.scan(token)
+    paired = [call[-1] for call in bt.calls if "pair" in call]
+    assert sorted(paired) == sorted([SONY, MYSTERY])                          # both controllers, once each, no Pair press
+    assert bt.devices[SONY]["Paired"] == "yes" and bt.devices[SONY]["Connected"] == "yes"
+    assert ["bluetoothctl", "trust", SONY] in bt.calls
+    assert bt.devices[KEYBOARD]["Paired"] == "no" and XBOX not in paired     # not the keyboard, not the paired pad
+    assert c.scanning is False and not c.busy
+
+
+def test_a_find_that_cant_pair_says_why_and_doesnt_keep_trying(pads):
+    c, bt, server, clock, setup = pads
+    token = c.open("good-pass")
+    bt.pair_ok = False
+    c.scan(token)
+    assert sum(1 for call in bt.calls if "pair" in call and SONY in call) == ws.BT_PAIR_TRIES   # one go, not every second
+    assert c.errors[SONY].startswith("It refused the pairing")
+
+
 def test_a_pad_never_heard_says_so(pads):
     c, bt, server, clock, setup = pads
     token = c.open("good-pass")
