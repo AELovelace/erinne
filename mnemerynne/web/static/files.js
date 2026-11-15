@@ -1407,6 +1407,8 @@
     job.state = "uploading";
     job.detail = "Uploading";
     paintJob(job);
+    holdAwake();                                   // the computer stays awake while files go up
+    if (job.file.size > PARTS_FROM) { uploadInParts(job); return; }   // big: in parts that survive a blip
     const form = new FormData();
     form.append("file", job.file, job.file.name);
     form.append("collection_id", job.cid);
@@ -1435,6 +1437,125 @@
     xhr.send(form);
   }
 
+  /* A big file in parts (the server's ingest/parts.py). A dropped connection, a sleeping laptop or the server
+     restarting for an update costs one part: it's sent again, and the upload carries on where it was. Choosing
+     the same file again later (after a reload) also carries on, because the server finds the upload by who,
+     where, and the file's name, size and modified time. */
+  const PARTS_FROM = 32 * 1024 * 1024;             // files bigger than this go in parts
+  const RETRY_MAX_MS = 30000;                      // the longest wait between tries
+  const RETRY_FOR_MS = 6 * 3600 * 1000;            // give up after this long without a single part getting through
+
+  function retryable(status, finishing) {          // worth trying again: the network, the server restarting or busy
+    return status === 0 || status === 408 || status === 429 || status >= 500 || (finishing && status === 409);
+  }
+
+  function wait(ms) { return new Promise(function (res) { setTimeout(res, ms); }); }
+
+  /* One request: resolves {status, body}; status 0 is the network failing. Progress reports bytes sent. */
+  function send(method, url, body, json, progress) {
+    return new Promise(function (resolve) {
+      const xhr = new XMLHttpRequest();
+      xhr.open(method, url);
+      if (json) xhr.setRequestHeader("Content-Type", "application/json");
+      if (progress) xhr.upload.addEventListener("progress", function (e) { progress(e.loaded); });
+      xhr.addEventListener("load", function () {
+        let data = null;
+        try { data = JSON.parse(xhr.responseText); } catch (e) { /* not JSON */ }
+        resolve({ status: xhr.status, body: data });
+      });
+      xhr.addEventListener("error", function () { resolve({ status: 0, body: null }); });
+      xhr.addEventListener("timeout", function () { resolve({ status: 0, body: null }); });
+      xhr.send(json ? JSON.stringify(body) : body);
+    });
+  }
+
+  /* send(), tried again with a growing wait while the failure is one that passes. Resolves the last answer. */
+  async function patiently(job, attempt, what, finishing) {   // finishing: 409 is "still putting it together"
+    let delay = 2000, since = Date.now();
+    for (;;) {
+      const r = await attempt();
+      if (!retryable(r.status, finishing) || Date.now() - since > RETRY_FOR_MS) return r;
+      const busy = r.status === 409;               // finishing still putting it together: not a lost connection
+      job.detail = (busy ? "Putting it together" : r.status === 0 ? "Connection lost" : "Server busy")
+        + " · trying again" + (what ? " (" + what + ")" : "");
+      paintJob(job);
+      await Promise.race([wait(delay), new Promise(function (res) {   // back online: try at once
+        window.addEventListener("online", res, { once: true });
+      })]);
+      delay = Math.min(delay * 2, RETRY_MAX_MS);
+    }
+  }
+
+  function failed(job, r, fallback) {
+    job.state = "failed";
+    job.detail = (r.body && r.body.detail) || (r.status === 413 ? "Too large to upload" : fallback + " (" + r.status + ")");
+    finish(job);
+  }
+
+  async function uploadInParts(job) {
+    const f = job.file;
+    const start = await patiently(job, function () {
+      return send("POST", "/api/files/uploads", {
+        collection_id: job.cid, folder_id: job.fid || null, name: f.name, size: f.size, modified: f.lastModified || 0,
+        relative_path: job.path.indexOf("/") >= 0 ? job.path : null }, true);
+    });
+    if (start.status !== 200) return failed(job, start, "Upload failed");
+    const up = start.body;
+    const id = up.id, size = up.part_size, count = Math.ceil(f.size / size);
+    if (!up.file_id) {
+      const have = new Set(up.parts);
+      let done = 0;                                // bytes already on the server
+      have.forEach(function (n) { done += Math.min(size, f.size - n * size); });
+      const show = function (sent) {
+        job.pct = Math.min(1, (done + sent) / f.size);
+        job.detail = Math.round(job.pct * 100) + "%";
+        paintJob(job);
+      };
+      show(0);
+      if (have.size) { job.detail = "Carrying on · " + job.detail; paintJob(job); }
+      for (let n = 0; n < count; n++) {
+        if (have.has(n)) continue;
+        const piece = f.slice(n * size, Math.min(f.size, (n + 1) * size));
+        const r = await patiently(job, function () {
+          return send("PUT", "/api/files/uploads/" + id + "/parts/" + n, piece, false, show);
+        }, Math.round(done / f.size * 100) + "%");
+        if (r.status !== 200) return failed(job, r, "Upload failed");
+        done += piece.size;
+        show(0);
+      }
+    }
+    job.detail = "Putting it together";            // the server checks the whole file: big ones take a minute
+    paintJob(job);
+    const end = await patiently(job, function () {
+      return send("POST", "/api/files/uploads/" + id + "/finish", {}, true);
+    }, "", true);
+    if (end.status !== 200 && end.status !== 201) return failed(job, end, "Upload failed");
+    job.fileId = end.body.id;
+    job.pct = 1;
+    settle(job, end.body, end.status === 200);
+    finish(job);
+  }
+
+  /* Keep the screen (and so the computer) awake while uploads run: a sleeping laptop drops the connection.
+     Browsers let it go when the tab is hidden, so it's asked for again on coming back. */
+  let awake = null;
+  async function holdAwake() {
+    if (awake || !navigator.wakeLock || document.visibilityState !== "visible") return;
+    try {
+      awake = await navigator.wakeLock.request("screen");
+      awake.addEventListener("release", function () { awake = null; });
+    } catch (e) { awake = null; }                  // refused (battery saver, say): uploads carry on regardless
+  }
+  function letSleep() {
+    if (awake && !queue.some(function (j) { return j.state === "waiting" || j.state === "uploading"; })) {
+      awake.release().catch(function () {});
+      awake = null;
+    }
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (queue.some(function (j) { return j.state === "uploading"; })) holdAwake();
+  });
+
   function settle(job, f, duplicate) {
     if (f.status === "ready") { job.state = "done"; job.detail = duplicate ? "Already here" : "Ready"; }
     else if (f.status === "stored") { job.state = "done"; job.detail = "Stored (not searchable)"; }
@@ -1448,6 +1569,7 @@
     paintJob(job);
     updateQueueTitle();
     pump();
+    letSleep();                                    // nothing left to send: the computer may sleep again
     // Show new files (and new folders from folder uploads) without hammering the server.
     clearTimeout(refreshSoon);
     refreshSoon = setTimeout(async function () {

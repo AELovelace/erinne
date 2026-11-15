@@ -22,6 +22,8 @@
 
 **Failed.** Open Properties for the error. Common causes: a corrupt PDF, a file that isn't what its extension says, text that isn't UTF-8. Fix the file and upload it again, or press *Retry indexing*.
 
+**An upload says "Connection lost · trying again".** The connection to the server dropped (Wi-Fi, sleep, or the server restarting). Leave the tab open: big files carry on by themselves when it comes back. If you closed the tab, choose the same file for the same folder again and it carries on from where it stopped.
+
 **Stored.** This kind of file can't be searched (images, archives, old .doc without the converter). It is kept and can be downloaded.
 
 **"You can't change files here."** You have read access only. Ask the library's owner or an admin for write access; on the file share that is a Windows permission.

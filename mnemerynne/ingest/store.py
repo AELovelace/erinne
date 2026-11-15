@@ -105,6 +105,31 @@ def receive(stream: BinaryIO, filename: str, settings: Settings, into: Path | No
     return Received(sha.hexdigest(), kind, size, tmp_path, display_name, _mime(kind, display_name), note, into is not None)
 
 
+def received_from(path: Path, filename: str, settings: Settings, staged: bool) -> Received:
+    """A file already put together on disk (an upload in parts, ingest/parts.py), checked like receive() checks a
+    stream: hashed, sniffed, held to the size limit. staged: it is already the hidden file in its share folder.
+    Nothing is copied; on a refusal the file stays where it is (the caller drops the upload)."""
+    display_name = clean_display_name(filename)
+    sha = hashlib.sha256()                                 # the whole file's hash, read once from the disk
+    size = 0
+    kind = None
+    limit = settings.max_file_bytes
+    with open(path, "rb") as fh:
+        while block := fh.read(_READ_SIZE):
+            if kind is None:
+                kind = _sniff(block, display_name)         # the type from the first block, as for any upload
+            size += len(block)
+            if size > limit:
+                raise TooLarge(f"File is larger than the {limit // (1024 * 1024)} MB upload limit.")
+            sha.update(block)
+    if size == 0:
+        raise UploadError("The file is empty.")
+    note = _indexable(kind, path, size, settings, display_name)   # why it's stored only, if it is
+    if note:
+        kind = "other"
+    return Received(sha.hexdigest(), kind, size, path, display_name, _mime(kind, display_name), note, staged)
+
+
 def inspect(path: Path, display_name: str, settings: Settings) -> tuple[str, str, int, str | None]:
     """(kind, mime, size, note) of a file read in place on the share; the
     same rules as uploads (note: why it is stored but not searchable)."""

@@ -11,14 +11,16 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 
+import anyio
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from itsdangerous import BadData, URLSafeTimedSerializer
 from pydantic import BaseModel, Field
 
-from mnemerynne import api_tokens, comments, downloads, editing, fs, jobs, permissions, share
+from mnemerynne import api_tokens, comments, db, downloads, editing, fs, jobs, permissions, share
 from mnemerynne.config import Settings
 from mnemerynne.ingest import markdown, store
+from mnemerynne.ingest import parts as upload_parts
 from mnemerynne.media import screens as media_screens
 from mnemerynne.web.deps import api_user, get_db, get_settings, is_admin, page_user
 from mnemerynne.web.sendfile import send_file
@@ -438,6 +440,20 @@ def trash_list(collection_id: int, user=Depends(api_user), conn: sqlite3.Connect
 
 
 # ------------------------------------------------------------------- uploads
+def _upload_target(conn: sqlite3.Connection, user, collection_id: int | None,
+                   folder_id: int | None) -> tuple[fs.Access, int]:
+    """Where an upload may go, checked the same way for one request and for parts: (access, the collection)."""
+    access = fs.Access.of(conn, user["id"])
+    target = collection_id if collection_id is not None else permissions.private_collection_id(conn, user["id"])
+    if target not in access.writable:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't upload to this collection")
+    _fs_errors(lambda: fs.require_folder(conn, target, folder_id))
+    access.confirm(target, folder_id)              # an upload changes something: ask the share now
+    if not access.can_write(target, folder_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't upload to this folder")
+    return access, target
+
+
 @router.post("/api/files")
 def upload(
     file: UploadFile = File(...),
@@ -453,14 +469,7 @@ def upload(
     `relative_path` comes from a folder upload ("Reports/2026/q1.pdf"): the
     folders in it are created under `folder_id` as needed.
     """
-    access = fs.Access.of(conn, user["id"])
-    target = collection_id if collection_id is not None else permissions.private_collection_id(conn, user["id"])
-    if target not in access.writable:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't upload to this collection")
-    _fs_errors(lambda: fs.require_folder(conn, target, folder_id))
-    access.confirm(target, folder_id)              # an upload changes something: ask the share now
-    if not access.can_write(target, folder_id):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't upload to this folder")
+    access, target = _upload_target(conn, user, collection_id, folder_id)
     parts = fs.split_relative_path(relative_path) if relative_path else None
     landed, into = _fs_errors(lambda: store.landing(conn, target, folder_id, parts, user["id"]))   # written straight into its folder
     try:
@@ -471,6 +480,81 @@ def upload(
     file_id, created = _fs_errors(lambda: store.add_file(conn, settings, received, target, user["id"], folder_id=landed))
     return JSONResponse(_file_json(fs.file_row(conn, file_id), access),
                         status_code=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+# Big files go up in parts (ingest/parts.py): a dropped connection or a restart costs one part, not the whole file.
+class PartsStartBody(BaseModel):
+    collection_id: int | None = None
+    folder_id: int | None = None
+    relative_path: str | None = Field(None, max_length=1024)
+    name: str = Field(..., min_length=1, max_length=1024)
+    size: int = Field(..., gt=0)
+    modified: int = 0                                  # the file's last-modified time (ms): part of what resumes it
+
+
+def _parts_errors(work):
+    """Run work(); a PartsError becomes its HTTP refusal, a store refusal a 413 or 400, as for one-request uploads."""
+    try:
+        return _fs_errors(work)
+    except upload_parts.PartsError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    except store.UploadError as exc:
+        code = status.HTTP_413_CONTENT_TOO_LARGE if isinstance(exc, store.TooLarge) else status.HTTP_400_BAD_REQUEST
+        raise HTTPException(code, str(exc)) from exc
+
+
+@router.post("/api/files/uploads")
+def start_parts(body: PartsStartBody, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db),
+                settings: Settings = Depends(get_settings)):
+    """Start a big file's upload, or find it again: its id, the part size and the parts already here."""
+    _access, target = _upload_target(conn, user, body.collection_id, body.folder_id)
+    folder_parts = fs.split_relative_path(body.relative_path) if body.relative_path else None
+    landed, into = _fs_errors(lambda: store.landing(conn, target, body.folder_id, folder_parts, user["id"]))
+    return _parts_errors(lambda: upload_parts.start(conn, settings, user["id"], target, body.folder_id, body.relative_path,
+                                             body.name, body.size, body.modified, landed, into))
+
+
+@router.put("/api/files/uploads/{upload_id}/parts/{n}")
+async def put_upload_part(upload_id: str, n: int, request: Request, user=Depends(api_user),
+                          settings: Settings = Depends(get_settings)):
+    """One part's bytes, the whole body. Sent again, it overwrites itself, so a retry is always safe."""
+    too_big = HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, f"At most {upload_parts.PART_BYTES // (1024 * 1024)} MB a part.")
+    length = request.headers.get("content-length")
+    if length and length.isdigit() and int(length) > upload_parts.PART_BYTES:
+        raise too_big                                  # refused before reading a byte
+    data = bytearray()
+    async for block in request.stream():               # at most one part (16 MB) in memory
+        data += block
+        if len(data) > upload_parts.PART_BYTES:
+            raise too_big
+
+    def write():                                       # off the event loop, with its own connection
+        conn = db.connect(settings.db_path)
+        try:
+            return _parts_errors(lambda: upload_parts.put_part(conn, settings, user["id"], upload_id, n, bytes(data)))
+        finally:
+            conn.close()
+
+    return await anyio.to_thread.run_sync(write)
+
+
+@router.post("/api/files/uploads/{upload_id}/finish")
+def finish_parts(upload_id: str, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db),
+                 settings: Settings = Depends(get_settings)):
+    """Every part is here: the file is checked and added, and answers as a one-request upload does."""
+    meta = _parts_errors(lambda: upload_parts.record(settings, upload_id, user["id"]))
+    access, _target = _upload_target(conn, user, meta["collection_id"], meta["folder_id"])   # still allowed?
+    file_id, created = _parts_errors(lambda: upload_parts.finish(conn, settings, user["id"], upload_id))
+    return JSONResponse(_file_json(fs.file_row(conn, file_id), access),
+                        status_code=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+@router.delete("/api/files/uploads/{upload_id}")
+def drop_parts(upload_id: str, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db),
+               settings: Settings = Depends(get_settings)):
+    """Cancel an upload in parts: its bytes and its record go."""
+    _parts_errors(lambda: upload_parts.drop(conn, settings, user["id"], upload_id))
+    return {"status": "dropped"}
 
 
 @router.get("/api/files")

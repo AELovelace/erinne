@@ -11,6 +11,7 @@ from mnemerynne import (db, directory, editing, fs, health, jobs, lumipet, m365,
                         sharepoint, sync)
 from mnemerynne.clients.embed import Embedder
 from mnemerynne.config import Settings
+from mnemerynne.ingest import parts as upload_parts
 from mnemerynne.ingest import pipeline
 from mnemerynne.media import catalog
 
@@ -179,6 +180,12 @@ def run(settings: Settings, *, once: bool = False, poll_seconds: float = 2.0) ->
                         log.info("Dropped %d backup upload(s) nobody finished.", swept)
                 except Exception:
                     log.exception("Backup upload cleanup failed")
+                try:
+                    swept = upload_parts.sweep(conn, settings)      # Files' uploads in parts nobody finished
+                    if swept:
+                        log.info("Dropped %d upload(s) in parts nobody finished.", swept)
+                except Exception:
+                    log.exception("Upload-in-parts cleanup failed")
                 try:
                     expired = proposals.purge(conn, settings)
                     if expired:

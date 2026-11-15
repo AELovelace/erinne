@@ -699,3 +699,28 @@ def test_a_staged_file_isnt_created_private(root):
     finally:
         os.umask(old)
     assert path.stat().st_mode & 0o777 == 0o644                       # mkstemp's 0600 would mask the folder's ACLs away
+
+
+def test_an_upload_in_parts_waits_hidden_in_its_folder_and_resumes_after_a_rename(client, conn, directory, root, settings,
+                                                                                  monkeypatch):
+    from mnemerynne.ingest import parts
+    monkeypatch.setattr(parts, "PART_BYTES", 4)
+    oracle = _oracle(conn, settings, root)
+    (root / "Oracle" / "Old").mkdir()
+    share.sync(conn, settings)
+    folder = conn.execute("SELECT id FROM folders WHERE name = 'Old'").fetchone()["id"]
+    _login(client, conn, directory)
+    data = b"twelve bytes"
+    start = {"collection_id": oracle, "folder_id": folder, "name": "big.txt", "size": len(data), "modified": 1}
+    uid = client.post("/api/files/uploads", json=start).json()["id"]
+    assert client.put(f"/api/files/uploads/{uid}/parts/0", content=data[:4]).status_code == 200
+    assert len(_hidden(root / "Oracle" / "Old")) == 1               # its bytes wait hidden in the folder they land in
+    (root / "Oracle" / "Old").rename(root / "Oracle" / "New")        # the folder is renamed meanwhile (in Files)
+    conn.execute("UPDATE folders SET name = 'New' WHERE id = ?", (folder,))
+    again = client.post("/api/files/uploads", json=start)
+    assert again.status_code == 200 and again.json()["parts"] == [0], again.text   # carries on
+    for n in (1, 2):
+        assert client.put(f"/api/files/uploads/{uid}/parts/{n}", content=data[n * 4:(n + 1) * 4]).status_code == 200
+    r = client.post(f"/api/files/uploads/{uid}/finish")
+    assert r.status_code == 201, r.text
+    assert (root / "Oracle" / "New" / "big.txt").read_bytes() == data and _hidden(root) == []

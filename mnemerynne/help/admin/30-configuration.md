@@ -75,7 +75,7 @@ Also in the database (Access → Settings): the **admin group** (default `Domain
 | `LIBREOFFICE_COMMAND`, `LIBREOFFICE_TIMEOUT` | `soffice`, 300 | Converts old .doc/.ppt when present on PATH. |
 | `TRASH_DAYS` | 30 | Recycle-bin items are deleted for good after this. |
 
-**Very large browser uploads** need three things. Raise `MNEMERYNNE_MAX_FILE_BYTES`. Raise the reverse proxy's body limit to match, with request buffering off and a long read timeout, because the server hashes the file before it answers. Set `TMPDIR` to a folder on a big disk that the service can write to, such as `<data_dir>/tmp`: the file is held there as it arrives, and `/tmp` may be small. Leave room for twice the file's size while it uploads. A browser upload can't resume after a dropped connection.
+**Very large browser uploads** need three things. Raise `MNEMERYNNE_MAX_FILE_BYTES`. Raise the reverse proxy's body limit to match, with request buffering off and a long read timeout, because the server hashes the file before it answers. Set `TMPDIR` to a folder on a big disk that the service can write to, such as `<data_dir>/tmp`: the file is held there as it arrives, and `/tmp` may be small. Leave room for twice the file's size while it uploads (once for a file over 32 MB). Files over 32 MB go up from the browser in 16 MB parts (`/api/files/uploads`), so a dropped connection or a restart costs one part: the page tries again and carries on, and choosing the same file again after a reload resumes it. The parts wait in a hidden `.mnemerynne-upload-*` file in the folder they land in (or `<data_dir>/tmp/file-uploads/` off the share); unfinished ones are cleared after a day. The reverse proxy must pass `PUT` to `/api/files/uploads/`.
 
 ## Editing and versions
 

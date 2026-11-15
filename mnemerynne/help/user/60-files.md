@@ -20,8 +20,13 @@ Click to select, Ctrl-click to add, Shift-click for a range, Ctrl-A for all, Esc
 - **Upload ▾ → Files…** or **Folder…**: a folder upload keeps its subfolders.
 - **Drag and drop** files or whole folders from your computer onto the list.
 - The **upload queue** at the bottom right shows each file's progress: uploaded, then Queued, Indexing and Ready as its text is read for search. "Already here" means the same file was already in that folder, so nothing was added.
+- **Big files (over 32 MB) go up in pieces**, so a dropped connection doesn't lose the upload:
+  - If your Wi-Fi drops, your laptop sleeps or the server restarts for an update, the queue says **Connection lost · trying again** and carries on by itself where it stopped.
+  - If you closed the tab or reloaded, choose the same file for the same folder again: it says **Carrying on** and sends only what's missing. Unfinished uploads are kept for a day.
+  - **Putting it together** at the end checks the whole file; a very big one takes a minute or two.
+  - While files go up, the page keeps your screen awake so the computer doesn't sleep. Keep the tab open until the queue says done.
 
-Any kind of file can be stored (up to 500 MB). PDF, Markdown, text, Word, PowerPoint, Excel, CSV, OpenDocument, RTF, HTML, code and config files become searchable; other kinds are stored only. Very large documents are stored but not indexed. See [Opening and previewing files](previews.md#searchable-or-not) for the statuses.
+Any kind of file can be stored, up to the server's limit (500 MB unless your admin raised it). PDF, Markdown, text, Word, PowerPoint, Excel, CSV, OpenDocument, RTF, HTML, code and config files become searchable; other kinds are stored only. Very large documents are stored but not indexed. See [Opening and previewing files](previews.md#searchable-or-not) for the statuses.
 
 You can upload only where you can change files: your File box, and libraries or folders where you have write access.
 
