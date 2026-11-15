@@ -918,6 +918,31 @@ def is_gamepad(info: dict) -> bool:
     return bool(GAMEPAD_NAME_RE.search(info.get("Name") or info.get("Alias") or ""))
 
 
+def pair_problem(why: str) -> str:
+    """What the TV says when a pairing fails, from Bluetooth.pair's account of it: the step it stopped at in plain
+    words, then BlueZ's own error name (org.bluez.Error.X, or the HCI reason) so it can be looked up."""
+    low = why.lower()
+    code = re.findall(r"org\.bluez\.Error\.(\w+)", why)
+    named = re.search(r"\b(le-connection-abort-by-local|page-timeout|connection-timeout|br-connection-[\w-]+)", low)
+    tag = code[-1] if code else (named.group(1) if named else "")
+    tail = f" (BlueZ: {tag})" if tag else ""
+    if low.startswith("paired; connect:"):
+        return "It paired, but didn't connect. Press its Xbox / PS button to wake it, or Forget it and pair again." + tail
+    if "not available" in low or "notavailable" in low:
+        return "The box can't see it any more. Put it in pairing mode, press Find controllers, then Pair." + tail
+    if any(k in (tag or "").lower() for k in ("authentication", "rejected", "canceled")):
+        return ("It refused the pairing. Forget it on anything else it was paired to (or hold its pairing button "
+                "until it flashes fast) and press Pair again." + tail)
+    if low.startswith("not heard") and not tag:
+        return ("The box never heard it. Hold the pairing button until its light flashes fast, keep it near the box, "
+                "and press Pair while it's flashing.")
+    if "no answer" in low and not tag:
+        return "It was heard, but didn't answer the pairing. Put it back in pairing mode and press Pair again."
+    if tag:
+        return "It didn't pair." + tail
+    return "It didn't pair. Hold the controller's pairing button until its light flashes fast, then try again."
+
+
 def pad_kind(name: str) -> str:
     """Which family, for the picture on the TV: xbox, playstation or other."""
     low = name.lower()
@@ -972,25 +997,28 @@ class Bluetooth:
         pad is heard (or BT_SEE_SECONDS), and success is only what BlueZ itself then says: Paired, and Connected."""
         window = BT_SEE_SECONDS + BT_PAIR_TRIES * (BT_PAIR_SECONDS + 5) + 20     # the whole pairing, scanned
         self.spawn(lambda: self.ctl("--timeout", str(window), "scan", "on", timeout=window + 10))
+        heard = False
         for _ in range(BT_SEE_SECONDS):                       # heard advertising: BlueZ has its RSSI from this scan
             if "RSSI" in self.info(address):
+                heard = True
                 break
             self.sleep(1)
-        log = []
+        # The journal line (and pair_problem's input) says how far it got: "not heard;" first if it never was.
+        log = [] if heard else [f"not heard in {BT_SEE_SECONDS} s"]
         for _ in range(BT_PAIR_TRIES):
             code, out, err = self.ctl("--agent", "NoInputNoOutput", "--timeout", str(BT_PAIR_SECONDS), "pair", address,
                                       timeout=BT_PAIR_SECONDS + 10)
-            log.append((out + err).strip() or f"pair: no answer in {BT_PAIR_SECONDS} s (exit {code})")
+            log.append("pair: " + ((out + err).strip() or f"no answer in {BT_PAIR_SECONDS} s"))
             if self.info(address).get("Paired") == "yes":
                 break
             self.sleep(2)
         else:
-            return False, " | ".join(log)                   # every attempt, for the journal
+            return False, " | ".join(log)                   # every attempt
         self.ctl("trust", address, timeout=10)
         if self.info(address).get("Connected") != "yes":     # an LE pad is often connected by the pairing itself
             code, out, err = self.ctl("--timeout", "15", "connect", address, timeout=25)
             if self.info(address).get("Connected") != "yes":
-                return False, (out + err).strip() or "connect: no answer in 15 s"
+                return False, "paired; connect: " + ((out + err).strip() or "no answer in 15 s")
         return True, ""
 
     def remove(self, address: str) -> None:
@@ -1072,11 +1100,21 @@ class Controllers:
         def go() -> None:
             try:
                 self.bt.power_on()
+                self.forget_unpaired()                 # each Find starts afresh: only what's heard this round
                 self.bt.scan()
             finally:
                 with self.lock:
                     self.scanning = False
         self.thread(go)
+
+    def forget_unpaired(self) -> None:
+        """Drop the game controllers an earlier Find turned up and nobody paired (BlueZ keeps them, so the list
+        grew every round), and their errors. Paired ones, and one being paired right now, stay."""
+        for address in self.bt.addresses():
+            info = self.bt.info(address)
+            if info and is_gamepad(info) and info.get("Paired") != "yes" and address not in self.busy:
+                self.bt.remove(address)
+                self.errors.pop(address, None)
 
     def _known(self, address: str) -> dict:
         address = (address or "").upper()
@@ -1102,9 +1140,8 @@ class Controllers:
             try:
                 ok, why = self.bt.pair(found)
                 if not ok:
-                    self.errors[found] = ("It didn't pair. Hold the controller's pairing button until its light "
-                                          "flashes fast, then try again.")
-                    print(f"mnemerynne-screen-wifi: pairing {found} failed: {why.strip()[-300:]}", file=sys.stderr, flush=True)
+                    self.errors[found] = pair_problem(why)        # the step and BlueZ's reason, on the TV
+                    print(f"mnemerynne-screen-wifi: pairing {found} failed: {why.strip()[-600:]}", file=sys.stderr, flush=True)
             finally:
                 with self.lock:
                     self.busy.pop(found, None)

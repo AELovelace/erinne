@@ -180,7 +180,7 @@ def test_a_pairing_that_times_out_says_so_and_is_tried_again(pads):
     bt.pair_silent = True
     c.pair(token, SONY)
     sony = next(d for d in c.devices() if d["id"] == SONY)
-    assert sony["paired"] is False and "pairing button" in sony["error"]
+    assert sony["paired"] is False and "heard, but didn't answer" in sony["error"]   # it was heard: not the light
     assert sum(1 for call in bt.calls if "pair" in call) == ws.BT_PAIR_TRIES
     assert not any("connect" in call for call in bt.calls)                    # never got as far as connecting
 
@@ -199,6 +199,43 @@ def test_pairing_scans_alongside_like_doll_os(pads):
     assert bt.devices[SONY]["Paired"] == "yes" and bt.devices[SONY]["Connected"] == "yes"
     assert not any("connect" in call for call in bt.calls)
     assert next(d for d in c.devices() if d["id"] == SONY)["error"] is None
+
+
+def test_each_find_starts_afresh(pads):
+    """BlueZ keeps every device a scan turned up, so the list grew each round: unpaired controllers from an
+    earlier Find (and their errors) go when Find is pressed again; paired ones stay."""
+    c, bt, server, clock, setup = pads
+    token = c.open("good-pass")
+    stale = "AA:BB:CC:00:00:77"
+    bt.devices[stale] = {"Name": "Xbox Wireless Controller", "Icon": "input-gaming", "Paired": "no", "Connected": "no"}
+    c.errors[stale] = "It didn't pair."
+    c.scan(token)
+    listed = [d["id"] for d in c.devices()]
+    assert stale not in listed and stale not in c.errors                     # last round's leftover is gone
+    assert XBOX in listed and SONY in listed                                  # the paired one, and this round's find
+    assert ["bluetoothctl", "remove", stale] in bt.calls
+    assert ["bluetoothctl", "remove", KEYBOARD] not in bt.calls               # only game controllers are touched
+
+
+def test_a_pad_never_heard_says_so(pads):
+    c, bt, server, clock, setup = pads
+    token = c.open("good-pass")
+    quiet = "AA:BB:CC:00:00:66"                                               # listed once, not advertising now
+    bt.devices[quiet] = {"Name": "Xbox Wireless Controller", "Icon": "input-gaming", "Paired": "no", "Connected": "no"}
+    bt.pair_silent = True
+    c.pair(token, quiet)
+    assert "never heard it" in c.errors[quiet]
+
+
+def test_the_tv_says_what_went_wrong():
+    """pair_problem: the step in plain words, and BlueZ's own reason to look up; never just "the light"."""
+    refused = ws.pair_problem("pair: Attempting to pair with AA\nFailed to pair: org.bluez.Error.AuthenticationCanceled")
+    assert refused.startswith("It refused the pairing") and refused.endswith("(BlueZ: AuthenticationCanceled)")
+    assert "never heard" in ws.pair_problem("not heard in 15 s | pair: no answer in 20 s | pair: no answer in 20 s")
+    assert ws.pair_problem("not heard in 15 s | pair: Failed to pair: org.bluez.Error.ConnectionAttemptFailed") == \
+        "It didn't pair. (BlueZ: ConnectionAttemptFailed)"
+    assert "didn't connect" in ws.pair_problem("paired; connect: Failed to connect: org.bluez.Error.Failed le-connection-abort-by-local")
+    assert "can't see it" in ws.pair_problem("pair: Device AA:BB:CC:00:00:66 not available")
 
 
 def test_no_adapter(box):

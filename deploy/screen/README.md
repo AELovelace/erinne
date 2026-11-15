@@ -197,7 +197,9 @@ Any remote that may drive the TV opens it; so does the box's own keyboard or a c
 1. **Pairing mode:** on an Xbox controller, hold the pair button on its top until the Xbox button flashes fast. On a
    DualSense, hold **Create** and **PS** until the light bar flashes.
 2. **Find controllers**, then **Pair** beside it while it's still flashing (put it back in pairing mode first if it
-   stopped). It shows **Connected** and its battery.
+   stopped). It shows **Connected** and its battery. Each Find starts a fresh list: controllers an earlier Find
+   turned up that nobody paired are dropped. When a pairing fails, the TV says at which step (never heard, heard
+   but didn't answer, refused, paired but didn't connect) and BlueZ's own reason, like `(BlueZ: AuthenticationFailed)`.
 3. Next time, its middle button turns it on and it reconnects by itself. **Forget** (twice) unpairs it.
 
 How it's kept safe:
