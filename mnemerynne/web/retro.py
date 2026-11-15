@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, Response
@@ -75,12 +76,27 @@ def retro_page(request: Request, user=Depends(page_user), conn: sqlite3.Connecti
 
 @router.get("/media/retro/play/{file_id}", response_class=HTMLResponse)
 def player_page(file_id: int, request: Request, user=Depends(page_user),
-                conn: sqlite3.Connection = Depends(get_media_db)):
-    row, console = _rom(conn, user, file_id)
+                conn: sqlite3.Connection = Depends(get_media_db), settings: Settings = Depends(get_settings)):
+    shelf = retro.Shelf(conn, user["id"])
+    found = shelf.rom(file_id)
+    if found is None:
+        raise _not_found("Game not found")
+    row, console = found
+    tracks, missing = shelf.tracks(row, settings)      # a .cue's .bin tracks, which the emulator fetches first
+    bios = shelf.bios(console)
     game = {"id": row["id"], "title": retro.title_of(row["display_name"]), "console": console.key,
-            "console_name": console.name, "core": console.core,
+            "console_name": console.name, "system": console.system, "core": console.core_for(row["display_name"]),
+            "save_folder": retro.SAVE_FOLDERS.get(console.core_for(row["display_name"]), ""),
             "rom": f"/media/retro/rom/{row['id']}/{_rom_name(row)}", "slots": list(retro.STATE_SLOTS[1:]),
-            "saves": retro.saves(conn, user["id"], row["blob_sha256"])}
+            "saves": retro.saves(conn, user["id"], row["blob_sha256"]),
+            # Where each track goes in the emulator's files (beside the .cue, under the name the .cue gives it).
+            "files": {"/" + name: f"/media/retro/track/{row['id']}/{n}/{quote(Path(name).name)}"
+                      for n, (name, _) in enumerate(tracks)},
+            "missing": missing,
+            # The BIOS goes beside the game under its own name, which is what the core looks for.
+            "bios": f"/media/retro/bios/{bios['id']}/{bios['display_name'].lower()}" if bios is not None else None,
+            "needs_bios": console.needs_bios(row["display_name"]) and bios is None,
+            "bios_names": list(console.bios)}
     response = request.app.state.templates.TemplateResponse(request, "retro_play.html", {
         # In a <script> block: a file name holding "</script>" mustn't end it, so no "<" goes in as it is.
         "user": user, "game": game, "game_json": json.dumps(game).replace("<", "\\u003c")})
@@ -109,6 +125,37 @@ def rom_file(file_id: int, name: str, user=Depends(media_user), conn: sqlite3.Co
         raise _not_found("Game not found")
     return send_file(path, media_type="application/octet-stream", filename=name, content_disposition_type="inline",
                      headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=86400"})
+
+
+@router.api_route("/media/retro/track/{file_id}/{n}/{name}", methods=["GET", "HEAD"])
+def track_file(file_id: int, n: int, name: str, user=Depends(media_user),
+               conn: sqlite3.Connection = Depends(get_media_db), settings: Settings = Depends(get_settings)):
+    """The nth file a .cue game names (a .bin track beside it), for the emulator; the name is only for the address."""
+    shelf = retro.Shelf(conn, user["id"])
+    found = shelf.rom(file_id)
+    tracks = shelf.tracks(found[0], settings)[0] if found is not None else []
+    if not 0 <= n < len(tracks):
+        raise _not_found("Track not found")
+    path = store.content_path(conn, settings, tracks[n][1]["id"])
+    if not path.is_file():
+        raise _not_found("Track not found")
+    return send_file(path, media_type="application/octet-stream", headers={
+        "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=86400"})
+
+
+@router.api_route("/media/retro/bios/{file_id}/{name}", methods=["GET", "HEAD"])
+def bios_file(file_id: int, name: str, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_media_db),
+              settings: Settings = Depends(get_settings)):
+    """A console's BIOS from its folder (see Console.bios), under the name the core looks for."""
+    shelf = retro.Shelf(conn, user["id"])
+    row = next((b for c in retro.CONSOLES.values() if (b := shelf.bios(c)) is not None and b["id"] == file_id), None)
+    if row is None or name != row["display_name"].lower():
+        raise _not_found()
+    path = store.content_path(conn, settings, file_id)
+    if not path.is_file():
+        raise _not_found()
+    return send_file(path, media_type="application/octet-stream", headers={
+        "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=86400"})
 
 
 @router.get("/media/retro/cover/{file_id}")

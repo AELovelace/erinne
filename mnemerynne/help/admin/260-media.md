@@ -143,41 +143,64 @@ Slots now play three horizontal lines on a 3×3 board. The wager is per line and
 
 ## Retro
 
-**Media → Retro** plays console games in the browser: Game Boy Advance today, with Super Nintendo and Game Boy to follow. It uses [EmulatorJS](https://github.com/EmulatorJS/EmulatorJS), which is RetroArch built for the browser, served from this server. People's guide: [Retro](../user/retro.md).
+**Media → Retro** plays console games in the browser: NES, Super Nintendo, Genesis, Game Boy, Game Boy Color, Game Boy Advance and PlayStation. It uses [EmulatorJS](https://github.com/EmulatorJS/EmulatorJS), which is RetroArch built for the browser, served from this server. People's guide: [Retro](../user/retro.md).
 
 - **Turning it on:** **Settings → Entertainment → Media → Retro**. It's off until an admin turns it on, and it's on only while Media is.
 - **Who can play:** whoever may use Media, seeing only the games their account can read on the share.
-- **The Games folder:** turning Retro on makes a folder at the top of the share with a folder per console inside (`GBA`). **Games folder** picks another top-level folder, but not the Media or Signage folder. Nothing is ever deleted.
-- **Games:** people bring their own ROMs. Mnemerynne never downloads any.
+- **The Games folder:** turning Retro on makes a folder at the top of the share with a folder per console inside: `NES`, `SNES`, `Genesis`, `Game Boy`, `Game Boy Color`, `GBA`, `PS1`.
+  - A console's folder under another usual name is used instead, not doubled: `Super Nintendo`, `Mega Drive`, `PlayStation` and so on (`CONSOLES` in `mnemerynne/media/retro.py`).
+  - A console added in a later version gets its folder from the next catalog pass, once. A folder an admin removes on purpose isn't made again.
+  - **Games folder** picks another top-level folder, but not the Media or Signage folder. Nothing is ever deleted.
+- **Games:** people bring their own ROMs and discs. Mnemerynne never downloads any.
 - **Box art:** a picture beside a game with the same name.
 - **No catalogue:** the shelves are read from the share scan's list of files.
 
+**The cores**, one per console:
+
+| Console | Core | Notes |
+| --- | --- | --- |
+| NES | FCEUmm | `.fds` needs `disksys.rom` in the NES folder |
+| Super Nintendo | Snes9x | |
+| Genesis | Genesis Plus GX | |
+| Game Boy and Game Boy Color | Gambatte | |
+| Game Boy Advance | mGBA | |
+| PlayStation | PCSX-ReARMed | `.cue` (its `.bin` tracks come along), `.pbp`, `.zip`/`.7z`; no BIOS needed |
+| PlayStation `.chd` | Beetle PSX | needs a BIOS (`scph5501.bin`, `scph5500.bin` or `scph5502.bin`) in the PS1 folder |
+
+- A BIOS is found anywhere in its console's folder, in any letter case. It's served to the core under the lower-case name the core looks for, and only to people who can read it.
+- A game that needs a BIOS but has none shows **Needs a BIOS** on the shelf, and the player names the files it looks for.
+- A `.cue` whose tracks aren't beside it opens, but says which track is missing.
+- Disc games download whole before they start, so the browser needs the memory for them.
+
 **Saves** are kept in `media.db`, so the nightly backup has them. There are four kinds:
-- the game's own save,
+- the game's own save (a battery save, or a PlayStation memory card),
 - four save-state slots, each with a screenshot,
 - an automatic state for **Continue**,
 - the last time each game was played.
 
-They're keyed by the ROM's content, not the file. Renaming, moving or re-adding a ROM keeps its saves. They go with the account when it's removed.
+They're keyed by the game's content, not the file. Renaming, moving or re-adding a game keeps its saves. They go with the account when it's removed.
 
 Sizes:
-- The game's own save is at most 1 MB.
-- A state is at most 16 MB. A GBA state is about 430 KB.
+- The game's own save is at most 1 MB. A PlayStation memory card is 128 KB.
+- A state is at most 16 MB.
 - A screenshot is at most 1 MB.
 
 **The player page** has its own Content-Security-Policy:
 - It talks to this server only. `connect-src 'self'` blocks EmulatorJS's update check, its CDN fallback for a missing core, and netplay.
 - It needs `'wasm-unsafe-eval'` for the cores and `'unsafe-eval'` for the zip and 7z extractors' older Emscripten code.
 
-**Licences:**
+**Licences** (each core's own is in its `.data` archive, and shown in the player's menu):
 - EmulatorJS is GPL-3.0, shipped unminified with its licence in `static/vendor/emulatorjs`.
-- The GBA core, mGBA, is MPL-2.0.
-- The SNES core, Snes9x, is free for non-commercial use only. Keep Retro off on an install that's used commercially.
+- mGBA is MPL-2.0.
+- FCEUmm, Gambatte, PCSX-ReARMed and Beetle PSX are GPL-2.0.
+- **Snes9x and Genesis Plus GX are for non-commercial use only.** Keep Retro off on an install that's used commercially.
 
-**Updating the emulator or adding a core:** `python python/fetch_emulatorjs.py`. It pins each npm package and checks its sha512. Its `--check` (also run by `tests/test_retro.py`) confirms the folder still matches. See `static/vendor/emulatorjs/README.md`.
+**Updating the emulator or adding a core:** `python python/fetch_emulatorjs.py`. It pins each npm package and checks its sha512. Its `--check` (also run by `tests/test_retro.py`) confirms the folder still matches. See `static/vendor/emulatorjs/README.md`. All seven cores together are about 15 MB.
 
 **Testing:**
-- `tests/retro-browser.mjs` plays a homebrew test ROM (`python/make_retro_test_rom.py`) in Chrome. It checks the screen, the save slots, Continue, and the game's own save making it to the server and back.
+- `tests/retro-browser.mjs` plays a homebrew test game per console (`python/make_retro_test_rom.py`, written by hand in each console's machine code) in Chrome.
+- Every game must boot and paint its screen pink. Every one but the PlayStation's must count its boots in its own save, and pick up from the server's copy in a fresh browser.
+- The GBA also goes through the save slots, Continue and loading a slot.
 - Run it with `PUPPETEER_MODULE` set, as for the other browser checks.
 
 ## Signage

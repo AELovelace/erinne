@@ -34,6 +34,16 @@
 .rt-game[data-console="gba"] .rt-cart { --cart: #5b4aa8; --cart-edge: #3a2f73; }
 .rt-game[data-console="snes"] .rt-cart { --cart: #b9b6c4; --cart-edge: #8d8a99; --label: #ffffff; }
 .rt-game[data-console="gb"] .rt-cart { --cart: #c3c1b6; --cart-edge: #9c9a8f; --label: #ecefe1; }
+.rt-game[data-console="gbc"] .rt-cart { --cart: #3fa7a0; --cart-edge: #2a716c; --label: #f2fbf9; }
+.rt-game[data-console="nes"] .rt-cart { --cart: #8c8a87; --cart-edge: #5f5d5a; --label: #f6f1e7; --label-ink: #b0172b; }
+.rt-game[data-console="genesis"] .rt-cart { --cart: #2b2b30; --cart-edge: #111114; --label: #e8e8ec; --label-ink: #1a3d8f; }
+/* The PS1's games are discs: a silver circle with a hole, the title printed round the middle. */
+.rt-game[data-console="psx"] .rt-cart { --cart: #d9dbe2; --cart-edge: #9fa3b0; --label: transparent;
+  background: radial-gradient(circle, #1a1a1f 0 9%, #c8cbd4 9.5% 14%, transparent 14.5%),
+    conic-gradient(from 30deg, #e9ebf0, #b7bcc8, #f4f0f7, #aeb4c2, #e9ebf0); border-radius: 50%; }
+.rt-game[data-console="psx"] .rt-label { box-shadow: none; aspect-ratio: auto; width: 80%; padding-top: 34%;
+  color: #2b2140; text-shadow: 0 1px 0 rgba(255, 255, 255, .7); }
+.rt-badge-warn { background: #b4561c; }
 .rt-label { width: 72%; aspect-ratio: 4 / 3; display: grid; place-items: center; text-align: center; padding: .4rem;
   border-radius: 6px; background: var(--label); color: var(--label-ink); font-weight: 700; font-size: .82rem; line-height: 1.2;
   overflow: hidden; word-break: break-word; box-shadow: inset 0 0 0 2px rgba(0, 0, 0, .08); }

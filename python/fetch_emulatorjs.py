@@ -31,6 +31,13 @@ FRONTEND = ("emulatorjs", "sha512-7z3qaA4LwyurhuGvdMUDF9xJpEbxC3SNy9+E9tSaOsRo8F
 # Core name -> the npm package's sha512 (dist.integrity), one per console in media/retro.py.
 CORES = {
     "mgba": "sha512-daiHzZQKEr+P9fra7j5YoEAXiyYUEtBhFQ8EAV/SeCtrkvqtayU7GQ9LYgoSgzkKSwsbNSskApqGuA9EGARYPA==",
+    "snes9x": "sha512-JTe9Rv9eOuCkgkG4ILwuCZUqNcVI3m9ju1NHTTjridUlFgJSqL4DUqF/vLKN9olCpsqlJFfcCayAOoikJxefwA==",
+    "gambatte": "sha512-Oq3AJL9SKnMsNAmtAP2eN934TQts3NHeaAe0z1BO9Lx/L3xDZKLpxL+XwgcSXIrl4Sx1oXxYEUwD7JjPEQ0DGg==",
+    "fceumm": "sha512-XX9Vv2N/hzp0TstNMCTSppEs+sg+1lpJpPdSDuRqIO/cwdt7dUcF+WjNX1yQJLRbP5+XwcNHZ6K4BKy8CJpndQ==",
+    "genesis_plus_gx": "sha512-D1e2XA2CPRAjfr0JurpXJgR9dePxl/xHtaE8v1T9BqD9A3DLfobIFWsWU9jCFS4NfUxCvcLdTYdY/We3QzvcTw==",
+    "pcsx_rearmed": "sha512-mMbl/NszCryFI15X5QniOqLNL7YGZ6tLP24gr5y1q2ekFOIbtc39BcVTMDEwRndNGovh2nPoCcMjB+W3fgQCog==",
+    # Beetle PSX: plays the PS1's .chd discs (PCSX-ReARMed's build here doesn't), with a real BIOS beside them.
+    "mednafen_psx_hw": "sha512-SzNrmaqMqBknf/0hTvPg3pIACQeLb6PVSfaJKjYI4i6u0mpAhgsIW4PJiLOHn5RfLtTpy+eIWQJvC1DQGApfeQ==",
 }
 # From the frontend package: its path in the package -> its path under the vendor folder.
 FRONTEND_FILES = {

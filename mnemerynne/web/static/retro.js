@@ -31,11 +31,12 @@
       const img = el("img");
       img.src = game.cover; img.alt = ""; img.loading = "lazy";
       art.append(img);
-    } else {   // a cartridge with the title on its label
+    } else {   // a cartridge with the title on its label (a disc, for the PS1: retro.css)
       art.classList.add("rt-cart");
       art.append(el("span", "rt-label", game.title));
     }
-    if (game.can_continue) art.append(el("span", "rt-badge", "▶ Continue"));
+    if (game.needs_bios) art.append(el("span", "rt-badge rt-badge-warn", "Needs a BIOS"));   // the player says which
+    else if (game.can_continue) art.append(el("span", "rt-badge", "▶ Continue"));
     else if (game.has_save) art.append(el("span", "rt-badge", "💾 Saved"));
     const words = el("div", "rt-words");
     words.append(el("strong", "rt-name", game.title));

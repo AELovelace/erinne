@@ -1898,7 +1898,7 @@
       : "Turning it on makes the folder, with " + consoles + " inside."));
     retroForm.appendChild(retroActions);
     retroForm.appendChild(el("p", "small muted", "People bring their own games (ROMs they dumped); Mnemerynne never " +
-      "downloads any. The SNES emulator (Snes9x) is free for non-commercial use only."));
+      "downloads any. The Super Nintendo and Genesis emulators (Snes9x, Genesis Plus GX) are for non-commercial use only."));
     retroForm.addEventListener("submit", function (e) {   // the switch, and the folder when it changed
       e.preventDefault();
       const body = { retro_enabled: retroOn.checked };

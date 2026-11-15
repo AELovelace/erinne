@@ -32,5 +32,5 @@ Left out on purpose:
 - **EmulatorJS** is GPL-3.0 (`LICENSE`). Its source is here as published, unminified.
 - **Each core** carries its own licence inside its `.data` archive (`license.txt`, shown in the player's menu):
   - mGBA (Game Boy Advance) is MPL-2.0.
-  - Snes9x is free for non-commercial use only. That's why Retro is off until an admin turns it on.
-  - Gambatte is GPL-2.0.
+  - FCEUmm (NES), Gambatte (Game Boy), PCSX-ReARMed and Beetle PSX (PlayStation) are GPL-2.0.
+  - **Snes9x (Super Nintendo) and Genesis Plus GX (Genesis) are for non-commercial use only.** That's why Retro is off until an admin turns it on.

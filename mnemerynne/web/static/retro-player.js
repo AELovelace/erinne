@@ -99,9 +99,9 @@
     FS.writeFile(path, bytes);
   }
 
-  function sramPathBeforeBoot() {   // where RetroArch will look for it: /data/saves/<the ROM's name>.<the core's suffix>
+  function sramPathBeforeBoot() {   // where RetroArch will look: /data/saves/<the core's folder>/<the ROM's name>.srm
     const base = game.rom.split("/").pop().replace(/\.[^.]*$/, "");
-    return "/data/saves/" + base + "." + (emu.saveFileExt || "srm");
+    return "/data/saves/" + (game.save_folder ? game.save_folder + "/" : "") + base + "." + (emu.saveFileExt || "srm");
   }
 
   // ---------------------------------------------------------------- states
@@ -279,8 +279,12 @@
     // Its update check asks emulatorjs.org (only on localhost); the page's policy refuses that, so it isn't asked.
     window.EmulatorJS.prototype.checkForUpdates = function () {};
     emu = new window.EmulatorJS("#rp-game", {
-      gameUrl: game.rom, dataPath: DATA, system: game.console, gameName: game.title, color: accent(),
+      // The game's own core (a PS1 .chd plays on another one than the console's usual): EmulatorJS finds the
+      // console from it for its controls and menus.
+      gameUrl: game.rom, dataPath: DATA, system: game.core, gameName: game.title, color: accent(),
       startOnLoad: true, volume: 0.5, threads: false,
+      biosUrl: game.bios || "",            // beside the game, under the name the core looks for
+      externalFiles: game.files,           // a .cue's .bin tracks, beside it under the names it gives them
       // The game's own save goes to the emulator's file every 30 s while it changes; each write reaches us
       // (saveSaveFiles below) and the server.
       defaultOptions: { "save-save-interval": "30" },
@@ -361,6 +365,17 @@
   });
   $("rp-continue").addEventListener("click", function () { boot(true); });
   $("rp-fresh").addEventListener("click", function () { boot(false); });
+
+  // A game that can't start says why, instead of a start button that ends in the emulator's error.
+  if (game.missing && game.missing.length) {
+    status("Can't start: its .cue names " + game.missing.join(", ") + ", which isn't beside it on the share.");
+    return;
+  }
+  if (game.needs_bios) {
+    status("Can't start: this kind of " + game.console_name + " game needs a BIOS file (" + game.bios_names.join(", ") +
+      ") in the " + game.console_name + " folder on the share.");
+    return;
+  }
 
   const auto = saveOf("auto");
   $("rp-continue").hidden = !auto;

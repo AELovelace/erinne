@@ -1,9 +1,9 @@
-"""Isolated loopback preview for tests/retro-browser.mjs: Media → Retro with one homebrew game on a disposable share.
+"""Isolated loopback preview for tests/retro-browser.mjs: Media → Retro with homebrew games on a disposable share.
 
     python python/retro_preview.py <port>
 
 Never reads the project's .env or live data: a temporary folder holds the database and a share with
-Games/GBA/Lumi Test.gba (python/make_retro_test_rom.py). Signs in as alice / preview-password.
+a homebrew game per console (python/make_retro_test_rom.py). Signs in as alice / preview-password.
 """
 
 import sys
@@ -15,7 +15,7 @@ sys.path[:0] = [str(ROOT), str(ROOT / "tests"), str(ROOT / "python")]
 
 import uvicorn
 from fakes import FakeDirectory, FakeEmbedder, FakeShareChecker
-from make_retro_test_rom import build
+from make_retro_test_rom import GAMES
 from mnemerynne import accounts, db, media, share, users
 from mnemerynne.config import Settings
 from mnemerynne.media import retro
@@ -41,8 +41,9 @@ def main():
         media.save_settings(conn, settings, {"media_group": "Domain Users", "radio_directory_url": "",
                                              "retro_enabled": True})
         with db.transaction(conn):
-            retro.ensure_library(conn)                       # Games, with GBA in it
-        (root / "Games" / "GBA" / "Lumi Test.gba").write_bytes(build())
+            retro.ensure_library(conn)                       # Games, with a folder per console in it
+        for key, (name, make, _) in GAMES.items():           # one homebrew game in each console's folder
+            (root / "Games" / retro.CONSOLES[key].folder / name).write_bytes(make())
         share.sync(conn, settings)                           # the share scan: the game is a file like any other
         conn.close()
         app = create_app(settings, Services(llm=None, embedder=FakeEmbedder(), directory=people, share_checker=checker))
