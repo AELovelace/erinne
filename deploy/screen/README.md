@@ -231,6 +231,11 @@ Launch the game reads it directly.
 The drivers are the kernel's own (`hid-playstation` for the DualSense, `hid-microsoft` for Xbox over Bluetooth).
 - An Xbox controller that won't connect usually needs a firmware update once, from an Xbox or the Xbox Accessories
   app on Windows.
+- A Bluetooth LE Xbox pad that always fails with `(BlueZ: AuthenticationFailed)`, even with `privacy` in
+  `sudo btmgmt info`'s current settings, usually means the box's adapter can't do LE pairing. The cheap "CSR"
+  dongles (`lsusb`: `0a12:0001`) are mostly clones like that. Use a Realtek RTL8761B dongle, or an **xb2pc**
+  (an ESP32-S3 sketch that pairs the pad itself and plugs in as a USB gamepad, laid out like a wired Xbox 360 pad).
+  A pad on an xb2pc doesn't appear in 🔗 Controllers, since the box only sees a USB gamepad.
 - **No Bluetooth adapter** (many 3rd-generation NUCs): the page says so; a small USB Bluetooth adapter adds one.
 - Over SSH: `bluetoothctl devices Paired` lists them, and `journalctl -u mnemerynne-screen-wifi -b` shows why a
   pairing failed.
