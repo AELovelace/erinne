@@ -196,7 +196,8 @@ Any remote that may drive the TV opens it; so does the box's own keyboard or a c
 
 1. **Pairing mode:** on an Xbox controller, hold the pair button on its top until the Xbox button flashes fast. On a
    DualSense, hold **Create** and **PS** until the light bar flashes.
-2. **Find controllers**, then **Pair** beside it. It shows **Connected** and its battery.
+2. **Find controllers**, then **Pair** beside it while it's still flashing (put it back in pairing mode first if it
+   stopped). It shows **Connected** and its battery.
 3. Next time, its middle button turns it on and it reconnects by itself. **Forget** (twice) unpairs it.
 
 How it's kept safe:
@@ -207,6 +208,11 @@ How it's kept safe:
 - It pairs only game controllers: BlueZ's `input-gaming` icon, or a controller's name when the device gives no icon.
   Keyboards, mice and phones are never listed.
 - Pairing uses no PIN (Just Works), then trusts the controller so it reconnects.
+
+**Bluetooth LE pads** (an Xbox One S on its 2021 firmware, Series X|S) pair the way Doll-OS's DS-Slave pairs them:
+only while the box is scanning and the pad is heard advertising. So **Pair** scans alongside, waits up to 15 seconds
+to hear the pad, then pairs (twice if the first try is refused). It counts as paired only when BlueZ says so:
+`bluetoothctl pair --timeout` exits 0 having printed nothing when it gives up, which 0.4.0 took for a pairing.
 
 A paired controller is the box's own input, like its keyboard: the D-pad moves, A presses, B goes back, Start plays
 and pauses, the Xbox / PS button goes home. It also works on the start page and in Kiosk settings. In Retro and Lumi

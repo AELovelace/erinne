@@ -22,6 +22,8 @@ class FakeBluetoothctl:
         self.adapter = adapter
         self.calls = []
         self.pair_ok = True
+        self.pair_silent = False     # bluetoothctl's --timeout ran out: exit 0, nothing printed, nothing paired
+        self.pair_connects = False   # a Bluetooth LE pad comes up connected from the pairing itself
         self.devices = {
             XBOX: {"Name": "Xbox Wireless Controller", "Icon": "input-gaming", "Paired": "yes", "Connected": "yes",
                    "Battery Percentage": "0x5a (90)"},
@@ -54,11 +56,17 @@ class FakeBluetoothctl:
             return 0, f"Device {rest[1]} (public)\n\tAlias: {d['Name']}\n{body}\tUUID: Human Interface Device...\n", ""
         if cmd == "scan":
             self.devices.update(self.nearby)
+            for address in self.nearby:
+                self.devices[address]["RSSI"] = "-52"      # heard advertising in this scan
             return 0, "Discovery started\n", ""
         if cmd == "pair":
             if not self.pair_ok:
                 return 1, "", "Failed to pair: org.bluez.Error.AuthenticationFailed"
+            if self.pair_silent:
+                return 0, "", ""
             self.devices[rest[1]]["Paired"] = "yes"
+            if self.pair_connects:
+                self.devices[rest[1]]["Connected"] = "yes"
             return 0, "Pairing successful\n", ""
         if cmd == "trust":
             return 0, "trust succeeded\n", ""
@@ -88,7 +96,8 @@ class FakeServer:
 def pads(box):
     nm, clock, setup, events = box
     bt, server = FakeBluetoothctl(), FakeServer()
-    c = ws.Controllers(setup, ws.Bluetooth(run=bt), http=server, clock=clock, thread=lambda fn: fn())   # threads run inline
+    c = ws.Controllers(setup, ws.Bluetooth(run=bt, spawn=lambda fn: fn(), sleep=lambda s: None), http=server, clock=clock,
+                       thread=lambda fn: fn())   # threads run inline, and nothing really waits
     return c, bt, server, clock, setup
 
 
@@ -160,6 +169,36 @@ def test_only_controllers_can_be_paired_and_a_failure_says_how(pads):
     c.pair(token, SONY)
     sony = next(d for d in c.devices() if d["id"] == SONY)
     assert sony["paired"] is False and "pairing button" in sony["error"]
+
+
+def test_a_pairing_that_times_out_says_so_and_is_tried_again(pads):
+    """bluetoothctl's --timeout ends a pair that never happened with exit 0 and nothing printed (a Bluetooth LE
+    Xbox pad that wasn't being heard): that's a failure, not a pairing, and it's tried twice."""
+    c, bt, server, clock, setup = pads
+    token = c.open("good-pass")
+    bt.devices.update(bt.nearby)
+    bt.pair_silent = True
+    c.pair(token, SONY)
+    sony = next(d for d in c.devices() if d["id"] == SONY)
+    assert sony["paired"] is False and "pairing button" in sony["error"]
+    assert sum(1 for call in bt.calls if "pair" in call) == ws.BT_PAIR_TRIES
+    assert not any("connect" in call for call in bt.calls)                    # never got as far as connecting
+
+
+def test_pairing_scans_alongside_like_doll_os(pads):
+    """As Doll-OS's DS-Slave pairs an LE pad: while scanning and the pad is heard advertising, then straight in.
+    One that comes up connected from the pairing isn't connected again."""
+    c, bt, server, clock, setup = pads
+    token = c.open("good-pass")
+    bt.devices.update({SONY: dict(bt.nearby[SONY])})                         # listed by an earlier Find, not heard now
+    bt.pair_connects = True
+    c.pair(token, SONY)
+    names = [next(a for a in call[1:] if not a.startswith("-") and not a.isdigit() and a != "NoInputNoOutput")
+             for call in bt.calls]
+    assert names.index("scan") < names.index("pair")                          # the scan runs first and alongside
+    assert bt.devices[SONY]["Paired"] == "yes" and bt.devices[SONY]["Connected"] == "yes"
+    assert not any("connect" in call for call in bt.calls)
+    assert next(d for d in c.devices() if d["id"] == SONY)["error"] is None
 
 
 def test_no_adapter(box):

@@ -90,7 +90,9 @@ RESTART_MODIFIERS = ((29, 97), (42, 54), (56, 100))   # Ctrl, Shift and Alt: the
 
 # Bluetooth game controllers (Bluetooth and Controllers, below)
 BT_SCAN_SECONDS = 20                         # one "Find controllers": as long as a controller's pairing light flashes
-BT_PAIR_SECONDS = 30
+BT_PAIR_SECONDS = 20                         # one `bluetoothctl pair` attempt
+BT_PAIR_TRIES = 2                            # a Bluetooth LE Xbox pad often refuses the first attempt
+BT_SEE_SECONDS = 15                          # how long Pair waits to see the pad advertising before trying anyway
 BT_MAX_DEVICES = 40                          # a busy street can show dozens of phones; only so many are looked at
 CONTROLLERS_SECONDS = 600                    # the TV's Controllers page, once opened, renewed while it's used
 CONTROLLERS_HEADER = "X-Controllers"
@@ -929,8 +931,10 @@ def pad_kind(name: str) -> str:
 class Bluetooth:
     """BlueZ through bluetoothctl (no D-Bus bindings on the box: stdlib only). `run` is injectable for tests."""
 
-    def __init__(self, run=None) -> None:
+    def __init__(self, run=None, *, spawn=None, sleep=time.sleep) -> None:
         self.run = run or run_cmd
+        self.spawn = spawn or (lambda fn: threading.Thread(target=fn, daemon=True).start())   # the scan beside a pair
+        self.sleep = sleep
 
     def ctl(self, *args: str, timeout: int = 15) -> tuple[int, str, str]:
         return self.run(["bluetoothctl", *args], timeout)
@@ -959,16 +963,34 @@ class Bluetooth:
         self.ctl("--timeout", str(seconds), "scan", "on", timeout=seconds + 10)
 
     def pair(self, address: str) -> tuple[bool, str]:
-        """Pair (no PIN: game controllers use Just Works), trust (so it reconnects by itself when turned on), connect."""
-        code, out, err = self.ctl("--agent", "NoInputNoOutput", "--timeout", str(BT_PAIR_SECONDS), "pair", address,
-                                  timeout=BT_PAIR_SECONDS + 10)
-        text = out + err
-        if code != 0 and "AlreadyExists" not in text and "Pairing successful" not in text:
-            return False, text
+        """Pair (no PIN: game controllers use Just Works), trust (so it reconnects by itself when turned on), connect.
+
+        Done the way Doll-OS's DS-Slave pairs a Bluetooth LE Xbox pad (2021+ firmware, Series X|S): while the box
+        is scanning and the pad is advertising in pairing mode. "Find controllers" has stopped by the time Pair is
+        pressed, and an LE pad that isn't being heard can't be reached: `bluetoothctl pair` just waits, and when its
+        --timeout runs out it exits 0 having printed nothing. So a scan runs beside the pairing, Pair waits until the
+        pad is heard (or BT_SEE_SECONDS), and success is only what BlueZ itself then says: Paired, and Connected."""
+        window = BT_SEE_SECONDS + BT_PAIR_TRIES * (BT_PAIR_SECONDS + 5) + 20     # the whole pairing, scanned
+        self.spawn(lambda: self.ctl("--timeout", str(window), "scan", "on", timeout=window + 10))
+        for _ in range(BT_SEE_SECONDS):                       # heard advertising: BlueZ has its RSSI from this scan
+            if "RSSI" in self.info(address):
+                break
+            self.sleep(1)
+        log = []
+        for _ in range(BT_PAIR_TRIES):
+            code, out, err = self.ctl("--agent", "NoInputNoOutput", "--timeout", str(BT_PAIR_SECONDS), "pair", address,
+                                      timeout=BT_PAIR_SECONDS + 10)
+            log.append((out + err).strip() or f"pair: no answer in {BT_PAIR_SECONDS} s (exit {code})")
+            if self.info(address).get("Paired") == "yes":
+                break
+            self.sleep(2)
+        else:
+            return False, " | ".join(log)                   # every attempt, for the journal
         self.ctl("trust", address, timeout=10)
-        code, out, err = self.ctl("--timeout", "15", "connect", address, timeout=25)
-        if code != 0 and "Connection successful" not in out + err:
-            return False, out + err
+        if self.info(address).get("Connected") != "yes":     # an LE pad is often connected by the pairing itself
+            code, out, err = self.ctl("--timeout", "15", "connect", address, timeout=25)
+            if self.info(address).get("Connected") != "yes":
+                return False, (out + err).strip() or "connect: no answer in 15 s"
         return True, ""
 
     def remove(self, address: str) -> None:
