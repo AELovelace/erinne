@@ -17,6 +17,12 @@ Python's standard library, plus python3-qrcode for the QR codes (without it, the
 
 Ctrl+Shift+Alt+R on any keyboard restarts the kiosk (RestartKeys): read from the kernel's input devices,
 so it works whatever Firefox shows, or when Firefox has stopped answering.
+
+Bluetooth game controllers (Controllers): the TV page's 🎮 Controllers (the Mnemerynne server's own page,
+in this box's Firefox) pairs Xbox and PlayStation controllers through /api/controllers. That is the one
+part answered across origins: only to the configured Mnemerynne address, only with a pass the server gave
+for a remote's OK (or the box's own keys), checked with the server; and only game controllers are paired,
+never keyboards, mice or anything else (bluetoothctl, BlueZ).
 """
 
 from __future__ import annotations
@@ -78,6 +84,21 @@ INPUT_EVENT = struct.Struct("llHHi")         # struct input_event: the time (two
 EV_KEY = 1
 KEY_R = 19
 RESTART_MODIFIERS = ((29, 97), (42, 54), (56, 100))   # Ctrl, Shift and Alt: the left and the right one
+
+# Bluetooth game controllers (Bluetooth and Controllers, below)
+BT_SCAN_SECONDS = 20                         # one "Find controllers": as long as a controller's pairing light flashes
+BT_PAIR_SECONDS = 30
+BT_MAX_DEVICES = 40                          # a busy street can show dozens of phones; only so many are looked at
+CONTROLLERS_SECONDS = 600                    # the TV's Controllers page, once opened, renewed while it's used
+CONTROLLERS_HEADER = "X-Controllers"
+MAC_RE = re.compile(r"^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$")
+# BlueZ's icon for a game controller (a gamepad's Class of Device, or its Bluetooth LE appearance). A device
+# that says nothing about itself is let through by name; one that says it's a keyboard or mouse never is.
+GAMEPAD_ICON = "input-gaming"
+NOT_GAMEPAD_ICONS = ("input-keyboard", "input-mouse", "input-tablet", "phone", "computer", "audio-card",
+                     "audio-headset", "audio-headphones", "printer", "camera-photo", "camera-video", "modem",
+                     "network-wireless", "video-display", "multimedia-player", "scanner")
+GAMEPAD_NAME_RE = re.compile(r"xbox|dualsense|dualshock|wireless controller|gamepad|game ?pad|pro controller|8bitdo", re.I)
 
 
 # ------------------------------------------------------------------ helpers
@@ -860,6 +881,212 @@ class Kiosk:
         return out
 
 
+# --------------------------------------------------------- game controllers
+def bt_fields(text: str) -> dict:
+    """`bluetoothctl info`'s "Key: value" lines (the first value wins: there are many UUID lines)."""
+    out: dict[str, str] = {}
+    for line in text.splitlines():
+        key, sep, value = line.strip().partition(": ")
+        if sep and key and key not in out:
+            out[key] = value.strip()
+    return out
+
+
+def bt_battery(value: str | None) -> int | None:
+    """"0x5a (90)" -> 90."""
+    found = re.search(r"\((\d{1,3})\)", value or "")
+    return min(100, int(found.group(1))) if found else None
+
+
+def is_gamepad(info: dict) -> bool:
+    """A game controller by its icon, or (when it gives none) by its name; never a keyboard, mouse or phone."""
+    icon = info.get("Icon", "")
+    if icon == GAMEPAD_ICON:
+        return True
+    if icon in NOT_GAMEPAD_ICONS or icon.startswith("audio-"):
+        return False
+    return bool(GAMEPAD_NAME_RE.search(info.get("Name") or info.get("Alias") or ""))
+
+
+def pad_kind(name: str) -> str:
+    """Which family, for the picture on the TV: xbox, playstation or other."""
+    low = name.lower()
+    if "xbox" in low:
+        return "xbox"
+    if "dualsense" in low or "dualshock" in low or low == "wireless controller":   # Sony's controllers name themselves so
+        return "playstation"
+    return "other"
+
+
+class Bluetooth:
+    """BlueZ through bluetoothctl (no D-Bus bindings on the box: stdlib only). `run` is injectable for tests."""
+
+    def __init__(self, run=None) -> None:
+        self.run = run or run_cmd
+
+    def ctl(self, *args: str, timeout: int = 15) -> tuple[int, str, str]:
+        return self.run(["bluetoothctl", *args], timeout)
+
+    def available(self) -> bool:
+        """Is there a Bluetooth adapter at all (a 3rd-generation NUC may need a USB dongle)?"""
+        code, out, _ = self.ctl("show", timeout=10)
+        return code == 0 and out.strip().startswith("Controller")
+
+    def power_on(self) -> None:
+        self.ctl("power", "on", timeout=10)
+
+    def addresses(self) -> list[str]:
+        code, out, _ = self.ctl("devices", timeout=10)
+        if code != 0:
+            return []
+        found = [m.group(1) for m in re.finditer(r"^Device ([0-9A-F:]{17}) ", out, re.M)]
+        return [a for a in found if MAC_RE.match(a)][:BT_MAX_DEVICES]
+
+    def info(self, address: str) -> dict:
+        code, out, _ = self.ctl("info", address, timeout=10)
+        return bt_fields(out) if code == 0 else {}
+
+    def scan(self, seconds: int = BT_SCAN_SECONDS) -> None:
+        """Look for devices in pairing mode for `seconds` (blocks; run it in a thread)."""
+        self.ctl("--timeout", str(seconds), "scan", "on", timeout=seconds + 10)
+
+    def pair(self, address: str) -> tuple[bool, str]:
+        """Pair (no PIN: game controllers use Just Works), trust (so it reconnects by itself when turned on), connect."""
+        code, out, err = self.ctl("--agent", "NoInputNoOutput", "--timeout", str(BT_PAIR_SECONDS), "pair", address,
+                                  timeout=BT_PAIR_SECONDS + 10)
+        text = out + err
+        if code != 0 and "AlreadyExists" not in text and "Pairing successful" not in text:
+            return False, text
+        self.ctl("trust", address, timeout=10)
+        code, out, err = self.ctl("--timeout", "15", "connect", address, timeout=25)
+        if code != 0 and "Connection successful" not in out + err:
+            return False, out + err
+        return True, ""
+
+    def remove(self, address: str) -> None:
+        self.ctl("remove", address, timeout=10)
+
+
+class Controllers:
+    """The TV's 🎮 Controllers page: which game controllers are paired, finding and pairing new ones, forgetting
+    one. Opened with a pass the Mnemerynne server gave the TV page for a remote's OK (or the box's own keys),
+    redeemed with the server here; then a token in the X-Controllers header, good for CONTROLLERS_SECONDS."""
+
+    def __init__(self, setup: Setup, bt: Bluetooth | None = None, *, http=None, clock=time.monotonic, thread=None) -> None:
+        self.setup, self.bt, self.clock = setup, bt or Bluetooth(), clock
+        self.http = http or http_json
+        self.thread = thread or (lambda fn: threading.Thread(target=fn, daemon=True).start())
+        self.lock = threading.Lock()
+        self.sessions: dict[str, float] = {}      # token -> until
+        self.scanning = False
+        self.busy: dict[str, str] = {}            # address -> "pairing"
+        self.errors: dict[str, str] = {}          # address -> what went wrong pairing it
+
+    def origin(self) -> str:
+        """The one origin answered across sites: the Mnemerynne address (no path: install.sh keeps it so)."""
+        return self.setup.server.rstrip("/")
+
+    # -- who may
+    def open(self, token: str) -> str:
+        if not self.setup.server:
+            raise KioskError("No Mnemerynne address is set.", 409)
+        status, body = self.http("POST", self.setup.server + "/api/media/kiosk/controllers/redeem", {"pass": token})
+        if status != 200:
+            raise KioskError(body.get("detail") or "The server didn't accept that. Press OK on your remote again.", 403)
+        fresh = secrets.token_urlsafe(32)
+        with self.lock:
+            now = self.clock()
+            self.sessions = {k: v for k, v in self.sessions.items() if v > now}
+            self.sessions[fresh] = now + CONTROLLERS_SECONDS
+        self.thread(self.bt.power_on)
+        return fresh
+
+    def need(self, token: str | None) -> None:
+        with self.lock:
+            now = self.clock()
+            until = self.sessions.get(token or "")
+            if until is None or until <= now:
+                self.sessions.pop(token or "", None)
+                raise KioskError("Controllers closed after a while. Open them again from the TV's menu.", 401)
+            self.sessions[token] = now + CONTROLLERS_SECONDS
+
+    # -- what's there
+    def devices(self) -> list[dict]:
+        """Game controllers only: the paired ones, and while finding, the ones in pairing mode nearby."""
+        out = []
+        for address in self.bt.addresses():
+            info = self.bt.info(address)
+            if not info or not is_gamepad(info):
+                continue
+            name = info.get("Alias") or info.get("Name") or "Game controller"
+            out.append({"id": address, "name": name, "kind": pad_kind(name), "paired": info.get("Paired") == "yes",
+                        "connected": info.get("Connected") == "yes", "battery": bt_battery(info.get("Battery Percentage")),
+                        "busy": self.busy.get(address), "error": self.errors.get(address)})
+        out.sort(key=lambda d: (not d["paired"], not d["connected"], d["name"].lower()))
+        return out
+
+    def state(self) -> dict:
+        available = self.bt.available()
+        return {"available": available, "scanning": self.scanning, "devices": self.devices() if available else []}
+
+    # -- what it does
+    def scan(self, token: str | None) -> None:
+        self.need(token)
+        if not self.bt.available():
+            raise KioskError("This box has no Bluetooth. A small USB Bluetooth adapter adds it.", 409)
+        with self.lock:
+            if self.scanning:
+                return
+            self.scanning = True
+
+        def go() -> None:
+            try:
+                self.bt.power_on()
+                self.bt.scan()
+            finally:
+                with self.lock:
+                    self.scanning = False
+        self.thread(go)
+
+    def _known(self, address: str) -> dict:
+        address = (address or "").upper()
+        if not MAC_RE.match(address):
+            raise KioskError("That isn't a controller this box can see.", 422)
+        info = self.bt.info(address)
+        if not info:
+            raise KioskError("That controller isn't nearby any more. Press Find controllers again.", 404)
+        if not is_gamepad(info):
+            raise KioskError("Only game controllers can be paired here.", 403)
+        return {"address": address, "info": info}
+
+    def pair(self, token: str | None, address: str) -> None:
+        self.need(token)
+        found = self._known(address)["address"]
+        with self.lock:
+            if found in self.busy:
+                return
+            self.busy[found] = "pairing"
+            self.errors.pop(found, None)
+
+        def go() -> None:
+            try:
+                ok, why = self.bt.pair(found)
+                if not ok:
+                    self.errors[found] = ("It didn't pair. Hold the controller's pairing button until its light "
+                                          "flashes fast, then try again.")
+                    print(f"mnemerynne-screen-wifi: pairing {found} failed: {why.strip()[-300:]}", file=sys.stderr, flush=True)
+            finally:
+                with self.lock:
+                    self.busy.pop(found, None)
+        self.thread(go)
+
+    def forget(self, token: str | None, address: str) -> None:
+        self.need(token)
+        found = self._known(address)["address"]
+        self.bt.remove(found)
+        self.errors.pop(found, None)
+
+
 # ---------------------------------------------------------------------- web
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "mnemerynne-screen-wifi"
@@ -901,7 +1128,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(403, "Wrong address", "text/plain")
             return
         path = urlsplit(self.path).path
-        if local and path.startswith(("/settings", "/api/kiosk/")):
+        if local and path == "/api/controllers" and self.controllers is not None:
+            self._controllers(path)
+        elif local and path.startswith(("/settings", "/api/kiosk/")):
             self._kiosk_get(path)
         elif path == "/" and local:
             self._send(200, START_PAGE, "text/html")
@@ -934,7 +1163,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         else:
             self._send(404, "Not found", "text/plain")
 
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        """The TV page's preflight for /api/controllers (a JSON POST with the X-Controllers header)."""
+        path = urlsplit(self.path).path
+        if not (self.server.local and self.controllers is not None and path.startswith("/api/controllers")
+                and self._host_ok() and self._cross_origin_ok()):
+            self._send(403, "", "text/plain")
+            return
+        self._send(204, "", "text/plain", {**self._cors(), "Access-Control-Allow-Methods": "GET, POST",
+                                            "Access-Control-Allow-Headers": "Content-Type, " + CONTROLLERS_HEADER,
+                                            "Access-Control-Allow-Private-Network": "true",   # a browser's local-network check
+                                            "Access-Control-Max-Age": "600"})
+
     def do_POST(self) -> None:  # noqa: N802
+        path = urlsplit(self.path).path
+        if self.server.local and self.controllers is not None and path.startswith("/api/controllers"):
+            self._controllers(path)
+            return
         if not self._host_ok() or self.headers.get("Origin") not in self.server.origins \
                 or not self.headers.get("Content-Type", "").startswith("application/json"):
             self._json(403, {"detail": "Not from this page."})
@@ -974,6 +1219,55 @@ class Handler(http.server.BaseHTTPRequestHandler):
     @property
     def kiosk(self) -> "Kiosk | None":
         return getattr(self.server, "kiosk", None)
+
+    # -- 🎮 Controllers: the TV page's (the Mnemerynne address's) only way in, across origins
+    @property
+    def controllers(self) -> "Controllers | None":
+        return getattr(self.server, "controllers", None)
+
+    def _cross_origin_ok(self) -> bool:
+        origin = self.controllers.origin() if self.controllers is not None else ""
+        return bool(origin) and self.headers.get("Origin") == origin
+
+    def _cors(self) -> dict:
+        return {"Access-Control-Allow-Origin": self.controllers.origin(), "Vary": "Origin"}
+
+    def _controllers(self, path: str) -> None:
+        """/api/controllers (GET: what's paired and nearby), /open, /scan, /pair, /forget. Only from the Mnemerynne
+        address (its Origin, and Host 127.0.0.1), JSON only; everything but /open needs the X-Controllers token."""
+        c = self.controllers
+        if not self._host_ok() or not self._cross_origin_ok():
+            self._json(403, {"detail": "Not from this TV's Mnemerynne."})
+            return
+        cors = self._cors()
+        token = self.headers.get(CONTROLLERS_HEADER, "")[:200]
+        try:
+            if self.command == "GET":
+                c.need(token)
+                self._send(200, json.dumps(c.state()), extra=cors)
+                return
+            if not self.headers.get("Content-Type", "").startswith("application/json"):
+                raise KioskError("That wasn't understood.", 400)
+            try:
+                body = self._body()
+            except (ValueError, TypeError):
+                raise KioskError("That wasn't understood.", 400) from None
+            if path == "/api/controllers/open":
+                fresh = c.open(str(body.get("pass", ""))[:200])
+                self._send(200, json.dumps({"token": fresh, "expires_in": CONTROLLERS_SECONDS, **c.state()}), extra=cors)
+            elif path == "/api/controllers/scan":
+                c.scan(token)
+                self._send(202, json.dumps({"scanning": True, "seconds": BT_SCAN_SECONDS}), extra=cors)
+            elif path == "/api/controllers/pair":
+                c.pair(token, str(body.get("id", "")))
+                self._send(202, json.dumps({"pairing": True}), extra=cors)
+            elif path == "/api/controllers/forget":
+                c.forget(token, str(body.get("id", "")))
+                self._send(200, json.dumps(c.state()), extra=cors)
+            else:
+                self._send(404, json.dumps({"detail": "Not found"}), extra=cors)
+        except KioskError as exc:
+            self._send(exc.status, json.dumps({"detail": str(exc)}), extra=cors)
 
     def _wifi_open(self) -> bool:
         """Wi-Fi on the TV: with Kiosk settings unlocked; or open while the box has no network (a new box,
@@ -1076,8 +1370,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 class Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, setup: Setup, local: bool, kiosk: "Kiosk | None" = None) -> None:
+    def __init__(self, address, setup: Setup, local: bool, kiosk: "Kiosk | None" = None,
+                 controllers: "Controllers | None" = None) -> None:
         self.box, self.local, self.kiosk = setup, local, (kiosk if local else None)
+        self.controllers = controllers if local else None     # never on the hotspot
         super().__init__(address, Handler)
         if local:
             own = f"127.0.0.1:{self.server_address[1]}"
@@ -1598,6 +1894,50 @@ $("lock").addEventListener("click", async function () { await call("POST", "/api
 """
 
 
+# A paired game controller on these pages (the start page, Wi-Fi, Kiosk settings), like the box's keyboard:
+# the D-pad or the left stick moves between buttons and fields, A presses, B goes back a page. The TV page
+# (media.js) does the same with gamepad.js; these pages are served from here, so they carry their own copy.
+PAD_SCRIPT = """<script>
+(function () {
+  if (!navigator.getGamepads) return;
+  var held = {}, next = {};
+  function items() { return Array.prototype.filter.call(document.querySelectorAll("button, a[href], input, select, textarea"),
+    function (n) { return n.offsetParent !== null && !n.disabled; }); }
+  function move(step) { var all = items(); if (!all.length) return; var at = all.indexOf(document.activeElement);
+    all[(at < 0 ? 0 : at + step + all.length) % all.length].focus(); }
+  function act(what) {
+    if (what === "down" || what === "right") move(1); else if (what === "up" || what === "left") move(-1);
+    else if (what === "ok") { var f = document.activeElement; if (f && f !== document.body) f.click(); else move(1); }
+    else if (what === "back") history.back();
+  }
+  function poll(now) {
+    var pads = []; try { pads = navigator.getGamepads() || []; } catch (e) {}
+    var on = {};
+    Array.prototype.forEach.call(pads, function (p) {
+      if (!p || p.connected === false) return;
+      var b = function (i) { return p.buttons[i] && (p.buttons[i].pressed || p.buttons[i].value > 0.5); };
+      var x = p.axes[0] || 0, y = p.axes[1] || 0;
+      if (b(0)) on.ok = 1; if (b(1)) on.back = 1;
+      if (b(12) || y < -0.5) on.up = 1; if (b(13) || y > 0.5) on.down = 1;
+      if (b(14) || x < -0.5) on.left = 1; if (b(15) || x > 0.5) on.right = 1;
+    });
+    Object.keys(on).forEach(function (k) {
+      if (!held[k]) { held[k] = 1; next[k] = now + 420; act(k); }
+      else if (k !== "ok" && k !== "back" && now >= next[k]) { next[k] = now + 140; act(k); }
+    });
+    Object.keys(held).forEach(function (k) { if (!on[k]) delete held[k]; });
+    requestAnimationFrame(poll);
+  }
+  requestAnimationFrame(poll);
+})();
+</script>"""
+
+
+START_PAGE = START_PAGE.replace("</script></body></html>", "</script>" + PAD_SCRIPT + "</body></html>")
+WIFI_PAGE = WIFI_PAGE.replace("</script></body></html>", "</script>" + PAD_SCRIPT + "</body></html>")
+SETTINGS_PAGE = SETTINGS_PAGE.replace("</script></body></html>", "</script>" + PAD_SCRIPT + "</body></html>")
+
+
 # ------------------------------------------------------------- restart keys
 class RestartKeys:
     """Ctrl+Shift+Alt+R on any keyboard restarts the kiosk (Firefox under cage; systemd starts it again).
@@ -1677,7 +2017,7 @@ def restart_kiosk() -> None:
 def main() -> None:
     conf = read_conf()
     setup = Setup(NM(), conf.get("MNEMERYNNE_URL", "").rstrip("/"), hotspot=conf.get("WIFI_SETUP", "yes") == "yes")
-    local = Server(("127.0.0.1", LOCAL_PORT), setup, local=True, kiosk=Kiosk(setup))
+    local = Server(("127.0.0.1", LOCAL_PORT), setup, local=True, kiosk=Kiosk(setup), controllers=Controllers(setup))
     threading.Thread(target=local.serve_forever, daemon=True).start()
     hotspot_server: list[Server] = []
 

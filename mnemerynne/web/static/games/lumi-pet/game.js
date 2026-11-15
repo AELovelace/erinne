@@ -7,12 +7,12 @@
    They are one pet on one save, so all three talk to the same API. */
 (function () {
   "use strict";
-  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Pk = window.LumiPetPicker, Gd = window.LumiPetGarden, Ga = window.LumiPetGardenArt, Sk = window.LumiPetSkills, Sa = window.LumiPetSkillsArt, Cl = window.LumiPetCollection, Ca = window.LumiPetCollectionArt, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt, Pu = window.LumiPetParty, GT = window.LumiPetGardenTree, GTa = window.LumiPetGardenTreeArt, Ta = window.LumiPetTavernArt;
+  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Pk = window.LumiPetPicker, Gd = window.LumiPetGarden, Ga = window.LumiPetGardenArt, Sk = window.LumiPetSkills, Sa = window.LumiPetSkillsArt, Cl = window.LumiPetCollection, Ca = window.LumiPetCollectionArt, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt, Pu = window.LumiPetParty, GT = window.LumiPetGardenTree, GTa = window.LumiPetGardenTreeArt, Ta = window.LumiPetTavernArt, Tw = window.LumiPetTown, TwA = window.LumiPetTownArt;
   const $ = function (id) { return document.getElementById(id); };
   const room = $("lp-room"), list = $("lp-list"), houseArt = $("lp-house"), tabButtons = Array.from(document.querySelectorAll("[data-lp-tab]"));
   const API = "/api/media/games/lumi-pet/", OLD_SAVE = "mnemerynne-game:lumi-pet:companion";
   const TABS = tabButtons.map(function (button) { return button.dataset.lpTab; }); // This app's tabs, e.g. Lumi Dungeons: dungeon, battle, skills, settings
-  const APP = $("gm").dataset.game, NAME = $("gm").dataset.name; // Which of Lumi's apps this page is ("lumi-pet", "lumi-dungeons", "lumi-garden") and its name.
+  const APP = $("gm").dataset.game, NAME = $("gm").dataset.name; // Which of Lumi's apps this page is ("lumi-pet", "lumi-dungeons", "lumi-garden", "lumi-town") and its name.
   const APPS = { // Lumi's three apps, for the "Open ..." rows in Settings: icon, name, and what is there.
     "lumi-pet": ["✨", "Lumi Pet", "Her room: care, snacks, toys, clothes, her house and the shop"],
     "lumi-dungeons": ["🗝", "Lumi Dungeons", "Dungeon trips, arena fights, skills and mods"],
@@ -62,6 +62,15 @@
   // row to, and what the room last drew.
   let opened = { home: null, closet: null }, flip = {}, lastHouse = "";
   let effectUntil = 0, lastReport = "", lastList = "", lastKeys = "", lastDone = null, timer = null, polled = 0, reminders = "unsupported";
+  // Lumi Town (town-ui.js, town-art.js; Doll's design, 2026-11-12): the map behind her room's door. `townAt` is the place
+  // she's inside (the Arcade, the Casino or the Lumi-Soft field), or null on the map; the list's cursor is where she
+  // stands. The page opens where ?at= says (media.js sends it when a game opened from here closes), and remembers on
+  // this device which cabinet or table each place's cursor was on.
+  const TOWN = APP === "lumi-town", KEYS_TOWN = "▲ ▼ ◀ ▶ walk to a place · Enter goes in<br>Inside: ▲ ▼ choose a game · Enter plays<br>Mouse: press a place, a cabinet or a table<br>Escape / Back returns";
+  const arrival = TOWN ? Tw.arrive(new URLSearchParams(location.search).get("at")) : null, townPicks = TOWN ? G.store.get("town-picks", {}) : {};
+  let townAt = arrival ? arrival.inside : null;
+  if (arrival) picks[0] = townAt ? Math.max(0, Math.min(Number(townPicks[townAt]) || 0, Tw.place(townAt).games.length - 1)) : arrival.cursor; // Back from a game: on its cabinet.
+  const DESK = !TV && window.matchMedia("(any-pointer: fine)").matches; // A mouse and keyboard are here: Lumi-Soft can be played (media.js offers it only there too).
 
   function serverNow() { return Date.now() + offset; } // The server's clock, so timers agree across devices.
 
@@ -87,18 +96,73 @@
       .replace('<g data-slot="front"></g>', "<g>" + W.render(outfit, "front") + "</g>") + "</g>";
   }
 
-  function openApp(slug) { // Go to another of Lumi's apps. Inside Media's game layer the layer swaps the game in its frame (media.js), so its bar and remote keys follow; on its own the page just goes there.
-    if (framed) window.parent.postMessage({ type: "mnemerynne-game-open", slug: slug }, location.origin);
-    else location.href = "/media/games/" + slug;
+  function openApp(slug, where) { // Go to another of Lumi's apps (or, from Lumi Town, a game). Inside Media's game layer the layer swaps the game in its frame (media.js), so its bar and remote keys follow; on its own the page just goes there.
+    where = where || {}; // at: where that page starts (Lumi Town: a place); back: the town place to come back to when it closes (media.js games.back).
+    if (framed) window.parent.postMessage({ type: "mnemerynne-game-open", slug: slug, at: where.at || null, back: where.back || null }, location.origin);
+    else location.href = "/media/games/" + slug + (where.at ? "?at=" + encodeURIComponent(where.at) : ""); // On its own the browser's Back is the way back (drawTown keeps the town's address current).
   }
 
-  function adventure() { // Her room's door (Doll's design, 2026-11-11): she trots off through it, and Lumi Dungeons opens.
+  function adventure() { // Her room's door (Doll's design, 2026-11-11; Lumi Town 2026-11-12): she trots off through it, out into Lumi Town.
     if (room.dataset.leaving === "true") return; // Already on her way: one press is enough.
     room.dataset.leaving = "true"; // game.css: she trots towards the door and fades.
-    say("Off on an adventure! 🗝");
+    say("Off into town! 🏘");
     G.sound.unlock(); [523.25, 659.25, 783.99].forEach(function (f, i) { G.sound.tone(f, 0.14, i * 0.09, 0.18); }); // Three little steps up: off she goes.
-    setTimeout(function () { openApp("lumi-dungeons"); }, 700); // Long enough to see her go.
+    setTimeout(function () { openApp("lumi-town", { at: "home" }); }, 700); // Long enough to see her go. She comes out in front of her own house.
     setTimeout(function () { delete room.dataset.leaving; }, 2500); // Back in place if this page is still showing (a refused swap, or the browser's Back).
+  }
+
+  // ---- Lumi Town: the map and the places on it (town-ui.js has the words and the lists, town-art.js the drawings).
+  function townGo(change) { // A town row that stays in the town: walk into a place, or back out onto the map.
+    if (change.leave) { const was = townAt; townAt = null; picks[tab] = Tw.index(was); say("Back out in Lumi Town. Where next?"); return; }
+    const place = Tw.place(change.enter);
+    if (!place) return;
+    picks[tab] = Tw.index(place.id); // She walks up to it first.
+    if (place.app) { townOpen(place.app, place.home ? null : place.id, place.going); return; } // Her house, the tavern, the garden: Lumi's own apps. Her house is home: leaving it doesn't come back here.
+    townAt = place.id;
+    picks[tab] = Math.max(0, Math.min(Number(townPicks[place.id]) || 0, place.games.length - 1)); // On the cabinet she last played here.
+    say(place.hello);
+    G.sound.unlock(); G.sound.tone(659.25, .12, 0, .12); G.sound.tone(880, .16, .1, .1); // The shop bell.
+  }
+
+  function townOpen(slug, back, words) { // Off to a game or one of Lumi's apps: she hops to the door and it opens. Leaving it walks back to `back` (a place), or nowhere (her house).
+    if (room.dataset.leaving === "true") return; // One press is enough.
+    if (townAt) { townPicks[townAt] = picks[tab]; G.store.set("town-picks", townPicks); } // Coming back puts her on the same cabinet.
+    room.dataset.leaving = "true"; // game.css: a little hop, and she's gone in.
+    say(words || "Let's play! ✨");
+    G.sound.unlock(); [587.33, 739.99, 880].forEach(function (f, i) { G.sound.tone(f, 0.12, i * 0.08, 0.16); });
+    setTimeout(function () { openApp(slug, back ? { back: back } : {}); }, 600);
+    setTimeout(function () { delete room.dataset.leaving; }, 2500); // Still here (a refused swap, or the browser's Back): she's back on the map.
+  }
+
+  function townMove(action) { // The arrows in the town. On the map ◀ ▶ walk along a row and ▲ ▼ cross to the other row; inside, every arrow goes along the line.
+    const count = rows().length, by = action === "left" || action === "up" || action === "prev" ? -1 : 1;
+    if (!count) return;
+    if (!townAt && (action === "up" || action === "down")) picks[tab] = (picks[tab] + 3) % count; // Two rows of three: straight across the street.
+    else picks[tab] = (picks[tab] + by + count) % count;
+    render();
+  }
+
+  function townPress(event) { // Mouse and touch in Lumi Town: a place on the map, a cabinet or table inside, or the exit mat. It does what its row does.
+    const hit = event.target.closest("[data-click]");
+    if (!TOWN || !hit || !snap) return;
+    const what = hit.dataset.click.split(":"), key = { place: "place-", game: "game-" }[what[0]];
+    const at = rows().findIndex(function (row) { return row.key === (key ? key + what[1] : what[0]); });
+    if (at < 0) return;
+    picks[tab] = at; choose();
+  }
+
+  function drawTown() { // Lumi Town: the map or a place's inside (town-art.js), with Lumi standing where the cursor is.
+    const here = Tw.inside(townAt), spot = Tw.PLACES[picks[tab]] || Tw.PLACES[0], night = sceneNow().night;
+    const cursor = here ? picks[tab] : spot.id, at = TwA.spot(townAt, cursor, here ? here.games.length : 0);
+    if (!room.dataset.town) { room.dataset.townStill = "true"; requestAnimationFrame(function () { requestAnimationFrame(function () { delete room.dataset.townStill; }); }); } // The first draw: she's simply there (game.css), and walks from then on.
+    room.dataset.town = here ? here.id : "map"; room.dataset.open = "false"; // No windows onto the page's scenery: the town paints its own sky.
+    room.style.setProperty("--gx", String(at.x - 500)); room.style.setProperty("--gy", String(at.y)); // game.css walks her there.
+    $("lp-place").textContent = here ? here.room : "LUMI TOWN";
+    const signature = JSON.stringify(["town", townAt, cursor, night]);
+    if (signature === lastHouse) return; // Only redrawn when she moves, goes in or out, or day turns to night.
+    lastHouse = signature;
+    houseArt.innerHTML = TwA.scene({ at: townAt, cursor: cursor, games: here ? here.games.map(function (g) { return g.slug; }) : [], label: here ? "" : spot.name, night: night }); // Markup authored in town-art.js; the label is escaped there.
+    try { history.replaceState(null, "", location.pathname + "?at=" + (townAt || spot.id)); } catch (e) { /* the address is a nicety */ } // A reload, or the browser's Back from a game, lands here again.
   }
 
   function welcomeHome() { // Lumi Pet, after a dungeon trip: her welcome-home line, once per trip on this device (dungeon-ui.js welcome).
@@ -162,6 +226,7 @@
 
   function rows() { // What the selected tab offers, as plain rows: the list and the remote both read from here.
     const pet = snap.pet, c = snap.catalog, name = TABS[tab], asleep = sceneNow().asleep;
+    if (name === "town") return Tw.rows({ at: townAt, desk: DESK, away: Boolean(exploring()), go: townGo, open: townOpen }); // Lumi Town: the places, or the games inside one.
     if (name === "care") {
       if (awayRows().length) return awayRows(); // She isn't in her room: nothing to cuddle until she is back (the Pantry can still send her a snack).
       const health = snap.health, sore = !health.out && health.hp < health.max; // Hurt, and at home to do something about it.
@@ -175,7 +240,7 @@
         if (pet.potions) potion.send = { action: "drink" }; else potion.note = "No potions left. Lumi Dungeons sells them, on its Battle tab.";
         list.push(potion);
       }
-      list.push({ key: "adventure", icon: "🗝", name: "Through the door", hint: "Off to Lumi Dungeons: trips, the arena, skills", local: adventure }); // Her room's door as a row, for remotes, keyboards and phones too narrow to show it.
+      list.push({ key: "adventure", icon: "🏘", name: "Through the door", hint: "Out into Lumi Town: the tavern, the arcade, the casino, the garden and the Lumi-Soft field", local: adventure }); // Her room's door as a row, for remotes, keyboards and phones too narrow to show it.
       return list;
     }
     if (name === "pantry") return c.snacks.concat(c.treats).filter(function (food) { return !food.price || pet.inventory[food.id]; }).map(function (food) {
@@ -201,14 +266,14 @@
     if (name === "dungeon") { // A dungeon fight and its result use the Battle lists; everything else is the dungeon's own.
       if (couching()) return []; // The couch draws one menu per person instead (drawCouch).
       if ((snap.fight && snap.fight.status === "active") || finished) return battleRows();
-      const home = inParty() ? null : function () { openApp("lumi-pet"); }; // "Take her home" (not from a party: leaving the page would leave her friends).
+      const home = inParty() ? null : function () { openApp("lumi-town", { at: "tavern" }); }; // "Back to town", out the tavern's front door (not from a party: leaving the page would leave her friends).
       const own = Dg.rows({ snap: snap, play: play, dismissed: dismissedRun, care: caring, go: dungeonGo, home: home });
       if (inParty() && party.phase === "lobby") return Pu.lobbyRows(party, partyAct);
       if (inParty() && party.run) return Pu.tripRows(party, own, serverNow(), fightCtx(aim, ally));
       if (!exploring() && !(snap.dungeon.run && snap.dungeon.run.over && dismissedRun !== snap.dungeon.run.id)) { // Choosing where to go: or going with friends.
         askParties();
         if (browsing) return Pu.browserRows(openParties, { at: browsing.at, back: function () { browsing = null; picks[tab] = 0; }, askCode: TV ? null : askCode });
-        return (home ? [Dg.homeRow(home)] : []).concat(Pu.startRows({ open: openParties, tv: TV, askCode: askCode, browse: browse }), own); // The way home first, then friends, then places.
+        return (home ? [Dg.homeRow(home)] : []).concat(Pu.startRows({ open: openParties, tv: TV, askCode: askCode, browse: browse }), own); // The way back to town first, then friends, then places.
       }
       return own;
     }
@@ -234,6 +299,8 @@
     Object.keys(APPS).forEach(function (slug) { // Lumi's other two apps.
       if (slug !== APP) settings.push({ key: "open-" + slug, icon: APPS[slug][0], name: "Open " + APPS[slug][1], hint: APPS[slug][2], local: function () { openApp(slug); } });
     });
+    if (APP === "lumi-dungeons" || APP === "lumi-garden") settings.push({ key: "town", icon: "🏘", name: "Back to town", hint: "Lumi Town: her house, the arcade, the casino and the Lumi-Soft field", // Out of the tavern's door, or the garden's gate.
+      local: function () { openApp("lumi-town", { at: APP === "lumi-garden" ? "garden" : "tavern" }); } });
     if (!inApp && !framed) settings.push({ key: "install", icon: "⬇", name: "Install " + NAME, hint: "Its own icon on your home screen, opening straight here", local: installApp }); // In a browser tab: each of Lumi's apps can be an app of its own.
     return settings;
   }
@@ -292,6 +359,7 @@
   function trip() { return has("dungeon") ? exploring() : null; } // ...as far as this page shows it: only Lumi Dungeons draws and plays a trip. The other two apps say she is away (awayRows).
 
   function syncPlay() { // Keep the page's copy of a puzzle in step with where Lumi is: start one at a door, drop it on leaving.
+    if (TOWN) return; // No puzzles in town, and its first draw mustn't move the cursor off the place she arrived at.
     const run = trip(), lock = run && run.facing ? run.facing.lock : null, cards = run && !run.facing && run.game && run.game.kind === "match" && !run.room.done;
     const turn = run && run.party && run.party.puzzle ? ":" + run.party.puzzle.phase + run.party.puzzle.turn + ":" + run.party.puzzle.holder : ""; // A party's new turn starts the board afresh.
     const id = (!run ? "" : lock ? run.id + ":" + run.facing.at + ":" + lock.kind + (lock.tries ? lock.tries.length : "") : cards ? run.id + ":" + run.at + ":match" : "") + turn;
@@ -709,7 +777,7 @@
     room.dataset.away = String(Boolean(snap) && awayRows().length > 0 && !gardening()); // In the other two apps her room is empty while she is out (game.css).
     if (!run) caring = false;
     $("gm").dataset.walking = String(Boolean(run)); // The dungeon's own, taller right panel, with the tabs folded away for the whole trip (game.css). The garden does the same (drawGarden).
-    $("lp-keys").innerHTML = snap && walking() ? KEYS_DUNGEON : KEYS_HOME; // Fixed text from this file.
+    $("lp-keys").innerHTML = snap && walking() ? KEYS_DUNGEON : TOWN ? KEYS_TOWN : KEYS_HOME; // Fixed text from this file.
     const here = TABS[tab] === "dungeon"; // A puzzle's panel covers the room (and Lumi) only while this tab can play it.
     room.dataset.puzzle = String(Boolean(here && run && (run.facing || (run.game && run.game.kind === "match" && !run.room.done))));
     art.style.display = run ? "" : "none"; bar.hidden = !run;
@@ -742,6 +810,7 @@
   }
 
   function drawHouse(preview) { // Draw the room: what the server says is placed, with the highlighted object tried on.
+    if (TOWN) { drawTown(); return; } // Lumi Town draws the map, or the place she's in.
     if (APP === "lumi-dungeons") { // Lumi Dungeons' lobby is the Lantern & Paw tavern (tavern-art.js), not her apartment (Doll's request, 2026-11-11).
       const night = sceneNow().night, signature = "tavern:" + night;
       if (signature === lastHouse) return; // Only redrawn when day turns to night or back.
@@ -1078,6 +1147,7 @@
     if (!snap) return;
     const arrow = ["left", "right", "up", "down"].indexOf(action) >= 0;
     if (action === "next" || action === "prev" || action === "play" || arrow) pendingConfirm = null; // Only a second Enter confirms.
+    if (TOWN && (arrow || action === "next" || action === "prev")) { townMove(action); return; } // Lumi Town: every arrow walks her (it has no other tabs to change to).
     if (albuming()) { albumKey(action); return; } // So has the Collection's gallery.
     if (room.dataset.browse === "true" && arrow && browserKey(action)) return; // The party browser: arrows move over the cards.
     if (treeing()) { skillsKey(action); return; } // The skill tree has its own keys too: the arrows move over the skills.
@@ -1176,7 +1246,11 @@
     render();
   });
 
-  houseArt.addEventListener("click", doorPress); // Her room's door, in Lumi Pet: through it to Lumi Dungeons.
+  houseArt.addEventListener("click", doorPress); // Her room's door, in Lumi Pet: through it to Lumi Town.
+  houseArt.addEventListener("click", townPress); // Lumi Town: its places, cabinets and tables.
+  window.addEventListener("pageshow", function (event) { // Back from a game (or another app) with the browser's Back: the page comes back as it was left, mid-hop through a door.
+    if (event.persisted) delete room.dataset.leaving; // She's here again, and the next press goes somewhere at once.
+  });
 
   $("lp-team").addEventListener("click", function (event) { // Mouse and touch on a creature in the co-op fight: aim at it.
     const hit = event.target.closest("[data-click]");
@@ -1291,6 +1365,7 @@
     if (location.hash === "#garden" && !has("garden")) { location.replace("/media/games/lumi-garden"); return; } // An old "flowers are ready" reminder or home-screen shortcut, from when the garden was a tab of Lumi Pet.
     if (trip()) { tab = TABS.indexOf("dungeon"); say(snap.fight ? snap.fight.log.slice(-3).join(" ") : trip().say); } // A trip was waiting: pick it up where it stopped.
     else if (snap.fight && has("battle")) { tab = TABS.indexOf("battle"); say(snap.fight.log.slice(-3).join(" ")); } // A fight was waiting: pick it up where it stopped.
+    else if (TOWN) say(townAt ? Tw.place(townAt).hello : exploring() ? "Lumi Town! Lumi is out exploring: the Lantern & Paw is where she set off from." : "Lumi Town! Where shall we go?"); // Out of a door, or back from a game.
     else if (awayRows().length) say(exploring() ? "Lumi is out exploring. Lumi Dungeons is where she is." : "Lumi is in the middle of a fight, over in Lumi Dungeons."); // She is busy in another of her apps.
     else if (APP === "lumi-dungeons") say("Where shall we go? Pick a place to explore, or find a fight in the arena.");
     announceDone(); welcomeHome(); render(); // (A fresh trip home outranks a finished nap: it is said last.)

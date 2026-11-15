@@ -77,7 +77,7 @@ A few tracks only have a 30-second **Preview only**, and some can't be played he
 - Choose one and it opens over the whole page. **← Games** (or Escape or Backspace) goes back; **⛶** fills the screen; **⧉** opens it in a tab of its own.
 - The bar at the top shows the game's controls. They're the same on a keyboard and on a **remote panel**: its arrows and **Enter** play the game while it's open on the TV, and the panel shows the score under the game's name. The panel's **Stop**, or sending anything to the TV from your phone, closes the game.
 - **Coins** are one purse for your whole account, shared by every game and shown at the top of Games. You start with 1,000. They're only for fun: they have no cash value, belong to this Erynne server alone, and aren't SadGirlCoin. A TV uses the coins of the account it's paired to.
-- Online casino tables bet your coins. Yarn Pop, Lumi Conga and Teacup Tower cost 25 coins a run and pay their score. Prism Drop, StickBob Runner and Lumi's three apps pay some, and Lumi's shops spend them. If you can't afford the smallest bet, a casino table offers a free refill back to 1,000.
+- Online casino tables bet your coins. Yarn Pop, Lumi Conga and Teacup Tower cost 25 coins a run and pay their score. Lumi Launch costs 25 coins a go and pays 1 coin for every 20 m she flies (up to 300 a day). Prism Drop, StickBob Runner and Lumi's three apps pay some, and Lumi's shops spend them. If you can't afford the smallest bet, a casino table offers a free refill back to 1,000.
 - Several players on one TV with remotes play for **free credits** instead, and never touch anyone's coins.
 - Prism Drop remembers its best score on this device; coins, table balances and rounds are saved on Erynne's server.
 - Games under **Mouse & keyboard** can't be played with a remote or a touch screen, so that shelf only shows on a device with a mouse. A TV and a phone don't list them.
@@ -111,6 +111,16 @@ Every arcade game shows **your own Lumi**, in her glow colour and what she's wea
 
 **Teacup Tower** 🫖 is our own climber in the same shell, with your own Lumi as the climber. She bounces off every teacup by herself; **◀ ▶** steer her (hold them on a keyboard, or hold a finger or the mouse to one side of her; each remote press steers for a moment). The faster she's moving sideways, the higher she bounces, and the side walls kick her back a little faster, so a run at a wall can carry her past several floors. Hops of two floors or more in a row build a **combo**. Every 25th floor is a wide landing saucer; higher up some cups slide and some are cracked (one bounce each). From floor 5 the tower starts rising by itself, faster every 30 seconds: fall below the bottom and the climb is over. A run costs 25 coins and pays **1 coin a floor**. Showdowns race up the same tower; the higher floor wins.
 
+**Lumi Launch** 🎇 fires your own Lumi from a pastel star cannon to see how far she flies. Everything is one button, **OK**, so it plays the same on every kind of controller: **Enter** or **Space** on a keyboard, a **tap** or a **click** anywhere on the course, the **OK** on any Mnemerynne remote (the TV's own, the Erynne panel, the phone remote, a TV guest's), or **A** on a **gamepad** (Xbox, PlayStation, Switch Pro and most USB pads). On a phone, big **OK** and **▲ ▼** buttons sit under your thumbs.
+
+- **Aim:** the cannon's needle swings between 15° and 75°. Press **OK** to lock the angle. **▲ ▼** (or ◀ ▶, or the D-pad) nudge it one degree at a time, and once you nudge it the needle stops swinging, so you can line it up slowly on a remote.
+- **Power:** a bar fills and empties. Press **OK** to fire. Fuller is faster.
+- **In the air:** **OK** spends a **sparkle puff**, a little hop up and forward. She has three each launch (the stars at the top right).
+- **The course** is the same for all three launches of a go, and a little different every go. **Cloud Pillows** bounce her high; **Teacup Flingers** catch her and throw her out at 55°; **Yarn Rolls** speed her along the ground; **Wish Wind** columns lift her; floating **Stardust** gives back a puff; and once in a while a **Comet** rockets her on. Stay out of the **honey** (she sticks) and off the **nap mats** (she falls asleep): either ends that launch where she lands. They get more common the further she goes.
+- **A go** is three launches. It costs **25 coins** and pays **1 coin for every 20 m** of all three added up, up to 300 coins a day. The page only sends the server your presses, and the server flies her again from them before it pays, so the distances on the results are the server's. **P**, ⏯ or a gamepad's **Start** pauses; **End the go** still counts the launches she's finished.
+- **Best launches** shows the household's longest goes. A pink flag on the course marks your own longest launch.
+- **Couch turns** are free play for up to four, taking turns on one screen, three rounds, the longest total wins. On a paired TV, each person presses **OK on their remote** (or **A** on a gamepad) to join, and the TV shows **their own Lumi**: the TV owner's remote is the owner's Lumi, and a TV guest's remote is the guest's Lumi. On a computer or phone, **Add a player on this screen** adds players who pass it round. During a turn, only that player's remote or gamepad launches (this screen's own keys always can).
+
 All built-in games on a paired TV follow **Screens → Text size**, just like the Media UI. Automatic keeps the 1080p size and enlarges games at higher resolutions (1.5× at 2560×1440, 2× at 3840×2160, using the browser's CSS viewport). A saved custom size takes precedence. Changes apply to an open game without restarting it.
 
 ### Lumi Pet
@@ -118,10 +128,21 @@ All built-in games on a paired TV follow **Screens → Text size**, just like th
 Lumi is a little glowing fairy cat, and she has three apps on the **Lumi** shelf. They are the same Lumi: one pet, one level, one purse of coins, whichever you open.
 
 - **Lumi Pet** ✨ is her room: looking after her, her food and toys, her clothes, her house, the shop and her collection.
-- **Lumi Dungeons** 🗝 is her adventures: dungeon trips, arena fights, and her skills and mods. It opens in **the Lantern & Paw**, the tavern adventurers set out from, instead of her room. It has a bar of glowing potions, a quest board and a crackling hearth, with stars in the window at night.
+- **Lumi Dungeons** 🗝 is her adventures: dungeon trips, arena fights, and her skills and mods. It opens in **the Lantern & Paw**, the tavern adventurers set out from (it's the tavern in Lumi Town), instead of her room. It has a bar of glowing potions, a quest board and a crackling hearth, with stars in the window at night.
 - **Lumi's Garden** 🌸 is the Stardust Garden: flowers, starpowder and the press.
 
-Each app's **Settings** tab has **Open** rows for the other two. Lumi Pet and Lumi Dungeons also have a door between them. In Lumi Pet, press the **door** in her room, or choose **Through the door** at the end of **Care**, and she trots off to Lumi Dungeons. The door is on the left of her room, so on a squarer screen or a phone the panel can hide it; the Care row always works. In Lumi Dungeons, **Take her home** is the first row of the Dungeon tab whenever she isn't on a trip, and the first row when a trip ends. It isn't offered while you're in a party. Back in her room after a trip, Lumi says where she went and what she brought home, once per trip. While Lumi is on a dungeon trip or in a fight she is in Lumi Dungeons: her room in Lumi Pet is empty and the garden waits, and both show a row, **Lumi is out exploring**, that takes you to her. You can still send her a snack from the Pantry.
+Each app's **Settings** tab has **Open** rows for the other two.
+
+**Lumi Town** 🏘 is outside her front door. In Lumi Pet, press the **door** in her room, or choose **Through the door** at the end of **Care**, and she trots out into town. The door is on the left of her room, so on a squarer screen or a phone the panel can hide it; the Care row always works. Lumi Town has no card on the Games page: her door is the way in. The town map has six places, and Lumi walks to whichever one you pick (**Up/Down/Left/Right** on a remote or keyboard, or press a place):
+
+- **Arcade**: Yarn Pop, Lumi Conga, Teacup Tower, Prism Drop and Lumi Launch, one cabinet each.
+- **Tavern**: the Lantern & Paw, which is Lumi Dungeons.
+- **Casino**: Lumi's Lounge, with Blackjack, Roulette, Horse Racing and the Slot Machines.
+- **Lumi's house**: back to her room in Lumi Pet.
+- **Garden**: the Stardust Garden, which is Lumi's Garden.
+- **Lumi-Soft field**: Lumi-Soft. It needs a mouse and keyboard, so on a TV or a phone its row only says so.
+
+Walk into the Arcade, the Casino or the field and pick a game; **Back to the town map** walks out again. When you leave a game you opened from the town (the bar's **Back**, or **Escape**), you're back where you were in town, on the same cabinet or table. On its own in a browser tab, the browser's Back does the same. Lumi Dungeons and Lumi's Garden have **Back to town** in their Settings. In Lumi Dungeons, **Back to town** is also the first row of the Dungeon tab whenever she isn't on a trip, and the first row when a trip ends; it isn't offered while you're in a party. Back in her room after a trip, Lumi says where she went and what she brought home, once per trip. While Lumi is on a dungeon trip or in a fight she is in Lumi Dungeons: her room in Lumi Pet is empty and the garden waits, and both show a row, **Lumi is out exploring**, that takes you to her. You can still send her a snack from the Pantry.
 
 Look after her in **Games → Lumi Pet**. On a TV remote, **Previous/Next** change tab, **Up/Down** move through the list, **Left/Right** flip the choices of the row you are on, and **Enter** does it. On a keyboard, Previous/Next are **Page Up/Page Down** (or **[** and **]**). You can also tap or click anything. Her **name** and her **colour** are in **Settings** (in Lumi Pet and Lumi Dungeons): **Name** (up to 16 letters; it's what her friends see in a party) and **Colour**, which opens red, green and blue sliders (◀ ▶ on a remote, or slide them) and shows her new colour in the room as you go; **Keep** saves it, and **Her glow's own colours** goes back. Her colour is only how she looks: her element in a fight is still her glow. Lumi Pet's tabs are **Care** (cuddle, nap), **Pantry** (her food), **Toys**, **Closet** (what she wears), **Home** (decorating), **Shop** (capsules, snacks, treats and toys for coins), **Collection** and **Settings** (her glow colour, sound, reminders, her other apps). Lumi Dungeons has **Dungeon**, **Battle**, **Skills** and **Settings** (her glow, the storyteller, sound). Lumi's Garden has **Garden** and **Settings** (sound, reminders). Keyboard Tab reaches individual controls, and Escape/Back returns to Games.
 
@@ -257,6 +278,35 @@ Its **arrows and Enter** work like the TV's own arrow keys while the TV shows it
 - **Controlling it:** from your phone, or from any panel (its own included), with play/pause, skipping, next/previous, volume, mute and stop.
 - **What it can reach:** it plays only what is cast to it. It can't browse or fetch anything else.
 - **Removing it:** removing the remote removes its speaker as well.
+
+## Game controllers on a TV box
+
+A TV run by a Mnemerynne TV box can pair **Xbox One (Bluetooth) and PlayStation 5 DualSense controllers** over Bluetooth. A paired controller is a remote for that TV and a controller for the games.
+
+**Pairing one:** on the TV, open **🔗 Controllers** in the menu with your remote (anyone whose remote may drive that TV can, TV guests too) and follow it:
+
+1. Put the controller in pairing mode:
+   - **Xbox:** hold the small pair button on its top until the Xbox button flashes fast.
+   - **PlayStation 5:** hold **Create** and the **PS** button until the light around the touchpad flashes.
+2. Press **🔍 Find controllers**. It looks for about 20 seconds.
+3. Press **Pair** beside it. It says **Connected**, with the battery level where the controller gives one.
+
+Only game controllers show up or pair there: never a keyboard, a mouse or a phone. The next time you turn the controller on (its middle button), it connects by itself. **Forget** (press it twice) unpairs one. The box needs Bluetooth: if it has none, the page says so, and a small USB Bluetooth adapter adds it. An Xbox controller that won't connect may need its firmware updated once, from an Xbox or the Xbox Accessories app on Windows.
+
+**On the TV,** a controller works like the box's own keyboard:
+
+| Button | What it does |
+| --- | --- |
+| **D-pad** or **left stick** | Moves around |
+| **A** (✕) | Presses |
+| **B** (○) | Goes back |
+| **Start** (Options) | Plays and pauses |
+| **LB / RB** (L1 / R1) | Previous and next |
+| **Xbox** or **PS** button | Home (where Firefox passes it on) |
+
+It works in every built-in game; Lumi Launch reads it directly, a player per controller in couch turns. Because it's in your hands at the box, it can also open **⚙ Kiosk settings**, which a remote never can (they still need an admin's approval or the PIN).
+
+**In Retro** (on the TV, Retro opens in the TV's game layer; see the Retro help) it's the console's controller. A second controller is player 2, and up to four can play. Its **Xbox** or **PS** button (or **Start** and **Select** held together) pauses the game and opens its menu: **Resume**, **Save state**, **Load state**, **Leave the game**.
 
 ## Your phone as a remote
 

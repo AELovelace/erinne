@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Retro · Media · {{ product_name }}{% endblock %}
 {% block body %}
-{% include "_nav.html" %}
+{% if not on_tv %}{% include "_nav.html" %}{% endif %}{#- On a TV it's in Media's game layer, whose bar has Back. -#}
 <link rel="stylesheet" href="{{ static('retro.css') }}">
 {#- Media → Retro (web/retro.py, static/retro.js): a shelf per console of the games in the Games folder this
     person can read, Continue playing on top. A game opens the player (/media/retro/play/<id>). -#}
 <main class="rt" id="rt" data-folder="{{ folder }}" data-admin="{{ 1 if is_admin else 0 }}">
   <header class="rt-head">
-    <a class="rt-back" href="/media">← Media</a>
+    {% if not on_tv %}<a class="rt-back" href="/media">← Media</a>{% endif %}
     <h1>🕹 Retro</h1>
     <div class="rt-tools">
       <label class="rt-search"><span class="sr-only">Find a game</span>
@@ -22,4 +22,7 @@
   <div id="rt-content" aria-live="polite"><p class="muted">Loading the games…</p></div>
 </main>
 <script src="{{ static('retro.js') }}" defer></script>
+{#- On a TV: the remote, controllers and leaving (retro-tv.js); controllers navigate anywhere. -#}
+<script src="{{ static('games/gamepad.js') }}" defer></script>
+<script src="{{ static('retro-tv.js') }}" defer></script>
 {% endblock %}

@@ -345,3 +345,21 @@
 @keyframes lp-tv-fire { 0% { transform: scale(1, 1); } 35% { transform: scale(1.04, .92); } 70% { transform: scale(.97, 1.07); } 100% { transform: scale(1.02, .96); } }
 @keyframes lp-tv-glow { from { opacity: .7; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .lp-house .lp-tv-fire, .lp-house .lp-tv-glow { animation: none; } }
+/* Lumi Town (town-art.js, game.js drawTown): the map, or a place's inside. Lumi is small and walks to whatever the cursor
+   is on (--gx from the drawing's middle, --gy her feet), like in the garden; the dashed ring and the label show where. */
+.lp-room[data-town] .lp-pet-wrap { width: calc(46 * var(--u)); left: calc(50% + (var(--gx, 0) - 23) * var(--u)); bottom: calc(50% + (250 - var(--gy, 268)) * var(--u)); pointer-events: none;
+  transition: left .45s ease-in-out, bottom .45s ease-in-out; }
+.lp-room[data-town]:not([data-town="map"]) .lp-pet-wrap { width: calc(58 * var(--u)); left: calc(50% + (var(--gx, 0) - 29) * var(--u)); } /* Inside, a step closer. */
+.lp-room[data-town] .lp-effect { font-size: calc(14 * var(--u)); top: -40%; right: -20%; }
+.lp-room[data-town] .lp-caption { display: none; } /* The places' own signs and the label say it. */
+.lp-room[data-town][data-leaving="true"] .lp-pet-wrap { transform: translateY(calc(-16 * var(--u))) scale(.5); opacity: 0; transition: transform .55s ease-in, opacity .55s ease-in; } /* In through the door. */
+.lp-house [data-click^="place:"], .lp-house [data-click^="game:"], .lp-house [data-click="leave"] { cursor: pointer; }
+.lp-house .lp-tw-on { filter: drop-shadow(0 0 7px #ff8ecb) brightness(1.08); }
+.lp-house .lp-tw-mark { animation: lp-tw-mark 1.4s ease-in-out infinite alternate; }
+.lp-house .lp-tw-glow { animation: lp-tw-glow 2.6s ease-in-out infinite alternate; }
+@keyframes lp-tw-mark { from { opacity: .45; } to { opacity: 1; } }
+@keyframes lp-tw-glow { from { opacity: .65; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .lp-room[data-town] .lp-pet-wrap { transition: none; } .lp-house .lp-tw-mark, .lp-house .lp-tw-glow { animation: none; } }
+.lp-tabs[data-count="1"] { display: none; } /* Lumi Town has one list: no tabs to pick between. */
+.lp-room[data-town-still] .lp-pet-wrap { transition: none; } /* Opening the town: she's already at the door, not sliding in from the middle. */
+.lp-room[data-town] .lp-room-top { text-shadow: 0 0 4px #1a0f2e, 0 0 10px #1a0f2e; } /* Readable over a bright daytime sky. */

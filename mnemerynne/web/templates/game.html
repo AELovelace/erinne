@@ -2,7 +2,7 @@
 {% block title %}{{ game.name }} · {{ product_name }}{% endblock %}
 {#- Each Lumi app (Lumi Pet, Lumi Dungeons, Lumi's Garden: games.py LUMI_APPS) is an app of its own: installed from its
     page it gets its own name and icon (web/app.py lumi_manifest). Lumi Pet's icons keep their first names (lumi-180.png). -#}
-{% block app_links %}{% if game.kit == 'lumi-pet' %}{% set icon = 'lumi' if game.slug == 'lumi-pet' else game.slug %}
+{% block app_links %}{% if game.kit == 'lumi-pet' and not game.hidden %}{#- Lumi Town is hidden (games.py): no app of its own, so the site's own links. -#}{% set icon = 'lumi' if game.slug == 'lumi-pet' else game.slug %}
   <link rel="manifest" href="/media/games/{{ game.slug }}/manifest.webmanifest">
   <link rel="apple-touch-icon" href="{{ static('icons/' ~ icon ~ '-180.png') }}">
   <meta name="theme-color" content="#1a0f2e">
@@ -26,7 +26,7 @@
 {% if game.slug == 'roulette' %}<script src="{{ static('games/casino/roulette.js') }}"></script>{% endif %}
 {% if game.multiplayer %}<script src="{{ static('games/lumi-pet/closet.js') }}"></script><script src="{{ static('games/casino/lumi-table.js') }}"></script>{% endif %}{# Lumi's Lounge: Dealer Lumi, each player's Lumi in her clothes, chips. #}
 {% if not game.multiplayer %}<script src="{{ static('games/' ~ asset ~ '/rules.js') }}"></script>{% endif %}
-{% if asset == 'lumi-pet' %}{% for part in ('house', 'closet', 'picker-ui', 'enemies', 'battle-ui', 'dungeon-ui', 'dungeon-art', 'tavern-art', 'garden-ui', 'garden-art', 'garden-tree', 'garden-tree-art', 'skills-ui', 'skills-art', 'collection-ui', 'collection-art', 'party-ui') %}<script src="{{ static('games/lumi-pet/' ~ part ~ '.js') }}"></script>{% endfor %}{% endif %}
+{% if asset == 'lumi-pet' %}{% for part in ('house', 'closet', 'picker-ui', 'enemies', 'battle-ui', 'dungeon-ui', 'dungeon-art', 'tavern-art', 'garden-ui', 'garden-art', 'garden-tree', 'garden-tree-art', 'skills-ui', 'skills-art', 'collection-ui', 'collection-art', 'party-ui', 'town-ui', 'town-art') %}<script src="{{ static('games/lumi-pet/' ~ part ~ '.js') }}"></script>{% endfor %}{% endif %}
 {% for part in game.extras if part.endswith('.js') %}<script src="{{ static('games/' ~ part) }}"></script>{% endfor %}
 <script src="{{ static('games/' ~ asset ~ '/game.js') }}"></script>
 {% endblock %}

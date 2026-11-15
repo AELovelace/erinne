@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from mnemerynne import arcade, lobby, lumisoft, runner, showdown
+from mnemerynne import arcade, lobby, lumilaunch, lumisoft, runner, showdown
 from mnemerynne.rooms_bus import sse
 from mnemerynne import bfgguf, casino, casino_remote, claude_chat, coins, games, lumi_tv, lumidungeon, lumiparty, lumipet, lumitales, prism, push, users
 from mnemerynne.db import read_transaction, transaction
@@ -217,6 +217,70 @@ def soft_finish(body: SoftFinish, user=Depends(media_user), conn=Depends(get_gam
     """The run is over: the server replays its shots, pays its score once, keeps bests and gives any prizes it won."""
     with transaction(conn):
         return _soft_call(lumisoft.finish, conn, user["id"], body.run, body.model_dump())
+
+
+# ------------------------------------------------------------------ Lumi Launch (lumilaunch.py)
+# A go is three launches on one seeded course; the page sends only each launch's presses and the server flies Lumi
+# again from them (lumilaunch_rules.py) before it pays. Couch turns on a TV are free play: the only thing they ask the
+# server is whose Lumi a remote's OK belongs to (/tv/player), so each player launches their own.
+def _launch_call(fn, *args, **kwargs):
+    """A Lumi Launch refusal becomes a small error the page can show; nothing was changed."""
+    try:
+        return fn(*args, **kwargs)
+    except lumilaunch.Refused as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+
+
+LaunchPress = tuple[Annotated[int, Field(ge=0, le=100_000)], Literal["ok", "up", "down"]]   # [frame, button], as rules.js logs it
+
+
+class LaunchRun(BaseModel):
+    """A finished go: its ticket and each launch's presses, exactly as rules.js recorded them. Never a distance."""
+    model_config = ConfigDict(extra="forbid")
+    run: int = Field(ge=1, strict=True)
+    shots: list[Annotated[list[LaunchPress], Field(max_length=2000)]] = Field(max_length=3)
+
+
+@router.get("/api/media/games/lumi-launch/state")
+def launch_state(user=Depends(media_user), conn=Depends(get_games_db)):
+    """The title screen: the price, how it pays, this person's bests and the household's best launches."""
+    return lumilaunch.state(conn, user["id"])
+
+
+@router.post("/api/media/games/lumi-launch/start")
+def launch_start(user=Depends(media_user), conn=Depends(get_games_db)):
+    """A ticket and a course for a new go (it costs lumilaunch.ENTRY coins)."""
+    with transaction(conn):
+        return _launch_call(lumilaunch.start, conn, user["id"])
+
+
+@router.post("/api/media/games/lumi-launch/finish")
+def launch_finish(body: LaunchRun, user=Depends(media_user), conn=Depends(get_games_db)):
+    """The go is over: the server replays its launches, pays the distance once and keeps the bests."""
+    with transaction(conn):
+        return _launch_call(lumilaunch.finish, conn, user["id"], body.run, [list(map(list, log)) for log in body.shots])
+
+
+@router.post("/api/media/games/lumi-launch/tv/player")
+def launch_tv_player(body: PlayerPick, request: Request, user=Depends(media_user), conn=Depends(get_games_db)):
+    """Couch turns: the TV hands over a remote's OK press, and gets back who holds that remote (the TV's owner or one of
+    their TV guests) and how their Lumi looks, so she's the one in the cannon on their turn. Nothing is charged."""
+    screen = screen_device(request, conn)
+    if screen["speaker"] or screen["user_id"] != user["id"]:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Couch players join from a TV, with a remote's OK.")
+    try:
+        proof = casino_remote.read(request.app.state.settings.secret_key, body.controller)
+    except casino_remote.BadData:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "That press is too old. Press OK on your remote again.") from None
+    if proof.get("action") != "enter":
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Press OK on your remote to join.")
+    remote = _live_remote(request, conn, proof, screen, casino_remote.actor("screen", screen))
+    if remote is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This remote can't play on this TV. The TV's owner can make you "
+                                                       "a TV guest under Media → Screens.")
+    holder = users.get_user_by_id(conn, remote["user_id"])
+    return {"name": holder["username"], "remote": remote["id"], "look": lumipet.look(conn, holder["id"]),
+            "owner": holder["id"] == screen["user_id"]}
 
 
 @router.post("/api/media/games/lumi-pet/visit")

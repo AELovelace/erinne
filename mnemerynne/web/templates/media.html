@@ -29,7 +29,12 @@
         page of its own, like Remote, so it stays in the menu on a phone (media.css). Not on a TV yet: its pages want a
         person signed in, and a TV has only its screen key. -#}
     {% if retro_on and not screen %}<a class="mc-menu-item" href="/media/retro" style="text-decoration: none"><span class="mc-icon">🕹</span>Retro</a>{% endif %}
+    {#- On a TV, Retro opens in the game layer (media.js RETRO), where the remote and controllers reach it. -#}
+    {% if retro_on and screen %}<button type="button" class="mc-menu-item" id="mc-retro"><span class="mc-icon">🕹</span>Retro</button>{% endif %}
     {#- Screen size and Wi-Fi are inside Kiosk settings, which sits at the bottom of the menu (media.css). -#}
+    {#- Pairing Bluetooth game controllers to the box (deploy/screen/wifi-setup.py Controllers): on a TV box only,
+        and any remote may open it (the server checks the press, web/kiosk.py controllers_open). -#}
+    {% if screen %}<button type="button" class="mc-menu-item" data-view="controllers" id="mc-controllers" hidden><span class="mc-icon">🔗</span>Controllers</button>{% endif %}
     {% if screen %}<button type="button" class="mc-menu-item" id="mc-kiosk" data-local-only hidden><span class="mc-icon">⚙</span>Kiosk settings</button>{% endif %}
     {% if not screen and screens_allowed %}<button type="button" class="mc-menu-item" data-view="screens"><span class="mc-icon">📺</span>Screens</button>
     {#- No data-view: it opens its own page, and so stays visible on a phone (media.css). -#}
@@ -172,6 +177,7 @@
 <script src="{{ static('picker.js') }}"></script>
 <script src="{{ static('vendor/hls.js/hls.min.js') }}"></script>
 <script src="{{ static('signage_render.js') }}"></script>
+<script src="{{ static('games/gamepad.js') }}"></script>{#- a controller on the TV (media.js padPress) -#}
 <script src="{{ static('media.js') }}"></script>
 {% if screen %}<script src="{{ static('kiosk_screen.js') }}"></script>{% endif %}
 {% endblock %}

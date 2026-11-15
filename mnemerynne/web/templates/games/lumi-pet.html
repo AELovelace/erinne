@@ -1,13 +1,15 @@
 {# Lumi's room uses native SVG and CSS: no downloaded art, fonts or external service.
-   One page for three apps (mnemerynne/games.py): Lumi Pet, Lumi Dungeons and Lumi's Garden each show their own tabs
-   (game.tabs) over the same room, and game.js only offers what the tabs here allow. #}
+   One page for four apps (mnemerynne/games.py): Lumi Pet, Lumi Dungeons, Lumi's Garden and Lumi Town each show their own
+   tabs (game.tabs) over the same room, and game.js only offers what the tabs here allow. #}
 {%- set words = {
   "lumi-pet": ("// A LITTLE LIGHT, JUST FOR YOU", "LUMI", "PET", "A soft place to land."),
   "lumi-dungeons": ("// DOWN WHERE THE TREASURE IS", "LUMI", "DUNGEONS", "Brave little paws."),
   "lumi-garden": ("// THE STARDUST GARDEN", "LUMI’S", "GARDEN", "Flowers, powder and patience."),
+  "lumi-town": ("// WHERE SHALL WE GO?", "LUMI", "TOWN", "Lanterns, music and somewhere to be."),
 }[game.slug] %}
 {%- set tab_names = {"care": "Care", "pantry": "Pantry", "toys": "Toys", "closet": "Closet", "home": "Home", "battle": "Battle",
-  "skills": "Skills", "dungeon": "Dungeon", "garden": "Garden", "shop": "Shop", "collection": "Collection", "settings": "Settings"} %}
+  "skills": "Skills", "dungeon": "Dungeon", "garden": "Garden", "shop": "Shop", "collection": "Collection", "settings": "Settings", "town": "Town"} %}
+{%- set room_name = {"lumi-dungeons": "THE LANTERN & PAW", "lumi-town": "LUMI TOWN"}.get(game.slug, "THE STARLIGHT NOOK") %}
 <section class="lp-intro gm-panel" aria-label="Your companion">
   <p class="gm-eyebrow">{{ words[0] }}</p>
   <h1 class="gm-title">{{ words[1] }}<span>{{ words[2] }}</span></h1>
@@ -36,7 +38,7 @@
 </section>
 
 <section class="lp-room" id="lp-room" data-palette="rose" data-sleep="false" aria-label="Lumi's room">
-  <div class="lp-room-top"><span>{{ "THE LANTERN & PAW" if game.slug == "lumi-dungeons" else "THE STARLIGHT NOOK" }}</span>{#- Lumi Dungeons' lobby is a tavern (tavern-art.js); her own apps show her room. -#}{#- On a shared TV: whose Lumi this is (Who's playing?, mnemerynne/lumi_tv.py). -#}<span class="lp-player" id="lp-player" hidden></span><span id="lp-clock">A quiet afternoon</span></div>
+  <div class="lp-room-top"><span id="lp-place">{{ room_name }}</span>{#- Lumi Dungeons' lobby is a tavern (tavern-art.js), Lumi Town a map (town-art.js: game.js names the place she's in); her own apps show her room. -#}{#- On a shared TV: whose Lumi this is (Who's playing?, mnemerynne/lumi_tv.py). -#}<span class="lp-player" id="lp-player" hidden></span><span id="lp-clock">A quiet afternoon</span></div>
   {#- The house: game.js draws every spot's object here from static/games/lumi-pet/house.js. The room fills the screen and crops this wide
       drawing's sides to fit. Its windows are holes in the wall: the theme's scrolling backdrop, behind the page, shows through them. -#}
   <svg class="lp-house" id="lp-house" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>

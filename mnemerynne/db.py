@@ -92,6 +92,9 @@ GAMES_TABLES = ("coin_accounts", "coin_transactions", "lumi_pets", "lumi_gardens
                 "lumi_push_events", "lumi_parties", "lumi_party_members", "push_subscriptions", "arcade_rooms",
                 "arcade_runs", "casino_rooms", "prism_runs", "runner_runs", "lumisoft_progress", "lumisoft_bests",
                 "lumisoft_runs")
+# Games tables that were born in games.db (migrations/games/, never in core), so nothing moves for them; their user_id
+# columns still need cleaning when a user goes.
+GAMES_OWN_TABLES = ("lumi_launch_runs", "lumi_launch_bests")
 MEDIA_TABLES = ("signage_groups", "media_artwork", "media_screens", "media_remotes", "media_screen_guests",
                 "media_sources", "media_albums", "media_items", "media_tv_shows", "media_progress", "signage_shows",
                 "signage_schedule", "signage_screens")       # parents before the tables that refer to them
@@ -107,7 +110,8 @@ FEATURE_DBS: dict[str, FeatureDb] = {f.name: f for f in (
     # table goes in migrations/games/, never in core's migrations.
     FeatureDb("games", moves=GAMES_TABLES,
               user_columns=tuple((t, "user_id") for t in GAMES_TABLES
-                                 if t not in ("coin_transactions", "lumi_parties", "arcade_rooms", "casino_rooms"))),
+                                 if t not in ("coin_transactions", "lumi_parties", "arcade_rooms", "casino_rooms"))
+              + tuple((t, "user_id") for t in GAMES_OWN_TABLES)),
     # Phase 3: Rooms (rooms.py, rooms_bus.py, web/rooms.py, the rooms service). A message outlives its author.
     FeatureDb("rooms", moves=ROOMS_TABLES,
               user_columns=(("chat_members", "user_id"), ("chat_reactions", "user_id"), ("chat_mentions", "user_id")),

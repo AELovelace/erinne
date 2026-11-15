@@ -25,6 +25,7 @@ HOUSE = "__HOUSE__"
 START = 1000                  # a new purse
 PRISM_POINTS_PER_COIN = 10    # a finished Prism Drop game pays its score divided by this
 PRISM_DAILY_CAP = 200         # the most Prism Drop pays one account in a day
+LAUNCH_DAILY_CAP = 300        # the most Lumi Launch pays one account in a day (lumilaunch.py)
 PET_VISIT = 25                # the first Lumi Pet visit of the day
 
 

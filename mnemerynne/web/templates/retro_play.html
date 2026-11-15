@@ -33,4 +33,7 @@
 </div>
 <script id="rp-data" type="application/json">{{ game_json | safe }}</script>
 <script src="{{ static('retro-player.js') }}" defer></script>
+{#- The remote, a controller's menu (its Xbox / PS button, or Start + Select held) and leaving on a TV (retro-tv.js). -#}
+<script src="{{ static('games/gamepad.js') }}" defer></script>
+<script src="{{ static('retro-tv.js') }}" defer></script>
 {% endblock %}

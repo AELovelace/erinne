@@ -222,6 +222,13 @@ A TV run by a screen box (`deploy/screen/` in the repository) has **⚙ Kiosk se
 
 Opening the settings (`kiosk.unlock`) and changing the top bar (`kiosk.top_bar`) are logged, with the admin who approved. The box's README (`deploy/screen/README.md`, step 6) covers the rest.
 
+**🔗 Controllers** (a screen box only) pairs Bluetooth game controllers, Xbox One and PlayStation 5, to the box, from the TV's menu with a remote. The box's helper does the pairing (BlueZ, through `bluetoothctl`). It pairs only game controllers, never keyboards, mice or phones, and only for the TV's own page, after a one-time pass:
+- The server gives the TV page a pass for a remote's OK (a remote that may drive that TV: its owner's or a TV guest's), or for the box's own keyboard or controller (`POST /media/screen/controllers/open`).
+- The helper redeems the pass with the server (`POST /api/media/kiosk/controllers/redeem`, rate limited).
+- The helper then answers the page for ten minutes of use.
+
+A paired controller drives the TV like the box's keyboard, so unlike a remote it can open Kiosk settings (still behind the phone approval or the PIN). Boxes get BlueZ and Bluetooth turned on from the next screen release (Kiosk settings → Updates); one without a Bluetooth adapter needs a USB one. **Retro** opens in the TV's game layer on a paired screen (as the TV's owner), with the remote and controllers; see Retro below.
+
 **On every page, not only the TV page,** a screen box keeps its screen size and text size, has a small bar (**📺 Back to TV**, **‹ ›**), and still hears the remote. Documents open inside a page with that bar. **Backspace** goes back a page, and **Ctrl+Shift+Alt+R** restarts the kiosk.
 
 **Someone using the TV** (on any page but the TV page) gets 10 seconds to keep it when a command comes from a phone: **Keep using the TV**, or Escape. Otherwise an open document is saved as it is and the TV goes back to its page to carry the command out, signing out whoever was signed in on it.

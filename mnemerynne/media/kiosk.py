@@ -137,6 +137,41 @@ class Unlocks:
         self._sessions.pop(_hash(token or ""), None)
 
 
+# ------------------------------------------------------------ game controllers
+PASS_SECONDS = 120            # how long the TV has to hand a controllers pass to the box's helper
+MAX_PASSES = 200              # passes waiting at once, server-wide
+
+
+class ControllerPasses:
+    """The TV's 🎮 Controllers page (pairing Bluetooth game controllers on a screen box). The box's helper can't
+    tell who is at the TV, so the TV page asks here first: with a remote's OK (a remote paired to this TV's
+    owner, or a TV guest's: web/kiosk.py checks the signed press) or the box's own keyboard or controller, it
+    gets a one-time pass, and the helper redeems it with the server before it lets the page pair anything.
+    In memory like Unlocks; only the pass's SHA-256 is kept."""
+
+    def __init__(self, clock=time.monotonic) -> None:
+        self.clock = clock
+        self._passes: dict[str, dict] = {}       # sha256(pass) -> {screen, by, until}
+
+    def issue(self, screen_id: int, by: str) -> str:
+        """A pass for this screen's helper; `by` is who opened it (a remote holder's name, or "this TV")."""
+        now = self.clock()
+        self._passes = {k: v for k, v in self._passes.items() if v["until"] > now}
+        if len(self._passes) >= MAX_PASSES:
+            raise ScreenBusy("Too many screens are opening Controllers. Try again in a minute.")
+        token = secrets.token_urlsafe(32)
+        self._passes[_hash(token)] = {"screen": screen_id, "by": by, "until": now + PASS_SECONDS}
+        return token
+
+    def redeem(self, token: str) -> dict:
+        """A pass, once: {screen, by}."""
+        now = self.clock()
+        hit = self._passes.pop(_hash(token or ""), None)
+        if hit is None or hit["until"] <= now:
+            raise ScreenError("That has run out or was used already. Press OK on your remote again.")
+        return {"screen": hit["screen"], "by": hit["by"]}
+
+
 # ------------------------------------------------------------- screen settings
 def settings_of(row: sqlite3.Row) -> dict:
     return {"id": row["id"], "name": row["name"], "top_bar": bool(row["top_bar"]), "soundcloud_profile": row["soundcloud_profile"]}

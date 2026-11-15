@@ -20,6 +20,21 @@
   const SAVES = "/api/media/retro/saves/" + game.id + "/";
   const AUTO_EVERY_MS = 3 * 60 * 1000;     // an automatic state this often, while the game is being played
   const SLOT_NAMES = { auto: "Automatic", 1: "Slot 1", 2: "Slot 2", 3: "Slot 3", 4: "Slot 4" };
+  // Controllers: player 1 keeps EmulatorJS's own keys and pad buttons; players 2, 3 and 4 get the same pad buttons
+  // (EmulatorJS leaves them unmapped), so a second controller on a TV plays player 2 straight away. Each pad joins
+  // the next free player when it's first pressed. (2026-11-14, Bluetooth controllers on the TV boxes.)
+  const PAD = ["BUTTON_2", "BUTTON_4", "SELECT", "START", "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT", "BUTTON_1",
+    "BUTTON_3", "LEFT_TOP_SHOULDER", "RIGHT_TOP_SHOULDER", "LEFT_BOTTOM_SHOULDER", "RIGHT_BOTTOM_SHOULDER", "LEFT_STICK",
+    "RIGHT_STICK", "LEFT_STICK_X:+1", "LEFT_STICK_X:-1", "LEFT_STICK_Y:+1", "LEFT_STICK_Y:-1", "RIGHT_STICK_X:+1",
+    "RIGHT_STICK_X:-1", "RIGHT_STICK_Y:+1", "RIGHT_STICK_Y:-1"];
+  const KEYS = ["x", "s", "v", "enter", "up arrow", "down arrow", "left arrow", "right arrow", "z", "a", "q", "e", "tab", "r",
+    "", "", "h", "f", "g", "t", "l", "j", "k", "i"];   // player 1's keyboard, as EmulatorJS's initControlVars has it
+  function controllers() {
+    const one = {}, pad = {};
+    PAD.forEach(function (button, i) { one[i] = KEYS[i] ? { value: KEYS[i], value2: button } : { value2: button }; pad[i] = { value2: button }; });
+    one[24] = { value: "1" }; one[25] = { value: "2" }; one[26] = { value: "3" };
+    return { 0: one, 1: Object.assign({}, pad), 2: Object.assign({}, pad), 3: Object.assign({}, pad) };
+  }
 
   const $ = function (id) { return document.getElementById(id); };
   let emu = null;               // the EmulatorJS instance, once its scripts are in
@@ -290,6 +305,7 @@
       defaultOptions: { "save-save-interval": "30" },
       // Its exit button restarts the game in place, and netplay talks to emulatorjs.org: both hidden.
       buttonOpts: { exitEmulation: false, netplay: false },
+      defaultControllers: controllers(),
     });
     // The game's own save, put back before the game boots: games read it once, at the start.
     emu.on("saveDatabaseLoaded", function (FS) {
@@ -321,7 +337,8 @@
   }
 
   // -------------------------------------------------------------- leaving
-  async function leave() {   // the game's own save and an automatic state reach the server first
+  async function leave(then) {   // the game's own save and an automatic state reach the server first; then the shelves (or `then`: the TV's)
+    if (typeof then !== "function") then = null;           // a click's event isn't a "then"
     if (leaving) return;
     leaving = true;
     status("Saving…");
@@ -343,8 +360,14 @@
         return;
       }
     }
-    location.href = "/media/retro";
+    if (then) { leaving = false; then(); } else location.href = "/media/retro";
   }
+
+  // For retro-tv.js (Retro on a TV: the remote, the controller's menu, and leaving when the TV says so).
+  window.RetroPlayer = {
+    started: function () { return started; }, emu: function () { return emu; }, leave: leave, openSlots: openSlots,
+    pause: function () { if (emu && started) emu.pause(); }, resume: function () { if (emu && started) emu.play(); },
+  };
 
   document.addEventListener("visibilitychange", function () {   // a phone switching apps may never come back
     if (document.visibilityState !== "hidden" || !started || leaving) return;

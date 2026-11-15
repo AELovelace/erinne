@@ -40,7 +40,7 @@ def test_migrate_all_moves_every_games_row_out_of_core(settings):
     before = {t: core.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in db.GAMES_TABLES}
     core.close()
     versions = db.migrate_all(settings.db_path, settings.embed_dim)
-    assert versions["games"] == 1
+    assert versions["games"] == 2                                       # 0001 (the move) and 0002 (Lumi Launch's own tables)
     core = db.connect(settings.db_path)
     assert not [t for t in db.GAMES_TABLES if core.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (t,)).fetchone()]
     games = db.connect_feature(settings.db_path, "games")
@@ -48,7 +48,7 @@ def test_migrate_all_moves_every_games_row_out_of_core(settings):
     assert coins.peek(games, alice) == coins.START
     named = games.execute("SELECT u.username FROM lumi_pets p JOIN users u ON u.id = p.user_id ORDER BY 1").fetchall()
     assert [r[0] for r in named] == ["alice", "bob"]                                 # core read through the attach
-    assert db.migrate_all(settings.db_path, settings.embed_dim)["games"] == 1        # again: nothing left to move
+    assert db.migrate_all(settings.db_path, settings.embed_dim)["games"] == 2        # again: nothing left to move
 
 
 def test_deleting_a_user_forgets_their_games_rows(settings):

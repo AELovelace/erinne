@@ -260,7 +260,7 @@
     viewSelect.addEventListener("change", function () { go(viewSelect.value); });
   }
 
-  const SECTION_OF = { screens: "screens", cast: "screens", pair: "screens", home: "home", movies: "movies", movie: "movies", music: "music", album: "music",
+  const SECTION_OF = { controllers: "controllers", screens: "screens", cast: "screens", pair: "screens", home: "home", movies: "movies", movie: "movies", music: "music", album: "music",
                        artist: "music", pictures: "pictures", live: "live", radio: "radio", tv: "tv", tvshow: "tv",
                        games: "games", soundcloud: "soundcloud", scset: "soundcloud", scsearch: "soundcloud", scuser: "soundcloud" };
 
@@ -278,7 +278,8 @@
     const views = { home: viewHome, movies: viewMovies, movie: viewMovie, tv: viewTv, tvshow: viewTvShow, music: viewMusic, album: viewAlbum,
                     soundcloud: viewSoundCloud, scset: viewScSet, scsearch: viewScSearch, scuser: viewScUser,
                     artist: viewArtist, pictures: viewPictures, live: viewLive, radio: viewRadio, games: viewGames,
-                    screens: viewScreens, cast: viewScreens, pair: function (code) { return viewScreens("", code); } };
+                    screens: viewScreens, cast: viewScreens, pair: function (code) { return viewScreens("", code); },
+                    controllers: viewControllers };
     try {
       const nodes = await (views[r.view] || viewHome)(r.arg);
       if (token !== renderToken) return;
@@ -951,6 +952,7 @@
                     onClick: function () { games.open(g); } });
     };
     const out = [], named = {};                          // a shelf per kind of game (Lumi, Arcade, Table games), in the order the server lists them
+    data.games = data.games.filter(function (g) { return !g.hidden; });                    // Lumi Town has no card: her room's door is the way in (games.py hidden)
     data.games.filter(function (g) { return !g.mouse_keyboard; }).forEach(function (g) {   // what any remote or touch screen can play
       const title = g.shelf || "Games";
       if (!named[title]) { named[title] = []; out.push(title); }
@@ -973,23 +975,157 @@
     }).catch(function () { box.textContent = ""; });
   }
 
+  /* 🔗 Controllers (a TV box only; 2026-11-14): Bluetooth game controllers, Xbox One and PlayStation 5, paired to the
+     box as remotes and for the games (Retro, Lumi Launch). The box's own helper does the pairing
+     (deploy/screen/wifi-setup.py Controllers, http://127.0.0.1:9187/api/controllers): this page first gets a one-time
+     pass from the server for the press that opened it (a remote's OK, which the server checks is a remote that may
+     drive this TV, or the box's own keyboard or controller: web/kiosk.py controllers_open), the helper redeems it,
+     and answers with a token good for ten minutes of use. Only game controllers are ever listed or paired. */
+  const PADS_HOME = KIOSK_HOME + "api/controllers";
+  const pads = { token: null, timer: null, sure: null };   // sure: the controller whose Forget was pressed once
+  let lastPress = null;                                     // the last press that may open it: {controller} or {local}, and when
+
+  async function padsApi(path, body) { // the box's helper, across origins (it answers this server's origin only)
+    const response = await fetch(PADS_HOME + path, {
+      method: body === undefined ? "GET" : "POST", cache: "no-store", signal: AbortSignal.timeout(10000),
+      headers: Object.assign({ "X-Controllers": pads.token || "" }, body === undefined ? {} : { "Content-Type": "application/json" }),
+      body: body === undefined ? undefined : JSON.stringify(body) });
+    let data = {};
+    try { data = await response.json(); } catch (e) { /* not JSON */ }
+    if (!response.ok) { const err = new Error(data.detail || "The box's helper didn't answer."); err.status = response.status; throw err; }
+    return data;
+  }
+
+  async function padsOpen() { // a pass for the press that opened this page, then the helper's token
+    const press = lastPress && Date.now() - lastPress.at < 15000 ? lastPress : { local: true };
+    const got = await api("POST", "/media/screen/controllers/open", press.controller ? { controller: press.controller } : { local: true });
+    const opened = await padsApi("/open", { pass: got.pass });
+    pads.token = opened.token;
+    return opened;
+  }
+
+  function padsLine(d) { // what the TV says about one controller
+    if (d.busy) return "Pairing… keep it close";
+    if (d.error) return d.error;
+    if (d.paired && d.connected) return "Connected" + (d.battery !== null && d.battery !== undefined ? " · battery " + d.battery + "%" : "");
+    if (d.paired) return "Paired · press its middle button to wake it";
+    return "Ready to pair";
+  }
+
+  function drawPads(box, state) {
+    const keep = document.activeElement && box.contains(document.activeElement) ? document.activeElement.dataset.key : null;
+    const out = [];
+    if (!state.available) {
+      out.push(empty("A small USB Bluetooth adapter adds it, then come back here.", "This box has no Bluetooth."));
+      box.replaceChildren.apply(box, out);
+      return;
+    }
+    out.push(el("p", "mc-pads-how", "Put a controller in pairing mode, then Find controllers. Xbox: hold the small pair button " +
+      "on its top until the Xbox button flashes fast. PlayStation 5: hold Create and the PS button until the light around " +
+      "the touchpad flashes."));
+    const find = button(state.scanning ? "🔍 Looking for controllers…" : "🔍 Find controllers", "mc-pads-find", function () {
+      padsApi("/scan", {}).then(refreshPads).catch(function (err) { showError(err.message); });
+    });
+    find.dataset.nav = ""; find.dataset.key = "find";
+    out.push(find);
+    const list = el("div", "mc-pads-list");
+    if (!state.devices.length) list.append(el("p", "mc-empty", state.scanning ? "Looking… hold the controller's pairing button." : "No controllers yet."));
+    state.devices.forEach(function (d) {
+      const row = el("div", "mc-pad" + (d.connected ? " on" : ""));
+      row.append(el("span", "mc-pad-icon", d.kind === "playstation" ? "🎮 PS" : d.kind === "xbox" ? "🎮 Xbox" : "🎮"));
+      const words = el("div", "mc-pad-words");
+      words.append(el("strong", null, d.name), el("span", "mc-sub", padsLine(d)));
+      row.append(words);
+      let act;
+      if (!d.paired) act = button("Pair", "", function () { padsApi("/pair", { id: d.id }).then(refreshPads).catch(function (err) { showError(err.message); }); });
+      else act = button(pads.sure === d.id ? "Forget it?" : "Forget", "secondary", function () {
+        if (pads.sure !== d.id) { pads.sure = d.id; refreshPads(); return; }   // pressed twice: it isn't undone
+        pads.sure = null;
+        padsApi("/forget", { id: d.id }).then(function (s) { drawPads(box, s); }).catch(function (err) { showError(err.message); });
+      });
+      act.dataset.nav = ""; act.dataset.key = d.id;
+      act.disabled = Boolean(d.busy);
+      row.append(act);
+      list.append(row);
+    });
+    out.push(list);
+    out.push(el("p", "muted small", "A paired controller drives the TV like a keyboard: the D-pad or stick moves, A presses, B goes back, " +
+      "Start plays or pauses, the Xbox or PS button goes home. In Retro it's the console's controller (a second one is player 2), and " +
+      "its Xbox or PS button (or Start and Select held) opens the game's menu."));
+    box.replaceChildren.apply(box, out);
+    const again = keep && Array.prototype.find.call(box.querySelectorAll("[data-key]"), function (n) { return n.dataset.key === keep; });
+    if (again) again.focus({ preventScroll: true });
+  }
+
+  function refreshPads() { // every two seconds while the page shows: pairing and finding happen on the box
+    const box = $("mc-pads");
+    if (!box || route().view !== "controllers") { clearInterval(pads.timer); pads.timer = null; return; }
+    padsApi("").then(function (state) { if (box.isConnected) drawPads(box, state); }).catch(function (err) {
+      if (err.status === 401) { pads.token = null; clearInterval(pads.timer); pads.timer = null; showError("Controllers closed after a while. Open them again from the menu."); }
+    });
+  }
+
+  async function viewControllers() {
+    setHead("Controllers");
+    if (!kiosk) return [empty("Game controllers pair to a Mnemerynne TV box, from that TV's menu.", "Only on a TV box.")];
+    let state;
+    try { state = pads.token ? await padsApi("") : await padsOpen(); }
+    catch (err) {
+      if (err.status !== 401) throw err;
+      pads.token = null;                                   // the helper forgot it (ten minutes, or a restart): a new pass
+      state = await padsOpen();
+    }
+    const box = el("div", "mc-pads");
+    box.id = "mc-pads";
+    drawPads(box, state);
+    clearInterval(pads.timer);
+    pads.timer = setInterval(refreshPads, 2000);
+    return [box];
+  }
+
+  /* Media → Retro on a TV: its pages (web/retro.py) in the game layer, so the remote reaches them through the frame
+     like a game's (retro-tv.js), controllers play in it (the TV page leaves the pads to it), and leaving asks it to
+     save first. */
+  const RETRO = { slug: "retro", name: "Retro", icon: "🕹", url: "/media/retro", pads: true, saveFirst: true,
+                  controls: "A controller plays · its Xbox / PS button (or Start + Select held) opens the game's menu · remote: arrows and OK, ⏯ menu" };
+
   /* The game layer: the game's page (/media/games/<slug>, web/games.py) in a frame filling the screen. It's
      Mnemerynne's own code on its own origin, so the two talk by messages (static/games/common.js):
      - here → game: a remote panel's arrows and Enter ({type: "mnemerynne-game-key", key}), and the keyboard's
        when the frame doesn't have focus;
      - game → here: its score line ("mnemerynne-game-state", which a remote panel shows under the game's name),
        Escape or Backspace inside it ("mnemerynne-game-close"), and a request for another game by its slug
-       ("mnemerynne-game-open": Lumi's three apps open each other this way, so the bar and the remote follow).
-     The panel's Stop, or anything cast to the TV, closes the game (screenMode.command). */
+       ("mnemerynne-game-open": Lumi's apps open each other this way, so the bar and the remote follow).
+     Lumi Town (games.py, hidden from the list) opens its games with {back: "<place>"}: the game it came from is
+     remembered (games.back), and leaving the game (the bar's Back, Escape, or the game's own close) walks back into
+     that place in the town instead of closing. The panel's Stop, or anything cast to the TV, closes the game outright
+     (screenMode.command). */
   const gameFrame = $("mc-game-frame");
+  const PLACE = /^[a-z][a-z-]{0,23}$/;   // a town place's id, as the town sends it (static/games/lumi-pet/town-ui.js)
   const games = {
-    current: null, sub: "",
+    current: null, sub: "", back: null,   // back: {game, at} to return to when this game is left, or null
 
     isOpen: function () { return !$("mc-game").hidden; },
 
-    url: function (g) { return "/media/games/" + encodeURIComponent(g.slug); },
+    url: function (g, at) { return g.url || "/media/games/" + encodeURIComponent(g.slug) + (at ? "?at=" + encodeURIComponent(at) : ""); },
 
-    open: function (g) {
+    /* Whether the open game reads controllers itself (Lumi Launch's gamepad.js, Retro's emulator): then the TV page
+       leaves them alone, so a press isn't taken twice. */
+    readsPads: function () {
+      const g = this.current;
+      return Boolean(g && (g.pads || (g.extras || []).indexOf("gamepad.js") >= 0));
+    },
+
+    /* A game that saves on the way out (Retro): ask it to, and close when it says it's done (or after a while). */
+    leaving: false, leaveTimer: null,
+    askLeave: function () {
+      if (this.leaving) return;
+      this.leaving = true;
+      if (gameFrame.contentWindow) gameFrame.contentWindow.postMessage({ type: "mnemerynne-game-leave" }, location.origin);
+      this.leaveTimer = setTimeout(function () { games.close(true); }, 8000);
+    },
+
+    open: function (g, at) { // at: where in the game to start (Lumi Town: the place she's in or in front of)
       player.close();
       nowPlaying.pause();
       this.current = g;
@@ -998,12 +1134,24 @@
       $("mc-game-icon").textContent = g.icon || "🎮";
       $("mc-game-status").textContent = g.controls || "";
       $("mc-game").hidden = false;
-      gameFrame.src = this.url(g);
+      gameFrame.src = this.url(g, at);
       gameFrame.focus();
       if (screenId) screenMode.report(true);
     },
 
-    close: function () {
+    /* Leaving a game: back into the town it was opened from, or (from anywhere else) back to Games. */
+    leave: function () {
+      if (this.current && this.current.saveFirst && this.isOpen()) { this.askLeave(); return; }
+      const back = this.back;
+      if (back && this.isOpen() && this.current && this.current.slug !== back.game.slug) { this.back = null; this.open(back.game, back.at); return; }
+      this.close();
+    },
+
+    close: function (saved) { // saved: a save-first game said it's done (or ran out of time): close at once
+      if (!saved && this.current && this.current.saveFirst && this.isOpen()) { this.askLeave(); return; }
+      clearTimeout(this.leaveTimer);
+      this.leaving = false;
+      this.back = null;                   // closed outright: nothing to walk back into
       if (!this.isOpen()) return;
       gameFrame.removeAttribute("src");   // stops it: nothing keeps running behind the page
       $("mc-game").hidden = true;
@@ -1039,7 +1187,7 @@
       games.close();
     },
   };
-  $("mc-game-back").addEventListener("click", function () { games.close(); });
+  $("mc-game-back").addEventListener("click", function () { games.leave(); });
   gameFrame.addEventListener("load", function () { games.syncScale(); });
   window.addEventListener("resize", function () { games.syncScale(); });
   $("mc-game-full").addEventListener("click", function () { games.full(); });
@@ -1047,11 +1195,16 @@
   window.addEventListener("message", function (e) {
     if (e.origin !== location.origin || e.source !== gameFrame.contentWindow || !games.isOpen()) return;   // our game only
     const data = e.data || {};
-    if (data.type === "mnemerynne-game-close") games.close();
+    if (data.type === "mnemerynne-game-close") { if (games.leaving) games.close(true); else games.leave(); }
     else if (data.type === "mnemerynne-game-open") {   // only ever a game the server lists for this person
+      const from = games.current, back = typeof data.back === "string" && PLACE.test(data.back) ? data.back : null;
+      const at = typeof data.at === "string" && PLACE.test(data.at) ? data.at : null;
       api("GET", "/api/media/games").then(function (listed) {
         const next = listed.games.find(function (g) { return g.slug === data.slug; });
-        if (next && games.isOpen()) games.open(next);
+        if (!next || !games.isOpen()) return;
+        if (back && from) games.back = { game: from, at: back };            // opened from the town: leaving comes back to this place
+        else if (games.back && next.slug === games.back.game.slug) games.back = null;   // walked back into the town itself
+        games.open(next, at);
       }).catch(function () {});                        // the game that asked simply stays open
     }
     else if (data.type === "mnemerynne-game-state") {
@@ -2105,6 +2258,7 @@
   function remotePress(button, controller, remote) {
     const key = REMOTE_KEYS[button];
     if (!key) return;
+    if (button === "enter" && controller) lastPress = { controller: controller, at: Date.now() };   // what may open Controllers
     if (games.isOpen()) { games.key(key, controller, remote); return; }   // Preserve the signed remote identity (and which remote it was) through the TV frame.
     const target = document.activeElement || document.body;
     const field = ["INPUT", "SELECT", "TEXTAREA"].indexOf(target.tagName) >= 0;
@@ -2116,12 +2270,44 @@
     else if (target !== document.body && !field) target.click();
   }
 
+  /* A game controller (gamepad.js: paired over Bluetooth in Controllers, or plugged in): the box's own, like its
+     keyboard, so it also reaches Kiosk settings (a remote never does). Its presses are replayed as keys here, or go
+     to the open game, unless the game reads controllers itself (Lumi Launch, Retro). */
+  const PAD_KEYS = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight", enter: "Enter",
+                     back: "Escape", play: "MediaPlayPause", prev: "MediaTrackPrevious", next: "MediaTrackNext" };
+  let padDispatch = false;                 // a controller's key is being replayed: it counts as the box's own
+  function padPress(action) {
+    lastPress = { local: true, at: Date.now() };
+    if (games.isOpen()) {
+      if (games.readsPads()) return;                                       // it has the controller itself
+      if (action === "back" || action === "home") { games.leave(); return; }
+      const key = PAD_KEYS[action];
+      if (key) games.key(key === "MediaPlayPause" ? "MediaPlay" : key);
+      return;
+    }
+    if (action === "home") { go("home"); return; }
+    const key = PAD_KEYS[action];
+    if (!key) return;
+    const target = document.activeElement || document.body;
+    const field = ["INPUT", "SELECT", "TEXTAREA"].indexOf(target.tagName) >= 0;
+    padDispatch = true;
+    try {
+      if (!target.dispatchEvent(new KeyboardEvent("keydown", { key: key, bubbles: true, cancelable: true }))) return;   // taken
+      if (key !== "Enter") { if (field && action !== "back") move(action, false); return; }
+      if (episodes.counting() && $("mc-upnext").contains(target)) target.click();
+      else if (!$("mc-player").hidden) player.toggleAny();
+      else if (!$("mc-viewer").hidden) viewer.slideshow();
+      else if (target !== document.body && !field) { window.mcPadPress = true; try { target.click(); } finally { window.mcPadPress = false; } }
+    } finally { padDispatch = false; }
+  }
+
   document.addEventListener("keydown", function (e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.isTrusted) lastPress = { local: true, at: Date.now() };   // the box's own keyboard
     // A game has the keyboard while its frame has focus (keys inside it never reach this page). With focus out
     // here, Escape or Backspace goes back to Games, and arrows and Enter go to the game, unless on the bar's buttons.
     if (games.isOpen()) {
-      if (e.key === "Escape" || e.key === "Backspace") { e.preventDefault(); games.close(); return; }
+      if (e.key === "Escape" || e.key === "Backspace") { e.preventDefault(); games.leave(); return; }   // back into Lumi Town if that's where it came from
       const onBar = document.activeElement && document.activeElement.closest && document.activeElement.closest(".mc-game-bar");
       if (["MediaPlay", "MediaPlayPause", "p", "P"].indexOf(e.key) >= 0) {
         e.preventDefault(); games.key("MediaPlay"); // Play always reaches the open game, even with the bar focused.
@@ -2137,7 +2323,7 @@
     const tag = (document.activeElement && document.activeElement.tagName) || "";
     const typing = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
     const dirs = { ArrowRight: "right", ArrowLeft: "left", ArrowDown: "down", ArrowUp: "up" };
-    if (dirs[e.key] && !typing) { e.preventDefault(); move(dirs[e.key], !e.isTrusted); return; }   // untrusted: a remote
+    if (dirs[e.key] && !typing) { e.preventDefault(); move(dirs[e.key], !e.isTrusted && !padDispatch); return; }   // untrusted: a remote (a controller is the box's own)
     if ((e.key === "Escape" || (e.key === "Backspace" && !typing)) && ["movie", "tvshow", "album", "artist", "scset"].indexOf(route().view) >= 0) {
       e.preventDefault(); history.back(); return;
     }
@@ -3203,6 +3389,9 @@
   document.querySelectorAll(".mc-menu-item[data-view]").forEach(function (b) {
     b.addEventListener("click", function () { go(b.dataset.view); });
   });
+  if ($("mc-controllers")) $("mc-controllers").hidden = !kiosk;          // pairing needs the box's own helper
+  if ($("mc-retro")) $("mc-retro").addEventListener("click", function () { games.open(RETRO); });
+  if (screenId && window.MPad) window.MPad.start(padPress);              // a controller paired to the box, or plugged in
 
   function tick() {
     const now = new Date();

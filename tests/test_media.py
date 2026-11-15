@@ -1173,7 +1173,7 @@ def test_built_in_games_open_from_media_and_show_on_a_remote(client, conn, direc
     _turn_on(client)
     assert 'data-view="games"' in client.get("/media").text                # built in: listed with no setup
     listed = client.get("/api/media/games").json()["games"]
-    assert [g["slug"] for g in listed] == [g.slug for g in games.GAMES] and [g["name"] for g in listed[:4]] == ["Lumi Pet", "Lumi Dungeons", "Lumi’s Garden", "Prism Drop"]
+    assert [g["slug"] for g in listed] == [g.slug for g in games.GAMES] and [g["name"] for g in listed[:5]] == ["Lumi Pet", "Lumi Dungeons", "Lumi’s Garden", "Lumi Town", "Prism Drop"]
     page = client.get("/media/games/prism-drop")
     assert page.status_code == 200
     for name in ("games/common.js", "games/common.css", "games/prism-drop/rules.js", "games/prism-drop/game.js",
@@ -1186,8 +1186,11 @@ def test_built_in_games_open_from_media_and_show_on_a_remote(client, conn, direc
     shelves = {}                                         # Lumi's three apps have a shelf of their own, and so do the table games
     for g in listed:
         shelves.setdefault(g["shelf"], []).append(g["slug"])
-    assert list(shelves) == ["Lumi", "Arcade", "Table games"] and shelves["Lumi"] == ["lumi-pet", "lumi-dungeons", "lumi-garden"]
-    assert shelves["Table games"] == ["blackjack", "roulette", "horse-racing", "slots"] and shelves["Arcade"] == ["prism-drop", "stickbob-runner", "lumi-soft", "breakout", "snake", "teacup-tower"]
+    assert list(shelves) == ["Lumi", "Arcade", "Table games"] and shelves["Lumi"] == ["lumi-pet", "lumi-dungeons", "lumi-garden", "lumi-town"]
+    # Lumi Town is listed (so the game layer may open it) but hidden: no card, her room's door is the way in (media.js viewGames).
+    assert [g["slug"] for g in listed if g["hidden"]] == ["lumi-town"]
+    assert "!g.hidden" in (Path(__file__).parent.parent / "mnemerynne/web/static/media.js").read_text(encoding="utf-8")
+    assert shelves["Table games"] == ["blackjack", "roulette", "horse-racing", "slots"] and shelves["Arcade"] == ["prism-drop", "stickbob-runner", "lumi-soft", "breakout", "snake", "teacup-tower", "lumi-launch"]
     for slug in ("breakout", "snake", "teacup-tower"):                   # the GameMaker ports: the shared arcade shell, then the game
         page = client.get(f"/media/games/{slug}")
         assert page.status_code == 200 and 'id="ar-canvas"' in page.text
@@ -1218,6 +1221,17 @@ def test_built_in_games_open_from_media_and_show_on_a_remote(client, conn, direc
         assert tabs[slug] == list(games.get(slug).tabs) and f'data-count="{len(tabs[slug])}"' in app.text
     assert tabs == {"lumi-pet": ["care", "pantry", "toys", "closet", "home", "shop", "collection", "settings"],
                     "lumi-dungeons": ["dungeon", "battle", "skills", "settings"], "lumi-garden": ["garden", "settings"]}
+    town = client.get("/media/games/lumi-town")                          # Lumi Town: the same kit, one list, its own scripts, no app of its own
+    assert town.status_code == 200 and 'data-game="lumi-town" data-kit="lumi-pet"' in town.text and re.findall(r'data-lp-tab="([a-z]+)"', town.text) == ["town"]
+    assert "/static/games/lumi-pet/town-ui.js?v=" in town.text and "/static/games/lumi-pet/town-art.js?v=" in town.text
+    assert "LUMI<span>TOWN</span>" in town.text and 'id="lp-place">LUMI TOWN<' in town.text
+    assert "lumi-town/manifest.webmanifest" not in town.text and client.get("/media/games/lumi-town/manifest.webmanifest").status_code == 404
+    assert anonymous.get("/media/games/lumi-town").status_code == 401
+    # Every place in the town opens a game that exists (town-ui.js names them by slug).
+    town_ui = (Path(__file__).parent.parent / "mnemerynne/web/static/games/lumi-pet/town-ui.js").read_text(encoding="utf-8")
+    named = re.findall(r'(?:slug|app): "([a-z-]+)"', town_ui)
+    assert set(named) == {"breakout", "snake", "teacup-tower", "prism-drop", "lumi-launch", "lumi-dungeons", "blackjack", "roulette", "horse-racing",
+                          "slots", "lumi-pet", "lumi-garden", "lumi-soft"} and all(games.get(slug) for slug in named)
     assert "LUMI<span>PET</span>" in pet.text and "LUMI<span>DUNGEONS</span>" in client.get("/media/games/lumi-dungeons").text
     assert all(g["track_keys"] and g["kit"] == "lumi-pet" for g in listed[:3])   # a remote's Previous and Next reach all three
     assert anonymous.get("/media/games/lumi-dungeons").status_code == 401 and anonymous.get("/media/games/lumi-garden").status_code == 401

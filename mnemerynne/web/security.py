@@ -157,6 +157,8 @@ PUBLIC_LIMITS: list[tuple[str, frozenset[str] | None, int, int]] = [
     ("/media/remote/pair", None, 60, 60),     # an unpaired remote (media/remotes.py) asks every 3 s
     ("/api/media/kiosk/redeem", frozenset({"POST"}), 30, 60),   # a screen box's helper (kiosk settings)
     ("/api/media/kiosk/screen", None, 120, 60),
+    ("/api/media/kiosk/controllers/redeem", frozenset({"POST"}), 30, 60),   # a screen box's helper (🎮 Controllers)
+    ("/media/screen/controllers/open", frozenset({"POST"}), 30, 60),
 ]
 
 

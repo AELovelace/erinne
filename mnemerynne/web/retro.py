@@ -20,7 +20,7 @@ from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
 from mnemerynne.media import retro
-from mnemerynne.web.deps import get_db, get_media_db, get_settings, is_admin, page_user
+from mnemerynne.web.deps import LoginRequired, _session_user, get_db, get_media_db, get_settings, is_admin
 from mnemerynne.web.media import _media_on, media_user
 from mnemerynne.web.sendfile import send_file
 
@@ -65,17 +65,35 @@ def _consoles() -> list[dict]:
 
 
 # -------------------------------------------------------------------- pages
+def retro_page_user(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> sqlite3.Row:
+    """Whoever is signed in; or on a paired TV (2026-11-14: Retro in the TV's game layer), the TV's owner, as for
+    the rest of Media. Neither: the sign-in page."""
+    user = _session_user(request, conn)
+    if user is not None:
+        return user
+    try:
+        return media_user(request, conn)
+    except HTTPException:
+        raise LoginRequired() from None
+
+
+def _on_tv(request: Request, conn: sqlite3.Connection) -> bool:
+    """Shown on a TV by its screen key (nobody signed in): no site menu, and none of the owner's messages."""
+    return _session_user(request, conn) is None
+
+
 @router.get("/media/retro", response_class=HTMLResponse)
-def retro_page(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_media_db)):
+def retro_page(request: Request, user=Depends(retro_page_user), conn: sqlite3.Connection = Depends(get_media_db)):
     lib = retro.library(conn)
+    tv = _on_tv(request, conn)
     return request.app.state.templates.TemplateResponse(request, "retro.html", {
-        "user": user, "is_admin": is_admin(request, conn, user), "active": "media",
+        "user": None if tv else user, "on_tv": tv, "is_admin": False if tv else is_admin(request, conn, user), "active": "media",
         "folder": lib["share_path"] if lib is not None else media.load_settings(conn)["retro_folder"],
         "consoles": _consoles()})
 
 
 @router.get("/media/retro/play/{file_id}", response_class=HTMLResponse)
-def player_page(file_id: int, request: Request, user=Depends(page_user),
+def player_page(file_id: int, request: Request, user=Depends(retro_page_user),
                 conn: sqlite3.Connection = Depends(get_media_db), settings: Settings = Depends(get_settings)):
     shelf = retro.Shelf(conn, user["id"])
     found = shelf.rom(file_id)
@@ -99,7 +117,7 @@ def player_page(file_id: int, request: Request, user=Depends(page_user),
             "bios_names": list(console.bios)}
     response = request.app.state.templates.TemplateResponse(request, "retro_play.html", {
         # In a <script> block: a file name holding "</script>" mustn't end it, so no "<" goes in as it is.
-        "user": user, "game": game, "game_json": json.dumps(game).replace("<", "\\u003c")})
+        "user": None if _on_tv(request, conn) else user, "game": game, "game_json": json.dumps(game).replace("<", "\\u003c")})
     response.headers["Content-Security-Policy"] = PLAYER_CSP
     return response
 

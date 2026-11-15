@@ -56,14 +56,14 @@ test("a finished trip shows how it ended once, then the places again", () => {
   assert.equal(open(lost).rows[0].hint, "Carried home from floor 2 · left behind: 24 coins · 1 potion");
 });
 
-test("a trip's ending offers to take her home first, which reads the ending on the way out", () => {
+test("a trip's ending offers the way back to town first, which reads the ending on the way out", () => {
   const home = run({ over: "home", ended: { coins: 80, potions: 1, trophies: [], mods: [], depth: 3 } }), went = [], opened = [];
   const snap = { pet: { potions: 2 }, dungeon: { run: home, environments: [] } };
-  const rows = UI.rows({ snap, play: {}, dismissed: null, go: change => went.push(change), home: () => opened.push("lumi-pet") });
+  const rows = UI.rows({ snap, play: {}, dismissed: null, go: change => went.push(change), home: () => opened.push("lumi-town") });
   assert.deepEqual(rows.map(r => r.key), ["go-home", "continue"]);
-  assert.equal(rows[0].name, "Take her home");
+  assert.equal(rows[0].name, "Back to town"); // Out of the tavern into Lumi Town (2026-11-12), where her house is.
   rows[0].local();
-  assert.deepEqual([went, opened], [[{ dismiss: 9 }], ["lumi-pet"]], "Read, then off to her room");
+  assert.deepEqual([went, opened], [[{ dismiss: 9 }], ["lumi-town"]], "Read, then out into town");
   assert.deepEqual(UI.rows({ snap, play: {}, dismissed: null, go() {} }).map(r => r.key), ["continue"], "No way home offered (a party): just the ending");
   assert.deepEqual(UI.homeRow(() => {}).key, "go-home");
 });

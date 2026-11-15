@@ -9,7 +9,7 @@
 - Who may play: whoever may use Media, and a paired screen (the TV) as its owner, like the rest of Media.
 - Coins are one purse per account, shared by every game and kept on this server (coins.py). Online casino tables bet them,
   local multiplayer tables use free-to-play credits instead, and Prism Drop and the Lumi apps pay small rewards the server has
-  checked. Breakout and Snake cost a run's entry and pay its checked score (arcade.py), solo or in showdowns (showdown.py). Prism Drop's best score stays on the device. Lumi lives on the account (lumipet.py): one pet for Lumi Pet, Lumi Dungeons and Lumi’s Garden, whose shops
+  checked. Breakout and Snake cost a run's entry and pay its checked score (arcade.py), solo or in showdowns (showdown.py). Prism Drop's best score stays on the device. Lumi lives on the account (lumipet.py): one pet for Lumi Pet, Lumi Dungeons, Lumi’s Garden and Lumi Town (a map, hidden from Games, reached through her door), whose shops
   spend coins. Coins have no cash value.
 """
 
@@ -32,6 +32,7 @@ class Game:
     extras: tuple[str, ...] = ()   # more files under static/games/ its page loads before game.js (.css and .js), e.g. a shared shell
     kit: str = ""       # the folder under static/games/ (and the partial) its page is built from, when that isn't its own slug: the three Lumi apps share "lumi-pet"
     tabs: tuple[str, ...] = ()     # which of the kit's tabs this app shows, in order (templates/games/lumi-pet.html); empty means the game has no tabs
+    hidden: bool = False   # not a card in Media → Games: reached only from inside another game (Lumi Town, through her room's door). Still listed, so the game layer may open it (media.js)
 
 
 GAMES: tuple[Game, ...] = (
@@ -50,6 +51,13 @@ GAMES: tuple[Game, ...] = (
          description="The Stardust Garden: plant flowers, trim them when they’re ready, and press their starpowder into coins. It keeps growing while you’re away.",
          controls="▲ ▼ ◀ ▶ move over the plots · Enter plants or trims · ⏯ presses the powder · ⏮ ⏭ choose", track_keys=True,
          shelf="Lumi", kit="lumi-pet", tabs=("garden", "settings")),
+    # Lumi Town (Doll's design, 2026-11-12): the town map behind her room's door, with her house, the tavern (Lumi Dungeons),
+    # the garden (Lumi's Garden), and the Arcade, Casino and Lumi-Soft field to walk into (static/games/lumi-pet/town-ui.js).
+    # A game opened from it comes back to it when it closes (media.js games.back). No card of its own: the door is the way in.
+    Game(slug="lumi-town", name="Lumi Town", icon="🏘",
+         description="Lumi's town: her house, the tavern, the garden, the Arcade, the Casino and the Lumi-Soft field.",
+         controls="▲ ▼ or ◀ ▶ choose a place · Enter goes in · Escape / Back returns", track_keys=True,
+         shelf="Lumi", kit="lumi-pet", tabs=("town",), hidden=True),
     Game(slug="prism-drop", name="Prism Drop", icon="🔮",
          description="Pick a pocket and Lumi drops her glowing ball through blocks, bombs, bonus pegs and sliding platforms, then flies down to fetch it. Ten drops, and your score pays coins.",
          controls="◀ ▶ pick a pocket · Enter drops · ▲ replays the last drop · ▼ sound on or off",
@@ -84,6 +92,13 @@ GAMES: tuple[Game, ...] = (
          description="Lumi bounces up an endless tower of teacups: steer her, run at the walls to fly higher, string big hops into combos, and keep ahead as the tower rises. Race someone in a showdown. 25 coins a run; every floor pays one.",
          controls="◀ ▶ steer · she bounces by herself · faster sideways jumps higher · P pauses · menus: arrows and Enter",
          extras=("lumi-pet/closet.js", "arcade/lumi-sprite.js", "arcade/arcade.css", "arcade/arcade.js")),
+    # Lumi Launch (Doll's break game, 2026-11-14): fire Lumi from a star cannon for distance. Its own page (not the arcade
+    # shell: it has couch turns), every kind of remote plus gamepads (gamepad.js). The server replays each go's presses
+    # before it pays (lumilaunch.py, lumilaunch_rules.py); couch turns on a TV are free play.
+    Game(slug="lumi-launch", name="Lumi Launch", icon="🎇",
+         description="Fire Lumi from her star cannon and see how far she flies: bounce her off Cloud Pillows, Teacup Flingers and Yarn Rolls, spend sparkle puffs in the air, and stay out of the honey. Three launches a go; couch turns on a TV. 25 coins a go; every 20 m pays one.",
+         controls="OK (Enter, Space, a tap, a remote's OK or a gamepad's A) locks the angle, fires, then puffs · ▲ ▼ nudge the angle · P pauses · menus: arrows and OK",
+         extras=("lumi-pet/closet.js", "arcade/lumi-sprite.js", "gamepad.js")),
 )
 
 # Casino tables share one renderer and server rules; each still has its own Games card.
@@ -112,4 +127,4 @@ def kit(game: Game) -> str:
     return "casino" if game.multiplayer else game.kit or game.slug
 
 
-LUMI_APPS: tuple[Game, ...] = tuple(g for g in GAMES if g.kit == "lumi-pet")   # Lumi Pet, Lumi Dungeons, Lumi's Garden: installable apps of their own (web/app.py)
+LUMI_APPS: tuple[Game, ...] = tuple(g for g in GAMES if g.kit == "lumi-pet" and not g.hidden)   # Lumi Pet, Lumi Dungeons, Lumi's Garden: installable apps of their own (web/app.py). Lumi Town isn't: it's only ever reached through her door.

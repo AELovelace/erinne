@@ -363,6 +363,9 @@ user_pref("network.connectivity-service.enabled", false);
 user_pref("browser.backspace_action", 0);                       // Backspace goes back a page: the kiosk has no buttons
 user_pref("browser.link.open_newwindow", 1);                    // new tabs and windows open in this one: with no tabs
 user_pref("browser.link.open_newwindow.restriction", 0);        // in the kiosk, a document opened in one strands people
+user_pref("dom.gamepad.enabled", true);                         // game controllers (Bluetooth or USB) reach the pages
+user_pref("network.lna.blocking", false);                       // the TV page asks this box's helper (127.0.0.1) to pair
+user_pref("network.lna.enabled", false);                        // controllers; Firefox's local-network guard would stop it
 EOF
     if [[ $YOUTUBE_H264 == 1 ]]; then
         cat <<'EOF'
@@ -504,6 +507,9 @@ install_packages() {
         pipewire pipewire-alsa pipewire-pulseaudio wireplumber pulseaudio-utils wlr-randr curl git \
         google-noto-sans-fonts google-noto-color-emoji-fonts
     sys dnf install -y --setopt=install_weak_deps=False python3 python3-qrcode
+    # Bluetooth game controllers (Xbox, PlayStation) for 🎮 Controllers on the TV: BlueZ (bluetoothctl). The
+    # kernel has the drivers (hid-playstation, hid-microsoft).
+    sys dnf install -y --setopt=install_weak_deps=False bluez
     if [[ $WIFI_SETUP == 1 ]]; then
         sys dnf install -y --setopt=install_weak_deps=False iw dnsmasq NetworkManager-wifi
     fi
@@ -615,6 +621,7 @@ enable_service() {
     fi
     # The helper runs either way (the start page, Kiosk settings); WIFI_SETUP in the settings file says
     # whether it may start the hotspot.
+    sys systemctl enable --now bluetooth.service         # paired controllers reconnect by themselves at boot
     sys systemctl enable mnemerynne-screen-wifi.service
     sys systemctl restart mnemerynne-screen-wifi.service
     sys systemctl enable mnemerynne-screen.service
@@ -670,6 +677,11 @@ check() {
     if curl -fsS -o /dev/null --max-time 3 http://127.0.0.1:9187/api/status; then ok "start page and Kiosk settings running"; else bad "the helper isn't answering: journalctl -u mnemerynne-screen-wifi -b"; fi
     if [[ $(conf_value WIFI_SETUP) == yes ]]; then
         if iw list 2>/dev/null | grep -A10 "Supported interface modes" | grep -qw AP; then ok "the Wi-Fi card can be a hotspot"; else note "no Wi-Fi card that can be a hotspot: setting up Wi-Fi needs a cable or SSH"; fi
+    fi
+    if bluetoothctl show 2>/dev/null | grep -q "^Controller"; then
+        ok "Bluetooth, $(bluetoothctl devices Paired 2>/dev/null | grep -c '^Device') paired (🎮 Controllers on the TV)"
+    else
+        note "no Bluetooth adapter: game controllers need one (a small USB Bluetooth adapter works)"
     fi
     if [[ -d $SOURCE_DIR/.git ]]; then
         ok "release $(git -C "$SOURCE_DIR" describe --tags --always --match 'screen-v*' HEAD 2>/dev/null) ($SOURCE_DIR)"

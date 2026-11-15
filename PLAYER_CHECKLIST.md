@@ -23,13 +23,16 @@ Ordinary **Create table** keeps the original one-seat-per-account/TV behavior. T
 
 ## Yarn Pop, Lumi Conga and the arcade's Lumi
 
-0. **Your own Lumi:** give your Lumi a glow and something to wear in Lumi Pet, then open Prism Drop, Yarn Pop, Lumi Conga and Teacup Tower. Each should show her in that glow and outfit. In Prism Drop she holds the ball over your pick, lets go, darts about while it falls, then fetches it from the pocket and carries it back up. A solo game should fill most of the screen.
+0. **Your own Lumi:** give your Lumi a glow and something to wear in Lumi Pet, then open Prism Drop, Yarn Pop, Lumi Conga, Teacup Tower and Lumi Launch. Each should show her in that glow and outfit. In Prism Drop she holds the ball over your pick, lets go, darts about while it falls, then fetches it from the pocket and carries it back up. A solo game should fill most of the screen.
 1. **Solo:** **Play solo** costs 25 coins. Yarn Pop launches Lumi with Enter, ▲ or a tap and the cushion follows held keys, a pointer, or a remote's nudges; check her face changes as she speeds up, and that multiball brings in friends in other colours. Lumi Conga starts on the first arrow; check each Lumi picked up joins the end of the line in her own colour (pink 1, gold 5, aqua 10). Game over shows the score the server counted and the coins paid.
 2. **Showdown:** two people sit at one table and both press **Ready to race**. Check that nobody is charged until both are ready, that both get the same levels or food, and that each sees the other's board live.
 3. **Watching:** a third person watches both boards. Check that bets on the winner pay double and that bets come back when a racer leaves before the race.
 4. **Going away:** close the game as a racer between races. After 30 seconds the seat shows as empty and any bets come back. Mid-race, the racer who left forfeits.
 5. **Teacup Tower:** Lumi bounces by herself and ◀ ▶ steer her. Running at a wall makes her bounce higher, and big hops show COMBO. A cracked cup takes one bounce. From floor 5 the tower rises, and falling below the bottom ends the run with 1 coin a floor. In a showdown, both racers climb the same tower and each sees the other's climb.
-6. **Casino tables:** close a table game and wait two minutes. The seat is given up, and a bet placed for the next round comes back. A TV table ends once the TV has been away for two minutes.
+6. **Lumi Launch, solo:** **Play a go** costs 25 coins. The needle swings; ▲ ▼ nudge it and it stops swinging; OK locks it. The power bar fills and empties; OK fires. In the air, OK spends a sparkle puff (three stars, top right), and floating stardust gives one back. Check Cloud Pillows bounce her, Teacup Flingers throw her, Yarn Rolls speed her along, Wish Wind lifts her, and honey or a nap mat stops her where she lands (she looks stuck or asleep). After three launches the results show the server's distances and the coins paid (1 per 20 m), and **Best launches** lists the household. A pink flag marks your longest launch.
+7. **Lumi Launch, every controller:** play launches with Enter or Space, with a click or a tap on the course, with a remote's OK on a paired TV, and with a gamepad's A (Start pauses, the D-pad nudges). On a phone, check the big OK and ▲ ▼ buttons appear and the hint doesn't cover the cannon.
+8. **Lumi Launch, couch turns on a TV:** choose **Couch turns** and press OK on two remotes, one of them a TV guest's. Check each joins under their own name with their own Lumi, that a remote pressing out of turn gets "It's …'s turn!", and that after three rounds the scores crown the longest total (no crown on a tie). On a computer, **Add a player on this screen** works without remotes.
+9. **Casino tables:** close a table game and wait two minutes. The seat is given up, and a bet placed for the next round comes back. A TV table ends once the TV has been away for two minutes.
 
 ## Lumi Pet
 
@@ -81,9 +84,19 @@ Games follow **Screens → Text size**, including while a game is already open. 
 5. **Couch:** the same fight on one TV with remotes: each person's column shows their moves only on their turn; ◀ ▶ choose aim and who an item is for; ⏯ drinks a potion on your turn.
 6. **Open parties:** with a party waiting on another device, choose **See open parties**: check the card shows its host, place, code, the Lumis already in it (in their colours) and free seats; join with arrows + Enter and with two taps.
 
-## Lumi Pet ⇄ Lumi Dungeons: the door (2026-11-11)
+## Lumi Pet ⇄ Lumi Town: the door (2026-11-11, the town 2026-11-12)
 
-1. **The door:** in Lumi Pet, press the door in her room. Check she trots off and Lumi Dungeons opens. Inside Media's game window, check the name in the bar changes too. On a phone where the door is off-screen, check **Care → Through the door** (the last row) does the same.
-2. **Take her home:** in Lumi Dungeons, check **Take her home** is the first row of the Dungeon tab and goes back to her room. Check it isn't there in a party lobby or on a party trip.
-3. **After a trip:** finish a trip (walk home, give up, or lose). Check the ending screen has **Take her home** first, with the cursor on it. Choose it and check Lumi Pet says where she went and what she brought back. Reload and check she doesn't say it again.
+1. **The door:** in Lumi Pet, press the door in her room. Check she trots off and Lumi Town opens, with her standing in front of her house. Inside Media's game window, check the name in the bar changes too. On a phone where the door is off-screen, check **Care → Through the door** (the last row) does the same.
+2. **Back to town:** in Lumi Dungeons, check **Back to town** is the first row of the Dungeon tab and lands in town in front of the tavern. Check it isn't there in a party lobby or on a party trip.
+3. **After a trip:** finish a trip (walk home, give up, or lose). Check the ending screen has **Back to town** first, with the cursor on it. Choose it, then **Lumi's house**, and check Lumi Pet says where she went and what she brought back. Reload and check she doesn't say it again.
 4. **The tavern:** open Lumi Dungeons and check the background is the Lantern & Paw tavern, not her room. Check the bottles, quest board and hearth, that the fire flickers, and that after dark the window shows stars. Check Lumi Pet still shows her own room.
+
+## Lumi Town (2026-11-12)
+
+1. **No card:** check Lumi Town isn't on the Games page; only her door leads there.
+2. **The map:** check all six places show on a TV, a computer and a phone: Arcade, Tavern, Casino on the high street, and Lumi's house, Garden and the Lumi-Soft field on the lane. Walk between them with the arrows (▲ ▼ cross the street) and with presses. Check Lumi walks to each door, the place lights up and its name shows over it. After dark, check the sky has stars and the lamps glow.
+3. **Walking in:** go into the Arcade, the Casino and the field. Check each looks like itself, lists its games (Arcade: Yarn Pop, Lumi Conga, Teacup Tower, Prism Drop, Lumi Launch, five cabinets in a row; Casino: Blackjack, Roulette, Horse Racing, Slots; field: Lumi-Soft), and that **Back to the town map** walks out in front of it.
+4. **Coming back:** inside Media's game window, open a game from the Arcade and leave it with the bar's **Back**, then another and leave with **Escape**. Check both land back in the Arcade on the cabinet you played. Do the same with a casino table, and with the Tavern and Garden (they land in front of them on the map). From the town itself, check **Back** goes to Games.
+5. **Lumi-Soft:** on a computer check the field's Lumi-Soft row opens it; on a TV or phone check it only says it needs a mouse and keyboard.
+6. **Home:** choose **Lumi's house** and check her room opens, and that leaving it goes to Games, not back to town.
+7. **Remote:** on a paired TV, walk the town with a remote and open a casino table from it; check leaving the table comes back to the Casino.

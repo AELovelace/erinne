@@ -77,7 +77,14 @@ Everything is saved on the server, so a game carries on from any browser or devi
 
 Saves belong to the game, not the file. Renaming a game, moving it or putting it back later keeps its saves, and two copies of one game share them. Your saves are yours alone: someone else playing the same game has their own.
 
+## On a TV
+
+On a paired TV, **🕹 Retro** in the TV's menu opens Retro in the TV's game layer, as the TV's owner (their games and their saves).
+
+- **The remote:** the arrows walk the shelves and OK opens a game. In a running game, the arrows and OK are the console's D-pad and A, and **⏯** opens the game's menu.
+- **A game controller** (on a TV box: Media help, *Game controllers on a TV box*) plays the game. A second one is player 2, and up to four can play. Its **Xbox** or **PS** button, or **Start** and **Select** held together, opens the game's menu: **Resume**, **Save state**, **Load state**, **Leave the game**. In the shelves and menus, the D-pad moves, **A** presses and **B** goes back.
+- **Leaving:** the TV bar's **Back**, Escape, **Leave the game**, or the remote's **Stop**. It saves first (the game's own save and an automatic state), then closes, as **← Retro** does.
+
 ## Where Retro isn't yet
 
-- **On a TV**, as a paired screen: Retro's pages need a person signed in.
 - **Netplay**, playing together over the network.

@@ -147,7 +147,7 @@ def make_templates(app: FastAPI) -> Jinja2Templates:
         """This browser is a screen (the TV, by its key): its underscan and text size on every page, and on a
         screen box the small bar and the remote (base.html). A built-in game frame inherits text size only."""
         framed = request.headers.get("sec-fetch-dest") == "iframe"
-        if framed and not request.url.path.startswith("/media/games/"):
+        if framed and not request.url.path.startswith(("/media/games/", "/media/retro")):   # Retro: the TV's game layer too
             return None
         screen = media_screens.by_token(conn, request.cookies.get(media_screens.COOKIE))
         if screen is None:

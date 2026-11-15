@@ -469,3 +469,15 @@ html.mc-sg-running, html.mc-sg-running body { overflow: hidden; }
 .mc-cal-values { font-variant-numeric: tabular-nums; font-size: 1.5rem; margin: 1.2rem 0; }
 .mc-cal-buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem; }
 .mc-cal-remote { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: -.3rem 0 .8rem 1.4rem; }
+
+/* 🔗 Controllers (a TV box: media.js viewControllers): what's paired, Find controllers, and a row per controller. */
+.mc-pads { display: grid; gap: 1rem; max-width: 46rem; }
+.mc-pads-how { margin: 0; color: var(--muted); line-height: 1.5; }
+.mc-pads-find { justify-self: start; }
+.mc-pads-list { display: grid; gap: .6rem; }
+.mc-pad { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .9rem; align-items: center; padding: .7rem 1rem;
+          border-radius: .8rem; border: 1px solid var(--line, #6b3a85); background: var(--glass, #1f0a2e); }
+.mc-pad.on { border-color: var(--cyan, #00f0ff); }
+.mc-pad-icon { font-size: 1.1rem; white-space: nowrap; }
+.mc-pad-words { display: grid; gap: .15rem; min-width: 0; }
+.mc-pad-words .mc-sub { white-space: normal; font-size: .9rem; }

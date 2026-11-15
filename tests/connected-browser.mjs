@@ -11,6 +11,7 @@ import { checkLumiPartyBrowser, checkLumiPartyCouch, checkLumiPartyFight, checkL
 import { checkArcadeLumi } from "./arcade-lumi-browser.mjs";
 import { checkGameScaling } from "./game-scaling-browser.mjs";
 import { checkLumiSoft } from "./lumi-soft-browser.mjs";
+import { checkLumiLaunch, checkLumiLaunchTV } from "./lumi-launch-browser.mjs";
 
 const modulePath = process.env.PUPPETEER_MODULE;
 const { default: puppeteer } = await import(modulePath ? pathToFileURL(modulePath).href : "puppeteer");
@@ -47,6 +48,9 @@ try {
   await mkdir("runs/casino-browser", { recursive: true });
   if (process.env.LUMI_SOFT_ONLY === "1") { // Focused iteration on Lumi-Soft.
     await checkLumiSoft(bob, base);
+  } else if (process.env.LUMI_LAUNCH_ONLY === "1") { // Focused iteration on Lumi Launch: every input, a paid go, couch turns on a TV.
+    await checkLumiLaunch(bob, base);
+    await checkLumiLaunchTV(alice, base);
   } else if (process.env.LUMI_GARDEN_ONLY === "1") { // Focused iteration on Lumi's Garden: its plots, minigames and pages.
     await checkLumiPetGarden(browser, alice, base);
   } else if (process.env.ARCADE_ONLY === "1") { // Focused iteration on Lumi in the arcade games.
@@ -63,7 +67,7 @@ try {
     const screen = await alice.evaluate(async () => (await fetch("/api/media/screens", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Shared TV test" }) })).json());
     await alice.goto(base + "/media/screen#games");
     await alice.waitForFunction(async () => (await (await fetch("/api/media/screens")).json()).screens.some(s => s.online));
-    await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 11);
+    await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 12);
     await alice.evaluate(() => [...document.querySelectorAll(".mc-card")].find(b => b.querySelector(".mc-label").textContent === "Slot Machines").click());
     await checkSharedTV(alice, screen, base);
   } else {
@@ -218,7 +222,7 @@ try {
   // A shelf per kind of game: Lumi's three apps, the arcade games a remote can play, the four tables. A computer also shows Mouse & keyboard.
   await alice.waitForFunction(() => document.querySelectorAll(".mc-shelf .mc-grid").length >= 3);
   assert.deepEqual(await alice.$$eval(".mc-shelf", shelves => shelves.map(shelf => [shelf.querySelector("h2, h3, .mc-shelf-title")?.textContent || "", shelf.querySelector(".mc-grid").children.length])),
-    [["Lumi", 3], ["Arcade", 4], ["Table games", 4], ["Mouse & keyboard", 2]]);
+    [["Lumi", 3], ["Arcade", 5], ["Table games", 4], ["Mouse & keyboard", 2]]);
   await checkLumiPetFrame(alice);
   await alice.evaluate(() => { // The top bar keeps controls; the remote consumes the iframe's status message.
     window.casinoTestReport = "";
@@ -252,7 +256,7 @@ try {
   });
   await alice.goto(base + "/media/screen#games");
   await alice.waitForFunction(async () => (await (await fetch("/api/media/screens")).json()).screens.some(s => s.online));
-  await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 11);
+  await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 12);
   await alice.evaluate(() => [...document.querySelectorAll(".mc-card")].find(b => b.querySelector(".mc-label").textContent === "Slot Machines").click());
   const tvFrame = await (await alice.$("#mc-game-frame")).contentFrame();
   await tvFrame.waitForSelector("#casino-create:not([disabled])");
@@ -275,7 +279,7 @@ try {
 
   // Lumi Pet takes the remote's Previous and Next itself (they change its category); other games leave them to the music.
   await alice.goto(base + "/media/screen#games");
-  await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 11);
+  await alice.waitForFunction(() => document.querySelectorAll(".mc-card").length === 12);
   await alice.evaluate(() => [...document.querySelectorAll(".mc-card")].find(b => b.querySelector(".mc-label").textContent === "Lumi Pet").click());
   const petFrame = await (await alice.waitForSelector("#mc-game-frame")).contentFrame();
   await petFrame.waitForSelector('[data-lp-row="cuddle"]');
@@ -308,6 +312,9 @@ try {
   const reducedResult = await bob.$eval(".roulette-wheel", e => e.dataset.landed);
   assert.equal(await bob.$eval(".roulette-pocket.winning", e => e.dataset.number), reducedResult);
   console.log("Roulette reduced-motion mode skips spinning and displays the correct server result");
+  await bob.emulateMediaFeatures([]);
+  await checkLumiLaunch(bob, base);                            // last: its go spends and pays bob's coins, which nothing after counts
+  await checkLumiLaunchTV(alice, base);
   }
   assert.deepEqual(errors, []);
 } catch (failure) {

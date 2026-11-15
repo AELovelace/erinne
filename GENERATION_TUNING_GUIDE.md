@@ -7,7 +7,7 @@
 | Seats / rooms | 8 seats per room; 100 live rooms; create blocked at 3 joined rooms per identity per game |
 | Coins (online tables) | One purse per account, 1,000 to start (`coins.py`); free refill to 1,000 below the minimum spin/round cost (30 for three-line slots, 10 otherwise) between rounds |
 | Credits (local tables) | 1,000 per seat, per table, gone when the table ends; same refill rule |
-| Coin rewards | Prism Drop: 1 per 10 points, 200 a day (`PRISM_POINTS_PER_COIN`, `PRISM_DAILY_CAP`). Lumi Pet: 25 for the day's first visit (`PET_VISIT`); fight wins pay `floor((15 + 3 × enemy level + tier bonus) × 0.6)` with no daily limit. Lumi's prices are in `lumipet_data/*.json` |
+| Coin rewards | Prism Drop: 1 per 10 points, 200 a day (`PRISM_POINTS_PER_COIN`, `PRISM_DAILY_CAP`). Lumi Launch: 25 coins a go, 1 per 20 m, 300 a day (`lumilaunch.ENTRY`, `lumilaunch.METRES_PER_COIN`, `coins.LAUNCH_DAILY_CAP`; the bot's random play averages about 1,350 m a go). Lumi Pet: 25 for the day's first visit (`PET_VISIT`); fight wins pay `floor((15 + 3 × enemy level + tier bonus) × 0.6)` with no daily limit. Lumi's prices are in `lumipet_data/*.json` |
 | Bets | 10–500, multiples of 10; slots use a per-line bet and reserve 3× that amount; replaced bets refund the full prior reservation |
 | Timers | 45s betting; 30s blackjack; 6s wheel/race/reels; 10s results |
 | Expiry | 2h without a table request; stale rows removed on room creation or a balance check, handing back bets still open |

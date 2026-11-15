@@ -16,6 +16,8 @@ How it works:
   to join it and pick the box's network from your phone (step 5).
 - **Kiosk settings:** admins change the box's address, volume, top bar and text size, and install updates, from the
   TV's menu with a phone approval or a PIN (step 6).
+- **Game controllers:** Xbox One and PlayStation 5 controllers pair over Bluetooth from the TV's **🔗 Controllers**,
+  with the remote, and then work as a remote and in the games (step 7).
 
 ## 1. The box
 
@@ -47,7 +49,8 @@ It takes a few minutes. It:
 - enables RPM Fusion (free);
 - swaps Fedora's FFmpeg for RPM Fusion's, because Fedora's own can't decode H.264, which Mnemerynne's
   transcoder sends;
-- installs the VA-API drivers, cage, Firefox, PipeWire, wlr-randr, git, and what the Wi-Fi setup needs;
+- installs the VA-API drivers, cage, Firefox, PipeWire, wlr-randr, git, BlueZ (game controllers), and what the
+  Wi-Fi setup needs;
 - writes its files and starts the screen;
 - checks the box and prints what it found (step 4).
 
@@ -94,6 +97,7 @@ sudo bash install.sh --check
 | **running on tty1** / **sound goes to HDMI** | The kiosk is up and sound goes to the TV. If the TV was off, give it 30 seconds after turning it on. |
 | **picture: …** | The mode the TV is in, its refresh rate and scaling (or, with the screen stopped, the TV's first mode), and the `--display` settings. |
 | **start page and Kiosk settings running** / **can be a hotspot** | The helper answers, and the Wi-Fi card can offer the setup hotspot. |
+| **Bluetooth, N paired** | There's a Bluetooth adapter for game controllers, and how many are paired. Without one: a small USB Bluetooth adapter. |
 | **release …** | Which screen release the box runs, from `/opt/mnemerynne-screen`. |
 
 ## 5. Wi-Fi
@@ -183,6 +187,36 @@ answering: the helper reads the keyboards itself.
 **Releases:** the box follows git tags named `screen-vX.Y.Z`. Tag a release only on a commit that's ready
 for every box, and push the tag (`git push origin screen-v0.3.0`).
 
+## 7. Game controllers
+
+**🔗 Controllers** in the TV's menu (a box only) pairs **Xbox One (Bluetooth)** and **PlayStation 5 DualSense** controllers.
+Any remote that may drive the TV opens it; so does the box's own keyboard or a controller already paired.
+
+1. **Pairing mode:** on an Xbox controller, hold the pair button on its top until the Xbox button flashes fast. On a
+   DualSense, hold **Create** and **PS** until the light bar flashes.
+2. **Find controllers**, then **Pair** beside it. It shows **Connected** and its battery.
+3. Next time, its middle button turns it on and it reconnects by itself. **Forget** (twice) unpairs it.
+
+How it's kept safe:
+- The page is the server's TV page talking to the helper (`http://127.0.0.1:9187/api/controllers`). The helper
+  answers only the configured Mnemerynne address (its Origin, Host 127.0.0.1), never the hotspot.
+- The helper only lets the page in with a one-time pass the server gave for a remote's OK (one allowed to drive this
+  TV) or the box's own keys, which it redeems with the server.
+- It pairs only game controllers: BlueZ's `input-gaming` icon, or a controller's name when the device gives no icon.
+  Keyboards, mice and phones are never listed.
+- Pairing uses no PIN (Just Works), then trusts the controller so it reconnects.
+
+A paired controller is the box's own input, like its keyboard: the D-pad moves, A presses, B goes back, Start plays
+and pauses, the Xbox / PS button goes home. It also works on the start page and in Kiosk settings. In Retro and Lumi
+Launch the game reads it directly.
+
+The drivers are the kernel's own (`hid-playstation` for the DualSense, `hid-microsoft` for Xbox over Bluetooth).
+- An Xbox controller that won't connect usually needs a firmware update once, from an Xbox or the Xbox Accessories
+  app on Windows.
+- **No Bluetooth adapter** (many 3rd-generation NUCs): the page says so; a small USB Bluetooth adapter adds one.
+- Over SSH: `bluetoothctl devices Paired` lists them, and `journalctl -u mnemerynne-screen-wifi -b` shows why a
+  pairing failed.
+
 ## When something's wrong
 
 | What you see | What to do |
@@ -215,6 +249,7 @@ To use the box for something else: `sudo bash install.sh --uninstall`, and remov
 | `/usr/local/libexec/mnemerynne-screen-wifi`, `/etc/systemd/system/mnemerynne-screen-wifi.service` | The helper, as root: the start page (`http://127.0.0.1:9187/`), Kiosk settings (`/settings`), and the Wi-Fi setup (it starts NetworkManager's hotspot and joins networks). |
 | `/etc/NetworkManager/dnsmasq-shared.d/mnemerynne-screen.conf` | On the hotspot, every name resolves to the box, so phones open the setup page. |
 | firewalld zone `nm-shared` | HTTP allowed, for the setup page on the hotspot only. |
+| `bluetooth.service` | Enabled (BlueZ), so paired game controllers reconnect at boot. |
 | `/etc/firefox/policies/policies.json` | Autoplay allowed for the server only; no extensions, updates, telemetry or first-run pages. It applies to every Firefox on the box, which on a dedicated box is only this one. |
 | `/etc/dnf/dnf5-plugins/automatic.conf` | Nightly updates. |
 

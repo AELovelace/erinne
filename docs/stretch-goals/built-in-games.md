@@ -19,6 +19,18 @@
 - Their showdowns keep two racers plus five betting watchers, with the lobby rebuilt. No host can spend anyone's coins, both racers ready up before anyone pays, nobody can take both racer seats, and a racer who leaves forfeits instead of jamming the race. Seats free themselves when a page goes away.
 - The casino tables got the same presence handling (`lobby.py`).
 
+## Status (2026-11-14): Lumi Launch
+
+**Lumi Launch** is a Lumi launch-for-distance game, built for a break from NAS work at Doll's request ("a lumi themed kitten cannon clone"). It's our own game in that genre, with its own name, course pieces, art and rules:
+- the course pieces are Cloud Pillows, Teacup Flingers, Yarn Rolls, Wish Wind, Stardust, Comets, honey puddles and nap mats;
+- nothing comes from Kitten Cannon: not its name, characters, art, obstacles or sounds.
+
+How it plays:
+- Two presses, so it plays the same on every controller. OK locks the swinging needle, then OK stops the power bar and fires. OK in the air spends a sparkle puff.
+- **Every remote type:** keyboard, mouse and touch, every Mnemerynne remote on a TV, and **gamepads**. Gamepads go through a new shared helper (`static/games/gamepad.js`), the first gamepad support in the built-in games, so the gamepad item in the plan below is now started.
+- A go (three launches) costs 25 coins and pays 1 coin per 20 m, up to 300 a day. The server replays the presses before paying (`lumilaunch.py`, `games.db` migration 0002).
+- **Couch turns** are free play for up to four on one screen. On a TV, each remote's OK joins as its holder, with their own Lumi.
+
 ## Status (2026-11-11): Lumi-Soft
 
 **Lumi-Soft** finishes the sniper prototype in Doll's GameMaker arcade (`rmSniperScope`) as a browser game on the Mouse & keyboard shelf, at Doll's request, rebuilt in Lumi's style around her prototype's scope (plan: BeepDrive Agents, "Lumi-Soft Plan (2026-11-11).md"). It's a scoped target-gallery game in the spirit of arcade rail shooters, with no names, characters, levels or art from any existing game, and no real-gun imagery: a toy Popper, cardboard creatures, water balloons. It follows the rule below properly: the server replays every shot (`lumisoft.py`, migration 0074) before paying 1 coin per 250 points, with a 300-a-day default cap. Doll's choices: continues cost more each time and keep the score; the sample pack from her GameMaker project (bought from a friend who made it) supplies the sounds; and a full Lumi-Soft set for Lumi's house plus goggles are its prizes.
@@ -217,7 +229,7 @@ own. These are *our* code, reviewed like the rest of the app, so they can run on
 | 2 | **Window Garden** (cozy, server-clock growth, saves) | 1–2 evenings |
 | 3 | **Buzzer Bloom Quiz** (party, hot-seat) with a starter question pack | ~1 evening |
 | 4 | SadGirlCoin: account link, API key, server-checked garden rewards | 2+ evenings, and a talk first |
-| later | More toys (Static Bloom, Teacup Tower, Beep Bop), Doll Room, Lumi Pet, Doodle Pass, phones as controllers, TV remote and gamepad | — |
+| later | More toys (Static Bloom, Teacup Tower, Beep Bop), Doll Room, Lumi Pet, Doodle Pass, phones as controllers, TV remote and gamepad (gamepads started 2026-11-14 with Lumi Launch's `gamepad.js`) | — |
 
 ## Tests and checks
 - **Python:**

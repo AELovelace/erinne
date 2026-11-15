@@ -134,17 +134,36 @@ Not tried yet: a real player's feel for difficulty and the coin rate (1 per 250 
 **Three apps.** Lumi Pet, Lumi Dungeons and Lumi's Garden are one pet in three apps that share one page kit (see the contributor guide). `tests/test_media.py` checks all three are listed on the "Lumi" shelf, that each page is the shared kit showing exactly its own tabs, and that neither new page asks for files of its own. `tests/test_lumigarden.py` checks each app's manifest (its own id, scope, name, icons and shortcuts to the other two), that the icon files exist, and that no other game has a manifest. `tests/js/service_worker.test.mjs` checks the garden reminder opens Lumi's Garden and that the old `#garden` address is still allowed. In real Chrome, `checkLumiApps` in `tests/lumi-pet-browser.mjs` opens each app, checks its tabs and Settings (the storyteller only in Lumi Dungeons, reminders never there, no "Open" row for itself), follows the **Open** rows round all three, compares the coins and level, and then shows Lumi Pet and Lumi's Garden a trip under way: an empty room, only the **Lumi is out exploring** row, the pantry still working, and that row landing in Lumi Dungeons inside the dungeon. `checkLumiPetFrame` opens Lumi's Garden from Lumi Pet inside Media's game window and checks the bar's name changes. The door (2026-11-11):
 - `checkLumiApps`:
   - checks her room has a door that nothing covers;
-  - presses it with the mouse at a 16:9 TV's size, on the part beside the left panel (at 1440×1000 the panel hides nearly all of it), and lands in Lumi Dungeons;
-  - checks **Take her home** is there and goes back;
-  - then does the same round trip with Care's last row, **Through the door**.
+  - presses it with the mouse at a 16:9 TV's size, on the part beside the left panel (at 1440×1000 the panel hides nearly all of it), and lands in Lumi Town in front of her house;
+  - then the round trip home and back out with Care's last row, **Through the door**.
 - `checkLumiPet`:
-  - checks Lumi Dungeons opens with **Take her home** first;
+  - checks Lumi Dungeons opens with **Back to town** first;
   - after giving up a trip, checks the ending screen has it first with the cursor on it;
-  - checks it lands in Lumi Pet with her welcome-home line, and that a reload doesn't repeat it.
+  - checks it lands in Lumi Town, then her house in Lumi Pet with her welcome-home line, and that a reload doesn't repeat it.
+- Lumi Town (2026-11-12):
+  - `tests/js/lumi_town.test.mjs` checks:
+    - the six places in map order, each pressable, all inside the middle every screen shows;
+    - which open Lumi's apps and what's inside the Arcade, Casino and field;
+    - the rows inside, and that a game row opens with this place to come back to;
+    - Lumi-Soft only says "mouse and keyboard" on a TV or phone;
+    - where `?at=` lands;
+    - every drawing, day and night, with nothing broken, the label escaped, and Lumi's spots on screen.
+  - `tests/test_media.py` checks it's listed but hidden (no card), its page is the kit with one tab and its two scripts, it has no manifest, and every slug the town names is a real game.
+  - `checkLumiApps`, in a tab of its own:
+    - every place shows uncovered at 1440×1000, 1920×1080 and phone size;
+    - the arrows walk her (▲ crosses the street) and Enter goes into the tavern (Lumi Dungeons), whose **Back to town** lands in front of it;
+    - it walks into and out of the Arcade, Casino and field, checking their rows, names and pressable stations, and saves `runs/casino-browser/lumi-town.png` and `lumi-town-<place>.png`;
+    - a game, then the browser's Back, lands on the same cabinet;
+    - a press on her house goes home.
+  - `checkLumiPetFrame`, inside Media's game window:
+    - there's no Lumi Town card; the door opens it;
+    - Lumi Conga from the Arcade, then the bar's **Back**, lands back in the arcade on that cabinet;
+    - the tavern, then **Escape**, lands in front of the tavern;
+    - Back from the town itself closes as ever.
 - `tests/js/lumi_dungeon.test.mjs` checks the home row (first on an ending, which it reads first; not offered without `home`, as in a party) and the welcome line: the three endings, too old, undated, and still out.
 - `tests/test_lumidungeon.py` checks each ending is dated (`ended.at`).
 - The tavern (Lumi Dungeons' lobby): `tests/js/lumi_tavern.test.mjs` checks it draws by day and by night with no broken numbers or open groups, the window changing with the hour, and every breathing light being a group. `checkLumiApps` checks Lumi Dungeons shows the tavern (none of her furniture) and its name, and saves `runs/casino-browser/lumi-dungeons-tavern.png` to look at.
-- Not automated: the trot by eye, and the door on a real TV with a remote. The remote reaches the door only through the Care row. The other checks below now open the app that has the tab they test. Not automated: installing each app from a real phone (three icons side by side on a home screen), an installed Lumi Pet opening Lumi Dungeons (it is outside that app's scope, so a phone may show it in a browser bar), and the Open rows on a real TV with a remote.
+- Not automated: the trot by eye, and the door on a real TV with a remote. The remote reaches the door only through the Care row. Lumi Town on a real TV with a remote (and the casino tables' TV mode opened from it), on a real phone, and an installed Lumi Pet going out into town (Lumi Town is outside its scope, so a phone may show a browser bar). The other checks below now open the app that has the tab they test. Not automated: installing each app from a real phone (three icons side by side on a home screen), an installed Lumi Pet opening Lumi Dungeons (it is outside that app's scope, so a phone may show it in a browser bar), and the Open rows on a real TV with a remote.
 
 Run `.venv/Scripts/python.exe -m pytest tests/test_lumipet.py -q -p no:cacheprovider` for the server: the decay curve (last quarter in exactly one day, the same in one step or many), catch-up while away, rewards landing when a nap or play finished, cooldowns, the pantry and its limit, toys, the shop refusing what can't be afforded, the ledger, the one-time browser import, catalog validation, and the API refusing any result the page tries to name. Run `node --test tests/js/lumi_pet.test.mjs` for the page's rules: night boundaries, nap and wake overrides, moods, and reading the old browser save. The Media pytest suite runs all Node rule tests and checks Lumi's authenticated page, static assets, registry entry and paired-TV access. Syntax-check `static/games/lumi-pet/game.js` and `rules.js` under `mnemerynne/web/` with `node --check`.
 
@@ -231,6 +250,66 @@ Every dungeon place now has a decor set: one piece for each of the 15 house spot
 ## Performance on a big share
 
 `tests/test_performance.py` covers the scan's write lock, the permission cache, the music list cache, connection reuse and the indexes. On the NAS, with something copied in or not: press around Files and Media while watching `journalctl -u mnemerynne-worker`, and no page should stall for the length of a scan. Remove someone's access to a folder from Windows: within 30 seconds lists stop showing it, and opening a file in it must fail at once. A brand-new folder must be usable straight away.
+
+## Game controllers on a TV box, and Retro on the TV
+
+- **The box's helper:** `tests/test_screen_bluetooth.py`, with a pretend `bluetoothctl`, checks that:
+  - only game controllers are listed or paired (by icon, or by name when there's none; never a keyboard, mouse or phone);
+  - opening needs a pass the server accepts, and it closes after ten minutes;
+  - finding, pairing (no PIN, then trusted and connected), a failure saying how, forgetting, and no adapter;
+  - only the Mnemerynne address may ask across origins (preflight, Origin, Host), never the hotspot or the helper's own pages;
+  - the box's own pages take a controller.
+- **The server:** `tests/test_controllers_pass.py` checks the pass:
+  - a TV guest's OK opens it, once, and the box's own keys open it;
+  - it's refused for no press, a non-OK press, a forged one, a removed guest, or a browser that isn't a TV;
+  - passes run out.
+- **Retro on a TV:** `tests/test_retro_tv.py` checks that Retro's pages open on a TV as its owner, with no site menu or messages, framed with the TV's text size, and that the TV's Media page offers Retro in the game layer and 🔗 Controllers. The installer's BlueZ and Bluetooth lines are in `tests/test_screen_install.py`.
+- **Node:** `tests/js/gamepad.test.mjs` covers LB/RB and the Xbox/PS button.
+- **Chrome:** `tests/tv-controllers-browser.mjs` (`python/tv_controllers_preview.py` runs the app and the box's real helper on 127.0.0.1:9187, with only `bluetoothctl` pretend):
+  1. a real paired remote's OK opens Controllers through the server's pass;
+  2. a pretend controller finds, pairs and forgets a DualSense, moves focus, and opens Kiosk settings (the remote can't);
+  3. Retro in the game layer: walked and started with the remote, the controller's Xbox/PS button menu, player 2 mapped, and the TV's Back keeping an automatic state on the server.
+
+  Run it with `PUPPETEER_MODULE=… CHROME_PATH=… node tests/tv-controllers-browser.mjs`. Screenshots: `runs/tv-controllers/`.
+- **On a real box (can't be faked):**
+  - Tag a screen release and update the box from Kiosk settings, so it gets BlueZ. `--check` then shows **Bluetooth**.
+  - Pair an Xbox One controller and a DualSense from the TV's 🔗 Controllers with the remote.
+  - Check in Firefox that both report the standard layout: A presses, B goes back, the D-pad moves, Start pauses.
+  - Check whether the Xbox / PS button reaches the page. If it doesn't, Start + Select held opens Retro's menu.
+  - Play a Retro game with two controllers.
+  - Turn a controller off and on: it reconnects by itself.
+
+## Lumi Launch
+
+- **Server:** `tests/test_lumilaunch.py` replays the recorded goes in `tests/fixtures/lumi_launch_runs.json`. Every position, speed, frame and ending must match what the page's `rules.js` recorded, bit for bit. It also covers:
+  - both rules files holding the same angle table;
+  - the course is seeded, and its hazards grow further out;
+  - the presses do what the page says (a nudge stops the needle; an idle cannon fires itself after 30 s, twice);
+  - entry and paying once, the 300-a-day cap, no coins no go, and a go faster than the clock paying nothing;
+  - bad logs refused (unknown button, frames out of order, four launches);
+  - quitting early still counting, one go at a time, bests and the board, and a removed user's rows cleaned;
+  - the routes taking presses only (a claimed distance is a 422);
+  - couch turns' `/tv/player`: a TV guest's OK names her and her Lumi, while a stale or forged proof, a non-OK press, or a browser that isn't a TV is refused.
+- **Node:**
+  - `tests/js/lumi_launch.test.mjs` replays the same file and re-plays the bot's goes. It checks the rules use no `Math.sin`/`sqrt`/random, and tests the needle, the power bar, puffs and stardust, every course piece, bouncing, and the launch's time limit.
+  - `tests/js/gamepad.test.mjs` covers the gamepad helper with a pretend `getGamepads`: the button map, held directions repeating while OK doesn't, the stick, two pads, an unplugged pad letting go, and a browser without the API.
+  - `tests/js/lumi_town.test.mjs` checks the Arcade's five cabinets stand snug, clear of the panels.
+- **After any rules change, run `node tests/js/lumi_launch_bot.mjs` to re-record**, then both suites. After changing the angles' range, run `python python/make_lumi_launch_tables.py`.
+- **Chrome:** `tests/lumi-launch-browser.mjs` (`LUMI_LAUNCH_ONLY=1 node tests/connected-browser.mjs`; it also runs last in the full suite). It:
+  1. plays a paid go, one launch each by the keyboard, by a remote's key message, and by a pretend gamepad plus a click on the course (and Start to pause), then checks the server's results, the coins and the board;
+  2. plays couch turns on a phone with the touch buttons;
+  3. checks 1080p and 4K for overflow and a sharp canvas;
+  4. pairs a TV with two real remotes over the command stream: both join by OK under their holders' names, a press out of turn is turned away, and three rounds end in a winner (or a tie, with no crown).
+
+  Screenshots go to `runs/casino-browser/lumi-launch-*.png`.
+- **By eye:**
+  - Lumi peeks out of the barrel while aiming, tumbles with her face changing as she speeds up, and sits happily where she stops (asleep on a nap mat, stuck in honey).
+  - Every course piece is easy to tell apart from the couch.
+  - On a phone held upright, the hint sits above the course, clear of the cannon and the OK button.
+- **On the NAS:**
+  - Play a go with the TV remote, the phone remote, and a gamepad plugged into the TV box.
+  - Play couch turns with a TV guest's remote, and check the guest's own Lumi is in the cannon on her turn.
+  - In Lumi Town, check the Arcade shows five cabinets in a row.
 
 ## Yarn Pop, Lumi Conga and the table lobby
 

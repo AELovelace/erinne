@@ -486,6 +486,7 @@ def screen_page(request: Request, conn: sqlite3.Connection = Depends(get_media_d
         box = True
     return request.app.state.templates.TemplateResponse(request, "media.html", {
         "user": owner, "is_admin": False, "active": "media", "has_library": media.library(conn) is not None,
+        "retro_on": retro.enabled(conn),          # Retro in the TV's game layer (media.js RETRO, web/retro.py)
         "folder": _folder_name(conn), "screen": {"id": screen["id"], "name": screen["name"],
                                                  "safe_x": screen["safe_x"], "safe_y": screen["safe_y"],
                                                  "ui_scale": screen["ui_scale"],

@@ -84,3 +84,7 @@
   .rp-slot-shot { width: 72px; }
   .rp-slot-buttons { grid-column: 1 / -1; }
 }
+
+/* The game's menu on a TV (retro-tv.js): Resume, Save state, Load state, Leave, one under the other. */
+.rp-tvmenu .rp-slots-box { display: grid; gap: .6rem; text-align: center; }
+.rp-tvmenu .rp-slots-box button { width: 100%; }

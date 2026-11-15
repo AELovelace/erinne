@@ -20,7 +20,7 @@ Doll asked on 2026-11-14 for "snes, gba, gbc, nes, and genesis emulators", a sha
 | 1 | GBA (mGBA): the Games folder, shelves, player, saves, admin switch, help, tests | Built 2026-11-14 (e694b2f); Doll: "this works perfect" |
 | 2 | SNES (Snes9x), Game Boy and Game Boy Color (Gambatte), NES (FCEUmm), Genesis (Genesis Plus GX) | Built 2026-11-14 |
 | 3 | PS1, Doll's stretch goal: PCSX-ReARMed for `.cue` (+ tracks), `.pbp` and archives; Beetle PSX for `.chd` with a BIOS | Built 2026-11-14 |
-| 4 | On a paired TV, with a phone or pad as the controller | Idea |
+| 4 | On a paired TV: the TV's game layer, the remote (shelves, menus, D-pad and A in a game), Bluetooth controllers (players 1-4, the Xbox/PS button or Start+Select for the game's menu), leaving saves first | Built 2026-11-14 (session 8243, with the TV boxes' 🔗 Controllers) |
 | 5 | Box art looked up online (libretro-thumbnails, by No-Intro name) when *online metadata* is on | Idea |
 | 6 | Master System and Game Gear: Genesis Plus GX plays them already, so a `CONSOLES` row each | Idea |
 

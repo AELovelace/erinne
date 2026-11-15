@@ -13,9 +13,10 @@ import sqlite3
 import segno
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from mnemerynne.db import transaction
+from mnemerynne import users
 from mnemerynne.media import kiosk, screens, soundcloud
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import _session_user, admin_user, get_db, get_media_db, is_admin
@@ -150,3 +151,64 @@ def change_screen(body: ScreenSettings, session=Depends(kiosk_session), conn: sq
 @router.post("/api/media/kiosk/lock", status_code=status.HTTP_204_NO_CONTENT)
 def lock(request: Request, x_kiosk_session: str = Header("", max_length=200)):
     unlocks(request).end(x_kiosk_session)
+
+
+# ------------------------------------------------------- 🎮 Controllers (Bluetooth)
+def passes(request: Request) -> kiosk.ControllerPasses:
+    if getattr(request.app.state, "media_controller_passes", None) is None:
+        request.app.state.media_controller_passes = kiosk.ControllerPasses()
+    return request.app.state.media_controller_passes
+
+
+class ControllersOpen(BaseModel):
+    """The TV page opening its Controllers page: a remote's OK as the server signed it, or its own keys."""
+    model_config = ConfigDict(extra="forbid")
+    controller: str | None = Field(None, max_length=2000)
+    local: bool = False
+
+
+@router.post("/media/screen/controllers/open")
+def controllers_open(body: ControllersOpen, request: Request, screen=Depends(screen_device),
+                     conn: sqlite3.Connection = Depends(get_media_db)):
+    """A one-time pass for this box's helper to open pairing. A remote's OK must be from a remote that may drive
+    this TV (its owner's, or a TV guest's); the box's own keyboard or a controller already paired to it is
+    "local", and can only come from the TV itself (the screen's key)."""
+    from mnemerynne import casino_remote                   # the signed remote press, as games checks it
+    from mnemerynne.web.games import _live_remote
+    if body.controller:
+        try:
+            proof = casino_remote.read(request.app.state.settings.secret_key, body.controller)
+        except casino_remote.BadData:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "That press is too old. Press OK on your remote again.") from None
+        if proof.get("action") != "enter":
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Press OK on your remote.")
+        remote = _live_remote(request, conn, proof, screen, casino_remote.actor("screen", screen))
+        if remote is None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "This remote can't drive this TV.")
+        holder = users.get_user_by_id(conn, remote["user_id"])
+        by = holder["username"] if holder else "a remote"
+    elif body.local:
+        by = "this TV"
+    else:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Press OK on your remote.")
+    try:
+        token = passes(request).issue(screen["id"], by)
+    except screens.ScreenError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    return {"pass": token, "by": by, "expires_in": kiosk.PASS_SECONDS}
+
+
+class PassBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    pass_: str = Field(..., alias="pass", max_length=200)
+
+
+@router.post("/api/media/kiosk/controllers/redeem")
+def controllers_redeem(body: PassBody, request: Request, conn: sqlite3.Connection = Depends(get_media_db)):
+    """The box's helper hands in the TV's pass (once) before it lets the Controllers page pair anything."""
+    try:
+        found = passes(request).redeem(body.pass_)
+    except screens.ScreenError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from None
+    row = _screen_row(conn, found["screen"])
+    return {"screen": row["name"], "by": found["by"]}

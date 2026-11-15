@@ -163,14 +163,14 @@
       })).concat([potionRow(snap, run)]);
   }
 
-  function homeRow(home) { // Lumi Dungeons' way back to her room in Lumi Pet (Doll's design, 2026-11-11). `home` opens Lumi Pet.
-    return { key: "go-home", icon: "✨", name: "Take her home", hint: "Back to her room in Lumi Pet", local: home };
+  function homeRow(home) { // Lumi Dungeons' way out (Doll's design, 2026-11-11): out of the tavern into Lumi Town (2026-11-12), where her house is. `home` opens the town.
+    return { key: "go-home", icon: "🏘", name: "Back to town", hint: "Out the tavern door into Lumi Town · her house is there too", local: home };
   }
 
   function rows(ctx) { // ctx: { snap, play, dismissed, care (the snack-and-potion list is open), go(change), home (opens Lumi Pet, or null) }
     const snap = ctx.snap, run = snap.dungeon.run, go = ctx.go;
     if (!run || (run.over && ctx.dismissed === run.id)) return places(snap);
-    if (run.over) { // A trip just ended: its summary, and first the way home (which counts the ending as read on the way out).
+    if (run.over) { // A trip just ended: its summary, and first the way back to town (which counts the ending as read on the way out).
       const carry = { key: "continue", icon: "›", name: run.over === "home" ? "Home again!" : "Carry on", hint: summary(run), local: function () { go({ dismiss: run.id }); } };
       if (!ctx.home) return [carry];
       return [homeRow(function () { go({ dismiss: run.id }); ctx.home(); }), carry];
