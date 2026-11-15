@@ -262,6 +262,39 @@ def test_install_under_a_root_and_run_again(tmp_path):
     assert "DISPLAY_MODE=auto\n" in conf and "DISPLAY_SCALE=100\n" in conf
 
 
+FEDORA_BLUEZ = """[General]
+
+# Default adapter name
+#Name = BlueZ
+#Privacy = off
+JustWorksRepairing = never
+
+[Policy]
+AutoEnable=true
+"""
+
+
+def test_bluez_is_set_up_for_bluetooth_le_xbox_pads(tmp_path):
+    """Doll's Xbox One S (2021 firmware: Bluetooth LE) failed with AuthenticationFailed: BlueZ hands over its
+    identity key (as Doll-OS's DS-Slave does, ENC|ID) only with Privacy = device. install.sh sets that and the rest
+    of xpadneo's settings in main.conf, keeps everything else, and restarts bluetoothd only when it changed."""
+    root = _root(tmp_path)
+    bluez = root / "etc" / "bluetooth" / "main.conf"
+    bluez.parent.mkdir(parents=True)
+    bluez.write_text(FEDORA_BLUEZ)
+    out = run("https://erynne.example.com", "--no-packages", root=root).stdout
+    conf = bluez.read_text()
+    general = conf.split("[General]")[1].split("[")[0]
+    assert "\nPrivacy = device\n" in general and "\nJustWorksRepairing = always\n" in general
+    assert "\nControllerMode = dual\n" in general and "JustWorksRepairing = never" not in conf   # replaced, not doubled
+    assert "MinConnectionInterval = 7\nMaxConnectionInterval = 9\nConnectionLatency = 0" in conf.split("[LE]")[1]
+    assert "#Name = BlueZ" in conf and "[Policy]\nAutoEnable=true" in conf                       # the rest kept
+    assert "systemctl restart bluetooth.service" in out
+    out = run("--keep-options", "--no-packages", root=root).stdout                               # again: no change
+    assert bluez.read_text() == conf and "restart bluetooth.service" not in out
+    assert conf.count("Privacy = device") == 1 and conf.count("# Mnemerynne screen") == 2
+
+
 def _git(cwd, *args):
     return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=True).stdout.strip()
 

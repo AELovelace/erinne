@@ -53,6 +53,8 @@ DNF_AUTOMATIC=$ROOT/etc/dnf/dnf5-plugins/automatic.conf
 WIFI_HELPER=$ROOT/usr/local/libexec/mnemerynne-screen-wifi
 WIFI_UNIT=$ROOT/etc/systemd/system/mnemerynne-screen-wifi.service
 WIFI_DNS=$ROOT/etc/NetworkManager/dnsmasq-shared.d/mnemerynne-screen.conf
+BT_CONF=$ROOT/etc/bluetooth/main.conf          # BlueZ's settings: a few set for Bluetooth LE Xbox pads
+BT_RESTART=0                                    # 1 when BT_CONF changed: bluetoothd reads it only at start
 HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 WIFI_SOURCE=$HERE/wifi-setup.py
 SOURCE_DIR=$ROOT/opt/mnemerynne-screen          # the box's own copy of the repository (the updater's)
@@ -480,6 +482,39 @@ address=/#/10.42.0.1
 EOF
 }
 
+# BlueZ's main.conf with the settings Bluetooth LE Xbox pads need (an Xbox One S on its 2021 firmware, Series
+# X|S), from xpadneo's troubleshooting guide; the rest of the file is left as it was (stdin -> stdout).
+#   Privacy = device             BlueZ hands over its identity key only with LE privacy on, as Doll-OS's DS-Slave
+#                                does (key distribution ENC|ID); without it the pad refuses: AuthenticationFailed
+#   JustWorksRepairing = always  a pad that forgot the box (its pair button wipes its keys) can pair again
+#   ControllerMode = dual        Bluetooth LE as well as classic (the DualSense is classic)
+#   [LE] intervals 7-9, latency 0  the pad's 100 Hz reports without lag (it asks for poor ones itself)
+render_bluetooth_conf() {
+    awk -v general='ControllerMode = dual|Privacy = device|JustWorksRepairing = always' \
+        -v le='MinConnectionInterval = 7|MaxConnectionInterval = 9|ConnectionLatency = 0' '
+        function emit(list,   n, a, i) {                       # our lines, after a marker comment
+            print "# Mnemerynne screen (install.sh): for Bluetooth LE game controllers"
+            n = split(list, a, "|"); for (i = 1; i <= n; i++) print a[i]
+        }
+        function key(line) { sub(/[ \t]*=.*/, "", line); return line }
+        BEGIN {
+            n = split(general "|" le, all, "|"); for (i = 1; i <= n; i++) ours[key(all[i])] = 1
+        }
+        /^# Mnemerynne screen \(install\.sh\)/ { next }         # our marker from a run before
+        /^\[/ {                                                  # a section: ours go first in it
+            section = $0; print
+            if (section == "[General]") { emit(general); g = 1 }
+            if (section == "[LE]") { emit(le); l = 1 }
+            next
+        }
+        /^[A-Za-z]/ && (section == "[General]" || section == "[LE]") && (key($0) in ours) { next }   # replaced
+        { print }
+        END {                                                    # a section the file did not have
+            if (!g) { print ""; print "[General]"; emit(general) }
+            if (!l) { print ""; print "[LE]"; emit(le) }
+        }'
+}
+
 render_dnf_automatic() {
     cat <<'EOF'
 # The Mnemerynne screen (deploy/screen/install.sh): install updates nightly, rebooting when one needs it.
@@ -538,6 +573,14 @@ write_files() {
     [[ -f $WIFI_SOURCE ]] || die "wifi-setup.py isn't beside install.sh: clone the repository onto the box (README)"
     put 0755 "$WIFI_HELPER" <"$WIFI_SOURCE"
     render_wifi_unit | put 0644 "$WIFI_UNIT"
+    # BlueZ's settings for Bluetooth LE Xbox pads (render_bluetooth_conf); bluetoothd restarts only if they changed.
+    local bt_old bt_new
+    bt_old=$(cat -- "$BT_CONF" 2>/dev/null || true)
+    bt_new=$(printf '%s\n' "$bt_old" | render_bluetooth_conf)
+    if [[ $bt_new != "$bt_old" ]]; then
+        printf '%s\n' "$bt_new" | put 0644 "$BT_CONF"
+        BT_RESTART=1
+    fi
     if [[ $WIFI_SETUP == 1 ]]; then
         render_wifi_dns | put 0644 "$WIFI_DNS"
     fi
@@ -622,6 +665,10 @@ enable_service() {
     # The helper runs either way (the start page, Kiosk settings); WIFI_SETUP in the settings file says
     # whether it may start the hotspot.
     sys systemctl enable --now bluetooth.service         # paired controllers reconnect by themselves at boot
+    if [[ $BT_RESTART == 1 ]]; then
+        sys restorecon "$BT_CONF"
+        sys systemctl restart bluetooth.service          # bluetoothd reads main.conf only when it starts
+    fi
     sys systemctl enable mnemerynne-screen-wifi.service
     sys systemctl restart mnemerynne-screen-wifi.service
     sys systemctl enable mnemerynne-screen.service

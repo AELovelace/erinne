@@ -215,7 +215,13 @@ How it's kept safe:
 **Bluetooth LE pads** (an Xbox One S on its 2021 firmware, Series X|S) pair the way Doll-OS's DS-Slave pairs them:
 only while the box is scanning and the pad is heard advertising. It stops advertising soon after Find stops, so up
 to 0.4.3 a pad Find listed was gone by the time Pair was pressed; since 0.4.4 Find pairs it the moment it's heard.
-**Pair** scans alongside too, waits up to 30 seconds to hear the pad, then pairs (twice if the first try is refused). It counts as paired only when BlueZ says so:
+**Pair** scans alongside too, waits up to 30 seconds to hear the pad, then pairs (twice if the first try is refused).
+They also need BlueZ to hand over its identity key, which it does only with LE privacy on (DS-Slave distributes
+`ENC|ID` keys); without it the pad answers `AuthenticationFailed`. So since 0.4.5 `install.sh` sets, in
+`/etc/bluetooth/main.conf` (the rest of the file is kept, and bluetoothd restarts only when it changed), the settings
+from [xpadneo's troubleshooting guide](https://github.com/atar-axis/xpadneo/blob/master/docs/TROUBLESHOOTING.md):
+`[General]` `Privacy = device`, `JustWorksRepairing = always` (a pad whose pair button wiped its keys pairs again),
+`ControllerMode = dual`, and `[LE]` connection intervals 7-9 with latency 0 (the pad's 100 Hz reports, no lag). It counts as paired only when BlueZ says so:
 `bluetoothctl pair --timeout` exits 0 having printed nothing when it gives up, which 0.4.0 took for a pairing.
 
 A paired controller is the box's own input, like its keyboard: the D-pad moves, A presses, B goes back, Start plays
