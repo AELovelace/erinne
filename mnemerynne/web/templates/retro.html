@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Retro · Media · {{ product_name }}{% endblock %}
+{% block body %}
+{% include "_nav.html" %}
+<link rel="stylesheet" href="{{ static('retro.css') }}">
+{#- Media → Retro (web/retro.py, static/retro.js): a shelf per console of the games in the Games folder this
+    person can read, Continue playing on top. A game opens the player (/media/retro/play/<id>). -#}
+<main class="rt" id="rt" data-folder="{{ folder }}" data-admin="{{ 1 if is_admin else 0 }}">
+  <header class="rt-head">
+    <a class="rt-back" href="/media">← Media</a>
+    <h1>🕹 Retro</h1>
+    <div class="rt-tools">
+      <label class="rt-search"><span class="sr-only">Find a game</span>
+        <input type="search" id="rt-q" placeholder="Find a game" autocomplete="off" maxlength="200"></label>
+      <select id="rt-console" aria-label="Console">
+        <option value="">Every console</option>
+        {% for c in consoles %}<option value="{{ c.key }}">{{ c.name }}</option>{% endfor %}
+      </select>
+    </div>
+  </header>
+  <p class="error" id="rt-error" role="alert" hidden></p>
+  <div id="rt-content" aria-live="polite"><p class="muted">Loading the games…</p></div>
+</main>
+<script src="{{ static('retro.js') }}" defer></script>
+{% endblock %}

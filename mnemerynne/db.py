@@ -116,7 +116,9 @@ FEATURE_DBS: dict[str, FeatureDb] = {f.name: f for f in (
     # Phase 4: Media (media/, web/media.py, kiosk, SoundCloud's TV profiles, signage, the worker's catalog).
     FeatureDb("media", moves=MEDIA_TABLES,
               user_columns=(("media_progress", "user_id"), ("media_remotes", "user_id"), ("media_screens", "user_id"),
-                            ("media_screen_guests", "guest_id"), ("media_screen_guests", "owner_id")),
+                            ("media_screen_guests", "guest_id"), ("media_screen_guests", "owner_id"),
+                            # Retro's saves and plays (migrations/media/0002_retro.sql): born in media.db, nothing moves
+                            ("retro_saves", "user_id"), ("retro_plays", "user_id")),
               user_null_columns=(("media_sources", "created_by"), ("signage_shows", "created_by"),
                                  ("signage_shows", "updated_by")),
               file_columns=(("media_items", "file_id"), ("media_progress", "file_id")),

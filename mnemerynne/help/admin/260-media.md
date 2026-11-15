@@ -97,6 +97,10 @@ StickBob Runner (Media → Games → Mouse & keyboard) pays coins at the end of 
 
 Lumi-Soft (Media → Games → Mouse & keyboard) is a cardboard target gallery built from Doll's GameMaker sniper prototype, played in the browser. Unlike StickBob Runner, its score is checked properly: the page sends every shot (when, and where it was aimed), every reload and how many continues it used, and `mnemerynne/lumisoft.py` replays the whole run with `lumisoft_rules.py` (a copy of the page's `rules.js`) before paying. A run costs 25 coins, each continue costs more (50, 100, 200, then 400), and a run pays 1 coin per 250 points, recorded in `coin_transactions` as game `lumi-soft` with reference `lumi-soft:<run>`. A run claiming more play than the time since it started pays nothing. **Settings → Entertainment → Media → Games → Lumi-Soft coins a day** caps one person's pay per day (**300** by default; 0 is no limit). Migration **0074** adds `lumisoft_runs` (tickets: one live run per person), `lumisoft_bests` (best scores per stage, Story and each day's Daily Range) and `lumisoft_progress` (stages cleared, creatures popped, prizes won). Its prizes are pieces in Lumi Pet's catalogs marked `"prize": "lumi-soft"`: they can't be bought, rolled from a capsule or found, and Lumi-Soft puts them in the player's house or closet when they're won. The stages are `mnemerynne/lumisoft_data/stages.json` (made by `python/make_lumisoft_stages.py`). No setup is needed.
 
+## Lumi Launch
+
+Lumi Launch (Media → Games → Arcade, and a cabinet in Lumi Town's Arcade) fires the player's own Lumi from a star cannon for distance; a go is three launches on one seeded course. Like Lumi-Soft, its distances are checked properly: the page sends only each launch's presses (`[frame, button]`, the buttons being `ok`, `up` and `down`), and `mnemerynne/lumilaunch.py` flies her again with `lumilaunch_rules.py` (a line-for-line copy of the page's `rules.js`) before paying. A go costs 25 coins and pays 1 coin per 20 m, up to **300 coins a person a day** (`coins.LAUNCH_DAILY_CAP`, a constant: there's no Media setting for it), recorded in `coin_transactions` as game `lumi-launch` with reference `lumi-launch:<go>`, so a go pays once. A go claiming more flying than the time since it started pays nothing. Couch turns on one screen are free play and never reach the server, except to ask, on a paired TV, whose remote pressed OK (`POST /api/media/games/lumi-launch/tv/player`, checked the same way as Who's playing?: the TV's owner's own remotes and their TV guests' remotes only). Its tables are in `games.db` (`migrations/games/0002_lumi_launch.sql`, the first games table born there rather than moved from core): `lumi_launch_runs` (tickets: one live go per person; finished ones are kept a day) and `lumi_launch_bests` (each person's longest go and launch, for the board). It needs no setup. Gamepads work through `static/games/gamepad.js`, a small helper any built-in game can load.
+
 ## Yarn Pop, Lumi Conga and Teacup Tower
 
 Yarn Pop and Lumi Conga (Media → Games → Arcade) are Breakout and Snake, ported from Doll's GameMaker arcade and dressed up with Lumi on 2026-11-11. Their slugs (`breakout`, `snake`), rules, runs and server checks are unchanged; only their names and looks are new. Each game draws the player's own Lumi from her save through `GET /api/media/games/lumi-look` (`arcade.lumi_look`: her glow and outfit, read only), and each showdown seat keeps its racer's look from when they sat down. Prism Drop and Teacup Tower draw her the same way. `python/export_roulette_arcade.py` copies their power-up icons, banner and sounds from the GameMaker project, and they share one shell (`static/games/arcade/`). They need no setup. Migration **0071** adds two tables:
@@ -136,6 +140,45 @@ This mode needs no new migration or external service: controller drafts, private
 Clients poll active tables approximately once a second and lobbies every three seconds while visible. All table users see names, bets, cards after dealing (except the dealer's hole card), balances and results. Tables are discoverable by everyone with Media access. Coins and credits have no cash value and never connect to SadGirlCoin.
 
 Slots now play three horizontal lines on a 3×3 board. The wager is per line and the full three-line cost is shown before placing it. This needs no new database migration: existing saved one-line rounds finish at their original cost and change to three lines at the next round.
+
+## Retro
+
+**Media → Retro** plays console games in the browser: Game Boy Advance today, with Super Nintendo and Game Boy to follow. It uses [EmulatorJS](https://github.com/EmulatorJS/EmulatorJS), which is RetroArch built for the browser, served from this server. People's guide: [Retro](../user/retro.md).
+
+- **Turning it on:** **Settings → Entertainment → Media → Retro**. It's off until an admin turns it on, and it's on only while Media is.
+- **Who can play:** whoever may use Media, seeing only the games their account can read on the share.
+- **The Games folder:** turning Retro on makes a folder at the top of the share with a folder per console inside (`GBA`). **Games folder** picks another top-level folder, but not the Media or Signage folder. Nothing is ever deleted.
+- **Games:** people bring their own ROMs. Mnemerynne never downloads any.
+- **Box art:** a picture beside a game with the same name.
+- **No catalogue:** the shelves are read from the share scan's list of files.
+
+**Saves** are kept in `media.db`, so the nightly backup has them. There are four kinds:
+- the game's own save,
+- four save-state slots, each with a screenshot,
+- an automatic state for **Continue**,
+- the last time each game was played.
+
+They're keyed by the ROM's content, not the file. Renaming, moving or re-adding a ROM keeps its saves. They go with the account when it's removed.
+
+Sizes:
+- The game's own save is at most 1 MB.
+- A state is at most 16 MB. A GBA state is about 430 KB.
+- A screenshot is at most 1 MB.
+
+**The player page** has its own Content-Security-Policy:
+- It talks to this server only. `connect-src 'self'` blocks EmulatorJS's update check, its CDN fallback for a missing core, and netplay.
+- It needs `'wasm-unsafe-eval'` for the cores and `'unsafe-eval'` for the zip and 7z extractors' older Emscripten code.
+
+**Licences:**
+- EmulatorJS is GPL-3.0, shipped unminified with its licence in `static/vendor/emulatorjs`.
+- The GBA core, mGBA, is MPL-2.0.
+- The SNES core, Snes9x, is free for non-commercial use only. Keep Retro off on an install that's used commercially.
+
+**Updating the emulator or adding a core:** `python python/fetch_emulatorjs.py`. It pins each npm package and checks its sha512. Its `--check` (also run by `tests/test_retro.py`) confirms the folder still matches. See `static/vendor/emulatorjs/README.md`.
+
+**Testing:**
+- `tests/retro-browser.mjs` plays a homebrew test ROM (`python/make_retro_test_rom.py`) in Chrome. It checks the screen, the save slots, Continue, and the game's own save making it to the server and back.
+- Run it with `PUPPETEER_MODULE` set, as for the other browser checks.
 
 ## Signage
 

@@ -1,0 +1,76 @@
+/* Media → Retro: the shelves (templates/retro.html, retro.js) and the player (retro_play.html, retro-player.js).
+   The theme's own colours throughout (--rose, --ink, --muted, --line, --glass); each console's cartridges have
+   colours of their own (data-console). */
+
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ------------------------------------------------------------------ shelves */
+.rt { max-width: 1200px; margin: 0 auto; padding: 1rem clamp(1rem, 3vw, 2rem) 3rem; }
+.rt-head { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; margin-bottom: 1rem; }
+.rt-head h1 { margin: 0; font-family: var(--serif); }
+.rt-back { color: var(--muted); text-decoration: none; }
+.rt-back:hover { color: var(--rose); }
+.rt-tools { display: flex; flex-wrap: wrap; gap: .5rem; margin-left: auto; }
+.rt-tools input, .rt-tools select { min-width: 0; }
+.rt-search input { width: min(16rem, 60vw); }
+
+.rt-shelf { margin: 1.5rem 0; }
+.rt-shelf-title { font-family: var(--serif); font-size: 1.2rem; margin: 0 0 .6rem; }
+.rt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 1rem; }
+.rt-game { display: grid; gap: .4rem; color: var(--ink); text-decoration: none; border-radius: var(--radius, 12px);
+  padding: .4rem; outline-offset: 3px; transition: transform .15s ease, background .15s ease; }
+.rt-game:hover, .rt-game:focus-visible { background: var(--glass); transform: translateY(-2px); }
+.rt-art { position: relative; aspect-ratio: 1 / 1; border-radius: calc(var(--radius, 12px) * .7); overflow: hidden;
+  background: var(--glass); border: 1px solid var(--line); display: grid; place-items: center; box-shadow: var(--shadow); }
+.rt-art img { width: 100%; height: 100%; object-fit: contain; }
+.rt-words { display: grid; min-width: 0; }
+.rt-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-badge { position: absolute; left: .35rem; bottom: .35rem; font-size: .72rem; padding: .1rem .45rem; border-radius: 999px;
+  background: var(--rose); color: #fff; }
+
+/* A cartridge in its console's colours, the title on its label, for a game without box art. */
+.rt-cart { --cart: #6d5a8f; --cart-edge: #4c3d66; --label: #f3eefb; --label-ink: #2b2140;
+  background: linear-gradient(160deg, var(--cart), var(--cart-edge)); border: 0; }
+.rt-game[data-console="gba"] .rt-cart { --cart: #5b4aa8; --cart-edge: #3a2f73; }
+.rt-game[data-console="snes"] .rt-cart { --cart: #b9b6c4; --cart-edge: #8d8a99; --label: #ffffff; }
+.rt-game[data-console="gb"] .rt-cart { --cart: #c3c1b6; --cart-edge: #9c9a8f; --label: #ecefe1; }
+.rt-label { width: 72%; aspect-ratio: 4 / 3; display: grid; place-items: center; text-align: center; padding: .4rem;
+  border-radius: 6px; background: var(--label); color: var(--label-ink); font-weight: 700; font-size: .82rem; line-height: 1.2;
+  overflow: hidden; word-break: break-word; box-shadow: inset 0 0 0 2px rgba(0, 0, 0, .08); }
+.rt-empty { padding: 2rem 1rem; text-align: center; max-width: 42rem; margin: 0 auto; }
+
+/* ------------------------------------------------------------------- player */
+.rp { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr; background: #000; z-index: 5; }
+.rp-bar { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; padding: .4rem .75rem;
+  padding-top: max(.4rem, env(safe-area-inset-top)); background: var(--chrome, rgba(20, 10, 30, .92)); color: var(--ink);
+  border-bottom: 1px solid var(--line); }
+.rp-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
+.rp-status { margin-left: auto; color: var(--muted); }
+.rp-stage { position: relative; min-height: 0; }
+.rp-stage > div { position: absolute; inset: 0; }
+.rp-start { position: fixed; inset: 0; z-index: 7; display: flex; gap: 1rem; align-items: center; justify-content: center;
+  flex-wrap: wrap; background: rgba(0, 0, 0, .55); }
+.rp-start[hidden] { display: none; }
+.rp-start button { font-size: 1.15rem; padding: .8rem 1.6rem; }
+
+.rp-slots { position: fixed; inset: 0; z-index: 8; display: grid; place-items: center; background: rgba(0, 0, 0, .6); padding: 1rem; }
+.rp-slots[hidden] { display: none; }
+.rp-slots-box { width: min(34rem, 100%); max-height: 90vh; overflow: auto; background: var(--glass-strong, #1b1026);
+  color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius, 12px); padding: 1rem 1.2rem; box-shadow: var(--shadow); }
+.rp-slots-box h2 { margin: 0 0 .6rem; font-family: var(--serif); }
+.rp-slot-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
+.rp-slot { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: .75rem; align-items: center;
+  padding: .4rem; border: 1px solid var(--line); border-radius: calc(var(--radius, 12px) * .6); }
+.rp-slot-shot { width: 96px; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 6px; background: #000; color: var(--muted);
+  display: grid; place-items: center; image-rendering: pixelated; }
+.rp-slot-words { display: grid; min-width: 0; }
+.rp-slot-buttons { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.rp-slots-foot { display: flex; justify-content: flex-end; margin-top: .8rem; }
+
+@media (max-width: 520px) {
+  .rt-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: .6rem; }
+  .rp-console { display: none; }
+  .rp-slot { grid-template-columns: 72px minmax(0, 1fr); }
+  .rp-slot-shot { width: 72px; }
+  .rp-slot-buttons { grid-column: 1 / -1; }
+}

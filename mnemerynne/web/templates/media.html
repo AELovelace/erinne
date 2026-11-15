@@ -25,6 +25,10 @@
     <button type="button" class="mc-menu-item" data-view="radio"><span class="mc-icon">📻</span>Radio</button>
     {#- Games (mnemerynne/games.py): the built-in games, for whoever may use Media (the TV as its owner). -#}
     <button type="button" class="mc-menu-item" data-view="games"><span class="mc-icon">🎮</span>Games</button>
+    {#- Retro (web/retro.py): console games from the Games folder, once an admin turned it on. No data-view: it is a
+        page of its own, like Remote, so it stays in the menu on a phone (media.css). Not on a TV yet: its pages want a
+        person signed in, and a TV has only its screen key. -#}
+    {% if retro_on and not screen %}<a class="mc-menu-item" href="/media/retro" style="text-decoration: none"><span class="mc-icon">🕹</span>Retro</a>{% endif %}
     {#- Screen size and Wi-Fi are inside Kiosk settings, which sits at the bottom of the menu (media.css). -#}
     {% if screen %}<button type="button" class="mc-menu-item" id="mc-kiosk" data-local-only hidden><span class="mc-icon">⚙</span>Kiosk settings</button>{% endif %}
     {% if not screen and screens_allowed %}<button type="button" class="mc-menu-item" data-view="screens"><span class="mc-icon">📺</span>Screens</button>

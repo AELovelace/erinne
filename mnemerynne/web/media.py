@@ -29,7 +29,7 @@ from mnemerynne import db, group_refs, media, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
-from mnemerynne.media import artwork, browse, catalog, live, probe, remotes, screens, signage, soundcloud, speakers, transcode
+from mnemerynne.media import artwork, browse, catalog, live, probe, remotes, retro, screens, signage, soundcloud, speakers, transcode
 from mnemerynne.web import security
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import _session_user, admin_user, api_user, get_db, get_media_db, get_settings, is_admin, page_user, release_db
@@ -120,6 +120,7 @@ def media_page(request: Request, user=Depends(page_user), conn: sqlite3.Connecti
     return request.app.state.templates.TemplateResponse(request, "media.html", {
         "user": user, "is_admin": admin, "active": "media",
         "has_library": media.library(conn) is not None, "folder": _folder_name(conn),
+        "retro_on": retro.enabled(conn),          # Media → Retro in the menu (web/retro.py)
         "screens_allowed": screens.may_use(conn, user, request.app.state.directory)})
 
 
@@ -1217,11 +1218,20 @@ def _admin_status(request: Request, conn: sqlite3.Connection) -> dict:
             "tmdb_key_set": bool(cfg.get("tmdb_key_enc")),
             "soundcloud_set": bool(cfg.get("soundcloud_id_enc") and cfg.get("soundcloud_secret_enc")),
             "sources": live.sources(conn, enabled_only=False), "catalog": catalog.status(conn, lib),
+            "retro": _retro_status(conn),
             "sessions": sessions(request).running(),
             # Top-level folders of the share, to pick the Media folder from (inboxes aren't libraries).
             "folders": [r["share_path"] for r in conn.execute(
                 "SELECT share_path FROM collections WHERE kind = 'library' AND share_path IS NOT NULL "
                 "AND instr(share_path, '/') = 0 ORDER BY share_path COLLATE NOCASE")]}
+
+
+def _retro_status(conn: sqlite3.Connection) -> dict:
+    """Retro's folder as it is on the share, and how many games it holds (whoever may read them)."""
+    lib = retro.library(conn)
+    return {"library": {"id": lib["id"], "share_path": lib["share_path"]} if lib else None,
+            "games": retro.game_count(conn),
+            "consoles": [{"key": c.key, "name": c.name, "folder": c.folder} for c in retro.CONSOLES.values()]}
 
 
 @admin_router.get("/api/admin/settings/media")
@@ -1245,6 +1255,8 @@ class MediaSettingsBody(BaseModel):
     signage_effects: dict | None = None                        # CRT effects for newly paired screens
     runner_daily_cap: int | None = Field(None, ge=0, le=1_000_000, strict=True)   # StickBob Runner's coins a day per person; 0: no limit
     lumisoft_daily_cap: int | None = Field(None, ge=0, le=1_000_000, strict=True)  # Lumi-Soft's coins a day per person; 0: no limit
+    retro_enabled: bool | None = None                          # Retro (media/retro.py): console games, off by default
+    retro_folder: str | None = Field(None, max_length=120)     # its Games folder at the top of the share
 
 
 @admin_router.put("/api/admin/settings/media")
@@ -1270,8 +1282,16 @@ def admin_settings(body: MediaSettingsBody, request: Request, user=Depends(admin
                 _log(conn, user, "settings.signage_folder", media.check_folder(body.signage_folder))
                 if media.enabled(conn) and body.enabled is not False:
                     media.ensure_signage_library(conn)
-            changes = body.model_dump(exclude={"enabled", "folder", "tmdb_key", "soundcloud_id", "soundcloud_secret", "signage_folder"},
-                                      exclude_none=True)
+            if body.retro_folder is not None and retro.set_folder(conn, settings, body.retro_folder):
+                _log(conn, user, "settings.retro_folder", media.check_folder(body.retro_folder))
+            # Retro's folder (a console's folder each) is made when Retro goes on, or moves while it's on.
+            retro_on = body.retro_enabled if body.retro_enabled is not None else media.load_settings(conn)["retro_enabled"]
+            if retro_on and (body.retro_enabled is True or body.retro_folder is not None):
+                retro.ensure_library(conn)
+            if body.retro_enabled is not None and body.retro_enabled != media.load_settings(conn)["retro_enabled"]:
+                _log(conn, user, "settings.retro", "on" if body.retro_enabled else "off")
+            changes = body.model_dump(exclude={"enabled", "folder", "tmdb_key", "soundcloud_id", "soundcloud_secret", "signage_folder",
+                                               "retro_folder"}, exclude_none=True)
             if changes.get("signage_effects") is not None:
                 try:
                     changes["signage_effects"] = signage.clean_effects(changes["signage_effects"])

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ game.title }} · Retro · {{ product_name }}{% endblock %}
+{% block body %}
+<link rel="stylesheet" href="{{ static('retro.css') }}">
+{#- The player (web/retro.py player_page, static/retro-player.js): EmulatorJS (static/vendor/emulatorjs) fills the
+    page under a slim bar. Saves go to the server, never only to this browser: the game's own save as the game
+    writes it, a save state into the slot picked here, and an automatic one (Continue) on leaving. The page's own
+    Content-Security-Policy keeps the emulator talking to this server only. -#}
+<div class="rp" id="rp">
+  <div class="rp-bar">
+    <button type="button" id="rp-back" title="Save and go back to Retro">← Retro</button>
+    <strong class="rp-title">{{ game.title }}</strong>
+    <span class="rp-console muted small">{{ game.console_name }}</span>
+    <span class="rp-status small" id="rp-status" role="status"></span>
+    <button type="button" id="rp-save" title="Save state" disabled>💾 Save</button>
+    <button type="button" id="rp-load" title="Load state" disabled>📂 Load</button>
+    <button type="button" id="rp-full" title="Full screen">⛶</button>
+  </div>
+  {#- Before the game starts: Continue (the automatic state) or a fresh start. -#}
+  <div class="rp-start" id="rp-start" hidden>
+    <button type="button" id="rp-continue">▶ Continue <span class="muted small" id="rp-continue-when"></span></button>
+    <button type="button" class="secondary" id="rp-fresh">Start</button>
+  </div>
+  <div class="rp-stage"><div id="rp-game"></div></div>
+  {#- The save-state slots, for saving into or loading from (retro-player.js slots). -#}
+  <div class="rp-slots" id="rp-slots" role="dialog" aria-modal="true" aria-labelledby="rp-slots-title" hidden>
+    <div class="rp-slots-box">
+      <h2 id="rp-slots-title">Save state</h2>
+      <ul class="rp-slot-list" id="rp-slot-list"></ul>
+      <div class="rp-slots-foot"><button type="button" class="secondary" id="rp-slots-close">Close (Esc)</button></div>
+    </div>
+  </div>
+</div>
+<script id="rp-data" type="application/json">{{ game_json | safe }}</script>
+<script src="{{ static('retro-player.js') }}" defer></script>
+{% endblock %}

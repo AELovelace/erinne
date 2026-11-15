@@ -2,3 +2,5 @@ deploy/linux/** text eol=lf
 *.sh text eol=lf
 *.sql text eol=lf
 deploy/screen/** text eol=lf
+# EmulatorJS as fetched by python/fetch_emulatorjs.py, byte for byte (its MANIFEST.json checks them): no newline changes.
+mnemerynne/web/static/vendor/emulatorjs/** -text

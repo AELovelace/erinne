@@ -1876,6 +1876,38 @@
     });
     playback.appendChild(gamesForm);
 
+    // Retro (mnemerynne/media/retro.py, web/retro.py): console games played in the browser, from a folder of their
+    // own on the share (a folder per console). Off until turned on here; people bring their own ROMs.
+    playback.appendChild(el("h3", "ax-h small", "Retro"));
+    const rs = data.retro || { library: null, games: 0, consoles: [] };
+    const retroForm = el("form");
+    const retroGrid = el("div", "agent-settings");
+    const retroOn = agentField(retroGrid, "Retro console games", agentInput("checkbox", s.retro_enabled));
+    retroOn.title = "Adds Retro to Media's menu: games from the folder below, played in the browser, saves kept per person";
+    const retroFolder = agentField(retroGrid, "Games folder", agentInput("text", rs.library ? rs.library.share_path : s.retro_folder));
+    retroFolder.setAttribute("list", "media-folders");
+    retroFolder.placeholder = "Games";
+    retroFolder.title = "A folder at the top of the share; one folder per console is made inside it";
+    retroForm.appendChild(retroGrid);
+    const retroActions = el("div", "ax-new");
+    const saveRetro = el("button", "small", "Save");
+    saveRetro.type = "submit";
+    const consoles = rs.consoles.map(function (c) { return c.folder; }).join(", ");
+    retroActions.append(saveRetro, el("span", "small muted", rs.library
+      ? rs.games + " game(s) in " + rs.library.share_path + " (" + consoles + "). Share permissions decide who sees which."
+      : "Turning it on makes the folder, with " + consoles + " inside."));
+    retroForm.appendChild(retroActions);
+    retroForm.appendChild(el("p", "small muted", "People bring their own games (ROMs they dumped); Mnemerynne never " +
+      "downloads any. The SNES emulator (Snes9x) is free for non-commercial use only."));
+    retroForm.addEventListener("submit", function (e) {   // the switch, and the folder when it changed
+      e.preventDefault();
+      const body = { retro_enabled: retroOn.checked };
+      const name = retroFolder.value.trim();
+      if (name && name.toLowerCase() !== String(rs.library ? rs.library.share_path : s.retro_folder).toLowerCase()) body.retro_folder = name;
+      save(body);
+    });
+    playback.appendChild(retroForm);
+
     // Live TV and radio: SGCRelay's station list, then the admin's own streams and stations.
     const radioForm = el("form");
     const radioGrid = el("div", "agent-settings");

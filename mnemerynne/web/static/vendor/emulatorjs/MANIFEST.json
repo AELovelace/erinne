@@ -1,0 +1,23 @@
+{
+ "version": "4.2.3",
+ "cores": [
+  "mgba"
+ ],
+ "files": {
+  "compression/extract7z.js": "4ac9933b995a516cb6b3ca4027db860278372a20c21c405d93ceb1998498853a",
+  "compression/extractzip.js": "3cc825428724213acd43d30552a78008e0869b2326de17dee240dbff9ee2f629",
+  "cores/mgba-legacy-wasm.data": "e300d2f368c82bf61d77c972c36e367cf16408ec3d50beede080337519a3d696",
+  "cores/mgba-wasm.data": "01fcaf6d4296ef1db6676e0c69400c4474e24572d0b2b99cc097e4ae885e02d7",
+  "cores/reports/mgba.json": "08219f6c855a9d996f04ed21169bb0c5ac64d469a8a536468b9876205b5c268d",
+  "emulator.css": "0ba5b1ce183b6ecb95c17e54e89fbae77697ebb94ec23caca5fd19f9b569defe",
+  "LICENSE": "a617fab6d251b3302b1cb2c1c94f52d1c584f6fcb2fc218ec1a475bc08053a61",
+  "src/compression.js": "bd6723ec29fee8de81118cfbddfcb53301b8f41f7c6fb22c2de44dedbf111c2c",
+  "src/emulator.js": "24ebac4baf739892046b82c3bdf01d5b6795b801b77d289e43a4c7d59f9666be",
+  "src/GameManager.js": "f026130eda3648557498c54c70cbb5b36fd71b088e7e42e5a13e413aab11d888",
+  "src/gamepad.js": "27707ee9256cf3e1a6f32d1c3c42f2aed991d637773699fff566008229cc09c8",
+  "src/nipplejs.js": "cf745190f5dc5db942ad54f5683d56c6d6da445646f4b4fc23c049c9985a04df",
+  "src/shaders.js": "79bcd4c35740b2858fc28f2f1894ddb8f483f1aba6f564869a713515726fe902",
+  "src/storage.js": "06759f310bb2d782d2728e1d3417a0d8f613eff935d2959c1a705670041a6f2e",
+  "version.json": "d8991427000a96fb97daefdb62178071e9bbff911760706148e584ae8d69f9e7"
+ }
+}

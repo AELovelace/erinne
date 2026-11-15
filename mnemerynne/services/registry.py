@@ -79,7 +79,7 @@ SERVICES: dict[str, Service] = {s.name: s for s in (
         serves="Media (/media/, /api/media/, its admin and signage): the TV and speaker hub, pairing codes and "
                "transcoding sessions live in this one process, so every path that touches them comes here",
         routers=("mnemerynne.web.media:router", "mnemerynne.web.media:admin_router", "mnemerynne.web.kiosk:router",
-                 "mnemerynne.web.soundcloud:router"),
+                 "mnemerynne.web.soundcloud:router", "mnemerynne.web.retro:router"),   # Retro: /media/retro, /api/media/retro
         paths=("/api/media/", "/media/", "/api/admin/media", "/api/admin/signage", "/api/admin/settings/media"),
         port=38207,
         single=True,                       # the hub, the pairings and the ffmpeg sessions are this process's memory
