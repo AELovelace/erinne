@@ -203,6 +203,16 @@ Any remote that may drive the TV opens it; so does the box's own keyboard or a c
    but didn't answer, refused, paired but didn't connect) and BlueZ's own reason, like `(BlueZ: AuthenticationFailed)`.
 3. Next time, its middle button turns it on and it reconnects by itself. **Forget** (twice) unpairs it.
 
+**Volume from an xb2pc controller:** the box's helper reads an xb2pc dongle's volume keys and turns the box's
+**system volume** (the same level as Kiosk settings' System volume), so it works in videos, music and Retro alike:
+- **Share + RB** or **Share + D-pad →**: louder (hold to keep going)
+- **Share + LB** or **Share + D-pad ←**: quieter
+- **Share + B**: mute or unmute
+
+They come in as the dongle's own "Consumer Control" input device. The helper grabs that device, so Firefox doesn't
+also turn Media's own volume. Other keyboards' volume keys are left to Firefox, as before. Steps are 5%; turning it
+up also unmutes.
+
 How it's kept safe:
 - The page is the server's TV page talking to the helper (`http://127.0.0.1:9187/api/controllers`). The helper
   answers only the configured Mnemerynne address (its Origin, Host 127.0.0.1), never the hotspot.

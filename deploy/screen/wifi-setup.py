@@ -87,6 +87,38 @@ INPUT_EVENT = struct.Struct("llHHi")         # struct input_event: the time (two
 EV_KEY = 1
 KEY_R = 19
 RESTART_MODIFIERS = ((29, 97), (42, 54), (56, 100))   # Ctrl, Shift and Alt: the left and the right one
+KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP = 113, 114, 115
+VOLUME_STEP = 5                              # one press of a volume key (percent of the system volume)
+EVIOCGNAME = 0x81004506                      # ioctl: an input device's name, into 256 bytes
+EVIOCGRAB = 0x40044590                       # ioctl: this reader alone gets the device's events
+
+
+def volume_keys_device(name: str) -> bool:
+    """An xb2pc dongle's volume keys (its Share combos): a device of their own ("... Consumer Control", as
+    hid-generic names an application collection), read and grabbed here so the box's system volume changes and
+    Firefox doesn't also turn Media's own volume. Any other keyboard's volume keys stay Firefox's."""
+    low = name.lower()
+    return "xb2pc" in low and "consumer control" in low
+
+
+def input_name(stream) -> str:
+    """The device's name (EVIOCGNAME), or "" where it can't be asked."""
+    try:
+        import fcntl                         # Linux only; the tests on other systems pass their own
+        raw = fcntl.ioctl(stream.fileno(), EVIOCGNAME, bytes(256))
+        return raw.split(b"\0", 1)[0].decode("utf-8", "replace")
+    except (ImportError, OSError, ValueError):
+        return ""
+
+
+def grab_input(stream) -> bool:
+    """Take the device's events for this reader alone (EVIOCGRAB); False where it can't."""
+    try:
+        import fcntl
+        fcntl.ioctl(stream.fileno(), EVIOCGRAB, 1)
+        return True
+    except (ImportError, OSError, ValueError):
+        return False
 
 # Bluetooth game controllers (Bluetooth and Controllers, below)
 BT_SCAN_SECONDS = 20                         # one "Find controllers": as long as a controller's pairing light flashes
@@ -689,12 +721,28 @@ class Kiosk:
         self.need(token)
         if not isinstance(level, int) or isinstance(level, bool) or not 0 <= level <= 100:
             raise KioskError("The volume is 0 to 100.", 422)
-        set_conf_value(self.conf_path, "SYSTEM_VOLUME", str(level))   # the HDMI script keeps it after a restart
-        code, _, err = self.run(["runuser", "-u", SCREEN_USER, "--", "env", f"XDG_RUNTIME_DIR=/run/user/{self.uid()}",
-                                 "pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{level}%"], 15)
+        code, err = self._apply_volume(level)
         if code != 0:
             raise KioskError(f"Saved, but the sound didn't change now: {err.strip() or 'no sound server'}.", 409)
         return level
+
+    def _apply_volume(self, level: int) -> tuple[int, str]:
+        """The system volume, now (pactl) and after a restart (SYSTEM_VOLUME, which the HDMI script keeps)."""
+        set_conf_value(self.conf_path, "SYSTEM_VOLUME", str(level))
+        code, _, err = self._as_screen_user(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{level}%"])
+        return code, err
+
+    def step_volume(self, delta: int) -> int:
+        """A volume key on the box (an xb2pc's Share + RB / LB): the system volume up or down a step, unmuted.
+        The box's own buttons, like its keyboard, need no PIN."""
+        level = max(0, min(100, self.volume() + delta))
+        self._apply_volume(level)
+        self._as_screen_user(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "0"])   # turning it up means wanting sound
+        return level
+
+    def toggle_mute(self) -> None:
+        """The mute key on the box (an xb2pc's Share + B): the system sound off, or back on."""
+        self._as_screen_user(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"])
 
     def _as_screen_user(self, cmd: list[str], timeout: int = 15) -> tuple[int, str, str]:
         """A command in the kiosk's own sound session (PipeWire runs as the screen's user)."""
@@ -2032,10 +2080,14 @@ SETTINGS_PAGE = SETTINGS_PAGE.replace("</script></body></html>", "</script>" + P
 # ------------------------------------------------------------- restart keys
 class RestartKeys:
     """Ctrl+Shift+Alt+R on any keyboard restarts the kiosk (Firefox under cage; systemd starts it again).
-    The devices are only read, never grabbed: cage gets every key as before."""
+    Keyboards are only read, never grabbed: cage gets every key as before. An xb2pc dongle's volume keys
+    (volume_keys_device) are the one exception: grabbed, and they turn the box's system volume (`volume`, the
+    Kiosk: step_volume, toggle_mute)."""
 
-    def __init__(self, restart, *, clock=time.monotonic, input_dir: str = INPUT_DIR) -> None:
+    def __init__(self, restart, *, volume=None, clock=time.monotonic, input_dir: str = INPUT_DIR,
+                 name_of=input_name, grab=grab_input) -> None:
         self.restart, self.clock, self.input_dir = restart, clock, input_dir
+        self.volume, self.name_of, self.grab = volume, name_of, grab
         self.down: set[int] = set()
         self.last = float("-inf")
         self.watching: set[str] = set()
@@ -2057,8 +2109,22 @@ class RestartKeys:
         self.restart()
         return True
 
-    def read(self, stream) -> None:
-        """Key events from one device until it goes away (unplugged)."""
+    def volume_key(self, code: int, value: int) -> None:
+        """One key from an xb2pc's volume device: a press (not a release, not a repeat) turns the system volume."""
+        if value != 1 or self.volume is None:
+            return
+        try:
+            if code == KEY_VOLUMEUP:
+                self.volume.step_volume(VOLUME_STEP)
+            elif code == KEY_VOLUMEDOWN:
+                self.volume.step_volume(-VOLUME_STEP)
+            elif code == KEY_MUTE:
+                self.volume.toggle_mute()
+        except Exception as exc:   # noqa: BLE001 - a sound server that's away mustn't stop the reading
+            print(f"mnemerynne-screen-wifi: volume key: {exc!r}", file=sys.stderr, flush=True)
+
+    def read(self, stream, volume: bool = False) -> None:
+        """Key events from one device until it goes away (unplugged); `volume`: an xb2pc's volume keys."""
         try:
             while True:
                 data = stream.read(INPUT_EVENT.size)
@@ -2066,7 +2132,10 @@ class RestartKeys:
                     return
                 _, _, kind, code, value = INPUT_EVENT.unpack(data)
                 if kind == EV_KEY:
-                    self.key(code, value)
+                    if volume:
+                        self.volume_key(code, value)
+                    else:
+                        self.key(code, value)
         except OSError:
             return
 
@@ -2087,11 +2156,14 @@ class RestartKeys:
                 continue
             with self.lock:
                 self.watching.add(path)
-            threading.Thread(target=self._watch, args=(path, stream), daemon=True).start()
+            volume = self.volume is not None and volume_keys_device(self.name_of(stream))
+            if volume and not self.grab(stream):   # Firefox would turn Media's volume as well: say so, carry on
+                print(f"mnemerynne-screen-wifi: couldn't grab {path}", file=sys.stderr, flush=True)
+            threading.Thread(target=self._watch, args=(path, stream, volume), daemon=True).start()
 
-    def _watch(self, path: str, stream) -> None:
+    def _watch(self, path: str, stream, volume: bool = False) -> None:
         try:
-            self.read(stream)
+            self.read(stream, volume)
         finally:
             stream.close()
             with self.lock:
@@ -2108,7 +2180,8 @@ def restart_kiosk() -> None:
 def main() -> None:
     conf = read_conf()
     setup = Setup(NM(), conf.get("MNEMERYNNE_URL", "").rstrip("/"), hotspot=conf.get("WIFI_SETUP", "yes") == "yes")
-    local = Server(("127.0.0.1", LOCAL_PORT), setup, local=True, kiosk=Kiosk(setup), controllers=Controllers(setup))
+    kiosk = Kiosk(setup)
+    local = Server(("127.0.0.1", LOCAL_PORT), setup, local=True, kiosk=kiosk, controllers=Controllers(setup))
     threading.Thread(target=local.serve_forever, daemon=True).start()
     hotspot_server: list[Server] = []
 
@@ -2133,7 +2206,7 @@ def main() -> None:
             print("mnemerynne-screen-wifi: hotspot down", flush=True)
 
     setup.on_hotspot = on_hotspot
-    keys = RestartKeys(restart_kiosk)
+    keys = RestartKeys(restart_kiosk, volume=kiosk)   # and an xb2pc's volume keys turn the system volume
     while True:
         keys.scan()
         try:

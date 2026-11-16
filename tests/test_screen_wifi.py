@@ -5,6 +5,7 @@ import http.client
 import importlib.util
 import io
 import json
+import os
 import threading
 import time
 from pathlib import Path
@@ -720,6 +721,62 @@ def test_restart_keys_are_read_from_every_input_device(tmp_path):
     assert restarts == [1] and keys.watching == set()
     keys.read(io.BytesIO(b"short"))                        # a device that went away mid-event
     ws.RestartKeys(lambda: None, input_dir=str(tmp_path / "missing")).scan()
+
+
+def test_volume_keys_step_the_system_volume_and_mute(kiosk):
+    """An xb2pc's Share combos (volume keys on the box): a step of the system volume, kept like Kiosk settings'
+    level and unmuted; mute toggles. No PIN: the box's own buttons."""
+    k, run, server, clock, setup, conf = kiosk
+    who = ["runuser", "-u", "mnemerynne-screen", "--", "env", "XDG_RUNTIME_DIR=/run/user/990"]
+    assert k.step_volume(ws.VOLUME_STEP) == 85
+    assert "SYSTEM_VOLUME=85\n" in conf.read_text()
+    assert run.calls[-2:] == [who + ["pactl", "set-sink-volume", "@DEFAULT_SINK@", "85%"],
+                              who + ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "0"]]
+    for _ in range(5):
+        k.step_volume(ws.VOLUME_STEP)
+    assert k.volume() == 100                                   # never past 100
+    for _ in range(30):
+        k.step_volume(-ws.VOLUME_STEP)
+    assert k.volume() == 0                                     # nor under 0
+    k.toggle_mute()
+    assert run.calls[-1] == who + ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"]
+
+
+def test_an_xb2pcs_volume_keys_are_grabbed_and_turn_the_system_volume(tmp_path):
+    """The dongle's volume keys come as their own "... Consumer Control" device: that one is grabbed (Firefox
+    mustn't turn Media's volume as well) and turns the system volume. A keyboard's volume keys are left alone, and
+    the dongle's restart keys don't exist."""
+    def events(*keys):
+        return b"".join(ws.INPUT_EVENT.pack(0, 0, ws.EV_KEY, code, value) for code, value in keys)
+
+    class Volume:
+        def __init__(self):
+            self.done = []
+
+        def step_volume(self, delta):
+            self.done.append(delta)
+
+        def toggle_mute(self):
+            self.done.append("mute")
+
+    (tmp_path / "event3").write_bytes(events((ws.KEY_VOLUMEUP, 1), (ws.KEY_VOLUMEUP, 0), (ws.KEY_VOLUMEDOWN, 1),
+                                             (ws.KEY_VOLUMEDOWN, 2), (ws.KEY_VOLUMEDOWN, 0), (ws.KEY_MUTE, 1)))
+    (tmp_path / "event4").write_bytes(events((ws.KEY_VOLUMEUP, 1), (ws.KEY_VOLUMEUP, 0)))   # a keyboard's
+    names = {"event3": "xb2pc xb2pc Xbox pad Consumer Control", "event4": "Logitech K380 Consumer Control"}
+    grabbed, volume = [], Volume()
+    keys = ws.RestartKeys(lambda: None, volume=volume, clock=lambda: 1000.0, input_dir=str(tmp_path),
+                          name_of=lambda stream: names[os.path.basename(stream.name)],
+                          grab=lambda stream: grabbed.append(os.path.basename(stream.name)) or True)
+    keys.scan()
+    for _ in range(100):
+        if not keys.watching:
+            break
+        time.sleep(0.02)
+    assert volume.done == [ws.VOLUME_STEP, -ws.VOLUME_STEP, "mute"]   # presses only: no repeat, no release
+    assert grabbed == ["event3"]
+    assert ws.volume_keys_device("xb2pc xb2pc Xbox pad Consumer Control")
+    assert not ws.volume_keys_device("xb2pc xb2pc Xbox pad")           # the gamepad itself stays Firefox's
+    assert ws.input_name(io.BytesIO(b"")) == ""                         # not a device: no name, no error
 
 
 def test_the_kiosk_opens_new_windows_in_place_and_backspace_goes_back():
