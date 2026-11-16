@@ -22,6 +22,7 @@
   const DELAYS = { 3: "Low (LAN)", 5: "Normal", 8: "Smooth (far away)" };   // frames of input delay the host picks
   const CHECK_EVERY = 300;            // frames between state checksums (5 s at 60 fps)
   const RESYNC_GAP_MS = 20000;        // the most often a mismatch restarts everyone
+  const RESTART_GAP_MS = 1500;        // the least time between two restarts the host didn't press for
   const WAIT_SHOW_MS = 400;           // a stall this long says who it's waiting for
   const LIST_EVERY_MS = 3000;         // the room list, while the panel's open and we're in none
   const PING_EVERY_MS = 20000;        // a keep-alive the server answers (proxies drop a websocket quiet for 60 s)
@@ -40,6 +41,8 @@
     gate: false,              // paused waiting for someone's presses
     waitingFor: -1, waitSince: 0,
     userPaused: false, internal: false,
+    held: false,              // a guest who just joined: their own game paused until the host's state comes
+    startLater: 0,            // the host: a restart put off until RESTART_GAP_MS since the last (a second join)
     sums: {},                 // frame -> {slot: checksum}
     lastResync: 0, resyncs: 0,  // restarts sent (the host) or taken (a guest), for the panel and the tests
     checkEvery: CHECK_EVERY,
@@ -159,7 +162,7 @@
         go.type = "button";
         go.dataset.key = "go";
         go.disabled = np.players.length < 2 || !player() || !player().started();
-        go.title = np.players.length < 2 ? "Waiting for someone to join" : "Everyone starts from where you are now";
+        go.title = np.players.length < 2 ? "Waiting for someone to join" : "Everyone starts again from where you are now";
         go.addEventListener("click", function () { startAll("pressed"); });
         row.append(go);
       } else {
@@ -216,7 +219,11 @@
   }
   function stop(why) {   // out of the room: the game goes on alone, saved as usual again
     np.ws = null; np.code = ""; np.slot = -1; np.players = []; np.closedWhy = "";
+    clearTimeout(np.startLater); np.startLater = 0;   // a restart still waiting for its turn: no room to start now
+    const wasHeld = np.held;
+    np.held = false;
     stopLockstep();
+    if (wasHeld && !np.started && !np.userPaused && emu()) internally(function () { np.origPlay(true); });   // a guest who never got the host's game: their own runs again
     if (player()) player().netplay(null);
     status(why);
     draw();
@@ -230,19 +237,24 @@
     if (m.t === "welcome") {
       np.code = m.code; np.slot = m.slot; np.players = m.players; np.host = m.slot === 0;
       if (player()) player().netplay(np.host ? "host" : "guest");
-      status(np.host ? "Room " + m.code + " is open: others can join from 👥." : "Joined " + hostName() + "'s room.");
+      status(np.host ? "Room " + m.code + " is open: when someone joins from 👥, you both play from your game."
+        : "Joined " + hostName() + "'s room: waiting for their game…");
       if (np.host) closePanel();
+      else holdForHost();                             // a guest's own game stops here: the host's replaces it
       draw();
     } else if (m.t === "players") {
-      const before = np.players.length;
+      const before = np.players;
       np.players = m.players;
+      const newcomers = m.players.filter(function (p) { return !before.some(function (b) { return b.slot === p.slot; }); });
       if (np.started) {
         for (const f in np.inputs) {   // someone left: their presses aren't waited for any more
           for (const s in np.inputs[f]) if (!np.players.some(function (p) { return String(p.slot) === s; })) delete np.inputs[f][s];
         }
         tryResume();
-        if (np.host && np.players.length > before) startAll("joined");   // a newcomer starts from where we are
       }
+      // Someone joined: everyone (them too) starts from the host's game as it is now. Started or not: the host
+      // needn't press anything (Start together sat in a closed panel, so a guest's game used to just run on alone).
+      if (np.host && newcomers.length && before.length) startAll("joined");
       draw();
     } else if (m.t === "closed") {
       np.closedWhy = m.why || "The room closed.";
@@ -295,7 +307,7 @@
     np.origPause = e.pause.bind(e);
     e.play = function (dontUpdate) {
       if (!np.internal) np.userPaused = false;
-      if (np.started && np.gate) return;          // waiting for someone: it goes on when they're here
+      if ((np.started && np.gate) || np.held) return;   // waiting for someone, or for the host's game: it goes on then
       return np.origPlay(dontUpdate);
     };
     e.pause = function (dontUpdate) {
@@ -349,7 +361,7 @@
     np.sentUpTo = np.delay - 1;
     np.applied = -1;
     np.resyncs += 1;
-    np.started = true; np.gate = false; np.waitingFor = -1;
+    np.started = true; np.gate = false; np.waitingFor = -1; np.held = false;
     sendPresses();                                  // our presses for frame `delay`
     if (applyFrame(0)) { if (!np.userPaused) internally(function () { np.origPlay(true); }); }
     else gateOn(0);
@@ -359,8 +371,14 @@
   function startAll(why) {   // the host: everyone (us too) from our state now
     const e = emu();
     if (!np.host || !e || !np.ws) return;
-    if (why !== "pressed" && Date.now() - np.lastResync < 1500) return;   // two reasons at once: one restart
+    const wait = RESTART_GAP_MS - (Date.now() - np.lastResync);
+    if (why !== "pressed" && wait > 0) {   // two reasons at once: one restart now, and the next once the gap's passed,
+      if (!np.startLater) np.startLater = setTimeout(function () { np.startLater = 0; startAll(why); }, wait);   // so a
+      return;                                                     // second newcomer isn't left out (everyone'd wait on them)
+    }
+    clearTimeout(np.startLater); np.startLater = 0;
     np.lastResync = Date.now();
+    (np.why || (np.why = [])).push(why);          // why each start happened (the panel's history, and the tests)
     hook();
     const state = e.gameManager.getState();
     np.epoch += 1;
@@ -397,6 +415,13 @@
     delete np.inputs[f];
     np.applied = f;
     return true;
+  }
+
+  function holdForHost() {   // a guest, in: their own game waits, paused, until the host's state (beginFrom)
+    hook();
+    if (!emu()) return;
+    np.held = true;
+    internally(function () { np.origPause(true); });
   }
 
   function gateOn(f) {
@@ -475,7 +500,7 @@
     loaded: function () { if (np.host && np.started) startAll("loaded"); },
     state: function () {
       return { code: np.code, slot: np.slot, host: np.host, players: np.players, started: np.started, delay: np.delay,
-               frame: np.started && emu() ? frameNow() : -1, starts: np.resyncs, gate: np.gate, ticks: np.ticks || 0,
+               frame: np.started && emu() ? frameNow() : -1, starts: np.resyncs, why: np.why || [], gate: np.gate, ticks: np.ticks || 0,
                sent: np.sentUpTo, applied: np.applied, local: np.local.length };
     },
     tune: function (opts) { if (opts && opts.checkEvery > 0) np.checkEvery = opts.checkEvery; },   // tests: check sooner

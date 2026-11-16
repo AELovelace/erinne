@@ -1,8 +1,10 @@
 // Retro netplay in two real browsers (Doll, 2026-11-15): alice and bob, each in a browser of their own, play the
-// NES test game together. alice opens a room from 👥, bob finds it in his list and joins, alice starts. Then the
-// lockstep: both games run, frame for frame; a press of bob's reaches both games as player 2 at the same frame;
-// their states' checksums agree (no resync for drifting); bob leaving lets alice play on alone, and alice closing
-// the room tells bob, whose game goes on alone too. Over the media service's websocket, through the page's own CSP.
+// NES test game together. alice opens a room from 👥, bob finds it in his list and joins, and that starts them both
+// from alice's game (she presses nothing). Then the lockstep: both games run, frame for frame; a press of bob's
+// reaches both games as player 2 at the same frame; their states' checksums are the same at every check (no resync
+// for drifting); bob leaving lets alice play on alone. bob and carol joining a second apart both get alice's game
+// (the second start waits out the gap instead of being dropped), and alice closing the room tells bob, whose game
+// goes on alone too. Over the media service's websocket, through the page's own CSP.
 //   PUPPETEER_MODULE=<puppeteer(-core)'s lib/esm/puppeteer/puppeteer(-core).js> CHROME_PATH=<chrome> node tests/retro-netplay-browser.mjs
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -31,6 +33,14 @@ async function player(context, name) {   // a signed-in page for `name`, the NES
     Object.defineProperty(window, "EmulatorJS", { configurable: true, get: () => real, set: v => {
       real = class extends v { constructor(...a) { super(...a); window.EJS_emulator_for_tests = this; } };
     } });
+  });
+  await page.evaluateOnNewDocument(() => {   // every checksum this browser sends, to compare across browsers
+    window.sentSums = [];
+    const real = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (d) {
+      if (typeof d === "string" && d.includes('"t":"sum"')) window.sentSums.push(JSON.parse(d));
+      return real.call(this, d);
+    };
   });
   await page.goto(base + "/login");
   await page.evaluate(async n => {
@@ -85,10 +95,10 @@ try {
   assert.deepEqual((await np(bob)).players.map(p => p.name), ["alice", "bob"]);
   assert.equal((await np(bob)).slot, 1);
 
-  // alice starts: both play from her state, frame for frame.
-  await alice.click("#rp-together-open");
-  await press(alice, "go", ":not([disabled])");
+  // bob joining starts them both from alice's game: she needn't press anything (2026-11-15: Start together sat in a
+  // closed panel, so a guest's game just ran on alone and nothing synced).
   await bob.waitForFunction(() => window.RetroNetplay.state().started, { timeout: 15000 });
+  await alice.waitForFunction(() => window.RetroNetplay.state().started, { timeout: 15000 });
   await sleep(3000);
   const [a1, b1] = [await np(alice), await np(bob)];
   assert.ok(a1.frame > 20 && b1.frame > 20, `both games run: alice ${a1.frame}, bob ${b1.frame}`);
@@ -109,8 +119,13 @@ try {
   await sleep(6000);
   const [a2, b2] = [await np(alice), await np(bob)];
   assert.ok(a2.frame > a1.frame + 60, "still playing");
-  assert.equal(a2.starts, 1, "no resync for drifting apart (alice)");
+  assert.equal(a2.starts, 1, "no resync for drifting apart (alice): " + JSON.stringify(a2.why));
   assert.equal(b2.starts, 1, "no resync for drifting apart (bob)");
+  const sums = page => page.evaluate(() => Object.fromEntries(window.sentSums.map(s => [s.e + ":" + s.f, s.h])));
+  const [sa, sb] = [await sums(alice), await sums(bob)];
+  const both = Object.keys(sa).filter(k => k in sb);
+  assert.ok(both.length >= 5, "checksums from both at the same frames: " + both.length);
+  both.forEach(k => assert.equal(sa[k], sb[k], "the same game state at epoch:frame " + k));
 
   // bob leaves: alice plays on alone.
   await bob.evaluate(() => window.RetroNetplay.open());
@@ -120,9 +135,25 @@ try {
   await sleep(1500);
   assert.ok((await np(alice)).frame > a3 + 10, "alice isn't kept waiting for bob");
 
-  // bob joins again (the room's started: alice restarts everyone from where she is), then alice closes it.
+  // bob and carol join a second apart (the room's started: alice restarts everyone from where she is). carol's start
+  // comes inside the gap after bob's, so it waits its turn rather than being dropped (which left everyone waiting on
+  // her presses forever). Then all three play on, in step.
+  const carol = await player(await browser.createBrowserContext(), "carol");
+  await carol.click("#rp-together-open");
   await press(bob, `join-${code}`);
-  await bob.waitForFunction(() => window.RetroNetplay.state().started, { timeout: 15000 });
+  await sleep(300);
+  await press(carol, `join-${code}`);
+  for (const page of [bob, carol]) await page.waitForFunction(() => window.RetroNetplay.state().started, { timeout: 15000 });
+  await alice.waitForFunction(() => window.RetroNetplay.state().players.length === 3 && !window.RetroNetplay.state().gate, { timeout: 15000 });
+  await sleep(2500);
+  const trio = await Promise.all([alice, bob, carol].map(np));
+  assert.equal(trio[2].slot, 2, "carol is player 3");
+  assert.ok(trio.every(s => s.frame > 30), "all three run: " + trio.map(s => s.frame));
+  assert.ok(Math.max(...trio.map(s => s.frame)) - Math.min(...trio.map(s => s.frame)) <= trio[0].delay + 2,
+    "in step: " + trio.map(s => s.frame));
+  await carol.evaluate(() => window.RetroNetplay.open());
+  await press(carol, "quit");
+  await alice.waitForFunction(() => window.RetroNetplay.state().players.length === 2, { timeout: 10000 });
   await alice.evaluate(() => window.RetroNetplay.open());
   await press(alice, "quit");
   await bob.waitForFunction(() => !window.RetroNetplay.state().code, { timeout: 10000 });
@@ -133,8 +164,8 @@ try {
     "bob's game goes on alone");
 
   assert.deepEqual(errors, [], "no page errors");
-  console.log(`ok: room ${code}, alice and bob in lockstep (frame ${a2.frame}), bob's press as player 2 in both, ` +
-    "checksums agreed, leaving and closing both fine");
+  console.log(`ok: room ${code}, a join starts everyone, alice and bob in lockstep (frame ${a2.frame}), bob's press as ` +
+    "player 2 in both, the same checksums, two joins a second apart both in step, leaving and closing both fine");
 } catch (err) {
   console.error(err);
   console.error(logs.slice(-2000));
