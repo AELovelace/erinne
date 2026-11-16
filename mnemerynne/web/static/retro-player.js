@@ -277,6 +277,28 @@
     return /^#[0-9a-f]{6}$/i.test(v) ? v : "";
   }
 
+  // EmulatorJS gives a controller a player only when its GamepadHandler announces it ("connected"), and that
+  // handler looks at the browser's controllers the first time inside its own constructor, before EmulatorJS has
+  // started listening. So a controller already there when the game loads (on a TV, the one that just picked the
+  // game) was announced to nobody, never got a player, and every press of it was dropped ("Gamepad not set
+  // anywhere"): Metroid's buttons did nothing while the remote worked. Each controller the handler knows that no
+  // player has gets the next free one, as a newly connected one would. (2026-11-15)
+  function seatPads() {
+    const pads = emu && emu.gamepad && emu.gamepad.gamepads, seats = emu && emu.gamepadSelection;
+    if (!pads || !seats || !seats.length) return;   // EmulatorJS hasn't built its players yet
+    let changed = false;
+    pads.forEach(function (pad) {
+      if (!pad) return;
+      const key = pad.id + "_" + pad.index;           // how EmulatorJS names a controller in its players
+      if (seats.indexOf(key) >= 0) return;            // already playing
+      const free = seats.indexOf("");
+      if (free < 0) return;                            // four players already
+      seats[free] = key;
+      changed = true;
+    });
+    if (changed && typeof emu.updateGamepadLabels === "function") emu.updateGamepadLabels();   // its Controls menu shows it
+  }
+
   async function boot(resume) {   // the choice is the click browsers want before a page may play sound
     $("rp-start").hidden = true;
     status("Loading…");
@@ -307,6 +329,7 @@
       buttonOpts: { exitEmulation: false, netplay: false },
       defaultControllers: controllers(),
     });
+    setInterval(seatPads, 500);   // a controller that was already here when the game loaded still gets a player
     // The game's own save, put back before the game boots: games read it once, at the start.
     emu.on("saveDatabaseLoaded", function (FS) {
       if (sram) { try { writeFile(FS, sramPathBeforeBoot(), sram); } catch (_) { /* checked again at start */ } }
