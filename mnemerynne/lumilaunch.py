@@ -4,7 +4,7 @@ the household's best launches.
 A go is three launches on one seeded course. The page plays it with static/games/lumi-launch/rules.js and sends only
 each launch's presses ([frame, button], ...). Nothing it says about distance is believed: lumilaunch_rules.replay()
 flies Lumi again here from the same presses, and that distance is what pays: a metre count divided by
-METRES_PER_COIN, up to coins.LAUNCH_DAILY_CAP a day, once per go. Couch turns on a TV are free play and never come
+METRES_PER_COIN, up to the Media setting 'launch_daily_cap' a day (0: no limit), once per go. Couch turns on a TV are free play and never come
 here (Doll's rule: local multiplayer uses free credits, online uses the account's coins).
 
 Every call here runs inside the caller's transaction."""
@@ -14,7 +14,7 @@ from __future__ import annotations
 import sqlite3
 import time
 
-from mnemerynne import arcade, coins, lumilaunch_rules as rules
+from mnemerynne import arcade, coins, lumilaunch_rules as rules, media
 
 GAME = "lumi-launch"
 ENTRY = 25                                  # a go of three launches, like a run in the other arcade games
@@ -39,6 +39,11 @@ def board(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
         "WHERE b.best_go > 0 ORDER BY b.best_go DESC, b.at LIMIT ?", (limit,))]
 
 
+def daily_cap(conn: sqlite3.Connection) -> int:
+    """The most one person may earn from Lumi Launch a day (Media settings 'launch_daily_cap'). 0: no limit."""
+    return media.daily_cap(conn, "launch_daily_cap")
+
+
 def _best(conn: sqlite3.Connection, user_id: int) -> dict:
     """This person's own bests (zeros before their first go)."""
     row = conn.execute("SELECT best_go, best_shot FROM lumi_launch_bests WHERE user_id = ?", (user_id,)).fetchone()
@@ -47,7 +52,7 @@ def _best(conn: sqlite3.Connection, user_id: int) -> dict:
 
 def state(conn: sqlite3.Connection, user_id: int) -> dict:
     """The title screen: the price, how it pays, this person's coins and bests, and the household board."""
-    return {"entry": ENTRY, "metres_per_coin": METRES_PER_COIN, "cap": coins.LAUNCH_DAILY_CAP, "shots": rules.SHOTS,
+    return {"entry": ENTRY, "metres_per_coin": METRES_PER_COIN, "cap": daily_cap(conn), "shots": rules.SHOTS,
             "coins": coins.peek(conn, user_id), "best": _best(conn, user_id), "board": board(conn)}
 
 
@@ -101,7 +106,7 @@ def finish(conn: sqlite3.Connection, user_id: int, run: int, shots: list, now: f
         result.update(best=_best(conn, user_id), coins=coins.peek(conn, user_id))
         return result
     result["earned"] = summary["total"] // METRES_PER_COIN
-    result["paid"] = coins.reward(conn, user_id, result["earned"], GAME, coins.LAUNCH_DAILY_CAP, f"{GAME}:{run}")
+    result["paid"] = coins.earn(conn, user_id, result["earned"], GAME, daily_cap(conn), f"{GAME}:{run}")   # 0: no limit
     result["capped"] = result["paid"] < result["earned"]
     conn.execute("UPDATE lumi_launch_runs SET score = ?, paid = ? WHERE id = ?", (summary["total"], result["paid"], run))
     old = _best(conn, user_id)

@@ -5,7 +5,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from mnemerynne import casino, coins, prism, retention, users
+from mnemerynne import casino, coins, media, prism, retention, users
 from mnemerynne.db import transaction
 from test_media import (_login, _no_network, _pair, _screens_for, _turn_on, checker, client, conn,  # noqa: F401
                         directory, root, settings)
@@ -277,12 +277,35 @@ def test_prism_pays_when_the_game_ends_and_then_starts_fresh(conn, alice):
     assert prism.current(conn, alice) == {"drops": 0, "score": 0}
 
 
-def test_prism_scores_above_the_days_limit_pay_only_up_to_it(conn, alice):
+def test_prism_scores_above_the_days_limit_pay_only_up_to_it(conn, settings, alice):
     with transaction(conn):
-        coins.reward(conn, alice, coins.PRISM_DAILY_CAP, "prism-drop", coins.PRISM_DAILY_CAP)
+        media.save_settings(conn, settings, {"prism_daily_cap": 200})           # Settings → Media → Games
+        coins.reward(conn, alice, 200, "prism-drop", 200)                        # today's 200 already paid
     for _ in range(prism.DROPS):
         out = prism.play(conn, alice, 5, lambda k: 0)
     assert out["paid"] == 0
+
+
+def test_every_daily_limit_is_a_setting_and_off_by_default(conn, settings, alice):
+    # Doll (2026-11-15): every game's daily coins in Settings, all 0 (no limit) for now.
+    assert set(media.DAILY_CAPS) == {"runner_daily_cap", "lumisoft_daily_cap", "prism_daily_cap", "launch_daily_cap"}
+    assert all(media.load_settings(conn)[name] == 0 == media.daily_cap(conn, name) for name in media.DAILY_CAPS)
+    with transaction(conn):
+        coins.reward(conn, alice, 5000, "prism-drop", 5000)                      # far past any old limit
+    for _ in range(prism.DROPS):
+        out = prism.play(conn, alice, 5, lambda k: 0)
+    assert out["paid"] == out["earned"] > 0                                      # still paid in full
+    for name in media.DAILY_CAPS:
+        with pytest.raises(media.MediaError, match=media.DAILY_CAPS[name]):
+            media.save_settings(conn, settings, {name: -1})
+
+
+def test_earn_pays_all_without_a_limit_and_a_run_once(conn, alice):
+    with transaction(conn):
+        assert coins.earn(conn, alice, 70, "x", 0, ref="x:1") == 70             # 0: no limit
+        assert coins.earn(conn, alice, 70, "x", 0, ref="x:1") == 0              # the same run never pays twice
+        assert coins.earn(conn, alice, 70, "x", 100, ref="x:2") == 30           # a limit: what's left of today's 100
+    assert coins.peek(conn, alice) == 1100
 
 
 def test_old_history_goes_but_the_balance_stays(conn, settings, alice):

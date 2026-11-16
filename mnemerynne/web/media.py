@@ -1260,6 +1260,8 @@ class MediaSettingsBody(BaseModel):
     signage_effects: dict | None = None                        # CRT effects for newly paired screens
     runner_daily_cap: int | None = Field(None, ge=0, le=1_000_000, strict=True)   # StickBob Runner's coins a day per person; 0: no limit
     lumisoft_daily_cap: int | None = Field(None, ge=0, le=1_000_000, strict=True)  # Lumi-Soft's coins a day per person; 0: no limit
+    prism_daily_cap: int | None = Field(None, ge=0, le=1_000_000, strict=True)     # Prism Drop's coins a day per person; 0: no limit
+    launch_daily_cap: int | None = Field(None, ge=0, le=1_000_000, strict=True)    # Lumi Launch's coins a day per person; 0: no limit
     retro_enabled: bool | None = None                          # Retro (media/retro.py): console games, off by default
     retro_folder: str | None = Field(None, max_length=120)     # its Games folder at the top of the share
 

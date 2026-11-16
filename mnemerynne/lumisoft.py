@@ -47,7 +47,7 @@ class Refused(ValueError):
 
 def daily_cap(conn: sqlite3.Connection) -> int:
     """The most one person may earn from Lumi-Soft a day (Media settings 'lumisoft_daily_cap'). 0: no limit."""
-    return int(media.load_settings(conn).get("lumisoft_daily_cap") or 0)
+    return media.daily_cap(conn, "lumisoft_daily_cap")
 
 
 def day_number(conn: sqlite3.Connection) -> int:
@@ -220,7 +220,7 @@ def finish(conn: sqlite3.Connection, user_id: int, run: int, log: dict, now: flo
     if not row["practice"]:
         result["earned"] = summary["score"] // POINTS_PER_COIN
         cap, ref = daily_cap(conn), f"{GAME}:{run}"
-        result["paid"] = coins.reward(conn, user_id, result["earned"], GAME, cap, ref) if cap else coins.prize(conn, user_id, result["earned"], GAME, ref)
+        result["paid"] = coins.earn(conn, user_id, result["earned"], GAME, cap, ref)   # 0: no limit
         result["capped"] = result["paid"] < result["earned"]
         boards = [(f"stage:{c['stage']}", c["score"], c["rank"]) for c in summary["cleared"] if c["stage"] != "training"]
         if row["mode"] == "story":

@@ -1851,28 +1851,32 @@
     tools.append(test, reread, relook, result);
     playback.appendChild(tools);
 
-    // Games: the most coins StickBob Runner pays one person a day (mnemerynne/runner.py). 0 means no limit.
+    // Games: the most coins each game pays one person a day (media.DAILY_CAPS; coins.earn). 0 means no limit.
     playback.appendChild(el("h3", "ax-h small", "Games"));
     const gamesForm = el("form");
     const gamesGrid = el("div", "agent-settings");
-    const runnerCap = agentInput("number", s.runner_daily_cap);
-    runnerCap.min = "0"; runnerCap.max = "1000000"; runnerCap.step = "1";
-    agentField(gamesGrid, "StickBob Runner coins a day", runnerCap).title =
-      "The most one person can earn from StickBob Runner in a day. 0 is no limit. Its scores come from the browser, so this is the guard against made-up runs.";
-    const softCap = agentInput("number", s.lumisoft_daily_cap);   // Lumi-Soft (mnemerynne/lumisoft.py): the server replays every shot, and this caps a day's pay
-    softCap.min = "0"; softCap.max = "1000000"; softCap.step = "1";
-    agentField(gamesGrid, "Lumi-Soft coins a day", softCap).title =
-      "The most one person can earn from Lumi-Soft in a day. 0 is no limit. A run pays 1 coin per 250 points; the server replays every shot to work out the score.";
+    const caps = [   // [setting, label, what the box's tooltip says about how that game pays]
+      ["prism_daily_cap", "Prism Drop coins a day", "A finished game pays 1 coin per 10 points."],
+      ["launch_daily_cap", "Lumi Launch coins a day", "A go pays 1 coin per 20 m; the server flies every launch again to check it."],
+      ["lumisoft_daily_cap", "Lumi-Soft coins a day", "A run pays 1 coin per 250 points; the server replays every shot to work out the score."],
+      ["runner_daily_cap", "StickBob Runner coins a day", "A run pays 1 coin per 10 m plus 1 per kill. Its scores come from the browser, so this is the guard against made-up runs."],
+    ].map(function (c) {   // one number box per game, each holding its own setting's name
+      const box = agentInput("number", s[c[0]] || 0);
+      box.min = "0"; box.max = "1000000"; box.step = "1";
+      agentField(gamesGrid, c[1], box).title = "The most one person can earn from it in a day. 0 is no limit. " + c[2];
+      return [c[0], box];
+    });
     gamesForm.appendChild(gamesGrid);
     const gamesActions = el("div", "ax-new");
     const saveGames = el("button", "small", "Save");
     saveGames.type = "submit";
-    gamesActions.append(saveGames, el("span", "small muted", "0 is no limit. StickBob pays 1 coin per 10 m plus 1 per kill; Lumi-Soft 1 per 250 points."));
+    gamesActions.append(saveGames, el("span", "small muted", "0 is no limit. Other games pay once per win, with no daily limit."));
     gamesForm.appendChild(gamesActions);
-    gamesForm.addEventListener("submit", function (e) {   // sends the cap only, as a whole number
+    gamesForm.addEventListener("submit", function (e) {   // every game's cap, as whole numbers
       e.preventDefault();
-      save({ runner_daily_cap: Math.max(0, Math.floor(Number(runnerCap.value) || 0)),
-        lumisoft_daily_cap: Math.max(0, Math.floor(Number(softCap.value) || 0)) });   // both caps, as whole numbers
+      const body = {};
+      caps.forEach(function (c) { body[c[0]] = Math.max(0, Math.floor(Number(c[1].value) || 0)); });
+      save(body);
     });
     playback.appendChild(gamesForm);
 

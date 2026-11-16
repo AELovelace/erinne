@@ -8,10 +8,12 @@ Who pays what:
 - Online casino tables bet and win from the seat's account (casino.py). A TV at an online table is the account it's paired to.
 - Local multiplayer (phone remotes around one TV) never touches a purse: those seats play on table-only credits.
 - Prism Drop and Lumi Pet pay rewards, and only for what the server saw itself, because a browser can claim anything.
+- Prism Drop, Lumi Launch, Lumi-Soft and StickBob Runner have a daily limit each, a Media setting (media.DAILY_CAPS,
+  paid through earn()); 0 is no limit, which is what Doll chose for all four (2026-11-15).
 - Breakout and Snake (arcade.py) cost 25 coins a run and pay its score, after the server has replayed (Snake) or bounded
   (Breakout) it. Showdown watchers bet on a racer; the winner's bets pay double (showdown.py).
 - StickBob Runner is the exception, by Doll's choice: it pays for what the browser reports, checked against the time the
-  run took (runner.py), with an optional daily cap in Media settings.
+  run took (runner.py), with its daily cap.
 
 Every function that changes money runs inside its caller's transaction (db.transaction), so a move and the game state
 that caused it are saved together or not at all.
@@ -24,8 +26,6 @@ import sqlite3
 HOUSE = "__HOUSE__"
 START = 1000                  # a new purse
 PRISM_POINTS_PER_COIN = 10    # a finished Prism Drop game pays its score divided by this
-PRISM_DAILY_CAP = 200         # the most Prism Drop pays one account in a day
-LAUNCH_DAILY_CAP = 300        # the most Lumi Launch pays one account in a day (lumilaunch.py)
 PET_VISIT = 25                # the first Lumi Pet visit of the day
 
 
@@ -113,6 +113,16 @@ def reward(conn: sqlite3.Connection, user_id: int, amount: int, game: str, cap: 
     if paying <= 0:
         return 0
     return paying if _move(conn, None, account, paying, "reward", game, ref) else 0
+
+
+def earn(conn: sqlite3.Connection, user_id: int, amount: int, game: str, cap: int, ref: str | None = None) -> int:
+    """A game's winnings under its daily limit (a Media setting, media.daily_cap): up to `cap` from this game today,
+    or all of it when `cap` is 0 (no limit). `ref` keeps a run from paying twice. Returns what was paid."""
+    if cap:
+        return reward(conn, user_id, amount, game, cap, ref)
+    if amount <= 0 or held(conn, user_id) is None:
+        return 0
+    return amount if _move(conn, None, _account(user_id), amount, "reward", game, ref) else 0   # no limit: all of it
 
 
 def prize(conn: sqlite3.Connection, user_id: int, amount: int, game: str, ref: str) -> int:

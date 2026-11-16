@@ -11,7 +11,7 @@ import secrets
 import sqlite3
 from typing import Callable
 
-from mnemerynne import coins
+from mnemerynne import coins, media
 from mnemerynne.db import transaction
 
 WIDTH, HEIGHT, DROPS = 10, 20, 10                          # ten pins across, twenty rows, ten drops a game
@@ -145,7 +145,7 @@ def play(conn: sqlite3.Connection, user_id: int, pick: int, draw: Draw = secrets
         earned = paid = 0
         if over:
             earned = score // coins.PRISM_POINTS_PER_COIN
-            paid = coins.reward(conn, user_id, earned, "prism-drop", coins.PRISM_DAILY_CAP)
+            paid = coins.earn(conn, user_id, earned, "prism-drop", media.daily_cap(conn, "prism_daily_cap"))   # 0: no limit
             conn.execute("DELETE FROM prism_runs WHERE user_id = ?", (user_id,))
         else:
             conn.execute("INSERT INTO prism_runs(user_id, drops, score) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET "

@@ -59,12 +59,16 @@ DEFAULT_RADIO_DIRECTORY = "https://sadgirlsclub.wtf/rr/healthz"
 DEFAULTS = {"folder": LIBRARY_NAME, "hwaccel": "auto", "max_transcodes": 2, "online_metadata": False,
             "radio_directory_url": DEFAULT_RADIO_DIRECTORY, "media_group": "", "screens_group": "",
             "signage_folder": "Signage", "signage_effects": {},
-            "runner_daily_cap": 0,   # the most StickBob Runner pays one person a day (runner.py); 0: no limit
-            "lumisoft_daily_cap": 300,   # the most Lumi-Soft pays one person a day (lumisoft.py); 0: no limit
+            # The most each game pays one person a day (DAILY_CAPS); 0: no limit, Doll's pick for all of them (2026-11-15).
+            "runner_daily_cap": 0, "lumisoft_daily_cap": 0, "prism_daily_cap": 0, "launch_daily_cap": 0,
             # Retro (media/retro.py): console games played in the browser, off until an admin turns it on; its
             # games live in this top-level share folder, a folder per console.
             "retro_enabled": False, "retro_folder": "Games"}
 GROUP_SETTINGS = ("media_group", "screens_group")
+# Every game whose coins have a daily limit, by its setting (Settings → Entertainment → Media → Games): the setting's
+# name -> the game's, for refusals. The rest pay once per win (coins.prize) and have no daily limit at all.
+DAILY_CAPS = {"runner_daily_cap": "StickBob Runner", "lumisoft_daily_cap": "Lumi-Soft",
+              "prism_daily_cap": "Prism Drop", "launch_daily_cap": "Lumi Launch"}
 _SECRETS = ("tmdb_key_enc", "soundcloud_id_enc", "soundcloud_secret_enc",     # kept encrypted, never in DEFAULTS or the API
             "ra_key_enc")   # RetroAchievements' Web API key: Retro's popularity (media/popularity.py)
 
@@ -118,6 +122,11 @@ def load_settings(conn: sqlite3.Connection) -> dict:
     return cfg
 
 
+def daily_cap(conn: sqlite3.Connection, name: str) -> int:
+    """The most a game pays one person a day (`name`: one of DAILY_CAPS); 0: no limit (coins.earn)."""
+    return int(load_settings(conn).get(name) or 0)
+
+
 def tmdb_key(settings: Settings, cfg: dict) -> str:
     enc = cfg.get("tmdb_key_enc")
     return (apis.decrypt_secret(settings, base64.b64decode(enc)) or "") if enc else ""
@@ -155,9 +164,9 @@ def save_settings(conn: sqlite3.Connection, settings: Settings, changes: dict, k
             raise MediaError("Retro is on or off (true or false).")
         if name == "max_transcodes" and not 0 <= int(value) <= 8:
             raise MediaError("At most 8 transcodes at once (0: never transcode).")
-        if name in ("runner_daily_cap", "lumisoft_daily_cap"):
+        if name in DAILY_CAPS:
             if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 1_000_000:
-                raise MediaError(("StickBob Runner" if name == "runner_daily_cap" else "Lumi-Soft") + "'s daily coins are a whole number from 0 (no limit) to 1,000,000.")
+                raise MediaError(DAILY_CAPS[name] + "'s daily coins are a whole number from 0 (no limit) to 1,000,000.")
         if name == "radio_directory_url" and value and not str(value).startswith(("http://", "https://")):
             raise MediaError("The station list is an http:// or https:// address.")
         if name in ("folder", "signage_folder", "retro_folder"):

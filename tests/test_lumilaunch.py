@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
-from mnemerynne import coins, db, lumilaunch, lumilaunch_rules as rules, users
+from mnemerynne import coins, db, lumilaunch, lumilaunch_rules as rules, media, users
 from test_lumi_tv_player import _couch
 from test_media import _login, _no_network, _turn_on, checker, client, conn, directory, root, settings  # noqa: F401
 
@@ -99,16 +99,19 @@ def test_a_go_costs_its_entry_and_pays_its_distance_once(games_conn, alice):
     assert ticket["entry"] == lumilaunch.ENTRY and ticket["shots"] == 3
     assert out["summary"] == recorded["result"] and not out["refused"]                     # the server's own replay
     assert out["earned"] == recorded["result"]["total"] // lumilaunch.METRES_PER_COIN
-    assert out["paid"] == min(out["earned"], coins.LAUNCH_DAILY_CAP)
+    assert out["paid"] == out["earned"] and not out["capped"]                             # no daily limit unless one's set
     assert out["coins"] == coins.START - lumilaunch.ENTRY + out["paid"]
     with pytest.raises(lumilaunch.Refused):                                                 # the ticket is used up
         lumilaunch.finish(games_conn, alice, ticket["run"], recorded["shots"], now=99999.0)
 
 
-def test_the_daily_cap(games_conn, alice):
+def test_the_daily_cap(conn, settings, games_conn, alice):
+    with db.transaction(conn):
+        media.save_settings(conn, settings, {"launch_daily_cap": 300})                      # Settings → Media → Games
+    assert lumilaunch.state(games_conn, alice)["cap"] == 300
     recorded = max(RUNS, key=lambda r: r["result"]["total"])
     paid = [_go(games_conn, alice, recorded, start=1000.0 + n * 1000)[1] for n in range(6)]
-    assert sum(o["paid"] for o in paid) == coins.LAUNCH_DAILY_CAP                           # 300 a day, however long she flies
+    assert sum(o["paid"] for o in paid) == 300                                              # 300 a day, however long she flies
     assert paid[-1]["paid"] == 0 and paid[-1]["capped"]
 
 

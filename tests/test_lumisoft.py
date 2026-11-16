@@ -85,15 +85,13 @@ def test_a_run_costs_its_entry_and_pays_its_score_once(conn, alice):
     assert ticket["entry"] == lumisoft.ENTRY and not ticket["practice"]
     assert out["summary"]["score"] == recorded["summary"]["score"]                         # the server's own replay
     assert out["earned"] == recorded["summary"]["score"] // lumisoft.POINTS_PER_COIN
-    assert out["paid"] == min(out["earned"], 300) and out["coins"] == coins.START - lumisoft.ENTRY + out["paid"]
+    assert out["paid"] == out["earned"] and out["coins"] == coins.START - lumisoft.ENTRY + out["paid"]   # no limit by default
     with pytest.raises(lumisoft.Refused):                                                   # the ticket is used up
         lumisoft.finish(conn, alice, ticket["run"], recorded["log"], now=99999.0)
 
 
 def test_the_daily_cap_and_its_setting(conn, settings, alice):
-    assert media.load_settings(conn)["lumisoft_daily_cap"] == 300 == lumisoft.daily_cap(conn)
-    with transaction(conn):
-        media.save_settings(conn, settings, {"lumisoft_daily_cap": 0})                     # 0: no limit
+    assert media.load_settings(conn)["lumisoft_daily_cap"] == 0 == lumisoft.daily_cap(conn)   # 0: no limit (Doll, 2026-11-15)
     _, out = _play(conn, alice, _run("story"))
     assert out["paid"] == out["earned"] > 300 and not out["capped"]
     with transaction(conn):

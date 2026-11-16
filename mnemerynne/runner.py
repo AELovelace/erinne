@@ -27,7 +27,7 @@ SPARE_KILLS = 5
 
 def daily_cap(conn: sqlite3.Connection) -> int:
     """The most one person may earn from StickBob Runner a day (Media settings 'runner_daily_cap'). 0: no limit."""
-    return int(media.load_settings(conn).get("runner_daily_cap") or 0)
+    return media.daily_cap(conn, "runner_daily_cap")
 
 
 def start(conn: sqlite3.Connection, user_id: int, now: float | None = None) -> int:
@@ -52,7 +52,7 @@ def finish(conn: sqlite3.Connection, user_id: int, run: int, meters: int, kills:
         else:
             earned = meters // METERS_PER_COIN + kills * COINS_PER_KILL
             ref, cap = f"{GAME}:{user_id}:{run}", daily_cap(conn)
-            paid = coins.reward(conn, user_id, earned, GAME, cap, ref) if cap else coins.prize(conn, user_id, earned, GAME, ref)
+            paid = coins.earn(conn, user_id, earned, GAME, cap, ref)   # 0: no limit
             result.update(earned=earned, paid=paid, capped=paid < earned)
     result["coins"] = coins.peek(conn, user_id)
     return result
