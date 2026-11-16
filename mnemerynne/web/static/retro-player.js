@@ -381,6 +381,12 @@
       file.className = "muted small";
       file.textContent = m.name;
       b.append(name, file);
+      if (m.original) {   // the server put it first: it looks like the original dump, not a hack
+        const star = document.createElement("span");
+        star.className = "rp-which-original small";
+        star.textContent = "⭐ Original";
+        name.append(" ", star);
+      }
       const auto = (m.saves || []).find(function (sv) { return sv.slot === "auto"; });
       if (auto) {
         const tag = document.createElement("span");

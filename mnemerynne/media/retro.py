@@ -209,6 +209,28 @@ def archive_roms(path: Path, console: Console, sha: str | None = None) -> list[s
     return roms
 
 
+# What a romhack, translation or odd dump calls itself (GoodTools' [h1] [T+Eng] [b1] [a1] [o1] [f1] [p1], No-Intro's
+# (Beta) (Proto) (Demo) (Sample), and the words hackers use), and what an original dump does (a region, GoodTools' [!]).
+_HACKISH = re.compile(r"hack|translat|randomi[sz]|patch|\bmod\b|improvement|\[t[+-]|\[[hbaofp]\d*[^\]]*\]|"
+                      r"\((?:beta|proto|prototype|demo|sample|kiosk|pirate|unl)[^)]*\)", re.IGNORECASE)
+_ORIGINALISH = re.compile(r"\((?:usa|europe|world|japan|u|e|j|en|ue|ju|jue)\b[^)]*\)|\[!\]", re.IGNORECASE)
+
+
+def looks_original(name: str) -> bool:
+    """A ROM whose name looks like an original dump: no hack or odd-dump marks, not in a folder of its own."""
+    return "/" not in name and not _HACKISH.search(name)
+
+
+def original_first(names: list[str]) -> list[str]:
+    """An archive's ROMs with the original first (Doll: hacks folders hold dozens): no hack marks first, then the
+    archive's top level before its folders, then a region tag or [!] before neither; else the archive's order."""
+    def rank(item: tuple[int, str]) -> tuple:
+        at, name = item
+        base = Path(name).name
+        return (bool(_HACKISH.search(name)), name.count("/"), not _ORIGINALISH.search(base), at)
+    return [name for _, name in sorted(enumerate(names), key=rank)]
+
+
 def member_key(rom_sha: str, member: str) -> str:
     """What one ROM inside an archive keeps its saves under (as a ROM's own sha256 is, for a plain file)."""
     import hashlib

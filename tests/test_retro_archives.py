@@ -48,6 +48,22 @@ def test_a_7z_s_file_names_are_read_from_its_header(tmp_path):
     assert sevenzip.names(tmp_path / "src" / "readme.txt") is None
 
 
+def test_the_original_comes_first_among_dozens_of_hacks():
+    """Doll: a folder of hacks can hold dozens. No hack marks first, then the archive's top level, then a region or
+    [!]; the archive's order breaks ties. Only a ROM that really looks original is marked so."""
+    names = ["hacks/Metroid Fusion - Hard Mode (Hack).gba", "Metroid Fusion [T+Spa].gba", "Metroid Fusion (Beta).gba",
+             "Metroid Fusion Randomizer.gba", "Metroid Fusion [b1].gba", "extras/Metroid Fusion (USA).gba",
+             "Metroid Fusion (Europe) [!].gba", "Metroid Fusion - Boss Rush.gba", "Metroid Fusion (USA).gba"]
+    ordered = retro.original_first(names)
+    assert ordered[:2] == ["Metroid Fusion (Europe) [!].gba", "Metroid Fusion (USA).gba"]   # the archive's order between them
+    assert ordered[2] == "Metroid Fusion - Boss Rush.gba"          # no marks, no region: after the tagged originals
+    assert ordered[3] == "extras/Metroid Fusion (USA).gba"         # clean, but in a folder: after the top level
+    assert set(ordered[4:]) == {names[0], names[1], names[2], names[3], names[4]}   # every hack after
+    assert retro.looks_original("Metroid Fusion (USA).gba") and not retro.looks_original("hacks/x.gba")
+    assert not retro.looks_original("Super Mario World [h1].sfc") and not retro.looks_original("Zelda [T+Eng1.0].sfc")
+    assert retro.original_first(["only.gba"]) == ["only.gba"]
+
+
 def test_which_rom_and_each_rom_s_own_saves(client, conn, directory, root, settings):
     _login(client, conn, directory)
     _turn_on(client)
@@ -59,7 +75,8 @@ def test_which_rom_and_each_rom_s_own_saves(client, conn, directory, root, setti
     share.sync(conn, settings)
     games = _by_title(client)
     pack = _player(client, games["Metroid Pack"]["id"])
-    assert [m["name"] for m in pack["members"]] == ["hacks/Metroid Fusion (Hack).gba", "Metroid Fusion (USA).gba"]
+    assert [m["name"] for m in pack["members"]] == ["Metroid Fusion (USA).gba", "hacks/Metroid Fusion (Hack).gba"]   # original first
+    assert [m["original"] for m in pack["members"]] == [True, False]
     assert [m["title"] for m in pack["members"]] == ["Metroid Fusion", "Metroid Fusion"] and "gba" in pack["rom_exts"]
     assert "members" not in _player(client, games["Solo"]["id"])        # one ROM: nothing to choose
     assert "members" not in _player(client, games["Disc"]["id"])        # a disc's files: one game, never split

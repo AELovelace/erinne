@@ -152,8 +152,11 @@ def player_page(file_id: int, request: Request, user=Depends(retro_page_user),
     except OSError:
         inside = []
     if len(inside) > 1:
+        ordered = retro.original_first(inside)          # the original first: folders of hacks can hold dozens
         game["members"] = [{"name": n, "title": retro.title_of(Path(n).name),
-                            "saves": retro.saves(conn, user["id"], retro.member_key(row["blob_sha256"], n))} for n in inside]
+                            "original": i == 0 and retro.looks_original(n),
+                            "saves": retro.saves(conn, user["id"], retro.member_key(row["blob_sha256"], n))}
+                           for i, n in enumerate(ordered)]
         game["rom_exts"] = sorted(e.lstrip(".") for e in console.exts)   # what counts as a ROM when it's unpacked
     response = request.app.state.templates.TemplateResponse(request, "retro_play.html", {
         # In a <script> block: a file name holding "</script>" mustn't end it, so no "<" goes in as it is.
