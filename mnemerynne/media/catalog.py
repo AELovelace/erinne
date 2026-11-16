@@ -22,7 +22,7 @@ from mnemerynne import db, media, share
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
-from mnemerynne.media import artwork, probe, retro
+from mnemerynne.media import artwork, probe, retro, romsort
 
 log = logging.getLogger("mnemerynne.media")
 
@@ -162,8 +162,13 @@ def run_pass(conn: sqlite3.Connection, settings: Settings, budget_s: float = 20.
         with transaction(core):
             media.ensure_section_folders(core)   # TV, in a Media folder made before there was one
             retro.ensure_console_folders(core)   # Retro's consoles added since it was turned on (media/retro.py)
+            romsort.ensure_unsorted(core)        # and its Unsorted drop folder (media/romsort.py)
     except (OSError, media.MediaError):
         log.info("Media: couldn't add the new section folders yet", exc_info=True)
+    try:
+        romsort.sort_unsorted(core)              # ROMs dropped in Unsorted, into their consoles' folders
+    except (OSError, media.MediaError):
+        log.info("Retro: couldn't sort the Unsorted folder this time", exc_info=True)
     roots = media.catalog_roots(conn)
     if not roots:
         return stats

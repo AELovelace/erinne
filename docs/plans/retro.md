@@ -23,6 +23,7 @@ Doll asked on 2026-11-14 for "snes, gba, gbc, nes, and genesis emulators", a sha
 | 4 | On a paired TV: the TV's game layer, the remote (shelves, menus, D-pad and A in a game), Bluetooth controllers (players 1-4, the Xbox/PS button or Start+Select for the game's menu), leaving saves first | Built 2026-11-14 (session 8243, with the TV boxes' 🔗 Controllers) |
 | 5 | Box art looked up online (libretro-thumbnails, by No-Intro name) when *online metadata* is on | Idea |
 | 6 | Master System and Game Gear: Genesis Plus GX plays them already, so a `CONSOLES` row each | Idea |
+| 7 | **Unsorted**, Doll's ask: a drop folder in the Games folder; the catalog pass recognises each ROM by its header (inside a `.zip` or `.7z` too) and moves it, with its tracks and box art, into its console's folder (`media/romsort.py`) | Built 2026-11-15 |
 
 ## How a console is added
 
@@ -50,4 +51,6 @@ Turning Retro on again makes the new console's folder, because `ensure_library` 
 - FCEUmm fills the NES picture chip's RAM with a pattern at power-on, so a homebrew test must set every palette entry, not only the backdrop.
 - PCSX-ReARMed's build here has no `.chd` support (its `core.json` lists none), so `.chd` goes to Beetle PSX, which needs a real BIOS. PCSX-ReARMed runs a bare PS-X EXE without one, which is how the PS1 test game works.
 - A loose `.cue`'s tracks reach the emulator through EmulatorJS's `externalFiles`, written beside the `.cue` under the names it gives them. The BIOS is written beside the game under its URL's last part, so that part is the lower-case name the core looks for.
+- A new console's ROM signature goes in `media/romsort.py` `identify_bytes` (and a suffix only it uses in `_BY_SUFFIX`, its shelf's suffix in `CANONICAL`), so Unsorted can sort it.
+- Python has no 7z reader. `romsort` decodes the first packed stream right after 7z's 32-byte signature header as raw LZMA2, LZMA or stored, which is 7-Zip's usual layout and enough for a header. An LZMA (not LZMA2) stream has no end marker, so the decoder runs into the archive's index and fails; the longest clean start is found by halving. `tests/test_romsort.py` builds real archives with 7-Zip when it's installed.
 - Snes9x and Genesis Plus GX are non-commercial only; the GPL-2 cores' "noncommercial" wording is only the GPL's clause about passing on source code.

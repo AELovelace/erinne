@@ -41,6 +41,20 @@ Put your own games in the **Games** folder on the share, in the folder for their
 - **Box art:** put a picture beside a game with the same name, such as `Chrono Trigger.sfc` and `Chrono Trigger.png` (`.png`, `.jpg` or `.webp`). Without one, the game shows as a cartridge in its console's colours (a disc for the PlayStation) with its title on it.
 - **Names:** tags like `(USA)`, `(Rev 1)` or `[!]` are left off the title shown.
 
+### The Unsorted folder
+
+Not sure which folder a game belongs in? Drop it in **Games/Unsorted** (folders inside it are fine). Every few minutes the NAS looks inside each file and moves it to its console's folder:
+
+- **It reads what the game says about itself, not its name:** the NES's iNES tag, the SNES's internal header, `SEGA` in a Genesis cartridge, the Game Boy and GBA headers, a PlayStation disc's volume label.
+- **Archives:** it reads inside a `.zip` (its biggest file) or a `.7z`.
+- **Game Boy or Color:** a game made for the Color, or that uses its colours, goes to **Game Boy Color**.
+- **Extensions:** a game whose extension its console's shelf doesn't list gets the console's own, such as `mystery.bin` → `mystery.gba`. A PlayStation disc image without a `.cue` gets one written beside it.
+- **What travels with it:** a `.cue` takes its `.bin` tracks (it waits until they're all there), a picture named like the game goes with it as its box art, and a BIOS goes to its console's folder by its name.
+- **What it never does:** replace anything. A name that's taken gets `(2)`, and a game that's already in its folder, byte for byte, stays in Unsorted.
+- **What stays in Unsorted:** files still being copied in (it waits two minutes after the last change) and anything it doesn't recognise.
+
+If you delete the Unsorted folder, it isn't made again.
+
 ### PlayStation discs
 
 - **`.cue` and `.bin`:** keep the `.cue` and its `.bin` tracks together in one folder. The `.cue` is the game on the shelf; its tracks come with it when you play. If a track the `.cue` names is missing, the player says which.
