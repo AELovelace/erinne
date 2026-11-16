@@ -1162,6 +1162,13 @@
       refreshCoins();                     // the game may have paid or spent some
     },
 
+    /* A remote panel's gamepad button going down or up (gamepad mode): the game decides what it means (Retro plays it
+       as a player of its own, retro-tv.js; the built-in games take it as their actions, games/common.js). */
+    pad: function (button, down, controller, remote) {
+      if (gameFrame.contentWindow) gameFrame.contentWindow.postMessage({ type: "mnemerynne-game-pad", button: button,
+        down: down, controller: controller, remote: remote }, location.origin);
+    },
+
     /* One key for the game: a remote panel's press, or the keyboard while focus is on this page. */
     key: function (key, controller, remote) { // remote: which remote pressed (a couch game keeps one cursor per remote); the signed controller is the proof
       if (gameFrame.contentWindow) gameFrame.contentWindow.postMessage({ type: "mnemerynne-game-key", key: key, controller: controller, remote: remote }, location.origin);
@@ -2271,6 +2278,21 @@
     else if (target !== document.body && !field) target.click();
   }
 
+  /* Gamepad mode from a remote panel (the "pad" command, media/remotes.py PAD_BUTTONS: a SNES-shaped pad's buttons
+     going down and up; Doll, 2026-11-16). An open game gets every one, held buttons and all. Elsewhere a button going
+     down moves around as the remote's own press does (the D-pad, A as OK), B goes back as Escape does; the rest have
+     nothing to do outside a game. It never counts as the box's own (no Kiosk settings), as a remote never does. */
+  const PAD_AS_PRESS = { up: "up", down: "down", left: "left", right: "right", a: "enter" };
+  function remotePad(button, down, controller, remote) {
+    if (games.isOpen()) { games.pad(button, down, controller, remote); return; }
+    if (!down) return;
+    if (PAD_AS_PRESS[button]) { remotePress(PAD_AS_PRESS[button], controller, remote); return; }
+    if (button === "b") {
+      const target = document.activeElement || document.body;
+      target.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    }
+  }
+
   /* A game controller (gamepad.js: paired over Bluetooth in Controllers, or plugged in): the box's own, like its
      keyboard, so it also reaches Kiosk settings (a remote never does). Its presses are replayed as keys here, or go
      to the open game, unless the game reads controllers itself (Lumi Launch, Retro). */
@@ -2931,6 +2953,9 @@
         viewer.close();
       } else if (a === "press") {
         remotePress(cmd.button, cmd.controller, cmd.remote);
+      } else if (a === "pad") {
+        remotePad(cmd.button, cmd.down === true, cmd.controller, cmd.remote);
+        return;                                   // a game controller's every press and release: no report each time
       }
       setTimeout(function () { screenMode.report(true); }, 300);
     },

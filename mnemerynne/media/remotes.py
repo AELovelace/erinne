@@ -34,8 +34,15 @@ SEEN_SECONDS = 60                     # last_seen_at is saved at most this often
 _saved: dict[int, float] = {}         # remote id -> time.monotonic() its last_seen_at was last saved, in this process
 _saved_lock = threading.Lock()
 ACTIONS = ("toggle", "skip", "volume", "mute", "night", "next", "prev", "stop", "press", "play_source", "play_station",
-           "audio_track", "subtitles")   # the last two step the playing film to its next sound / subtitle track
+           "audio_track", "subtitles",   # these two step the playing film to its next sound / subtitle track
+           "pad")                        # gamepad mode: one button going down or up (PAD_BUTTONS, `down`)
 BUTTONS = ("up", "down", "left", "right", "enter")   # press: the TV page replays them as its own arrow keys
+# Gamepad mode (Doll, 2026-11-16: the phone's panel and the Tab5 as a game controller for Retro and the TV's games):
+# a SNES-shaped pad, its buttons named by place as on a SNES (A right, B bottom, X top, Y left). Each goes down and
+# comes up, so a held button stays held. The TV page gives them to the open game (Retro as a player of its own;
+# the built-in games as their actions, PAD_AS_PRESS) and, outside a game, moves around as a remote's press does.
+PAD_BUTTONS = ("up", "down", "left", "right", "a", "b", "x", "y", "l", "r", "start", "select")
+PAD_AS_PRESS = {"up": "up", "down": "down", "left": "left", "right": "right", "a": "enter", "start": "play"}   # a press's same
 
 
 def _hash(token: str) -> str:

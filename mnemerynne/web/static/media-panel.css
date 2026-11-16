@@ -103,3 +103,34 @@
 /* Corners. The neon theme squares everything with !important, but the panel's are round: an id outranks it. */
 #mp .mp-card, #mp button, #mp .mp-link, #mp input { border-radius: .5rem !important; }
 #mp .mp-pad, #mp .mp-dot, #mp button.mp-key { border-radius: 50% !important; }   /* the D-pad, its keys and the status dot */
+
+/* Gamepad mode (media-panel.js gamepad): a SNES-shaped pad filling the phone, best held sideways. */
+.mp-gamepad { position: fixed; inset: 0; z-index: 20; display: grid; grid-template-rows: auto 1fr auto; gap: .6rem;
+  padding: max(.6rem, env(safe-area-inset-top)) max(.8rem, env(safe-area-inset-right)) max(.6rem, env(safe-area-inset-bottom))
+    max(.8rem, env(safe-area-inset-left));
+  background: var(--blush, #07020d); touch-action: none; user-select: none; -webkit-user-select: none;
+  -webkit-touch-callout: none; overscroll-behavior: none; }
+.mp-gamepad[hidden] { display: none; }
+.mp-gp-top { display: grid; grid-template-columns: 1fr auto auto 1fr; gap: .6rem; align-items: center; }
+.mp-gp-title { justify-self: center; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-gp-exit { font-size: .85rem; padding: .35rem .7rem; }
+.mp-gp-main { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; justify-items: center; gap: 1rem; min-height: 0; }
+.mp-gp-key { touch-action: none; font: inherit; font-weight: 700; color: var(--ink, #ffe9f5); background: var(--glass, rgba(255,255,255,.08));
+  border: 2px solid var(--line, rgba(255,255,255,.2)); transition: transform .05s, background .05s; }
+.mp-gp-key.mp-gp-down, .mp-gp-arm.mp-gp-down { background: var(--rose, #ff2e97); border-color: var(--rose, #ff2e97); transform: scale(.94); }
+.mp-gp-shoulder { padding: .7rem 0; border-radius: 1rem 1rem .4rem .4rem; font-size: 1.1rem; }
+.mp-gp-small { border-radius: 999px; padding: .4rem .9rem; font-size: .8rem; }
+.mp-gp-mid { display: flex; gap: .6rem; }
+.mp-gp-dpad { --s: min(42vmin, 15rem); width: var(--s); height: var(--s); display: grid; grid-template: 1fr 1fr 1fr / 1fr 1fr 1fr;
+  gap: 2px; touch-action: none; }
+.mp-gp-arm { background: var(--glass, rgba(255,255,255,.1)); border: 2px solid var(--line, rgba(255,255,255,.2)); border-radius: .5rem; }
+.mp-gp-up { grid-area: 1 / 2; } .mp-gp-left { grid-area: 2 / 1; } .mp-gp-right { grid-area: 2 / 3; } .mp-gp-down { grid-area: 3 / 2; }
+.mp-gp-hub { grid-area: 2 / 2; background: var(--glass, rgba(255,255,255,.06)); border-radius: .3rem; }
+.mp-gp-face { --s: min(42vmin, 15rem); width: var(--s); height: var(--s); display: grid; grid-template: 1fr 1fr 1fr / 1fr 1fr 1fr; }
+.mp-gp-round { border-radius: 50%; font-size: 1.3rem; aspect-ratio: 1; width: 100%; padding: 0; }
+.mp-gp-x { grid-area: 1 / 2; } .mp-gp-y { grid-area: 2 / 1; } .mp-gp-a { grid-area: 2 / 3; } .mp-gp-b { grid-area: 3 / 2; }
+.mp-gp-line { text-align: center; min-height: 1.2em; }
+@media (orientation: portrait) {   /* held upright: the pad above the buttons */
+  .mp-gp-main { grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
+  .mp-gp-mid { order: 3; }
+}

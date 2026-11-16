@@ -1145,6 +1145,34 @@ def test_a_remote_pairs_with_a_code_and_controls_only_its_owners_screens(client,
     _hub(client).unlisten(screen_id, queue)
 
 
+def test_a_remote_in_gamepad_mode_sends_each_button_down_and_up(client, conn, directory, media_conn):
+    """Gamepad mode (the phone's panel, the Tab5): a SNES-shaped pad's buttons go down and up, so one can be held.
+    The D-pad, A and Start going down carry the same proof as the remote's own press (enter, play), so the couch games
+    seat a gamepad as they do the remote; the rest carry none. Nothing else of the pad gets through."""
+    _login(client, conn, directory)
+    _turn_on(client)
+    screen_id, _ = _pair(client)
+    panel, auth, remote_id = _remote(client)
+    queue = _hub(client).listen(screen_id)
+    url = f"/api/media/remote/screens/{screen_id}/command"
+    from mnemerynne import casino_remote
+    secret = client.app.state.settings.secret_key
+    for button, down, proved in (("a", True, "enter"), ("a", False, None), ("start", True, "play"), ("x", True, None),
+                                 ("up", True, "up"), ("up", False, None), ("l", True, None), ("select", False, None)):
+        r = panel.post(url, json={"action": "pad", "button": button, "down": down}, headers=auth)
+        assert r.status_code == 200, r.text
+        sent = queue.get_nowait()
+        assert (sent["action"], sent["button"], sent["down"], sent["remote"]) == ("pad", button, down, remote_id)
+        if proved:
+            assert casino_remote.read(secret, sent["controller"])["action"] == proved, button
+        else:
+            assert "controller" not in sent, button
+    for body in ({"action": "pad", "button": "a"}, {"action": "pad", "down": True}, {"action": "pad", "button": "enter", "down": True},
+                 {"action": "pad", "button": "z", "down": True}, {"action": "press", "button": "a"}):
+        assert panel.post(url, json=body, headers=auth).status_code == 422, body
+    _hub(client).unlisten(screen_id, queue)
+
+
 def test_a_remotes_poll_never_waits_on_the_write_lock(client, conn, directory, settings, media_conn):
     _login(client, conn, directory)
     _turn_on(client)

@@ -88,8 +88,40 @@
       <div class="mp-bar">
         <button type="button" id="mp-open-screens">Screens</button>
         <button type="button" id="mp-open-channels">Channels</button>
+        <button type="button" id="mp-open-gamepad">🎮 Gamepad</button>
         <a class="mp-link" href="/media">Media</a>
       </div>
+    </section>
+
+    {#- Gamepad mode (media-panel.js gamepad): the phone as a SNES-shaped controller for Retro and the TV's games.
+        Each button goes down and comes up, so it can be held; buttons named by place: A right, B bottom, X top, Y left. -#}
+    <section class="mp-view mp-gamepad" id="mp-gamepad" hidden>
+      <div class="mp-gp-top">
+        <button type="button" class="mp-gp-key mp-gp-shoulder" data-gp="l">L</button>
+        <span class="mp-gp-title" id="mp-gp-title"></span>
+        <button type="button" class="mp-gp-exit" id="mp-gp-exit">✕ Remote</button>
+        <button type="button" class="mp-gp-key mp-gp-shoulder" data-gp="r">R</button>
+      </div>
+      <div class="mp-gp-main">
+        <div class="mp-gp-dpad" id="mp-gp-dpad" role="group" aria-label="D-pad">
+          <span class="mp-gp-arm mp-gp-up" data-dir="up"></span>
+          <span class="mp-gp-arm mp-gp-left" data-dir="left"></span>
+          <span class="mp-gp-hub"></span>
+          <span class="mp-gp-arm mp-gp-right" data-dir="right"></span>
+          <span class="mp-gp-arm mp-gp-down" data-dir="down"></span>
+        </div>
+        <div class="mp-gp-mid">
+          <button type="button" class="mp-gp-key mp-gp-small" data-gp="select">Select</button>
+          <button type="button" class="mp-gp-key mp-gp-small" data-gp="start">Start</button>
+        </div>
+        <div class="mp-gp-face" role="group" aria-label="Buttons">
+          <button type="button" class="mp-gp-key mp-gp-round mp-gp-x" data-gp="x">X</button>
+          <button type="button" class="mp-gp-key mp-gp-round mp-gp-y" data-gp="y">Y</button>
+          <button type="button" class="mp-gp-key mp-gp-round mp-gp-a" data-gp="a">A</button>
+          <button type="button" class="mp-gp-key mp-gp-round mp-gp-b" data-gp="b">B</button>
+        </div>
+      </div>
+      <div class="mp-muted mp-gp-line" id="mp-gp-line"></div>
     </section>
 
     {#- Screens and Channels: the panel's two list pages, eight rows at a time. -#}

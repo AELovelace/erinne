@@ -1056,7 +1056,8 @@ class RemoteCommand(BaseModel):
     action: Literal[remotes.ACTIONS]
     by: float | None = Field(None, ge=-36000, le=36000)  # skip
     level: float | None = Field(None, ge=0, le=1)        # volume; night (none: the next step)
-    button: Literal[remotes.BUTTONS] | None = None       # press: up, down, left, right or enter
+    button: Literal[remotes.BUTTONS + remotes.PAD_BUTTONS] | None = None   # press: up, down, left, right or enter; pad: PAD_BUTTONS
+    down: bool | None = None                             # pad: the button went down (true) or came up (false)
     source_id: int | None = None                         # play_source
     key: str | None = Field(None, max_length=2000)       # play_station
 
@@ -1074,15 +1075,27 @@ async def remote_command(screen_id: int, body: RemoteCommand, request: Request, 
     owner = holder if screen["user_id"] == holder["id"] else users.get_user_by_id(conn, screen["user_id"])
     if owner is None or not screens.may_use(conn, owner, request.app.state.directory):
         raise _not_found()                                                 # the TV's owner left the screens group
-    command = await anyio.to_thread.run_sync(_command, conn, owner, Command(**body.model_dump()), request.app.state.settings)
+    if body.action == "pad":                                               # gamepad mode: straight to the TV, nothing to look up
+        if body.button not in remotes.PAD_BUTTONS or body.down is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Which pad button, and down or up?")
+        command = {"action": "pad", "button": body.button, "down": body.down}
+    else:
+        if body.action == "press" and body.button not in remotes.BUTTONS:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Which button?")
+        command = await anyio.to_thread.run_sync(_command, conn, owner, Command(**body.model_dump(exclude={"down"})),
+                                                 request.app.state.settings)
     if screen["speaker"]:
         command = await anyio.to_thread.run_sync(_for_speaker, request, conn, owner, screen, command)
     command.update(sender=holder["username"], override=False)
-    if not screen["speaker"] and body.action in ("press", "toggle"):
+    if not screen["speaker"] and body.action in ("press", "toggle", "pad"):
         from mnemerynne import casino_remote
-        # Only authenticated panel commands carry a seat proof; phone/keyboard controls remain ordinary inputs.
-        command["controller"] = casino_remote.issue(request.app.state.settings.secret_key, remote, screen,
-                                                     body.button if body.action == "press" else "play")
+        # Only authenticated panel commands carry a seat proof; phone/keyboard controls remain ordinary inputs. A pad
+        # button that means a press (PAD_AS_PRESS: the D-pad, A, Start), going down, is proved as that press, so the
+        # couch games seat a gamepad as they do the remote.
+        same = remotes.PAD_AS_PRESS.get(body.button) if body.action == "pad" and body.down else None
+        if body.action != "pad" or same:
+            command["controller"] = casino_remote.issue(request.app.state.settings.secret_key, remote, screen,
+                                                         same or (body.button if body.action == "press" else "play"))
         command["remote"] = remote["id"]                  # which remote pressed, so a couch game keeps each one's cursor (not a proof)
     command_id = hub(request).send(screen_id, command)
     if command_id is None:

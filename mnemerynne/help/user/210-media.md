@@ -291,6 +291,23 @@ Its **arrows and Enter** work like the TV's own arrow keys while the TV shows it
 - **What it can reach:** it plays only what is cast to it. It can't browse or fetch anything else.
 - **Removing it:** removing the remote removes its speaker as well.
 
+### Gamepad mode
+
+The phone remote (**Media → Remote** on your phone) and the M5Stack Tab5 panel can turn into a **game controller** for the TV, for Retro and the TV's games. Press **🎮 Gamepad** on the remote page (on the Tab5, **Gamepad** in the bottom bar). The screen turns sideways into a pad shaped like a Super Nintendo controller:
+
+- **D-pad** on the left. Slide your thumb around it; the diagonals work too.
+- **A B X Y** on the right, placed as on a Super Nintendo: **A** on the right, **B** at the bottom, **X** at the top, **Y** on the left.
+- **L** and **R** in the top corners, and **Select** and **Start** in the middle.
+
+Buttons stay **held for as long as you hold them**, and you can press several at once (run and jump). A phone gives a small buzz on each press.
+
+- **In Retro** the pad is **a player of its own**: the first player that no controller plugged into or paired with the TV already has. The game's bar says which (for example *📱 A remote is player 2*). Two phones are two players. Outside a game, the D-pad and **A** move around the shelves, **B** goes back, **L** and **R** flip the library's pages, and **Start** opens the game's menu.
+- **In the TV's other games** (Lumi Launch, the Lounge tables and so on) a button works as the remote's own: the D-pad moves, **A** is OK, **Start** is Play, and **L** and **R** are Previous and Next. Couch seats work as with the remote.
+- **Outside a game** the D-pad and **A** move around the TV like the remote's arrows and Enter, and **B** goes back.
+- **✕ Remote** (on the Tab5, **Remote**) goes back to the remote. Leaving lets go of anything still held, so nothing stays pressed on the TV.
+
+Each press travels through the server, so on a slow connection there's a small delay. A controller paired to a TV box over Bluetooth is quicker, if you have one.
+
 ## Game controllers on a TV box
 
 A TV run by a Mnemerynne TV box can pair **Xbox One (Bluetooth) and PlayStation 5 DualSense controllers** over Bluetooth. A paired controller is a remote for that TV and a controller for the games.

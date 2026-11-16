@@ -16,6 +16,7 @@
                  a: "left", d: "right", w: "up", s: "down", A: "left", D: "right", W: "up", S: "down",
                  MediaPlay: "play", MediaPlayPause: "play", p: "play", P: "play",
                  MediaTrackNext: "next", MediaTrackPrevious: "prev", PageDown: "next", PageUp: "prev", "]": "next", "[": "prev" };
+  const PAD_ACTIONS = { up: "up", down: "down", left: "left", right: "right", a: "enter", start: "play", l: "prev", r: "next" };
   let onAction = null, directEnter = null, tabNavigation = false;
 
   function toParent(kind, extra) { // A message to the TV page; nothing when opened on its own.
@@ -46,6 +47,10 @@
     const data = e.data || {};
     if (data.type === "mnemerynne-game-key" && KEYS[data.key]) act(KEYS[data.key], typeof data.controller === "string" ? data.controller : undefined,
       Number.isInteger(data.remote) ? data.remote : undefined);
+    // A remote panel in gamepad mode (media/remotes.py PAD_BUTTONS): a button going down is the game's action, as a
+    // press is (A or Start: enter or play; L / R: prev / next); going up, and X, Y, B and Select, mean nothing here.
+    if (data.type === "mnemerynne-game-pad" && data.down === true && PAD_ACTIONS[data.button]) act(PAD_ACTIONS[data.button],
+      typeof data.controller === "string" ? data.controller : undefined, Number.isInteger(data.remote) ? data.remote : undefined);
     if (data.type === "mnemerynne-game-scale" && document.documentElement.classList.contains("tv") &&
         Number.isFinite(data.scale) && data.scale >= .75 && data.scale <= 3) {
       document.documentElement.style.setProperty("--ui-scale", String(data.scale)); // Reuse the UI's rem scale, never multiply it twice.

@@ -131,10 +131,53 @@
     gm.simulateInput(0, index, 1);
     setTimeout(function () { gm.simulateInput(0, index, 0); }, 120);
   }
+  /* A remote panel in gamepad mode (media/remotes.py PAD_BUTTONS; the phone's panel or the Tab5): in a running game
+     it's a controller of its own, a player of its own (the first player no controller of the box has, nor another
+     remote), its buttons held while held; outside a game it moves around like a controller (LB / RB flip the
+     library's pages, Start opens the game's menu). Buttons by place, as on a SNES: A right, B bottom, X top, Y left. */
+  const PAD_INPUT = { b: 0, y: 1, select: 2, start: 3, up: 4, down: 5, left: 6, right: 7, a: 8, x: 9, l: 10, r: 11 };   // EmulatorJS's
+  const padPlayers = {};          // remote id -> the player it plays
+  const padHeld = {};             // "remote:button" -> the player it was pressed on, so letting go always lets go
+  function padPlayer(remote) {   // this remote's player: kept, else the first one free
+    const e = player() && player().emu();
+    if (padPlayers[remote] !== undefined) return padPlayers[remote];
+    const pads = (e && e.gamepadSelection) || [];
+    const taken = Object.keys(padPlayers).map(function (k) { return padPlayers[k]; });
+    let free = [0, 1, 2, 3].find(function (n) { return !pads[n] && taken.indexOf(n) < 0; });
+    if (free === undefined) free = [0, 1, 2, 3].find(function (n) { return taken.indexOf(n) < 0; });
+    if (free === undefined) free = 3;
+    padPlayers[remote] = free;
+    if (player() && player().status) player().status("📱 A remote is player " + (free + 1));
+    return free;
+  }
+  function remotePad(button, down, remote) {
+    const p = player(), id = Number.isInteger(remote) ? remote : 0, held = id + ":" + button;
+    if (!down) {                                                     // letting go: on the player it was pressed on
+      if (padHeld[held] !== undefined && p && p.emu()) p.emu().gameManager.simulateInput(padHeld[held], PAD_INPUT[button], 0);
+      delete padHeld[held];
+      return;
+    }
+    if (inGame()) {
+      const n = padPlayer(id);
+      padHeld[held] = n;
+      p.emu().gameManager.simulateInput(n, PAD_INPUT[button], 1);
+      return;
+    }
+    if (button === "start") { if (p && p.started()) openMenu(); return; }   // outside the game: menus and shelves
+    if (button === "a") press();
+    else if (button === "b") back();
+    else if (button === "l" || button === "r") { if (window.RetroLibrary && layer() === document) window.RetroLibrary.flip(button === "l" ? -1 : 1); }
+    else if (["up", "down", "left", "right"].indexOf(button) >= 0) move(button);
+  }
+
   window.addEventListener("message", function (e) {
     if (!framed || e.origin !== location.origin || e.source !== window.parent) return;
     const data = e.data || {};
     if (data.type === "mnemerynne-game-leave") { leave(); return; }
+    if (data.type === "mnemerynne-game-pad") {
+      if (Object.prototype.hasOwnProperty.call(PAD_INPUT, data.button)) remotePad(data.button, data.down === true, data.remote);
+      return;
+    }
     if (data.type !== "mnemerynne-game-key") return;
     const key = String(data.key || "");
     if (key === "MediaPlay") { if (player()) openMenu(); return; }

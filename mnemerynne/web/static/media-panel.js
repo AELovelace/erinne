@@ -289,6 +289,8 @@
     $("mp-pair").hidden = name !== "pair";
     $("mp-remote").hidden = name !== "remote";
     $("mp-list").hidden = !list;
+    $("mp-gamepad").hidden = name !== "gamepad";
+    if (name !== "gamepad" && window.MPGamepad) window.MPGamepad.leave();   // nothing stays held on the TV
     if (name !== "pair") stopCode();                     // a code is only wanted on the pair page
     else if (!signedIn && !codeTimer) newCode();         // signed out: gets a code to show
     paint();
@@ -401,8 +403,8 @@
     if (view === "pair") paintPair();
     else if (view === "remote") paintRemote();
     else if (view === "screens") paintScreens();
-    else paintChannels();
-    paintStatus();
+    else if (view === "channels") paintChannels();
+    paintStatus();                                     // (gamepad mode draws itself)
   }
 
   // ------------------------------------------------------------------- taps
@@ -463,6 +465,112 @@
     if (document.hidden) clearTimeout(timer); else if (key) { touchedAt = Date.now(); schedule(0); }
   });
   setInterval(function () { if (view === "remote" && !document.hidden) paintProgress(); }, 1000);   // the bar moves between polls
+
+  // ------------------------------------------------------------------ gamepad mode
+  /* The phone as a game controller for the chosen TV (Doll, 2026-11-16): a SNES-shaped pad whose buttons go down and
+     come up ({action: "pad", button, down}: media/remotes.py PAD_BUTTONS), so a held button stays held. Retro plays
+     it as a player of its own; the TV's built-in games take its presses as their actions; outside a game it moves
+     around like the D-pad. Every finger is followed on its own (pointer events), the D-pad as one zone a thumb can
+     roll across (diagonals too), and each button has its own queue, so its down and up arrive in order without
+     waiting on the others. The Tab5's firmware (mnemerynne-tab-5.ino) has the same pad: keep them in step. */
+  const gamepad = (function () {
+    const chains = {};            // button -> the last send for it: down and up stay in order
+    const held = {};              // button -> true while it's down here
+    const dpadTouches = {};       // pointer id -> the directions that finger holds on the D-pad
+    const keyTouches = {};        // pointer id -> the button it holds
+
+    function setLine(text) { $("mp-gp-line").textContent = text || ""; }
+    function sendPad(button, down) {   // one button down or up, after this button's last one
+      const s = current();
+      if (!s || !s.online) { setLine(s ? screenName(s) + " isn't connected: is Media open on it?" : "Choose a screen first"); return; }
+      chains[button] = (chains[button] || Promise.resolve()).then(function () {
+        return call("POST", "/api/media/remote/screens/" + s.id + "/command", { action: "pad", button: button, down: down })
+          .catch(function (err) { setLine(err.message); });
+      });
+    }
+    function set(button, down) {   // a change of what's held: sent, lit, felt
+      if (Boolean(held[button]) === down) return;
+      held[button] = down;
+      document.querySelectorAll('[data-gp="' + button + '"], [data-dir="' + button + '"]').forEach(function (el) {
+        el.classList.toggle("mp-gp-down", down);
+      });
+      if (down && navigator.vibrate) { try { navigator.vibrate(8); } catch (e) { /* not allowed */ } }
+      sendPad(button, down);
+    }
+
+    function dpadDirs(event) {   // the directions a finger at this point holds: 8 ways, nothing near the middle
+      const box = $("mp-gp-dpad").getBoundingClientRect();
+      const dx = event.clientX - (box.left + box.width / 2), dy = event.clientY - (box.top + box.height / 2);
+      if (Math.hypot(dx, dy) < box.width * 0.12) return [];
+      const sector = (Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) + 8) % 8;   // 0 right, 2 down, 4 left, 6 up
+      return [["right"], ["right", "down"], ["down"], ["down", "left"], ["left"], ["left", "up"], ["up"], ["up", "right"]][sector];
+    }
+    function syncDpad() {   // every finger on the D-pad together: what's held now
+      const now = {};
+      Object.keys(dpadTouches).forEach(function (id) { dpadTouches[id].forEach(function (d) { now[d] = true; }); });
+      ["up", "down", "left", "right"].forEach(function (d) { set(d, Boolean(now[d])); });
+    }
+
+    const dpad = $("mp-gp-dpad");
+    dpad.addEventListener("pointerdown", function (e) {
+      e.preventDefault();
+      try { dpad.setPointerCapture(e.pointerId); } catch (err) { /* a synthetic pointer */ }   // keeps the D-pad sliding off it
+      dpadTouches[e.pointerId] = dpadDirs(e);
+      syncDpad();
+    });
+    dpad.addEventListener("pointermove", function (e) {
+      if (!dpadTouches[e.pointerId]) return;
+      dpadTouches[e.pointerId] = dpadDirs(e);
+      syncDpad();
+    });
+    function dpadUp(e) { if (dpadTouches[e.pointerId]) { delete dpadTouches[e.pointerId]; syncDpad(); } }
+    ["pointerup", "pointercancel", "lostpointercapture"].forEach(function (t) { dpad.addEventListener(t, dpadUp); });
+
+    document.querySelectorAll("#mp-gamepad .mp-gp-key").forEach(function (key) {
+      key.addEventListener("pointerdown", function (e) {
+        e.preventDefault();
+        try { key.setPointerCapture(e.pointerId); } catch (err) { /* a synthetic pointer */ }
+        keyTouches[e.pointerId] = key.dataset.gp;
+        set(key.dataset.gp, true);
+      });
+      function up(e) {
+        const button = keyTouches[e.pointerId];
+        if (!button) return;
+        delete keyTouches[e.pointerId];
+        if (!Object.keys(keyTouches).some(function (id) { return keyTouches[id] === button; })) set(button, false);
+      }
+      ["pointerup", "pointercancel", "lostpointercapture"].forEach(function (t) { key.addEventListener(t, up); });
+    });
+    $("mp-gamepad").addEventListener("contextmenu", function (e) { e.preventDefault(); });   // a long press isn't a menu
+
+    function enter() {   // full screen and sideways, where the phone lets a page ask
+      const s = current();
+      $("mp-gp-title").textContent = s ? "🎮 " + screenName(s) : "Choose a screen first";
+      setLine("");
+      const page = document.documentElement;
+      if (page.requestFullscreen && !document.fullscreenElement) {
+        page.requestFullscreen({ navigationUI: "hide" }).then(function () {
+          if (screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(function () {});
+        }).catch(function () { /* stays as it is */ });
+      }
+    }
+    function leave() {   // let go of everything (the TV mustn't keep a button held), and out of full screen
+      Object.keys(dpadTouches).forEach(function (id) { delete dpadTouches[id]; });
+      Object.keys(keyTouches).forEach(function (id) { delete keyTouches[id]; });
+      Object.keys(held).forEach(function (b) { if (held[b]) set(b, false); });
+      if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(function () {});
+    }
+    return { enter: enter, leave: leave, held: function () { return Object.keys(held).filter(function (b) { return held[b]; }); } };
+  }());
+  window.MPGamepad = gamepad;   // show() lets go through it; the tests read what's held
+
+  $("mp-open-gamepad").addEventListener("click", function () {
+    if (!current()) { setStatus("Choose a screen first"); return; }
+    show("gamepad");
+    gamepad.enter();
+  });
+  $("mp-gp-exit").addEventListener("click", function () { show("remote"); });
+  document.addEventListener("visibilitychange", function () { if (document.hidden) gamepad.leave(); });   // pocketed
 
   // -------------------------------------------------------------------- start
   show(key ? "remote" : "pair");   // a paired phone opens straight on the remote
