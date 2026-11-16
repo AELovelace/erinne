@@ -211,7 +211,7 @@ def test_the_player_page_and_the_rom(client, conn, directory, root, settings):
     page = client.get(f"/media/retro/play/{game['id']}")
     assert page.status_code == 200
     csp = page.headers["content-security-policy"]
-    assert "connect-src 'self' blob: data:" in csp and "'wasm-unsafe-eval'" in csp and "frame-ancestors 'self'" in csp
+    assert "connect-src 'self' wss://testserver ws://testserver blob: data:;" in csp and "'wasm-unsafe-eval'" in csp and "frame-ancestors 'self'" in csp
     player = _player_data(page.text)
     assert player["title"] == "Evil" and player["core"] == "mgba" and player["console"] == "gba"
     assert player["system"] == "gba" and player["save_folder"] == "mGBA"

@@ -77,6 +77,7 @@
   let sramChain = Promise.resolve(true);   // sends of the game's own save, one after another
   let autoFrame = -1;           // the frame of the last automatic state: none again until the game moves on
   let leaving = false;
+  let netGuest = false;         // playing in someone else's netplay room (retro-netplay.js): their game, not ours to save
 
   function status(text) { $("rp-status").textContent = text || ""; }   // the bar's short message
 
@@ -121,6 +122,7 @@
 
   // ------------------------------------------------------------- the game's own save
   function sendSram(bytes) {   // queued after any send still going; resolves true once the server has it
+    if (netGuest) return sramChain.then(function () { return true; });   // a guest's game is the host's: kept by the host
     if (!bytes || !bytes.length) return sramChain;
     const mark = fingerprint(bytes);
     if (mark === sentSram) return sramChain;
@@ -172,7 +174,7 @@
   }
 
   async function autoState(always) {   // the automatic state, unless nothing was played since the last one
-    if (!started || !emu.gameManager) return;
+    if (!started || !emu.gameManager || netGuest) return;
     const frame = emu.gameManager.getFrameNum();
     if (!always && frame === autoFrame) return;
     autoFrame = frame;
@@ -270,6 +272,7 @@
       const state = await getBytes(SAVES + slot);
       if (!state) throw new Error("it's gone");
       emu.gameManager.loadState(state);
+      if (window.RetroNetplay) window.RetroNetplay.loaded();   // a host's load: everyone starts again from it
       status("Loaded " + SLOT_NAMES[slot]);
       closeSlots();
     } catch (err) { status("Couldn't load that state: " + err.message); }
@@ -424,6 +427,12 @@
   window.RetroPlayer = {
     started: function () { return started; }, emu: function () { return emu; }, leave: leave, openSlots: openSlots,
     pause: function () { if (emu && started) emu.pause(); }, resume: function () { if (emu && started) emu.play(); },
+    // retro-netplay.js: "guest" in someone's room (no saving, no states of our own), "host" or null otherwise.
+    netplay: function (role) {
+      netGuest = role === "guest";
+      $("rp-save").disabled = $("rp-load").disabled = netGuest || !started;
+    },
+    status: status,
   };
 
   document.addEventListener("visibilitychange", function () {   // a phone switching apps may never come back

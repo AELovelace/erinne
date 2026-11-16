@@ -33,6 +33,8 @@
 </div>
 <script id="rp-data" type="application/json">{{ game_json | safe }}</script>
 <script src="{{ static('retro-player.js') }}" defer></script>
+{#- 👥 Play together: a room, and lockstep with the others in it (retro-netplay.js, web/retro.py's websocket). -#}
+<script src="{{ static('retro-netplay.js') }}" defer></script>
 {#- The remote, a controller's menu (its Xbox / PS button, or Start + Select held) and leaving on a TV (retro-tv.js). -#}
 <script src="{{ static('games/gamepad.js') }}" defer></script>
 <script src="{{ static('retro-tv.js') }}" defer></script>

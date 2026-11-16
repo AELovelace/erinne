@@ -56,6 +56,7 @@ WEB_ROUTERS = (
     "mnemerynne.web.media:router", "mnemerynne.web.media:admin_router", "mnemerynne.web.media:share_router",
     "mnemerynne.web.kiosk:router", "mnemerynne.web.soundcloud:router",   # Media → SoundCloud
     "mnemerynne.web.retro:router",                # Media → Retro: console games in the browser (media/retro.py)
+    "mnemerynne.web.retro:netplay_router",        # Retro's rooms for playing together (a websocket; media/netplay.py)
     "mnemerynne.web.admin_notices:router", "mnemerynne.web.remote:router", "mnemerynne.web.admin_remote:router",
     "mnemerynne.web.sync:router", "mnemerynne.web.sync:admin_router",   # the desktop backup app (sync.py)
     "mnemerynne.web.games:router",                # Media → Games: the built-in games (games.py)

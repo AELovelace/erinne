@@ -110,3 +110,10 @@
 /* The game's menu on a TV (retro-tv.js): Resume, Save state, Load state, Leave, one under the other. */
 .rp-tvmenu .rp-slots-box { display: grid; gap: .6rem; text-align: center; }
 .rp-tvmenu .rp-slots-box button { width: 100%; }
+
+/* 👥 Play together (retro-netplay.js): the room's panel, like the save slots. */
+.rp-np-row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .6rem 0; }
+.rp-np-room { display: flex; justify-content: space-between; align-items: center; gap: .6rem; padding: .4rem .6rem;
+  border: 1px solid var(--line); border-radius: calc(var(--radius, 12px) * .6); }
+.rp-np-code { font-family: var(--serif); font-size: 1.6rem; letter-spacing: .12em; margin: .2rem 0 .6rem; }
+.rp-together h3 { margin: .8rem 0 .4rem; }

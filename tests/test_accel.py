@@ -130,12 +130,16 @@ def test_the_accel_config_has_internal_locations_for_every_folder_and_kind(tmp_p
     probe = conf[conf.index("location = /_accel-probe/share {"):]
     assert "allow 192.168.1.5;" in probe and "deny all;" in probe and nginx.PROBE in probe
     assert "/_accel-probe/static" not in conf
-    assert conf.count("proxy_set_header X-Mnemerynne-Accel 1;") == 2             # the server and /remote/
+    # The server's own, and again in every websocket location (/remote/, Media's: Retro's netplay), as a location
+    # that sets headers of its own doesn't inherit the server's.
+    sockets = conf.count("proxy_set_header Upgrade $http_upgrade;")
+    assert sockets >= 2 and conf.count("proxy_set_header X-Mnemerynne-Accel 1;") == 1 + sockets
 
 
 def test_without_accel_nobody_can_claim_the_header():
     conf = nginx.render("192.168.1.5:38200")
-    assert conf.count('proxy_set_header X-Mnemerynne-Accel "";') == 2 and "/_accel/" not in conf
+    sockets = conf.count("proxy_set_header Upgrade $http_upgrade;")   # the server, and each websocket location again
+    assert conf.count('proxy_set_header X-Mnemerynne-Accel "";') == 1 + sockets and "/_accel/" not in conf
     remote = conf[conf.index("location /remote/"):]
     assert "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;" in remote[:remote.index("}")]
 

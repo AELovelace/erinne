@@ -7,31 +7,47 @@ own routes; a ROM, a cover and a save answer only for someone who can read that 
 
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 import sqlite3
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+import anyio
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import HTMLResponse, Response
 
-from mnemerynne import media
+from mnemerynne import media, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
-from mnemerynne.media import retro
-from mnemerynne.web.deps import LoginRequired, _session_user, get_db, get_media_db, get_settings, is_admin
+from mnemerynne.media import netplay, retro, screens
+from mnemerynne.web.deps import LoginRequired, _session_user, feature_pool, get_db, get_media_db, get_settings, is_admin
 from mnemerynne.web.media import _media_on, media_user
 from mnemerynne.web.sendfile import send_file
 
 # The player page loads the emulator's own scripts and its core (a .wasm made into a blob: script), and may only
-# talk to this server: no update checks, no CDN fallback for a missing core, no netplay. 'unsafe-eval': the zip and
+# talk to this server: no update checks, no CDN fallback for a missing core, no EmulatorJS netplay (Retro's own,
+# retro-netplay.js, is a websocket to this same host: named in connect-src by player_csp, as some Firefox versions
+# don't count ws: / wss: to the page's own host as 'self'). 'unsafe-eval': the zip and
 # 7z extractors (static/vendor/emulatorjs/compression, which open every core) are older Emscripten builds whose
 # cwrap() evals; the page runs no script but this server's and the core's own blob:, and has no inline script.
 PLAYER_CSP = ("default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval' 'unsafe-eval'; worker-src 'self' blob:; "
               "connect-src 'self' blob: data:; img-src 'self' blob: data:; media-src 'self' blob:; "
               "style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'self'")
 _SHOT_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
+
+
+_HOST = re.compile(r"[A-Za-z0-9.-]+(:[0-9]{1,5})?|\[[0-9A-Fa-f:.]+\](:[0-9]{1,5})?")   # a name or an [IPv6], and a port
+
+
+def player_csp(request: Request) -> str:
+    """PLAYER_CSP with this host's websocket (netplay) in connect-src, for whichever address the page came by."""
+    host = request.headers.get("host", "")
+    if not _HOST.fullmatch(host):
+        return PLAYER_CSP                           # not a plain host[:port]: 'self' alone
+    return PLAYER_CSP.replace("connect-src 'self' ", f"connect-src 'self' wss://{host} ws://{host} ", 1)
 
 
 def _retro_on(conn: sqlite3.Connection = Depends(get_db)) -> None:
@@ -118,7 +134,7 @@ def player_page(file_id: int, request: Request, user=Depends(retro_page_user),
     response = request.app.state.templates.TemplateResponse(request, "retro_play.html", {
         # In a <script> block: a file name holding "</script>" mustn't end it, so no "<" goes in as it is.
         "user": None if _on_tv(request, conn) else user, "game": game, "game_json": json.dumps(game).replace("<", "\\u003c")})
-    response.headers["Content-Security-Policy"] = PLAYER_CSP
+    response.headers["Content-Security-Policy"] = player_csp(request)
     return response
 
 
@@ -285,3 +301,90 @@ def delete_save(file_id: int, slot: str, user=Depends(media_user), conn: sqlite3
     if not gone:
         raise _not_found("No save there")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------- netplay
+# Playing together (media/netplay.py rooms, static/retro-netplay.js lockstep). The room list answers like the rest
+# of Retro; the room itself is a websocket on its own router, as a websocket has no request for the router's guards.
+@router.get("/api/media/retro/netplay/rooms")
+def netplay_rooms(game: int | None = None, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_media_db)):
+    """The rooms open for a game this person can read (`game`), or for every game they can."""
+    shelf = retro.Shelf(conn, user["id"])
+    if game is not None:
+        if shelf.rom(game) is None:
+            raise _not_found("Game not found")
+        ids = [game]
+    else:
+        ids = [g["id"] for g in shelf.games()]
+    return {"rooms": netplay.ROOMS.open_for(ids), "max": netplay.MAX_PLAYERS}
+
+
+netplay_router = APIRouter()
+
+
+def _netplay_check(websocket: WebSocket, conn: sqlite3.Connection, game: int) -> tuple[sqlite3.Row, sqlite3.Row, str] | None:
+    """(the person, the ROM, its console) for someone who may play this game here, as Retro's routes check; else None.
+    A paired TV plays as its owner, as everywhere in Media."""
+    directory = websocket.app.state.directory
+    if not media.enabled(conn) or not retro.enabled(conn):
+        return None
+    user = _session_user(websocket, conn)
+    if user is not None:
+        if not media.may_use(conn, user, directory):
+            return None
+    else:
+        screen = screens.by_token(conn, websocket.cookies.get(screens.COOKIE))
+        user = users.get_user_by_id(conn, screen["user_id"]) if screen is not None else None
+        if user is None or not user["active"] or not screens.may_use(conn, user, directory):
+            return None
+    found = retro.Shelf(conn, user["id"]).rom(game)
+    return (user, found[0], found[1].key) if found is not None else None
+
+
+@netplay_router.websocket("/api/media/retro/netplay/ws")
+async def netplay_socket(websocket: WebSocket, game: int, room: str = ""):
+    """A seat in a room: `room` empty opens one for `game` (this person hosts), a code joins it. Then every message
+    goes to the others (netplay.Rooms.relay) until this page goes."""
+    pool = feature_pool(websocket.app, "media")
+    conn = await anyio.to_thread.run_sync(pool.get)
+    try:
+        allowed = await anyio.to_thread.run_sync(_netplay_check, websocket, conn, game)
+    finally:
+        pool.put(conn)
+    if allowed is None:
+        await websocket.close(code=4403)              # not theirs to play: the page says so
+        return
+    user, rom, console = allowed
+    await websocket.accept()
+    lock = asyncio.Lock()                             # one send at a time: two others may relay to us at once
+
+    async def send(message: str | bytes) -> None:
+        async with lock:
+            if isinstance(message, bytes):
+                await websocket.send_bytes(message)
+            else:
+                await websocket.send_text(message)
+
+    title = retro.title_of(rom["display_name"])
+    try:
+        if room:
+            seat = await netplay.ROOMS.join(room, game_id=game, user_id=user["id"], name=user["username"], send=send)
+        else:
+            seat = await netplay.ROOMS.open(game_id=game, title=title, console=console, user_id=user["id"],
+                                            name=user["username"], send=send)
+    except netplay.NetplayError as exc:
+        await send(json.dumps({"t": "error", "why": str(exc)}))
+        await websocket.close()
+        return
+    the_room, me = seat
+    try:
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                break
+            data = message.get("bytes")
+            await netplay.ROOMS.relay(the_room, me, data if data is not None else message.get("text") or "")
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await netplay.ROOMS.leave(the_room, me)

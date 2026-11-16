@@ -103,6 +103,26 @@ On a paired TV, **🕹 Retro** in the TV's menu opens Retro in the TV's game lay
 - **A game controller** (on a TV box: Media help, *Game controllers on a TV box*) plays the game. A second one is player 2, and up to four can play. Its **Xbox** or **PS** button, or **Start** and **Select** held together, opens the game's menu: **Resume**, **Save state**, **Load state**, **Leave the game**. In the shelves and menus, the D-pad moves, **A** presses and **B** goes back.
 - **Leaving:** the TV bar's **Back**, Escape, **Leave the game**, or the remote's **Stop**. It saves first (the game's own save and an automatic state), then closes, as **← Retro** does.
 
+## Playing together (netplay)
+
+Up to four people can play one game together, each in their own browser or on their own TV. It works across the house or between houses.
+
+1. Everyone opens **the same game** in Retro and presses **Start**.
+2. One person presses **👥** in the game's bar (on a TV: **👥 Play together** in the game's menu) and **Open a room**. They're the **host** and player 1.
+3. The others press **👥** too. The room shows under **Rooms open for** the game: **Join**. They're players 2, 3 and 4, in the order they joined.
+4. The host presses **▶ Start together**. Everyone's game jumps to where the host's is, and you're playing together.
+
+Good to know:
+
+- **Who can join:** only people who can read that game on the share see its rooms.
+- **Input delay:** the host picks it before opening the room. **Low** suits the same house, **Normal** most of the time, **Smooth** friends far away. A higher delay hides a slow connection better, but buttons answer a moment later.
+- **Waiting:** every game waits for whoever's behind, so it never runs ahead. If someone's connection stalls, everyone sees **Waiting for …** until it catches up.
+- **Saves:** the game is the host's. The host's saves and states work as usual. Guests don't save, so a guest's own progress in that game is left as it was.
+- **Joining later:** someone joining a game that's already running makes everyone start again from where the host is. So does the host loading a state.
+- **Staying in step:** every few seconds the games check they're still the same. If they've drifted apart, everyone starts again from the host's, by itself. **↻ Resync everyone** does it by hand.
+- **Leaving:** **Leave the room** carries on alone. The host's **Close the room** ends it for everyone, and everyone's game carries on alone. The host can **Let go** of a player.
+- **Controllers:** each browser plays with its first controller, its keyboard, or a TV's remote. A second controller on the same TV doesn't play in a room.
+
 ## Where Retro isn't yet
 
-- **Netplay**, playing together over the network.
+- **Netplay with two controllers on one TV** (two players from one TV in a room).

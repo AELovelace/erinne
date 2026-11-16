@@ -31,6 +31,8 @@
     if (menu && !menu.hidden) return menu;
     const slots = document.getElementById("rp-slots");
     if (slots && !slots.hidden) return slots;
+    const together = document.getElementById("rp-together");   // 👥 Play together (retro-netplay.js)
+    if (together && !together.hidden) return together;
     return document;
   }
   function targets() {
@@ -77,6 +79,7 @@
     box.append(title);
     [["Resume", closeMenu], ["💾 Save state", function () { closeMenu(true); player().openSlots("save"); }],
      ["📂 Load state", function () { closeMenu(true); player().openSlots("load"); }],
+     ["👥 Play together", function () { closeMenu(); if (window.RetroNetplay) window.RetroNetplay.open(); }],
      ["Leave the game", function () { closeMenu(true); leave(); }]].forEach(function (item, i) {
       const b = document.createElement("button");
       b.type = "button";
@@ -115,6 +118,7 @@
     if (menu && !menu.hidden) { closeMenu(); return; }
     const slots = document.getElementById("rp-slots");
     if (slots && !slots.hidden) { document.getElementById("rp-slots-close").click(); return; }
+    if (window.RetroNetplay && window.RetroNetplay.isOpen()) { window.RetroNetplay.close(); return; }
     if (player() && !player().started()) { location.href = "/media/retro"; return; }   // not playing yet: the shelves
     if (!player()) leave();
   }

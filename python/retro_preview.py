@@ -3,7 +3,8 @@
     python python/retro_preview.py <port>
 
 Never reads the project's .env or live data: a temporary folder holds the database and a share with
-a homebrew game per console (python/make_retro_test_rom.py). Signs in as alice / preview-password.
+a homebrew game per console (python/make_retro_test_rom.py). Signs in as alice / preview-password (and bob, the
+same password: a second player for netplay, tests/retro-netplay-browser.mjs).
 """
 
 import sys
@@ -30,13 +31,14 @@ def main():
         (root / share.MARKER).write_text("")
         settings = Settings(_env_file=None, data_dir=Path(directory) / "data", embed_dim=4, share_root=root,
                             share_settle_seconds=0, secret_key="retro-local-preview-only-secret", ad_domain="PREVIEW")
-        people = FakeDirectory({"alice": {"Domain Users"}})
+        people = FakeDirectory({"alice": {"Domain Users"}, "bob": {"Domain Users"}})
         checker = FakeShareChecker(root)
         share.configure(settings, people, checker)
         conn = db.connect(settings.db_path)
         db.migrate(conn, settings.embed_dim)
-        uid = users.create_user(conn, "alice", "preview-password")
-        accounts.link(conn, uid, "alice", people)
+        for name in ("alice", "bob"):                        # bob: the second player in the netplay test
+            uid = users.create_user(conn, name, "preview-password")
+            accounts.link(conn, uid, name, people)
         media.set_enabled(conn, True)
         media.save_settings(conn, settings, {"media_group": "Domain Users", "radio_directory_url": "",
                                              "retro_enabled": True})
