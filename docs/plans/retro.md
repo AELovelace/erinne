@@ -23,6 +23,7 @@ Doll asked on 2026-11-14 for "snes, gba, gbc, nes, and genesis emulators", a sha
 | 4 | On a paired TV: the TV's game layer, the remote (shelves, menus, D-pad and A in a game), Bluetooth controllers (players 1-4, the Xbox/PS button or Start+Select for the game's menu), leaving saves first | Built 2026-11-14 (session 8243, with the TV boxes' 🔗 Controllers) |
 | 5 | Box art looked up online (libretro-thumbnails, by No-Intro name) when *online metadata* is on | Idea |
 | 6 | Master System and Game Gear: Genesis Plus GX plays them already, so a `CONSOLES` row each | Idea |
+| 8 | **The library redesigned**, Doll's ask: pages flipped with LB / RB (tabs, `[` `]`). **Top** = Continue playing, then a row per console of its top 50 by RetroAchievements players (`media/popularity.py`, matched by RA's ROM hashes, else title); a page per console, A–Z. Her choices: RetroAchievements, a row per console, recents on Top, console pages A–Z | Built 2026-11-15 |
 | 7 | **Unsorted**, Doll's ask: a drop folder in the Games folder; the catalog pass recognises each ROM by its header (inside a `.zip` or `.7z` too) and moves it, with its tracks and box art, into its console's folder (`media/romsort.py`) | Built 2026-11-15 |
 
 ## How a console is added

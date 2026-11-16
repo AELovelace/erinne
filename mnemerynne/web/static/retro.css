@@ -14,6 +14,27 @@
 .rt-tools input, .rt-tools select { min-width: 0; }
 .rt-search input { width: min(16rem, 60vw); }
 
+/* The pages (retro.js): a tab each, LB and RB at the ends for a controller's shoulder buttons. */
+.rt-pages { display: flex; align-items: center; gap: .4rem; overflow-x: auto; padding: .2rem .1rem .6rem;
+  scrollbar-width: thin; }
+.rt-pages[hidden] { display: none; }
+.rt-tab { flex: none; border: 1px solid var(--line); background: var(--glass); color: var(--ink); border-radius: 999px;
+  padding: .35rem .9rem; font: inherit; cursor: pointer; white-space: nowrap; }
+.rt-tab:hover, .rt-tab:focus-visible { border-color: var(--rose); }
+.rt-tab[aria-current="page"] { background: var(--rose); border-color: var(--rose); color: #fff; }
+.rt-shoulder { flex: none; font-size: .7rem; font-weight: 700; letter-spacing: .04em; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 6px 6px 3px 3px; padding: .05rem .4rem; }
+
+/* The Top page's rows: one console each, scrolling left to right. */
+.rt-row { display: grid; grid-auto-flow: column; grid-auto-columns: 150px; gap: 1rem; overflow-x: auto;
+  padding: .2rem .2rem .8rem; scroll-snap-type: x proximity; scroll-padding-inline: .2rem; scrollbar-width: thin; }
+.rt-row > .rt-game { scroll-snap-align: start; }
+.rt-rank { position: absolute; left: .35rem; top: .35rem; font-size: .72rem; font-weight: 700; padding: .05rem .4rem;
+  border-radius: 999px; background: rgba(0, 0, 0, .55); color: #fff; }
+.rt-more { border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
+.rt-more-art { background: var(--glass); }
+.rt-more-arrow { font-size: 2.4rem; color: var(--rose); }
+
 .rt-shelf { margin: 1.5rem 0; }
 .rt-shelf-title { font-family: var(--serif); font-size: 1.2rem; margin: 0 0 .6rem; }
 .rt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 1rem; }
@@ -79,6 +100,7 @@
 
 @media (max-width: 520px) {
   .rt-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: .6rem; }
+  .rt-row { grid-auto-columns: 118px; gap: .6rem; }
   .rp-console { display: none; }
   .rp-slot { grid-template-columns: 72px minmax(0, 1fr); }
   .rp-slot-shot { width: 72px; }

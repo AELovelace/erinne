@@ -245,6 +245,8 @@ class Shelf:
         roms = [r for r in rows if console_of(r["display_name"], self.folders[r["folder_id"]])]
         played = self._played({r["blob_sha256"] for r in roms})
         saved = self._saved({r["blob_sha256"] for r in roms})
+        from mnemerynne.media import popularity     # (it imports this module)
+        players = popularity.players_by_rom(self.conn, {r["blob_sha256"] for r in roms})   # RetroAchievements' counts
         order = list(CONSOLES)
         out = []
         for r in roms:
@@ -255,6 +257,7 @@ class Shelf:
                         "name": r["display_name"], "size": r["size"],
                         "cover": f"/media/retro/cover/{cover}" if cover else None,
                         "played_at": played.get(r["blob_sha256"]),
+                        "players": players.get(r["blob_sha256"]),   # None: not ranked (yet); the pages sort by it
                         "has_save": "sram" in slots, "can_continue": "auto" in slots,
                         "needs_bios": console.needs_bios(r["display_name"]) and self.bios(console) is None})
         out.sort(key=lambda g: (order.index(g["console"]), g["title"].lower(), g["name"].lower()))

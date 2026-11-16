@@ -65,7 +65,8 @@ DEFAULTS = {"folder": LIBRARY_NAME, "hwaccel": "auto", "max_transcodes": 2, "onl
             # games live in this top-level share folder, a folder per console.
             "retro_enabled": False, "retro_folder": "Games"}
 GROUP_SETTINGS = ("media_group", "screens_group")
-_SECRETS = ("tmdb_key_enc", "soundcloud_id_enc", "soundcloud_secret_enc")     # kept encrypted, never in DEFAULTS or the API
+_SECRETS = ("tmdb_key_enc", "soundcloud_id_enc", "soundcloud_secret_enc",     # kept encrypted, never in DEFAULTS or the API
+            "ra_key_enc")   # RetroAchievements' Web API key: Retro's popularity (media/popularity.py)
 
 
 class MediaError(ValueError):
@@ -122,6 +123,12 @@ def tmdb_key(settings: Settings, cfg: dict) -> str:
     return (apis.decrypt_secret(settings, base64.b64decode(enc)) or "") if enc else ""
 
 
+def ra_key(settings: Settings, cfg: dict) -> str:
+    """RetroAchievements' Web API key (Retro's popularity), or "" until an admin saves one."""
+    enc = cfg.get("ra_key_enc")
+    return (apis.decrypt_secret(settings, base64.b64decode(enc)) or "") if enc else ""
+
+
 def soundcloud_credentials(settings: Settings, cfg: dict) -> tuple[str, str] | None:
     """SoundCloud's client id and secret (media/soundcloud.py), or None until both are saved."""
     found = []
@@ -134,9 +141,10 @@ def soundcloud_credentials(settings: Settings, cfg: dict) -> tuple[str, str] | N
 
 
 def save_settings(conn: sqlite3.Connection, settings: Settings, changes: dict, key: str | None = None,
-                  soundcloud_id: str | None = None, soundcloud_secret: str | None = None) -> dict:
-    """changes: any of DEFAULTS' keys (others ignored). key, soundcloud_id, soundcloud_secret: None keeps what is saved,
-    '' removes it."""
+                  soundcloud_id: str | None = None, soundcloud_secret: str | None = None,
+                  retroachievements_key: str | None = None) -> dict:
+    """changes: any of DEFAULTS' keys (others ignored). key (TMDB's), soundcloud_id, soundcloud_secret,
+    retroachievements_key: None keeps what is saved, '' removes it."""
     cfg = load_settings(conn)
     for name, value in changes.items():
         if value is None or name not in DEFAULTS:
@@ -155,7 +163,8 @@ def save_settings(conn: sqlite3.Connection, settings: Settings, changes: dict, k
         if name in ("folder", "signage_folder", "retro_folder"):
             value = check_folder(value)
         cfg[name] = value
-    for name, secret in (("tmdb_key_enc", key), ("soundcloud_id_enc", soundcloud_id), ("soundcloud_secret_enc", soundcloud_secret)):
+    for name, secret in (("tmdb_key_enc", key), ("soundcloud_id_enc", soundcloud_id), ("soundcloud_secret_enc", soundcloud_secret),
+                         ("ra_key_enc", retroachievements_key)):
         if secret is None:
             continue
         if secret.strip():

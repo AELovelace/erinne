@@ -154,6 +154,12 @@ Slots now play three horizontal lines on a 3×3 board. The wager is per line and
 - **Games:** people bring their own ROMs and discs. Mnemerynne never downloads any.
 - **Box art:** a picture beside a game with the same name.
 - **No catalogue:** the shelves are read from the share scan's list of files.
+- **Unsorted:** a `Unsorted` folder beside the console folders is a drop box. The catalog pass recognises each ROM by its header and moves it into its console's folder (`mnemerynne/media/romsort.py`).
+- **Popularity (the Top page):** the library's first page ranks each console's games by how many people played them on RetroAchievements (`mnemerynne/media/popularity.py`).
+  - **Setting it up:** a free [RetroAchievements](https://retroachievements.org) account. Copy its **Web API key** (Settings → Keys) into **RetroAchievements key** in Retro's settings. It's stored encrypted and only ever shown as saved or not. Remove it and nothing more is asked; the pages go back to A to Z.
+  - **What's sent:** the key, console numbers and game numbers. Never titles, file names or who plays what.
+  - **How games are matched:** by RetroAchievements' own ROM fingerprints (an MD5; the NES without its 16-byte header, the SNES without a copier header; a `.zip`'s biggest file). PS1 discs, `.7z` archives and anything whose fingerprint isn't listed are matched by title within their console, exactly, leaving hacks and homebrew out.
+  - **How gently:** each console's game list is fetched once a week. Each game's player count is asked once a month, at most 25 a pass, a moment apart. A big library fills in over a few hours. **Settings** shows how many games were found and ranked so far.
 
 **The cores**, one per console:
 

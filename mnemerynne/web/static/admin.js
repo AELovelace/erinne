@@ -1888,6 +1888,13 @@
     retroFolder.setAttribute("list", "media-folders");
     retroFolder.placeholder = "Games";
     retroFolder.title = "A folder at the top of the share; one folder per console is made inside it";
+    // RetroAchievements' Web API key: ranks each console's games by how many people played them there (the
+    // library's first page), media/popularity.py. Stored encrypted; only ever shown as saved or not.
+    const raKey = agentInput("password", "");
+    raKey.placeholder = data.retroachievements_key_set ? "Saved — type to replace" : "RetroAchievements Web API key";
+    raKey.autocomplete = "off";
+    agentField(retroGrid, "RetroAchievements key", raKey).title =
+      "retroachievements.org → Settings → Keys (a free account). Only game and console numbers are sent, never titles or who plays";
     retroForm.appendChild(retroGrid);
     const retroActions = el("div", "ax-new");
     const saveRetro = el("button", "small", "Save");
@@ -1896,7 +1903,18 @@
     retroActions.append(saveRetro, el("span", "small muted", rs.library
       ? rs.games + " game(s) in " + rs.library.share_path + " (" + consoles + "). Share permissions decide who sees which."
       : "Turning it on makes the folder, with " + consoles + " inside."));
+    if (data.retroachievements_key_set) {
+      const dropRa = el("button", "link small", "Remove RetroAchievements key");
+      dropRa.type = "button";
+      dropRa.addEventListener("click", function () { save({ retroachievements_key: "" }); });
+      retroActions.appendChild(dropRa);
+    }
     retroForm.appendChild(retroActions);
+    const pop = rs.popularity || null;
+    if (data.retroachievements_key_set && pop) {   // how far the ranking has got (it fills in over a few catalog passes)
+      retroForm.appendChild(el("p", "small muted", "Popularity: " + pop.found + " of " + pop.checked +
+        " game(s) found on RetroAchievements, " + pop.ranked + " with a player count so far."));
+    }
     retroForm.appendChild(el("p", "small muted", "People bring their own games (ROMs they dumped); Mnemerynne never " +
       "downloads any. The Super Nintendo and Genesis emulators (Snes9x, Genesis Plus GX) are for non-commercial use only."));
     retroForm.addEventListener("submit", function (e) {   // the switch, and the folder when it changed
@@ -1904,6 +1922,7 @@
       const body = { retro_enabled: retroOn.checked };
       const name = retroFolder.value.trim();
       if (name && name.toLowerCase() !== String(rs.library ? rs.library.share_path : s.retro_folder).toLowerCase()) body.retro_folder = name;
+      if (raKey.value.trim()) body.retroachievements_key = raKey.value.trim();   // empty box: keep the saved key
       save(body);
     });
     playback.appendChild(retroForm);

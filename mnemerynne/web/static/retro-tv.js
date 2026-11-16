@@ -4,7 +4,8 @@
  *  - the remote, through the TV page's messages ({type: "mnemerynne-game-key", key}, as the built-in games get
  *    them): on the shelves and in menus the arrows move between games and buttons and OK opens one; in a running
  *    game the arrows and OK are the console's D-pad and A, and ⏯ opens the menu;
- *  - a controller (Bluetooth or USB, through gamepad.js) in the shelves and menus: the D-pad or stick moves, A
+ *  - a controller (Bluetooth or USB, through gamepad.js) in the shelves and menus: LB / RB flip the library's pages
+ *    (retro.js RetroLibrary), the D-pad or stick moves, A
  *    presses, B goes back. In a running game EmulatorJS has the controller to itself (player 1, 2, 3, 4 in the
  *    order they're pressed), except the Xbox / PS button, or Start and Select held together, which opens the menu;
  *  - the menu (on the player): Resume, Save state, Load state, Leave;
@@ -152,6 +153,9 @@
     else if (action === "back") back();
     else if (action === "enter") press();
     else if (action === "play") { if (player()) openMenu(); }
+    else if (action === "prev" || action === "next") {   // LB / RB: the library's pages (retro.js), not in a menu
+      if (window.RetroLibrary && layer() === document) window.RetroLibrary.flip(action === "prev" ? -1 : 1);
+    }
     else if (["up", "down", "left", "right"].indexOf(action) >= 0) move(action);
   });
   if (navigator.getGamepads) { // Start + Select held together: the menu, for a controller whose middle button the browser hides

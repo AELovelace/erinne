@@ -22,7 +22,7 @@ from mnemerynne import db, media, share
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
-from mnemerynne.media import artwork, probe, retro, romsort
+from mnemerynne.media import artwork, popularity, probe, retro, romsort
 
 log = logging.getLogger("mnemerynne.media")
 
@@ -169,6 +169,10 @@ def run_pass(conn: sqlite3.Connection, settings: Settings, budget_s: float = 20.
         romsort.sort_unsorted(core)              # ROMs dropped in Unsorted, into their consoles' folders
     except (OSError, media.MediaError):
         log.info("Retro: couldn't sort the Unsorted folder this time", exc_info=True)
+    try:                                         # Retro's popularity from RetroAchievements (with a key set)
+        popularity.refresh(conn, settings, time.monotonic() + budget_s / 2)
+    except (OSError, sqlite3.Error, media.MediaError):
+        log.info("Retro: couldn't rank the games this time", exc_info=True)
     roots = media.catalog_roots(conn)
     if not roots:
         return stats

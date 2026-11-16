@@ -10,11 +10,15 @@
 
 Retro only appears once an admin has turned it on. The games are ones your household puts on the share: Erynne never downloads any.
 
-## The shelves
+## The pages
 
-- **Continue playing** at the top has the games you played last.
-- Below it is a shelf per console.
-- **Find a game** searches by title. The console menu shows one console's games.
+Retro's library is a few pages. Flip between them with a controller's **LB** and **RB**, the **[** and **]** keys (or Page Up and Page Down), or the tabs at the top:
+
+- **⭐ Top:** **Continue playing** first, the games you played last. Below it is a row for each console with its **50 most popular** games on the share. Scroll a row left and right. The most played comes first, marked **#1**, **#2** and so on. A row's last card, **All**, opens that console's page.
+- **A page per console:** all of its games, A to Z.
+- **Find a game** searches every console at once by title.
+
+Popularity is how many people have played a game on [RetroAchievements](https://retroachievements.org), shown as **👥** under the game (for example `👥 12k`). It appears once an admin has added a RetroAchievements key, and fills in over the first few hours. A game RetroAchievements doesn't know, like a homebrew, goes after the ranked ones, A to Z.
 - **▶ Continue** on a game means it has an automatic save to carry on from. **💾 Saved** means it has its own save.
 - **Needs a BIOS** means the game won't start until a BIOS file is put on the share. See [BIOS files](#bios-files).
 

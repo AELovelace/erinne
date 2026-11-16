@@ -29,7 +29,8 @@ from mnemerynne import db, group_refs, media, users
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
-from mnemerynne.media import artwork, browse, catalog, live, probe, remotes, retro, screens, signage, soundcloud, speakers, transcode
+from mnemerynne.media import (artwork, browse, catalog, live, popularity, probe, remotes, retro, screens, signage, soundcloud,
+                              speakers, transcode)
 from mnemerynne.web import security
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import _session_user, admin_user, api_user, get_db, get_media_db, get_settings, is_admin, page_user, release_db
@@ -1218,6 +1219,7 @@ def _admin_status(request: Request, conn: sqlite3.Connection) -> dict:
                         | {g: group_refs.label(conn, cfg[g]) for g in media.GROUP_SETTINGS},
             "tmdb_key_set": bool(cfg.get("tmdb_key_enc")),
             "soundcloud_set": bool(cfg.get("soundcloud_id_enc") and cfg.get("soundcloud_secret_enc")),
+            "retroachievements_key_set": bool(cfg.get("ra_key_enc")),
             "sources": live.sources(conn, enabled_only=False), "catalog": catalog.status(conn, lib),
             "retro": _retro_status(conn),
             "sessions": sessions(request).running(),
@@ -1232,6 +1234,7 @@ def _retro_status(conn: sqlite3.Connection) -> dict:
     lib = retro.library(conn)
     return {"library": {"id": lib["id"], "share_path": lib["share_path"]} if lib else None,
             "games": retro.game_count(conn),
+            "popularity": popularity.status(conn),   # what RetroAchievements has said (media/popularity.py)
             "consoles": [{"key": c.key, "name": c.name, "folder": c.folder} for c in retro.CONSOLES.values()]}
 
 
@@ -1252,6 +1255,7 @@ class MediaSettingsBody(BaseModel):
     tmdb_key: str | None = Field(None, max_length=1000)   # None: keep; "": remove
     soundcloud_id: str | None = Field(None, max_length=1000)       # None: keep; "": remove
     soundcloud_secret: str | None = Field(None, max_length=1000)   # None: keep; "": remove
+    retroachievements_key: str | None = Field(None, max_length=200)   # Retro's popularity; None: keep; "": remove
     signage_folder: str | None = Field(None, max_length=120)   # the Signage folder at the top of the share
     signage_effects: dict | None = None                        # CRT effects for newly paired screens
     runner_daily_cap: int | None = Field(None, ge=0, le=1_000_000, strict=True)   # StickBob Runner's coins a day per person; 0: no limit
@@ -1292,7 +1296,7 @@ def admin_settings(body: MediaSettingsBody, request: Request, user=Depends(admin
             if body.retro_enabled is not None and body.retro_enabled != media.load_settings(conn)["retro_enabled"]:
                 _log(conn, user, "settings.retro", "on" if body.retro_enabled else "off")
             changes = body.model_dump(exclude={"enabled", "folder", "tmdb_key", "soundcloud_id", "soundcloud_secret", "signage_folder",
-                                               "retro_folder"}, exclude_none=True)
+                                               "retro_folder", "retroachievements_key"}, exclude_none=True)
             if changes.get("signage_effects") is not None:
                 try:
                     changes["signage_effects"] = signage.clean_effects(changes["signage_effects"])
@@ -1307,13 +1311,18 @@ def admin_settings(body: MediaSettingsBody, request: Request, user=Depends(admin
                     except group_refs.GroupRefError as exc:
                         raise media.MediaError(str(exc)) from None
             soundcloud_changed = body.soundcloud_id is not None or body.soundcloud_secret is not None
-            if changes or body.tmdb_key is not None or soundcloud_changed:
-                media.save_settings(conn, settings, changes, body.tmdb_key, body.soundcloud_id, body.soundcloud_secret)
+            ra_changed = body.retroachievements_key is not None
+            if changes or body.tmdb_key is not None or soundcloud_changed or ra_changed:
+                media.save_settings(conn, settings, changes, body.tmdb_key, body.soundcloud_id, body.soundcloud_secret,
+                                    body.retroachievements_key)
                 detail = ", ".join(f"{k}={v}" for k, v in changes.items())
                 if body.tmdb_key is not None:
                     detail = (detail + ", " if detail else "") + ("TMDB key set" if body.tmdb_key else "TMDB key removed")
                 if soundcloud_changed:                    # that it changed, never what to
                     detail = (detail + ", " if detail else "") + "SoundCloud key changed"
+                if ra_changed:
+                    detail = (detail + ", " if detail else "") + ("RetroAchievements key set" if body.retroachievements_key
+                                                                  else "RetroAchievements key removed")
                 _log(conn, user, "settings.media_options", detail)
     except (media.MediaError, OSError) as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
