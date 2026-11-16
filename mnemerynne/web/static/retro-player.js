@@ -78,6 +78,15 @@
   let autoFrame = -1;           // the frame of the last automatic state: none again until the game moves on
   let leaving = false;
   let netGuest = false;         // playing in someone else's netplay room (retro-netplay.js): their game, not ours to save
+  let member = null;            // an archive holding several ROMs: the one picked in "Which ROM?" (its saves are its own)
+
+  // A save's address: the slot (or the list), for the ROM picked inside an archive if there is one.
+  function saveUrl(path, extra) {
+    const q = [];
+    if (member) q.push("member=" + encodeURIComponent(member));
+    if (extra) q.push(extra);
+    return SAVES.slice(0, -1) + (path ? "/" + path : "") + (q.length ? "?" + q.join("&") : "");
+  }
 
   function status(text) { $("rp-status").textContent = text || ""; }   // the bar's short message
 
@@ -106,7 +115,7 @@
   }
 
   async function refreshSaves() {   // the slots' sizes and times, after a change
-    const response = await fetch(SAVES.slice(0, -1), { credentials: "same-origin", cache: "no-store" });
+    const response = await fetch(saveUrl(""), { credentials: "same-origin", cache: "no-store" });
     if (response.ok) saves = (await response.json()).saves;
   }
 
@@ -128,7 +137,7 @@
     if (mark === sentSram) return sramChain;
     sentSram = mark;
     const copy = bytes.slice();   // the emulator's buffer can change under a slow send
-    sramChain = sramChain.then(function () { return putBytes(SAVES + "sram", copy); }).then(function () {
+    sramChain = sramChain.then(function () { return putBytes(saveUrl("sram"), copy); }).then(function () {
       status("Game saved");
       return true;
     }, function (err) {
@@ -168,8 +177,8 @@
   }
 
   async function keepState(slot, taken) {   // a captured moment into a slot, then its screenshot; throws if it couldn't
-    await putBytes(SAVES + slot, taken.state);
-    if (taken.shot) await putBytes(SAVES + slot + "/shot", taken.shot, "image/png").catch(function () { /* the state is kept */ });
+    await putBytes(saveUrl(slot), taken.state);
+    if (taken.shot) await putBytes(saveUrl(slot + "/shot"), taken.shot, "image/png").catch(function () { /* the state is kept */ });
     await refreshSaves();
   }
 
@@ -191,7 +200,7 @@
     row.className = "rp-slot";
     const pic = document.createElement(kept && kept.has_shot ? "img" : "div");
     pic.className = "rp-slot-shot";
-    if (kept && kept.has_shot) { pic.src = SAVES + slot + "/shot?v=" + encodeURIComponent(kept.updated_at); pic.alt = ""; }
+    if (kept && kept.has_shot) { pic.src = saveUrl(slot + "/shot", "v=" + encodeURIComponent(kept.updated_at)); pic.alt = ""; }
     else pic.textContent = kept ? "💾" : "—";
     const words = document.createElement("div");
     words.className = "rp-slot-words";
@@ -269,7 +278,7 @@
   async function doLoad(slot) {
     status("Loading " + SLOT_NAMES[slot] + "…");
     try {
-      const state = await getBytes(SAVES + slot);
+      const state = await getBytes(saveUrl(slot));
       if (!state) throw new Error("it's gone");
       emu.gameManager.loadState(state);
       if (window.RetroNetplay) window.RetroNetplay.loaded();   // a host's load: everyone starts again from it
@@ -280,7 +289,7 @@
 
   async function doDelete(slot) {
     try {
-      const response = await fetch(SAVES + slot, { method: "DELETE", credentials: "same-origin" });
+      const response = await fetch(saveUrl(slot), { method: "DELETE", credentials: "same-origin" });
       if (!response.ok && response.status !== 404) throw new Error(await failure(response));
       await refreshSaves();
       drawSlots();
@@ -335,12 +344,74 @@
     if (changed && typeof emu.updateGamepadLabels === "function") emu.updateGamepadLabels();   // its Controls menu shows it
   }
 
+  // "Which ROM?": an archive holding several ROMs (an original and its hacks) would play whichever the emulator
+  // unpacked first. Only the one picked goes through as it unpacks (EmulatorJS's checkCompression hands each file to
+  // a callback: the other ROMs are left out, anything else goes through), so it's the only one the emulator sees.
+  function onlyThePickedRom(e) {
+    if (!member || !game.rom_exts) return;
+    const exts = game.rom_exts;
+    const unpack = e.checkCompression.bind(e);
+    e.checkCompression = function (data, msg, fileCb) {
+      if (typeof fileCb !== "function") return unpack(data, msg, fileCb);   // the core's own files
+      return unpack(data, msg, function (name, bytes) {
+        const ext = String(name).split(".").pop().toLowerCase();
+        if (name !== member && exts.includes(ext)) return;                   // another ROM in the archive: left out
+        return fileCb(name, bytes);
+      });
+    };
+  }
+
+  function chooseRom() {   // the archive's ROMs, a button each; picking one goes on to its own Continue / Start
+    const box = $("rp-which");
+    box.replaceChildren();
+    const head = document.createElement("h2");
+    head.textContent = "Which ROM?";
+    const hint = document.createElement("p");
+    hint.className = "muted small";
+    hint.textContent = "This archive holds " + game.members.length + " ROMs. Each keeps its own saves.";
+    box.append(head, hint);
+    game.members.forEach(function (m) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "rp-which-rom secondary";
+      b.dataset.member = m.name;
+      const name = document.createElement("strong");
+      name.textContent = m.title;
+      const file = document.createElement("span");
+      file.className = "muted small";
+      file.textContent = m.name;
+      b.append(name, file);
+      const auto = (m.saves || []).find(function (sv) { return sv.slot === "auto"; });
+      if (auto) {
+        const tag = document.createElement("span");
+        tag.className = "rp-which-tag small";
+        tag.textContent = "▶ " + when(auto.updated_at);
+        b.append(tag);
+      }
+      b.addEventListener("click", function () { pickRom(m); });
+      box.append(b);
+    });
+    box.hidden = false;
+    $("rp-continue").hidden = $("rp-fresh").hidden = $("rp-other").hidden = true;
+    const first = box.querySelector("button");
+    if (first) first.focus();
+  }
+
+  function pickRom(m) {   // this ROM: its saves, then the usual Continue / Start
+    member = m.name;
+    saves = m.saves || [];
+    $("rp-which").hidden = true;
+    $("rp-other").hidden = false;
+    $("rp-fresh").hidden = false;
+    showStart();
+  }
+
   async function boot(resume) {   // the choice is the click browsers want before a page may play sound
     $("rp-start").hidden = true;
     status("Loading…");
     let sram = null, auto = null;
     try {
-      [sram, auto] = await Promise.all([getBytes(SAVES + "sram"), resume ? getBytes(SAVES + "auto") : null]);
+      [sram, auto] = await Promise.all([getBytes(saveUrl("sram")), resume ? getBytes(saveUrl("auto")) : null]);
       await loadStyle(DATA + "emulator.css");
       for (const name of SCRIPTS) await loadScript(DATA + "src/" + name);
     } catch (err) {
@@ -366,6 +437,7 @@
       defaultControllers: controllers(),
     });
     setInterval(seatPads, 500);   // a controller that was already here when the game loaded still gets a player
+    onlyThePickedRom(emu);
     // The game's own save, put back before the game boots: games read it once, at the start.
     emu.on("saveDatabaseLoaded", function (FS) {
       if (sram) { try { writeFile(FS, sramPathBeforeBoot(), sram); } catch (_) { /* checked again at start */ } }
@@ -433,6 +505,7 @@
       $("rp-save").disabled = $("rp-load").disabled = netGuest || !started;
     },
     status: status,
+    member: function () { return member; },   // retro-netplay.js: everyone in a room plays the same ROM
   };
 
   document.addEventListener("visibilitychange", function () {   // a phone switching apps may never come back
@@ -466,10 +539,19 @@
     return;
   }
 
-  const auto = saveOf("auto");
-  $("rp-continue").hidden = !auto;
-  if (auto) $("rp-continue-when").textContent = "(" + when(auto.updated_at) + ")";
-  $("rp-fresh").textContent = auto ? "Start over" : "▶ Start";
-  $("rp-start").hidden = false;
-  (auto ? $("rp-continue") : $("rp-fresh")).focus();
+  function showStart() {   // Continue (the automatic state) or a fresh start, for the game (or the ROM picked)
+    const auto = saveOf("auto");
+    $("rp-continue").hidden = !auto;
+    if (auto) $("rp-continue-when").textContent = "(" + when(auto.updated_at) + ")";
+    $("rp-fresh").textContent = auto ? "Start over" : "▶ Start";
+    $("rp-start").hidden = false;
+    (auto ? $("rp-continue") : $("rp-fresh")).focus();
+  }
+  $("rp-other").addEventListener("click", chooseRom);
+  if (game.members && game.members.length > 1) {   // an archive of several ROMs: which one first
+    $("rp-start").hidden = false;
+    chooseRom();
+  } else {
+    showStart();
+  }
 })();

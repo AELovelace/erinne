@@ -251,6 +251,11 @@
       np.closedWhy = m.why;
       disconnect(m.why);
     } else if (m.t === "start") {
+      const mine = player() && player().member ? player().member() : null;
+      if ((m.member || null) !== mine) {           // an archive of several ROMs: everyone must play the same one
+        disconnect("The host is playing " + (m.member || "the archive's first ROM") + ": pick that one in Which ROM? to play together.");
+        return;
+      }
       np.pendingStart = { delay: Number(m.delay) || 5, epoch: Number(m.epoch) || 0 };   // the state comes next, as a binary message
       status("Starting together…");
     } else if (m.t === "i") {
@@ -359,7 +364,7 @@
     hook();
     const state = e.gameManager.getState();
     np.epoch += 1;
-    send({ t: "start", delay: np.delay, epoch: np.epoch, why: why });
+    send({ t: "start", delay: np.delay, epoch: np.epoch, why: why, member: player().member ? player().member() : null });
     np.ws.send(new Uint8Array(state));             // the server puts our slot in front
     beginFrom(state, np.delay);
     status(why === "joined" ? "Someone joined: everyone starts again from here." : why === "checksum"

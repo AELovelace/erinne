@@ -16,10 +16,13 @@
     <button type="button" id="rp-load" title="Load state" disabled>📂 Load</button>
     <button type="button" id="rp-full" title="Full screen">⛶</button>
   </div>
-  {#- Before the game starts: Continue (the automatic state) or a fresh start. -#}
+  {#- Before the game starts: for an archive holding several ROMs, which one (each keeps its own saves); then
+      Continue (the automatic state) or a fresh start. -#}
   <div class="rp-start" id="rp-start" hidden>
+    <div class="rp-which" id="rp-which" role="group" aria-label="Which ROM?" hidden></div>
     <button type="button" id="rp-continue">▶ Continue <span class="muted small" id="rp-continue-when"></span></button>
     <button type="button" class="secondary" id="rp-fresh">Start</button>
+    <button type="button" class="secondary" id="rp-other" hidden>↩ Another ROM</button>
   </div>
   <div class="rp-stage"><div id="rp-game"></div></div>
   {#- The save-state slots, for saving into or loading from (retro-player.js slots). -#}

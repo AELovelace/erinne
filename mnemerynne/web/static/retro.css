@@ -117,3 +117,14 @@
   border: 1px solid var(--line); border-radius: calc(var(--radius, 12px) * .6); }
 .rp-np-code { font-family: var(--serif); font-size: 1.6rem; letter-spacing: .12em; margin: .2rem 0 .6rem; }
 .rp-together h3 { margin: .8rem 0 .4rem; }
+
+/* "Which ROM?" (retro-player.js chooseRom): an archive's ROMs, a button each, before Continue / Start. */
+.rp-which { display: grid; gap: .5rem; width: min(34rem, 92vw); max-height: 80vh; overflow: auto; padding: 1rem;
+  background: var(--glass-strong, #1b1026); color: var(--ink); border: 1px solid var(--line);
+  border-radius: var(--radius, 12px); box-shadow: var(--shadow); }
+.rp-which[hidden] { display: none; }
+.rp-which h2 { margin: 0; font-family: var(--serif); }
+.rp-start .rp-which-rom { display: grid; grid-template-columns: 1fr auto; gap: .1rem .6rem; text-align: left;
+  font-size: 1rem; padding: .6rem .9rem; }
+.rp-which-rom .muted { grid-column: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-which-tag { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--rose); }

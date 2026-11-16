@@ -174,6 +174,47 @@ def console_of(name: str, console: Console) -> bool:
     return ext in console.exts or ext in ARCHIVE_EXT
 
 
+# ------------------------------------------------------------------ archives holding several ROMs
+# A .zip or .7z can hold several games: an original and its romhacks, revisions, a set. The emulator would play
+# whichever it unpacked first, so such an archive asks "Which ROM?" (web/retro.py, retro-player.js) and only the
+# one picked reaches it. Each ROM inside keeps saves of its own (member_key). A disc (PS1) is all its files: never
+# split. Doll, 2026-11-15.
+_ARCHIVE_LISTS: dict[str, list[str]] = {}       # an archive's content (sha256) -> its ROMs: content doesn't change
+MAX_ARCHIVE_LISTS = 512
+
+
+def archive_roms(path: Path, console: Console, sha: str | None = None) -> list[str]:
+    """The ROMs in an archive: its members with one of the console's own suffixes, in the archive's order
+    (folders kept in the name, as the emulator sees them). [] for a disc console, or what can't be read."""
+    if console.key == "psx" or Path(path).suffix.lower() not in ARCHIVE_EXT:
+        return []
+    if sha and sha in _ARCHIVE_LISTS:
+        return _ARCHIVE_LISTS[sha]
+    names: list[str] | None
+    if Path(path).suffix.lower() == ".zip":
+        import zipfile
+        try:
+            with zipfile.ZipFile(path) as z:
+                names = [m.filename for m in z.infolist() if not m.is_dir()]
+        except (OSError, zipfile.BadZipFile):
+            names = None
+    else:
+        from mnemerynne.media import sevenzip
+        names = sevenzip.names(Path(path))
+    roms = [n for n in names or [] if Path(n).suffix.lower() in console.exts and not n.startswith("__MACOSX/")]
+    if sha and names is not None:
+        if len(_ARCHIVE_LISTS) >= MAX_ARCHIVE_LISTS:
+            _ARCHIVE_LISTS.clear()
+        _ARCHIVE_LISTS[sha] = roms
+    return roms
+
+
+def member_key(rom_sha: str, member: str) -> str:
+    """What one ROM inside an archive keeps its saves under (as a ROM's own sha256 is, for a plain file)."""
+    import hashlib
+    return hashlib.sha256(f"{rom_sha}/{member}".encode()).hexdigest()
+
+
 def cue_files(text: str) -> list[str]:
     """The files a .cue sheet names (its FILE lines), in order, as written."""
     return [m.group(1) or m.group(2) for m in _CUE_FILE.finditer(text)]

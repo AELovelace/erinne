@@ -38,7 +38,7 @@ Put your own games in the **Games** folder on the share, in the folder for their
 | `GBA` | Game Boy Advance | `.gba` |
 | `PS1` | PlayStation | `.cue` with its `.bin` tracks, `.pbp`, or `.chd` (which needs a BIOS) |
 
-- Any game can also be a `.zip` or `.7z` holding it.
+- Any game can also be a `.zip` or `.7z` holding it. One holding several ROMs (an original and its romhacks, say) asks **Which ROM?** when you open it: nothing starts until you pick one, only that one is played, and each keeps its own saves. **↩ Another ROM** goes back to the list. (A PlayStation disc's zip is one game.)
 - An existing folder with another usual name counts too, such as `Super Nintendo`, `Mega Drive` or `PlayStation`.
 - Folders inside a console's folder are fine, such as `SNES/RPGs`.
 - New games appear after the next share scan, within a few minutes.

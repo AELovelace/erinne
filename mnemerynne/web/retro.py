@@ -70,6 +70,21 @@ def _rom(conn: sqlite3.Connection, user, file_id: int) -> tuple[sqlite3.Row, ret
     return found
 
 
+def _save_key(conn: sqlite3.Connection, settings: Settings, user, file_id: int, member: str | None) -> str:
+    """What a game's saves are kept under: the ROM's content (its sha256), or for one ROM inside an archive that
+    holds several (`member`, "Which ROM?"), that ROM's own key, so a hack's save never lands on the original's."""
+    row, console = _rom(conn, user, file_id)
+    if not member:
+        return row["blob_sha256"]
+    try:
+        inside = retro.archive_roms(store.content_path(conn, settings, row["id"]), console, row["blob_sha256"])
+    except OSError:
+        inside = []
+    if member not in inside:
+        raise _not_found("That ROM isn't in this archive")
+    return retro.member_key(row["blob_sha256"], member)
+
+
 def _rom_name(row: sqlite3.Row) -> str:
     """What the emulator calls the ROM: named by its content, so each game's own save (kept by the browser
     under this name too) is that game's, and its suffix still tells a .zip from a .gba."""
@@ -131,6 +146,15 @@ def player_page(file_id: int, request: Request, user=Depends(retro_page_user),
             "bios": f"/media/retro/bios/{bios['id']}/{bios['display_name'].lower()}" if bios is not None else None,
             "needs_bios": console.needs_bios(row["display_name"]) and bios is None,
             "bios_names": list(console.bios)}
+    # An archive holding several ROMs (an original and its hacks): "Which ROM?" first, each with its own saves.
+    try:
+        inside = retro.archive_roms(store.content_path(conn, settings, row["id"]), console, row["blob_sha256"])
+    except OSError:
+        inside = []
+    if len(inside) > 1:
+        game["members"] = [{"name": n, "title": retro.title_of(Path(n).name),
+                            "saves": retro.saves(conn, user["id"], retro.member_key(row["blob_sha256"], n))} for n in inside]
+        game["rom_exts"] = sorted(e.lstrip(".") for e in console.exts)   # what counts as a ROM when it's unpacked
     response = request.app.state.templates.TemplateResponse(request, "retro_play.html", {
         # In a <script> block: a file name holding "</script>" mustn't end it, so no "<" goes in as it is.
         "user": None if _on_tv(request, conn) else user, "game": game, "game_json": json.dumps(game).replace("<", "\\u003c")})
@@ -215,9 +239,10 @@ def played(file_id: int, user=Depends(media_user), conn: sqlite3.Connection = De
 
 
 @router.get("/api/media/retro/saves/{file_id}")
-def list_saves(file_id: int, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_media_db)):
-    row, _ = _rom(conn, user, file_id)
-    return {"saves": retro.saves(conn, user["id"], row["blob_sha256"])}
+def list_saves(file_id: int, member: str | None = None, user=Depends(media_user),
+               conn: sqlite3.Connection = Depends(get_media_db), settings: Settings = Depends(get_settings)):
+    key = _save_key(conn, settings, user, file_id, member)
+    return {"saves": retro.saves(conn, user["id"], key)}
 
 
 def _refuse(exc: retro.RetroError) -> HTTPException:
@@ -225,11 +250,12 @@ def _refuse(exc: retro.RetroError) -> HTTPException:
 
 
 @router.get("/api/media/retro/saves/{file_id}/{slot}")
-def get_save(file_id: int, slot: str, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_media_db)):
+def get_save(file_id: int, slot: str, member: str | None = None, user=Depends(media_user),
+             conn: sqlite3.Connection = Depends(get_media_db), settings: Settings = Depends(get_settings)):
     """One slot's data, as it was saved ('sram': the game's own save; 'auto', '1' to '4': save states)."""
-    row, _ = _rom(conn, user, file_id)
+    key = _save_key(conn, settings, user, file_id, member)
     try:
-        body = retro.get_save(conn, user["id"], row["blob_sha256"], slot)
+        body = retro.get_save(conn, user["id"], key, slot)
     except retro.RetroError as exc:
         raise _refuse(exc) from None
     if body is None:
@@ -238,10 +264,11 @@ def get_save(file_id: int, slot: str, user=Depends(media_user), conn: sqlite3.Co
 
 
 @router.get("/api/media/retro/saves/{file_id}/{slot}/shot")
-def get_shot(file_id: int, slot: str, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_media_db)):
-    row, _ = _rom(conn, user, file_id)
+def get_shot(file_id: int, slot: str, member: str | None = None, user=Depends(media_user),
+             conn: sqlite3.Connection = Depends(get_media_db), settings: Settings = Depends(get_settings)):
+    key = _save_key(conn, settings, user, file_id, member)
     try:
-        body = retro.get_save(conn, user["id"], row["blob_sha256"], slot, shot=True)
+        body = retro.get_save(conn, user["id"], key, slot, shot=True)
     except retro.RetroError as exc:
         raise _refuse(exc) from None
     if body is None:
@@ -261,28 +288,28 @@ async def _body(request: Request, limit: int) -> bytes:
 
 
 @router.put("/api/media/retro/saves/{file_id}/{slot}", status_code=status.HTTP_204_NO_CONTENT)
-async def put_save(file_id: int, slot: str, request: Request, user=Depends(media_user),
-                   conn: sqlite3.Connection = Depends(get_media_db)):
+async def put_save(file_id: int, slot: str, request: Request, member: str | None = None, user=Depends(media_user),
+                   conn: sqlite3.Connection = Depends(get_media_db), settings: Settings = Depends(get_settings)):
     """Keep a slot: the body is the save itself (application/octet-stream), replacing what the slot held."""
-    row, _ = _rom(conn, user, file_id)
+    key = _save_key(conn, settings, user, file_id, member)
     data = await _body(request, retro.MAX_SRAM if slot == "sram" else retro.MAX_STATE)
     try:
         with transaction(conn):
-            retro.put_save(conn, user["id"], row["blob_sha256"], slot, data)
+            retro.put_save(conn, user["id"], key, slot, data)
     except retro.RetroError as exc:
         raise _refuse(exc) from None
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.put("/api/media/retro/saves/{file_id}/{slot}/shot", status_code=status.HTTP_204_NO_CONTENT)
-async def put_shot(file_id: int, slot: str, request: Request, user=Depends(media_user),
-                   conn: sqlite3.Connection = Depends(get_media_db)):
+async def put_shot(file_id: int, slot: str, request: Request, member: str | None = None, user=Depends(media_user),
+                   conn: sqlite3.Connection = Depends(get_media_db), settings: Settings = Depends(get_settings)):
     """A save state's screenshot (a PNG), sent after the state itself."""
-    row, _ = _rom(conn, user, file_id)
+    key = _save_key(conn, settings, user, file_id, member)
     png = await _body(request, retro.MAX_SHOT)
     try:
         with transaction(conn):
-            kept = retro.put_shot(conn, user["id"], row["blob_sha256"], slot, png)
+            kept = retro.put_shot(conn, user["id"], key, slot, png)
     except retro.RetroError as exc:
         raise _refuse(exc) from None
     if not kept:
@@ -291,11 +318,12 @@ async def put_shot(file_id: int, slot: str, request: Request, user=Depends(media
 
 
 @router.delete("/api/media/retro/saves/{file_id}/{slot}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_save(file_id: int, slot: str, user=Depends(media_user), conn: sqlite3.Connection = Depends(get_media_db)):
-    row, _ = _rom(conn, user, file_id)
+def delete_save(file_id: int, slot: str, member: str | None = None, user=Depends(media_user),
+             conn: sqlite3.Connection = Depends(get_media_db), settings: Settings = Depends(get_settings)):
+    key = _save_key(conn, settings, user, file_id, member)
     try:
         with transaction(conn):
-            gone = retro.delete_save(conn, user["id"], row["blob_sha256"], slot)
+            gone = retro.delete_save(conn, user["id"], key, slot)
     except retro.RetroError as exc:
         raise _refuse(exc) from None
     if not gone:

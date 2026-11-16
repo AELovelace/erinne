@@ -7,7 +7,9 @@ a homebrew game per console (python/make_retro_test_rom.py). Signs in as alice /
 same password: a second player for netplay, tests/retro-netplay-browser.mjs).
 """
 
+import os
 import sys
+import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -46,6 +48,12 @@ def main():
             retro.ensure_library(conn)                       # Games, with a folder per console in it
         for key, (name, make, _) in GAMES.items():           # one homebrew game in each console's folder
             (root / "Games" / retro.CONSOLES[key].folder / name).write_bytes(make())
+        if os.environ.get("RETRO_PREVIEW_PACK"):            # tests/retro-which-rom-browser.mjs: a zip of two ROMs
+            hack = bytearray(GAMES["gba"][1]())
+            hack[0xA0:0xA9] = b"LUMI HACK"                   # another title: another game, as a romhack is
+            with zipfile.ZipFile(root / "Games" / "GBA" / "Lumi Pack.zip", "w") as pack:
+                pack.writestr("Lumi Test.gba", GAMES["gba"][1]())
+                pack.writestr("hacks/Lumi Test (Hack).gba", bytes(hack))
         share.sync(conn, settings)                           # the share scan: the game is a file like any other
         conn.close()
         app = create_app(settings, Services(llm=None, embedder=FakeEmbedder(), directory=people, share_checker=checker))
