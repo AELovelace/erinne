@@ -29,9 +29,42 @@
     "RIGHT_STICK_X:-1", "RIGHT_STICK_Y:+1", "RIGHT_STICK_Y:-1"];
   const KEYS = ["x", "s", "v", "enter", "up arrow", "down arrow", "left arrow", "right arrow", "z", "a", "q", "e", "tab", "r",
     "", "", "h", "f", "g", "t", "l", "j", "k", "i"];   // player 1's keyboard, as EmulatorJS's initControlVars has it
+  // Nintendo's pads have A on the right and B at the bottom (the SNES's Y on the left, X on top): the other way round
+  // from an Xbox pad's letters, which EmulatorJS's map follows. On those consoles a controller plays by place, as
+  // RetroArch does: its bottom button (standard 0) is the console's B, the right one (1) its A, the left (2) its Y,
+  // the top (3) its X. (Doll, 2026-11-15: Zero Mission's A and B were the wrong way round.)
+  const NINTENDO = { nes: true, snes: true, gb: true, gbc: true, gba: true };   // media/retro.py's console keys
+  const BY_LABEL = { 0: "BUTTON_2", 1: "BUTTON_4", 8: "BUTTON_1", 9: "BUTTON_3" };   // EmulatorJS input (B, Y, A, X) -> pad button: its own map
+  const BY_PLACE = { 0: "BUTTON_1", 1: "BUTTON_3", 8: "BUTTON_2", 9: "BUTTON_4" };   // the same inputs, by where the buttons sit
+  const byPlace = NINTENDO[game.console] === true;
+  function padButton(i) { return byPlace && BY_PLACE[i] ? BY_PLACE[i] : PAD[i]; }   // the pad button for EmulatorJS input i
+
+  // EmulatorJS keeps each game's controls in the browser once it has run, and they win over defaultControllers: a
+  // Nintendo game played before keeps the letter map. A player whose face buttons are still exactly that map moves to
+  // the map by place; one somebody set up differently in the Controls menu is left alone.
+  function byPlaceForPlayedGames() {
+    if (!byPlace || !emu || !emu.controls) return;
+    let moved = false;
+    for (let p = 0; p < 4; p++) {
+      const mine = emu.controls[p];
+      if (!mine) continue;
+      [[0, 8], [1, 9]].forEach(function (pair) {   // B and A, then Y and X: each pair turned round only if it's stock
+        const stock = pair.every(function (i) { return mine[i] && mine[i].value2 === BY_LABEL[i]; });
+        if (!stock) return;
+        pair.forEach(function (i) { mine[i].value2 = BY_PLACE[i]; });
+        moved = true;
+      });
+    }
+    if (moved) { try { emu.saveSettings(); } catch (_) { /* kept for this visit anyway */ } }
+  }
+
   function controllers() {
     const one = {}, pad = {};
-    PAD.forEach(function (button, i) { one[i] = KEYS[i] ? { value: KEYS[i], value2: button } : { value2: button }; pad[i] = { value2: button }; });
+    PAD.forEach(function (_, i) {
+      const button = padButton(i);
+      one[i] = KEYS[i] ? { value: KEYS[i], value2: button } : { value2: button };
+      pad[i] = { value2: button };
+    });
     one[24] = { value: "1" }; one[25] = { value: "2" }; one[26] = { value: "3" };
     return { 0: one, 1: Object.assign({}, pad), 2: Object.assign({}, pad), 3: Object.assign({}, pad) };
   }
@@ -339,6 +372,7 @@
     emu.on("loadState", function () { openSlots("load"); });
     emu.on("start", function () {
       started = true;
+      byPlaceForPlayedGames();   // a Nintendo game's saved letter map, turned round (EmulatorJS has loaded it by now)
       $("rp-save").disabled = $("rp-load").disabled = false;
       fetch("/api/media/retro/played/" + game.id, { method: "POST", credentials: "same-origin" }).catch(function () {});
       const gm = emu.gameManager;

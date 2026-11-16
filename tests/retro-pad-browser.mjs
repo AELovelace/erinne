@@ -3,7 +3,9 @@
 // GamepadHandler announces it, and that first look happens inside the handler's constructor, before EmulatorJS
 // listens, so such a controller never got a player and every press was dropped (Doll's Metroid, 2026-11-15).
 // retro-player.js seatPads gives it the next free player. This boots the NES test game with a pretend controller
-// present from the first moment, then checks it is player 1 and that Start reaches the game.
+// present from the first moment, then checks it is player 1 and that Start reaches the game. Then that a Nintendo
+// console plays by place (the right button is A, the bottom one B), and that a game played before, whose saved
+// controls are still EmulatorJS's letter map, is turned round when it starts again.
 //   PUPPETEER_MODULE=<puppeteer(-core)'s lib/esm/puppeteer/puppeteer(-core).js> CHROME_PATH=<chrome> node tests/retro-pad-browser.mjs
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -78,8 +80,47 @@ try {
     return calls;
   });
   assert.deepEqual(pressed.filter(c => c[1] === 3), [[0, 3, 1], [0, 3, 0]], "Start went in and came up: " + JSON.stringify(pressed));
+
+  // A Nintendo console plays by place: the right button (standard 1, Xbox B) is the NES's A (EmulatorJS input 8),
+  // the bottom one (0, Xbox A) its B (input 0). (Doll: Zero Mission's A and B were the wrong way round.)
+  const tap = async (button) => page.evaluate(async b => {
+    const emu = window.EJS_emulator_for_tests, calls = [];
+    const real = emu.gameManager.simulateInput.bind(emu.gameManager);
+    emu.gameManager.simulateInput = (player, input, value) => { calls.push([player, input, value]); return real(player, input, value); };
+    window.testPad.buttons[b] = { pressed: true, touched: true, value: 1 };
+    await new Promise(r => setTimeout(r, 200));
+    window.testPad.buttons[b] = { pressed: false, touched: false, value: 0 };
+    await new Promise(r => setTimeout(r, 200));
+    emu.gameManager.simulateInput = real;
+    return calls.filter(c => c[2] === 1).map(c => c[1]);
+  }, button);
+  assert.deepEqual(await tap(1), [8], "the right button is the NES's A");
+  assert.deepEqual(await tap(0), [0], "the bottom button is the NES's B");
+
+  // A Nintendo game played before keeps its controls in the browser, in EmulatorJS's letter map: next time they're
+  // turned round to the map by place (a map somebody set up differently would be left alone).
+  await page.evaluate(() => {
+    const emu = window.EJS_emulator_for_tests;   // what EmulatorJS's saveSettings writes, from these controls
+    const saved = JSON.parse(localStorage.getItem(emu.getLocalStorageKey()) || "null") ||
+      { controlSettings: JSON.parse(JSON.stringify(emu.controls)), settings: {}, cheats: [] };
+    for (const p of [0, 1, 2, 3]) Object.assign(saved.controlSettings[p], { 0: { ...saved.controlSettings[p][0], value2: "BUTTON_2" },
+      8: { ...saved.controlSettings[p][8], value2: "BUTTON_1" } });   // as an earlier visit left it
+    localStorage.setItem(emu.getLocalStorageKey(), JSON.stringify(saved));
+  });
+  await page.goto(`${base}/media/retro/play/${nes.id}`);
+  await page.waitForSelector("#rp-fresh");
+  await page.click("#rp-fresh");
+  await page.waitForFunction(() => !document.getElementById("rp-save").disabled, { timeout: 60000 });
+  const turned = await page.evaluate(() => {
+    const c = window.EJS_emulator_for_tests.controls[0];
+    return [c[0].value2, c[8].value2];
+  });
+  assert.deepEqual(turned, ["BUTTON_1", "BUTTON_2"], "the saved letter map was turned round");
+  await page.waitForFunction(() => (window.EJS_emulator_for_tests.gamepadSelection || [])[0] === "xb2pc Xbox pad_0",
+    { timeout: 5000 });
+  assert.deepEqual(await tap(1), [8], "and the right button is A again after a reload");
   assert.deepEqual(errors, [], "no page errors");
-  console.log("ok: a controller connected before the game loaded plays as player 1");
+  console.log("ok: a controller connected before the game loaded plays as player 1, Nintendo buttons by place");
 } catch (err) {
   console.error(err);
   process.exitCode = 1;
