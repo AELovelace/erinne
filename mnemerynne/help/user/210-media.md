@@ -293,7 +293,7 @@ Its **arrows and Enter** work like the TV's own arrow keys while the TV shows it
 
 ### Gamepad mode
 
-The phone remote (**Media → Remote** on your phone) and the M5Stack Tab5 panel can turn into a **game controller** for the TV, for Retro and the TV's games. Press **🎮 Gamepad** on the remote page (on the Tab5, **Gamepad** in the bottom bar). The screen turns sideways into a pad shaped like a Super Nintendo controller:
+The phone remote (**Media → Remote** on your phone) and the M5Stack Tab5 panel can turn into a **game controller** for the TV, for Retro and the TV's games. Press **🎮 Pad** on the remote page (on the Tab5, **Gamepad** in the bottom bar). The screen turns sideways into a pad shaped like a Super Nintendo controller:
 
 - **D-pad** on the left. Slide your thumb around it; the diagonals work too.
 - **A B X Y** on the right, placed as on a Super Nintendo: **A** on the right, **B** at the bottom, **X** at the top, **Y** on the left.

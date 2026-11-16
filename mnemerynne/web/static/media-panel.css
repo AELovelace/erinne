@@ -57,7 +57,9 @@
 #mp button.mp-armed { background: var(--red); }                        /* Unpair: tap again to confirm */
 #mp button:disabled { opacity: .4; cursor: default; }
 .mp-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: .4rem; }
-.mp-bar { display: grid; grid-template-columns: 2fr 2fr 1fr; gap: .4rem; }   /* Screens, Channels and the way back */
+.mp-bar { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .4rem; }   /* Screens, Channels, 🎮 Pad and the way back: one row, even on a small phone */
+.mp-bar > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 349px) { #mp .mp-bar > * { font-size: .78rem; } }   /* the narrowest phones: "Channels" whole too */
 .mp-foot { display: grid; grid-template-columns: repeat(4, 1fr); gap: .4rem; margin-top: auto; }   /* kept at the bottom */
 
 /* The round D-pad: a glass disc with a neon rim, and blossoms between the arrows. */
