@@ -52,6 +52,8 @@ def test_a_room_relays_to_the_others_and_the_host_steers_it():
         await rooms.relay(room, guest, json.dumps({"t": "start", "delay": 3}))           # only the host starts
         await rooms.relay(room, guest, b"a guest's state")                               # or sends a state
         await rooms.relay(room, guest, json.dumps({"t": "anything"}))                    # unknown: dropped
+        await rooms.relay(room, guest, json.dumps({"t": "ping"}))                        # a keep-alive: answered
+        assert guest_box.got[-1] == {"t": "pong"}
         await rooms.relay(room, guest, "not json")
         assert len(host_box.got) == before and room.started is False
 

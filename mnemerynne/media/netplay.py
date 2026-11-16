@@ -162,6 +162,9 @@ class Rooms:
             data = json.loads(message)
         except ValueError:
             return
+        if isinstance(data, dict) and data.get("t") == "ping":   # keep-alive: answered, so no proxy (nginx's 60 s
+            await self._safe(member, '{"t":"pong"}')              # read timeout) drops a quiet room's connection
+            return
         if not isinstance(data, dict) or data.get("t") not in RELAYED:
             return
         if data["t"] in HOST_ONLY and member.slot != 0:

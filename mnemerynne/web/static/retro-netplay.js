@@ -24,6 +24,7 @@
   const RESYNC_GAP_MS = 20000;        // the most often a mismatch restarts everyone
   const WAIT_SHOW_MS = 400;           // a stall this long says who it's waiting for
   const LIST_EVERY_MS = 3000;         // the room list, while the panel's open and we're in none
+  const PING_EVERY_MS = 20000;        // a keep-alive the server answers (proxies drop a websocket quiet for 60 s)
 
   const game = JSON.parse(document.getElementById("rp-data").textContent);
   const player = function () { return window.RetroPlayer || null; };
@@ -201,6 +202,10 @@
       stop(why);
     };
     ws.onerror = function () { /* onclose says why */ };
+    const keepAlive = setInterval(function () {   // a quiet room (before Start) would be dropped by nginx after 60 s
+      if (np.ws !== ws || ws.readyState > 1) { clearInterval(keepAlive); return; }
+      if (ws.readyState === 1) ws.send('{"t":"ping"}');
+    }, PING_EVERY_MS);
     draw();
   }
   function send(obj) { if (np.ws && np.ws.readyState === 1) np.ws.send(JSON.stringify(obj)); }
