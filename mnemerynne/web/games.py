@@ -13,11 +13,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from mnemerynne import arcade, lobby, lumilaunch, lumisoft, runner, showdown
+from mnemerynne import arcade, lobby, lumilaunch, lumisoft, lumitown, runner, showdown
 from mnemerynne.rooms_bus import sse
 from mnemerynne import bfgguf, casino, casino_remote, claude_chat, coins, games, lumi_tv, lumidungeon, lumiparty, lumipet, lumitales, prism, push, users
 from mnemerynne.db import read_transaction, transaction
-from mnemerynne.media import remotes, screens
+from mnemerynne.media import remotes, retro, screens
 from mnemerynne.web.deps import _session_user, feature_pool, get_games_db, release_db
 from mnemerynne.web.media import _media_on, _screen, media_user, screen_device
 
@@ -33,9 +33,10 @@ router = APIRouter(dependencies=[Depends(_media_on), Depends(_uncached)])
 
 
 @router.get("/api/media/games")
-def media_games(user=Depends(media_user)):
-    """The games Media → Games shows, for a signed-in person or a paired screen (the TV)."""
-    return {"games": games.listing()}
+def media_games(user=Depends(media_user), conn=Depends(get_games_db)):
+    """The games Media → Games shows, for a signed-in person or a paired screen (the TV), and whether Retro is on
+    (Lumi Town's Retro café opens it by name in Media's game layer: media.js RETRO)."""
+    return {"games": games.listing(), "retro": retro.enabled(conn)}
 
 
 @router.get("/api/media/games/lumi-look")
@@ -283,6 +284,31 @@ def launch_tv_player(body: PlayerPick, request: Request, user=Depends(media_user
             "owner": holder["id"] == screen["user_id"]}
 
 
+class TownHere(BaseModel):
+    """Where this Lumi stands in Lumi Town: a place's id (town-ui.js) and the street. Never anyone else's."""
+    model_config = ConfigDict(extra="forbid")
+    at: str = Field(pattern=r"^[a-z][a-z-]{0,23}$")
+    street: Literal["high", "market"]
+
+
+@router.post("/api/media/games/lumi-pet/town")
+def pet_town(body: TownHere, user=Depends(pet_user), conn=Depends(get_games_db)):
+    """Lumi Town, every few seconds: say where this Lumi is (unless "Show me in town" is off), and hear who else is in
+    town, each with their Lumi's look (lumipet.look) and their name. On a shared TV, the play pass's holder."""
+    seen = lumipet.town_seen(conn, user["id"])
+    if seen:
+        lumitown.TOWN.visit(user["id"], body.at, body.street)
+    else:
+        lumitown.TOWN.leave(user["id"])
+    here = []
+    for uid, at, street in lumitown.TOWN.here(but=user["id"]):
+        person = users.get_user_by_id(conn, uid)
+        if person is None or not person["active"]:
+            continue
+        here.append({"id": uid, "name": person["username"], "at": at, "street": street, "look": lumipet.look(conn, uid)})
+    return {"seen": seen, "here": here}
+
+
 @router.post("/api/media/games/lumi-pet/visit")
 def pet_visit(user=Depends(pet_user), conn=Depends(get_games_db)):
     """The first time someone spends a moment with Lumi today. Takes no numbers from the page, so there's nothing to fake."""
@@ -295,7 +321,7 @@ class PetAction(BaseModel):
     """What the person chose to do with Lumi. Only choices: which thing and how many. The server decides every result."""
     model_config = ConfigDict(extra="forbid")
     action: Literal["cuddle", "feed", "play", "nap", "wake", "buy", "decorate", "wear", "capsule", "glow", "import", "storyteller",
-                    "learn", "respec", "equip", "mod", "potions", "heal", "drink", "garden_reminders",
+                    "learn", "respec", "equip", "mod", "potions", "heal", "drink", "garden_reminders", "town_seen",
                     "unpack", "name", "colour", "stat", "stats_auto", "auto_stats", "stats_reset", "kit"]
     item: str | None = Field(default=None, max_length=40)
     count: int = Field(default=1, ge=1, le=lumipet.MAX_HELD, strict=True)
@@ -732,7 +758,9 @@ def game_page(slug: str, request: Request, user=Depends(media_user), conn=Depend
     who_plays = (tv_play and game.kit == "lumi-pet" and _session_user(request, conn) is None
                  and bool(screens.guests(conn, user["id"])))
     return request.app.state.templates.TemplateResponse(request, "game.html", {"game": game, "tv_play": tv_play,
-                                                                               "who_plays": who_plays})
+                                                                               "who_plays": who_plays,
+                                                                               # Lumi Town's Retro café is open while Retro is on.
+                                                                               "retro_on": game.slug == "lumi-town" and retro.enabled(conn)})
 
 
 class TableCreate(BaseModel):

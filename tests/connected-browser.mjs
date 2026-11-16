@@ -5,7 +5,7 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import net from "node:net";
-import { checkLumiApps, checkLumiPet, checkLumiPetCapsules, checkLumiPetDoors, checkLumiPetFrame, checkLumiPetGarden, checkLumiPetPhone, checkLumiPetSkills } from "./lumi-pet-browser.mjs";
+import { checkLumiApps, checkLumiTownFriends, checkLumiPet, checkLumiPetCapsules, checkLumiPetDoors, checkLumiPetFrame, checkLumiPetGarden, checkLumiPetPhone, checkLumiPetSkills } from "./lumi-pet-browser.mjs";
 import { checkSharedTV } from "./casino-tv-browser.mjs";
 import { checkLumiPartyBrowser, checkLumiPartyCouch, checkLumiPartyFight, checkLumiPartyOnline, checkLumiPartyPuzzle } from "./lumi-party-browser.mjs";
 import { checkArcadeLumi } from "./arcade-lumi-browser.mjs";
@@ -48,6 +48,9 @@ try {
   await mkdir("runs/casino-browser", { recursive: true });
   if (process.env.LUMI_SOFT_ONLY === "1") { // Focused iteration on Lumi-Soft.
     await checkLumiSoft(bob, base);
+  } else if (process.env.LUMI_TOWN_ONLY === "1") { // Focused iteration on Lumi Town: its streets, the Market, friends in town.
+    await checkLumiApps(browser, alice, base);
+    await checkLumiTownFriends(alice, bob, base);
   } else if (process.env.LUMI_LAUNCH_ONLY === "1") { // Focused iteration on Lumi Launch: every input, a paid go, couch turns on a TV.
     await checkLumiLaunch(bob, base);
     await checkLumiLaunchTV(alice, base);
@@ -77,6 +80,7 @@ try {
   await checkLumiPetSkills(browser, alice, base);
   await checkLumiPetPhone(browser, alice, base);
   await checkLumiApps(browser, alice, base);
+  await checkLumiTownFriends(alice, bob, base);
   await checkLumiPetCapsules(bob, base);
   await checkLumiSoft(bob, base);                              // after the capsules: they count bob's purse to the coin
   await checkLumiPartyOnline(alice, bob, base);

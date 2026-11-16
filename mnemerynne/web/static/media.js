@@ -1200,7 +1200,8 @@
       const from = games.current, back = typeof data.back === "string" && PLACE.test(data.back) ? data.back : null;
       const at = typeof data.at === "string" && PLACE.test(data.at) ? data.at : null;
       api("GET", "/api/media/games").then(function (listed) {
-        const next = listed.games.find(function (g) { return g.slug === data.slug; });
+        // Retro isn't one of the built-in games: its café in Lumi Town opens it by name (RETRO, below), where it's on.
+        const next = data.slug === "retro" ? (listed.retro ? RETRO : null) : listed.games.find(function (g) { return g.slug === data.slug; });
         if (!next || !games.isOpen()) return;
         if (back && from) games.back = { game: from, at: back };            // opened from the town: leaving comes back to this place
         else if (games.back && next.slug === games.back.game.slug) games.back = null;   // walked back into the town itself

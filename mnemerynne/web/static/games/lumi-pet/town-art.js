@@ -1,5 +1,6 @@
 /* Lumi Town's drawings (Doll's design, 2026-11-12): the town map, and the insides of the three places you walk into
-   (the Arcade, the Casino and the Lumi-Soft field). Each is one 1000 x 500 picture, drawn in the room behind the lists
+   (the Arcade, the Casino and the Lumi-Soft field), and Market Street (2026-11-14: the Retro café, the Market and its
+   inside of four stalls), with a signpost at each street's end to the other. Each is one 1000 x 500 picture, drawn in the room behind the lists
    like her apartment (house.js) and the tavern (tavern-art.js).
 
    Every screen shows the middle of the picture (about x 290-710: game.css crops the sides to fit), so everything you
@@ -15,6 +16,12 @@
 
   // Each place on the map: its middle and the line its front door stands on. Top row on the high street, bottom row on the lane.
   const MAP = { arcade: [355, 232], tavern: [500, 232], casino: [645, 232], home: [355, 436], garden: [500, 436], field: [645, 436] };
+  // Market Street (2026-11-14): the Retro café and the Market on its top row; its lane has the fountain, and room for more.
+  const MARKET = { cafe: [430, 232], market: [575, 232] };
+  // The signpost to the other street, keyed by where it leads: on the High Street's right-hand end to Market Street, and
+  // on Market Street's left-hand end back. Both inside the middle every screen shows.
+  const SIGNS = { market: [688, 282], high: [312, 282] };   // standing on the cobbles at the street's end
+  const ALL = Object.assign({}, MAP, MARKET);
   const STATIONS = [365, 455, 545, 635]; // Inside a place: where its cabinets or tables stand, close enough that a squarer screen's panels don't cover the end ones (four of them).
   // The same row for any count, centred on the room: four 90 apart is STATIONS exactly. Five (the Arcade since Lumi Launch,
   // 2026-11-14) stand 72 apart and a fifth smaller (SNUG), so all five sit in the middle a 1440x1000 screen leaves clear of
@@ -158,7 +165,43 @@
       text(cx, base - 92, "LUMI-SOFT", 10.5, "#ffffff", 'font-family="monospace" font-weight="bold" letter-spacing="2"') + glow(text(cx + 56, base - 98, "🎯", 12, "#ffffff"));
   }
 
-  const BUILD = { arcade: arcade, tavern: tavern, casino: casino, home: house, garden: garden, field: field };
+  function cafe(cx, base, night) { // The Retro café: a teal shopfront with a giant cartridge on the roof, a pixel picture in the window, and a cocoa sign.
+    const lit = night ? "#ffcf7a" : "#bfe6ff";
+    let pixels = "";
+    [[0, 0, 0], [1, 0, 1], [2, 0, 0], [0, 1, 1], [1, 1, 1], [2, 1, 1], [0, 2, 1], [2, 2, 1]].forEach(function (p, i) { if (p[2]) pixels += rect(cx - 46 + p[0] * 7, base - 66 + p[1] * 7, 6, 6, NEON[i % NEON.length]); });
+    return rect(cx - 30, base - 150, 60, 34, "#c9a8ff", 'rx="4" stroke="#7a55c0" stroke-width="2.5"') + rect(cx - 22, base - 146, 44, 18, "#efe4ff", 'rx="2"') + // The cartridge on the roof, with its label.
+      text(cx, base - 133, "RETRO", 9, "#7a55c0", 'font-family="monospace" font-weight="bold" letter-spacing="2"') + [-14, -6, 2, 10].map(function (dx) { return rect(cx + dx, base - 118, 4, 4, "#d8b24a"); }).join("") +
+      rect(cx - 60, base - 114, 120, 114, "#2f8a8a") + rect(cx - 60, base - 114, 120, 6, "#246c6c") +
+      rect(cx - 64, base - 108, 128, 20, "#1a3a4a", 'rx="4" stroke="#70ebea" stroke-width="1.5"') + glow(text(cx, base - 93, "RETRO CAFÉ", 12, "#70ebea", 'font-family="monospace" font-weight="bold" letter-spacing="2"')) +
+      rect(cx - 52, base - 74, 36, 30, "#0b1626", 'rx="3" stroke="#ffe9f5" stroke-width="2"') + pixels + // A little pixel picture in the window.
+      rect(cx + 16, base - 74, 36, 30, lit, 'rx="3" stroke="#ffe9f5" stroke-width="2"') + path("M" + (cx + 26) + " " + (base - 62) + " h14 v8 a7 7 0 0 1 -14 0 Z", "#8a5a3a") + path("M" + (cx + 40) + " " + (base - 60) + " a4 4 0 0 1 0 6", "none", 'stroke="#8a5a3a" stroke-width="2"') + // A cocoa in the other.
+      (night ? glow(rect(cx + 14, base - 76, 40, 34, "#ffcf7a", 'opacity=".2"')) : "") +
+      rect(cx - 13, base - 44, 26, 44, "#1a3a4a", 'rx="2"') + rect(cx - 9, base - 40, 18, 18, lit, 'opacity=".8"') + circle(cx + 8, base - 20, 2, "#ffdc83") +
+      glow(text(cx - 44, base - 14, "🎮", 11, "#ffffff")) + text(cx + 46, base - 12, "☕", 11, "#ffffff");
+  }
+
+  function market(cx, base, night) { // The Market: a long shopfront under a pink and cream striped awning, crates of goods out front and bunting.
+    let stripes = "", crates = "", flags = "";
+    for (let i = 0; i < 8; i++) stripes += path("M" + (cx - 66 + i * 16.5) + " " + (base - 92) + " h16.5 l2 18 a9 9 0 0 1 -18 0 Z", i % 2 ? "#fff3e6" : "#ff8ecb");
+    [[-50, "#ff9d6b"], [-26, "#8be9a8"], [26, "#ffdc83"], [50, "#c9a8ff"]].forEach(function (c) {
+      crates += rect(cx + c[0] - 11, base - 18, 22, 18, "#c8a070", 'rx="2"') + [-6, 0, 6].map(function (dx) { return circle(cx + c[0] + dx, base - 20, 4, c[1]); }).join("");
+    });
+    for (let i = 0; i < 7; i++) flags += path("M" + (cx - 54 + i * 18) + " " + (base - 126) + " l9 0 l-4.5 9 Z", NEON[i % NEON.length]);
+    return rect(cx - 62, base - 118, 124, 118, night ? "#6a4a3a" : "#e8c8a0") + rect(cx - 62, base - 118, 124, 6, "#c8a070") +
+      path("M" + (cx - 66) + " " + (base - 126) + " Q" + cx + " " + (base - 118) + " " + (cx + 66) + " " + (base - 126), "none", 'stroke="#8a6a4a" stroke-width="1.5"') + flags +
+      rect(cx - 50, base - 112, 100, 18, "#5a3420", 'rx="4"') + text(cx, base - 99, "MARKET", 12, "#ffdc83", 'font-family="serif" font-weight="bold" letter-spacing="3"') + stripes +
+      rect(cx - 52, base - 70, 104, 40, night ? "#ffcf7a" : "#fff3e6", 'opacity=".9"') + rect(cx - 14, base - 66, 28, 66, "#8a5a3a", 'rx="2"') + circle(cx + 9, base - 32, 2, "#ffdc83") +
+      text(cx - 34, base - 44, "🍪", 12, "#ffffff") + text(cx + 34, base - 44, "🔮", 12, "#ffffff") + crates + (night ? glow(rect(cx - 52, base - 70, 104, 40, "#ffcf7a", 'opacity=".2"')) : "");
+  }
+
+  const BUILD = { arcade: arcade, tavern: tavern, casino: casino, home: house, garden: garden, field: field, cafe: cafe, market: market };
+
+  function signpost(to, words, on) { // The way to the other street: a post with an arrow-shaped board, pressable.
+    const at = SIGNS[to], x = at[0], y = at[1], right = x > 500, d = right ? 1 : -1;   // d: which way the arrow points
+    return group((on ? marker(x - 26 * d, y + 14) : "") + rect(x - 3, y - 6, 6, 18, "#8a6a4a") +
+      path("M" + (x - 32 * d) + " " + (y - 26) + " H" + (x + 32 * d) + " L" + (x + 42 * d) + " " + (y - 15) + " L" + (x + 32 * d) + " " + (y - 4) + " H" + (x - 32 * d) + " Z", "#c8a070", 'stroke="#8a6a4a" stroke-width="1.5"') +
+      text(x + (right ? -4 : 4), y - 11, words, 8.5, "#5a3420", 'font-family="serif" font-weight="bold" letter-spacing="1"') + hit(x - 40, y - 34, 80, 50, "street:" + to), on ? 'class="lp-tw-on"' : "");
+  }
 
   function townMap(opts) { // The whole map: sky, hills, ground, trees and lamps at the sides, the six places, and who's picked.
     const night = opts.night, picked = MAP[opts.cursor] ? opts.cursor : null;
@@ -170,10 +213,12 @@
     const sides = tree(70, 232, 40, night) + tree(178, 226, 30, night) + tree(250, 236, 22, night) + tree(780, 230, 26, night) + tree(880, 234, 38, night) + tree(960, 222, 26, night) +
       lamp(282, 244, night) + lamp(718, 244, night) + tree(110, 440, 36, night) + tree(226, 446, 26, night) + tree(790, 440, 28, night) + tree(900, 444, 40, night) +
       lamp(282, 448, night) + lamp(718, 448, night);
-    const signpost = rect(497, 300, 6, 36, "#8a6a4a") + rect(468, 304, 64, 16, "#c8a070", 'rx="3"') + text(500, 316, "LUMI TOWN", 9, "#5a3420", 'font-family="serif" font-weight="bold" letter-spacing="1"');
+    const sign = rect(497, 300, 6, 36, "#8a6a4a") + rect(468, 304, 64, 16, "#c8a070", 'rx="3"') + text(500, 316, "LUMI TOWN", 9, "#5a3420", 'font-family="serif" font-weight="bold" letter-spacing="1"');
     const mark = picked ? marker(MAP[picked][0], MAP[picked][1] + (MAP[picked][1] > 300 ? 38 : 36)) : "";
-    const tag = picked && opts.label ? label(MAP[picked][0], MAP[picked][1] - (picked === "tavern" ? 160 : 140), opts.label) : "";
-    return group(sky(night, 140) + hills(night) + ground(night) + sides + signpost + mark + places +
+    const toMarket = opts.cursor === "street:market";
+    const tag = picked && opts.label ? label(MAP[picked][0], MAP[picked][1] - (picked === "tavern" ? 160 : 140), opts.label)
+      : toMarket && opts.label ? label(SIGNS.market[0] - 40, SIGNS.market[1] - 40, opts.label) : "";
+    return group(sky(night, 140) + hills(night) + ground(night) + sides + sign + signpost("market", "MARKET ST", toMarket) + mark + places +
       (night ? rect(-20, -20, 1040, 540, "#0a0620", 'opacity=".12" pointer-events="none"') : "") + tag, 'data-town="map" data-time="' + (night ? "night" : "day") + '"');
   }
 
@@ -276,10 +321,71 @@
       (night ? glow(circle(380, 140, 6, "#ffe6a8") + circle(620, 140, 6, "#ffe6a8")) : ""), 'data-town="field"');
   }
 
+  function marketStreet(opts) { // Market Street: the same sky and cobbles, the café and the Market, a fountain on the lane, bunting overhead.
+    const night = opts.night, picked = MARKET[opts.cursor] ? opts.cursor : null, back = opts.cursor === "street:high";
+    let places = "";
+    Object.keys(MARKET).forEach(function (id) {
+      const at = MARKET[id], on = id === picked;
+      places += group(BUILD[id](at[0], at[1], night) + hit(at[0] - 66, at[1] - 156, 132, 164, "place:" + id), 'data-place="' + id + '"' + (on ? ' class="lp-tw-on"' : ""));
+    });
+    let bunting = "";
+    for (let i = 0; i < 14; i++) bunting += path("M" + (296 + i * 30) + " " + (60 + Math.abs(7 - i) * 2) + " l12 0 l-6 11 Z", NEON[i % NEON.length]);
+    const string = path("M290 58 Q500 82 710 58", "none", 'stroke="#ffe9f5" stroke-width="1.2" opacity=".7"');
+    const fountain = oval(500, 456, 64, 16, night ? "#3a4a6a" : "#9ad4ff", 'stroke="#d8c8b4" stroke-width="6"') + rect(494, 414, 12, 40, "#d8c8b4") + oval(500, 414, 24, 7, "#d8c8b4") +
+      glow(path("M500 414 Q486 392 474 412 M500 414 Q514 392 526 412 M500 412 V388", "none", 'stroke="' + (night ? "#c9a8ff" : "#ffffff") + '" stroke-width="2.5" opacity=".85"'));
+    const cart = rect(330, 448, 60, 22, "#c8a070", 'rx="3"') + circle(342, 474, 7, "#8a6a4a") + circle(378, 474, 7, "#8a6a4a") +
+      [0, 1, 2, 3, 4].map(function (i) { return circle(338 + i * 11, 444, 5, NEON[(i + 1) % NEON.length]); }).join("") + line(330, 448, 318, 432, "#8a6a4a", 3);
+    const bench = rect(612, 452, 70, 8, "#8a5a3a", 'rx="2"') + rect(612, 440, 70, 6, "#8a5a3a", 'rx="2"') + rect(618, 460, 5, 14, "#5a3a2a") + rect(670, 460, 5, 14, "#5a3a2a");
+    const sides = tree(70, 232, 40, night) + tree(180, 228, 30, night) + tree(250, 236, 22, night) + tree(790, 230, 28, night) + tree(890, 236, 36, night) + tree(960, 226, 24, night) +
+      lamp(282, 244, night) + lamp(718, 244, night) + tree(110, 440, 36, night) + tree(226, 446, 26, night) + tree(790, 440, 30, night) + tree(900, 444, 40, night) + lamp(718, 448, night);
+    const mark = picked ? marker(MARKET[picked][0], MARKET[picked][1] + 36) : "";
+    const tag = picked && opts.label ? label(MARKET[picked][0], MARKET[picked][1] - 168, opts.label)
+      : back && opts.label ? label(SIGNS.high[0] + 40, SIGNS.high[1] - 40, opts.label) : "";
+    return group(sky(night, 140) + hills(night) + ground(night) + sides + string + bunting + fountain + cart + bench + signpost("high", "HIGH ST", back) + mark + places +
+      (night ? rect(-20, -20, 1040, 540, "#0a0620", 'opacity=".12" pointer-events="none"') : "") + tag, 'data-town="market-street" data-time="' + (night ? "night" : "day") + '"');
+  }
+
+  function stall(x, id, on) { // One of the Market's stalls: a striped awning, its counter, and what it sells on show.
+    const colour = { store: "#ff8ecb", capsules: "#c9a8ff", seeds: "#8be9a8", garden: "#ffdc83" }[id] || "#ff9d6b";
+    const name = { store: "STORE", capsules: "CAPSULES", seeds: "SEEDS", garden: "GARDEN" }[id] || "STALL";
+    let stripes = "", goods = "";
+    for (let i = 0; i < 6; i++) stripes += path("M" + (x - 42 + i * 14) + " 230 h14 l1 14 a7.5 7.5 0 0 1 -15 0 Z", i % 2 ? "#fff3e6" : colour);
+    if (id === "store") goods = [["🍪", -22, 300], ["🍌", 0, 300], ["🥛", 22, 300], ["🎾", -12, 332], ["🧸", 12, 332]].map(function (g) { return text(x + g[1], g[2], g[0], 16, "#ffffff"); }).join("");
+    else if (id === "capsules") goods = [[-18, "#ff8ecb", "★"], [18, "#70ebea", "☾"]].map(function (m) { // Two capsule machines: a glass globe of capsules on a coin stand.
+      return rect(x + m[0] - 14, 316, 28, 34, m[1], 'rx="4"') + circle(x + m[0], 300, 16, "#ffffff", 'opacity=".55" stroke="' + m[1] + '" stroke-width="2"') +
+        circle(x + m[0] - 6, 302, 4, "#ffdc83") + circle(x + m[0] + 5, 296, 4, "#8be9a8") + circle(x + m[0] + 2, 306, 4, "#ff9d6b") + text(x + m[0], 338, m[2], 11, "#ffffff"); }).join("");
+    else if (id === "seeds") goods = [-24, -8, 8, 24].map(function (dx, i) { return rect(x + dx - 6, 290, 12, 16, NEON[i], 'rx="1"') + circle(x + dx, 296, 3, "#ffffff", 'opacity=".8"'); }).join("") +
+      [-16, 0, 16].map(function (dx, i) { return path("M" + (x + dx - 8) + " 326 h16 l-3 14 h-10 Z", "#c06a3a") + line(x + dx, 326, x + dx, 316, "#3f8a4a", 2) + circle(x + dx, 314, 4, NEON[(i + 3) % NEON.length]); }).join("");
+    else goods = path("M" + (x - 30) + " 340 h22 l-4 -18 h-14 Z", "#a07a5a") + circle(x - 19, 316, 9, "#4fae5a") + // A planter, a little lantern and a birdbath.
+      rect(x + 2, 300, 10, 16, "#3a3048", 'rx="2"') + glow(rect(x + 4, 304, 6, 8, "#ffdc83")) + rect(x + 6, 316, 2, 24, "#3a3048") +
+      oval(x + 28, 320, 12, 4, "#9ad4ff", 'stroke="#d8c8b4" stroke-width="2"') + rect(x + 26, 322, 4, 18, "#d8c8b4");
+    return group((on ? marker(x, 452) : "") + rect(x - 40, 244, 4, 120, "#8a6a4a") + rect(x + 36, 244, 4, 120, "#8a6a4a") + stripes +
+      rect(x - 34, 210, 68, 18, "#5a3420", 'rx="3"') + text(x, 223, name, 9.5, colour, 'font-family="monospace" font-weight="bold" letter-spacing="1"') + goods +
+      rect(x - 44, 350, 88, 30, "#c8a070", 'rx="3"') + rect(x - 44, 350, 88, 5, "#a07a5a") + (on ? glow(rect(x - 44, 244, 88, 136, colour, 'opacity=".12"')) : "") +
+      hit(x - 46, 206, 92, 250, "stall:" + id), on ? 'class="lp-tw-on"' : "");
+  }
+
+  function marketInside(opts) { // The Market under its roof: wooden beams, lanterns, a tiled floor and the stalls in a row.
+    const night = opts.night;
+    let beams = "", tiles = "", lanterns = "";
+    for (let x = -20; x < 1040; x += 120) beams += rect(x, 0, 14, 360, "#6a4a3a", 'opacity=".6"');
+    for (let x = -20; x < 1040; x += 40) for (let y = 380; y < 520; y += 40) tiles += rect(x, y, 38, 38, (x + y) % 80 ? "#e8d0b0" : "#d8bc98");
+    [180, 340, 500, 660, 820].forEach(function (x, i) { lanterns += line(x, 0, x, 70, "#8a6a4a", 1.5) + glow(oval(x, 84, 12, 16, NEON[i % NEON.length], 'opacity=".9"')); });
+    let stalls = "";
+    const row = stations(opts.games.length);
+    opts.games.forEach(function (id, i) { stalls += stall(row[i], id, opts.cursor === i); });
+    return group(rect(-20, -20, 1040, 400, night ? "#3a2a3a" : "#f3e3c8") + beams + lanterns + glow(text(500, 150, "✦ T H E   M A R K E T ✦", 24, "#c06a9a", 'font-family="serif" font-weight="bold"')) +
+      rect(-20, 376, 1040, 150, "#e8d0b0") + tiles + rect(-20, 374, 1040, 6, "#a07a5a") + stalls + exitMat(opts.cursor === opts.games.length) +
+      (night ? rect(-20, -20, 1040, 540, "#0a0620", 'opacity=".18" pointer-events="none"') : ""), 'data-town="market"');
+  }
+
   // ---- What game.js asks for ------------------------------------------------------------------------------
   function scene(opts) { // The picture for where she is. opts: at (a place she's inside, or null for the map), cursor (the map: a
     // place id; inside: the row number, one past the games for the exit), games (the slugs inside, in town-ui.js order), label, night.
-    const o = { at: opts.at || null, cursor: opts.cursor, games: opts.games || [], label: opts.label || "", night: Boolean(opts.night) };
+    // street: which map ("high" or "market"); the map's cursor may also be "street:<where>", its signpost to the other street.
+    const o = { at: opts.at || null, cursor: opts.cursor, games: opts.games || [], label: opts.label || "", night: Boolean(opts.night), street: opts.street || "high" };
+    if (o.at === "market") return marketInside(o);
+    if (!o.at && o.street === "market") return marketStreet(o);
     if (o.at === "arcade") return arcadeInside(o);
     if (o.at === "casino") return casinoInside(o);
     if (o.at === "field") return fieldInside(o);
@@ -287,12 +393,16 @@
   }
 
   function spot(at, cursor, count) { // Where Lumi stands (the middle of her feet) for this cursor: by a place's door on the map, or in front of a station inside.
-    if (!at) { const p = MAP[cursor] || MAP.tavern; return { x: p[0], y: p[1] + (p[1] > 300 ? 38 : 36) }; }
+    if (!at && typeof cursor === "string" && cursor.indexOf("street:") === 0 && SIGNS[cursor.slice(7)]) { // Beside a street's signpost.
+      const s = SIGNS[cursor.slice(7)];
+      return { x: s[0] + (s[0] > 500 ? -26 : 26), y: s[1] + 14 };
+    }
+    if (!at) { const p = ALL[cursor] || MAP.tavern; return { x: p[0], y: p[1] + (p[1] > 300 ? 38 : 36) }; }
     if (cursor >= count) return { x: 500, y: 474 }; // On the exit mat.
     if (at === "field") return { x: 440, y: 452 }; // Beside the cushion.
     const row = stations(count);
     return { x: row[Math.min(cursor, row.length - 1)], y: 452 };
   }
 
-  return { MAP: MAP, STATIONS: STATIONS, SNUG: SNUG, stations: stations, scene: scene, spot: spot };
+  return { MAP: MAP, MARKET: MARKET, SIGNS: SIGNS, STATIONS: STATIONS, SNUG: SNUG, stations: stations, scene: scene, spot: spot };
 });

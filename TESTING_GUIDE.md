@@ -163,6 +163,22 @@ Not tried yet: a real player's feel for difficulty and the coin rate (1 per 250 
 - `tests/js/lumi_dungeon.test.mjs` checks the home row (first on an ending, which it reads first; not offered without `home`, as in a party) and the welcome line: the three endings, too old, undated, and still out.
 - `tests/test_lumidungeon.py` checks each ending is dated (`ended.at`).
 - The tavern (Lumi Dungeons' lobby): `tests/js/lumi_tavern.test.mjs` checks it draws by day and by night with no broken numbers or open groups, the window changing with the hour, and every breathing light being a group. `checkLumiApps` checks Lumi Dungeons shows the tavern (none of her furniture) and its name, and saves `runs/casino-browser/lumi-dungeons-tavern.png` to look at.
+- Market Street and friends in town (2026-11-14):
+  - `tests/js/lumi_town.test.mjs` checks:
+    - each street's places and rows (the walk and **Show me in town** at the end), its signposts and spots;
+    - the café closed while Retro is off;
+    - the Market's stalls and a stall's wares;
+    - Market Street and the Market drawn whole, day and night;
+    - the townsfolk staying on the streets, fewer at night, wearing Lumi's own clothes.
+  - `tests/test_lumitown.py` checks:
+    - two people each see the other, never themselves;
+    - **Show me in town** off hides her at once while she still sees him, and on brings her back;
+    - people drop out after 20 seconds;
+    - the route takes only a place and a street (422).
+  - In Chrome:
+    - `checkLumiApps` goes round the corner, checks Market Street's pressables, walks into the Market and every stall, buys a cookie in town (the coins go down and it's in the pantry), checks townsfolk are out, and comes back to the High Street. Screenshots: `lumi-town-market-street.png` and `lumi-town-market.png`.
+    - `checkLumiTownFriends` puts alice and bob in town at once: each sees the other, alice turning **Show me in town** off hides her from bob, and on brings her back. Screenshot: `lumi-town-friends.png`.
+    - `LUMI_TOWN_ONLY=1 node tests/connected-browser.mjs` runs just these.
 - Not automated: the trot by eye, and the door on a real TV with a remote. The remote reaches the door only through the Care row. Lumi Town on a real TV with a remote (and the casino tables' TV mode opened from it), on a real phone, and an installed Lumi Pet going out into town (Lumi Town is outside its scope, so a phone may show a browser bar). The other checks below now open the app that has the tab they test. Not automated: installing each app from a real phone (three icons side by side on a home screen), an installed Lumi Pet opening Lumi Dungeons (it is outside that app's scope, so a phone may show it in a browser bar), and the Open rows on a real TV with a remote.
 
 Run `.venv/Scripts/python.exe -m pytest tests/test_lumipet.py -q -p no:cacheprovider` for the server: the decay curve (last quarter in exactly one day, the same in one step or many), catch-up while away, rewards landing when a nap or play finished, cooldowns, the pantry and its limit, toys, the shop refusing what can't be afforded, the ledger, the one-time browser import, catalog validation, and the API refusing any result the page tries to name. Run `node --test tests/js/lumi_pet.test.mjs` for the page's rules: night boundaries, nap and wake overrides, moods, and reading the old browser save. The Media pytest suite runs all Node rule tests and checks Lumi's authenticated page, static assets, registry entry and paired-TV access. Syntax-check `static/games/lumi-pet/game.js` and `rules.js` under `mnemerynne/web/` with `node --check`.

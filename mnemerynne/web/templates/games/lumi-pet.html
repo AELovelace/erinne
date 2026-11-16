@@ -45,6 +45,9 @@
   {#- The dungeon (mnemerynne/lumidungeon.py): while Lumi is out, game.js draws the room she is in over the house (dungeon-art.js),
       in the same wide drawing, with a line of her health and satchel. -#}
   <svg class="lp-dungeon" id="lp-dungeon" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style="display: none"></svg>
+  {#- Lumi Town's townsfolk, and everyone else's Lumis in town now (game.js drawFolk): over the town picture, in its own
+      coordinates, moved by transform only. Never pressable: presses go through to the places. -#}
+  <svg class="lp-folk" id="lp-folk" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
   <div class="lp-dhud" id="lp-dhud" hidden>
     <span id="lp-d-title"></span>
     <div class="lp-bar"><i id="lp-d-hp"></i></div><div class="lp-bar lp-bar-mp"><i id="lp-d-mp"></i></div>

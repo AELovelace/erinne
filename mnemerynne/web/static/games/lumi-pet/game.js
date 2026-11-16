@@ -7,7 +7,7 @@
    They are one pet on one save, so all three talk to the same API. */
 (function () {
   "use strict";
-  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Pk = window.LumiPetPicker, Gd = window.LumiPetGarden, Ga = window.LumiPetGardenArt, Sk = window.LumiPetSkills, Sa = window.LumiPetSkillsArt, Cl = window.LumiPetCollection, Ca = window.LumiPetCollectionArt, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt, Pu = window.LumiPetParty, GT = window.LumiPetGardenTree, GTa = window.LumiPetGardenTreeArt, Ta = window.LumiPetTavernArt, Tw = window.LumiPetTown, TwA = window.LumiPetTownArt;
+  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Pk = window.LumiPetPicker, Gd = window.LumiPetGarden, Ga = window.LumiPetGardenArt, Sk = window.LumiPetSkills, Sa = window.LumiPetSkillsArt, Cl = window.LumiPetCollection, Ca = window.LumiPetCollectionArt, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt, Pu = window.LumiPetParty, GT = window.LumiPetGardenTree, GTa = window.LumiPetGardenTreeArt, Ta = window.LumiPetTavernArt, Tw = window.LumiPetTown, TwA = window.LumiPetTownArt, TF = window.LumiPetTownFolk;
   const $ = function (id) { return document.getElementById(id); };
   const room = $("lp-room"), list = $("lp-list"), houseArt = $("lp-house"), tabButtons = Array.from(document.querySelectorAll("[data-lp-tab]"));
   const API = "/api/media/games/lumi-pet/", OLD_SAVE = "mnemerynne-game:lumi-pet:companion";
@@ -66,9 +66,12 @@
   // she's inside (the Arcade, the Casino or the Lumi-Soft field), or null on the map; the list's cursor is where she
   // stands. The page opens where ?at= says (media.js sends it when a game opened from here closes), and remembers on
   // this device which cabinet or table each place's cursor was on.
-  const TOWN = APP === "lumi-town", KEYS_TOWN = "▲ ▼ ◀ ▶ walk to a place · Enter goes in<br>Inside: ▲ ▼ choose a game · Enter plays<br>Mouse: press a place, a cabinet or a table<br>Escape / Back returns";
+  const TOWN = APP === "lumi-town", KEYS_TOWN = "▲ ▼ ◀ ▶ walk to a place · ▶ off the end: Market Street · Enter goes in<br>Inside: ▲ ▼ choose a game or a stall · Enter plays or buys<br>Mouse: press a place, a cabinet, a stall or a signpost<br>Escape / Back returns";
   const arrival = TOWN ? Tw.arrive(new URLSearchParams(location.search).get("at")) : null, townPicks = TOWN ? G.store.get("town-picks", {}) : {};
-  let townAt = arrival ? arrival.inside : null;
+  // Market Street (2026-11-14): which street's map she's on, and in the Market, the stall she's at (and, at Garden things,
+  // which of the garden's decoration drawers is open: garden-ui.js). RETRO_ON: Media → Retro is on, so the café is open.
+  let townAt = arrival ? arrival.inside : null, townStreet = arrival ? arrival.street : "high", marketStall = null, marketDrawer = null;
+  const RETRO_ON = $("gm").dataset.retro === "1";
   if (arrival) picks[0] = townAt ? Math.max(0, Math.min(Number(townPicks[townAt]) || 0, Tw.place(townAt).games.length - 1)) : arrival.cursor; // Back from a game: on its cabinet.
   const DESK = !TV && window.matchMedia("(any-pointer: fine)").matches; // A mouse and keyboard are here: Lumi-Soft can be played (media.js offers it only there too).
 
@@ -99,7 +102,7 @@
   function openApp(slug, where) { // Go to another of Lumi's apps (or, from Lumi Town, a game). Inside Media's game layer the layer swaps the game in its frame (media.js), so its bar and remote keys follow; on its own the page just goes there.
     where = where || {}; // at: where that page starts (Lumi Town: a place); back: the town place to come back to when it closes (media.js games.back).
     if (framed) window.parent.postMessage({ type: "mnemerynne-game-open", slug: slug, at: where.at || null, back: where.back || null }, location.origin);
-    else location.href = "/media/games/" + slug + (where.at ? "?at=" + encodeURIComponent(where.at) : ""); // On its own the browser's Back is the way back (drawTown keeps the town's address current).
+    else location.href = slug === "retro" ? "/media/retro" : "/media/games/" + slug + (where.at ? "?at=" + encodeURIComponent(where.at) : ""); // On its own the browser's Back is the way back (drawTown keeps the town's address current). Retro is Media's own page.
   }
 
   function adventure() { // Her room's door (Doll's design, 2026-11-11; Lumi Town 2026-11-12): she trots off through it, out into Lumi Town.
@@ -112,13 +115,32 @@
   }
 
   // ---- Lumi Town: the map and the places on it (town-ui.js has the words and the lists, town-art.js the drawings).
-  function townGo(change) { // A town row that stays in the town: walk into a place, or back out onto the map.
-    if (change.leave) { const was = townAt; townAt = null; picks[tab] = Tw.index(was); say("Back out in Lumi Town. Where next?"); return; }
+  const STALL_HELLO = { store: "Everything a little Lumi could want~", capsules: "Turn the handle... what's inside?", seeds: "Every seed here grows in the Stardust Garden.",
+                        garden: "Lanterns, planters and pretty things for the garden." };
+
+  function townGo(change) { // A town row that stays in the town: walk into a place or out, round the corner to the other street, or up to a stall.
+    if (change.street) { // Off the end of the street, round the corner: she comes out by its first place, or back by the Casino.
+      townStreet = Tw.STREETS[change.street] ? change.street : "high"; townAt = null; marketStall = null; marketDrawer = null;
+      picks[tab] = townStreet === "market" ? 0 : Tw.index("casino");
+      say(townStreet === "market" ? "Market Street! The Retro café and the Market~" : "Back on the High Street. Where next?");
+      townHere();
+      return;
+    }
+    if ("stall" in change) { // In the Market: up to a stall, or back from it to the row of stalls.
+      const market = Tw.inside(townAt);
+      if (!market) return;
+      if (change.stall) { marketStall = change.stall; marketDrawer = null; picks[tab] = 0; say(STALL_HELLO[change.stall] || ""); }
+      else { picks[tab] = Math.max(0, market.games.findIndex(function (g) { return g.stall === marketStall; })); marketStall = null; marketDrawer = null; }
+      return;
+    }
+    if (change.leave) { const was = townAt; townAt = null; marketStall = null; marketDrawer = null; picks[tab] = Tw.index(was); say("Back out in Lumi Town. Where next?"); townHere(); return; }
     const place = Tw.place(change.enter);
     if (!place) return;
     picks[tab] = Tw.index(place.id); // She walks up to it first.
+    if (place.retro) { townOpen("retro", place.id, place.going); return; } // The Retro café: Media → Retro, and back out in front of the café.
     if (place.app) { townOpen(place.app, place.home ? null : place.id, place.going); return; } // Her house, the tavern, the garden: Lumi's own apps. Her house is home: leaving it doesn't come back here.
-    townAt = place.id;
+    townAt = place.id; marketStall = null; marketDrawer = null;
+    townHere();
     picks[tab] = Math.max(0, Math.min(Number(townPicks[place.id]) || 0, place.games.length - 1)); // On the cabinet she last played here.
     say(place.hello);
     G.sound.unlock(); G.sound.tone(659.25, .12, 0, .12); G.sound.tone(880, .16, .1, .1); // The shop bell.
@@ -134,35 +156,166 @@
     setTimeout(function () { delete room.dataset.leaving; }, 2500); // Still here (a refused swap, or the browser's Back): she's back on the map.
   }
 
-  function townMove(action) { // The arrows in the town. On the map ◀ ▶ walk along a row and ▲ ▼ cross to the other row; inside, every arrow goes along the line.
-    const count = rows().length, by = action === "left" || action === "up" || action === "prev" ? -1 : 1;
+  function townMove(action) { // The arrows in the town. On the map ◀ ▶ walk along a row and ▲ ▼ cross to the other row; ▶ off the High Street's
+    // right-hand end goes round the corner to Market Street, and ◀ off its left-hand end comes back. Inside, every arrow goes along the line.
+    const count = rows().length, by = action === "left" || action === "up" || action === "prev" ? -1 : 1, at = picks[tab];
     if (!count) return;
-    if (!townAt && (action === "up" || action === "down")) picks[tab] = (picks[tab] + 3) % count; // Two rows of three: straight across the street.
-    else picks[tab] = (picks[tab] + by + count) % count;
+    if (!townAt) {
+      const places = Tw.street(townStreet).length;
+      if (townStreet === "high" && action === "right" && at < places && at % 3 === 2) { townGo({ street: "market" }); render(); return; }
+      if (townStreet === "market" && action === "left" && at === 0) { townGo({ street: "high" }); render(); return; }
+      if ((action === "up" || action === "down") && townStreet === "high" && at < 6) { picks[tab] = (at + 3) % 6; render(); return; } // Two rows of three: straight across the street.
+    }
+    picks[tab] = (at + by + count) % count;
     render();
   }
 
   function townPress(event) { // Mouse and touch in Lumi Town: a place on the map, a cabinet or table inside, or the exit mat. It does what its row does.
     const hit = event.target.closest("[data-click]");
     if (!TOWN || !hit || !snap) return;
-    const what = hit.dataset.click.split(":"), key = { place: "place-", game: "game-" }[what[0]];
+    const what = hit.dataset.click.split(":"), key = { place: "place-", game: "game-", stall: "stall-", street: "street-" }[what[0]];
     const at = rows().findIndex(function (row) { return row.key === (key ? key + what[1] : what[0]); });
     if (at < 0) return;
     picks[tab] = at; choose();
   }
 
-  function drawTown() { // Lumi Town: the map or a place's inside (town-art.js), with Lumi standing where the cursor is.
-    const here = Tw.inside(townAt), spot = Tw.PLACES[picks[tab]] || Tw.PLACES[0], night = sceneNow().night;
-    const cursor = here ? picks[tab] : spot.id, at = TwA.spot(townAt, cursor, here ? here.games.length : 0);
+  function drawTown() { // Lumi Town: a street's map or a place's inside (town-art.js), with Lumi standing where the cursor is.
+    const here = Tw.inside(townAt), places = Tw.street(townStreet), way = Tw.STREETS[townStreet], night = sceneNow().night;
+    const onPlace = places[picks[tab]] || null; // On a map, the walk and "Show me in town" rows stand her by the signpost.
+    const cursor = here && marketStall ? Math.max(0, here.games.findIndex(function (g) { return g.stall === marketStall; })) // at a stall: she stays at it
+      : here ? picks[tab] : onPlace ? onPlace.id : "street:" + way.other;
+    const at = TwA.spot(townAt, cursor, here ? here.games.length : 0);
     if (!room.dataset.town) { room.dataset.townStill = "true"; requestAnimationFrame(function () { requestAnimationFrame(function () { delete room.dataset.townStill; }); }); } // The first draw: she's simply there (game.css), and walks from then on.
-    room.dataset.town = here ? here.id : "map"; room.dataset.open = "false"; // No windows onto the page's scenery: the town paints its own sky.
+    room.dataset.town = here ? here.id : "map"; room.dataset.street = townStreet; room.dataset.open = "false"; // No windows onto the page's scenery: the town paints its own sky.
     room.style.setProperty("--gx", String(at.x - 500)); room.style.setProperty("--gy", String(at.y)); // game.css walks her there.
-    $("lp-place").textContent = here ? here.room : "LUMI TOWN";
-    const signature = JSON.stringify(["town", townAt, cursor, night]);
-    if (signature === lastHouse) return; // Only redrawn when she moves, goes in or out, or day turns to night.
-    lastHouse = signature;
-    houseArt.innerHTML = TwA.scene({ at: townAt, cursor: cursor, games: here ? here.games.map(function (g) { return g.slug; }) : [], label: here ? "" : spot.name, night: night }); // Markup authored in town-art.js; the label is escaped there.
-    try { history.replaceState(null, "", location.pathname + "?at=" + (townAt || spot.id)); } catch (e) { /* the address is a nicety */ } // A reload, or the browser's Back from a game, lands here again.
+    $("lp-place").textContent = here ? here.room : townStreet === "market" ? "MARKET STREET" : "LUMI TOWN";
+    const signature = JSON.stringify(["town", townStreet, townAt, cursor, night]);
+    if (signature !== lastHouse) { // Only redrawn when she moves, goes in or out, changes street, or day turns to night.
+      lastHouse = signature;
+      houseArt.innerHTML = TwA.scene({ street: townStreet, at: townAt, cursor: cursor, games: here ? here.games.map(function (g) { return g.slug || g.stall; }) : [],
+        label: here ? "" : onPlace ? onPlace.name : way.walk, night: night }); // Markup authored in town-art.js; the label is escaped there.
+      try { history.replaceState(null, "", location.pathname + "?at=" + (townAt || (onPlace || places[0]).id)); } catch (e) { /* the address is a nicety */ } // A reload, or the browser's Back from a game, lands here again.
+    }
+    drawFolk();
+  }
+
+  // ---- Shopping at the Market (2026-11-14): Lumi Pet's and Lumi's Garden's own lists, in town (Doll: "shop right in town").
+  function shopItems() { // Snacks, treats and toys for sale: the Shop tab, and the Market's general store.
+    const pet = snap.pet, c = snap.catalog;
+    return c.snacks.concat(c.treats, c.toys).filter(function (thing) { return thing.price && !pet.toys.includes(thing.id); }).map(function (thing) {
+      const held = pet.inventory[thing.id] || 0, toy = c.toys.includes(thing);
+      return { key: thing.id, icon: thing.icon, name: thing.name, send: { action: "buy", item: thing.id },
+        hint: thing.price + " coins" + (toy ? " · a toy to keep" : held ? " · have " + held : "") };
+    });
+  }
+
+  function powderRow() { // What the garden's things cost: starpowder from Lumi's Garden.
+    return { key: "powder", icon: "✦", name: Gd.format(snap.garden.powder) + " starpowder", hint: "From the Stardust Garden's press: seeds and garden things cost it",
+      note: "Starpowder comes from Lumi's Garden: trim flowers and use the press." };
+  }
+
+  function seedRows() { // The seed stall: every flower not growing in this garden yet, the ones she can unlock first (garden-tree.js says why not).
+    const garden = snap.garden, level = snap.pet.level;
+    const left = garden.flowers.filter(function (flower) { return GT.state(garden, flower, level) !== "unlocked"; });
+    left.sort(function (a, b) { return (GT.state(garden, a, level) === "open" ? 0 : 1) - (GT.state(garden, b, level) === "open" ? 0 : 1); });
+    if (!left.length) return [powderRow(), { key: "all-seeds", icon: "🌸", name: "Every seed is growing", hint: "This garden has them all", note: "This garden already grows every flower." }];
+    return [powderRow()].concat(left.map(function (flower) {
+      const row = { key: "seed-" + flower.id, icon: "🌱", name: flower.name, hint: GT.cost(flower) + " · " + GT.about(flower) };
+      if (GT.state(garden, flower, level) === "open") { row.url = "garden"; row.send = { action: "unlock", item: flower.id }; }
+      else { row.icon = "🔒"; row.note = GT.why(garden, flower, level); }
+      return row;
+    }));
+  }
+
+  function stallRows(id) { // What one of the Market's stalls sells.
+    const garden = snap.garden, decor = snap.garden_decor;
+    if (id === "store") return shopItems();
+    if (id === "capsules") { // The Star and Moon Capsules (coins), and the Seedling Capsule (starpowder), as their own shops offer them.
+      const seedling = Gd.rows({ garden: garden, decor: decor, drawer: "decor", go: function () {} }).find(function (row) { return row.key === "capsule"; });
+      return Pk.capsuleRows(snap).concat(seedling ? [Object.assign({}, seedling, { key: "capsule-seed" })] : []);
+    }
+    if (exploring()) return [{ key: "away", icon: "🗺", name: "Lumi is out exploring", hint: "The garden's stalls wait until she's home", note: "Lumi is out exploring. The garden waits for her, and so does this stall." }];
+    if (id === "seeds") return seedRows();
+    if (id === "garden") { // The garden's decorations: its slots, a slot's pieces and the store of spares (garden-ui.js), without the garden's own capsule and Back.
+      const drawer = marketDrawer || "decor";
+      const got = Gd.rows({ garden: garden, decor: decor, drawer: drawer, go: function (change) { marketDrawer = change.drawer || null; } });
+      return [powderRow()].concat(drawer === "decor" ? got.filter(function (row) { return row.key !== "back" && row.key !== "capsule"; }) : got);
+    }
+    return [];
+  }
+
+  // ---- Lumi Town's townsfolk, and everyone else's Lumis who are in town now (town-folk.js, mnemerynne/lumitown.py), on
+  // their own layer over the town picture (#lp-folk), moved by `transform` only: the picture isn't redrawn for them.
+  const folkArt = $("lp-folk"), greeted = new Set(), strolls = {};
+  let visitors = [], townPolled = 0, folkSig = "", folkSay = Date.now() + 6000;
+
+  function townHere() { // Tell the server where she is (unless "Show me in town" is off) and hear who else is in town.
+    if (!TOWN || !snap) return;
+    townPolled = Date.now();
+    const places = Tw.street(townStreet), at = townAt || (places[picks[tab]] || places[0]).id;
+    G.api(API + "town", { at: at, street: townStreet }).then(function (data) {
+      visitors = (data.here || []).filter(function (v) { return v && v.look && Tw.place(v.at); });
+      visitors.forEach(function (v) { // A hello, once a visit, for someone on this street.
+        if (greeted.has(v.id) || Tw.place(v.at).street !== townStreet) return;
+        greeted.add(v.id);
+        say(v.name + "'s " + (v.look.name || "Lumi") + " is in town! 👋");
+      });
+      drawFolk();
+    }).catch(function () { /* the town is fine on its own */ });
+  }
+
+  function folkFigure(id, look, kind, words) { // One Lumi on the layer: her shapes in her look (lumiMarkup), a name tag, and a speech line.
+    const ns = "http://www.w3.org/2000/svg", g = document.createElementNS(ns, "g"), flip = document.createElementNS(ns, "g");
+    g.setAttribute("class", "lp-folk-one " + kind); g.dataset.id = id;
+    flip.setAttribute("class", "lp-folk-flip");
+    flip.innerHTML = '<svg x="-24" y="-45" width="48" height="45" viewBox="0 0 320 300" overflow="visible">' + lumiMarkup(look) + "</svg>"; // Authored shapes; the look is the server's checked one.
+    g.append(flip);
+    if (words) { const tag = document.createElementNS(ns, "text"); tag.setAttribute("class", "lp-folk-name"); tag.setAttribute("y", "13"); tag.textContent = words; g.append(tag); } // A person's own words: text only.
+    const said = document.createElementNS(ns, "text"); said.setAttribute("class", "lp-folk-say"); said.setAttribute("y", "-52"); g.append(said);
+    return g;
+  }
+
+  function folkPlace(g, x, y, facingLeft) { g.style.transform = "translate(" + x + "px, " + y + "px)"; g.firstChild.dataset.flip = facingLeft ? "true" : "false"; }
+
+  function drawFolk() { // Who's out: the townsfolk on this street's map, and visitors on it (or in the place she's in). Rebuilt only when that changes.
+    if (!TOWN || !folkArt) return;
+    const night = sceneNow().night, here = townAt, npcs = here ? [] : TF.folkOn(townStreet, night);
+    const guests = visitors.filter(function (v) { return here ? v.at === here : Tw.place(v.at).street === townStreet; });
+    const signature = JSON.stringify([townStreet, here, night, npcs.map(function (n) { return n.id; }), guests.map(function (v) { return [v.id, v.at, v.name, v.look]; })]);
+    if (signature === folkSig) return;
+    folkSig = signature;
+    folkArt.replaceChildren();
+    npcs.forEach(function (n, i) {
+      const s = strolls[n.id] || (strolls[n.id] = { x: TF.start(n, i), until: 0 }), g = folkFigure("npc-" + n.id, n.look, "lp-folk-npc", "");
+      folkArt.append(g); folkPlace(g, s.x, TF.y(n), false);
+    });
+    const crowd = {};
+    guests.forEach(function (v) { // Visitors stand by the place they're at (inside: by the door), side by side.
+      const n = crowd[v.at] = (crowd[v.at] || 0) + 1, base = here ? { x: 500, y: 474 } : TwA.spot(null, v.at), side = n % 2 ? 1 : -1;
+      const x = Math.max(TF.WALK_MIN, Math.min(TF.WALK_MAX, base.x + side * (34 + 30 * Math.floor((n - 1) / 2))));
+      const g = folkFigure("guest-" + v.id, v.look, "lp-folk-guest", (v.look.name || "Lumi") + " · " + v.name);
+      folkArt.append(g); folkPlace(g, x, base.y, side < 0);
+    });
+  }
+
+  function folkWander() { // Once a second in town: a townsfolk Lumi whose pause is over strolls on, and now and then one says something.
+    if (!TOWN || townAt || G.reducedMotion || !folkArt) return;
+    const now = Date.now(), night = sceneNow().night, out = TF.folkOn(townStreet, night);
+    out.forEach(function (n, i) {
+      const s = strolls[n.id] || (strolls[n.id] = { x: TF.start(n, i), until: 0 });
+      if (now < s.until) return;
+      const to = TF.next(s.x, [Math.random(), Math.random()]), seconds = Math.abs(to - s.x) / 35, g = folkArt.querySelector('[data-id="npc-' + n.id + '"]');
+      s.until = now + seconds * 1000 + TF.pause(Math.random()); // A stroll at about 35 units a second, then a while standing about.
+      if (g) { g.style.transitionDuration = seconds.toFixed(1) + "s"; folkPlace(g, to, TF.y(n), to < s.x); }
+      s.x = to;
+    });
+    if (now < folkSay || !out.length) return;
+    folkSay = now + 9000 + Math.random() * 9000;
+    const who = out[Math.floor(Math.random() * out.length)], words = folkArt.querySelector('[data-id="npc-' + who.id + '"] .lp-folk-say');
+    if (!words) return;
+    words.textContent = TF.line(townStreet, night, Math.random());
+    words.parentNode.classList.add("saying");
+    setTimeout(function () { words.parentNode.classList.remove("saying"); }, 4200);
   }
 
   function welcomeHome() { // Lumi Pet, after a dungeon trip: her welcome-home line, once per trip on this device (dungeon-ui.js welcome).
@@ -226,7 +379,8 @@
 
   function rows() { // What the selected tab offers, as plain rows: the list and the remote both read from here.
     const pet = snap.pet, c = snap.catalog, name = TABS[tab], asleep = sceneNow().asleep;
-    if (name === "town") return Tw.rows({ at: townAt, desk: DESK, away: Boolean(exploring()), go: townGo, open: townOpen }); // Lumi Town: the places, or the games inside one.
+    if (name === "town") return Tw.rows({ at: townAt, street: townStreet, desk: DESK, away: Boolean(exploring()), retro: RETRO_ON, seen: pet.town_seen !== false,
+      stall: marketStall, stallRows: stallRows, go: townGo, open: townOpen }); // Lumi Town: a street's places, the games inside one, or a Market stall's wares.
     if (name === "care") {
       if (awayRows().length) return awayRows(); // She isn't in her room: nothing to cuddle until she is back (the Pantry can still send her a snack).
       const health = snap.health, sore = !health.out && health.hp < health.max; // Hurt, and at home to do something about it.
@@ -277,11 +431,7 @@
       }
       return own;
     }
-    if (name === "shop") return Pk.capsuleRows(snap).concat(c.snacks.concat(c.treats, c.toys).filter(function (thing) { return thing.price && !pet.toys.includes(thing.id); }).map(function (thing) { // The capsules first: this is where people look to buy one.
-      const held = pet.inventory[thing.id] || 0, toy = c.toys.includes(thing);
-      return { key: thing.id, icon: thing.icon, name: thing.name, send: { action: "buy", item: thing.id },
-        hint: thing.price + " coins" + (toy ? " · a toy to keep" : held ? " · have " + held : "") };
-    }));
+    if (name === "shop") return Pk.capsuleRows(snap).concat(shopItems()); // The capsules first: this is where people look to buy one.
     if (tint) return tintRows(); // The colour drawer: red, green and blue, then keep it or go back.
     const settings = []; // Settings: each app lists what is its own, then the way to Lumi's other apps.
     settings.push({ key: "name", icon: "✎", name: "Name: " + pet.name, hint: "What she's called, and what her friends see in a party", local: askName });
@@ -290,6 +440,8 @@
       turn: function (by) { submit({ key: "glow", send: { action: "glow", glow: Pk.turn(R.PALETTES, pet.glow, by) } }); } });
     if (has("dungeon")) settings.push({ key: "storyteller", icon: "✎", name: "Storyteller: " + (pet.storyteller === "live" ? "Live" : "Library"), hint: "Who writes the dungeon's lines: the game's library, or a model as you go", send: { action: "storyteller" } });
     settings.push({ key: "sound", icon: "♪", name: "Sound: " + (G.sound.isOn() ? "on" : "off"), hint: "Little chimes", local: function () { G.sound.toggle(); } });
+    if (APP === "lumi-pet") settings.push({ key: "town-seen", icon: "👀", name: "Show me in Lumi Town: " + (pet.town_seen === false ? "off" : "on"), // Also on the town's own map.
+      hint: pet.town_seen === false ? "Nobody sees your Lumi in town; you still see theirs" : "Others in Lumi Town see your Lumi there, in her clothes, with her name", send: { action: "town_seen" } });
     if (WHO) settings.push({ key: "switch-player", icon: "⇄", name: "Switch player", hint: "Playing " + (player ? player.name + "'s" : "this TV's own") + " Lumi · someone else presses OK on their remote", local: function () { forgetPlayer("Who's playing next?"); } }); // A shared TV: hand it to the next person.
     if (reminders !== "unsupported" && !has("dungeon")) { // Phones and computers only: a TV has nobody's pocket to buzz. Her needs and her flowers send them; the dungeons never do.
       if (has("garden")) settings.push({ key: "garden-reminders", icon: "❀", name: "Garden reminders: " + (pet.garden_reminders === false ? "off" : "on"), hint: "A nudge when slow flowers are ready to trim (needs Reminders on)", send: { action: "garden_reminders" } });
@@ -1280,6 +1432,7 @@
     if (!snap) return;
     const task = snap.pet.task;
     if ((task && serverNow() >= task.finishesAt) || Date.now() - polled > 15000) { polled = Date.now(); refresh(); }
+    if (TOWN) { folkWander(); if (Date.now() - townPolled > 5000) townHere(); } // Lumi Town: the townsfolk, and who else is in town (every five seconds).
     if (gardening()) { // The garden: send the presses made this second, and look in more often so the numbers move.
       lumiWanders();
       flushPresses();

@@ -363,3 +363,18 @@
 .lp-tabs[data-count="1"] { display: none; } /* Lumi Town has one list: no tabs to pick between. */
 .lp-room[data-town-still] .lp-pet-wrap { transition: none; } /* Opening the town: she's already at the door, not sliding in from the middle. */
 .lp-room[data-town] .lp-room-top { text-shadow: 0 0 4px #1a0f2e, 0 0 10px #1a0f2e; } /* Readable over a bright daytime sky. */
+
+/* Lumi Town's townsfolk and visitors (game.js drawFolk; town-folk.js): a layer over the town picture in its own coordinates,
+   never pressable. They stroll by transform only (cheap on a TV box), and they're awake whatever the hour. */
+.lp-folk { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; display: none; overflow: visible; }
+.lp-room[data-town] .lp-folk { display: block; }
+.lp-room[data-town][data-leaving="true"] .lp-folk { opacity: .6; }
+.lp-folk-one { transition: transform 3s linear; }
+.lp-folk-guest { transition: transform .45s ease; }
+.lp-folk-flip[data-flip="true"] { transform: scaleX(-1); }
+.lp-room .lp-folk .lp-eyes-open { display: inline; }
+.lp-room .lp-folk .lp-eyes-closed { display: none; }
+.lp-folk-name { font: 600 11px var(--serif, sans-serif); fill: #ffe9f5; text-anchor: middle; paint-order: stroke; stroke: #1a0f2e; stroke-width: 3px; }
+.lp-folk-say { font: 600 12px var(--serif, sans-serif); fill: #1a0f2e; text-anchor: middle; paint-order: stroke; stroke: #fff5fb; stroke-width: 6px; opacity: 0; transition: opacity .3s; }
+.lp-folk-one.saying .lp-folk-say { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .lp-folk-one { transition: none; } }

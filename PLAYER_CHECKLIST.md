@@ -100,3 +100,15 @@ Games follow **Screens → Text size**, including while a game is already open. 
 5. **Lumi-Soft:** on a computer check the field's Lumi-Soft row opens it; on a TV or phone check it only says it needs a mouse and keyboard.
 6. **Home:** choose **Lumi's house** and check her room opens, and that leaving it goes to Games, not back to town.
 7. **Remote:** on a paired TV, walk the town with a remote and open a casino table from it; check leaving the table comes back to the Casino.
+8. **Market Street:** press **Right** from the Casino (or the field), or the **MARKET ST** signpost. Check you're on Market Street, by the Retro café, with the Market beside it, bunting overhead and a fountain on the lane. **Left** off its end (or the **HIGH ST** signpost) goes back, by the Casino.
+9. **Retro café:** with Retro on, check it opens Retro, and leaving comes back in front of the café. With Retro off, check its row says the café is closed.
+10. **The Market:** walk in and check the four stalls.
+    - **General store:** buy a cookie and check the coins go down and it's in Lumi Pet's Pantry.
+    - **Capsule machines:** the Star, Moon and Seedling Capsules each roll, as in their own shops.
+    - **Seed stall:** check it unlocks an open flower and says why the others can't be yet.
+    - **Garden things:** check it buys or puts out a decoration.
+    - Check **Back to the stalls**, then **Back to Market Street**.
+11. **Townsfolk:** check a few Lumis stroll the streets and sometimes say something, and that fewer are out at night.
+12. **Friends in town:** with two people in Lumi Town at once (say, a TV and a phone), check each sees the other's Lumi, dressed as she is, with her name and theirs, by the place they're at, and a hello line.
+    - Turn **Show me in town** off on one: within a few seconds the other no longer sees her, but she still sees them.
+    - Turn it back on and check she reappears.

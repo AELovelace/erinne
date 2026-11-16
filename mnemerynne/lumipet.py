@@ -215,6 +215,7 @@ def _fresh(now: int) -> dict:
             "glow": "rose", "rest": "auto", "restUntil": 0, "task": None, "done": None, "cooldowns": {},
             "inventory": {}, "toys": [], "boost": None, "imported": False, "low": {}, "seen": now, "house": {}, "decor": [],
             "outfit": {}, "closet": [], "storyteller": "library", "garden_reminders": True,
+            "town_seen": True,                             # others in Lumi Town see her there (lumitown.py; Settings' "Show me in town")
             "name": "Lumi", "colour": None,               # what her friends see her called; her own colour (None: her glow's)
             "moved_in": MOVE_IN, "unpacked": 0, "box_day": "",   # she has just moved in: boxes unpacked so far, and the day of the last
             **lumibattle.fresh_fields()}
@@ -311,6 +312,17 @@ def look(conn: sqlite3.Connection, user_id: int) -> dict:
     colour = pet.get("colour") if isinstance(pet.get("colour"), str) and _COLOUR.match(pet["colour"]) else None
     name = pet.get("name") if isinstance(pet.get("name"), str) and _NAME.match(pet["name"]) else "Lumi"
     return {"glow": glow, "outfit": worn, "colour": colour, "name": name}
+
+
+def town_seen(conn: sqlite3.Connection, user_id: int) -> bool:
+    """Whether others in Lumi Town may see this person's Lumi there (her save's town_seen, on unless turned off).
+    Only reads, like look()."""
+    row = conn.execute("SELECT data FROM lumi_pets WHERE user_id = ?", (user_id,)).fetchone()
+    try:
+        pet = json.loads(row["data"]) if row else {}
+    except ValueError:
+        pet = {}
+    return pet.get("town_seen", True) is not False
 
 
 def _save(conn: sqlite3.Connection, user_id: int, pet: dict) -> None:
@@ -571,6 +583,8 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
         pet["colour"] = cleaned or None
     elif action == "garden_reminders":                    # whether "your flowers are ready" may be sent to her phone
         pet["garden_reminders"] = not pet.get("garden_reminders", True)
+    elif action == "town_seen":                           # whether others in Lumi Town see her there (lumitown.py)
+        pet["town_seen"] = not pet.get("town_seen", True)
     elif action == "storyteller":
         # Whose words the dungeon uses: the library that ships with the game, or (as well) a line written fresh for
         # each moment by the person's own model. Only a preference; whether a model is there is checked when asked.

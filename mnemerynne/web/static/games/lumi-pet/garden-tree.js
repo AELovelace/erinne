@@ -174,5 +174,5 @@
   }
 
   return { PAGES: PAGES, BRANCH_NAMES: BRANCH_NAMES, COLOURS: COLOURS, MOON: MOON, isPage: isPage, spots: spots, find: find, first: first, move: move,
-    state: state, choice: choice, lines: lines, rows: rows };
+    state: state, choice: choice, lines: lines, rows: rows, cost: cost, about: about, why: why };   // cost/about/why: the Market's seed stall too (game.js)
 });
