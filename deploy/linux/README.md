@@ -1148,6 +1148,38 @@ sudo systemctl enable --now nginx
 `X-Forwarded-Proto` (https) is passed on as it came. To go back: `sudo systemctl disable --now nginx`,
 put the `.env` copy back and restart `mnemerynne-web` (`front-door.sh off` does that).
 
+### nginx holds HTTPS on this box (instead of Caddy)
+
+On a box with no other proxy in front (mnemerynne.io), nginx can replace Caddy for the certificates too:
+one nginx, two layers. `/etc/nginx/conf.d/mnemerynne-edge.conf` (from `nginx-mnemerynne-edge.conf`) holds
+80 and 443 and sends everything to `127.0.0.1:38200`. There, `front-door.sh`'s config splits the paths as
+usual, and the web app moves to `127.0.0.1:38210`.
+
+That edge file existing changes two things in `front-door.sh`: `on` accepts `MNEMERYNNE_HOST=127.0.0.1`
+(without the edge it refuses, because nothing outside the box would send there), and `off` only removes the
+front door's config and reloads nginx, so HTTPS keeps working. Paths only this box has (a webhook
+receiver) go in `/etc/nginx/mnemerynne-edge.d/*.conf`, which is included inside the HTTPS server block.
+
+```sh
+sudo dnf install -y nginx certbot
+sed 's/mnemerynne.example.org/YOUR-HOSTNAME/g' /opt/mnemerynne/deploy/linux/nginx-mnemerynne-edge.conf \
+  | sudo tee /etc/nginx/conf.d/mnemerynne-edge.conf >/dev/null
+sudo install -d -m 755 /var/www/letsencrypt && sudo restorecon -R /var/www/letsencrypt   # nginx may read it
+sudo nginx -t                                                  # with Caddy still running: this only checks
+sudo systemctl stop caddy && sudo systemctl enable --now nginx && sudo systemctl disable caddy
+sudo certbot certonly --webroot -w /var/www/letsencrypt -d YOUR-HOSTNAME --agree-tos --register-unsafely-without-email
+printf '#!/bin/sh\nsystemctl reload nginx\n' | sudo tee /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+sudo chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh && sudo systemctl enable --now certbot-renew.timer
+sudo bash /opt/mnemerynne/deploy/linux/front-door.sh on        # the front door on loopback, behind the edge
+```
+
+**certbot needs port 80 open from the internet** (the `http-01` check). Caddy also gets certificates with
+`tls-alpn-01` over 443, which certbot can't do, so a box where only 443 is forwarded renewed fine under Caddy
+and fails under certbot. Forward 80 as well. Until then, Caddy's last certificates can be copied out of
+`/var/lib/caddy/.local/share/caddy/certificates/` and pointed at from the edge file.
+Going back: `sudo systemctl disable --now nginx && sudo systemctl enable --now caddy` (and `front-door.sh off`
+first, so the app has 38200 again).
+
 ### One unit for every service (`mnemerynne@`)
 
 `mnemerynne@.service` is a template: `mnemerynne@sync`, `mnemerynne@games` and every service added to

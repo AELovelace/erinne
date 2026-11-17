@@ -71,6 +71,14 @@ def test_a_service_added_to_the_registry_gets_its_route(monkeypatch):
     assert _location(conf, "/api/rooms/") == "mnemerynne_live_rooms"
 
 
+def test_a_loopback_front_door_names_127_0_0_1_once():
+    """Behind this box's own HTTPS edge the front door listens on 127.0.0.1: nginx warns on a duplicate geo entry."""
+    geo = nginx.render("127.0.0.1:38200", stamp="s").split("geo $front_door_box {")[1].split("}")[0]
+    assert geo.count("127.0.0.1") == 1
+    lan = nginx.render("192.168.1.5:38200", stamp="s").split("geo $front_door_box {")[1].split("}")[0]
+    assert "127.0.0.1 1;" in lan and "192.168.1.5 1;" in lan
+
+
 def test_the_command_prints_the_config(capsys):
     nginx.main(["--listen", "192.168.1.5:38200", "--web", "127.0.0.1:38210"])
     assert capsys.readouterr().out == nginx.render("192.168.1.5:38200", "127.0.0.1:38210")
@@ -215,6 +223,50 @@ write_conf 192.168.1.5:38200
 ''', _posix(conf))
     assert result.returncode == 1
     assert conf.read_text() == "the one that worked\n"
+
+
+def test_on_refuses_loopback_unless_nginx_holds_https_here(tmp_path):
+    """Behind Caddy (or another box's proxy) on 127.0.0.1, `on` would take an address nobody sends to: it stops.
+    With this box's own edge (nginx-mnemerynne-edge.conf) it goes ahead on loopback."""
+    body = SYSTEMCTL_LOG + '''
+LOG=$1; ENV=$2; SAVED=$1.saved; EDGE=$3; CONF=$1.conf; ENABLED=""; ACTIVE=""
+write_conf() { echo "write_conf $*" >> "$LOG"; return 1; }    # stop right after the check, nothing else touched
+command() { return 0; }; getenforce() { echo Disabled; }
+front_on
+'''
+    env = _env(tmp_path, MNEMERYNNE_PORT="38200")
+    log, edge = tmp_path / "log", tmp_path / "edge.conf"
+    refused = _run("front-door.sh", body, _posix(log), _posix(env), _posix(edge))
+    assert refused.returncode == 1 and "nginx-mnemerynne-edge.conf" in refused.stderr
+    assert not log.exists() or "write_conf" not in log.read_text()
+    edge.write_text("server {}\n")
+    allowed = _run("front-door.sh", body, _posix(log), _posix(env), _posix(edge))
+    assert "the front door listens on loopback" in allowed.stdout
+    assert "write_conf 127.0.0.1:38200" in log.read_text()
+
+
+def test_off_keeps_nginx_running_when_it_holds_https_here(tmp_path):
+    """`off` on a box whose nginx is also the HTTPS edge takes the front door's config away and reloads nginx,
+    instead of turning nginx (and every site) off."""
+    conf, edge, log = tmp_path / "front.conf", tmp_path / "edge.conf", tmp_path / "log"
+    conf.write_text("server { listen 127.0.0.1:38200; }\n")
+    edge.write_text("server {}\n")
+    env = _env(tmp_path)
+    saved = tmp_path / "saved.env"
+    saved.write_text("MNEMERYNNE_HOST=127.0.0.1\nMNEMERYNNE_PORT=38200\n")
+    result = _run("front-door.sh", SYSTEMCTL_LOG + '''
+LOG=$1; ENV=$2; SAVED=$3; CONF=$4; EDGE=$5; UNIT_DIR=$1.units; ENABLED="nginx"; ACTIVE="nginx"
+nginx() { echo "nginx $*" >> "$LOG"; }
+running() { echo mnemerynne-web; }
+off
+''', *(_posix(p) for p in (log, env, saved, conf, edge)))
+    assert result.returncode == 0, result.stderr
+    asked = log.read_text().splitlines()
+    assert "systemctl reload nginx" in asked and "nginx -t" in asked
+    assert not any(line.startswith("systemctl disable") for line in asked)
+    assert not conf.exists() and not saved.exists()
+    assert env.read_text() == "MNEMERYNNE_HOST=127.0.0.1\nMNEMERYNNE_PORT=38200\n"
+    assert "nginx keeps HTTPS" in result.stdout
 
 
 VALKEY_BOX = '''

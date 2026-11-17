@@ -17,6 +17,8 @@
 # mnemerynne/web/sendfile.py): nginx's workers run as the service user (the share's ACL names only it), SELinux is
 # told nginx may read those folders, each folder is probed through nginx, and only then is MNEMERYNNE_ACCEL set.
 # "accel off" is the B-to-A switch: the app sends every file itself again.
+# With /etc/nginx/conf.d/mnemerynne-edge.conf (nginx holds HTTPS on this box, nginx-mnemerynne-edge.conf), "on"
+# works with the app on 127.0.0.1 (the edge sends there), and "off" leaves nginx running for HTTPS.
 # A script rather than pasted lines: long pasted lines got cut short in the terminal.
 set -euo pipefail
 
@@ -26,6 +28,7 @@ SERVICE_USER=mnemerynne
 ENV=/etc/mnemerynne/mnemerynne.env
 SAVED=$ENV.before-front-door                     # the .env as it was before "on": "off" puts it back
 CONF=/etc/nginx/conf.d/mnemerynne-front.conf
+EDGE=/etc/nginx/conf.d/mnemerynne-edge.conf      # this box's own nginx holds HTTPS (443) and sends to the front door
 UNIT_DIR=/etc/systemd/system
 TEMPLATE=$APP/deploy/linux/mnemerynne@.service
 WEB_PORT=38210
@@ -62,6 +65,7 @@ enabled_services() {                        # comma-separated: the registry serv
     echo "$out"
 }
 valkey_set() { [ -n "$(env_get MNEMERYNNE_VALKEY_URL)" ]; }
+has_edge() { [ -f "$EDGE" ]; }              # nginx is the box's HTTPS edge too, so it must keep running when "off"
 
 running() {                                 # which of the app's services run: named units and mnemerynne@ ones
     systemctl list-units --type=service --state=active --no-legend --plain \
@@ -152,14 +156,24 @@ write_conf() {                              # the nginx config for listen addres
 }
 
 off() {
-    systemctl disable --now nginx 2>/dev/null || true
+    if has_edge; then                                       # nginx also holds HTTPS: only the front door goes
+        rm -f "$CONF"
+        if nginx -t; then systemctl reload nginx 2>/dev/null || true
+        else echo "nginx refuses its config without the front door; look with: sudo nginx -t" >&2; fi
+    else
+        systemctl disable --now nginx 2>/dev/null || true
+    fi
     if [ -f "$(dropin)" ]; then rm -f "$(dropin)"; systemctl daemon-reload; fi    # nginx's boot order as it was
     if [ -f "$SAVED" ]; then
         cp -a "$SAVED" "$ENV"
         rm -f "$SAVED"
     fi
     RUN=$(running); systemctl restart ${RUN:-mnemerynne-web}
-    echo "The web app has its address back: $(env_get MNEMERYNNE_HOST):$(env_get MNEMERYNNE_PORT); nginx is off."
+    if has_edge; then
+        echo "The web app has its address back: $(env_get MNEMERYNNE_HOST):$(env_get MNEMERYNNE_PORT); nginx keeps HTTPS ($EDGE)."
+    else
+        echo "The web app has its address back: $(env_get MNEMERYNNE_HOST):$(env_get MNEMERYNNE_PORT); nginx is off."
+    fi
 }
 
 fail() {                                                                # say what went wrong, then undo it all
@@ -174,10 +188,12 @@ front_on() {
     if [ -f "$SAVED" ]; then echo "Already on (run 'off' first to start again)."; exit 0; fi
     HOST=$(env_get MNEMERYNNE_HOST); PORT=$(env_get MNEMERYNNE_PORT)
     HOST=${HOST:-127.0.0.1}; PORT=${PORT:-38200}
-    if [ "$HOST" = 127.0.0.1 ]; then
-        echo "MNEMERYNNE_HOST is 127.0.0.1: nothing outside this box sends here; use Caddy or nginx-mnemerynne.conf." >&2
+    if [ "$HOST" = 127.0.0.1 ] && ! has_edge; then          # loopback only makes sense with this box's own edge
+        echo "MNEMERYNNE_HOST is 127.0.0.1: nothing outside this box sends here." >&2
+        echo "If nginx holds HTTPS on this box, put nginx-mnemerynne-edge.conf at $EDGE first (README)." >&2
         exit 1
     fi
+    if [ "$HOST" = 127.0.0.1 ]; then echo "nginx holds HTTPS here ($EDGE): the front door listens on loopback."; fi
     echo "Front door: nginx on $HOST:$PORT; the web app moves to 127.0.0.1:$WEB_PORT."
 
     command -v nginx >/dev/null || dnf install -y nginx >/dev/null

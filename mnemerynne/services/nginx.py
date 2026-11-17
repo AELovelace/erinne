@@ -87,8 +87,9 @@ def _box_only(probe_from: str) -> list[str]:
 def _box_geo(probe_from: str) -> str:
     """$front_door_box: 1 for this box's own addresses. The stamp answers with `return`, which nginx runs in its
     rewrite phase, before allow/deny are ever looked at, so its check has to be an `if` on this instead."""
+    own = "" if probe_from == "127.0.0.1" else f"    {probe_from} 1;\n"   # on loopback (an edge here) it's the same one
     return ("\n# This box's own addresses, for the stamp's check (see _stamp_location).\n"
-            "geo $front_door_box {\n    default 0;\n    127.0.0.1 1;\n" + f"    {probe_from} 1;\n" + "}\n")
+            "geo $front_door_box {\n    default 0;\n    127.0.0.1 1;\n" + own + "}\n")
 
 
 def _upstream(name: str) -> str:

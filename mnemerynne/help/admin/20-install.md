@@ -60,7 +60,7 @@ Local admins (role `admin`) are admins whatever the domain says; keep one as a f
 
 ## 5. HTTPS
 
-Caddy serves Mnemerynne on 443 with its own internal CA by default (`Caddyfile-mnemerynne`); install Caddy's root certificate on staff PCs, or use the public Caddyfile with Let's Encrypt when the box is reachable from the internet ([Security and exposure](security.md)). Set `MNEMERYNNE_PUBLIC_URL` to the address people use and restart the web app. `nginx-mnemerynne.conf` is the equivalent for nginx. Keep `FORWARDED_ALLOW_IPS=127.0.0.1` so rate limits see real client addresses.
+Caddy serves Mnemerynne on 443 with its own internal CA by default (`Caddyfile-mnemerynne`); install Caddy's root certificate on staff PCs, or use the public Caddyfile with Let's Encrypt when the box is reachable from the internet ([Security and exposure](security.md)). Set `MNEMERYNNE_PUBLIC_URL` to the address people use and restart the web app. `nginx-mnemerynne.conf` is the equivalent for nginx. To have nginx hold HTTPS *and* split the paths between the services (no Caddy at all), use `nginx-mnemerynne-edge.conf` with certbot, then `front-door.sh on`. certbot needs port 80 open from the internet, which Caddy didn't (deploy README, "nginx holds HTTPS on this box"). Keep `FORWARDED_ALLOW_IPS=127.0.0.1` so rate limits see real client addresses.
 
 ## 6. Check
 
