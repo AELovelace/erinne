@@ -6,7 +6,7 @@ Erynne can answer live questions from internal systems: "did every hotel send it
 
 Pick a starting point in the box above the list and press **Add**:
 
-- **Presets**: Wazuh (alert summary, alerts, failed logins, with a time window and a machine; alerts from an IP, by source IP or a pattern like `192.168.1.*`) and Atera (tickets, statuses, customers, alerts). An existing Wazuh API gets *Alerts from an IP* with **Add preset operations**.
+- **Presets**: Wazuh (the indexer: alerts with server-side filters, timeline, noise report, agent silence, vulnerabilities, packages, index health and retention), Wazuh manager (agents, versions, configuration with secrets redacted, SCA, FIM, logs, API users, open ports), Wazuh manager actions (active response, restart, upgrade, groups; proposals only) and Atera (tickets, statuses, customers, alerts). See [Wazuh](wazuh.md) for the users and roles each needs. Picking a preset asks for the address, since built-in presets carry example ones.
 - **Uploaded templates**: a JSON file a project hands you, describing its operations. **Upload template…** adds it to the list; re-uploading a file with the same name replaces it. The format is documented in `api-templates/api-package-guide.md` in the repository.
 - **Blank**: define operations by hand.
 
@@ -20,11 +20,28 @@ Then, on the API's page:
 
 ## Operations
 
-Each operation is a fixed request: a path, GET or a POST with a fixed body, and **typed parameters** (int with limits, date, enum from a list, short string, free text for actions) that the model fills in. The model never writes a request itself; it picks an operation and fills its parameters, which are checked against the types and limits and escaped into the body. Redirects aren't followed, responses are capped at 256 KB, calls time out after 20 seconds, are cached briefly (`cache_seconds`) and logged.
+Each operation is a fixed request: a path (which may carry a fixed query, like `/agents?select=id,name`), GET or a POST with a fixed body, and **typed parameters** (int with limits, date, enum from a list, short string, a list of up to 50 short values, free text for actions) that the model fills in. In a body, `{"$if": "name", "then": {…}}` is an optional part, left out when that parameter is empty: that's how the Wazuh alert operations take filters like "only these rule IDs" without a default that would hide everything else. The model never writes a request itself; it picks an operation and fills its parameters, which are checked against the types and limits and escaped into the body. Redirects aren't followed, responses are capped at 256 KB, calls time out after 20 seconds, are cached briefly (`cache_seconds`) and logged.
 
 - **Example questions** decide routing: a chat question goes to the operation whose examples are closest in meaning, if at least `MNEMERYNNE_API_ROUTE_THRESHOLD` (0.80) close. Give each operation 4 to 6 examples phrased the way staff ask, distinct from other operations' examples.
 - **Test** calls the operation now and lists the fields in the response. For actions it asks for confirmation, because it really makes the change.
 - **Add preset operations** on an existing API adds the preset's operations whose names it doesn't have yet; existing ones aren't changed.
+- **Update preset operations** does that and also rewrites the operations named like the preset's to its current version (path, body, parameters, shape, description, examples). It keeps whether each is enabled or needs an admin's approval, and leaves operations of the API's own alone.
+- **Sign in first at** (on *Connection*, for *User name and password*): for APIs that swap the user name and password for a token, like the Wazuh manager's `/security/user/authenticate`. The token is reused for 10 minutes, and fetched again if the API refuses it sooner.
+
+## Response shapes
+
+An operation's **Response shape** boils its answer down on the server, before it is cached, logged, shown on a call's page or handed to Erynne or Claude. It's JSON; leave it empty to keep the answer as the API sent it.
+
+| Key | Effect |
+|---|---|
+| `"format": "elasticsearch"` | A `_search` answer becomes `{total, rows, <each aggregation>}`: hits become flat rows of their `_source`, aggregations become plain lists (`[{"key": "site-chan", "count": 21604, …sub-aggregations}]`), metrics become their value, and `_shards`, `_index`, `_id`, sort keys go. `<name>_others` says how many fell outside a top list; `total_is_at_least` means the count was capped. |
+| `"format": "wazuh"` | The Wazuh manager's `{data: {affected_items, total_affected_items}}` becomes `{total, rows}` (plus `failed` when some items failed). |
+| `"keep": ["rule.level", "policy.states.name"]` | Only these fields of each row (dotted paths, mapped through lists). |
+| `"rename": {"rule.level": "level"}` | Shorter names for fields. |
+| `"redact": true` | Passwords, keys, tokens and webhook addresses become `[redacted]`, in fields and in text. yes/no switches (`use_password: yes`) stay. |
+| `"flatten": false` | Keep nested objects instead of `rule.level`-style keys. |
+
+The MCP connector now hands Claude the answer as JSON rather than as a string of JSON, so shaped answers cost far fewer tokens.
 - **Recent calls** shows who asked what. A citation in chat opens the exact response the answer was based on, for the person who asked and for admins. That response is stored with the call, so answers from Atera keep ticket text in Mnemerynne's database for `MNEMERYNNE_API_CALLS_DAYS`.
 
 ## Actions (operations that change data)

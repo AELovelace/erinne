@@ -51,7 +51,8 @@ def test_wildcards_only_in_bodies():
 
 def test_wazuh_preset_operations(conn, settings):
     ops = {op["name"]: op for op in apis.preset("wazuh")["operations"]}
-    assert set(ops) == {"Alert summary", "Alerts", "Failed logins", "Alerts from an IP"}
+    assert {"Alert summary", "Alerts", "Failed logins", "Alerts from an IP", "Alert timeline", "Noise report",
+            "Agent silence", "Vulnerabilities"} <= set(ops)            # the 2026-11-17 expansion added more
     seen = []
     apis.TRANSPORT = httpx.MockTransport(lambda r: seen.append(r) or httpx.Response(200, json={"hits": {"hits": []}}))
     alerts = ops["Alerts"]
@@ -61,7 +62,8 @@ def test_wazuh_preset_operations(conn, settings):
     sent = json.loads(seen[0].content)
     filters = sent["query"]["bool"]["filter"]
     assert sent["size"] == 20 and filters[0] == {"range": {"timestamp": {"gte": "now-6h"}}}
-    assert filters[1] == {"range": {"rule.level": {"gte": 12}}} and filters[2] == {"wildcard": {"agent.name": "FD-01"}}
+    assert filters[1] == {"range": {"rule.level": {"gte": 12, "lte": 15}}}       # max_level defaults to 15
+    assert filters[2] == {"wildcard": {"agent.name": "FD-01"}} and len(filters) == 3   # unset filters left out
     with pytest.raises(apis.ApiError, match="between"):
         apis.call(conn, settings, op_id, {"hours": 9999}, user_id=None, via="chat")
     # The agent's tool for it has typed, bounded parameters.
@@ -83,7 +85,7 @@ def test_wazuh_alerts_from_an_ip(conn, settings):
     sent = json.loads(seen[0].content)
     filters = sent["query"]["bool"]["filter"]
     assert filters[0] == {"range": {"timestamp": {"gte": "now-48h"}}}
-    assert filters[1] == {"range": {"rule.level": {"gte": 0}}}                    # quiet alerts count for one IP
+    assert filters[1] == {"range": {"rule.level": {"gte": 0, "lte": 15}}}         # quiet alerts count for one IP
     assert filters[2] == {"wildcard": {"data.srcip": "192.168.1.*"}}
     assert sent["size"] == 20 and set(sent["aggs"]) == {"levels", "rules", "agents", "locations", "users"}
     with pytest.raises(apis.ApiError, match="needed"):                             # no IP, no call
@@ -100,10 +102,10 @@ def test_existing_apis_take_in_new_preset_operations(admin_client, conn):  # noq
     conn.execute("INSERT INTO api_operations(api_id, name, method, path, body) VALUES (?, 'Alerts', 'POST', "
                  "'/x', '{}')", (api_id,))
     added = admin_client.post(f"/api/admin/apis/{api_id}/preset-operations", json={"preset": "wazuh"}).json()
-    assert added == {"added": 3}                       # "Alerts" was already there
+    assert added == {"added": 12, "updated": 0}        # "Alerts" was already there, and stays as it was
     names = [r[0] for r in conn.execute("SELECT name FROM api_operations WHERE api_id = ? ORDER BY id", (api_id,))]
-    assert names == ["Alerts", "Alert summary", "Failed logins", "Alerts from an IP"]
+    assert names[:4] == ["Alerts", "Alert summary", "Failed logins", "Alerts from an IP"]
     assert admin_client.post(f"/api/admin/apis/{api_id}/preset-operations",
-                             json={"preset": "wazuh"}).json() == {"added": 0}
+                             json={"preset": "wazuh"}).json() == {"added": 0, "updated": 0}
     assert admin_client.post(f"/api/admin/apis/{api_id}/preset-operations",
                              json={"preset": "nope"}).status_code == 404

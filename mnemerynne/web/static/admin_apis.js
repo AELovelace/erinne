@@ -113,7 +113,13 @@
     e.preventDefault();
     const key = $("new-api-preset").value;
     let body = { preset: key || null };
-    if (!key) {
+    const chosen = (state.list && state.list.presets || []).find(function (p) { return p.key === key; });
+    if (chosen) {
+      // Built-in presets carry a placeholder address (e.g. https://wazuh-indexer.example:9200): ask for the real one.
+      const url = prompt("Address of your " + chosen.name + " (change the example to yours):", chosen.base_url || "");
+      if (!url) return;
+      body.base_url = url.trim();
+    } else if (!key) {
       const name = prompt("Name of the API (e.g. Hotel stats):");
       if (!name) return;
       const url = prompt("Its address (e.g. https://stats.example.com/api):");
@@ -199,14 +205,29 @@
       return p.name.toLowerCase() === d.name.toLowerCase();
     });
     if (preset) {
+      const kind = preset.uploaded ? "template" : "preset";
       head.appendChild(button("Add preset operations", "link small", async function () {
         const done = await run(function () {
           return api("POST", "/api/admin/apis/" + d.id + "/preset-operations", { preset: preset.key });
         });
         if (done !== null) {
-          const kind = preset.uploaded ? "template" : "preset";
           alert(done.added ? "Added " + done.added + " operation(s) from the " + preset.name + " " + kind + "."
                            : "This API already has all of the " + kind + "'s operations.");
+          await open(d.id);
+        }
+      }));
+      // Rewrites operations that share a name with the preset's (their body, parameters and shape); keeps
+      // whether each is enabled or needs an admin's approval, and leaves the API's own operations alone.
+      head.appendChild(button("Update preset operations", "link small", async function () {
+        if (!confirm("Bring every operation named like one in the " + preset.name + " " + kind + " up to its " +
+                     "current version? Edits you made to those operations are replaced; operations of your own " +
+                     "stay as they are.")) return;
+        const done = await run(function () {
+          return api("POST", "/api/admin/apis/" + d.id + "/preset-operations", { preset: preset.key, update: true });
+        });
+        if (done !== null) {
+          alert("Updated " + done.updated + " and added " + done.added + " operation(s) from the " + preset.name +
+                " " + kind + ".");
           await open(d.id);
         }
       }));
@@ -245,20 +266,26 @@
                          ["basic", "User name and password"]], d.auth_type);
     const header = input(d.auth_header, { placeholder: "X-API-Key" });
     const user = input(d.auth_user);
+    const login = input(d.auth_login_path || "", { placeholder: "/security/user/authenticate" });
     const headerField = field("Header name", header);
     const userField = field("User name", user);
+    const loginField = field("Sign in first at (optional)", login,
+                             "For APIs that swap the user name and password for a token (the Wazuh manager: " +
+                             "/security/user/authenticate). Empty: the user name and password go with every call.");
     function toggle() {
       headerField.hidden = auth.value !== "header";
       userField.hidden = auth.value !== "basic";
+      loginField.hidden = auth.value !== "basic";
     }
     auth.addEventListener("change", toggle);
     toggle();
     const oneAtATime = checkbox("It runs one query at a time (calls wait their turn instead of failing with HTTP 429)",
                                 d.one_at_a_time);
-    s.append(field("Address", url), field("Authentication", auth), headerField, userField, oneAtATime,
+    s.append(field("Address", url), field("Authentication", auth), headerField, userField, loginField, oneAtATime,
              button("Save connection", "small", function () {
                patch({ base_url: url.value.trim(), auth_type: auth.value, auth_header: header.value.trim(),
-                       auth_user: user.value.trim(), one_at_a_time: oneAtATime.box.checked });
+                       auth_user: user.value.trim(), auth_login_path: auth.value === "basic" ? login.value.trim() : "",
+                       one_at_a_time: oneAtATime.box.checked });
              }));
 
     if (d.auth_type !== "none") {
@@ -354,6 +381,8 @@
     const examples = input(op ? op.example_questions : "", { multiline: true, rows: 4,
                                                               placeholder: "One question per line" });
     const cache = input(op ? op.cache_seconds : 60, { type: "number" });
+    const shape = input(op ? op.shape || "" : "", { multiline: true, rows: 2,
+                                                    placeholder: "{\"format\": \"elasticsearch\"}" });
     const enabled = checkbox("Enabled", op ? op.enabled : true);
     const bodyField = field("Body (fixed; the model only fills {{name}} slots, with checked values)", body);
     function toggle() {
@@ -372,8 +401,15 @@
                field("Parameters (JSON)", params,
                      'e.g. [{"name": "days", "type": "int", "in": "query", "min": 1, "max": 31, "default": 7, ' +
                      '"help": "How many days"}]. Types: string, int, date, enum (with "options"), and for ' +
-                     'actions text (free text up to 2000 characters, body only). "in": query, path, or body ' +
-                     '(write {{name}} in the body where the value goes).'),
+                     'actions text (free text up to 2000 characters, body only), and list (up to 50 values, ' +
+                     'comma-separated; a JSON array in the body). "in": query, path, or body (write {{name}} in ' +
+                     'the body where the value goes). In the body, {"$if": "name", "then": {…}} is left out ' +
+                     'when that parameter is empty: an optional filter.'),
+               field("Response shape (JSON, optional)", shape,
+                     'Boils the answer down on the server before anyone sees it. "format": "elasticsearch" ' +
+                     '(rows and plain aggregation lists) or "wazuh" (the manager API\'s affected_items as rows); ' +
+                     '"keep": ["rule.level", …] picks fields; "rename": {"rule.level": "level"}; "redact": true ' +
+                     'hides passwords, keys and webhook addresses before the answer is cached, logged or shown.'),
                field("Example questions", examples), field("Cache (seconds)", cache), enabled);
     box.append(button("Save", "small", function () {
       let parsed;
@@ -382,7 +418,8 @@
                         path: path.value.trim(), body: bodyField.hidden ? "" : body.value,
                         params: parsed, example_questions: examples.value, cache_seconds: Number(cache.value) || 0,
                         enabled: enabled.box.checked, action: action.box.checked,
-                        admin_approval: action.box.checked && adminApproval.box.checked };
+                        admin_approval: action.box.checked && adminApproval.box.checked,
+                        shape: shape.value.trim() };
       run(async function () {
         if (op) await api("PUT", "/api/admin/apis/operations/" + op.id, payload);
         else await api("POST", "/api/admin/apis/" + d.id + "/operations", payload);

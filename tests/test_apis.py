@@ -196,7 +196,7 @@ def test_claude_searches_an_answer_by_keyword(conn, settings, directory):
     tools = Tools(settings, lambda: None, lambda: directory)
     out, _ = tools.query_api(conn, Caller(ivan, "ivan", 1), "Hotel Stats", "Stats summary", {"days": 2},
                              find="kennewick")
-    assert [r["account_number"] for r in json.loads(out["data"])["rows"]] == ["900000", "900100", "900200", "900300"]
+    assert [r["account_number"] for r in out["data"]["rows"]] == ["900000", "900100", "900200", "900300"]
     assert out["rows"]["total"] == 4 and out["rows"]["matched_of"] == 351 and "next_offset" not in out["rows"]
     assert "4 of the 351 rows" in out["note"] and "other pages" in out["note"]
 
@@ -212,7 +212,7 @@ def test_claude_pages_through_a_long_answer(conn, settings, directory):
     got, offset = [], 0
     while True:
         out, _ = tools.query_api(conn, caller, "Hotel Stats", "Stats summary", {"days": 2}, offset=offset)
-        got += json.loads(out["data"])["rows"]
+        got += out["data"]["rows"]
         if "next_offset" not in out["rows"]:
             break
         assert f"offset={out['rows']['next_offset']}" in out["note"]
@@ -332,7 +332,7 @@ def test_operations_follow_the_ad_group_and_claude_switch(conn, settings, direct
     assert listed["apis"][0]["operations"][0]["operation"] == "Stats summary"
     _upstream(lambda r: httpx.Response(200, json={"occupancyPct": 80}))
     out, _ = tools.query_api(conn, Caller(ivan["id"], "ivan", 1), "hotel stats", "stats summary", {"days": 2})
-    assert out["citation"].startswith("Hotel Stats · Stats summary (live,") and '"occupancyPct":80' in out["data"]
+    assert out["citation"].startswith("Hotel Stats · Stats summary (live,") and out["data"] == {"occupancyPct": 80}   # JSON, not a string of it
 
 
 # ------------------------------------------------------------------ admin page

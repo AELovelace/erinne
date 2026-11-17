@@ -44,7 +44,7 @@ def _op_json(r: sqlite3.Row) -> dict:
             "path": r["path"], "params": apis.param_specs(r), "body": r["body"],
             "example_questions": r["example_questions"], "cache_seconds": r["cache_seconds"],
             "enabled": bool(r["enabled"]), "action": bool(r["action"]),
-            "admin_approval": bool(r["admin_approval"])}
+            "admin_approval": bool(r["admin_approval"]), "shape": r["shape"]}
 
 
 def _check_url(url: str) -> str:
@@ -115,9 +115,11 @@ async def list_apis(request: Request, user=Depends(admin_user), conn: sqlite3.Co
                     "operations": r["operations"], "calls_24h": r["calls_24h"],
                     "last_call": dict(last) if last else None})
     directory = request.app.state.directory
-    presets = [{"key": p["key"], "name": p["name"], "uploaded": False} for p in apis.PRESETS]
-    presets += [{"key": p["key"], "name": p["name"], "uploaded": True, "template_id": p["template_id"]}
-                for p in apis.uploaded_templates(conn)]
+    # base_url: the create form offers it as the address to change (built-in ones are placeholders).
+    presets = [{"key": p["key"], "name": p["name"], "uploaded": False, "base_url": p["base_url"]}
+               for p in apis.PRESETS]
+    presets += [{"key": p["key"], "name": p["name"], "uploaded": True, "template_id": p["template_id"],
+                 "base_url": p["base_url"]} for p in apis.uploaded_templates(conn)]
     return {"apis": out, "presets": presets,
             "groups": group_refs.choices(conn, await anyio.to_thread.run_sync(directory.groups)),
             "domain": settings.ad_domain,
@@ -144,55 +146,71 @@ async def create_api(body: NewApi, request: Request, user=Depends(admin_user),
     url = _check_url(body.base_url or (p["base_url"] if p else ""))
     with transaction(conn):
         api_id = conn.execute(
-            "INSERT INTO apis(name, description, base_url, auth_type, auth_header, auth_user, tls_check_hostname, "
-            "one_at_a_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO apis(name, description, base_url, auth_type, auth_header, auth_user, auth_login_path, "
+            "tls_check_hostname, one_at_a_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (name, p["description"] if p else "", url, p["auth_type"] if p else "none",
              p.get("auth_header", "") if p else "", p.get("auth_user", "") if p else "",
+             p.get("auth_login_path", "") if p else "",                 # e.g. the Wazuh manager's sign-in
              p.get("tls_check_hostname", 1) if p else 1, p.get("one_at_a_time", 0) if p else 0)).lastrowid
-        op_ids = _preset_operations(conn, api_id, p["operations"] if p else [])
+        op_ids, _ = _preset_operations(conn, api_id, p["operations"] if p else [])
         _log(conn, user, "api.create", name, f"preset {p['key']}" if p else "")
     await _index(request, conn, op_ids)
     return {"id": api_id, "name": name}
 
 
-def _preset_operations(conn: sqlite3.Connection, api_id: int, operations: list[dict]) -> list[int]:
-    """Add a preset's operations to an API (inside the caller's transaction), skipping names it has."""
-    have = {r[0].lower() for r in conn.execute("SELECT name FROM api_operations WHERE api_id = ?", (api_id,))}
-    op_ids = []
+def _preset_operations(conn: sqlite3.Connection, api_id: int, operations: list[dict],
+                       update: bool = False) -> tuple[list[int], list[int]]:
+    """Add a preset's operations to an API (inside the caller's transaction), skipping names it has; with
+    update, also rewrite the ones it has to the preset's version (keeping whether each is enabled and
+    needs an admin's approval). (added ids, updated ids)."""
+    have = {r["name"].lower(): r["id"] for r in
+            conn.execute("SELECT id, name FROM api_operations WHERE api_id = ?", (api_id,))}
+    added, updated = [], []
     for op in operations:
-        if op["name"].lower() in have:
-            continue
         params = op.get("params", [])
         action = bool(op.get("action", False))
         apis.check_specs(op["path"], params, op.get("method", "GET"), op.get("body", ""), action)
-        op_ids.append(conn.execute(
-            "INSERT INTO api_operations(api_id, name, description, example_questions, method, path, params, "
-            "body, cache_seconds, action) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (api_id, op["name"], op.get("description", ""), op.get("example_questions", ""),
-             op.get("method", "GET"), op["path"], json.dumps(params), op.get("body", ""),
-             0 if action else op.get("cache_seconds", 60), int(action))).lastrowid)
-    return op_ids
+        values = (op.get("description", ""), op.get("example_questions", ""), op.get("method", "GET"), op["path"],
+                  json.dumps(params), op.get("body", ""), 0 if action else op.get("cache_seconds", 60), int(action),
+                  apis.check_shape(op.get("shape", "")))
+        existing = have.get(op["name"].lower())
+        if existing is None:
+            added.append(conn.execute(
+                "INSERT INTO api_operations(api_id, name, description, example_questions, method, path, params, "
+                "body, cache_seconds, action, shape) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (api_id, op["name"], *values)).lastrowid)
+        elif update:
+            conn.execute("UPDATE api_operations SET description = ?, example_questions = ?, method = ?, path = ?, "
+                         "params = ?, body = ?, cache_seconds = ?, action = ?, shape = ? WHERE id = ?",
+                         (*values, existing))
+            updated.append(existing)
+    return added, updated
 
 
 class PresetBody(BaseModel):
     preset: str
+    update: bool = False     # also rewrite the operations it already has to the preset's version
 
 
 @router.post("/{api_id}/preset-operations")
 async def add_preset_operations(api_id: int, body: PresetBody, request: Request, user=Depends(admin_user),
                                 conn: sqlite3.Connection = Depends(get_db)):
-    """Bring an existing API up to date with a preset: its operations this API doesn't have yet."""
+    """Bring an existing API up to date with a preset: its operations this API doesn't have yet, and
+    (update) the preset's current version of the ones it has. Operations of the API's own stay as they are."""
     a = _api(conn, api_id)
     p = apis.preset(body.preset, conn)
     if p is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such preset")
     with transaction(conn):
-        op_ids = _preset_operations(conn, api_id, p["operations"])
-        if op_ids:
-            _log(conn, user, "api.preset_operations", a["name"], f"{len(op_ids)} from {p['key']}")
-    await _index(request, conn, op_ids)
+        added, updated = _preset_operations(conn, api_id, p["operations"], update=body.update)
+        if added or updated:
+            _log(conn, user, "api.preset_operations", a["name"],
+                 f"{len(added)} added, {len(updated)} updated from {p['key']}")
+        if body.update and p.get("auth_login_path") and not a["auth_login_path"] and a["auth_type"] == "basic":
+            conn.execute("UPDATE apis SET auth_login_path = ? WHERE id = ?", (p["auth_login_path"], api_id))
+    await _index(request, conn, added + updated)
     apis.clear_cache()
-    return {"added": len(op_ids)}
+    return {"added": len(added), "updated": len(updated)}
 
 
 async def _index(request: Request, conn: sqlite3.Connection, op_ids: list[int]) -> None:
@@ -224,7 +242,8 @@ def api_detail(api_id: int, request: Request, user=Depends(admin_user), conn: sq
         "id": a["id"], "name": a["name"], "description": a["description"],
         "description_html": markdown.render_html(a["description"]) if a["description"] else "",
         "base_url": a["base_url"], "auth_type": a["auth_type"], "auth_header": a["auth_header"],
-        "auth_user": a["auth_user"], "credential": apis.credential_status(settings, a),
+        "auth_user": a["auth_user"], "auth_login_path": a["auth_login_path"],
+        "credential": apis.credential_status(settings, a),
         "secret_changed_at": a["secret_changed_at"], "ca_pem": a["ca_pem"],
         "tls_check_hostname": bool(a["tls_check_hostname"]), "one_at_a_time": bool(a["one_at_a_time"]),
         "ad_group": group_refs.label(conn, a["ad_group"]),
@@ -242,6 +261,7 @@ class ApiPatch(BaseModel):
     auth_type: Literal["none", "bearer", "header", "basic"] | None = None
     auth_header: str | None = Field(None, max_length=80)
     auth_user: str | None = Field(None, max_length=200)
+    auth_login_path: str | None = Field(None, max_length=300)   # basic: sign in here first, then use the token
     ca_pem: str | None = Field(None, max_length=20000)
     tls_check_hostname: bool | None = None
     one_at_a_time: bool | None = None
@@ -273,6 +293,11 @@ async def update_api(api_id: int, body: ApiPatch, request: Request, user=Depends
     if "auth_header" in changes and changes["auth_header"] and \
             not all(c.isalnum() or c == "-" for c in changes["auth_header"]):
         raise _refuse(ValueError("A header name has only letters, digits and dashes."))
+    if "auth_login_path" in changes:
+        try:
+            changes["auth_login_path"] = apis.check_login_path(changes["auth_login_path"])
+        except apis.ApiError as exc:
+            raise _refuse(exc) from None
     if not changes:
         return {"status": "unchanged"}
     for key in ("tls_check_hostname", "one_at_a_time", "claude_enabled", "enabled"):
@@ -348,11 +373,13 @@ class Operation(BaseModel):
     enabled: bool = True
     action: bool = False    # changes data: proposed by Erynne or Claude, run only when the person applies it
     admin_approval: bool = False   # an action an admin approves (Access → Approvals) instead of the person
+    shape: str = Field("", max_length=8000)   # how the answer is boiled down (apis.check_shape); '' = as sent
 
 
 def _save_op(conn, api_id: int, op_id: int | None, body: Operation) -> int:
     try:
         apis.check_specs(body.path, body.params, body.method, body.body, body.action)
+        shape = apis.check_shape(body.shape)
     except apis.ApiError as exc:
         raise _refuse(exc) from None
     if body.admin_approval and not body.action:
@@ -361,16 +388,17 @@ def _save_op(conn, api_id: int, op_id: int | None, body: Operation) -> int:
     values = (body.name.strip(), body.description, body.example_questions, body.method, body.path,
               json.dumps(body.params), body.body if body.method in apis.BODY_METHODS else "",
               0 if body.action else body.cache_seconds, int(body.enabled), int(body.action),
-              int(body.admin_approval))
+              int(body.admin_approval), shape)
     try:
         if op_id is None:
             return conn.execute(
                 "INSERT INTO api_operations(name, description, example_questions, method, path, params, body, "
-                "cache_seconds, enabled, action, admin_approval, api_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "cache_seconds, enabled, action, admin_approval, shape, api_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (*values, api_id)).lastrowid
         conn.execute("UPDATE api_operations SET name = ?, description = ?, example_questions = ?, method = ?, "
-                     "path = ?, params = ?, body = ?, cache_seconds = ?, enabled = ?, action = ?, admin_approval = ? "
-                     "WHERE id = ?",
+                     "path = ?, params = ?, body = ?, cache_seconds = ?, enabled = ?, action = ?, admin_approval = ?, "
+                     "shape = ? WHERE id = ?",
                      (*values, op_id))
         return op_id
     except sqlite3.IntegrityError:

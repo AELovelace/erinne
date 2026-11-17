@@ -38,6 +38,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 import numpy as np
 
+from mnemerynne import wazuh_presets
 from mnemerynne.config import Settings
 
 TIMEOUT = 20.0
@@ -45,8 +46,11 @@ QUEUE_WAIT = 30.0                # a call to a one-at-a-time API waits this long
 RETRY_429_AFTER = 1.5            # seconds before trying a reading call again after HTTP 429
 MAX_RESPONSE_BYTES = 256 * 1024
 EXCERPT_CHARS = 20_000           # kept with each call, for the citation link
-PARAM_TYPES = ("string", "int", "date", "enum", "text")
+PARAM_TYPES = ("string", "int", "date", "enum", "text", "list")
 TEXT_MAX = 2000   # a "text" parameter: free text (a ticket comment) in an action's body, always JSON-escaped
+LIST_MAX = 50     # a "list" parameter: up to 50 short values (rule IDs, IPs), each checked like a string
+LOGIN_TOKEN_SECONDS = 600        # a signed-in API's token is reused this long (Wazuh's last 900 s)
+SHAPE_FORMATS = ("", "elasticsearch", "wazuh")
 READ_METHODS = ("GET", "POST")                       # a reading POST has a fixed body (e.g. a search)
 ACTION_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 BODY_METHODS = ("POST", "PUT", "PATCH")
@@ -184,6 +188,12 @@ def check_specs(path: str, specs: list[dict], method: str, body: str, action: bo
             raise ApiError(f"Parameter “{name}” is a list; give its options.")
         if s.get("type") == "text" and not (action and s.get("in") == "body"):
             raise ApiError(f"Parameter “{name}” is free text: only actions take it, and only in the body.")
+        if s.get("type") == "list" and s.get("in") == "path":
+            raise ApiError(f"Parameter “{name}” is a list: lists go in the query or the body, not the path.")
+    route, _, fixed_query = path.partition("?")            # a fixed query (?select=id,name) is sent as written
+    if _PLACEHOLDER.search(fixed_query) or "#" in path:
+        raise ApiError("A path's fixed query (after ?) can't hold {placeholders}; make them query parameters.")
+    full_path, path = path, route
     for placeholder in _PLACEHOLDER.findall(path):
         if not any(s["name"] == placeholder and s.get("in") == "path" for s in specs):
             raise ApiError(f"The path uses {{{placeholder}}} but there's no path parameter by that name.")
@@ -200,12 +210,65 @@ def check_specs(path: str, specs: list[dict], method: str, body: str, action: bo
         except ValueError as exc:
             raise ApiError(f"A {method} operation needs a JSON body (with {{{{name}}}} where body parameters go).") \
                 from exc
+        _check_conditions(json.loads(render_body(body, samples)), in_body)   # every {"$if": name} names a body parameter
+        fill_body(body, samples)                                             # filled in, and with nothing filled in
+        fill_body(body, {})
     elif body:
         raise ApiError(f"{method} operations have no body.")
     elif any(s.get("in") == "body" for s in specs):
         raise ApiError("Body parameters need a body to go in ({{name}} where each goes).")
-    if not path.startswith("/") or path.startswith("//") or ".." in path or "://" in path or "\\" in path:
+    if not path.startswith("/") or path.startswith("//") or ".." in full_path or "://" in full_path \
+            or "\\" in full_path:
         raise ApiError("The path must start with / and stay under the API's address.")
+
+
+_DROP = object()   # a {"$if": ...} whose parameter is empty: left out of the body
+
+
+def _is_set(value) -> bool:
+    return value not in (None, "", [])
+
+
+def _check_conditions(node, in_body: set) -> None:
+    """Refuse a {"$if": name, "then": ..., "else": ...} that names no body parameter or has other keys."""
+    if isinstance(node, list):
+        for item in node:
+            _check_conditions(item, in_body)
+    elif isinstance(node, dict):
+        if "$if" in node:
+            if set(node) - {"$if", "then", "else"} or "then" not in node:
+                raise ApiError('A condition is {"$if": "name", "then": …} (and optionally "else": …), nothing more.')
+            if node["$if"] not in in_body:
+                raise ApiError(f"The body's condition {{\"$if\": \"{node['$if']}\"}} names no body parameter.")
+        for value in node.values():
+            _check_conditions(value, in_body)
+
+
+def _resolve(node, values: dict):
+    """The body with each {"$if": name, "then": X, "else": Y} replaced by X when that parameter has a
+    value, Y (or nothing at all) when it doesn't: optional filters, e.g. "only these rule IDs"."""
+    if isinstance(node, list):
+        return [r for r in (_resolve(item, values) for item in node) if r is not _DROP]
+    if isinstance(node, dict):
+        if "$if" in node:
+            branch = node["then"] if _is_set(values.get(node["$if"])) else node.get("else", _DROP)
+            return branch if branch is _DROP else _resolve(branch, values)
+        out = {}
+        for key, value in node.items():
+            resolved = _resolve(value, values)
+            if resolved is not _DROP:
+                out[key] = resolved
+        return out
+    return node
+
+
+def fill_body(template: str, values: dict) -> str:
+    """The body as it's sent: placeholders filled in (render_body), then its conditions resolved."""
+    rendered = render_body(template, values)
+    if '"$if"' not in template:
+        return rendered                                    # no conditions: exactly as rendered
+    body = _resolve(json.loads(rendered), values)
+    return json.dumps({} if body is _DROP else body, ensure_ascii=False)
 
 
 def _sample(spec: dict):
@@ -215,20 +278,24 @@ def _sample(spec: dict):
         return int(spec.get("min") if spec.get("min") is not None else 1)
     if kind == "enum":
         return str((spec.get("options") or ["x"])[0])
+    if kind == "list":
+        return ["x"]
     return "2026-01-01" if kind == "date" else "x"
 
 
 def render_body(template: str, values: dict) -> str:
     """The POST body with each {{name}} filled in: escaped text inside a JSON
     string ("now-{{hours}}h"), a JSON value elsewhere ({"size": {{count}}}).
-    A parameter without a value becomes "" or null."""
+    A parameter without a value becomes "" or null. A list is a JSON array
+    outside a string and its values joined with commas inside one."""
     out, pos, in_string, escaped = [], 0, False, False
     while pos < len(template):
         m = _BODY_PLACEHOLDER.match(template, pos)
         if m:
             value = values.get(m.group(1))
             if in_string:
-                out.append(json.dumps("" if value is None else str(value))[1:-1])
+                text = ",".join(map(str, value)) if isinstance(value, list) else "" if value is None else str(value)
+                out.append(json.dumps(text)[1:-1])                 # escaped, without its own quotes
             else:
                 out.append(json.dumps(value))
             pos = m.end()
@@ -258,6 +325,16 @@ def validate_params(specs: list[dict], given: dict | None) -> dict:
     for s in specs:
         name, kind = s["name"], s["type"]
         value = given.get(name)
+        if kind == "list":
+            value = _list_value(name, s, value)                # [] when nothing was given
+            if not value and s.get("default") not in (None, "", []):
+                value = _list_value(name, s, s["default"])
+            if not value:
+                if s.get("required"):
+                    raise ApiError(f"“{name}” is needed.")
+                continue
+            out[name] = value
+            continue
         if value in (None, ""):
             if s.get("default") not in (None, ""):
                 value = s["default"]
@@ -297,19 +374,250 @@ def validate_params(specs: list[dict], given: dict | None) -> dict:
     return out
 
 
+def _list_value(name: str, spec: dict, value) -> list[str]:
+    """A list parameter's values: a JSON list or comma-separated text, each a short safe string."""
+    if value in (None, ""):
+        return []
+    items = value if isinstance(value, list) else str(value).split(",")
+    items = [str(i).strip() for i in items if str(i).strip()]
+    if len(items) > LIST_MAX:
+        raise ApiError(f"“{name}” takes at most {LIST_MAX} values.")
+    pattern = _SAFE_BODY_STRING if spec.get("in") == "body" else _SAFE_STRING
+    if not all(pattern.match(i) and "," not in i for i in items):
+        raise ApiError(f"“{name}” contains characters that aren't allowed.")
+    return items
+
+
 def build_request(api, op, params: dict) -> tuple[str, str, dict, str | None]:
-    """(method, url, query, body) for a validated call."""
+    """(method, url, query, body) for a validated call. A fixed query written in the operation's path
+    (?select=id,name) is kept, with the query parameters added after it; lists go as a,b,c."""
+    from urllib.parse import parse_qsl
+
     specs = {s["name"]: s for s in param_specs(op)}
-    path = _PLACEHOLDER.sub(lambda m: quote(str(params[m.group(1)]), safe=""), op["path"])
+    route, _, fixed = op["path"].partition("?")
+    path = _PLACEHOLDER.sub(lambda m: quote(str(params[m.group(1)]), safe=""), route)
     url = api["base_url"].rstrip("/") + path
     base, built = urlsplit(api["base_url"]), urlsplit(url)
     if (base.scheme, base.netloc) != (built.scheme, built.netloc) or built.scheme not in ("https", "http"):
         raise ApiError("The operation's address leaves the API.")
-    query = {k: v for k, v in params.items() if specs[k].get("in", "query") == "query"}
+    query = dict(parse_qsl(fixed, keep_blank_values=True))
+    query.update({k: ",".join(v) if isinstance(v, list) else v for k, v in params.items()
+                  if specs[k].get("in", "query") == "query"})
     if op["method"] not in BODY_METHODS:
         return op["method"], url, query, None
     body = {k: v for k, v in params.items() if specs[k].get("in") == "body"}
-    return op["method"], url, query, render_body(op["body"], body) if op["body"] else None
+    return op["method"], url, query, fill_body(op["body"], body) if op["body"] else None
+
+
+# ------------------------------------------------------------------- shaping
+# An operation's shape boils its answer down on the server, before it is cached, logged, shown or handed to
+# the model: Elasticsearch boilerplate (_shards, _index, sort keys) goes, aggregations become plain lists,
+# and secrets (an operation with "redact") never leave this module.
+_SHAPE_KEYS = {"format", "keep", "rename", "redact", "flatten"}
+_REDACT_KEY = re.compile(r"(?i)(pass(wd|word)?$|password|secret|token|api_?key|hook_url|webhook|credential"
+                         r"|private_key|^key$)")
+_REDACT_TEXT = (
+    # "Random password chosen for agent authentication: 3b7c…", "api_key=…", "token: …"
+    (re.compile(r"(?i)\b(password|passwd|secret|token|api[_-]?key)\b([^:=\n]{0,40}?[:=]\s*)([^\s,;'\"]+)"),
+     r"\1\2[redacted]"),
+    (re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}"), r"\1 [redacted]"),
+    (re.compile(r"(?i)https?://[^\s\"'<>]*(hooks?|webhook)[^\s\"'<>]*"), "[redacted webhook]"),
+)
+_HARMLESS = {"", "yes", "no", "true", "false", "on", "off", "none", "disabled", "enabled"}
+
+
+def check_shape(shape) -> str:
+    """Admin or template input: the shape as tidy JSON text ('' for none), or ApiError."""
+    if shape in (None, "", {}):
+        return ""
+    if isinstance(shape, str):
+        try:
+            shape = json.loads(shape)
+        except ValueError:
+            raise ApiError("The response shape is JSON, e.g. {\"format\": \"elasticsearch\"}.") from None
+    if not isinstance(shape, dict) or set(shape) - _SHAPE_KEYS:
+        raise ApiError(f"A response shape is an object with only: {', '.join(sorted(_SHAPE_KEYS))}.")
+    if shape.get("format", "") not in SHAPE_FORMATS:
+        raise ApiError("The shape's format is elasticsearch, wazuh, or left out.")
+    keep, rename = shape.get("keep", []), shape.get("rename", {})
+    if not isinstance(keep, list) or len(keep) > 60 or not all(isinstance(k, str) and 0 < len(k) <= 120 for k in keep):
+        raise ApiError("The shape's keep is a list of at most 60 field paths, like \"rule.level\".")
+    if not isinstance(rename, dict) or len(rename) > 60 or \
+            not all(isinstance(k, str) and isinstance(v, str) and v for k, v in rename.items()):
+        raise ApiError("The shape's rename maps field paths to new names, like {\"rule.level\": \"level\"}.")
+    for flag in ("redact", "flatten"):
+        if not isinstance(shape.get(flag, True), bool):
+            raise ApiError(f"The shape's {flag} is true or false.")
+    return json.dumps(shape, ensure_ascii=False, sort_keys=True)
+
+
+def redact_text(text: str) -> str:
+    """Text with passwords, tokens, keys and webhook addresses blanked out."""
+    for pattern, replacement in _REDACT_TEXT:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def _redact(value):
+    """Every secret-looking field blanked (yes/no switches like use_password stay), and secrets in text."""
+    if isinstance(value, dict):
+        return {k: ("[redacted]" if _REDACT_KEY.search(str(k)) and _secretish(v) else _redact(v))
+                for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact(v) for v in value]
+    return redact_text(value) if isinstance(value, str) else value
+
+
+def _secretish(value) -> bool:
+    if isinstance(value, (dict, list)):
+        return bool(value)
+    return isinstance(value, (str, int, float)) and not isinstance(value, bool) and \
+        str(value).strip().lower() not in _HARMLESS
+
+
+def _flat(value, prefix: str = "") -> dict:
+    """{"rule": {"level": 3}} → {"rule.level": 3}; lists stay lists."""
+    out: dict = {}
+    for key, item in (value or {}).items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(item, dict) and item:
+            out.update(_flat(item, path))
+        else:
+            out[path] = item
+    return out
+
+
+def _pick(value, parts: list[str]):
+    """The value at a dotted path, mapped over lists on the way (states.name → every state's name)."""
+    if not parts:
+        return value
+    if isinstance(value, list):
+        picked = [_pick(v, parts) for v in value]
+        return [p for p in picked if p is not _DROP] or _DROP
+    if isinstance(value, dict) and parts[0] in value:
+        return _pick(value[parts[0]], parts[1:])
+    return _DROP
+
+
+def _row(item, shape: dict):
+    """One row: kept fields (all if keep is empty), flattened, renamed."""
+    if not isinstance(item, dict):
+        return item
+    if shape.get("keep"):
+        picked = {p: _pick(item, p.split(".")) for p in shape["keep"]}
+        item = {p: v for p, v in picked.items() if v is not _DROP}
+    if shape.get("flatten", True):
+        item = _flat(item)
+    rename = shape.get("rename") or {}
+    return {rename.get(k, k): v for k, v in item.items()}
+
+
+def _agg(value, shape: dict):
+    """One Elasticsearch aggregation as plain data: buckets → [{key, count, …sub}], a metric → its value."""
+    if not isinstance(value, dict):
+        return value
+    if "buckets" in value:
+        buckets = value["buckets"]
+        if isinstance(buckets, dict):                               # a "filters" aggregation: named buckets
+            buckets = [{"key": k, **v} for k, v in buckets.items()]
+        return [_bucket(b, shape) for b in buckets]
+    if isinstance(value.get("hits"), dict):                         # top_hits
+        return [_row(h.get("_source") or {}, shape) for h in value["hits"].get("hits") or []]
+    if "value" in value:
+        return value.get("value_as_string", value["value"])
+    if "doc_count" in value:                                        # a single-bucket filter
+        sub = _subaggs(value, shape)
+        return {"count": value["doc_count"], **sub} if sub else value["doc_count"]
+    return value
+
+
+def _subaggs(bucket: dict, shape: dict) -> dict:
+    out = {}
+    for name, sub in bucket.items():
+        if not isinstance(sub, dict) or name == "key":
+            continue
+        got = _agg(sub, shape)
+        # A one-bucket terms list that covers the whole parent (a rule ID's one description) is just its key.
+        if isinstance(got, list) and len(got) == 1 and isinstance(got[0], dict) and set(got[0]) == {"key", "count"} \
+                and got[0]["count"] == bucket.get("doc_count"):
+            got = got[0]["key"]
+        out[name] = got
+    return out
+
+
+def _bucket(bucket: dict, shape: dict) -> dict:
+    return {"key": bucket.get("key_as_string", bucket.get("key")), "count": bucket.get("doc_count"),
+            **_subaggs(bucket, shape)}
+
+
+def _shape_elasticsearch(data, shape: dict):
+    if not isinstance(data, dict) or not ("hits" in data or "aggregations" in data):
+        return data
+    out: dict = {}
+    hits = data.get("hits") or {}
+    total = hits.get("total")
+    if isinstance(total, dict):
+        out["total"] = total.get("value")
+        if total.get("relation") == "gte":
+            out["total_is_at_least"] = True                      # tracking was capped: "10,000 or more"
+    elif isinstance(total, int):
+        out["total"] = total
+    if hits.get("hits") or not data.get("aggregations"):
+        out["rows"] = [_row(h.get("_source") or {}, shape) for h in hits.get("hits") or []]
+    for name, agg in (data.get("aggregations") or {}).items():
+        out[name] = _agg(agg, shape)
+        if isinstance(agg, dict) and agg.get("sum_other_doc_count"):
+            out[name + "_others"] = agg["sum_other_doc_count"]   # how many more fell outside the top list
+    if data.get("timed_out"):
+        out["timed_out"] = True
+    if (data.get("_shards") or {}).get("failed"):
+        out["shards_failed"] = data["_shards"]["failed"]
+    return out
+
+
+def _shape_wazuh(data, shape: dict):
+    """The Wazuh manager API's {data: {affected_items, total_affected_items, failed_items}} as {total, rows}."""
+    inner = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(inner, dict):
+        return data
+    if "affected_items" not in inner:
+        return _row(inner, shape)                                # one object (an agent's configuration)
+    out: dict = {"total": inner.get("total_affected_items", len(inner["affected_items"])),
+                 "rows": [_row(i, shape) for i in inner["affected_items"]]}
+    if inner.get("total_failed_items"):
+        out["failed"] = inner.get("failed_items")
+        if data.get("message"):
+            out["message"] = data["message"]
+    return out
+
+
+def apply_shape(data, shape_text: str):
+    """The response boiled down by the operation's shape ('' = unchanged)."""
+    if not shape_text:
+        return data
+    shape = json.loads(shape_text)
+    if isinstance(data, str):                                    # not JSON, or cut off at 256 KB
+        return redact_text(data) if shape.get("redact") else data
+    fmt = shape.get("format", "")
+    if fmt == "elasticsearch":
+        data = _shape_elasticsearch(data, shape)
+    elif fmt == "wazuh":
+        data = _shape_wazuh(data, shape)
+    elif shape.get("keep") or shape.get("rename"):
+        found = _main_list(data)
+        if found:
+            data = _put(data, found[0], [_row(r, shape) for r in found[1]])
+        elif isinstance(data, dict):
+            data = _row(data, shape)
+    return _redact(data) if shape.get("redact") else data
+
+
+def _col(row, name: str, default=""):
+    """A column that older rows (or hand-made ones in tests) may not have."""
+    try:
+        return row[name]
+    except (IndexError, KeyError):
+        return default
 
 
 # ------------------------------------------------------------------- calling
@@ -355,14 +663,66 @@ def _ssl(api) -> ssl.SSLContext | bool:
     return ctx
 
 
-def _headers(settings: Settings, api) -> dict[str, str]:
+_tokens: dict[int, tuple[float, str, str]] = {}   # api id -> (good until, what it was made from, token)
+_tokens_lock = threading.Lock()
+_TOKEN_KEYS = ("token", "access_token", "jwt", "id_token")
+
+
+def check_login_path(path: str) -> str:
+    """Admin or template input: '' or a path under the API's address, like /security/user/authenticate."""
+    path = (path or "").strip()
+    if path and (not re.fullmatch(r"/[\w.\-/]{0,200}(\?[\w.\-=&]{0,100})?", path) or ".." in path or "//" in path):
+        raise ApiError("The sign-in path starts with / and stays under the API's address, "
+                       "like /security/user/authenticate.")
+    return path
+
+
+def _login_token(settings: Settings, api, secret: str, *, fresh: bool = False) -> str:
+    """A token from the API's sign-in path (user name + password, HTTP Basic, POST), reused for
+    LOGIN_TOKEN_SECONDS or until the API refuses it."""
+    made_from = hashlib.sha256(f"{api['base_url']}|{api['auth_user']}|{secret}|{api['auth_login_path']}"
+                               .encode()).hexdigest()
+    with _tokens_lock:
+        hit = _tokens.get(api["id"])
+    if hit and not fresh and hit[0] > time.monotonic() and hit[1] == made_from:
+        return hit[2]
+    url = api["base_url"].rstrip("/") + api["auth_login_path"]
+    basic = "Basic " + base64.b64encode(f"{api['auth_user']}:{secret}".encode()).decode()
+    status, _ctype, raw, _cut = _fetch(api, "POST", url, {}, None,
+                                       {"Accept": "application/json", "User-Agent": "Mnemerynne", "Authorization": basic})
+    if status in (401, 403):
+        raise ApiError(f"{api['name']} refused the user name and password at sign-in (HTTP {status}); an admin "
+                       "should check them on the APIs page")
+    if not 200 <= status < 300:
+        raise ApiError(f"{api['name']}'s sign-in answered HTTP {status}")
+    text = raw.decode("utf-8", errors="replace").strip()
+    token = None
+    try:
+        body = json.loads(text)
+        for holder in (body.get("data") if isinstance(body, dict) else None, body):
+            if isinstance(holder, dict):
+                token = next((holder[k] for k in _TOKEN_KEYS if isinstance(holder.get(k), str)), None)
+                if token:
+                    break
+    except ValueError:
+        token = text if re.fullmatch(r"[\w.\-~+/=]{10,8000}", text) else None   # ?raw=true: the token alone
+    if not token:
+        raise ApiError(f"{api['name']}'s sign-in answered without a token")
+    with _tokens_lock:
+        _tokens[api["id"]] = (time.monotonic() + LOGIN_TOKEN_SECONDS, made_from, token)
+    return token
+
+
+def _headers(settings: Settings, api, *, fresh: bool = False) -> dict[str, str]:
     headers = {"Accept": "application/json", "User-Agent": "Mnemerynne"}
     if api["auth_type"] == "none":
         return headers
     secret = decrypt_secret(settings, api["secret_enc"])
     if secret is None:
         raise ApiError(f"{api['name']} has no usable credential; an admin needs to enter it on the APIs page.")
-    if api["auth_type"] == "bearer":
+    if api["auth_type"] == "basic" and _col(api, "auth_login_path"):
+        headers["Authorization"] = f"Bearer {_login_token(settings, api, secret, fresh=fresh)}"
+    elif api["auth_type"] == "bearer":
         headers["Authorization"] = f"Bearer {secret}"
     elif api["auth_type"] == "header":
         headers[api["auth_header"] or "X-API-Key"] = secret
@@ -447,19 +807,26 @@ def call(conn: sqlite3.Connection, settings: Settings, op_id: int, params: dict 
             headers = _headers(settings, api)
             turn = _turn(api)
             status, ctype, raw, truncated = _fetch(api, method, url, query, body, headers)
+            if status == 401 and api["auth_type"] == "basic" and _col(api, "auth_login_path"):
+                headers = _headers(settings, api, fresh=True)      # the token ran out early: sign in again, once
+                status, ctype, raw, truncated = _fetch(api, method, url, query, body, headers)
             if status == 429 and not op["action"]:
                 time.sleep(RETRY_429_AFTER)
                 status, ctype, raw, truncated = _fetch(api, method, url, query, body, headers)
             raw_len = len(raw)
             text = raw.decode("utf-8", errors="replace")
             result.status_code, result.truncated = status, truncated
+            shape = _col(op, "shape")
             if 200 <= status < 300:
                 result.ok = True
                 try:
                     result.data = json.loads(text) if not truncated else text
                 except ValueError:
                     result.data = text
+                result.data = apply_shape(result.data, shape)      # before it's cached, logged or shown
             else:
+                if shape and json.loads(shape).get("redact"):
+                    text = redact_text(text)
                 result.error = _explain(status, text)
                 failed_text = text
         except ApiError as exc:
@@ -499,6 +866,8 @@ def call(conn: sqlite3.Connection, settings: Settings, op_id: int, params: dict 
 def clear_cache() -> None:
     with _cache_lock:
         _cache.clear()
+    with _tokens_lock:
+        _tokens.clear()                     # a changed credential or address signs in afresh
 
 
 # ----------------------------------------------------- shaping for the model
@@ -646,6 +1015,8 @@ def fill_prompt(op, question: str) -> str:
         detail = s["type"]
         if s["type"] == "enum":
             detail += ": " + ", ".join(str(o) for o in s["options"])
+        if s["type"] == "list":
+            detail += " of values, comma-separated"
         if s.get("min") is not None or s.get("max") is not None:
             detail += f", {s.get('min', '')}..{s.get('max', '')}"
         if s.get("default") not in (None, ""):
@@ -675,6 +1046,8 @@ def params_schema(op) -> dict | None:
         elif s["type"] == "date":
             # [0-9], not \d: llama-server's schema-to-grammar turns \d into a literal and the grammar fails to parse.
             prop = {"type": "string", "pattern": r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+        elif s["type"] == "list":
+            prop = {"type": "array", "items": {"type": "string"}, "maxItems": LIST_MAX}
         else:
             prop = {"type": "string"}
         if s.get("help"):
@@ -689,62 +1062,7 @@ def _p(name, type_, *, where="query", required=False, help="", **extra) -> dict:
 
 
 PRESETS: list[dict] = [
-    {
-        "key": "wazuh", "name": "Wazuh", "base_url": "https://172.27.22.250:9200", "auth_type": "basic",
-        "tls_check_hostname": 0,
-        "description": "Wazuh indexer (security alerts). Use a dedicated read-only user; only the fixed query "
-                       "below is ever sent. Trust the indexer's certificate on this page.",
-        "operations": [
-            {"name": "Alert summary", "method": "POST", "path": "/wazuh-alerts-*/_search", "cache_seconds": 120,
-             "params": [_p("hours", "int", where="body", min=1, max=720, default=24, help="How many hours back"),
-                        _p("min_level", "int", where="body", min=0, max=15, default=0,
-                           help="Lowest rule level to count (7+ notable, 12+ critical)"),
-                        _p("agent", "string", where="body", default="*",
-                           help="Machine (agent) name; * for all, or a pattern like FD-*")],
-             "body": '{"size": 0, "query": {"bool": {"filter": [{"range": {"timestamp": {"gte": "now-{{hours}}h"}}}, {"range": {"rule.level": {"gte": {{min_level}}}}}, {"wildcard": {"agent.name": "{{agent}}"}}]}}, "aggs": {"levels": {"terms": {"field": "rule.level", "size": 16}}, "rules": {"terms": {"field": "rule.description", "size": 15}, "aggs": {"level": {"max": {"field": "rule.level"}}}}, "agents": {"terms": {"field": "agent.name", "size": 15}}, "tactics": {"terms": {"field": "rule.mitre.tactic", "size": 10}}, "sources": {"terms": {"field": "data.srcip", "size": 10}}}}',
-             "description": "Counts of security alerts by level, rule, machine, MITRE tactic and source IP, "
-                            "for a time window, minimum level and machine.",
-             "example_questions": "How many security alerts were there today?\nWhat's the alert count by severity?\n"
-                                  "Which machines have the most alerts this week?\nWhat are the top alert types?"},
-            {"name": "Alerts", "method": "POST", "path": "/wazuh-alerts-*/_search", "cache_seconds": 60,
-             "params": [_p("hours", "int", where="body", min=1, max=720, default=24, help="How many hours back"),
-                        _p("min_level", "int", where="body", min=0, max=15, default=7,
-                           help="Lowest rule level (7+ notable, 12+ critical)"),
-                        _p("agent", "string", where="body", default="*",
-                           help="Machine (agent) name; * for all, or a pattern like FD-*"),
-                        _p("count", "int", where="body", min=1, max=50, default=20, help="How many alerts")],
-             "body": '{"size": {{count}}, "sort": [{"timestamp": "desc"}], "query": {"bool": {"filter": [{"range": {"timestamp": {"gte": "now-{{hours}}h"}}}, {"range": {"rule.level": {"gte": {{min_level}}}}}, {"wildcard": {"agent.name": "{{agent}}"}}]}}, "_source": ["timestamp", "rule.level", "rule.id", "rule.description", "rule.groups", "rule.mitre.tactic", "rule.mitre.technique", "agent.name", "agent.ip", "data.srcip", "data.srcuser", "data.dstuser", "location"]}',
-             "description": "The alerts themselves, newest first: time, level, rule, MITRE tactic, machine, "
-                            "source IP and user.",
-             "example_questions": "Show me today's critical alerts.\nWhat triggered alerts on the front desk PC?\n"
-                                  "What happened on FD-01 overnight?\nList the level 12 alerts this week."},
-            {"name": "Failed logins", "method": "POST", "path": "/wazuh-alerts-*/_search", "cache_seconds": 60,
-             "params": [_p("hours", "int", where="body", min=1, max=720, default=24, help="How many hours back"),
-                        _p("agent", "string", where="body", default="*",
-                           help="Machine (agent) name; * for all, or a pattern like FD-*")],
-             "body": '{"size": 0, "query": {"bool": {"filter": [{"range": {"timestamp": {"gte": "now-{{hours}}h"}}}, {"terms": {"rule.groups": ["authentication_failed", "authentication_failures", "invalid_login"]}}, {"wildcard": {"agent.name": "{{agent}}"}}]}}, "aggs": {"agents": {"terms": {"field": "agent.name", "size": 10}}, "sources": {"terms": {"field": "data.srcip", "size": 10}}, "users": {"terms": {"field": "data.dstuser", "size": 10}}, "rules": {"terms": {"field": "rule.description", "size": 10}}, "per_hour": {"date_histogram": {"field": "timestamp", "fixed_interval": "1h", "min_doc_count": 1}}}}',
-             "description": "Failed logins: how many, on which machines, from which IPs, for which accounts, and "
-                            "per hour (to spot brute force).",
-             "example_questions": "Any failed logins today?\nIs anyone brute-forcing us?\n"
-                                  "Which accounts had failed logins this week?\nWhere are the failed logins coming from?"},
-            # One source IP (or a pattern of them): what it set off, where, and the latest alerts themselves.
-            # Its own operation, not a filter on Alerts: a wildcard on data.srcip only matches alerts that
-            # have a source IP, so a "*" default there would hide every alert without one (Windows logons).
-            {"name": "Alerts from an IP", "method": "POST", "path": "/wazuh-alerts-*/_search", "cache_seconds": 60,
-             "params": [_p("srcip", "string", where="body", required=True,
-                           help="Source IP, e.g. 192.168.1.253, or a pattern like 192.168.1.*"),   # required: no "all IPs" default
-                        _p("hours", "int", where="body", min=1, max=720, default=24, help="How many hours back"),
-                        _p("min_level", "int", where="body", min=0, max=15, default=0,
-                           help="Lowest rule level (7+ notable, 12+ critical)"),               # 0: an IP's quiet alerts matter too
-                        _p("count", "int", where="body", min=1, max=50, default=20, help="How many alerts")],
-             "body": '{"size": {{count}}, "sort": [{"timestamp": "desc"}], "query": {"bool": {"filter": [{"range": {"timestamp": {"gte": "now-{{hours}}h"}}}, {"range": {"rule.level": {"gte": {{min_level}}}}}, {"wildcard": {"data.srcip": "{{srcip}}"}}]}}, "aggs": {"levels": {"terms": {"field": "rule.level", "size": 16}}, "rules": {"terms": {"field": "rule.description", "size": 15}, "aggs": {"level": {"max": {"field": "rule.level"}}}}, "agents": {"terms": {"field": "agent.name", "size": 10}}, "locations": {"terms": {"field": "location", "size": 10}}, "users": {"terms": {"field": "data.dstuser", "size": 10}}}, "_source": ["timestamp", "rule.level", "rule.id", "rule.description", "rule.groups", "rule.mitre.tactic", "rule.mitre.technique", "agent.name", "agent.ip", "data.srcip", "data.srcuser", "data.dstuser", "location"]}',
-             "description": "Everything one source IP (or a pattern like 192.168.1.*) set off: counts by level, "
-                            "rule, machine, log and account, plus the latest alerts, newest first.",
-             "example_questions": "What has 192.168.1.253 been doing?\nShow me the alerts from 34.14.12.83.\n"
-                                  "Which alerts came from 186.247.44.26 today?\nWhat is 192.168.1.76 setting off?\n"
-                                  "Is this IP attacking us?"},
-        ],
-    },
+    *wazuh_presets.PRESETS,          # Wazuh indexer, Wazuh manager, Wazuh manager actions (wazuh_presets.py)
     {
         "key": "atera", "name": "Atera", "base_url": "https://api.atera.com/api/v3", "auth_type": "bearer",
         "description": "Atera IT tickets and alerts (the same calls the IT dashboard makes). Full ticket text, "
@@ -913,12 +1231,12 @@ def openapi_operations(spec_text: str) -> list[dict]:
 
 TEMPLATE_FORMAT = "mnemerynne-api-template"
 _TEMPLATE_KEYS = {"format", "name", "description", "base_url", "auth_type", "auth_header", "auth_user",
-                  "tls_check_hostname", "one_at_a_time", "operations"}
+                  "auth_login_path", "tls_check_hostname", "one_at_a_time", "operations"}
 # Set by hand on the API, never brought in by a file.
 _TEMPLATE_REFUSED = {"secret", "token", "password", "credential", "ca_pem", "certificate", "ad_group",
                      "claude_enabled"}
 _OP_KEYS = {"name", "description", "example_questions", "method", "path", "params", "body", "cache_seconds",
-            "action"}
+            "action", "shape"}
 MAX_TEMPLATE_OPERATIONS = 50
 
 
@@ -985,13 +1303,19 @@ def parse_template(text: str) -> dict:
             raise ApiError(f"“{op_name}”: the body or example questions are too long or the wrong kind.")
         try:
             check_specs(str(op.get("path") or ""), params, method, body, action)
+            shape = check_shape(op.get("shape"))                 # how its answer is boiled down ('' = as sent)
         except ApiError as exc:
             raise ApiError(f"“{op_name}”: {exc}") from None
         out_ops.append({"name": op_name, "description": str(op.get("description") or "")[:2000],
                         "example_questions": examples, "method": method, "path": op["path"], "params": params,
-                        "body": body if method in BODY_METHODS else "", "cache_seconds": cache, "action": action})
+                        "body": body if method in BODY_METHODS else "", "cache_seconds": cache, "action": action,
+                        "shape": shape})
+    login_path = check_login_path(str(t.get("auth_login_path") or ""))   # sign in there first (basic only)
+    if login_path and auth_type != "basic":
+        raise ApiError("auth_login_path needs auth_type basic: the user name and password are swapped for a token.")
     return {"name": name, "description": str(t.get("description") or "")[:20000], "base_url": base_url,
             "auth_type": auth_type, "auth_header": auth_header, "auth_user": str(t.get("auth_user") or "")[:200],
+            "auth_login_path": login_path,
             "tls_check_hostname": 0 if t.get("tls_check_hostname") is False else 1,
             "one_at_a_time": 1 if t.get("one_at_a_time") is True else 0, "operations": out_ops}
 

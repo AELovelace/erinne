@@ -605,6 +605,11 @@ class Tools:
                           "rate_limited" if "429" in str(result.error) else "unavailable")
         live = f"live, {result.at[11:16]} UTC"
         data, rows = apis.page(result.data, offset or 0, 40_000, find=find)
+        if not isinstance(result.data, str):
+            try:
+                data = json.loads(data)          # as JSON, not a JSON string inside the JSON (P2: fewer tokens)
+            except ValueError:
+                pass                             # cut to fit ("…"): stays text
         notes = []
         if rows and "matched_of" in rows:
             notes.append(f"{rows['total']} of the {rows['matched_of']} rows the API returned mention "

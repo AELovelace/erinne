@@ -51,11 +51,12 @@ a time (as many rows as fit, with an offset to ask for the next ones), so
 | Field | Required | Meaning |
 |---|---|---|
 | `format` | yes | Always `"mnemerynne-api-template"`. |
-| `name` | yes | The API's name in Mnemerynne, at most 80 characters. Not `Wazuh` or `Atera` (those are built in). Uploading a file with the same name replaces the earlier upload. |
+| `name` | yes | The API's name in Mnemerynne, at most 80 characters. Not `Wazuh`, `Wazuh manager`, `Wazuh manager actions` or `Atera` (those are built in). Uploading a file with the same name replaces the earlier upload. |
 | `base_url` | yes | `https://…` (or `http://…`). Every operation's path is added to it, and requests can't leave it. |
 | `auth_type` | no | `none` (default), `bearer` (`Authorization: Bearer <secret>`), `header` (the secret in the header named by `auth_header`), or `basic` (user name `auth_user`, password = the secret). |
 | `auth_header` | for `header` | The header name, letters, digits and dashes, e.g. `X-API-Key`. |
 | `auth_user` | for `basic` | The user name. |
+| `auth_login_path` | no, `basic` only | A path to sign in at first, e.g. `/security/user/authenticate`. Mnemerynne POSTs the user name and password there (HTTP Basic), takes the token from the answer (`data.token`, `token`, `access_token` or `jwt`, or the whole body if it is just the token), sends it as `Authorization: Bearer …` and reuses it for 10 minutes. |
 | `tls_check_hostname` | no | `false` if the server is reached by an address its certificate doesn't name (e.g. an IP). The admin pins the certificate either way. Default `true`. |
 | `one_at_a_time` | no | `true` if the API answers only one request at a time (e.g. HTTP 429 while another query runs). Mnemerynne then queues calls to it instead of sending them side by side, and tells Claude. The admin can change it on the API's page. Default `false`. |
 | `description` | no | Markdown for the admin. Put the setup steps here (see *Description* below). |
@@ -90,10 +91,11 @@ admin.
 | `description` | no | One sentence on what it returns. **The AI reads this** when filling in parameters, so say what the data covers. |
 | `method` | no | `GET` (default) or `POST`; actions may also use `PUT`, `PATCH` or `DELETE`. |
 | `action` | no | `true` if the operation changes data (see *Actions*). Default `false`. |
-| `path` | yes | Starts with `/`; no `..`, `//`, `\` or `://`. May contain `{name}` for a path parameter, e.g. `/tickets/{ticketId}`. |
+| `path` | yes | Starts with `/`; no `..`, `//`, `\` or `://`. May contain `{name}` for a path parameter, e.g. `/tickets/{ticketId}`, and a fixed query that is always sent, e.g. `/agents?select=id,name,status` (no `{name}` after the `?`; query parameters are added to it). |
 | `params` | no | Up to 30 parameters (below). |
 | `body` | POST only | The fixed JSON body, with `{{name}}` where body parameters go (below). A JSON object, or a string (see *Bodies*). |
 | `cache_seconds` | no | 0 to 86400; default 60. Use 0–60 for live data. |
+| `shape` | no | How the answer is boiled down on the server before anyone sees it, e.g. `{"format": "elasticsearch"}` or `{"keep": ["id", "name"], "redact": true}`. See *Response shapes*. |
 | `example_questions` | strongly advised | A list of questions (up to 30), **phrased the way staff actually ask**. Chat questions are routed to the operation whose examples are closest in meaning, so give each operation 4–6 distinct examples that don't overlap with other operations. |
 
 ### Parameters
@@ -105,7 +107,7 @@ admin.
 | Field | Meaning |
 |---|---|
 | `name` | Letters, digits and `_`, starting with a letter or `_`, at most 41 characters. Unique in the operation. |
-| `type` | `int`, `date` (`YYYY-MM-DD`), `enum` (one of `options`; matched ignoring case), `string`, or `text` (actions only, in the body: free text up to 2000 characters, e.g. a comment). |
+| `type` | `int`, `date` (`YYYY-MM-DD`), `enum` (one of `options`; matched ignoring case), `string`, `list` (up to 50 values, each checked like a `string`; given as a JSON list or `a,b,c`; sent as `a,b,c` in the query and as a JSON array where it stands bare in a body; not in a path), or `text` (actions only, in the body: free text up to 2000 characters, e.g. a comment). |
 | `in` | `query` (default; added to the URL's query string), `path` (fills `{name}` in the path) or `body` (fills `{{name}}` in a POST body). |
 | `required` | `true` if the call makes no sense without it. |
 | `default` | Used when the question doesn't say. |
@@ -143,6 +145,37 @@ body isn't valid JSON until filled in, so write it as a **string** instead:
 ```
 
 Keep bodies on one line inside strings: JSON strings can't contain raw newlines.
+
+**Optional parts.** `{"$if": "name", "then": X}` (optionally with `"else": Y`)
+is replaced by `X` when the parameter `name` has a value, and by `Y` or nothing
+at all when it doesn't. Inside a list it's dropped from the list; as an
+object's value, the key goes. Use it for filters that should only apply when
+asked, which a default can't do (a `"*"` wildcard on a field hides every
+document without that field):
+
+```json
+"filter": [{"range": {"timestamp": {"gte": "now-{{hours}}h"}}},
+           {"$if": "rule_id", "then": {"terms": {"rule.id": {{rule_id}}}}}]
+```
+
+`name` must be a body parameter, and the object may hold only `$if`, `then`
+and `else`.
+
+### Response shapes
+
+`shape` boils the answer down on the server, before it is cached, logged,
+shown, or given to the AI. Every key is optional:
+
+| Key | Effect |
+|---|---|
+| `format` | `"elasticsearch"`: a `_search` answer becomes `{total, rows, <aggregations as plain lists>}` (hits become flat rows of their `_source`; buckets become `{"key", "count", …sub-aggregations}`; metrics become their value; `_shards`, `_index`, `_id` and sort keys go). `"wazuh"`: `{data: {affected_items, total_affected_items}}` becomes `{total, rows}`. Left out: the answer as sent. |
+| `keep` | Field paths to keep in each row, e.g. `["id", "policy.states.name"]` (mapped through lists). |
+| `rename` | Shorter names, e.g. `{"rule.level": "level"}`. |
+| `redact` | `true`: passwords, keys, tokens and webhook addresses become `[redacted]`, in fields and in text. Use it on anything that returns configuration or logs. |
+| `flatten` | `false` keeps nested objects; by default rows get `rule.level`-style keys. |
+
+Shaping saves the AI a lot of reading (an Elasticsearch answer is mostly
+boilerplate) and keeps secrets out of Mnemerynne's call log.
 
 ## Actions
 
