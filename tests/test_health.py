@@ -85,6 +85,16 @@ def test_probes_are_reused_for_a_few_seconds():
     assert health.probe("http://m:1", client, now=100.0 + health.PROBE_CACHE_SECONDS) == "ok" and len(calls) == 2
 
 
+def test_healthz_full_is_rate_limited_per_address(client, monkeypatch):
+    """It needs no sign-in and probes the models, so one address can't ask for it in a loop; /healthz stays open."""
+    from mnemerynne.web import security
+    monkeypatch.setattr(health, "models", lambda settings, client=None: {"generator": "ok", "embedder": "ok"})
+    limit = next(n for prefix, _, n, _ in security.PUBLIC_LIMITS if prefix == "/healthz/full")
+    codes = [client.get("/healthz/full").status_code for _ in range(limit + 1)]
+    assert 429 not in codes[:limit] and codes[-1] == 429
+    assert client.get("/healthz").status_code == 200
+
+
 def test_healthz_full_answers_503_while_anything_fails(client, conn, monkeypatch):
     """/healthz/full lists every check (states and counts only) and is 503 until all pass;
     /healthz itself stays a plain 200 for update.sh and the TV boxes."""

@@ -73,7 +73,7 @@ Then sign in, upload a document on Files, watch it reach Ready, ask a question o
 
 ### Monitoring
 
-`/healthz` only says the web app and its database answer. Update scripts and the TV boxes rely on its 200, so it stays that simple. For a monitor (Uptime Kuma, a cron `curl -f`), watch **`/healthz/full`**: it answers **503** while anything below fails, and 200 when all is well.
+`/healthz` only says the web app and its database answer. Update scripts and the TV boxes rely on its 200, so it stays that simple. For a monitor (Uptime Kuma, a cron `curl -f`), watch **`/healthz/full`**: it answers **503** while anything below fails, and 200 when all is well. It needs no sign-in, so it allows 12 asks a minute per address (then 429), and `nginx-mnemerynne-edge.conf` answers it only to private networks (10/8, 172.16/12, 192.168/16): run the monitor on the LAN.
 
 ```sh
 curl -s http://127.0.0.1:38200/healthz/full
