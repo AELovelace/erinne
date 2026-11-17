@@ -123,6 +123,10 @@ Good to know:
 - **Leaving:** **Leave the room** carries on alone. The host's **Close the room** ends it for everyone, and everyone's game carries on alone. The host can **Let go** of a player.
 - **Controllers:** each browser plays with its first controller, its keyboard, or a TV's remote. A second controller on the same TV doesn't play in a room.
 
+## When a game runs slowly
+
+If a game can't keep up, the bar says **Running slowly (N fps)** and names the graphics drawing it. The games draw every frame on the graphics card, so a slow game usually means the graphics, not the computer's speed. On a TV box, ask your admin to run the screen check (`install.sh --check`). It says which graphics the TV is on.
+
 ## Where Retro isn't yet
 
 - **Netplay with two controllers on one TV** (two players from one TV in a room).

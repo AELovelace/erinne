@@ -296,6 +296,41 @@
     } catch (err) { status("Couldn't delete it: " + err.message); }
   }
 
+  // ------------------------------------------------------------- speed
+  // A game running behind says so in the bar, with what's drawing it: EmulatorJS draws every frame with WebGL, so a
+  // box whose GPU can't keep up (nouveau on a GTX 745, or Firefox drawing in software: "llvmpipe") runs the game
+  // slow however quick its CPU is. Checked every few seconds while the game plays. (2026-11-17)
+  const SPEED_EVERY_MS = 5000;   // how often the frame count is looked at
+  const SLOW_FPS = 50;           // below this the game is noticeably slow (the consoles here run at 50-60)
+  let speedAt = 0, speedFrame = -1, slowSaid = false, slowTimes = 0;
+
+  function renderer() {   // the GPU WebGL draws on, as the browser names it ("llvmpipe" means no GPU at all)
+    try {
+      const gl = document.createElement("canvas").getContext("webgl");
+      if (!gl) return "no WebGL";
+      const info = gl.getExtension("WEBGL_debug_renderer_info");
+      const name = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+      const lose = gl.getExtension("WEBGL_lose_context");   // hand the test context back straight away
+      if (lose) lose.loseContext();
+      return String(name || "unknown");
+    } catch (_) { return "unknown"; }
+  }
+
+  function watchSpeed() {   // frames per second since the last look; a message after two slow looks in a row
+    if (!started || !emu || !emu.gameManager || emu.paused || document.hidden || leaving) { speedFrame = -1; return; }
+    const now = performance.now(), frame = emu.gameManager.getFrameNum();
+    if (speedFrame >= 0 && frame >= speedFrame) {
+      const fps = (frame - speedFrame) * 1000 / (now - speedAt);
+      slowTimes = fps < SLOW_FPS ? slowTimes + 1 : 0;
+      if (slowTimes >= 2) {   // two in a row: not just a save or a load that held it up
+        status("Running slowly (" + Math.round(fps) + " fps), drawing on " + renderer());
+        slowSaid = true;
+      } else if (!slowTimes && slowSaid) { status(""); slowSaid = false; }   // caught up: the message goes
+    }
+    speedAt = now;
+    speedFrame = frame;
+  }
+
   // ------------------------------------------------------------- start
   function loadScript(src) {
     return new Promise(function (resolve, reject) {
@@ -471,6 +506,7 @@
         setTimeout(function () { gm.loadState(auto); status("Continued from " + when(saveOf("auto").updated_at)); }, 50);
       } else status("");
       setInterval(function () { autoState(false).catch(function () { /* tried again next time */ }); }, AUTO_EVERY_MS);
+      setInterval(watchSpeed, SPEED_EVERY_MS);   // a slow game says so, and what's drawing it
     });
   }
 

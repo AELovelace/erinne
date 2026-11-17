@@ -710,6 +710,32 @@ check() {
     fi
     rm -f "$sample"
 
+    # Which GPU drives the TV, and with which driver. Retro's games (EmulatorJS) draw every frame through WebGL, and
+    # Firefox composites the page on the GPU too: an NVIDIA card on nouveau can't raise its clocks on a GTX 700 / 900
+    # (Maxwell) or newer, so it crawls at boot clocks and games run at a fraction of full speed. (2026-11-17: a GBA
+    # game slow on an i7-4xxx box whose TV hung off a GTX 745.)
+    step "Drawing (the page and Retro's games)"
+    local card driver connector tv_card="" tv_driver="" drivers=""
+    for card in /sys/class/drm/card[0-9]; do                       # every GPU the kernel knows, and its driver
+        [[ -e $card/device/driver ]] || continue
+        driver=$(basename "$(readlink -f "$card/device/driver")")
+        drivers+="${drivers:+, }${card##*/} $driver"
+        for connector in "$card"-*; do                              # the card with the TV plugged in
+            if [[ $(cat "$connector/status" 2>/dev/null) == connected ]]; then tv_card=${card##*/}; tv_driver=$driver; fi
+        done
+    done
+    note "GPUs: ${drivers:-none found}"
+    case $tv_driver in
+        i915|xe|amdgpu|radeon) ok "the TV is on $tv_card ($tv_driver): games and the page draw on the GPU" ;;
+        nvidia) ok "the TV is on $tv_card (NVIDIA's own driver)" ;;
+        nouveau) bad "the TV is on $tv_card with nouveau: it can't clock up a GTX 700/900 or newer, so Retro's games crawl. Plug the TV into the motherboard's HDMI (Intel graphics, turned on in the BIOS) and take the NVIDIA card out, or blacklist nouveau" ;;
+        "") note "no TV connected right now, so no way to tell which GPU draws the picture" ;;
+        *) note "the TV is on $tv_card ($tv_driver)" ;;
+    esac
+    if [[ -n $render && $tv_driver == nouveau ]]; then
+        note "video decoding was checked on $render; with two GPUs it may not be the Intel one"
+    fi
+
     step "The server"
     if [[ -z $url ]]; then
         bad "no address set (run the installer with it)"

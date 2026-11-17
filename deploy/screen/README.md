@@ -93,6 +93,7 @@ sudo bash install.sh --check
 | --- | --- |
 | **RPM Fusion FFmpeg** / **H.264 (High) decodes** | Films play at all. |
 | **the GPU decodes H.264** | VA-API works with the i965 driver; video is cheap. If this says FAIL, video still plays, on the CPU. |
+| **GPUs** / **the TV is on cardN (driver)** | Which graphics drives the TV. Retro's games draw every frame on it (WebGL). **FAIL … nouveau**: the TV hangs off an NVIDIA card on the open nouveau driver, which can't clock up a GTX 700/900 or newer, so games crawl however fast the CPU is. Plug the TV into the motherboard's HDMI (turn the Intel graphics on in the BIOS), and take the NVIDIA card out or blacklist nouveau. |
 | **… answers** / **the screen page answers** | The box reaches the server, its certificate is trusted, and Media is turned on. |
 | **running on tty1** / **sound goes to HDMI** | The kiosk is up and sound goes to the TV. If the TV was off, give it 30 seconds after turning it on. |
 | **picture: …** | The mode the TV is in, its refresh rate and scaling (or, with the screen stopped, the TV's first mode), and the `--display` settings. |
@@ -263,6 +264,7 @@ The drivers are the kernel's own (`hid-playstation` for the DualSense, `hid-micr
 | Forgot the kiosk PIN | Approve from an admin's phone instead, then set a new one. Or over SSH: `sudo rm /etc/mnemerynne-screen.pin`. |
 | A 404 page | Media is off, or the screens group isn't set (Settings → Entertainment → Media). |
 | No sound | Is the TV's input on this box, and is its volume up? `sudo bash install.sh --check` says whether sound goes to HDMI. `--audio auto` leaves the choice to PipeWire. |
+| Retro games run slow | The player's bar says **Running slowly (N fps), drawing on …**. `llvmpipe` means no GPU at all (Firefox draws in software). An `NV…` name means nouveau. Either way `--check` shows which GPU the TV is on. A 4th-gen Core i5/i7 runs GBA, SNES and PS1 at full speed once the Intel graphics draws. |
 | Stutters on films | The GPU isn't decoding (see `--check`), or the server is transcoding something heavy. Admin → Settings → Entertainment → Media shows running transcodes. |
 
 To use the box for something else: `sudo bash install.sh --uninstall`, and remove the screen under Media → Screens.
