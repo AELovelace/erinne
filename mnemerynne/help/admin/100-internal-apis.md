@@ -40,6 +40,7 @@ An operation's **Response shape** boils its answer down on the server, before it
 | `"rename": {"rule.level": "level"}` | Shorter names for fields. |
 | `"redact": true` | Passwords, keys, tokens and webhook addresses become `[redacted]`, in fields and in text. yes/no switches (`use_password: yes`) stay. |
 | `"flatten": false` | Keep nested objects instead of `rule.level`-style keys. |
+| `"single": ["description", "rule_id"]` | With `elasticsearch`: these sub-aggregations (size-1 top lists) always come back as just their top key (or `null`), and every other top list always stays a list, so a field never changes type between answers. Without `single`, a one-item list that covers its whole bucket is guessed to be a single value. |
 
 The MCP connector now hands Claude the answer as JSON rather than as a string of JSON, so shaped answers cost far fewer tokens.
 - **Recent calls** shows who asked what. A citation in chat opens the exact response the answer was based on, for the person who asked and for admins. That response is stored with the call, so answers from Atera keep ticket text in Mnemerynne's database for `MNEMERYNNE_API_CALLS_DAYS`.

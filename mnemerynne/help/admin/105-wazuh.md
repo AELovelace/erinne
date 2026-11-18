@@ -58,6 +58,15 @@ The alert operations filter **on the indexer**, so they find a rare alert inside
 
 Every Wazuh answer comes back boiled down: alerts as one flat row each (`time, level, rule_id, description, agent, srcip, user, location, …`), counts as plain lists (`[{"key": "site-chan", "count": 21604}]`), manager answers as `{total, rows}`. That's the operation's **response shape**; see [Internal APIs](internal-apis.md#response-shapes).
 
+Each field keeps one type from answer to answer:
+- **One value (a string, or `null`):** a rule's `description` and a rule's `rule_id` under a list, and a vulnerability's `severity`.
+- **Always a list of `{key, count}`:** the other top lists, such as the Noise report's `agents`, `sources` and `groups`.
+- **Always a number:** Agent silence's `recent`.
+
+The Noise report's `sources` is `[]` for rules whose alerts carry no `data.srcip`. That's most host-side rules: file integrity, rootcheck and package changes.
+
+Before 2026-11-18, `recent` sometimes came back as `{count, meta}`, and a field like `agents` was a bare string when there was only one machine. `recent` is fixed by the update itself. The steady lists need **Update preset operations**, pressed once on the Wazuh API's page; until then, those fields come back as before.
+
 ## Bringing an existing Wazuh API up to date
 
 An API made from the older Wazuh preset (four operations) keeps its address, credential and certificate. On its page:

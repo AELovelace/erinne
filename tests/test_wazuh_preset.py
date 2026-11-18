@@ -154,6 +154,43 @@ def test_the_elasticsearch_shape_drops_boilerplate_and_flattens():
     assert "_shards" not in json.dumps(out) and "_index" not in json.dumps(out)
 
 
+def test_noise_report_and_agent_silence_fields_keep_one_type_from_answer_to_answer():
+    # Reported from work on 2026-11-18: recent was a number one time and {count, meta} the next, and a Noise
+    # report's description/agents a string one time and a list the next.
+    def noise(agents, descriptions):                    # one rule's bucket, as OpenSearch sends it
+        return {"aggregations": {"rules": {"sum_other_doc_count": 0, "buckets": [{
+            "key": "5710", "doc_count": 30, "level": {"value": 5.0},
+            "description": {"sum_other_doc_count": 30 - descriptions[0][1],
+                            "buckets": [{"key": k, "doc_count": n} for k, n in descriptions[:1]]},
+            "agents": {"buckets": [{"key": k, "doc_count": n} for k, n in agents]},
+            "sources": {"buckets": []}, "groups": {"buckets": [{"key": "sshd", "doc_count": 30}]}}]}}}
+
+    shape = dict(json.loads(wazuh_presets.ES_SHAPE))
+    one_agent = apis.apply_shape(noise([("site-chan", 30)], [("sshd: attempt to login", 30)]), json.dumps(shape))
+    two_agents = apis.apply_shape(noise([("site-chan", 20), ("pi-chan", 10)],
+                                        [("sshd: attempt to login", 20), ("sshd: other", 10)]), json.dumps(shape))
+    for out in (one_agent, two_agents):                 # same types either way
+        rule = out["rules"][0]
+        assert rule["description"] == "sshd: attempt to login"                     # always a string
+        assert isinstance(rule["agents"], list) and rule["agents"][0]["key"] == "site-chan"
+        assert rule["sources"] == [] and rule["groups"] == [{"key": "sshd", "count": 30}]
+    assert one_agent["rules"][0]["agents"] == [{"key": "site-chan", "count": 30}]
+
+    silence = {"aggregations": {"agents": {"buckets": [         # OpenSearch echoes "meta": {} on some filters
+        {"key": "pi-chan", "doc_count": 4, "last": {"value": 1.0, "value_as_string": "2026-11-16T03:00"},
+         "recent": {"doc_count": 0, "meta": {}}},
+        {"key": "site-chan", "doc_count": 900, "last": {"value": 2.0, "value_as_string": "2026-11-18T09:00"},
+         "recent": {"doc_count": 70}}]}}}
+    for old_or_new in (json.dumps(shape), apis.check_shape({"format": "elasticsearch"})):
+        rows = apis.apply_shape(silence, old_or_new)["agents"]
+        assert [r["recent"] for r in rows] == [0, 70]   # always a number
+
+    empty = {"aggregations": {"vulns": {"buckets": [{"key": "CVE-1", "doc_count": 1, "severity": {"buckets": []}}]}}}
+    assert apis.apply_shape(empty, json.dumps(shape))["vulns"][0]["severity"] is None
+    with pytest.raises(apis.ApiError):
+        apis.check_shape({"format": "elasticsearch", "single": "description"})
+
+
 def test_the_wazuh_shape_and_keep_and_redaction():
     answer = {"data": {"affected_items": [
         {"id": 1, "username": "wazuh", "password": "hash", "roles": [1], "allow_run_as": True}],

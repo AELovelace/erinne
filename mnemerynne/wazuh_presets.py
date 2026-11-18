@@ -104,8 +104,9 @@ ALERT_SHAPE = _shape(format="elasticsearch", rename={
     "timestamp": "time", "rule.level": "level", "rule.id": "rule_id", "rule.description": "description",
     "rule.groups": "groups", "rule.mitre.tactic": "tactic", "rule.mitre.technique": "technique",
     "agent.name": "agent", "agent.ip": "agent_ip", "data.srcip": "srcip", "data.srcuser": "srcuser",
-    "data.dstuser": "user"})
-ES_SHAPE = _shape(format="elasticsearch")
+    "data.dstuser": "user"}, single=["description", "rule_id", "severity"])
+# Sub-aggregations of size 1 always come back as one value (a string, or null); every other one is always a list.
+ES_SHAPE = _shape(format="elasticsearch", single=["description", "rule_id", "severity"])
 
 
 def _terms(field: str, size="{{top}}", **aggs) -> dict:
@@ -215,9 +216,11 @@ INDEXER_OPERATIONS: list[dict] = [
                         "agents": _terms("agent.name", 3), "sources": _terms("data.srcip", 3),
                         "groups": _terms("rule.groups", 3)}}}}),
      "shape": ES_SHAPE,
-     "description": "The rules that make the most alerts, by rule ID, with each one's description, level, top "
-                    "machines, top source IPs and groups, and the share of the total. Use it to decide what to "
-                    "tune or exclude; pass the IDs you've dealt with in exclude_rule_id to see what's next.",
+     "description": "The rules that make the most alerts, by rule ID, with each one's description (a string), "
+                    "level, top machines, top source IPs and groups (always lists of {key, count}), and the share "
+                    "of the total. sources is [] for rules whose alerts carry no data.srcip, which is most "
+                    "host-side rules (file integrity, rootcheck, syscheck, package changes). Use it to decide "
+                    "what to tune or exclude; pass the IDs you've dealt with in exclude_rule_id to see what's next.",
      "example_questions": "Which rules make the most noise?\nWhat should we tune in Wazuh?\n"
                           "What are the noisiest alerts this week?\nWhat's flooding the alerts?"},
     # C7 / P8: a dead agent and a quiet one look the same in alert counts; this tells them apart.
@@ -231,8 +234,8 @@ INDEXER_OPERATIONS: list[dict] = [
              "last": {"max": {"field": "timestamp"}},
              "recent": {"filter": {"range": {"timestamp": {"gte": "now-{{silent_hours}}h"}}}}}}}}),
      "shape": ES_SHAPE,
-     "description": "Each agent's last alert time and how many alerts it sent in the last silent_hours, quietest "
-                    "first. recent = 0 means silent. An agent with no alert in the whole window isn't listed: "
+     "description": "Each agent's last alert time and how many alerts it sent in the last silent_hours (recent, "
+                    "always a number), quietest first. recent = 0 means silent. An agent with no alert in the whole window isn't listed: "
                     "Wazuh manager → Agents shows its status and last keep-alive.",
      "example_questions": "Which agents have gone quiet?\nHas any machine stopped sending alerts?\n"
                           "When did each agent last report?\nIs Pi-Chan still sending logs?"},

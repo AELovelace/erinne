@@ -413,7 +413,7 @@ def build_request(api, op, params: dict) -> tuple[str, str, dict, str | None]:
 # An operation's shape boils its answer down on the server, before it is cached, logged, shown or handed to
 # the model: Elasticsearch boilerplate (_shards, _index, sort keys) goes, aggregations become plain lists,
 # and secrets (an operation with "redact") never leave this module.
-_SHAPE_KEYS = {"format", "keep", "rename", "redact", "flatten"}
+_SHAPE_KEYS = {"format", "keep", "rename", "redact", "flatten", "single"}
 _REDACT_KEY = re.compile(r"(?i)(pass(wd|word)?$|password|secret|token|api_?key|hook_url|webhook|credential"
                          r"|private_key|^key$)")
 _REDACT_TEXT = (
@@ -448,6 +448,10 @@ def check_shape(shape) -> str:
     for flag in ("redact", "flatten"):
         if not isinstance(shape.get(flag, True), bool):
             raise ApiError(f"The shape's {flag} is true or false.")
+    single = shape.get("single", [])                              # sub-aggregations that are always one value
+    if not isinstance(single, list) or len(single) > 20 or \
+            not all(isinstance(k, str) and 0 < len(k) <= 120 for k in single):
+        raise ApiError("The shape's single is a list of at most 20 aggregation names, like \"description\".")
     return json.dumps(shape, ensure_ascii=False, sort_keys=True)
 
 
@@ -532,14 +536,19 @@ def _agg(value, shape: dict):
 
 
 def _subaggs(bucket: dict, shape: dict) -> dict:
+    """A bucket's sub-aggregations as {name: plain value}, each name always the same kind of value."""
+    single = shape.get("single")                                   # None: an older shape, guessed per answer
     out = {}
     for name, sub in bucket.items():
-        if not isinstance(sub, dict) or name == "key":
+        if not isinstance(sub, dict) or name in ("key", "meta"):  # OpenSearch echoes "meta": {}; it's not a result
             continue
         got = _agg(sub, shape)
-        # A one-bucket terms list that covers the whole parent (a rule ID's one description) is just its key.
-        if isinstance(got, list) and len(got) == 1 and isinstance(got[0], dict) and set(got[0]) == {"key", "count"} \
-                and got[0]["count"] == bucket.get("doc_count"):
+        if single is not None:
+            if name in single and isinstance(got, list):          # named in the shape: just the top key, or null
+                got = got[0].get("key") if got and isinstance(got[0], dict) else None
+        # An older shape: a one-bucket terms list that covers the whole parent is just its key.
+        elif isinstance(got, list) and len(got) == 1 and isinstance(got[0], dict) \
+                and set(got[0]) == {"key", "count"} and got[0]["count"] == bucket.get("doc_count"):
             got = got[0]["key"]
         out[name] = got
     return out
