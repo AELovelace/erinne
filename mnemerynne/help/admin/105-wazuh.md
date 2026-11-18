@@ -60,12 +60,22 @@ Every Wazuh answer comes back boiled down: alerts as one flat row each (`time, l
 
 Each field keeps one type from answer to answer:
 - **One value (a string, or `null`):** a rule's `description` and a rule's `rule_id` under a list, and a vulnerability's `severity`.
-- **Always a list of `{key, count}`:** the other top lists, such as the Noise report's `agents`, `sources` and `groups`.
-- **Always a number:** Agent silence's `recent`.
+- **Always a list of `{key, count}`:** the other top lists, such as the Noise report's `descriptions`, `agents`, `sources` and `groups`.
+- **Always a number:** Agent silence's `recent`. A level is a whole number (`3`, not `3.0`).
+- **Always `{total, rows}`:** *Indices* and *Indexer disk*, like the other list answers.
 
-The Noise report's `sources` is `[]` for rules whose alerts carry no `data.srcip`. That's most host-side rules: file integrity, rootcheck and package changes.
+In the **Noise report**:
+- `description` is a rule's most common text. One rule ID can carry several texts (a custom rule matching Splashtop, Microsoft connection tests and Teramind alike). `descriptions` lists up to five with their counts, so read it before saying what a rule's alerts are.
+- `sources` adds up the source IPs from `data.srcip` (most decoders), `data.src_ip` (Suricata) and `data.win.eventdata.ipAddress` (Windows events). It's `[]` for host-side rules with no source IP: file integrity, rootcheck and package changes.
 
-Before 2026-11-18, `recent` sometimes came back as `{count, meta}`, and a field like `agents` was a bare string when there was only one machine. `recent` is fixed by the update itself. The steady lists need **Update preset operations**, pressed once on the Wazuh API's page; until then, those fields come back as before.
+Before 2026-11-18:
+- `recent` sometimes came back as `{count, meta}`;
+- a field like `agents` was a bare string when there was only one machine;
+- the Noise report showed only the top description, and only `data.srcip`;
+- levels were decimals;
+- Indices and Indexer disk were bare lists.
+
+`recent` and the whole-number levels are fixed by the update itself. The rest need **Update preset operations**, pressed once on the Wazuh API's page; until then, those fields come back as before.
 
 ## Bringing an existing Wazuh API up to date
 

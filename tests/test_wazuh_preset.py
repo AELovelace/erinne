@@ -174,6 +174,7 @@ def test_noise_report_and_agent_silence_fields_keep_one_type_from_answer_to_answ
         assert rule["description"] == "sshd: attempt to login"                     # always a string
         assert isinstance(rule["agents"], list) and rule["agents"][0]["key"] == "site-chan"
         assert rule["sources"] == [] and rule["groups"] == [{"key": "sshd", "count": 30}]
+        assert rule["level"] == 5 and isinstance(rule["level"], int)               # max of a level: 5, not 5.0
     assert one_agent["rules"][0]["agents"] == [{"key": "site-chan", "count": 30}]
 
     silence = {"aggregations": {"agents": {"buckets": [         # OpenSearch echoes "meta": {} on some filters
@@ -189,6 +190,43 @@ def test_noise_report_and_agent_silence_fields_keep_one_type_from_answer_to_answ
     assert apis.apply_shape(empty, json.dumps(shape))["vulns"][0]["severity"] is None
     with pytest.raises(apis.ApiError):
         apis.check_shape({"format": "elasticsearch", "single": "description"})
+
+
+def test_the_noise_report_keeps_every_description_and_finds_source_ips_in_three_fields():
+    # Reported from work on 2026-11-18: rule 100101 read "Splashtop … 21,617" though Splashtop was ~9k of it,
+    # and Suricata and Windows alerts never showed their source IPs.
+    answer = {"aggregations": {"rules": {"buckets": [{
+        "key": "100101", "doc_count": 21617, "level": {"value": 3.0},
+        "description": {"sum_other_doc_count": 12617, "buckets": [{"key": "Splashtop", "doc_count": 9000}]},
+        "descriptions": {"buckets": [{"key": "Splashtop", "doc_count": 9000},
+                                     {"key": "Microsoft connection test", "doc_count": 7000},
+                                     {"key": "Teramind", "doc_count": 5617}]},
+        "agents": {"buckets": [{"key": "Suricata-1", "doc_count": 21617}]},
+        "sources": {"buckets": [{"key": "10.0.0.9", "doc_count": 40}]},
+        "src_ip": {"buckets": [{"key": "10.0.0.5", "doc_count": 15000}, {"key": "10.0.0.9", "doc_count": 100}]},
+        "win_ip": {"buckets": []},
+        "groups": {"buckets": []}}]}}}
+    op = next(o for o in wazuh_presets.INDEXER_OPERATIONS if o["name"] == "Noise report")
+    rule = apis.apply_shape(answer, apis.check_shape(op["shape"]))["rules"][0]
+    assert rule["description"] == "Splashtop" and rule["level"] == 3
+    assert [d["count"] for d in rule["descriptions"]] == [9000, 7000, 5617]        # the split stays visible
+    assert rule["sources"] == [{"key": "10.0.0.5", "count": 15000}, {"key": "10.0.0.9", "count": 140}]
+    assert "src_ip" not in rule and "win_ip" not in rule                          # folded into sources
+    body = json.dumps(op["body"]) if not isinstance(op["body"], str) else op["body"]
+    assert "data.src_ip" in body and "data.win.eventdata.ipAddress" in body
+    with pytest.raises(apis.ApiError):
+        apis.check_shape({"format": "elasticsearch", "merge": {"sources": "src_ip"}})
+
+
+def test_a_cat_answer_is_named_rows_like_every_other_list():
+    # Reported from work on 2026-11-18: rows.list was null on Indices and Indexer disk.
+    cat = [{"index": "wazuh-alerts-4.x-2026.11.17", "health": "green", "docs.count": "21604"},
+           {"index": "wazuh-alerts-4.x-2026.11.18", "health": "green", "docs.count": "900"}]
+    for name in ("Indices", "Indexer disk"):
+        op = next(o for o in wazuh_presets.INDEXER_OPERATIONS if o["name"] == name)
+        out = apis.apply_shape(cat, apis.check_shape(op["shape"]))
+        assert out == {"total": 2, "rows": cat}
+        assert apis.page(out, 0, 40_000)[1]["list"] == "rows"
 
 
 def test_the_wazuh_shape_and_keep_and_redaction():

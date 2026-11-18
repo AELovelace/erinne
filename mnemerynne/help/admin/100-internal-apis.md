@@ -34,13 +34,14 @@ An operation's **Response shape** boils its answer down on the server, before it
 
 | Key | Effect |
 |---|---|
-| `"format": "elasticsearch"` | A `_search` answer becomes `{total, rows, <each aggregation>}`: hits become flat rows of their `_source`, aggregations become plain lists (`[{"key": "site-chan", "count": 21604, …sub-aggregations}]`), metrics become their value, and `_shards`, `_index`, `_id`, sort keys go. `<name>_others` says how many fell outside a top list; `total_is_at_least` means the count was capped. |
+| `"format": "elasticsearch"` | A `_search` answer becomes `{total, rows, <each aggregation>}`: hits become flat rows of their `_source`, aggregations become plain lists (`[{"key": "site-chan", "count": 21604, …sub-aggregations}]`), metrics become their value, and `_shards`, `_index`, `_id`, sort keys go. `<name>_others` says how many fell outside a top list; `total_is_at_least` means the count was capped. Whole-number metrics are whole (`3`, not `3.0`), and a `_cat` answer (`?format=json`, a bare list) becomes `{total, rows}`. |
 | `"format": "wazuh"` | The Wazuh manager's `{data: {affected_items, total_affected_items}}` becomes `{total, rows}` (plus `failed` when some items failed). |
 | `"keep": ["rule.level", "policy.states.name"]` | Only these fields of each row (dotted paths, mapped through lists). |
 | `"rename": {"rule.level": "level"}` | Shorter names for fields. |
 | `"redact": true` | Passwords, keys, tokens and webhook addresses become `[redacted]`, in fields and in text. yes/no switches (`use_password: yes`) stay. |
 | `"flatten": false` | Keep nested objects instead of `rule.level`-style keys. |
 | `"single": ["description", "rule_id"]` | With `elasticsearch`: these sub-aggregations (size-1 top lists) always come back as just their top key (or `null`), and every other top list always stays a list, so a field never changes type between answers. Without `single`, a one-item list that covers its whole bucket is guessed to be a single value. |
+| `"merge": {"sources": ["src_ip", "win_ip"]}` | With `elasticsearch`: these top lists (one per field the same thing can live in) are folded into the named one. Counts are added by key, biggest first, and the list is as long as the longest; the folded-in names go. |
 
 The MCP connector now hands Claude the answer as JSON rather than as a string of JSON, so shaped answers cost far fewer tokens.
 - **Recent calls** shows who asked what. A citation in chat opens the exact response the answer was based on, for the person who asked and for admins. That response is stored with the call, so answers from Atera keep ticket text in Mnemerynne's database for `MNEMERYNNE_API_CALLS_DAYS`.

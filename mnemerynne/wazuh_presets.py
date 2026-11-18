@@ -107,6 +107,10 @@ ALERT_SHAPE = _shape(format="elasticsearch", rename={
     "data.dstuser": "user"}, single=["description", "rule_id", "severity"])
 # Sub-aggregations of size 1 always come back as one value (a string, or null); every other one is always a list.
 ES_SHAPE = _shape(format="elasticsearch", single=["description", "rule_id", "severity"])
+# The Noise report: a source IP lives in data.srcip, Suricata's data.src_ip or a Windows event's ipAddress;
+# the three top lists are folded into one sources list.
+NOISE_SHAPE = _shape(format="elasticsearch", single=["description", "rule_id", "severity"],
+                     merge={"sources": ["src_ip", "win_ip"]})
 
 
 def _terms(field: str, size="{{top}}", **aggs) -> dict:
@@ -212,15 +216,23 @@ INDEXER_OPERATIONS: list[dict] = [
      "body": _body({"size": 0, "track_total_hits": True,
                     "query": _with_exclusions(_alert_query(filters=False)),
                     "aggs": {"rules": {"terms": {"field": "rule.id", "size": "{{top}}"}, "aggs": {
-                        "description": _terms("rule.description", 1), "level": {"max": {"field": "rule.level"}},
-                        "agents": _terms("agent.name", 3), "sources": _terms("data.srcip", 3),
+                        "description": _terms("rule.description", 1),            # the top one, a string
+                        "descriptions": _terms("rule.description", 5),           # all of them (a rule's text varies)
+                        "level": {"max": {"field": "rule.level"}},
+                        "agents": _terms("agent.name", 3),
+                        "sources": _terms("data.srcip", 3),                      # most decoders
+                        "src_ip": _terms("data.src_ip", 3),                      # Suricata
+                        "win_ip": _terms("data.win.eventdata.ipAddress", 3),     # Windows events
                         "groups": _terms("rule.groups", 3)}}}}),
-     "shape": ES_SHAPE,
-     "description": "The rules that make the most alerts, by rule ID, with each one's description (a string), "
-                    "level, top machines, top source IPs and groups (always lists of {key, count}), and the share "
-                    "of the total. sources is [] for rules whose alerts carry no data.srcip, which is most "
-                    "host-side rules (file integrity, rootcheck, syscheck, package changes). Use it to decide "
-                    "what to tune or exclude; pass the IDs you've dealt with in exclude_rule_id to see what's next.",
+     "shape": NOISE_SHAPE,
+     "description": "The rules that make the most alerts, by rule ID, with each one's top description (a string), "
+                    "level (a whole number), and lists of {key, count}: descriptions (up to 5; a rule whose text "
+                    "varies shows how its count splits, so read these before naming what a rule is), top "
+                    "machines (agents), top source IPs (sources: data.srcip, Suricata's data.src_ip and Windows "
+                    "events' ipAddress together) and groups, and the share of the total. sources is [] for "
+                    "host-side rules with no source IP (file integrity, rootcheck, package changes). Use it to "
+                    "decide what to tune or exclude; pass the IDs you've dealt with in exclude_rule_id to see "
+                    "what's next.",
      "example_questions": "Which rules make the most noise?\nWhat should we tune in Wazuh?\n"
                           "What are the noisiest alerts this week?\nWhat's flooding the alerts?"},
     # C7 / P8: a dead agent and a quiet one look the same in alert counts; this tells them apart.
@@ -295,13 +307,14 @@ INDEXER_OPERATIONS: list[dict] = [
      "description": "The indexer cluster's health: status (green/yellow/red), nodes, active and unassigned shards.",
      "example_questions": "Is the Wazuh indexer healthy?\nAre there unassigned shards?\nIs the indexer green?"},
     {"name": "Indexer disk", "path": "/_cat/allocation?format=json&bytes=gb", "cache_seconds": 300,
-     "description": "Disk used and free on each indexer node, in GB, with its shard count.",
+     "shape": ES_SHAPE,                                       # the bare _cat list as {total, rows}
+     "description": "Disk used and free on each indexer node, in GB, with its shard count, as {total, rows}.",
      "example_questions": "How much disk does the Wazuh indexer have left?\nIs the indexer running out of space?"},
     {"name": "Indices", "path": "/_cat/indices/wazuh-*?format=json&bytes=mb&s=index"
                                 "&h=index,health,status,docs.count,store.size,creation.date.string",
-     "cache_seconds": 300,
+     "cache_seconds": 300, "shape": ES_SHAPE,                # the bare _cat list as {total, rows}
      "description": "Every Wazuh index (alerts per day, archives, states) with its health, document count, size in "
-                    "MB and creation date: how far back alerts go and how fast they grow.",
+                    "MB and creation date, as {total, rows}: how far back alerts go and how fast they grow.",
      "example_questions": "How far back do the Wazuh alerts go?\nHow big are the alert indices?\n"
                           "How much do alerts take per day?"},
     {"name": "Retention policies", "path": "/_plugins/_ism/policies", "cache_seconds": 300,

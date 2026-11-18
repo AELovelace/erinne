@@ -413,7 +413,7 @@ def build_request(api, op, params: dict) -> tuple[str, str, dict, str | None]:
 # An operation's shape boils its answer down on the server, before it is cached, logged, shown or handed to
 # the model: Elasticsearch boilerplate (_shards, _index, sort keys) goes, aggregations become plain lists,
 # and secrets (an operation with "redact") never leave this module.
-_SHAPE_KEYS = {"format", "keep", "rename", "redact", "flatten", "single"}
+_SHAPE_KEYS = {"format", "keep", "rename", "redact", "flatten", "single", "merge"}
 _REDACT_KEY = re.compile(r"(?i)(pass(wd|word)?$|password|secret|token|api_?key|hook_url|webhook|credential"
                          r"|private_key|^key$)")
 _REDACT_TEXT = (
@@ -452,6 +452,12 @@ def check_shape(shape) -> str:
     if not isinstance(single, list) or len(single) > 20 or \
             not all(isinstance(k, str) and 0 < len(k) <= 120 for k in single):
         raise ApiError("The shape's single is a list of at most 20 aggregation names, like \"description\".")
+    merge = shape.get("merge", {})                                # {"sources": ["src_ip", "win_ip"]}: lists folded in
+    if not isinstance(merge, dict) or len(merge) > 20 or not all(
+            isinstance(k, str) and k and isinstance(v, list) and 0 < len(v) <= 10
+            and all(isinstance(n, str) and n for n in v) for k, v in merge.items()):
+        raise ApiError("The shape's merge maps a list's name to the aggregations folded into it, "
+                       "like {\"sources\": [\"src_ip\", \"win_ip\"]}.")
     return json.dumps(shape, ensure_ascii=False, sort_keys=True)
 
 
@@ -528,7 +534,8 @@ def _agg(value, shape: dict):
     if isinstance(value.get("hits"), dict):                         # top_hits
         return [_row(h.get("_source") or {}, shape) for h in value["hits"].get("hits") or []]
     if "value" in value:
-        return value.get("value_as_string", value["value"])
+        got = value.get("value_as_string", value["value"])
+        return int(got) if isinstance(got, float) and got.is_integer() else got   # a max level: 3, not 3.0
     if "doc_count" in value:                                        # a single-bucket filter
         sub = _subaggs(value, shape)
         return {"count": value["doc_count"], **sub} if sub else value["doc_count"]
@@ -551,7 +558,23 @@ def _subaggs(bucket: dict, shape: dict) -> dict:
                 and set(got[0]) == {"key", "count"} and got[0]["count"] == bucket.get("doc_count"):
             got = got[0]["key"]
         out[name] = got
+    for target, names in (shape.get("merge") or {}).items():       # one top list from several fields
+        lists = [out.pop(n, None) for n in names] + [out.get(target)]
+        lists = [x for x in lists if isinstance(x, list)]
+        if lists:
+            out[target] = _merge_tops(lists)
     return out
+
+
+def _merge_tops(lists: list[list]) -> list:
+    """Several top lists of {key, count} as one: counts added by key, biggest first, as long as the longest."""
+    counts: dict = {}
+    for items in lists:
+        for item in items:
+            if isinstance(item, dict) and "key" in item:
+                counts[item["key"]] = counts.get(item["key"], 0) + (item.get("count") or 0)
+    top = sorted(counts.items(), key=lambda kv: -kv[1])[:max(len(x) for x in lists)]
+    return [{"key": k, "count": n} for k, n in top]
 
 
 def _bucket(bucket: dict, shape: dict) -> dict:
@@ -560,6 +583,8 @@ def _bucket(bucket: dict, shape: dict) -> dict:
 
 
 def _shape_elasticsearch(data, shape: dict):
+    if isinstance(data, list):                                     # a _cat answer (?format=json): rows as they are
+        return {"total": len(data), "rows": [_row(r, shape) for r in data]}
     if not isinstance(data, dict) or not ("hits" in data or "aggregations" in data):
         return data
     out: dict = {}
