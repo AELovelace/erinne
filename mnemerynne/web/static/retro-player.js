@@ -463,6 +463,18 @@
     sentSram = sram ? fingerprint(sram) : null;
     // Its update check asks emulatorjs.org (only on localhost); the page's policy refuses that, so it isn't asked.
     window.EmulatorJS.prototype.checkForUpdates = function () {};
+    // Netplay (retro-netplay.js) runs every frame with fast-forward on, as that's when one call is exactly one frame.
+    // So RetroArch's fast-forward draws every frame (not some, by time: the picture could stand still, and a game
+    // come out differently in each browser), says nothing on screen about it, and has no keyboard keys of
+    // RetroArch's own (Space, L) that could turn it off mid-game. EmulatorJS's own fast-forward is unchanged.
+    const cfg = window.EJS_GameManager && window.EJS_GameManager.prototype.getRetroArchCfg;
+    if (cfg && !cfg.netplayReady) {
+      window.EJS_GameManager.prototype.getRetroArchCfg = function () {
+        return cfg.call(this) + "fastforward_frameskip = false\nnotification_show_fast_forward = false\n" +
+          "input_toggle_fast_forward = nul\ninput_hold_fast_forward = nul\n";
+      };
+      window.EJS_GameManager.prototype.getRetroArchCfg.netplayReady = true;
+    }
     emu = new window.EmulatorJS("#rp-game", {
       // The game's own core (a PS1 .chd plays on another one than the console's usual): EmulatorJS finds the
       // console from it for its controls and menus.

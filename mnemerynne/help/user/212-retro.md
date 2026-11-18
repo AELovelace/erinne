@@ -115,8 +115,10 @@ Up to four people can play one game together, each in their own browser or on th
 Good to know:
 
 - **Who can join:** only people who can read that game on the share see its rooms.
-- **Input delay:** the host picks it before opening the room. **Low** suits the same house, **Normal** most of the time, **Smooth** friends far away. A higher delay hides a slow connection better, but buttons answer a moment later.
-- **Waiting:** every game waits for whoever's behind, so it never runs ahead. If someone's connection stalls, everyone sees **Waiting for …** until it catches up.
+- **No lag on your own buttons:** your presses reach your game on the next frame, as when playing alone. The others' presses take a moment to arrive, so until they do, your game guesses they're still holding what they held. When the real presses come and the guess was wrong, your game quietly goes back a few frames and plays them again with the real presses, in a few thousandths of a second. Now and then you may see someone's character jump a little: that's a correction. This is **rollback**, as fighting games online do it.
+- **Input delay:** the host picks it before opening the room. **Normal** (one frame) suits nearly everyone. **Instant** answers a frame sooner, with a few more corrections. **Steady** waits two frames, for fewer corrections on a slow connection.
+- **The PS1 is different:** it's too heavy to play frames again, so its games wait for everyone's presses instead (lockstep). Your own buttons answer a little later there: the host picks **Low**, **Normal** or **Smooth** for how much later, to cover the connection.
+- **Waiting:** if someone's connection stalls (more than about eight frames behind), everyone sees **Waiting for …** until it catches up.
 - **Saves:** the game is the host's. The host's saves and states work as usual. Guests don't save, so a guest's own progress in that game is left as it was.
 - **Joining later:** each new player makes everyone start again from where the host is, even mid-game. So does the host loading a state. Two people joining at almost the same moment start one after the other, a second or two apart.
 - **Staying in step:** every few seconds the games check they're still the same. If they've drifted apart, everyone starts again from the host's, by itself. **↻ Resync everyone** does it by hand.

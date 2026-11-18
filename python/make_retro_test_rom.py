@@ -3,7 +3,8 @@
     python python/make_retro_test_rom.py <folder>     # writes one game per console into <folder>
 
 No game of anyone else's: each is a few instructions written here by hand, in that console's own machine code. On
-each boot it adds 1 to a byte of its battery save, then fills the screen with pink. So a test can tell the emulator
+each boot it adds 1 to a byte of its battery save, then fills the screen with pink. The NES's also reads both pads every frame
+(green while a button's held) and keeps a running total of them, for the netplay test. So a test can tell the emulator
 ran (the screen's colour) and that the save went to the server and came back before the next boot (the byte went up
 by one per boot). The PS1's is a bare program (a PS-X EXE) with no memory card code: it only paints.
 
@@ -86,7 +87,50 @@ NES_PROGRAM = bytes((
     0x8D, 0x06, 0x20,        # $802E sta $2006
     0xA9, 0x0A,              # $8031 lda #$0A      background on
     0x8D, 0x01, 0x20,        # $8033 sta $2001
-    0x4C, 0x36, 0x80,        # $8036 jmp $8036     and stay
+    # Then, every frame: read both pads and fold them into a running total, so a game's state depends on every
+    # press of both players at the frame it came (tests/retro-netplay-browser.mjs: two browsers must agree).
+    0x2C, 0x02, 0x20,        # $8036 bit $2002     wait for the vertical blank ...
+    0x10, 0xFB,              # $8039 bpl $8036
+    0xA9, 0x01,              # $803B lda #1        ... strobe both pads ...
+    0x8D, 0x16, 0x40,        # $803D sta $4016
+    0xA9, 0x00,              # $8040 lda #0
+    0x8D, 0x16, 0x40,        # $8042 sta $4016
+    0xA2, 0x08,              # $8045 ldx #8        ... and read their eight buttons:
+    0xAD, 0x16, 0x40,        # $8047 lda $4016     player 1's into $10 ...
+    0x4A,                    # $804A lsr a
+    0x26, 0x10,              # $804B rol $10
+    0xAD, 0x17, 0x40,        # $804D lda $4017     ... player 2's into $11
+    0x4A,                    # $8050 lsr a
+    0x26, 0x11,              # $8051 rol $11
+    0xCA,                    # $8053 dex
+    0xD0, 0xF1,              # $8054 bne $8047
+    0xA5, 0x12,              # $8056 lda $12       the running totals: $12 = $12 * 2 + player 1 ...
+    0x0A,                    # $8058 asl a
+    0x65, 0x10,              # $8059 adc $10
+    0x85, 0x12,              # $805B sta $12
+    0xA5, 0x13,              # $805D lda $13       ... $13 = $13 * 2 + player 2
+    0x0A,                    # $805F asl a
+    0x65, 0x11,              # $8060 adc $11
+    0x85, 0x13,              # $8062 sta $13
+    0xE6, 0x14,              # $8064 inc $14       and the frames counted
+    0xA9, 0x3F,              # $8066 lda #$3F      the palette ($3F00) ...
+    0x8D, 0x06, 0x20,        # $8068 sta $2006
+    0xA9, 0x00,              # $806B lda #$00
+    0x8D, 0x06, 0x20,        # $806D sta $2006
+    0xA5, 0x10,              # $8070 lda $10       ... all green while either pad holds a button ...
+    0x05, 0x11,              # $8072 ora $11
+    0xF0, 0x04,              # $8074 beq $807A
+    0xA9, 0x2A,              # $8076 lda #$2A
+    0xD0, 0x02,              # $8078 bne $807C
+    0xA9, 0x24,              # $807A lda #$24      ... all pink otherwise
+    0xA2, 0x20,              # $807C ldx #32       (every entry: the screen's tiles use all of them)
+    0x8D, 0x07, 0x20,        # $807E sta $2007
+    0xCA,                    # $8081 dex
+    0xD0, 0xFA,              # $8082 bne $807E
+    0xA9, 0x00,              # $8084 lda #$00      the PPU's address back to $0000
+    0x8D, 0x06, 0x20,        # $8086 sta $2006
+    0x8D, 0x06, 0x20,        # $8089 sta $2006
+    0x4C, 0x36, 0x80,        # $808C jmp $8036     the next frame
 ))
 
 
