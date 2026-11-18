@@ -16,7 +16,7 @@
 - **Approve its proposals automatically:** off by default, and only there while *May propose changes* is on. When on, what the automation proposed is applied as you at the end of each run, with the same checks as pressing Apply yourself, so turn it on only for jobs you trust. Proposals that need a Mnemerynne admin (a whole library's AI edit, API actions marked for admin approval) still wait for one. The run's raw output says what was applied and what wasn't.
 - **Send the answer to:**
   - **your Inbox:** a note linking to the full answer;
-  - **a room:** posted by Erynne. Everyone there reads it, so she uses only what they all may read;
+  - **a room:** posted by Erynne. When Erynne runs it, she uses only what everyone there may read. When Claude runs it (your key or a routine), Claude works with *your* access, so the report can hold what only you may see. To post it anyway, tick **Share what my access finds with everyone in this room**. The post then says it ran with your access;
   - **a draft in your Outlook:** it isn't sent;
   - **a webhook** your admins set up, such as a Teams channel.
 

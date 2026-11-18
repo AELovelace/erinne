@@ -27,7 +27,7 @@ Every change is logged in Recent changes (`settings.automations*`, `automations.
   3. Claude works through the connector and calls `report_automation_run`, which delivers the answer.
   4. A routine that doesn't report within 2 hours is marked timed out. Anthropic allows 30 starts per routine per hour.
 
-**Rooms:** an automation that posts in a room always runs as Erynne, reading only what *everyone in that room* may read, exactly as when she's @mentioned there. Its answer is posted for all of them, so it can't use the owner's private files or mail.
+**Rooms:** an Erynne automation that posts in a room runs as Erynne in that room, reading only what *everyone in that room* may read, exactly as when she's @mentioned there. Its answer is posted for all of them, so it can't use the owner's private files or mail. A Claude automation (the owner's key or a routine) may post in a room too, but it works with the owner's own access. Saving one with a room is refused unless the owner ticks **Share what my access finds with everyone in this room** (stored as `deliver.room_share`). Its post is headed "run by Claude with *owner*'s access, shared by them". Rooms where Erynne is turned off aren't offered, for either runner.
 
 **Nothing to report:** an answer of exactly `NOTHING_TO_REPORT` (the templates ask for it, e.g. a health check with nothing wrong) is recorded as *nothing to report* and not delivered.
 

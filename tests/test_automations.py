@@ -138,10 +138,10 @@ def test_who_may_use_it_and_what_an_automation_may_be(conn, settings, people, di
     assert auto.view(runs, auto.get(runs, made))["routine_token"] == "saved"
     with pytest.raises(auto.AutomationError, match="already"):
         auto.create(runs, settings, alice, directory, {**body, "name": "brief"})
-    # Rooms: only Erynne posts there.
+    # Rooms: a Claude runner posts there only when its owner shares their access (Erynne reads what the room may).
     rooms.set_enabled(conn, True)
     room_id = rooms.create_channel(conn, alice, "ops")
-    with pytest.raises(auto.AutomationError, match="Only Erynne"):
+    with pytest.raises(auto.AutomationError, match="Share what my access finds"):
         auto.update(runs, settings, alice, directory, made, {"deliver": {"room_id": room_id}})
     auto.set_enabled(conn, False)
     assert not auto.may_use(conn, settings, boss, directory)
@@ -414,3 +414,37 @@ def test_an_admin_approval_is_never_auto_approved(settings, conn, people, direct
         step = next(s for s in run["trace"] if s["kind"] == "approval")
         assert step["ok"] is False and "admin" in step["error"]
         assert conn.execute("SELECT status FROM agent_proposals").fetchone()[0] == "pending"
+
+
+def test_a_claude_routine_posts_in_a_room_only_when_its_owner_shares_their_access(settings, conn, people, directory):
+    """Claude works with the owner's access, so a room only gets its report when they tick the share box (Doll's
+    choice, 2026-11-18); the post says whose access it used."""
+    rooms.set_enabled(conn, True)
+    alice = users.get_user(conn, "alice")
+    room_id = rooms.create_channel(conn, alice, "ops")
+
+    async def handler(request):
+        return httpx.Response(200, json={"claude_code_session_url": "https://claude.ai/code/s2"})
+    automations_run.TRANSPORT = httpx.MockTransport(handler)
+    with _web(settings, "alice", directory) as c:
+        body = {"name": "Audit", "prompt": "Audit Wazuh", "schedule": {"every": "day", "at": "07:30"},
+                "runner": "claude_routine", "routine_url": ROUTINE, "routine_token": "sk-ant-oat01-secret",
+                "deliver": {"inbox": False, "room_id": room_id}}
+        refused = c.post("/api/automations", json=body)
+        assert refused.status_code == 422 and "Share what my access finds" in refused.json()["detail"], refused.text
+        made = c.post("/api/automations", json={**body, "deliver": {**body["deliver"], "room_share_ack": True}})
+        assert made.status_code == 201, made.text
+        a = made.json()
+        assert a["deliver"] == {"inbox": False, "room_id": room_id, "room_share": True}
+        assert c.patch(f"/api/automations/{a['id']}", json={"name": "Daily audit"}).status_code == 200   # kept
+
+        run_id = c.post(f"/api/automations/{a['id']}/run").json()["run_id"]
+        assert _wait(c, run_id)["status"] == "waiting"
+        tools = Tools(settings, lambda: FakeEmbedder(), lambda: directory)
+        reader = api_tokens.verify(conn, api_tokens.create(conn, people["alice"], "r")[1])
+        out = c.portal.call(asyncio.to_thread, tools.report_automation_run, conn, reader, run_id, "Two hosts need patches.")
+        assert out[0]["status"] == "done" and {"to": "room", "ok": True, "room_id": room_id} in out[0]["delivered"]
+        with rooms.on(conn) as rooms_conn:
+            posted = rooms.history(rooms_conn, alice, room_id, directory)[-1]
+        assert posted["body"].startswith("**Daily audit** · _run by Claude with alice's access, shared by them_")
+        assert "Two hosts need patches." in posted["body"]

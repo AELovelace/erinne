@@ -211,9 +211,15 @@ def _deliver(conn: sqlite3.Connection, settings: Settings, user: sqlite3.Row, di
     out: dict = {"inbox": bool(deliver.get("inbox", False))}
     room_id = deliver.get("room_id")
     if room_id:
+        # Erynne posting in a room reads only what everyone there may. Claude works with the owner's own access, so
+        # its report may hold what only they can see: posting it shares that with the room, which they must say
+        # they mean (deliver.room_share_ack, Doll's choice 2026-11-18). The post then says whose access it used.
         if runner != "erynne":
-            raise AutomationError("Only Erynne posts in rooms: everyone there reads it, so she reads only what "
-                                  "they all may. Pick Erynne, or send Claude's answer to your Inbox.")
+            if not deliver.get("room_share_ack") and not deliver.get("room_share"):
+                raise AutomationError("Claude works with your own access, so its report can hold what only you may "
+                                      "see. Tick “Share what my access finds with everyone in this room” to post it "
+                                      "there, or pick Erynne, who reads only what the room may.")
+            out["room_share"] = True
         with rooms.on(conn) as rooms_conn:
             if rooms_conn is None or not rooms.enabled(rooms_conn):
                 raise AutomationError("Rooms is turned off.")

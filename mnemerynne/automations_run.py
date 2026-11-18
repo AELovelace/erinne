@@ -627,7 +627,9 @@ class Scheduler:
         if deliver.get("inbox"):
             done.append(await asyncio.to_thread(self._to_inbox, user["id"], row["name"], run["output"], link))
         if deliver.get("room_id"):
-            done.append(await asyncio.to_thread(self._to_room, deliver["room_id"], row["name"], body))
+            shared = row["runner"] != "erynne"             # Claude, with the owner's access (automations._deliver)
+            done.append(await asyncio.to_thread(self._to_room, deliver["room_id"], row["name"], body,
+                                                user["username"] if shared else ""))
         if deliver.get("email_draft"):
             done.append(await asyncio.to_thread(self._to_draft, user["id"], row["name"], body))
         for hook in hooks:
@@ -655,15 +657,19 @@ class Scheduler:
         finally:
             conn.close()
 
-    def _to_room(self, room_id: int, name: str, body: str) -> dict:
+    def _to_room(self, room_id: int, name: str, body: str, shared_by: str = "") -> dict:
+        """Post the answer in a room as Erynne. shared_by: Claude ran it with that person's access, which the post
+        says, so the room knows it may hold what only they can see."""
         from mnemerynne import rooms
+
+        head = f"**{name}**" + (f" · _run by Claude with {shared_by}'s access, shared by them_" if shared_by else "")
 
         conn = db.connect_for(self.settings.db_path, "rooms", "chat_rooms")   # rooms.db once moved there
         try:
             with db.transaction(conn):
                 if not rooms.enabled(conn):
                     return {"to": "room", "ok": False, "error": "Rooms is off."}
-                rooms.post(conn, None, room_id, f"**{name}**\n\n{body}"[:rooms.MAX_CHARS], self.get_directory(),
+                rooms.post(conn, None, room_id, f"{head}\n\n{body}"[:rooms.MAX_CHARS], self.get_directory(),
                            via="erynne")
             if self.bus is not None:
                 self.bus.wake()

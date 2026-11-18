@@ -182,14 +182,28 @@
     sendTo.appendChild(el("legend", "small", "Send the answer to"));
     sendTo.append(inbox.label, draft.label);
     hooks.forEach(function (h) { sendTo.appendChild(h[1].label); });
-    const roomField = field("A room", room, "Posted by Erynne. Everyone there reads it, so she reads only what they all may.");
-    if (state.data.rooms.length) sendTo.appendChild(roomField);
+    const roomHint = el("span", "muted small");                       // says whose access the post may carry
+    const roomField = field("A room", room);
+    roomField.appendChild(roomHint);
+    const roomShare = check("Share what my access finds with everyone in this room", deliver.room_share);
+    roomShare.label.classList.add("automator-sub");                   // Claude runs only: the owner says they mean it
+    if (state.data.rooms.length) sendTo.append(roomField, roomShare.label);
     const enabled = check("On", a.enabled !== false);
+
+    function showRoom() {                                             // the warning only matters for Claude with a room
+      const erynne = runner.value === "erynne";
+      roomHint.textContent = erynne
+        ? "Posted by Erynne. Everyone there reads it, so she reads only what they all may."
+        : "Posted by Erynne, but Claude did the job with your own access: its report can hold what only you may see. " +
+          "The post says it ran with your access.";
+      roomShare.label.hidden = erynne || !room.value;
+    }
+    room.addEventListener("change", showRoom);
 
     function showRunner() {
       routine.hidden = runner.value !== "claude_routine";
-      roomField.hidden = runner.value !== "erynne";
       tools.node.hidden = runner.value === "claude_routine";
+      showRoom();                                                     // the hint and the share box follow the runner
     }
     runner.addEventListener("change", showRunner);
     form.append(field("Name", name), field("What to do", prompt, "Write it as a request: Erynne does it with your " +
@@ -210,7 +224,8 @@
                      auto_approve: propose.box.checked && autoApprove.box.checked,
                      enabled: enabled.box.checked,
                      deliver: { inbox: inbox.box.checked, email_draft: draft.box.checked,
-                                room_id: runner.value === "erynne" && room.value ? parseInt(room.value, 10) : null,
+                                room_id: room.value ? parseInt(room.value, 10) : null,   // any runner (Claude: with the box ticked)
+                                room_share_ack: runner.value !== "erynne" && roomShare.box.checked,
                                 destinations: hooks.filter(function (h) { return h[1].box.checked; }).map(function (h) { return h[0]; }) } };
       if (runner.value === "claude_routine") {
         body.routine_url = routineUrl.value;
