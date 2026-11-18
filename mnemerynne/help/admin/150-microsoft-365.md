@@ -9,17 +9,19 @@ People keep signing in with their Mnemerynne account. On Preferences they link t
    - The settings file still works: `MNEMERYNNE_M365_CLIENT_ID` and `MNEMERYNNE_M365_CLIENT_SECRET` are used when nothing is saved on the page (that needs a restart of the web app and worker, as before). What is saved on the page wins. The page says which one is in use.
    - If the server's `SECRET_KEY` changes, the saved secret can't be read any more. The page says so and falls back to the settings file; enter the ID and secret again.
    - A tenant with its own app keeps using its own; the shared registration is for every tenant without one.
+   - Saving the app alone connects nothing: until at least one tenant is added below it, the page says *No tenants yet* and nobody can link. Carry on with **Each tenant**.
+   - Pasted IDs and secrets are trimmed (a stray space or newline would make Microsoft refuse the secret), and client IDs are kept in lowercase as Microsoft sends them. A Secret ID pasted where its Value belongs is refused with a note.
 3. API permissions → Microsoft Graph:
    - **Delegated**: `openid`, `profile`, `email`, `offline_access`, `User.Read`, `Files.Read.All`, `Mail.Read`, `Mail.Read.Shared`, `Calendars.Read`, `Mail.ReadWrite` (drafts only).
    - **Application**: `Sites.Selected` (SharePoint indexing, granted per site) and `GroupMember.Read.All` (Entra groups).
 
 ## Each tenant (Access → Settings → Microsoft 365)
 
-1. Add it by one of its domains or its tenant ID, with a name and who may link there:
+1. Add it by one of its domains or its tenant ID (the **Directory (tenant) ID** on an app registration's Overview, not its Application (client) ID: Mnemerynne asks Microsoft and refuses an ID that isn't a tenant), with a name and who may link there:
    - **Synced from our AD**: people may only link the Microsoft account whose on-premises logon name matches their linked domain account.
    - **Separate staff**: anyone may link an account they can sign in to; create their Mnemerynne user first.
 2. An admin *of that tenant* opens its **Grant consent** link once and accepts. **Check** confirms the app can sign in there.
-3. A tenant whose admins won't consent to an outside app can register its own single-tenant app: enter its client ID and secret on the tenant's row; it gets its own Link button on Preferences.
+3. A tenant whose admins won't consent to an outside app can register its own single-tenant app: enter its client ID and secret in the *Own app* boxes when adding the tenant (both, or neither for the shared app; they get the same checks as the shared app); it gets its own Link button on Preferences.
 
 Linked accounts show on Preferences and in each user's dialog on Access → Accounts, where admins can unlink them. Removing a tenant unlinks everyone in it and removes its SharePoint libraries. Refresh tokens are stored encrypted with `MNEMERYNNE_SECRET_KEY`; when Microsoft stops accepting one, the account shows *needs linking again*.
 

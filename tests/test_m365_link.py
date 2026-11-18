@@ -47,9 +47,10 @@ class FakeMicrosoft:
         url = str(request.url)
         if url.endswith("/.well-known/openid-configuration"):
             domain = url.split("/")[3]
-            if domain not in self.domains:
+            tid = domain if domain in self.domains.values() else self.domains.get(domain)   # by tenant ID or a domain
+            if tid is None:
                 return httpx.Response(400, json={"error": "invalid_tenant"})
-            return httpx.Response(200, json={"issuer": f"https://login.microsoftonline.com/{self.domains[domain]}/v2.0"})
+            return httpx.Response(200, json={"issuer": f"https://login.microsoftonline.com/{tid}/v2.0"})
         if url.endswith("/oauth2/v2.0/token"):
             form = parse_qs(request.content.decode())
             grant = form["grant_type"][0]
@@ -249,11 +250,37 @@ def test_admin_manages_tenants(client, ms, conn, world):
     ms.consented.add(GASCO)
     assert client.post(f"/api/admin/m365/tenants/{gasco['id']}/check").json()["ok"]
 
-    client.patch(f"/api/admin/m365/tenants/{gasco['id']}", json={"client_id": "own-app", "client_secret": "s3"})
+    client.patch(f"/api/admin/m365/tenants/{gasco['id']}", json={"client_id": OWN_APP.upper(), "client_secret": "s3"})
     own = next(t for t in client.get("/api/admin/m365").json()["tenants"] if t["label"] == "Gasco")
-    assert own["own_app"] and own["secret_set"] and "client_id=own-app" in own["consent_url"]
+    assert own["own_app"] and own["secret_set"] and f"client_id={OWN_APP}" in own["consent_url"]   # kept in lowercase
     assert "s3" not in json.dumps(own)
     assert client.get("/api/admin/log").json()["entries"][0]["action"] == "m365.tenant"
+
+
+OWN_APP = "44444444-4444-4444-4444-444444444444"
+
+
+def test_a_tenants_own_app_is_checked_like_the_shared_one(client, ms, conn, settings, world):
+    """The own-app boxes: trimmed, lowercased, both halves, the secret's Value, and the right GUID in each box."""
+    _login(client, "boss")
+    conn.execute("DELETE FROM m365_tenants WHERE tenant_id = ?", (GASCO,))
+    add = lambda **kw: client.post("/api/admin/m365/tenants", json={"ref": "gascofuel.com", "label": "Gasco", **kw})
+    for bad, why in (({"client_id": "own-app", "client_secret": "s3"}, r"Application \(client\) ID"),
+                     ({"client_id": OWN_APP}, "client secret"),                         # an app with no secret
+                     ({"client_secret": "s3"}, "without its app"),                      # a secret with no app
+                     ({"client_id": OWN_APP, "client_secret": HOME}, "secret's ID"),    # the Secret ID for its Value
+                     ({"ref": GASCO, "client_id": GASCO, "client_secret": "s3"}, "are the same")):
+        refused = add(**bad)
+        assert refused.status_code == 400 and re.search(why, refused.json()["detail"]), refused.text
+    refused = client.post("/api/admin/m365/tenants", json={"ref": OWN_APP, "label": "Oops"})   # the app's ID as the tenant
+    assert refused.status_code == 400 and "Directory (tenant) ID" in refused.json()["detail"]
+    assert conn.execute("SELECT count(*) FROM m365_tenants WHERE tenant_id = ?", (GASCO,)).fetchone()[0] == 0
+
+    added = add(client_id=f" {OWN_APP.upper()} ", client_secret=" s3cret\n")            # as pasted from Entra
+    assert added.status_code == 201, added.text
+    row = conn.execute("SELECT * FROM m365_tenants WHERE tenant_id = ?", (GASCO,)).fetchone()
+    assert row["client_id"] == OWN_APP and apis.decrypt_secret(settings, row["client_secret_enc"]) == "s3cret"
+    assert client.post("/api/admin/m365/tenants", json={"ref": GASCO, "label": "Again"}).json()["detail"] == "That tenant is already added."
 
 
 def test_removing_a_tenant_unlinks_its_accounts(client, ms, conn, world):
@@ -335,8 +362,8 @@ def test_access_wins_over_the_settings_file_and_removing_it_falls_back(client, m
     assert m365.app_token(m365.live(conn, settings), m365.tenant(conn, world["home"])) == "app-" + HOME
     assert m365._app_tokens[HOME][2] == LIVE_APP
     # A tenant's own app is never replaced by the shared one.
-    client.patch(f"/api/admin/m365/tenants/{world['gasco']}", json={"client_id": "own-app", "client_secret": "s3"})
-    assert m365.credentials(m365.live(conn, settings), m365.tenant(conn, world["gasco"])) == ("own-app", "s3")
+    client.patch(f"/api/admin/m365/tenants/{world['gasco']}", json={"client_id": OWN_APP, "client_secret": "s3"})
+    assert m365.credentials(m365.live(conn, settings), m365.tenant(conn, world["gasco"])) == (OWN_APP, "s3")
     # A secret this server can no longer read (its secret key changed) falls back, and Access says so.
     conn.execute("UPDATE meta SET value = ? WHERE key = ?", (json.dumps({"client_id": LIVE_APP, "secret_enc": "garbage"}), m365.SHARED_KEY))
     assert client.get("/api/admin/m365").json()["shared_app"] == {"source": "server", "client_id": "app-id", "unreadable": True}

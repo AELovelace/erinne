@@ -117,16 +117,29 @@ def shared_app(conn: sqlite3.Connection, settings: Settings) -> dict:
             "unreadable": saved is not None}
 
 
-def set_shared_app(conn: sqlite3.Connection, settings: Settings, client_id: str, client_secret: str) -> None:
-    """Save the shared app registration from the Access page. It takes effect at once, here and in the worker."""
-    client_id, client_secret = client_id.strip(), client_secret.strip()
+def _check_client_id(client_id: str) -> str:
+    """An app registration's Application (client) ID, trimmed and lowercased (Microsoft's ID tokens carry it in
+    lowercase, so an uppercase copy would fail finish_link's audience check). Refuses anything that isn't one."""
+    client_id = (client_id or "").strip().lower()          # stray spaces from copy-paste, and Microsoft's own case
     if not _GUID.match(client_id):
         raise M365Error("The client ID is the app registration's Application (client) ID, like 1b2c3d4e-0000-0000-0000-000000000000.")
+    return client_id
+
+
+def _check_secret(client_secret: str) -> str:
+    """A client secret's Value, trimmed: a pasted newline or space would make Microsoft refuse it (AADSTS7000215)."""
+    client_secret = (client_secret or "").strip()          # copy-paste often brings a trailing space or newline
     if not client_secret:
         raise M365Error("Enter the app registration's client secret (its Value, not its Secret ID).")
     if _GUID.match(client_secret):                         # the commonest slip: Entra shows both side by side
         raise M365Error("That looks like the secret's ID. Paste the secret's Value instead, shown once when it is created.")
-    value = json.dumps({"client_id": client_id.lower(), "secret_enc": apis.encrypt_secret(settings, client_secret).decode()})
+    return client_secret
+
+
+def set_shared_app(conn: sqlite3.Connection, settings: Settings, client_id: str, client_secret: str) -> None:
+    """Save the shared app registration from the Access page. It takes effect at once, here and in the worker."""
+    client_id, client_secret = _check_client_id(client_id), _check_secret(client_secret)   # same checks as a tenant's own app
+    value = json.dumps({"client_id": client_id, "secret_enc": apis.encrypt_secret(settings, client_secret).decode()})
     conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (SHARED_KEY, value))
     with _lock:
         _app_tokens.clear()                                # tokens the old app was given: ask again as the new one
@@ -147,18 +160,19 @@ def _http() -> httpx.Client:
 def resolve_tenant(ref: str) -> str:
     """The directory GUID for a tenant GUID or one of its domains."""
     ref = (ref or "").strip().lower()
-    if _GUID.match(ref):
-        return ref
-    if not re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,}", ref):
+    if not _GUID.match(ref) and not re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,}", ref):
         raise M365Error("Enter the tenant's ID or one of its domains, e.g. eternalhotels.com.")
     try:
         with _http() as client:
             r = client.get(f"{AUTHORITY}/{ref}/v2.0/.well-known/openid-configuration")
     except httpx.HTTPError as exc:
         raise M365Error(f"Couldn't reach Microsoft: {exc}") from None
-    issuer = r.json().get("issuer", "") if r.status_code == 200 else ""
+    issuer = _json(r).get("issuer", "") if r.status_code == 200 else ""
     match = re.search(r"/([0-9a-f-]{36})/", issuer)
     if not match:
+        if _GUID.match(ref):                               # a GUID that isn't a tenant: usually the app's own ID pasted here
+            raise M365Error(f"Microsoft doesn't know a tenant with the ID {ref}. Use the Directory (tenant) ID from the "
+                            "app registration's Overview, not its Application (client) ID.")
         raise M365Error(f"Microsoft doesn't know a Microsoft 365 tenant for {ref}.")
     return match.group(1).lower()
 
@@ -187,22 +201,37 @@ def _check_mode(mode: str) -> str:
 
 def add_tenant(conn: sqlite3.Connection, settings: Settings, ref: str, label: str, mode: str = "cloud",
                client_id: str = "", client_secret: str = "") -> int:
-    tid = resolve_tenant(ref)
+    secret = None
+    if (client_id or "").strip() or (client_secret or "").strip():   # an own app: both halves, both checked
+        if not (client_id or "").strip():
+            raise M365Error("A secret was given without its app: enter the own app's Application (client) ID too, "
+                            "or leave both empty to use the shared app.")
+        client_id = _check_client_id(client_id)            # trimmed, lowercased, a real client ID
+        secret = apis.encrypt_secret(settings, _check_secret(client_secret))   # trimmed, its Value not its ID
+    tid = resolve_tenant(ref)                              # after the cheap checks, so a typo doesn't wait on Microsoft
     label = (label or "").strip()[:80] or ref.strip()
     if by_tid(conn, tid) is not None:
         raise M365Error("That tenant is already added.")
-    secret = apis.encrypt_secret(settings, client_secret) if client_secret else None
+    if client_id and client_id == tid:                     # the same GUID in both boxes: one of them is wrong
+        raise M365Error("The tenant ID and the client ID are the same. The tenant is the Directory (tenant) ID; "
+                        "the client ID is the Application (client) ID.")
     return conn.execute(
         "INSERT INTO m365_tenants(tenant_id, label, domain, mode, client_id, client_secret_enc) "
         "VALUES (?, ?, ?, ?, ?, ?)",
         (tid, label, "" if _GUID.match(ref.strip()) else ref.strip().lower(), _check_mode(mode),
-         (client_id or "").strip(), secret)).lastrowid
+         client_id or "", secret)).lastrowid
 
 
 def update_tenant(conn: sqlite3.Connection, settings: Settings, row_id: int, *, label: str | None = None,
                   mode: str | None = None, enabled: bool | None = None, client_id: str | None = None,
                   client_secret: str | None = None) -> None:
-    tenant(conn, row_id)
+    row = tenant(conn, row_id)
+    if client_id is not None and client_id.strip():
+        client_id = _check_client_id(client_id)            # trimmed, lowercased, a real client ID
+        if client_secret is None and row["client_secret_enc"] is None:   # an own app with no secret can't sign in
+            raise M365Error("Enter the own app's secret (its Value) along with its client ID.")
+    if client_secret:
+        client_secret = _check_secret(client_secret)       # trimmed, its Value not its ID
     if label is not None:
         conn.execute("UPDATE m365_tenants SET label = ? WHERE id = ?", ((label.strip() or "Tenant")[:80], row_id))
     if mode is not None:

@@ -152,7 +152,10 @@
       wrap.appendChild(t);
       box.appendChild(wrap);
     } else {
-      box.appendChild(el("p", "muted", "No tenants yet."));
+      box.appendChild(el("p", data.configured ? "error" : "muted", data.configured  // The app alone does nothing: say what's next.
+        ? "No tenants yet, so nothing can use the app. Next: add your organisation below (its domain, e.g. contoso.com), " +
+          "then open its Grant consent link as that tenant's admin, press Check, and link accounts on the Preferences page."
+        : "No tenants yet."));
     }
 
     const form = el("form", "ax-new");
