@@ -8,8 +8,9 @@
   const $ = function (id) { return document.getElementById(id); };
   const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
   const RUNNERS = { erynne: "Erynne", claude_key: "Claude (your key)", claude_routine: "A Claude routine" };
-  const STATUS = { running: "running…", waiting: "waiting for Claude…", done: "done", quiet: "nothing to report",
-                   failed: "failed", timed_out: "timed out" };
+  const STATUS = { queued: "starting…", running: "running…", waiting: "waiting for Claude…", reported: "delivering…",
+                   done: "done", quiet: "nothing to report", failed: "failed", timed_out: "timed out" };
+  const FINAL = ["done", "quiet", "failed", "timed_out"];   // a run in one of these won't change any more
   const state = { data: null, selected: null, run: null };
 
   function showError(message) {
@@ -160,6 +161,14 @@
       "report_automation_run."), field("Routine address", routineUrl), field("Routine token", routineToken));
     const tools = toolPicker(a.tools || []);
     const propose = check("May propose changes (files, mail drafts, API actions) for me to apply", a.may_propose);
+    const autoApprove = check("Approve its proposals automatically (applied as me at the end of each run; ones that " +
+                              "need an admin still wait)", a.auto_approve);
+    autoApprove.label.classList.add("automator-sub");                  // indented under “May propose”
+    function showApprove() {                                           // auto-approval only means something while it may propose
+      autoApprove.box.disabled = !propose.box.checked;
+      if (!propose.box.checked) autoApprove.box.checked = false;
+    }
+    propose.box.addEventListener("change", showApprove);
     const deliver = a.deliver || { inbox: true };
     const inbox = check("My Inbox", deliver.inbox);
     const room = select(deliver.room_id || "", [["", "No room"]].concat(state.data.rooms.map(function (r) {
@@ -186,8 +195,9 @@
     form.append(field("Name", name), field("What to do", prompt, "Write it as a request: Erynne does it with your " +
       "access and answers with a report. If there's nothing to report she can say so, and nothing is sent."),
       schedule.node, field("Time zone", tz), field("Who runs it", runner), routine, tools.node, propose.label,
-      sendTo, enabled.label);
+      autoApprove.label, sendTo, enabled.label);
     showRunner();
+    showApprove();
 
     const save = el("button", null, a.id ? "Save" : "Create");
     save.type = "submit";
@@ -197,6 +207,7 @@
       showError("");
       const body = { name: name.value, prompt: prompt.value, schedule: schedule.value(), tz: tz.value,
                      runner: runner.value, tools: tools.value(), may_propose: propose.box.checked,
+                     auto_approve: propose.box.checked && autoApprove.box.checked,
                      enabled: enabled.box.checked,
                      deliver: { inbox: inbox.box.checked, email_draft: draft.box.checked,
                                 room_id: runner.value === "erynne" && room.value ? parseInt(room.value, 10) : null,
@@ -226,7 +237,9 @@
       const li = el("li");
       const b = button(r.started_at + " · " + (STATUS[r.status] || r.status) + (r.trigger !== "schedule" ? " (" + r.trigger + ")" : ""),
                        "link small", function () { showRun(r.run_id, out); });
-      li.appendChild(b);
+      li.append(b, document.createTextNode(" "), button("Raw output", "link small muted", function () {
+        liveRun(r.run_id, a.name);                                    // the step-by-step trace, live if it's running
+      }));
       ul.appendChild(li);
     });
     const out = el("div", "automator-output");
@@ -243,6 +256,13 @@
     box.replaceChildren();
     box.appendChild(el("p", "small muted", "Run " + r.run_id + " · " + (STATUS[r.status] || r.status) +
       (r.finished_at ? " · finished " + r.finished_at : "") + (r.model ? " · " + r.model : "")));
+    box.appendChild(button("Raw output (" + (r.trace ? r.trace.length : 0) + " steps)", "small", function () {
+      liveRun(r.run_id, r.name);                                      // every step it took, with each tool's raw result
+    }));
+    if (r.proposals && r.proposals.length) {
+      box.appendChild(button(r.proposals.length + (r.proposals.length === 1 ? " proposal" : " proposals") + " → Approvals",
+                             "link small", function () { showTab("approvals"); }));
+    }
     if (r.error) box.appendChild(el("p", "error small", r.error));
     if (r.claude_session_url) {
       const link = el("a", "small", "Claude's session");
@@ -259,7 +279,7 @@
         return d.to + (d.ok ? "" : " (failed" + (d.error ? ": " + d.error : "") + ")");
       }).join(", ")));
     }
-    if (r.status === "running" || r.status === "waiting") {
+    if (FINAL.indexOf(r.status) < 0) {                                // still going: look again shortly
       setTimeout(function () { if (state.run === runId && document.body.contains(box)) showRun(runId, box); }, 5000);
     }
   }
@@ -322,6 +342,8 @@
     try {
       const got = await api("POST", "/api/automations/" + id + "/run");
       state.run = got.run_id;
+      const a = state.data && state.data.automations.find(function (x) { return x.id === id; });
+      liveRun(got.run_id, a ? a.name : "Automation", function () { load(id); });   // the page catches up when it ends
       await load(id);
     } catch (err) { showError(err.message); }
   }
@@ -334,10 +356,175 @@
     renderDetail();
   }
 
+  // ------------------------------------------------------- the raw output, live
+  const KINDS = { start: "Started", prompt: "Prompt", info: "Note", note: "Model's note", route: "Route", tool: "Tool",
+                  proposal: "Proposal", sources: "Sources", delta: "Answer", answer: "Answer", routine: "Claude routine",
+                  approval: "Auto-approval", delivered: "Delivered", finish: "Finished", error: "Error", cut: "Cut" };
+
+  function pretty(value) {                                            // a step's field as readable text
+    if (typeof value === "string") {
+      try { return JSON.stringify(JSON.parse(value), null, 2); } catch (e) { return value; }   // trimmed JSON stays text
+    }
+    return JSON.stringify(value, null, 2);
+  }
+
+  function stepLine(step) {                                           // the one-line gist of a step
+    switch (step.kind) {
+      case "tool": return (step.summary || step.label || step.name) + (step.state ? " · " + step.state : "");
+      case "delivered": return step.to + (step.ok ? " ✓" : " ✗ " + (step.error || ""));
+      case "approval": return (step.ok ? "✓ applied: " : "✗ not applied: ") + (step.summary || "#" + step.proposal) +
+                              (step.error ? " (" + step.error + ")" : "");
+      case "sources": return Array.isArray(step.sources) ? step.sources.length + " sources" : "sources";
+      case "finish": return (STATUS[step.status] || step.status) + (step.text ? ": " + step.text : "");
+      case "start": return step.automation + " · " + step.trigger + " · " + step.runner + " · for " + step.owner;
+      case "proposal": return step.summary || "";
+      default: return step.text || step.label || "";
+    }
+  }
+
+  function stepNode(step, t0) {
+    const bad = step.state === "failed" || step.kind === "error" || step.ok === false;
+    const li = el("li", "automator-step" + (bad ? " is-bad" : ""));
+    const head = el("div", "automator-step-head");
+    head.append(el("span", "automator-step-time small", "+" + Math.max(0, step.at - t0).toFixed(1) + "s"),
+                el("strong", "small", KINDS[step.kind] || step.kind));
+    const line = stepLine(step);
+    if (line) head.appendChild(el("span", "automator-step-line small", line.length > 220 ? line.slice(0, 220) + "…" : line));
+    li.appendChild(head);
+    const extra = Object.keys(step).filter(function (k) { return ["n", "at", "kind"].indexOf(k) < 0; });
+    if (extra.length) {                                               // everything it carried, raw
+      const more = el("details", "automator-step-raw");
+      more.appendChild(el("summary", "small muted", "raw"));
+      extra.forEach(function (k) {
+        more.append(el("div", "small muted", k), el("pre", "small", pretty(step[k])));
+      });
+      li.appendChild(more);
+    }
+    return li;
+  }
+
+  /* A modal with a run's trace, filled in live from /api/automations/runs/{id}/stream, then its finished report.
+     Closing it doesn't stop the run. onEnd (optional) runs once when the run is over. */
+  function liveRun(runId, name, onEnd) {
+    const dlg = el("dialog", "dlg glass wide automator-live");
+    const head = el("div", "ax-bar");
+    const status = el("span", "badge small", "connecting…");
+    head.append(el("h2", null, name + " · run " + runId), status);
+    const follow = check("Follow the newest step", true);
+    const list = el("ol", "automator-trace");
+    const result = el("div", "automator-live-result");
+    const actions = el("div", "dlg-actions");
+    const steps = [];
+    let t0 = null, es = null, ended = false;
+    const copy = button("Copy raw JSON", "link", async function () {
+      try { await navigator.clipboard.writeText(JSON.stringify(steps, null, 2)); copy.textContent = "Copied ✓"; }
+      catch (e) { copy.textContent = "Couldn't copy"; }
+    });
+    actions.append(copy, button("Close", "", function () { dlg.close(); }));
+    dlg.append(head, follow.label, list, result, actions);
+    document.body.appendChild(dlg);
+
+    function add(step) {
+      if (step.n && step.n <= steps.length) return;                   // already shown (after a reconnect)
+      steps.push(step);
+      if (t0 === null) t0 = step.at;
+      list.appendChild(stepNode(step, t0));
+      if (follow.box.checked) list.scrollTop = list.scrollHeight;      // keep the newest in view
+    }
+
+    function finish(r) {
+      ended = true;
+      status.textContent = r.gone ? "gone" : (STATUS[r.status] || r.status);
+      if (r.gone) { result.replaceChildren(el("p", "error small", "That run is gone.")); return; }
+      result.replaceChildren();
+      if (r.error) result.appendChild(el("p", "error small", r.error));
+      if (r.html) {
+        const body = el("div", "md automator-answer");
+        body.innerHTML = r.html;   // rendered server-side from Markdown, raw HTML escaped
+        result.appendChild(body);
+      }
+      if (r.proposals && r.proposals.length) {
+        result.appendChild(button("See its " + r.proposals.length + (r.proposals.length === 1 ? " proposal" : " proposals") +
+                                  " on Approvals", "small", function () { dlg.close(); showTab("approvals"); }));
+      }
+      if (onEnd) onEnd();
+    }
+
+    function connect() {                                              // from the first step not shown yet
+      es = new EventSource("/api/automations/runs/" + runId + "/stream?after=" + steps.length);
+      es.addEventListener("step", function (e) { add(JSON.parse(e.data)); });
+      es.addEventListener("status", function (e) {
+        const s = JSON.parse(e.data).status;
+        status.textContent = STATUS[s] || s;
+      });
+      es.addEventListener("end", function (e) { es.close(); finish(JSON.parse(e.data)); });
+      es.onerror = function () {                                      // dropped: pick up where it left off
+        es.close();
+        if (!ended && dlg.open) { status.textContent = "reconnecting…"; setTimeout(connect, 2000); }
+      };
+    }
+
+    dlg.addEventListener("close", function () { ended = true; if (es) es.close(); dlg.remove(); });
+    dlg.showModal();
+    connect();
+  }
+
+  // ------------------------------------------------------------ the tabs
+  function showTab(name) {
+    document.querySelectorAll("#automator [role=tab]").forEach(function (t) {
+      t.setAttribute("aria-selected", String(t.dataset.tab === name));
+    });
+    document.querySelectorAll("#automator [data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== name; });
+    $("auto-new").hidden = name !== "automations";
+    if (name === "approvals") loadApprovals();
+  }
+
+  async function loadApprovals() {
+    const box = $("auto-approvals");
+    let data;
+    try { data = await api("GET", "/api/automations/approvals"); }
+    catch (err) { box.replaceChildren(el("p", "error", err.message)); return; }
+    showPending(data.pending);
+    box.replaceChildren();
+    if (!data.approvals.length) { box.appendChild(el("p", "muted", "Nothing proposed lately.")); return; }
+    let lastRun = null;
+    data.approvals.forEach(function (item) {
+      if (item.run_id !== lastRun) {                                  // one heading per run
+        lastRun = item.run_id;
+        const h = el("div", "ax-bar automator-approval-head");
+        h.append(el("strong", null, item.automation),
+                 el("span", "small muted", "run " + item.run_id + " · " + item.run_started_at +
+                    (item.auto_approve ? " · approves its own" : "")),
+                 button("Raw output", "link small", function () { liveRun(item.run_id, item.automation); }));
+        box.appendChild(h);
+      }
+      const card = window.ErynneAgent.proposal(item.proposal);        // the chat's own card: Apply / Dismiss
+      card.id = "p" + item.proposal.id;
+      box.appendChild(card);
+    });
+  }
+
+  function showPending(n) {                                           // the count on the Approvals tab
+    const badge = $("auto-pending");
+    badge.textContent = n ? String(n) : "";
+    badge.hidden = !n;
+  }
+
+  document.querySelectorAll("#automator [role=tab]").forEach(function (t) {
+    t.addEventListener("click", function () {
+      showTab(t.dataset.tab);
+      location.hash = t.dataset.tab === "approvals" ? "approvals" : (state.selected ? "a=" + state.selected : "");
+    });
+  });
+  api("GET", "/api/automations/approvals").then(function (d) { showPending(d.pending); }).catch(function () {});
+
   $("auto-new").addEventListener("click", function () { open("new"); });
   const hash = location.hash.slice(1);
   const wanted = /^a=(\d+)$/.exec(hash), run = /^run=(\d+)$/.exec(hash);
-  if (run) {
+  if (hash === "approvals") {
+    load();
+    showTab("approvals");
+  } else if (run) {
     api("GET", "/api/automations/runs/" + run[1]).then(function (r) {
       state.run = r.run_id;
       load(r.automation_id);

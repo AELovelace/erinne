@@ -12,7 +12,8 @@
   - **Erynne**, with the tools you tick. Leave them all unticked for every tool that only reads.
   - **Claude (your key)**, if you use Claude in chat, under your saved key.
   - **A Claude routine** you made on claude.ai. Give it the Mnemerynne connector and an API trigger, then paste the trigger's address and token here. Claude does the job there and reports back.
-- **May propose changes:** off by default. When on, it may draft file edits, emails or system changes, but only as proposals you apply yourself. Nothing is ever changed for you.
+- **May propose changes:** off by default. When on, it may draft file edits, emails or system changes as proposals. They wait on the **Approvals** tab for you to apply.
+- **Approve its proposals automatically:** off by default, and only there while *May propose changes* is on. When on, what the automation proposed is applied as you at the end of each run, with the same checks as pressing Apply yourself, so turn it on only for jobs you trust. Proposals that need a Mnemerynne admin (a whole library's AI edit, API actions marked for admin approval) still wait for one. The run's raw output says what was applied and what wasn't.
 - **Send the answer to:**
   - **your Inbox:** a note linking to the full answer;
   - **a room:** posted by Erynne. Everyone there reads it, so she uses only what they all may read;
@@ -21,7 +22,19 @@
 
 ## Runs
 
-Each automation lists its runs; open one to read the answer with its sources. **Run now** runs it straight away. If a run fails, your Inbox says why. Your automation pauses (and your Inbox tells you) if you lose access to Automator; turn it back **On** once you have it again.
+Each automation lists its runs; open one to read the answer with its sources. **Run now** runs it straight away and opens a window that shows the run as it happens. If a run fails, your Inbox says why.
+
+**Raw output** (beside each run, and in the window Run now opens) shows every step the run took, numbered and timed:
+- when it started and exactly what the model was asked;
+- what the model said between steps;
+- each tool it called, with the arguments it sent and, under **raw**, the result that came back (long ones are cut short);
+- what it proposed, what was auto-approved, where the answer went, and any error.
+
+While a run is going, the steps appear live; closing the window doesn't stop the run. **Copy raw JSON** copies every step, which helps when you ask someone why a run went wrong. A run made through a room doesn't show its tool steps, and a Claude routine shows what it was sent and when it reported back, not its own steps.
+
+## Approvals
+
+The **Approvals** tab lists what your automations proposed, grouped by run: the ones waiting for you first, then those decided in the last two weeks, including any approved automatically. Apply or dismiss them there, just as under a chat answer. The number on the tab is how many are waiting. Your automation pauses (and your Inbox tells you) if you lose access to Automator; turn it back **On** once you have it again.
 
 ## Through Claude
 

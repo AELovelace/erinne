@@ -30,6 +30,8 @@ import hmac
 import json
 import logging
 import re
+import threading
+import time
 from typing import Any, Callable
 
 import httpx
@@ -77,6 +79,128 @@ def unfit(conn, settings: Settings, row, directory) -> str:
     return ""
 
 
+TRACE_FLUSH = 0.5               # a run's new steps are saved (and a watching page woken) at most this often
+TRACE_MAX = 400                 # steps kept per run; the last one then says the rest was cut
+TRACE_TEXT = 4000               # characters kept of any one field (a tool's result, the prompt, the answer)
+
+
+def trace_channel(run_id: int) -> str:
+    """The event channel a run's watchers listen on: "look again, there are new steps"."""
+    return f"automations:run:{run_id}"
+
+
+def _trim(value: Any) -> Any:
+    """A step's field, kept small: long text cut to TRACE_TEXT, a big structure turned into cut JSON text."""
+    if isinstance(value, str):
+        return value if len(value) <= TRACE_TEXT else value[:TRACE_TEXT] + f"… ({len(value) - TRACE_TEXT} more characters)"
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    text = json.dumps(value, ensure_ascii=False, default=str)   # tool arguments and results, sources
+    return value if len(text) <= TRACE_TEXT else _trim(text)
+
+
+def add_steps(conn, run_id: int, steps: list[dict]) -> int:
+    """Append steps to a run's trace, inside the caller's transaction on Automator's tables; the step count after.
+    Numbers them on from the saved ones. Past TRACE_MAX they're dropped, with one step saying so. Nothing (0) where
+    the runs table has no trace column (tests that keep Automator's tables in core)."""
+    try:
+        row = conn.execute("SELECT trace FROM automation_runs WHERE id = ?", (run_id,)).fetchone()
+    except Exception:                                      # sqlite3.OperationalError: no such column
+        return 0
+    if row is None:
+        return 0
+    have = json.loads(row["trace"] or "[]")
+    for step in steps:
+        if len(have) >= TRACE_MAX:                         # full: the last slot already says so
+            break
+        if len(have) == TRACE_MAX - 1:                     # the last slot: say the rest is cut, keep nothing more
+            step = {"at": step["at"], "kind": "cut", "text": f"More steps happened; only the first {TRACE_MAX - 1} are kept."}
+        have.append({"n": len(have) + 1, **step})
+    conn.execute("UPDATE automation_runs SET trace = ? WHERE id = ?", (json.dumps(have, ensure_ascii=False), run_id))
+    return len(have)
+
+
+def note(settings: Settings, run_id: int, kind: str, **fields) -> None:
+    """One step, saved at once, from any process (a routine's report arriving, a failure recorded elsewhere)."""
+    conn = connect(settings)
+    try:
+        with db.transaction(conn):
+            add_steps(conn, run_id, [_step(kind, fields)])
+    finally:
+        conn.close()
+    try:
+        events.publish_sync(trace_channel(run_id), {})     # a watching page fetches it
+    except Exception:
+        pass                                               # Valkey gone: the page polls anyway
+
+
+def _step(kind: str, fields: dict) -> dict:
+    return {"at": round(time.time(), 2), "kind": kind, **{k: _trim(v) for k, v in fields.items()}}
+
+
+class Trace:
+    """A run's raw output while it runs: steps are buffered and saved together every TRACE_FLUSH seconds (and when
+    it closes), each save waking the run's watchers (trace_channel). add() is safe from any thread; it is also the
+    writer Agent.run is handed, with `raw` set so the agent includes each tool's arguments and result."""
+
+    raw = True                                             # Agent._loop: put the arguments and results in the events
+
+    def __init__(self, settings: Settings, run_id: int):
+        self.settings, self.run_id = settings, run_id
+        self.loop = asyncio.get_running_loop()
+        self.pending: list[dict] = []
+        self.lock = threading.Lock()
+        self.flusher: asyncio.Task | None = None
+
+    def __call__(self, event: dict) -> None:
+        """Agent.run's writer: every event it sends becomes a step of the same kind."""
+        event = dict(event)
+        kind = str(event.pop("type", "event"))
+        for clash in ("kind", "n", "at"):                  # a proposal's own "kind" (edit, api...) keeps its value
+            if clash in event:
+                event[f"{kind}_{clash}"] = event.pop(clash)
+        self.add(kind, **event)
+
+    def add(self, kind: str, /, **fields) -> None:
+        with self.lock:
+            self.pending.append(_step(kind, fields))
+        self.loop.call_soon_threadsafe(self._soon)         # the flush is scheduled on the run's own loop
+
+    def _soon(self) -> None:
+        if self.flusher is None or self.flusher.done():
+            self.flusher = self.loop.create_task(self._flush_later())
+
+    async def _flush_later(self) -> None:
+        await asyncio.sleep(TRACE_FLUSH)                   # gather what comes in the meantime into one save
+        while self.pending:
+            await asyncio.to_thread(self._save)
+
+    def _save(self) -> None:
+        with self.lock:
+            steps, self.pending = self.pending, []         # taken under the lock: add() never loses one
+        if not steps:
+            return
+        conn = connect(self.settings)
+        try:
+            with db.transaction(conn):
+                add_steps(conn, self.run_id, steps)
+        except Exception:
+            log.exception("Couldn't save run %s's trace", self.run_id)
+        finally:
+            conn.close()
+        try:
+            events.publish_sync(trace_channel(self.run_id), {})
+        except Exception:
+            pass                                           # Valkey gone: watching pages poll anyway
+
+    async def close(self) -> None:
+        """Save whatever is still waiting."""
+        if self.flusher is not None:
+            await asyncio.gather(self.flusher, return_exceptions=True)
+        while self.pending:
+            await asyncio.to_thread(self._save)
+
+
 def _wake() -> None:
     try:
         events.publish_sync(WAKE, {})
@@ -96,6 +220,7 @@ def start(conn, row, trigger: str, settings: Settings, directory) -> int:
                     "('queued', 'running', 'waiting', 'reported')", (row["id"],)).fetchone():
         raise auto.AutomationError("It's running already.")
     run_id = auto.start_run(conn, row, trigger, status="queued")
+    add_steps(conn, run_id, [_step("info", {"text": "Queued; the scheduler picks it up in a moment."})])
     db.after_commit(conn, _wake)           # once it's there to be claimed
     return run_id
 
@@ -106,6 +231,7 @@ def save_report(conn, run_id: int, text: str) -> bool:
     saved = conn.execute("UPDATE automation_runs SET status = 'reported', output = ?, model = 'claude routine' "
                          "WHERE id = ? AND status = 'waiting'", (text, run_id)).rowcount == 1
     if saved:
+        add_steps(conn, run_id, [_step("info", {"text": "Claude's routine reported back; delivering it."})])
         db.after_commit(conn, _wake)
     return saved
 
@@ -116,11 +242,16 @@ def fail(settings: Settings, run_id: int, text: str, error: str) -> None:
     try:
         with db.transaction(conn):
             auto.finish_run(conn, run_id, "failed", output=text, sources=[], error=error, model="claude routine")
+            add_steps(conn, run_id, [_step("error", {"text": error, "report": text})])   # the raw output says why
             run = auto.get_run(conn, run_id)
             auto.tell(conn, run["owner_id"], f"Your automation “{run['name']}” failed: {error}",
                       f"/automations#run={run_id}")
     finally:
         conn.close()
+    try:
+        events.publish_sync(trace_channel(run_id), {})     # a watching page sees it failed
+    except Exception:
+        pass
 
 
 class Scheduler:
@@ -253,31 +384,42 @@ class Scheduler:
                 conn.close()
             if row is None or user is None:
                 return
+            trace = Trace(self.settings, run_id)          # the raw output, saved as it happens
+            trace.add("start", trigger=run["trigger"], runner=row["runner"], automation=row["name"],
+                      owner=user["username"], tools=json.loads(row["tools"]) or "every reading tool",
+                      may_propose=bool(row["may_propose"]))
+            error = ""
             try:
                 if row["runner"] == "claude_routine":
-                    await self._fire_routine(run_id, row, user)
+                    await self._fire_routine(run_id, row, user, trace)
                     return
-                text, sources, model = await asyncio.wait_for(self._answer(row, user), RUN_TIMEOUT)
+                text, sources, model = await asyncio.wait_for(self._answer(row, user, trace), RUN_TIMEOUT)
             except asyncio.TimeoutError:
-                await asyncio.to_thread(self._finish, run_id, "failed", "", [], "", "It took longer than "
-                                        f"{int(RUN_TIMEOUT // 60)} minutes and was stopped.")
-                return
+                error = f"It took longer than {int(RUN_TIMEOUT // 60)} minutes and was stopped."
             except RunFailed as exc:
-                await asyncio.to_thread(self._finish, run_id, "failed", "", [], "", str(exc))
-                return
+                error = str(exc)
             except Exception as exc:
                 log.exception("Automation %s run %s failed", row["id"], run_id)
-                await asyncio.to_thread(self._finish, run_id, "failed", "", [], "",
-                                        f"Something went wrong: {type(exc).__name__}.")
+                error = f"Something went wrong: {type(exc).__name__}: {str(exc)[:300]}"   # the trace keeps the detail
+            finally:
+                if error:
+                    trace.add("error", text=error)
+                    await asyncio.to_thread(self._finish, run_id, "failed", "", [], "", error)
+                if error or row["runner"] == "claude_routine":
+                    await trace.close()                    # everything saved before the page hears it ended
+            if error:
                 return
-            await self.complete(run_id, text, sources, model)
+            await self.complete(run_id, text, sources, model, trace)
 
-    async def _answer(self, row, user) -> tuple[str, list[dict], str]:
+    async def _answer(self, row, user, trace: Trace) -> tuple[str, list[dict], str]:
         deliver = json.loads(row["deliver"])
         prompt = TASK_PREAMBLE.format(name=row["name"], user=user["username"]) + row["prompt"]
+        trace.add("prompt", text=prompt)                   # exactly what the model is asked
         if deliver.get("room_id") and row["runner"] == "erynne":
             if self.rooms_erynne is None:
                 raise RunFailed("Rooms isn't running.")
+            trace.add("info", text=f"Answering as Erynne in room {deliver['room_id']}, with what everyone there may "
+                                   "read. A room run doesn't show its tool steps here.")
             text, sources = await self.rooms_erynne.report(user["id"], deliver["room_id"], prompt)
             return text, sources, ""
         claude = row["runner"] == "claude_key"
@@ -287,17 +429,88 @@ class Scheduler:
         if ready != "ok":
             raise RunFailed("Claude isn't available to you." if claude else "Erynne's model isn't answering.")
         off = await self._switched_off(row, user["id"])
+        if off:
+            trace.add("info", text="Tools switched off for this run", tools=sorted(off))
         events: dict = {}
 
         def writer(event: dict) -> None:
             if event.get("type") == "sources":
                 events["sources"] = event["sources"]
+            trace(event)                                   # every event, into the raw output
 
+        writer.raw = True                                  # Agent._loop: include each tool's arguments and result
         out = await self.agent.run({"user_id": user["id"], "question": prompt, "disabled_tools": sorted(off),
                                     "use_claude": claude, "automation": True}, writer, None)
         if out is None:
             raise RunFailed("The model couldn't be reached.")
+        if out.get("model"):
+            trace.add("info", text="Answered by " + out["model"])
+        events["proposals"] = list(out.get("proposals") or [])   # what it proposed: kept with the run
+        if events["proposals"]:
+            await asyncio.to_thread(self._keep_proposals, trace.run_id, events["proposals"])
         return out["answer"]["text"], events.get("sources", []), out.get("model") or ""
+
+    def _keep_proposals(self, run_id: int, ids: list[int]) -> None:
+        """The proposals a run made, on its row (the Approvals tab, auto-approval). Skipped where the runs table
+        is still core's (no such column)."""
+        conn = connect(self.settings)
+        try:
+            with db.transaction(conn):
+                conn.execute("UPDATE automation_runs SET proposals = ? WHERE id = ?", (json.dumps(ids), run_id))
+        except Exception:
+            log.warning("Couldn't keep run %s's proposals", run_id, exc_info=True)
+        finally:
+            conn.close()
+
+    def _approve_all(self, run_id: int) -> list[dict]:
+        """Auto-approval: apply each proposal this run made, as its owner, with the same checks as applying by hand
+        (proposals.check_may_apply, then proposals.apply). Only when the automation may propose and auto-approves;
+        never one that waits for a Mnemerynne admin. One result per proposal; [] when there's nothing to do."""
+        from mnemerynne import proposals
+        from mnemerynne.web.admin import _log
+
+        conn = connect(self.settings)
+        try:
+            run = auto.get_run(conn, run_id)
+            row = auto.get(conn, run["automation_id"]) if run else None
+            user = auto.owner(conn, row) if row else None
+            ids = json.loads((run["proposals"] if run is not None and "proposals" in run.keys() else "") or "[]")
+            wanted = row is not None and "auto_approve" in row.keys() and row["auto_approve"] and row["may_propose"]
+        finally:
+            conn.close()
+        if not ids or not wanted or user is None:
+            return []
+        directory = self.get_directory()
+        core = db.connect(self.settings.db_path)
+        done: list[dict] = []
+        try:
+            admin = auto.is_admin(core, self.settings, user, directory)
+            for pid in ids:
+                try:
+                    prow = proposals.get(core, pid, user["id"])
+                    if prow["status"] != "pending":
+                        done.append({"proposal": pid, "ok": False, "error": f"It was already {prow['status']}."})
+                        continue
+                    if prow["approver"] == "admin":            # those stay with an admin, always
+                        done.append({"proposal": pid, "ok": False, "summary": prow["summary"],
+                                     "error": "It waits for a Mnemerynne admin (Access → Approvals); "
+                                              "auto-approval never decides those."})
+                        continue
+                    proposals.check_may_apply(core, user, prow, directory)
+                    out = proposals.apply(core, self.settings, user, pid, directory,
+                                          admin=prow["kind"] == "access" and admin)
+                    with db.transaction(core):                 # say who decided it, for the person and their Claude
+                        core.execute("UPDATE agent_proposals SET decision_note = ? WHERE id = ? AND decision_note IS NULL",
+                                     (f"Approved automatically by Automator (run {run_id}).", pid))
+                    _log(core, user, "proposal.apply", str(out.get("summary", ""))[:200],
+                         f"#{pid} (auto-approved by Automator, run {run_id})")
+                    done.append({"proposal": pid, "ok": True, "summary": out.get("summary", ""),
+                                 "status": out.get("status", "applied")})
+                except Exception as exc:                        # ProposalError, EditError, the API's own refusal
+                    done.append({"proposal": pid, "ok": False, "error": str(exc)[:300] or type(exc).__name__})
+        finally:
+            core.close()
+        return done
 
     async def _switched_off(self, row, user_id: int) -> set[str]:
         listed = (await self.agent.tool_list(user_id, automation=True))["tools"]
@@ -307,16 +520,39 @@ class Scheduler:
             off |= {t["name"] for t in listed if t.get("write")}
         return off
 
-    async def complete(self, run_id: int, text: str, sources: list[dict], model: str = "") -> dict:
-        """Record the answer and deliver it (also for a routine's report)."""
+    async def complete(self, run_id: int, text: str, sources: list[dict], model: str = "",
+                       trace: Trace | None = None) -> dict:
+        """Record the answer and deliver it (also for a routine's report). The trace is the run's, or a new one
+        that carries on the saved steps (a routine's report, arriving later)."""
+        if trace is None:                                  # a routine's report: its answer wasn't streamed
+            trace = Trace(self.settings, run_id)
+            trace.add("answer", text=text or "")
         text = (text or "").strip()
         quiet = text.strip(" \t\r\n.*_`\"'") == auto.QUIET
         status = "quiet" if quiet else "done"
-        await asyncio.to_thread(self._finish, run_id, status, text, sources, model, "")
-        if quiet:
-            return {"status": status, "delivered": []}
-        delivered = await self.deliver(run_id)
-        return {"status": status, "delivered": delivered}
+        try:
+            await asyncio.to_thread(self._finish, run_id, status, text, sources, model, "")
+            try:
+                approved = await asyncio.to_thread(self._approve_all, run_id)   # auto-approval, before it's sent on
+            except Exception as exc:                       # never let it stop the delivery
+                log.exception("Auto-approving run %s's proposals failed", run_id)
+                approved = [{"ok": False, "error": f"Auto-approval failed: {type(exc).__name__}; "
+                                                   "the proposals wait on the Approvals tab."}]
+            for a in approved:
+                trace.add("approval", **a)
+            if quiet:
+                trace.add("finish", status=status, text="Nothing to report, so nothing is delivered.")
+                return {"status": status, "delivered": []}
+            delivered: list[dict] = []
+            try:
+                delivered = await self.deliver(run_id)
+            finally:
+                for d in delivered:
+                    trace.add("delivered", **d)            # where it went, and what failed
+                trace.add("finish", status=status)         # the page's stream ends on this step
+            return {"status": status, "delivered": delivered}
+        finally:
+            await trace.close()                            # all of it saved before the page hears it ended
 
     def _finish(self, run_id, status, text, sources, model, error) -> None:
         conn = connect(self.settings)
@@ -331,11 +567,12 @@ class Scheduler:
             conn.close()
 
     # --------------------------------------------------------- the routine
-    async def _fire_routine(self, run_id: int, row, user) -> None:
+    async def _fire_routine(self, run_id: int, row, user, trace: Trace) -> None:
         token = apis.decrypt_secret(self.settings, row["routine_token_enc"])
         if not token:
             raise RunFailed("The routine's token can't be read; save it again.")
         text = ROUTINE_TEXT.format(name=row["name"], user=user["username"], run_id=run_id, prompt=row["prompt"])
+        trace.add("prompt", text=text)                     # exactly what the routine is sent (never its token)
         headers = {"authorization": f"Bearer {token}", "anthropic-version": ROUTINE_VERSION,
                    "content-type": "application/json"}
         async with httpx.AsyncClient(timeout=30.0, transport=TRANSPORT, follow_redirects=False) as client:
@@ -351,6 +588,7 @@ class Scheduler:
                     continue
                 break
         if got.status_code >= 400:
+            trace.add("routine", status_code=got.status_code, response=got.text)   # Anthropic's own words, raw
             raise RunFailed({401: "The routine's token was refused; make a new one on claude.ai.",
                              403: "The routine's token isn't allowed to start it.",
                              404: "No such routine (check its address).",
@@ -360,6 +598,9 @@ class Scheduler:
             session = str(got.json().get("claude_code_session_url") or "")
         except ValueError:
             session = ""
+        trace.add("routine", status_code=got.status_code, session=session, response=got.text,
+                  text="Claude's routine started; waiting for it to report back (up to "
+                       f"{int(auto.ROUTINE_WAIT.total_seconds() // 3600)} hours).")
         conn = connect(self.settings)
         try:
             with db.transaction(conn):

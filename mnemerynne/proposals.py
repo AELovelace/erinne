@@ -441,6 +441,18 @@ def _decide(conn: sqlite3.Connection, proposal_id: int, status: str, result_file
                  (status, result_file_id, by, (note or "").strip()[:1000] or None, proposal_id))
 
 
+def check_may_apply(conn: sqlite3.Connection, user: sqlite3.Row, row: sqlite3.Row, directory) -> None:
+    """Whether this person may apply this proposal at all (by hand, or Automator's auto-approval). Mail drafts need
+    the agent group; file changes need it anywhere but the person's own Agents folder. API actions, batches, deletes
+    and access requests check their own rights when applied."""
+    from mnemerynne import accounts
+
+    if row["kind"] in ("api", "batch", "delete", "access") or accounts.is_agent_user(conn, user, directory):
+        return
+    if row["kind"] == "mail" or not in_agents_folder(conn, user["id"], row):
+        raise ProposalError("Outside the agent group, Erynne only changes files in your Agents folder.")
+
+
 def apply(conn: sqlite3.Connection, settings: Settings, user: sqlite3.Row, proposal_id: int,
           directory=None, *, admin: bool = False, items: list[int] | None = None) -> dict:
     """Save a pending proposal as the person (every check made again). For files and mail the

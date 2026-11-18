@@ -40,11 +40,10 @@ def apply_proposal(proposal_id: int, request: Request, body: ApplyBody | None = 
 
     try:
         row = proposals.get(conn, proposal_id, user["id"])
-        if row["kind"] not in ("api", "batch", "delete", "access") and not accounts.is_agent_user(
-                conn, user, request.app.state.directory):
-            if row["kind"] == "mail" or not proposals.in_agents_folder(conn, user["id"], row):
-                raise HTTPException(status.HTTP_403_FORBIDDEN, "Outside the agent group, Erynne only changes files "
-                                                               "in your Agents folder.")
+        try:
+            proposals.check_may_apply(conn, user, row, request.app.state.directory)   # shared with auto-approval
+        except proposals.ProposalError as exc:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from None
         out = proposals.apply(conn, request.app.state.settings, user, proposal_id, request.app.state.directory,
                               admin=row["kind"] == "access" and is_admin(request, conn, user),
                               items=body.items if body else None)

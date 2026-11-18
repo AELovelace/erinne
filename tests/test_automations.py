@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from fakes import FakeDirectory, FakeEmbedder
 from mnemerynne import api_tokens, apis, automations as auto, automations_run, messages, rooms, users
-from mnemerynne.clients.llm import ToolTurn
+from mnemerynne.clients.llm import ToolCall, ToolTurn
 from mnemerynne.mcp_server import Tools
 from mnemerynne.web.app import Services, create_app
 from test_agent import AgentLLM
@@ -303,3 +303,114 @@ def test_admins_turn_it_on_and_off_and_pause_any_automation(settings, conn, peop
     assert auto.get(conn, a)["enabled"] == 0
     with _web(settings, "alice", directory) as c:
         assert c.get("/api/automations").status_code == 404
+
+
+# ------------------------------------------------- raw output, live, and auto-approval
+def _trace_done(c, run_id):
+    """The run, once its trace has its last step (saved a moment after the run's own status)."""
+    for _ in range(200):
+        run = c.get(f"/api/automations/runs/{run_id}").json()
+        if run["trace"] and run["trace"][-1]["kind"] in ("finish", "error"):
+            return run
+        c.portal.call(asyncio.sleep, 0.05)
+    raise AssertionError(f"run {run_id}'s trace never finished: {run['trace']}")
+
+
+def _sse(text):
+    """Server-sent events as (event, data) pairs."""
+    out = []
+    for block in text.split("\n\n"):
+        kind = next((line[7:] for line in block.splitlines() if line.startswith("event: ")), None)
+        data = next((line[6:] for line in block.splitlines() if line.startswith("data: ")), None)
+        if kind:
+            out.append((kind, json.loads(data)))
+    return out
+
+
+def test_a_runs_raw_output_is_kept_streamed_and_its_proposals_approve_themselves(settings, conn, people, directory):
+    llm = AgentLLM()
+    with _web(settings, "alice", directory, agent_llm=llm) as c:
+        base = {"name": "Notes", "prompt": "Keep my notes", "schedule": {"every": "day", "at": "07:30"}}
+        refused = c.post("/api/automations", json={**base, "auto_approve": True})           # nothing to approve
+        assert refused.status_code == 422 and "May propose" in refused.json()["detail"], refused.text
+        a = c.post("/api/automations", json={**base, "may_propose": True, "auto_approve": True}).json()
+        assert a["auto_approve"] and a["may_propose"]
+
+        llm.turns(ToolTurn("Writing it down.", [ToolCall("c1", "create_file",
+                                                         {"name": "notes.md", "content": "# Notes\nhello\n"})]),
+                  ToolTurn("Wrote notes.md."))
+        run_id = c.post(f"/api/automations/{a['id']}/run").json()["run_id"]
+        run = _trace_done(c, run_id)
+        assert run["status"] == "done" and len(run["proposals"]) == 1
+        pid = run["proposals"][0]
+        applied = conn.execute("SELECT status, decision_note FROM agent_proposals WHERE id = ?", (pid,)).fetchone()
+        assert applied["status"] == "applied" and f"Automator (run {run_id})" in applied["decision_note"]
+        assert conn.execute("SELECT count(*) FROM files WHERE display_name = 'notes.md'").fetchone()[0] == 1
+
+        # The raw output: every step, numbered, with the tool's arguments and its raw result.
+        trace = run["trace"]
+        kinds = [s["kind"] for s in trace]
+        assert kinds[0] == "start" and kinds[1] == "prompt" and kinds[-1] == "finish", kinds
+        assert [s["n"] for s in trace] == list(range(1, len(trace) + 1))
+        assert "Keep my notes" in trace[1]["text"]
+        assert any(s["kind"] == "note" and s["text"] == "Writing it down." for s in trace)        # the model's own words
+        calls = [s for s in trace if s["kind"] == "tool"]
+        assert calls[0]["state"] == "running" and calls[0]["arguments"]["name"] == "notes.md"
+        assert calls[1]["state"] == "done" and "proposal" in json.dumps(calls[1]["result"])
+        assert [s["ok"] for s in trace if s["kind"] == "approval"] == [True]
+        assert {"kind": "delivered", "to": "inbox", "ok": True}.items() <= next(
+            s for s in trace if s["kind"] == "delivered").items()
+
+        # Live: the stream sends each step, then the whole run; `after` skips what the page already has.
+        streamed = _sse(c.get(f"/api/automations/runs/{run_id}/stream").text)
+        assert [d["n"] for k, d in streamed if k == "step"] == [s["n"] for s in trace]
+        assert streamed[-1][0] == "end" and streamed[-1][1]["output"] == "Wrote notes.md."
+        later = _sse(c.get(f"/api/automations/runs/{run_id}/stream?after=3").text)
+        assert [d["n"] for k, d in later if k == "step"][0] == 4
+
+        # The Approvals tab: by run, with what was decided.
+        shown = c.get("/api/automations/approvals").json()
+        assert shown["pending"] == 0 and shown["approvals"][0]["run_id"] == run_id
+        assert shown["approvals"][0]["proposal"]["status"] == "applied" and shown["approvals"][0]["auto_approve"]
+
+        # Auto-approval off: the next proposal waits on Approvals, applied by hand from there.
+        assert c.patch(f"/api/automations/{a['id']}", json={"auto_approve": False}).status_code == 200
+        llm.turns(ToolTurn("", [ToolCall("c2", "create_file", {"name": "more.md", "content": "more"})]),
+                  ToolTurn("Drafted more.md."))
+        second = _trace_done(c, c.post(f"/api/automations/{a['id']}/run").json()["run_id"])
+        assert not any(s["kind"] == "approval" for s in second["trace"])
+        shown = c.get("/api/automations/approvals").json()
+        assert shown["pending"] == 1 and shown["approvals"][0]["proposal"]["status"] == "pending"
+        waiting = shown["approvals"][0]["proposal"]["id"]
+        assert c.post(f"/api/agent/proposals/{waiting}/apply").json()["status"] == "applied"
+
+        # Switching proposing off takes auto-approval with it.
+        c.patch(f"/api/automations/{a['id']}", json={"auto_approve": True})
+        c.patch(f"/api/automations/{a['id']}", json={"may_propose": False})
+        now = next(x for x in c.get("/api/automations").json()["automations"] if x["id"] == a["id"])
+        assert not now["may_propose"] and not now["auto_approve"]
+
+    with _web(settings, "bob", directory) as c:                                # not theirs
+        assert c.get(f"/api/automations/runs/{run_id}/stream").status_code == 404
+
+
+def test_an_admin_approval_is_never_auto_approved(settings, conn, people, directory):
+    """A proposal that waits for a Mnemerynne admin stays pending, and the trace says why."""
+    llm = AgentLLM()
+    with _web(settings, "alice", directory, agent_llm=llm) as c:
+        a = c.post("/api/automations", json={"name": "Notes", "prompt": "Keep my notes", "may_propose": True,
+                                             "auto_approve": True, "schedule": {"every": "day", "at": "07:30"}}).json()
+        llm.turns(ToolTurn("", [ToolCall("c1", "create_file", {"name": "n.md", "content": "n"})]), ToolTurn("Done."))
+        real = automations_run.Scheduler._approve_all
+
+        def as_if_admin(self, run_id):                                     # the proposal turned out to need an admin
+            conn.execute("UPDATE agent_proposals SET approver = 'admin'")
+            return real(self, run_id)
+        automations_run.Scheduler._approve_all = as_if_admin
+        try:
+            run = _trace_done(c, c.post(f"/api/automations/{a['id']}/run").json()["run_id"])
+        finally:
+            automations_run.Scheduler._approve_all = real
+        step = next(s for s in run["trace"] if s["kind"] == "approval")
+        assert step["ok"] is False and "admin" in step["error"]
+        assert conn.execute("SELECT status FROM agent_proposals").fetchone()[0] == "pending"

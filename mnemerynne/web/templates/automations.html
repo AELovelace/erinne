@@ -8,16 +8,28 @@
       <h1>Automator <span class="badge small">alpha</span></h1>
       <p class="muted">Jobs that run on a schedule: a morning briefing, a security digest, a check on the systems
         you can query. {{ assistant_name }} (or Claude) does them with your access and sends you the result.
-        Nothing is changed for you: at most, changes wait as proposals for you to apply.</p>
+        Nothing is changed for you: at most, changes wait as proposals for you to apply (on Approvals), or are
+        applied at once for an automation you set to approve its own.</p>
     </div>
     <button type="button" id="auto-new">New automation</button>
   </div>
+  <nav class="ax-tabs" role="tablist" aria-label="Automator sections">
+    <button type="button" role="tab" data-tab="automations" aria-selected="true">Automations</button>
+    <button type="button" role="tab" data-tab="approvals" aria-selected="false">Approvals <span class="badge small" id="auto-pending" hidden></span></button>
+  </nav>
   <p class="error" id="auto-error" role="alert" hidden></p>
-  <div class="automator-grid">
+  <div class="automator-grid" data-panel="automations" role="tabpanel" aria-label="Automations">
     <section id="auto-list" aria-label="Your automations" aria-live="polite"><p class="muted">Loading…</p></section>
     <section id="auto-detail" class="glass automator-detail" aria-label="Automation" hidden></section>
   </div>
+  <section data-panel="approvals" role="tabpanel" aria-label="Approvals" hidden>
+    <p class="muted">What your automations proposed: changes to files, mail drafts, API actions. Nothing happens until
+      you press Apply (or Run it), unless that automation approves its own proposals automatically. Ones that need a
+      Mnemerynne admin always wait for one.</p>
+    <div id="auto-approvals" aria-live="polite"><p class="muted">Loading…</p></div>
+  </section>
 </main>
 <script src="{{ static('picker.js') }}"></script>
+<script src="{{ static('agent.js') }}"></script>
 <script src="{{ static('automations.js') }}"></script>
 {% endblock %}

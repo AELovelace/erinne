@@ -277,6 +277,13 @@ def check(conn: sqlite3.Connection, settings: Settings, user: sqlite3.Row, direc
         out["tools"] = json.dumps(sorted(set(tools)))
     if given("may_propose"):
         out["may_propose"] = int(bool(body["may_propose"]))
+    if given("auto_approve"):
+        out["auto_approve"] = int(bool(body["auto_approve"]))
+    may_propose = out.get("may_propose", current["may_propose"] if current is not None else 0)
+    if out.get("auto_approve") and not may_propose:   # nothing to approve unless it may propose
+        raise AutomationError("Auto-approval needs “May propose changes” on.")
+    if not may_propose and current is not None and "auto_approve" in current.keys() and current["auto_approve"]:
+        out["auto_approve"] = 0                       # proposing switched off: auto-approval goes with it
     if given("deliver") or given("runner") or current is None:
         deliver = body.get("deliver") if given("deliver") else (json.loads(current["deliver"]) if current else {"inbox": True})
         out["deliver"] = json.dumps(_deliver(conn, settings, user, directory, runner, deliver))
@@ -387,6 +394,7 @@ def view(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
     return {"id": row["id"], "name": row["name"], "prompt": row["prompt"], "schedule": schedule, "tz": row["tz"],
             "when": describe(schedule, row["tz"]), "runner": row["runner"], "tools": json.loads(row["tools"]),
             "may_propose": bool(row["may_propose"]), "deliver": json.loads(row["deliver"]),
+            "auto_approve": bool(row["auto_approve"]) if "auto_approve" in row.keys() else False,   # its proposals applied at once
             "routine_url": row["routine_url"], "routine_token": "saved" if row["routine_token_enc"] else "",
             "enabled": bool(row["enabled"]), "paused_reason": row["paused_reason"],
             "next_run_at": row["next_run_at"] + " UTC" if row["next_run_at"] else None,
@@ -419,14 +427,19 @@ def runs(conn: sqlite3.Connection, automation_id: int, limit: int = 20) -> list[
                         (automation_id, limit)).fetchall()
 
 
-def run_view(row: sqlite3.Row, *, full: bool = True) -> dict:
+def run_view(row: sqlite3.Row, *, full: bool = True, trace: bool = False) -> dict:
+    """A run for the page or Claude. `trace`: with its raw output too (the page's Raw output; it can be large, so
+    Claude's get_automation_run leaves it out)."""
     out = {"run_id": row["id"], "automation_id": row["automation_id"], "trigger": row["trigger"],
            "status": row["status"], "started_at": row["started_at"] + " UTC",
            "finished_at": row["finished_at"] + " UTC" if row["finished_at"] else None,
            "error": row["error"], "model": row["model"], "claude_session_url": row["claude_session_url"],
            "delivered": json.loads(row["delivered"])}
+    out["proposals"] = json.loads((row["proposals"] if "proposals" in row.keys() else "") or "[]")   # agent_proposals ids
     if full:
         out.update({"output": row["output"], "sources": json.loads(row["sources"])})
+    if full and trace:   # the raw output, step by step (automations_run.Trace); none where the runs are still core's
+        out["trace"] = json.loads((row["trace"] if "trace" in row.keys() else "") or "[]")
     return out
 
 

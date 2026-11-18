@@ -8,20 +8,24 @@ is the automations service's while it runs."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
+import time
+from datetime import timedelta
 
 import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import apis, automations as auto, automations_run, group_refs, rooms
+from mnemerynne import apis, automations as auto, automations_run, events, group_refs, rooms
 from mnemerynne.automations_run import footnotes
 from mnemerynne.db import transaction
 from mnemerynne.ingest import markdown
+from mnemerynne.rooms_bus import sse
 from mnemerynne.web.admin import _log
-from mnemerynne.web.deps import admin_user, api_user, get_automations_db, get_db, is_admin, page_user
+from mnemerynne.web.deps import admin_user, api_user, get_automations_db, get_db, is_admin, page_user, release_db
 
 TEMPLATES = (
     {"key": "briefing", "name": "Morning briefing", "runner": "erynne",
@@ -154,9 +158,126 @@ def get_run(run_id: int, user=Depends(_on), conn: sqlite3.Connection = Depends(g
     run = auto.get_run(conn, run_id)
     if run is None or run["owner_id"] != user["id"]:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such run")
-    out = auto.run_view(run)
+    return _run_body(run)
+
+
+def _run_body(run: sqlite3.Row) -> dict:
+    """A run for the page: its fields, its trace, and its answer rendered from Markdown (raw HTML escaped)."""
+    out = auto.run_view(run, trace=True)                # the page shows the raw output too
     body = out["output"] + footnotes(out["output"], out["sources"], "")
     return {**out, "name": run["name"], "html": markdown.render_html(body) if body.strip() else ""}
+
+
+APPROVAL_DAYS = 14         # the Approvals tab shows proposals from runs this recent (pending ones always)
+
+
+@router.get("/api/automations/approvals")
+def approvals(user=Depends(_on), conn: sqlite3.Connection = Depends(get_db)):
+    """The Approvals tab: what the person's automations proposed, by run. Pending ones first (from any run still
+    on record), then those decided in the last APPROVAL_DAYS days, with who decided (auto-approved or by hand)."""
+    from mnemerynne import proposals
+
+    try:
+        runs = conn.execute(
+            "SELECT r.id, r.automation_id, r.started_at, r.proposals, a.name, a.auto_approve FROM automation_runs r "
+            "JOIN automations a ON a.id = r.automation_id WHERE a.owner_id = ? AND r.proposals <> '[]' "
+            "ORDER BY r.id DESC LIMIT 200", (user["id"],)).fetchall()
+    except sqlite3.OperationalError:                   # the runs are still core's: no proposals column yet
+        runs = []
+    items = []
+    for run in runs:
+        for pid in json.loads(run["proposals"] or "[]"):
+            row = conn.execute("SELECT * FROM agent_proposals WHERE id = ? AND user_id = ?", (pid, user["id"])).fetchone()
+            if row is None:
+                continue                               # purged, or not theirs
+            if row["status"] != "pending" and (row["decided_at"] or "") < auto.stamp(
+                    auto.now() - timedelta(days=APPROVAL_DAYS)):
+                continue                               # decided long ago
+            items.append({"run_id": run["id"], "automation_id": run["automation_id"], "automation": run["name"],
+                          "run_started_at": run["started_at"] + " UTC", "auto_approve": bool(run["auto_approve"]),
+                          "proposal": proposals.view(conn, row)})
+    items.sort(key=lambda i: (i["proposal"]["status"] != "pending", -i["run_id"]))   # waiting first, newest first
+    return {"approvals": items, "pending": sum(1 for i in items if i["proposal"]["status"] == "pending")}
+
+
+FINAL = ("done", "quiet", "failed", "timed_out")   # a run in one of these won't change any more
+STREAM_POLL = 2.0          # seconds between looks when no wake comes (Valkey down, another process's run)
+STREAM_BEAT = 15.0         # a comment this often keeps proxies from closing a quiet stream
+STREAM_GRACE = 10.0        # after the run is final, how long to wait for its last steps (a "finish" step)
+
+
+def _run_state(settings, run_id: int) -> tuple[sqlite3.Row | None, list[dict]]:
+    """The run and its trace, read afresh with a connection of the stream's own."""
+    conn = automations_run.connect(settings)
+    try:
+        run = auto.get_run(conn, run_id)
+        if run is None:
+            return None, []
+        return run, json.loads((run["trace"] if "trace" in run.keys() else "") or "[]")
+    finally:
+        conn.close()
+
+
+async def _run_stream(settings, run_id: int, after: int, disconnected):
+    """Server-sent events for one run: "step" for each new step of its trace (from step `after` on), "status" when
+    its status changes, and "end" with the whole run (its rendered answer too) once it's over."""
+    woken = asyncio.Event()
+
+    async def listen() -> None:                       # the runner saved new steps: look at once
+        try:
+            async for _ in events.subscribe(automations_run.trace_channel(run_id)):
+                woken.set()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass                                       # no bus: polling still works
+
+    listener = asyncio.create_task(listen())
+    seen, final_at, beat = None, None, time.monotonic()
+    try:
+        while True:
+            run, trace = await asyncio.to_thread(_run_state, settings, run_id)
+            if run is None:
+                yield sse("end", {"gone": True})
+                return
+            for step in trace[after:]:
+                yield sse("step", step)
+            after = max(after, len(trace))
+            if run["status"] != seen:
+                seen = run["status"]
+                yield sse("status", {"status": seen})
+            if seen in FINAL:
+                final_at = final_at or time.monotonic()
+                ended = not trace or trace[-1]["kind"] in ("finish", "error", "cut")
+                if ended or time.monotonic() - final_at > STREAM_GRACE:   # older runs have no "finish" step
+                    yield sse("end", _run_body(run))
+                    return
+            if await disconnected():
+                return
+            woken.clear()
+            try:
+                await asyncio.wait_for(woken.wait(), 0.5 if final_at else STREAM_POLL)
+            except asyncio.TimeoutError:
+                pass
+            if time.monotonic() - beat >= STREAM_BEAT:
+                beat = time.monotonic()
+                yield b": ping\n\n"
+    finally:
+        listener.cancel()
+        await asyncio.gather(listener, return_exceptions=True)
+
+
+@router.get("/api/automations/runs/{run_id}/stream")
+async def stream_run(run_id: int, request: Request, after: int = 0, user=Depends(_on),
+                     conn: sqlite3.Connection = Depends(get_db)):
+    """A run's raw output, live: its trace step by step, then the finished run."""
+    run = auto.get_run(conn, run_id)
+    if run is None or run["owner_id"] != user["id"]:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such run")
+    release_db(request)     # the stream reads with connections of its own; don't hold this one while the tab is open
+    return StreamingResponse(_run_stream(request.app.state.settings, run_id, max(0, after), request.is_disconnected),
+                             media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 # -------------------------------------------------------------------- admin

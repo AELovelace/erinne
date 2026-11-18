@@ -1017,6 +1017,7 @@ class Agent:
         Errors from the model propagate; progress["ran"] counts the tool calls made. A subagent's
         events carry its parent call's id and an "Erynne: " label."""
         offered = {s["function"]["name"] for s in specs}
+        raw = bool(getattr(writer, "raw", False))   # Automator's trace: each call's arguments and result too
         for step in range(int(cfg["max_steps"]) + 1):
             last = step == int(cfg["max_steps"])
             if last:   # out of steps: answer with what there is
@@ -1025,6 +1026,8 @@ class Agent:
             turn = await self._turn(client, messages, [] if last else specs, cfg)
             if not turn.tool_calls or last:
                 return turn.content
+            if raw and (turn.content or "").strip():   # what the model said before calling its tools
+                writer({"type": "note", "text": label_prefix + turn.content.strip()})
             messages.append({"role": "assistant", "content": turn.content or "", "tool_calls": [
                 {"id": c.id, "type": "function",
                  "function": {"name": c.name, "arguments": json.dumps(c.arguments, ensure_ascii=False)}}
@@ -1038,7 +1041,8 @@ class Agent:
                         "label": label_prefix + (
                             (f"Drafting a change in {api.api}" if api.action else f"Asking {api.api}") if api
                             else f"Sending MinErynne {delegate.number(call.id)} to read" if minerynne
-                            else _LABELS.get(call.name, call.name))})
+                            else _LABELS.get(call.name, call.name)),
+                        **({"arguments": call.arguments} if raw else {})})
                 if delegate is not None and call.name == DELEGATE_TOOL:
                     out = await delegate.run(call, caller, sources, api_map, writer)
                 else:
@@ -1052,7 +1056,8 @@ class Agent:
                 if minerynne:
                     summary = f"MinErynne {delegate.number(call.id)}: {summary}"
                 writer({"type": "tool", "id": event_id, "name": call.name,
-                        "state": "failed" if "error" in out else "done", "summary": label_prefix + summary})
+                        "state": "failed" if "error" in out else "done", "summary": label_prefix + summary,
+                        **({"result": out} if raw else {})})   # the tool's raw result (the trace trims it)
                 if out.get("proposal"):
                     proposed.append(out["proposal"])
                     writer({"type": "proposal", **await asyncio.to_thread(self._proposal_view, out["proposal"])})

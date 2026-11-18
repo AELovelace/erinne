@@ -19,7 +19,7 @@ Every change is logged in Recent changes (`settings.automations*`, `automations.
 
 ## Runners
 
-- **Erynne:** the agent's usual model (balancer nodes, then `MNEMERYNNE_LLM_URL`) with the owner's access and the tools they picked. If they picked none, every tool that only reads is used. Tools that change something (files, mail drafts, API actions) are offered only when the automation **may propose changes**, and even then they only make proposals the owner applies.
+- **Erynne:** the agent's usual model (balancer nodes, then `MNEMERYNNE_LLM_URL`) with the owner's access and the tools they picked. If they picked none, every tool that only reads is used. Tools that change something (files, mail drafts, API actions) are offered only when the automation **may propose changes**, and even then they only make proposals. The owner applies them from Automator's **Approvals** tab, unless they turned on **Approve its proposals automatically** for that automation. Then the run applies its own proposals as the owner when it ends, before delivering, with the same checks as Apply (agent group or Agents folder; the API operation still allowed to them). Proposals with an admin approver are never auto-approved; they wait in Access → Approvals as usual. Each auto-approval is in the access log as `proposal.apply` ("auto-approved by Automator, run N"), and the proposal's decision note says so.
 - **Claude (your key):** the same, driven by Claude under the owner's saved key (*Claude in chat*). Only for people in the Claude group.
 - **A Claude routine:** for work done on claude.ai.
   1. The owner makes a routine at claude.ai/code/routines with the Mnemerynne connector and an **API trigger**, and pastes the trigger's address and token into the automation. The token is stored encrypted with `MNEMERYNNE_SECRET_KEY`.
@@ -37,6 +37,8 @@ Every change is logged in Recent changes (`settings.automations*`, `automations.
 - at most every 15 minutes;
 - two runs at a time across the server;
 - 5 minutes per Erynne or Claude-key run.
+
+Each run keeps its **raw output** (`automation_runs.trace`): every step, with each tool call's arguments and its result cut to 4,000 characters, at most 400 steps. It is saved every half-second while the run works, and `GET /api/automations/runs/{id}/stream` sends it to the owner's page as server-sent events. Each save also wakes the page through the `automations:run:{id}` channel, falling back to a 2-second poll without Valkey. Only the run's owner can read it. The raw output holds what the tools returned, so it is as private as the run's answer.
 
 Runs are kept `MNEMERYNNE_AUTOMATION_RUN_DAYS` (90 by default). A new automation's time zone defaults to `MNEMERYNNE_TIMEZONE` (UTC). The scheduler runs in the web service; a run missed by less than an hour while it was down runs once when it's back, and older ones wait for their next time.
 
