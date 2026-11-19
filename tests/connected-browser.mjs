@@ -5,7 +5,7 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import net from "node:net";
-import { checkLumiApps, checkLumiTownFriends, checkLumiPet, checkLumiPetCapsules, checkLumiPetDoors, checkLumiPetFrame, checkLumiPetGarden, checkLumiPetPhone, checkLumiPetSkills } from "./lumi-pet-browser.mjs";
+import { checkLumiApps, checkLumiTownFriends, checkLumiPet, checkLumiPetCapsules, checkLumiPetRooms, roomModeOff, checkLumiPetDoors, checkLumiPetFrame, checkLumiPetGarden, checkLumiPetPhone, checkLumiPetSkills } from "./lumi-pet-browser.mjs";
 import { checkSharedTV } from "./casino-tv-browser.mjs";
 import { checkLumiPartyBrowser, checkLumiPartyCouch, checkLumiPartyFight, checkLumiPartyOnline, checkLumiPartyPuzzle } from "./lumi-party-browser.mjs";
 import { checkArcadeLumi } from "./arcade-lumi-browser.mjs";
@@ -44,9 +44,12 @@ try {
       if (!result.ok) throw new Error("Login failed");
     }, name);
     await page.evaluateOnNewDocument(() => { Object.defineProperty(document, "hidden", { get: () => false }); }); // Both test tabs act like visible TV screens.
+    await roomModeOff(page); // New Lumis start in room mode (2026-11-19); these checks drive the lists, and checkLumiPetRooms turns it on for its own.
   }
   await mkdir("runs/casino-browser", { recursive: true });
-  if (process.env.LUMI_SOFT_ONLY === "1") { // Focused iteration on Lumi-Soft.
+  if (process.env.LUMI_ROOMS_ONLY === "1") { // Focused iteration on room mode: walking her flat, its cards, the switch.
+    await checkLumiPetRooms(alice, base);
+  } else if (process.env.LUMI_SOFT_ONLY === "1") { // Focused iteration on Lumi-Soft.
     await checkLumiSoft(bob, base);
   } else if (process.env.LUMI_TOWN_ONLY === "1") { // Focused iteration on Lumi Town: its streets, the Market, friends in town.
     await checkLumiApps(browser, alice, base);
@@ -74,6 +77,7 @@ try {
     await alice.evaluate(() => [...document.querySelectorAll(".mc-card")].find(b => b.querySelector(".mc-label").textContent === "Slot Machines").click());
     await checkSharedTV(alice, screen, base);
   } else {
+  await checkLumiPetRooms(alice, base);
   await checkLumiPet(browser, alice, base);
   await checkLumiPetDoors(browser, alice, base);
   await checkLumiPetGarden(browser, alice, base);

@@ -5205,7 +5205,9 @@
     const defs = '<defs><clipPath id="lp-view-clip"><path d="' + opening + '"/></clipPath>' +
       '<mask id="lp-wall-mask" maskUnits="userSpaceOnUse" x="-100" y="0" width="' + (WIDE + 200) + '" height="500"><rect x="-100" width="' + (WIDE + 200) + '" height="500" fill="#fff"/>' +
       WINDOWS.map(function (x) { return '<path d="' + opening + '" transform="translate(' + x + ' 0)" fill="#000"/>'; }).join("") + "</mask></defs>";
-    return defs + LAYERS.map(function (spot) {
+    // `extra.only`: just these layers (room mode's kitchen and den: her wallpaper, floor and windows, none of her furniture).
+    const layers = extra && extra.only ? LAYERS.filter(function (spot) { return extra.only.indexOf(spot) >= 0; }) : LAYERS;
+    return defs + layers.map(function (spot) {
       const id = Object.prototype.hasOwnProperty.call(ART, house[spot]) ? house[spot] : BARE[spot], draw = id ? ART[id] : null;
       let art = draw && !(spot === "view" && open) ? draw() : ""; // An object this file doesn't know simply isn't drawn.
       if (art && spot === "view") art = group(art, 'clip-path="url(#lp-view-clip)"');

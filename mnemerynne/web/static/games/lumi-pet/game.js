@@ -7,7 +7,7 @@
    They are one pet on one save, so all three talk to the same API. */
 (function () {
   "use strict";
-  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Pk = window.LumiPetPicker, Gd = window.LumiPetGarden, Ga = window.LumiPetGardenArt, Sk = window.LumiPetSkills, Sa = window.LumiPetSkillsArt, Cl = window.LumiPetCollection, Ca = window.LumiPetCollectionArt, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt, Pu = window.LumiPetParty, GT = window.LumiPetGardenTree, GTa = window.LumiPetGardenTreeArt, Ta = window.LumiPetTavernArt, Tw = window.LumiPetTown, TwA = window.LumiPetTownArt, TF = window.LumiPetTownFolk;
+  const G = window.MGame, R = window.LumiPetRules, H = window.LumiPetHouse, E = window.LumiPetEnemies, Bt = window.LumiPetBattle, W = window.LumiPetCloset, Pk = window.LumiPetPicker, Gd = window.LumiPetGarden, Ga = window.LumiPetGardenArt, Sk = window.LumiPetSkills, Sa = window.LumiPetSkillsArt, Cl = window.LumiPetCollection, Ca = window.LumiPetCollectionArt, Dg = window.LumiPetDungeon, Da = window.LumiPetDungeonArt, Pu = window.LumiPetParty, GT = window.LumiPetGardenTree, GTa = window.LumiPetGardenTreeArt, Ta = window.LumiPetTavernArt, Tw = window.LumiPetTown, TwA = window.LumiPetTownArt, TF = window.LumiPetTownFolk, Ru = window.LumiPetRoom, RA = window.LumiPetRoomArt;
   const $ = function (id) { return document.getElementById(id); };
   const room = $("lp-room"), list = $("lp-list"), houseArt = $("lp-house"), tabButtons = Array.from(document.querySelectorAll("[data-lp-tab]"));
   const API = "/api/media/games/lumi-pet/", OLD_SAVE = "mnemerynne-game:lumi-pet:companion";
@@ -42,7 +42,14 @@
   const KEYS_HOME = "⏮ ⏭ change tab · ▲ ▼ choose<br>◀ ▶ swap in what she owns · Enter opens the spot, to buy more<br>Keyboard: Page Up / Page Down or [ ]<br>Escape / Back returns to Games";
   const KEYS_DUNGEON = "▲ ▼ ◀ ▶ walk, or work a puzzle<br>⏮ ⏭ choose from this list · Enter does it<br>⏯ drink a potion<br>Keyboard: Page Up / Page Down, P<br>Mouse: press a door, a chest, a card, a lamp or a square";
   const CUDDLES = ["Lumi leans into your hand. A tiny purr, just for you.", "Soft wings wrap around your fingers. We can stay like this a while."];
-  let snap = null, offset = 0, tab = 0, picks = TABS.map(function () { return 0; }), busy = false, visited = false;
+  // Room mode (room-ui.js, room-art.js; Doll's design, 2026-11-19): Lumi Pet without menus. ROOM is the room's own "tab"
+  // (one past the real ones): its rows are the things where she is, and its cursor is where she stands. A thing opens a
+  // card: the real tab's rows (roomCard is that thing), with the way back. roomAt is remembered on this device.
+  const ROOM = TABS.length, PLACE = $("lp-place").textContent;
+  const KEYS_ROOM = "◀ ▶ walk to the next thing · past the last, the next room<br>Enter uses it · ⏮ ⏭ the next room<br>In a card: ▲ ▼ choose · Escape / Back / B goes back to the room<br>Mouse: press a thing, the floor, or Lumi for a cuddle";
+  let roomAt = Ru ? Ru.clean(G.store.get("room-at", null)) : null, roomCard = null;
+  function freshPicks() { return TABS.map(function () { return 0; }).concat([0]); } // Every tab's cursor, and the room's.
+  let snap = null, offset = 0, tab = 0, picks = freshPicks(), busy = false, visited = false;
   let battleView = null, finished = null, lastFoe = ""; // Which Battle list is open, the fight that just ended, and the enemy last drawn.
   let lastOutfit = "";
   // The dungeon: the puzzle being worked on here, whether arrows drive it ("board") or the list, the finished trip
@@ -335,6 +342,7 @@
   }
 
   function goHome() { // "Back" from a full-room view (the garden, the trees, the gallery): this app's first tab, or its Settings when that view is the first tab.
+    if (roomCard) { closeCard(); return; } // Room mode: back to the room the card was opened in.
     changeTab(tab === 0 ? Math.max(0, TABS.indexOf("settings")) : 0); picks[tab] = 0;
   }
 
@@ -377,7 +385,13 @@
     return Math.max(0, snap.health.mends_in / (napping ? snap.battle.rules.nap_mend : 1) - (serverNow() - snap.now));
   }
 
-  function rows() { // What the selected tab offers, as plain rows: the list and the remote both read from here.
+  function rows() { // What is on offer now, as plain rows: the list and the remote both read from here.
+    if (tab === ROOM) return Ru.rows(roomAt, { open: openCard, walk: roomWalk, door: adventure }); // Room mode: the things where she is.
+    const list = tabRows();
+    return roomCard ? Ru.cardRows(list, roomCard, closeCard) : list; // A card: the tab's rows (some of them), then back to the room.
+  }
+
+  function tabRows() { // What the selected tab offers.
     const pet = snap.pet, c = snap.catalog, name = TABS[tab], asleep = sceneNow().asleep;
     if (name === "town") return Tw.rows({ at: townAt, street: townStreet, desk: DESK, away: Boolean(exploring()), retro: RETRO_ON, seen: pet.town_seen !== false,
       stall: marketStall, stallRows: stallRows, go: townGo, open: townOpen }); // Lumi Town: a street's places, the games inside one, or a Market stall's wares.
@@ -442,6 +456,8 @@
     settings.push({ key: "sound", icon: "♪", name: "Sound: " + (G.sound.isOn() ? "on" : "off"), hint: "Little chimes", local: function () { G.sound.toggle(); } });
     if (APP === "lumi-pet") settings.push({ key: "town-seen", icon: "👀", name: "Show me in Lumi Town: " + (pet.town_seen === false ? "off" : "on"), // Also on the town's own map.
       hint: pet.town_seen === false ? "Nobody sees your Lumi in town; you still see theirs" : "Others in Lumi Town see your Lumi there, in her clothes, with her name", send: { action: "town_seen" } });
+    if (APP === "lumi-pet") settings.push({ key: "room-mode", icon: "🏠", name: "Room mode: " + (pet.room_mode === false ? "off" : "on"), // Walk her flat and press things, or these lists.
+      hint: pet.room_mode === false ? "Lists, as before · on: walk Lumi's flat and press the fridge, the bed, the wardrobe…" : "Walk Lumi's flat and press things · off: just the lists", send: { action: "room_mode" } });
     if (WHO) settings.push({ key: "switch-player", icon: "⇄", name: "Switch player", hint: "Playing " + (player ? player.name + "'s" : "this TV's own") + " Lumi · someone else presses OK on their remote", local: function () { forgetPlayer("Who's playing next?"); } }); // A shared TV: hand it to the next person.
     if (reminders !== "unsupported" && !has("dungeon")) { // Phones and computers only: a TV has nobody's pocket to buzz. Her needs and her flowers send them; the dungeons never do.
       if (has("garden")) settings.push({ key: "garden-reminders", icon: "❀", name: "Garden reminders: " + (pet.garden_reminders === false ? "off" : "on"), hint: "A nudge when slow flowers are ready to trim (needs Reminders on)", send: { action: "garden_reminders" } });
@@ -455,6 +471,102 @@
       local: function () { openApp("lumi-town", { at: APP === "lumi-garden" ? "garden" : "tavern" }); } });
     if (!inApp && !framed) settings.push({ key: "install", icon: "⬇", name: "Install " + NAME, hint: "Its own icon on your home screen, opening straight here", local: installApp }); // In a browser tab: each of Lumi's apps can be an app of its own.
     return settings;
+  }
+
+  // ---- Room mode: walking her flat, opening and closing cards (room-ui.js has the rooms, room-art.js the new things).
+  function roomOn() { // Room mode is showing: Lumi Pet, her setting on (old saves count as on), and nobody choosing a player or on the couch.
+    return APP === "lumi-pet" && Boolean(Ru) && Boolean(snap) && snap.pet.room_mode !== false && !picking && !couching();
+  }
+
+  function syncRoom() { // Keep the tab in step with room mode: the room's own rows when no card is open, the lists when it's off.
+    const on = roomOn();
+    if (!on) { roomCard = null; if (tab === ROOM) changeTab(0); }
+    else if (!roomCard && tab !== ROOM) changeTab(ROOM); // Switched on (from Settings' list), or a card closed.
+    if (on) picks[ROOM] = roomAt.at; // The room's cursor is where she stands.
+    $("gm").dataset.rooms = String(on); // game.css folds the tabs away.
+    return on;
+  }
+
+  function roomMove(to) { // She walks to another spot (or room): remembered on this device, with a soft step.
+    const crossing = to.room !== roomAt.room, moved = crossing || to.at !== roomAt.at; // Measured before she goes.
+    roomAt = Ru.clean(to); picks[ROOM] = roomAt.at;
+    G.store.set("room-at", roomAt);
+    if (moved) { G.sound.unlock(); G.sound.tone(crossing ? 587.33 : 523.25, .08, 0, .06); } // A higher step through a doorway.
+  }
+
+  function roomWalk(to) { roomMove(to); lastList = ""; render(); } // A "To the kitchen" row, or an edge arrow.
+
+  function openCard(thing, at) { // Use a thing: she walks to it and its card opens (that tab's rows).
+    if (typeof at === "number") roomMove({ room: roomAt.room, at: at });
+    if (thing.act === "door") { adventure(); return; } // The front door: straight out into town, as ever.
+    const to = TABS.indexOf(thing.tab);
+    if (to < 0) return; // Not a tab this app has (can't happen in Lumi Pet; kept safe).
+    changeTab(to); roomCard = thing; picks[tab] = 0; lastList = "";
+    say(thing.say); // Lumi the guide: her line for it, read out by screen readers too.
+  }
+
+  function closeCard() { // Back to the room, standing where she was. True when a card was open.
+    if (!roomCard) return false;
+    roomCard = null; changeTab(ROOM); lastList = ""; render();
+    return true;
+  }
+
+  function roomKey(action, arrow) { // The keys in room mode. True when used here; false lets the usual handling run (a card's list, Enter, Play).
+    if (tab === ROOM) {
+      if (arrow) { roomMove(Ru.step(roomAt, action === "left" || action === "up" ? -1 : 1)); lastList = ""; render(); return true; }
+      if (action === "next" || action === "prev") { roomMove(Ru.hop(roomAt, action === "prev" ? -1 : 1)); lastList = ""; render(); return true; }
+      return false; // Enter uses the spot (its row), Play drinks a potion.
+    }
+    if (roomCard && (action === "next" || action === "prev")) { closeCard(); return true; } // No tabs to flip through in a card: back to the room.
+    return false;
+  }
+
+  function roomPress(event) { // Mouse and touch in room mode: a thing (walk to it and use it), or the floor (walk to the nearest thing).
+    if (!roomOn() || room.dataset.leaving === "true") return;
+    const hit = event.target.closest("[data-click]");
+    if (hit && hit.dataset.click.indexOf("thing:") === 0) {
+      const at = Ru.find(roomAt.room, hit.dataset.click.slice(6)), spot = Ru.layout(roomAt.room)[at];
+      if (spot) { pendingConfirm = null; openCard(spot, at); render(); }
+      return;
+    }
+    if (tint || (roomCard && (opened.home || opened.closet))) return; // Trying a colour or a piece on: the room is a preview, so a stray press doesn't walk off.
+    const matrix = houseArt.getScreenCTM && houseArt.getScreenCTM();
+    if (!matrix) return;
+    const point = houseArt.createSVGPoint(); point.x = event.clientX; point.y = event.clientY;
+    const x = point.matrixTransform(matrix.inverse()).x; // Where on the 1000-wide drawing the press was.
+    if (roomCard) { roomCard = null; changeTab(ROOM); } // Walking away closes the card.
+    roomMove({ room: roomAt.room, at: Ru.nearest(roomAt.room, x) }); lastList = ""; render();
+  }
+
+  function drawRoom(preview) { // Room mode's picture: the room she's in (house.js walls, room-art.js things), and her standing at her spot.
+    const here = Ru.room(roomAt.room), spot = Ru.spot(roomAt), house = Object.assign({}, snap.pet.house);
+    if (preview && here.id === "bedroom") house[preview[0]] = preview[1]; // Decorating: the piece tried on, in her bedroom.
+    room.dataset.rooms = here.id;
+    room.style.setProperty("--gx", String((spot ? spot.x : 500) - 500)); // game.css walks her there.
+    $("lp-place").textContent = here.name;
+    const scenery = document.querySelector(".parallax"), backdrop = Boolean(scenery) && getComputedStyle(scenery).display !== "none";
+    const boxes = here.id === "bedroom" && snap.boxes ? snap.boxes.left : 0;
+    const signature = JSON.stringify(["room", here.id, roomAt.at, house, backdrop, boxes]);
+    if (signature === lastHouse) return; // Only redrawn when she moves, or the room changes.
+    lastHouse = signature;
+    room.dataset.open = String(backdrop && house.view === "view-city"); // Her windows open onto the page's scenery in every room.
+    houseArt.innerHTML = (here.id === "bedroom" ? H.render(house, backdrop, { boxes: boxes }) : H.render(house, backdrop, { only: RA.SHELL })) +
+      RA.scene(here.id, house) + Ru.hits(here.id, roomAt.at); // All authored in house.js, room-art.js and room-ui.js; nothing a person typed.
+  }
+
+  function drawRoomBits(on) { // Room mode's extras around the picture: the guide's bubble, the arrows to the next rooms, the keys.
+    const guide = $("lp-guide"), ways = on && !roomCard ? Ru.neighbours(roomAt) : { left: null, right: null };
+    if (!on) { delete room.dataset.rooms; guide.hidden = true; $("lp-place").textContent = PLACE; }
+    else { guide.hidden = false; guide.textContent = Ru.guide(roomAt, roomCard); $("lp-keys").innerHTML = KEYS_ROOM; } // Fixed text from this file.
+    [["left", $("lp-way-left")], ["right", $("lp-way-right")]].forEach(function (pair) {
+      const to = ways[pair[0]];
+      pair[1].hidden = !to;
+      if (to) { // Its label is the room's short name ("kitchen"); its accessible name says where it walks.
+        const short = to.name.replace(/^HER |^THE /, "").toLowerCase();
+        pair[1].querySelector("[data-way-name]").textContent = short; pair[1].dataset.go = to.id;
+        pair[1].setAttribute("aria-label", "Walk to the " + short);
+      }
+    });
   }
 
   function changeTab(to) { // Open a category afresh: its sub-lists closed, nothing half-chosen.
@@ -963,6 +1075,7 @@
 
   function drawHouse(preview) { // Draw the room: what the server says is placed, with the highlighted object tried on.
     if (TOWN) { drawTown(); return; } // Lumi Town draws the map, or the place she's in.
+    if (roomOn()) { drawRoom(preview); return; } // Room mode: the kitchen, her bedroom or the den.
     if (APP === "lumi-dungeons") { // Lumi Dungeons' lobby is the Lantern & Paw tavern (tavern-art.js), not her apartment (Doll's request, 2026-11-11).
       const night = sceneNow().night, signature = "tavern:" + night;
       if (signature === lastHouse) return; // Only redrawn when day turns to night or back.
@@ -1123,6 +1236,7 @@
   function render() { // Refresh the room, meters and list without flooding the remote's status line.
     if (!snap) return;
     if (trip() && TABS[tab] !== "dungeon") changeTab(TABS.indexOf("dungeon")); // A trip (even one begun on another device) keeps Lumi Dungeons in the dungeon.
+    const rooming = syncRoom(); // Room mode on or off, and the tab to match.
     const pet = snap.pet, now = Date.now(), scene = sceneNow(), mood = R.mood(pet), task = pet.task;
     room.dataset.palette = pet.glow;
     $("lp-name").textContent = pet.name || "Lumi";
@@ -1162,6 +1276,7 @@
     drawHouse(TABS[tab] === "home" && pick && pick.preview);
     drawOutfit(TABS[tab] === "closet" && pick && pick.wear);
     drawDungeon();
+    if (APP === "lumi-pet") drawRoomBits(rooming); // After the dungeon's keys: room mode's own.
     drawGarden();
     drawSkills();
     drawAlbum();
@@ -1172,7 +1287,7 @@
     drawTint();
     drawCouch();
     const doing = snap.fight ? "fighting " + snap.fight.enemy.name : task ? BUSY[task.kind] : scene.asleep ? "dreaming" : mood.need ? "needs " + mood.need : "content";
-    const report = "Lumi · " + doing + " · " + tabButtons[tab].textContent + ": " + (pick ? pick.name : "nothing yet") + " · Enter to choose";
+    const report = "Lumi · " + doing + " · " + (tab === ROOM ? Ru.room(roomAt.room).name.toLowerCase() : roomCard ? roomCard.name : tabButtons[tab].textContent) + ": " + (pick ? pick.name : "nothing yet") + " · Enter to choose";
     if (report !== lastReport) { G.report(report); lastReport = report; }
   }
 
@@ -1299,6 +1414,7 @@
     if (!snap) return;
     const arrow = ["left", "right", "up", "down"].indexOf(action) >= 0;
     if (action === "next" || action === "prev" || action === "play" || arrow) pendingConfirm = null; // Only a second Enter confirms.
+    if (roomOn() && syncRoom() && roomKey(action, arrow)) return; // Room mode: the arrows walk her flat; in a card, ⏮ ⏭ go back.
     if (TOWN && (arrow || action === "next" || action === "prev")) { townMove(action); return; } // Lumi Town: every arrow walks her (it has no other tabs to change to).
     if (albuming()) { albumKey(action); return; } // So has the Collection's gallery.
     if (room.dataset.browse === "true" && arrow && browserKey(action)) return; // The party browser: arrows move over the cards.
@@ -1335,6 +1451,7 @@
     render();
   }
   G.onAction(onKey, { directEnter: function () { return true; } });
+  if (G.onBack) G.onBack(function () { return roomOn() && closeCard(); }); // Escape, Backspace or a pad's B closes a card (and only then leaves the game).
 
   // ---- Touch: the arrow pad and the press button (templates/games/lumi-pet.html), and installing this app (each of Lumi's three has its own manifest: web/app.py lumi_manifest).
   const touchy = window.matchMedia("(pointer: coarse), (max-width: 700px)"); // A touch screen, or a phone-sized window.
@@ -1398,7 +1515,17 @@
     render();
   });
 
-  houseArt.addEventListener("click", doorPress); // Her room's door, in Lumi Pet: through it to Lumi Town.
+  houseArt.addEventListener("click", function (event) { if (roomOn()) roomPress(event); else doorPress(event); }); // Room mode's things and floor; otherwise her room's door, through to Lumi Town.
+  $("lp-pet").addEventListener("click", function () { // Room mode: press Lumi herself for a cuddle (the bed's card has it too).
+    if (!roomOn() || busy || room.dataset.leaving === "true") return;
+    submit({ key: "cuddle", send: { action: "cuddle" } });
+  });
+  ["lp-way-left", "lp-way-right"].forEach(function (id) { // The arrows at the room's edges: walk through to the next room.
+    $(id).addEventListener("click", function () {
+      if (!roomOn() || !$(id).dataset.go) return;
+      roomWalk(Ru.enter($(id).dataset.go, id === "lp-way-left" ? "right" : "left"));
+    });
+  });
   houseArt.addEventListener("click", townPress); // Lumi Town: its places, cabinets and tables.
   window.addEventListener("pageshow", function (event) { // Back from a game (or another app) with the browser's Back: the page comes back as it was left, mid-hop through a door.
     if (event.persisted) delete room.dataset.leaving; // She's here again, and the next press goes somewhere at once.
@@ -1826,7 +1953,7 @@
     if (box) box.hidden = true;
     $("lp-player").hidden = !player;
     $("lp-player").textContent = player ? "Playing: " + player.name + "'s Lumi" : "";
-    snap = null; finished = null; play = {}; lastList = lastDungeon = lastHouse = lastGarden = lastSkills = lastAlbum = lastStory = ""; visited = false; tab = 0; picks = TABS.map(function () { return 0; }); // Nothing of the last player's Lumi stays on screen.
+    snap = null; finished = null; play = {}; lastList = lastDungeon = lastHouse = lastGarden = lastSkills = lastAlbum = lastStory = ""; visited = false; tab = 0; picks = freshPicks(); roomCard = null; // Nothing of the last player's Lumi stays on screen.
     begin();
   }
 

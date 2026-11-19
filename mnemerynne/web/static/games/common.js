@@ -18,6 +18,7 @@
                  MediaTrackNext: "next", MediaTrackPrevious: "prev", PageDown: "next", PageUp: "prev", "]": "next", "[": "prev" };
   const PAD_ACTIONS = { up: "up", down: "down", left: "left", right: "right", a: "enter", start: "play", l: "prev", r: "next" };
   let onAction = null, directEnter = null, tabNavigation = false;
+  let onBack = null; // A game's own "back" (Lumi Pet's room mode closes a card): true when it used the key, so the game stays open.
 
   function toParent(kind, extra) { // A message to the TV page; nothing when opened on its own.
     if (framed) window.parent.postMessage(Object.assign({ type: "mnemerynne-game-" + kind }, extra || {}), location.origin);
@@ -32,7 +33,11 @@
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === "Tab") { tabNavigation = true; return; } // Explicit keyboard focus navigation retains native button activation.
     if (e.target && (e.target.matches("input, select, textarea") || e.target.isContentEditable)) return; // Native form editing keeps its keys.
-    if (e.key === "Escape" || e.key === "Backspace") { if (framed) { e.preventDefault(); toParent("close"); } return; }
+    if (e.key === "Escape" || e.key === "Backspace") {
+      if (onBack && onBack()) { e.preventDefault(); return; } // The game went back a step itself (a card closed): not out of the game.
+      if (framed) { e.preventDefault(); toParent("close"); }
+      return;
+    }
     const action = KEYS[e.key];
     if (!action) return;
     if (["left", "right", "up", "down"].includes(action)) tabNavigation = false;
@@ -49,6 +54,7 @@
       Number.isInteger(data.remote) ? data.remote : undefined);
     // A remote panel in gamepad mode (media/remotes.py PAD_BUTTONS): a button going down is the game's action, as a
     // press is (A or Start: enter or play; L / R: prev / next); going up, and X, Y, B and Select, mean nothing here.
+    if (data.type === "mnemerynne-game-pad" && data.down === true && data.button === "b" && onBack) { sound.unlock(); onBack(); return; } // B is "back" where a game has one.
     if (data.type === "mnemerynne-game-pad" && data.down === true && PAD_ACTIONS[data.button]) act(PAD_ACTIONS[data.button],
       typeof data.controller === "string" ? data.controller : undefined, Number.isInteger(data.remote) ? data.remote : undefined);
     if (data.type === "mnemerynne-game-scale" && document.documentElement.classList.contains("tv") &&
@@ -145,6 +151,7 @@
     framed: framed,
     reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
     onAction: function (fn, options) { onAction = fn; directEnter = options && options.directEnter; }, // Optional direct Enter controls; older games keep native buttons.
+    onBack: function (fn) { onBack = fn; }, // fn() → true when Escape / Backspace / a pad's B went back a step in the game (false: leave the game, as before)
     tap: act,                                                // the game's own buttons and taps, as actions
     report: function (sub) { toParent("state", { sub: String(sub || "").slice(0, 300) }); },   // the line a remote shows
     close: function () { toParent("close"); },

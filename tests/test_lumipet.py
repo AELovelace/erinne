@@ -201,6 +201,17 @@ def test_spend_refuses_an_overdraft_without_touching_anything(conn, alice):
 
 
 # --------------------------------------------------------------------------- glow and the old browser save
+def test_room_mode_is_on_by_default_and_toggles_without_a_moment(conn, alice):
+    assert _state(conn, alice, T0)["pet"]["room_mode"] is True                # new Lumis start in her rooms
+    out = _act(conn, alice, "room_mode", T0)["pet"]
+    assert out["room_mode"] is False and out["moments"] == 0                   # off: the lists, as before
+    assert _act(conn, alice, "room_mode", T0)["pet"]["room_mode"] is True      # and back on
+    pet = json.loads(conn.execute("SELECT data FROM lumi_pets WHERE user_id = ?", (alice,)).fetchone()[0])
+    pet.pop("room_mode")                                                       # a save from before the setting existed
+    conn.execute("UPDATE lumi_pets SET data = ? WHERE user_id = ?", (json.dumps(pet), alice))
+    assert _act(conn, alice, "room_mode", T0)["pet"]["room_mode"] is False     # counted as on, so the first press turns it off
+
+
 def test_glow_changes_without_a_moment(conn, alice):
     out = _act(conn, alice, "glow", T0, glow="lagoon")["pet"]
     assert out["glow"] == "lagoon" and out["moments"] == 0

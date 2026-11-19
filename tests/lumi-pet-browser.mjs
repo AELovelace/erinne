@@ -16,6 +16,57 @@ async function moveTo(page, key) { // Move the list's cursor onto a row with the
 const places = row("env-moonlit-shrine") + ", " + row("continue"); // Lumi Dungeons' first list: the places to explore, or (on a device that hasn't read it yet) how the last trip ended.
 const said = (page, words) => page.waitForFunction(w => document.getElementById("lp-message").textContent.includes(w), {}, words);
 
+async function roomMode(page) { // Whether this account's Lumi is in room mode now (her save; old saves count as on).
+  return page.evaluate(async () => (await (await fetch("/api/media/games/lumi-pet/state")).json()).pet.room_mode !== false);
+}
+async function toggleRoomMode(page) { // Settings' Room mode row, sent straight to the server (the page isn't open yet).
+  const answer = await page.evaluate(async () => (await fetch("/api/media/games/lumi-pet/act", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "room_mode" }) })).status);
+  assert.equal(answer, 200, "Room mode switched");
+}
+export async function roomModeOff(page) { if (await roomMode(page)) await toggleRoomMode(page); } // The list-driven checks' starting point.
+
+export async function checkLumiPetRooms(page, base) { // Room mode (room-ui.js): walk her flat with keys and the mouse, use things, go back, switch it off.
+  if (!(await roomMode(page))) await toggleRoomMode(page);
+  await page.evaluate(() => localStorage.removeItem("mnemerynne-game:lumi-pet:room-at")); // Start where a first visit does: by the paint pots.
+  await page.goto(base + "/media/games/lumi-pet");
+  await page.waitForSelector(row("thing-paint") + '[aria-pressed="true"]');
+  assert.equal(await page.$eval("#gm", el => el.dataset.rooms), "true");
+  assert.ok(await page.$eval(".lp-tabs", el => getComputedStyle(el).display === "none"), "No tabs in room mode");
+  assert.match(await text(page, "#lp-guide"), /paint pots/i, "Lumi says what she's standing at");
+  await page.keyboard.press("ArrowRight"); // ▶ to her bed, ▶ again through to the den
+  await page.waitForSelector(row("thing-bed") + '[aria-pressed="true"]');
+  await page.keyboard.press("ArrowRight");
+  await page.waitForSelector(row("thing-wardrobe") + '[aria-pressed="true"]');
+  assert.equal(await page.$eval("#lp-room", el => el.dataset.rooms), "den");
+  await page.keyboard.press("PageUp"); await page.keyboard.press("PageUp"); // ⏮ ⏮: a room at a time, back to the kitchen
+  await page.waitForSelector(row("thing-potions") + '[aria-pressed="true"]');
+  await page.click('.lp-house [data-click="thing:fridge"]'); // The mouse: the fridge walks her there and opens the Pantry
+  await page.waitForSelector(row("apple"));
+  await said(page, "Something tasty");
+  await page.keyboard.press("Enter"); // The apple: fed through the fridge's card, exactly as from the Pantry tab
+  await said(page, "Apple!");
+  assert.ok(await page.$(row("card-back")), "A card ends with the way back");
+  await page.keyboard.press("Escape"); // Escape closes the card, not the game
+  await page.waitForSelector(row("thing-fridge") + '[aria-pressed="true"]');
+  assert.equal(page.url(), base + "/media/games/lumi-pet");
+  await page.click('.lp-house [data-click="thing:potions"]'); // She isn't hurt: the shelf says why, rather than offering nothing
+  await page.waitForSelector(row("card-empty"));
+  await page.keyboard.press("Escape");
+  await page.click("#lp-way-right"); // The edge arrow: into the bedroom, then the den's terminal for Settings
+  await page.waitForSelector(row("thing-door"));
+  await page.click("#lp-way-right");
+  await page.click('.lp-house [data-click="thing:terminal"]');
+  await page.waitForSelector(row("room-mode"));
+  assert.match(await text(page, row("room-mode")), /Room mode: on/);
+  await page.click(row("room-mode")); // Off: the lists and tabs come back, on the Settings tab
+  await page.waitForFunction(() => document.getElementById("gm").dataset.rooms === "false");
+  assert.ok(await page.$eval(".lp-tabs", el => getComputedStyle(el).display !== "none"), "The tabs are back");
+  assert.match(await text(page, row("room-mode")), /Room mode: off/);
+  assert.equal(await roomMode(page), false, "Saved on her account");
+  console.log("Lumi Pet room mode: walking, rooms, the fridge's card, Escape, the empty shelf, the edge arrows and the switch");
+}
+
 export async function checkLumiPetCapsules(page, base) { // Run on the second account, whose purse the casino checks don't count on to the coin.
   await page.goto(base + "/media/games/lumi-pet");
   await page.waitForSelector(row("cuddle"));

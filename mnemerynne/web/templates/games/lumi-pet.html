@@ -91,6 +91,12 @@
     </svg>
   </div>
   <div class="lp-caption"><span class="lp-dot" aria-hidden="true"></span><span id="lp-state">Settling in</span></div>
+  {#- Room mode (game.js drawRoomBits, room-ui.js): Lumi's speech bubble over her head (what she's standing at, or the
+      open card's line: the live region below says it to screen readers), and the arrows at the room's edges to the
+      next room. All hidden unless room mode is on. -#}
+  <p class="lp-guide" id="lp-guide" aria-hidden="true" hidden></p>
+  <button type="button" class="lp-way lp-way-left" id="lp-way-left" hidden><span aria-hidden="true">◀</span><span data-way-name></span></button>
+  <button type="button" class="lp-way lp-way-right" id="lp-way-right" hidden><span data-way-name></span><span aria-hidden="true">▶</span></button>
   {#- Touch controls (game.js drawPad shows them only on a touch screen or a phone): arrows to walk the dungeon and work
       its puzzles, and a big button for the garden's press. They do exactly what the keys do. -#}
   <div class="lp-pad" id="lp-pad" role="group" aria-label="Move" hidden>

@@ -133,6 +133,28 @@ Lumi is a little glowing fairy cat, and she has three apps on the **Lumi** shelf
 
 Each app's **Settings** tab has **Open** rows for the other two.
 
+**Room mode:** Lumi Pet opens in **room mode**: no tabs, just Lumi in her flat, and the things in it are what you do. Lumi walks to a thing and says what it's for, and using it opens a **card** with the same choices that tab's list would show. The flat has three rooms, left to right:
+
+| Room | Thing | What it opens |
+|---|---|---|
+| **Kitchen** | The fridge, her bowl | **Pantry** (her food) |
+| | The potion shelf | **Drink a potion** (only when she's hurt; otherwise it says so) |
+| **Bedroom** | The front door | Out into **Lumi Town** |
+| | The toy chest | **Toys** |
+| | The trophy shelf | **Collection** |
+| | The paint pots | **Home** (decorating, and unpacking moving boxes) |
+| | Her bed | **Care**: cuddle, nap, a potion, through the door |
+| **Den** | The wardrobe | **Closet** (what she wears) |
+| | The terminal | **Settings** |
+| | The capsule machine | **Shop** |
+
+- **Remote or keyboard:** **Left/Right** walk Lumi to the next thing. Past the last one, she walks through to the next room. **Previous/Next** (Page Up/Page Down, **[** **]**) jump a whole room. **Enter** uses the thing she's at. In a card, **Up/Down** choose and **Enter** does it, as in the lists. **Escape**, **Back**, a gamepad's **B**, or the card's last row, **Back to the room**, closes the card. Escape leaves the game only when no card is open.
+- **Mouse or touch:** press a thing to walk there and open it, press the floor to walk to the nearest thing, press **Lumi** herself for a cuddle, and press the **◀ kitchen** / **den ▶** arrows at the room's edges to change room.
+- The list on the right always shows the room's things (or the open card), so screen readers and keyboard Tab reach everything.
+- The kitchen and the den wear her own wallpaper, floor and windows from **Home**. Until she has unpacked a bed, a toy chest or a trophy shelf, a mattress, a cardboard box of toys and a plank shelf stand in for them.
+- Each device remembers which room she was in.
+- **Settings → Room mode** (on the den's terminal) turns it off, and Lumi Pet goes back to the tabs and lists. Turn it on again from **Settings** there. It's saved with your Lumi, so it follows you to every device. Lumi Dungeons and Lumi's Garden aren't affected.
+
 **Lumi Town** 🏘 is outside her front door. In Lumi Pet, press the **door** in her room, or choose **Through the door** at the end of **Care**, and she trots out into town. The door is on the left of her room, so on a squarer screen or a phone the panel can hide it; the Care row always works. Lumi Town has no card on the Games page: her door is the way in. It's a neon city where it's always night. Towers with lit windows stand under a smoggy pink sky, with wires and hologram billboards overhead. Every place has its own neon sign, the signs shine back off the wet road, steam rises from the grates, and a light rain falls. The street lights, the LUMI TOWN sign and the ring where Lumi is about to walk glow in her own colour. If your device is set to reduce motion, the rain stops and the steam holds still. The town has two streets. The **High Street** has six places, and Lumi walks to whichever one you pick (**Up/Down/Left/Right** on a remote or keyboard, or press a place):
 
 - **Arcade**: Yarn Pop, Lumi Conga, Teacup Tower, Prism Drop and Lumi Launch, one cabinet each.
@@ -156,7 +178,7 @@ Each app's **Settings** tab has **Open** rows for the other two.
 
 Walk into the Arcade, the Casino, the field or the Market and pick a game or a stall; **Back to the town map** (or **Back to Market Street**) walks out again. When you leave a game you opened from the town (the bar's **Back**, or **Escape**), you're back where you were in town, on the same cabinet or table. On its own in a browser tab, the browser's Back does the same. Lumi Dungeons and Lumi's Garden have **Back to town** in their Settings. In Lumi Dungeons, **Back to town** is also the first row of the Dungeon tab whenever she isn't on a trip, and the first row when a trip ends; it isn't offered while you're in a party. Back in her room after a trip, Lumi says where she went and what she brought home, once per trip. While Lumi is on a dungeon trip or in a fight she is in Lumi Dungeons: her room in Lumi Pet is empty and the garden waits, and both show a row, **Lumi is out exploring**, that takes you to her. You can still send her a snack from the Pantry.
 
-Look after her in **Games → Lumi Pet**. On a TV remote, **Previous/Next** change tab, **Up/Down** move through the list, **Left/Right** flip the choices of the row you are on, and **Enter** does it. On a keyboard, Previous/Next are **Page Up/Page Down** (or **[** and **]**). You can also tap or click anything. Her **name** and her **colour** are in **Settings** (in Lumi Pet and Lumi Dungeons): **Name** (up to 16 letters; it's what her friends see in a party) and **Colour**, which opens red, green and blue sliders (◀ ▶ on a remote, or slide them) and shows her new colour in the room as you go; **Keep** saves it, and **Her glow's own colours** goes back. Her colour is only how she looks: her element in a fight is still her glow. Lumi Pet's tabs are **Care** (cuddle, nap), **Pantry** (her food), **Toys**, **Closet** (what she wears), **Home** (decorating), **Shop** (capsules, snacks, treats and toys for coins), **Collection** and **Settings** (her glow colour, sound, reminders, her other apps). Lumi Dungeons has **Dungeon**, **Battle**, **Skills** and **Settings** (her glow, the storyteller, sound). Lumi's Garden has **Garden** and **Settings** (sound, reminders). Keyboard Tab reaches individual controls, and Escape/Back returns to Games.
+Look after her in **Games → Lumi Pet** (in room mode, see **Room mode** above; with it off, as follows). On a TV remote, **Previous/Next** change tab, **Up/Down** move through the list, **Left/Right** flip the choices of the row you are on, and **Enter** does it. On a keyboard, Previous/Next are **Page Up/Page Down** (or **[** and **]**). You can also tap or click anything. Her **name** and her **colour** are in **Settings** (in Lumi Pet and Lumi Dungeons): **Name** (up to 16 letters; it's what her friends see in a party) and **Colour**, which opens red, green and blue sliders (◀ ▶ on a remote, or slide them) and shows her new colour in the room as you go; **Keep** saves it, and **Her glow's own colours** goes back. Her colour is only how she looks: her element in a fight is still her glow. Lumi Pet's tabs are **Care** (cuddle, nap), **Pantry** (her food), **Toys**, **Closet** (what she wears), **Home** (decorating), **Shop** (capsules, snacks, treats and toys for coins), **Collection** and **Settings** (her glow colour, sound, reminders, her other apps). Lumi Dungeons has **Dungeon**, **Battle**, **Skills** and **Settings** (her glow, the storyteller, sound). Lumi's Garden has **Garden** and **Settings** (sound, reminders). Keyboard Tab reaches individual controls, and Escape/Back returns to Games.
 
 Lumi has three needs: **Tummy**, **Energy** and **Joy**. They run down while you're away, quickly when full and slowly near empty: the last quarter takes a whole day. Snacks fill her tummy, a five-minute nap restores energy when it ends, and cuddles and play bring joy. There is always a free apple and a free star ribbon. If a need reaches zero she is sad and sleepy, but she never loses anything, and a snack and a cuddle set her right. Lumi sleeps from 22:00 to 07:00 on your device's clock, and lives on your account, so she is the same on your phone, computer and TV.
 
@@ -302,7 +324,7 @@ The phone remote (**Media → Remote** on your phone) and the M5Stack Tab5 panel
 Buttons stay **held for as long as you hold them**, and you can press several at once (run and jump). A phone gives a small buzz on each press.
 
 - **In Retro** the pad is **a player of its own**: the first player that no controller plugged into or paired with the TV already has. The game's bar says which (for example *📱 A remote is player 2*). Two phones are two players. Outside a game, the D-pad and **A** move around the shelves, **B** goes back, **L** and **R** flip the library's pages, and **Start** opens the game's menu.
-- **In the TV's other games** (Lumi Launch, the Lounge tables and so on) a button works as the remote's own: the D-pad moves, **A** is OK, **Start** is Play, and **L** and **R** are Previous and Next. Couch seats work as with the remote.
+- **In the TV's other games** (Lumi Launch, the Lounge tables and so on) a button works as the remote's own: the D-pad moves, **A** is OK, **Start** is Play, and **L** and **R** are Previous and Next. In Lumi Pet's room mode, **B** closes a card. Couch seats work as with the remote.
 - **Outside a game** the D-pad and **A** move around the TV like the remote's arrows and Enter, and **B** goes back.
 - **✕ Remote** (on the Tab5, **Remote**) goes back to the remote. Leaving lets go of anything still held, so nothing stays pressed on the TV.
 

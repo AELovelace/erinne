@@ -321,7 +321,7 @@ class PetAction(BaseModel):
     """What the person chose to do with Lumi. Only choices: which thing and how many. The server decides every result."""
     model_config = ConfigDict(extra="forbid")
     action: Literal["cuddle", "feed", "play", "nap", "wake", "buy", "decorate", "wear", "capsule", "glow", "import", "storyteller",
-                    "learn", "respec", "equip", "mod", "potions", "heal", "drink", "garden_reminders", "town_seen",
+                    "learn", "respec", "equip", "mod", "potions", "heal", "drink", "garden_reminders", "town_seen", "room_mode",
                     "unpack", "name", "colour", "stat", "stats_auto", "auto_stats", "stats_reset", "kit"]
     item: str | None = Field(default=None, max_length=40)
     count: int = Field(default=1, ge=1, le=lumipet.MAX_HELD, strict=True)

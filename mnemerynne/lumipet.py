@@ -216,6 +216,7 @@ def _fresh(now: int) -> dict:
             "inventory": {}, "toys": [], "boost": None, "imported": False, "low": {}, "seen": now, "house": {}, "decor": [],
             "outfit": {}, "closet": [], "storyteller": "library", "garden_reminders": True,
             "town_seen": True,                             # others in Lumi Town see her there (lumitown.py; Settings' "Show me in town")
+            "room_mode": True,                             # Lumi Pet's walk-and-click rooms (game.js room mode); off: the lists, as before
             "name": "Lumi", "colour": None,               # what her friends see her called; her own colour (None: her glow's)
             "moved_in": MOVE_IN, "unpacked": 0, "box_day": "",   # she has just moved in: boxes unpacked so far, and the day of the last
             **lumibattle.fresh_fields()}
@@ -585,6 +586,8 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
         pet["garden_reminders"] = not pet.get("garden_reminders", True)
     elif action == "town_seen":                           # whether others in Lumi Town see her there (lumitown.py)
         pet["town_seen"] = not pet.get("town_seen", True)
+    elif action == "room_mode":                           # Settings → Room mode: walk her rooms and press things, or use the lists
+        pet["room_mode"] = not pet.get("room_mode", True)  # an old save without it counts as on (the default since 2026-11-19)
     elif action == "storyteller":
         # Whose words the dungeon uses: the library that ships with the game, or (as well) a line written fresh for
         # each moment by the person's own model. Only a preference; whether a model is there is checked when asked.
