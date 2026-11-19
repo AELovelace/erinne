@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from mnemerynne import arcade, lobby, lumilaunch, lumisoft, lumitown, runner, showdown
+from mnemerynne import arcade, events, lobby, lumilaunch, lumisoft, lumitown, runner, showdown
 from mnemerynne.rooms_bus import sse
 from mnemerynne import bfgguf, casino, casino_remote, claude_chat, coins, games, lumi_tv, lumidungeon, lumiparty, lumipet, lumitales, prism, push, users
 from mnemerynne.db import read_transaction, transaction
@@ -285,28 +285,100 @@ def launch_tv_player(body: PlayerPick, request: Request, user=Depends(media_user
 
 
 class TownHere(BaseModel):
-    """Where this Lumi stands in Lumi Town: a place's id (town-ui.js) and the street. Never anyone else's."""
+    """Where this Lumi stands in Lumi Town: a place's id (town-ui.js), the street, and whether she's inside that place
+    (or out on the street's map in front of it). Never anyone else's."""
     model_config = ConfigDict(extra="forbid")
     at: str = Field(pattern=r"^[a-z][a-z-]{0,23}$")
     street: Literal["high", "market"]
+    inside: bool = False                 # (older pages don't send it: out on the map)
 
 
 @router.post("/api/media/games/lumi-pet/town")
 def pet_town(body: TownHere, user=Depends(pet_user), conn=Depends(get_games_db)):
-    """Lumi Town, every few seconds: say where this Lumi is (unless "Show me in town" is off), and hear who else is in
-    town, each with their Lumi's look (lumipet.look) and their name. On a shared TV, the play pass's holder."""
+    """Lumi Town, every few seconds and whenever she moves: say where this Lumi is (unless "Show me in town" is off),
+    and hear who else is in town, each with their Lumi's look (lumipet.look) and their name, plus the last few lines
+    said where she is (local chat; a TV hears them this way) and the quick phrases. On a shared TV, the play pass's holder."""
     seen = lumipet.town_seen(conn, user["id"])
-    if seen:
-        lumitown.TOWN.visit(user["id"], body.at, body.street)
-    else:
-        lumitown.TOWN.leave(user["id"])
+    moved = lumitown.TOWN.visit(user["id"], body.at, body.street, body.inside) if seen else lumitown.TOWN.leave(user["id"])
+    if moved:
+        events.publish_sync(lumitown.CHANNEL, {"kind": "moved"})       # the others' streams: look again, at once
     here = []
-    for uid, at, street in lumitown.TOWN.here(but=user["id"]):
+    for uid, at, street, inside in lumitown.TOWN.here(but=user["id"]):
         person = users.get_user_by_id(conn, uid)
         if person is None or not person["active"]:
             continue
-        here.append({"id": uid, "name": person["username"], "at": at, "street": street, "look": lumipet.look(conn, uid)})
-    return {"seen": seen, "here": here}
+        here.append({"id": uid, "name": person["username"], "at": at, "street": street, "inside": inside, "look": lumipet.look(conn, uid)})
+    where = lumitown.place(body.at, body.street, body.inside)           # (a hidden Lumi still hears what's said)
+    return {"seen": seen, "here": here, "place": where, "lines": lumitown.TOWN.recent(where), "phrases": lumitown.phrases(),
+            "you": user["id"]}                                          # (so the page knows which lines are its own)
+
+
+class TownSay(BaseModel):
+    """A line said in Lumi Town: typed words (cleaned by lumitown.clean) or a quick phrase's id. One or the other."""
+    model_config = ConfigDict(extra="forbid")
+    text: str | None = Field(default=None, max_length=1000)
+    phrase: str | None = Field(default=None, pattern=r"^[a-z][a-z-]{0,23}$")
+
+
+@router.post("/api/media/games/lumi-pet/town/say")
+def pet_town_say(body: TownSay, user=Depends(pet_user), conn=Depends(get_games_db)):
+    """Say something where this Lumi is in town: everyone in the same place hears it (their streams, or a TV's next
+    POST). Only someone others can see may speak, and not too fast (lumitown SAY_*)."""
+    if not lumipet.town_seen(conn, user["id"]):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Turn on Show me in town first, so everyone can see who's talking.")
+    where = lumitown.TOWN.where(user["id"])
+    if where is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Step out into Lumi Town first!")
+    person = users.get_user_by_id(conn, user["id"])
+    try:
+        said = lumitown.line(user["id"], person["username"], lumipet.look(conn, user["id"]).get("name") or "Lumi", where,
+                             text=body.text, phrase=body.phrase)
+    except ValueError as exc:                                          # (checked first: a refused line uses up no breath)
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    if (events.count(f"lumi-say:{user['id']}", lumitown.SAY_GAP) > 1
+            or events.count(f"lumi-say-burst:{user['id']}", lumitown.SAY_WINDOW) > lumitown.SAY_BURST):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Slow down, I'm out of breath!")
+    lumitown.TOWN.said(said)
+    events.publish_sync(lumitown.CHANNEL, {"kind": "said", "line": said})
+    return {"line": said}
+
+
+@router.get("/api/media/games/lumi-pet/town/stream")
+async def pet_town_stream(request: Request, user=Depends(pet_user)):
+    """Lumi Town, live (a computer's or phone's page; a TV polls): "said" for each line said where this Lumi is now
+    (not her own: the page shows those from its POST), "moved" when someone arrives, leaves or moves (the page then
+    asks who's here), and a ping every 15 s."""
+    me = user["id"]
+
+    async def stream():
+        feed = events.subscribe(lumitown.CHANNEL)
+        waiting = asyncio.ensure_future(feed.__anext__())
+        beat = time.monotonic()
+        try:
+            yield b": hello\n\n"
+            while True:
+                done, _ = await asyncio.wait({waiting}, timeout=15)
+                if await request.is_disconnected():
+                    return
+                if waiting in done:
+                    _, data = waiting.result()
+                    waiting = asyncio.ensure_future(feed.__anext__())
+                    if data.get("kind") == "moved":
+                        yield sse("moved", {})
+                    elif data.get("kind") == "said":
+                        said = data.get("line") or {}
+                        if said.get("uid") != me and said.get("place") == lumitown.TOWN.where(me):
+                            yield sse("said", said)
+                if time.monotonic() - beat >= 15:
+                    beat = time.monotonic()
+                    yield b": ping\n\n"
+        finally:
+            waiting.cancel()
+            await feed.aclose()
+
+    release_db(request)     # the stream needs no database: don't hold this request's connection while it stays open
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.post("/api/media/games/lumi-pet/visit")

@@ -130,6 +130,7 @@
                         garden: "Lanterns, planters and pretty things for the garden." };
 
   function townGo(change) { // A town row that stays in the town: walk into a place or out, round the corner to the other street, or up to a stall.
+    chatOn = false; // Walking somewhere puts the phrases away.
     if (change.street) { // Off the end of the street, round the corner: she comes out by its first place, or back by the Casino.
       townStreet = Tw.STREETS[change.street] ? change.street : "high"; townAt = null; marketStall = null; marketDrawer = null;
       picks[tab] = townStreet === "market" ? 0 : Tw.index("casino");
@@ -259,12 +260,20 @@
   // their own layer over the town picture (#lp-folk), moved by `transform` only: the picture isn't redrawn for them.
   const folkArt = $("lp-folk"), greeted = new Set(), strolls = {};
   let visitors = [], townPolled = 0, folkSig = "", folkSay = Date.now() + 6000;
+  // Local chat (docs/plans/lumi-pet-social.md phase 2, mnemerynne/lumitown.py): what's said where she is.
+  let chatOn = false, phrases = [], chatPlace = "", townFeed = null, movedSoon = 0, chatLog = [], myId = null; // (myId: whose lines are "You")
+  const heardIds = new Set(), mine = new Set(), muted = new Set(G.store.get("town-muted", [])); // lines already shown; my own lines; who this device has muted
 
-  function townHere() { // Tell the server where she is (unless "Show me in town" is off) and hear who else is in town.
+  function townHere() { // Tell the server where she is (unless "Show me in town" is off) and hear who else is in town, and what's been said here.
     if (!TOWN || !snap) return;
     townPolled = Date.now();
+    townListen();
     const places = Tw.street(townStreet), at = townAt || (places[picks[tab]] || places[0]).id;
-    G.api(API + "town", { at: at, street: townStreet }).then(function (data) {
+    G.api(API + "town", { at: at, street: townStreet, inside: Boolean(townAt) }).then(function (data) {
+      if (data.place && data.place !== chatPlace) { chatPlace = data.place; chatLog = []; drawLog(); } // A new place: its own chatter.
+      if (data.phrases) phrases = data.phrases;
+      if (data.you) myId = data.you;
+      hear(data.lines || []); // (A TV, which has no stream, hears lines this way, every few seconds.)
       visitors = (data.here || []).filter(function (v) { return v && v.look && Tw.place(v.at); });
       visitors.forEach(function (v) { // A hello, once a visit, for someone on this street.
         if (greeted.has(v.id) || Tw.place(v.at).street !== townStreet) return;
@@ -273,6 +282,84 @@
       });
       drawFolk();
     }).catch(function () { /* the town is fine on its own */ });
+  }
+
+  function sharesPlace(v) { // A visitor in the same place as her (so they hear each other): inside the same place, or both out on this street.
+    return townAt ? v.inside === true && v.at === townAt : !v.inside && Tw.place(v.at).street === townStreet;
+  }
+
+  function townListen() { // A computer or phone hears lines and moves at once (GET town/stream); a TV's play pass can't ride a stream, so it polls.
+    if (!TOWN || townFeed || player || !window.EventSource) return;
+    townFeed = new EventSource(API + "town/stream"); // (It reconnects by itself after a blip.)
+    townFeed.addEventListener("said", function (event) { try { hear([JSON.parse(event.data)]); } catch (e) { /* a garbled line is skipped */ } });
+    townFeed.addEventListener("moved", function () { clearTimeout(movedSoon); movedSoon = setTimeout(townHere, 300); }); // Someone came, went or moved: who's here now (once, for a burst)
+  }
+
+  function hear(lines) { // New lines said where she is: into the log, and over the speaker's Lumi for a few seconds. Text only, never markup.
+    let fresh = false;
+    lines.forEach(function (line) {
+      if (!line || !line.id || heardIds.has(line.id)) return;
+      heardIds.add(line.id);
+      if (myId !== null && line.uid === myId) mine.add(line.id);        // her own, said from this or another device
+      if (line.place && chatPlace && line.place !== chatPlace) return; // Said somewhere she's just left.
+      if (muted.has(line.uid) && !mine.has(line.id)) return;            // Muted on this device.
+      chatLog.push(line); fresh = true;
+      if (chatLog.length > 6) chatLog.shift();
+      if (mine.has(line.id)) return;                                     // Her own: drawn by townSay.
+      const words = folkArt && folkArt.querySelector('[data-id="guest-' + Number(line.uid) + '"] .lp-folk-say');
+      if (words) { // Their Lumi's speech line, as the townsfolk's (game.css .lp-folk-say).
+        words.textContent = line.text.length > 30 ? line.text.slice(0, 29) + "…" : line.text; // short over her head (the panel's log has it all)
+        words.parentNode.classList.add("saying");
+        clearTimeout(words.parentNode.sayingUntil);
+        words.parentNode.sayingUntil = setTimeout(function () { words.parentNode.classList.remove("saying"); }, 6000);
+      }
+      G.sound.tone(987.77, .05, 0, .04); // A soft blip: someone spoke.
+    });
+    if (fresh) drawLog();
+  }
+
+  function drawLog() { // The last few lines said here, oldest first: "name: words". Built from text nodes only.
+    const log = $("lp-chat-log");
+    if (!log) return;
+    log.hidden = !TOWN || !chatLog.length;
+    log.replaceChildren.apply(log, chatLog.map(function (line) {
+      const item = document.createElement("li"), who = document.createElement("b");
+      who.textContent = mine.has(line.id) ? "You" : line.name; item.append(who, document.createTextNode(" " + line.text));
+      if (mine.has(line.id)) item.className = "mine";
+      return item;
+    }));
+  }
+
+  function townSay(send) { // Say a phrase ({phrase}) or typed words ({text}) to everyone here; the server's words if it can't be said.
+    G.api(API + "town/say", send).then(function (data) {
+      mine.add(data.line.id); hear([data.line]);
+      say("“" + data.line.text + "”"); // Her own bubble says it.
+    }).catch(function (refused) { say(refused.message); });
+  }
+
+  function chatTyping(open) { // The box to type a line in (T, or Type a message). Held keys let go, so she doesn't walk while you type.
+    const form = $("lp-chat-type"), input = $("lp-chat-input");
+    if (!form) return;
+    form.hidden = !open;
+    if (open) { if (G.letGo) G.letGo(); input.focus(); } else { input.value = ""; input.blur(); }
+  }
+
+  function chatMute(id) { // Mute or unmute someone on this device: their lines stop (or start again) showing.
+    if (muted.has(id)) muted.delete(id); else muted.add(id);
+    G.store.set("town-muted", Array.from(muted));
+    const who = visitors.find(function (v) { return v.id === id; });
+    say(who ? (muted.has(id) ? "Muted " + who.name + ". Their lines won't show here." : "You can hear " + who.name + " again.") : "");
+  }
+
+  function chatCtx() { // The town list's chat (town-ui.js chatRows): who's here to mute, and what each row does.
+    const people = visitors.filter(sharesPlace)
+      .map(function (v) { return { id: v.id, name: v.name, muted: muted.has(v.id) }; });
+    return { on: chatOn, phrases: phrases, people: people,
+             open: function () { chatOn = true; picks[tab] = 0; say("What shall I say?"); },
+             close: function () { chatOn = false; picks[tab] = 0; },
+             say: function (id) { townSay({ phrase: id }); },
+             type: function () { chatTyping(true); },
+             mute: chatMute };
   }
 
   function folkFigure(id, look, kind, words) { // One Lumi on the layer: her shapes in her look (lumiMarkup), a name tag, and a speech line.
@@ -291,7 +378,7 @@
   function drawFolk() { // Who's out: the townsfolk on this street's map, and visitors on it (or in the place she's in). Rebuilt only when that changes.
     if (!TOWN || !folkArt) return;
     const night = sceneNow().night, here = townAt, npcs = here ? [] : TF.folkOn(townStreet, night);
-    const guests = visitors.filter(function (v) { return here ? v.at === here : Tw.place(v.at).street === townStreet; });
+    const guests = visitors.filter(sharesPlace); // Only who's really in the same place: inside this one, or out on this street's map.
     const signature = JSON.stringify([townStreet, here, night, npcs.map(function (n) { return n.id; }), guests.map(function (v) { return [v.id, v.at, v.name, v.look]; })]);
     if (signature === folkSig) return;
     folkSig = signature;
@@ -402,7 +489,7 @@
   function tabRows() { // What the selected tab offers.
     const pet = snap.pet, c = snap.catalog, name = TABS[tab], asleep = sceneNow().asleep;
     if (name === "town") return Tw.rows({ at: townAt, street: townStreet, desk: DESK, away: Boolean(exploring()), retro: RETRO_ON, seen: pet.town_seen !== false,
-      stall: marketStall, stallRows: stallRows, go: townGo, open: townOpen }); // Lumi Town: a street's places, the games inside one, or a Market stall's wares.
+      stall: marketStall, stallRows: stallRows, go: townGo, open: townOpen, chat: chatCtx() }); // Lumi Town: a street's places, the games inside one, a Market stall's wares, or what to say.
     if (name === "care") {
       if (awayRows().length) return awayRows(); // She isn't in her room: nothing to cuddle until she is back (the Pantry can still send her a snack).
       const health = snap.health, sore = !health.out && health.hp < health.max; // Hurt, and at home to do something about it.
@@ -1573,7 +1660,7 @@
     const arrow = ["left", "right", "up", "down"].indexOf(action) >= 0;
     if (action === "next" || action === "prev" || action === "play" || arrow) pendingConfirm = null; // Only a second Enter confirms.
     if (roomOn() && syncRoom() && roomKey(action, arrow, meta)) return; // Room mode: the arrows walk her flat; in a card, ⏮ ⏭ go back.
-    if (TOWN && (arrow || action === "next" || action === "prev")) { townMove(action); return; } // Lumi Town: every arrow walks her (it has no other tabs to change to).
+    if (TOWN && !chatOn && (arrow || action === "next" || action === "prev")) { townMove(action); return; } // Lumi Town: every arrow walks her (it has no other tabs to change to); while chatting they go through the phrases.
     if (albuming()) { albumKey(action); return; } // So has the Collection's gallery.
     if (room.dataset.browse === "true" && arrow && browserKey(action)) return; // The party browser: arrows move over the cards.
     if (treeing()) { skillsKey(action); return; } // The skill tree has its own keys too: the arrows move over the skills.
@@ -1609,14 +1696,32 @@
     render();
   }
   G.onAction(onKey, { directEnter: function () { return true; } });
-  if (G.onBack) G.onBack(function () { return roomOn() && closeCard(); }); // Escape, Backspace or a pad's B closes a card (and only then leaves the game).
+  function backStep() { // Escape, Backspace, a pad's B: one step back inside the game (true), or nothing to go back from (false: leave the game).
+    if (TOWN && chatOn) { chatOn = false; picks[tab] = 0; lastList = ""; render(); return true; } // The town's phrases: back to the places.
+    return roomOn() && closeCard(); // Room mode: a card closes.
+  }
+  if (G.onBack) G.onBack(backStep);
   if (G.onHold) G.onHold(onHold); // Held arrows, WASD and a panel's pad: free walking in room mode (elsewhere the loop just stops at once).
   if (window.MPad) window.MPad.start(function (action, who, meta) { // A gamepad (Xbox, PlayStation, most USB pads; gamepad.js, loaded for Lumi Pet).
     G.sound.unlock();
-    if (action === "back") { if (roomOn()) closeCard(); return; } // B / Circle: out of a menu, back to the room
+    if (action === "back") { backStep(); return; }              // B / Circle: out of a menu (or the town's phrases)
     if (action === "home") return;                                // the Xbox / PS button: the browser's, not ours
     onKey(action, undefined, undefined, meta);                    // A, Start, LB / RB and the D-pad, as the keys
   }, onHold);                                                     // the stick (analog) and the D-pad walk her
+  if ($("lp-chat-type")) { // Lumi Town's typing box: Enter sends, Escape closes (common.js leaves keys in a text box alone).
+    $("lp-chat-type").addEventListener("submit", function (event) {
+      event.preventDefault();
+      const words = $("lp-chat-input").value.trim();
+      if (words) townSay({ text: words });
+      chatTyping(false);
+    });
+    $("lp-chat-input").addEventListener("keydown", function (event) { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); chatTyping(false); } });
+  }
+  document.addEventListener("keydown", function (event) { // T in Lumi Town opens the typing box (never while typing already).
+    if ((event.key !== "t" && event.key !== "T") || event.ctrlKey || event.metaKey || event.altKey || !TOWN || !snap) return;
+    if (event.target && event.target.matches && event.target.matches("input, select, textarea")) return;
+    event.preventDefault(); chatTyping(true);
+  });
   document.addEventListener("keydown", function (event) { // E uses the thing in reach, as Enter does (room mode only; never while typing).
     if ((event.key !== "e" && event.key !== "E") || event.ctrlKey || event.metaKey || event.altKey || !roomOn() || tab !== ROOM) return;
     if (event.target && event.target.matches && event.target.matches("input, select, textarea")) return;

@@ -387,6 +387,22 @@
 .lp-folk-one.saying .lp-folk-say { opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .lp-folk-one { transition: none; } }
 
+/* ---- Lumi Town's local chat (game.js hear/drawLog/chatTyping, mnemerynne/lumitown.py; 2026-11-19): the last few lines
+   said where she is, in the right-hand panel under her message, and a box over the picture to type one. Older lines step back. */
+.lp-chat-log { margin: 0 0 .6rem; padding: 0; list-style: none; display: flex; flex-direction: column; gap: .25rem; }
+.lp-chat-log[hidden] { display: none; }
+.lp-chat-log li { padding: .25rem .6rem; border-radius: .8rem; background: #0e0b1acc; color: #ffe9f5; font-size: .78rem; line-height: 1.3;
+  border: 1px solid #ffffff22; overflow-wrap: anywhere; }
+.lp-chat-log li:not(:nth-last-child(-n+3)) { opacity: .65; } /* the older lines step back */
+.lp-chat-log li b { color: var(--pet-glow, #ff8ecb); margin-right: .2rem; }
+.lp-chat-log li.mine { border-color: var(--pet-glow, #ff8ecb); }
+.lp-chat-type { position: absolute; z-index: 5; left: 50%; bottom: 14%; transform: translateX(-50%); width: min(44%, 26rem); display: flex; gap: .4rem;
+  padding: .4rem; border-radius: 1rem; background: #0e0b1aee; border: 1px solid var(--pet-glow, #ff8ecb); box-shadow: 0 0 16px var(--pet-glow, #ff8ecb); }
+.lp-chat-type[hidden] { display: none; }
+.lp-chat-type input { flex: 1; min-width: 0; padding: .45rem .7rem; border-radius: .7rem; border: 1px solid #ffffff33; background: #1a1430; color: #ffe9f5; font: inherit; }
+.lp-chat-type button { padding: .45rem .9rem; border-radius: .7rem; border: 0; background: var(--pet-glow, #ff8ecb); color: #1a0f2e; font-weight: 700; cursor: pointer; }
+@media (max-width: 700px) { .lp-chat-log li { font-size: .7rem; } .lp-chat-type { width: 92%; } } /* (on a computer, between the side panels; on a phone, the room's width) */
+
 /* ---- Room mode (Doll's design, 2026-11-19; game.js drawRoom/drawRoomBits, room-ui.js, room-art.js): Lumi walks her flat
    and the things in it are the menus. The tabs fold away; the list on the right is the room's things, or an open card. */
 .gm[data-rooms="true"] .lp-tabs { display: none; }

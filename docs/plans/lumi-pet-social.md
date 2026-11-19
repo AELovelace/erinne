@@ -132,6 +132,17 @@ Lumi Pet controls page (keyboard, mouse, gamepad, Tab5, remote).
 
 ## Phase 2: Places and local chat (start in Lumi Town)
 
+> **Built 2026-11-19** (Lumi Town). How it differs from the sketch below:
+> - Town walking is still place to place, so moves stay on the existing `POST .../town` (now with `inside`), sent at
+>   once on a move and every 5 s. The stream carries only `said` (a line, filtered to the listener's place) and
+>   `moved` (a nudge: the page POSTs again to see who's here). No per-frame positions yet: those come with houses.
+> - `lumitown.Town` grew `where`, `said`, `recent`; no new `lumiplaces.py` yet (houses will generalise it).
+> - A place is `street:<street>` (out on a street's map) or `in:<place>` (inside one). Visitors are now drawn only
+>   where they really are (inside vs. on the map), so what you see matches who hears you.
+> - The chat log lives in the right-hand panel under Lumi's message (the picture's sides are under the panels in town).
+> - Chat for remotes and pads is the town list itself ("💬 Say something" → phrases, Type, Mute, Back), not a wheel
+>   on Y. The POST answer carries `you` so your own lines say "You" after a reload.
+
 Town already knows who's on which street, so chat lands there first, then houses reuse it.
 
 ### A "place"

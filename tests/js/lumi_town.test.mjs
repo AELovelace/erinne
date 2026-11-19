@@ -177,3 +177,25 @@ test("Lumi stands at the door on the map, at a station inside, and on the exit m
     assert.ok(s.x >= 300 && s.x <= 700 && s.y <= 480, "Always where every screen can see her: " + JSON.stringify([at, i, s]));
   }
 });
+
+// ---- Local chat (docs/plans/lumi-pet-social.md phase 2, 2026-11-19): a "Say something" row on every map and inside every
+// place; chatting lists the quick phrases (a remote or a pad can say them), typing, muting whoever's here, and back.
+test("Say something is on the map and inside a place, and opens the chat list", () => {
+  const said = [];
+  const chat = { on: false, phrases: [{ id: "hi", icon: "👋", text: "Hi!" }, { id: "gg", icon: "🏆", text: "Good game!" }],
+                 people: [{ id: 7, name: "bob", muted: false }, { id: 9, name: "cat", muted: true }],
+                 open: () => said.push("open"), close: () => said.push("close"), say: id => said.push("say:" + id), type: () => said.push("type"), mute: id => said.push("mute:" + id) };
+  const base = { street: "high", go() {}, open() {}, chat };
+  const map = Tw.rows({ ...base, at: null });
+  assert.equal(map[map.length - 1].key, "say", "on the map, last");
+  const inside = Tw.rows({ ...base, at: "arcade" });
+  assert.deepEqual(inside.slice(-2).map(r => r.key), ["say", "leave"], "inside: just before the way out");
+  inside.find(r => r.key === "say").local();
+  const open = Tw.rows({ ...base, at: "arcade", chat: { ...chat, on: true } });
+  assert.deepEqual(open.map(r => r.key), ["say-hi", "say-gg", "say-type", "mute-7", "mute-9", "say-back"]);
+  assert.equal(open[0].name, "“Hi!”");
+  assert.deepEqual([open[3].name, open[4].name], ["Mute bob", "Unmute cat"]);
+  open.forEach(r => r.local());
+  assert.deepEqual(said, ["open", "say:hi", "say:gg", "type", "mute:7", "mute:9", "close"]);
+  assert.ok(!Tw.rows({ ...base, at: null, chat: undefined }).some(r => r.key === "say"), "no chat given (older callers): no row");
+});
