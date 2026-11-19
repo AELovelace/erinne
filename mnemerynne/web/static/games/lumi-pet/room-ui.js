@@ -21,38 +21,48 @@
   // Lumi's own words, always first person: `say` is her bubble over it in the lower bar (what it is), `open` what she
   // says when its menu opens. act: "door" goes straight out through her front door (no menu). In the bedroom, the boxes
   // sit over house.js's own furniture (its 400-wide block starts at x 300); in the kitchen and the den over room-art.js's things.
+  // The Home menu's spots each room's paint pots show (the bedroom: all her own furniture, none of the other rooms').
+  const KITCHEN_SPOTS = ["kitchen-wall", "kitchen-floor", "fridge", "bowl", "counter", "potions", "paints"];
+  const DEN_SPOTS = ["den-wall", "den-floor", "wardrobe", "terminal", "capsules", "paints"];
+  const ELSEWHERE = KITCHEN_SPOTS.concat(DEN_SPOTS).filter(function (spot) { return spot !== "paints"; });
+
   const ROOMS = [
     { id: "kitchen", name: "HER KITCHEN", things: [
       { id: "fridge", icon: "🧊", name: "My fridge", hint: "Snacks and treats", say: "My fridge! Snacks and treats live in here.", open: "Something tasty? I'll share!",
-        x: 380, box: [325, 160, 110, 265], tab: "pantry" },
+        x: 340, box: [283, 160, 115, 265], tab: "pantry" },
       { id: "bowl", icon: "🥣", name: "My bowl", hint: "Free snacks, always there", say: "My bowl! It's never, ever empty.", open: "Ooh, what's in my bowl today?",
-        x: 500, box: [455, 395, 90, 70], tab: "pantry" },
+        x: 470, box: [425, 375, 90, 58], tab: "pantry" },
       { id: "potions", icon: "🧪", name: "My potion shelf", hint: "Mends me after a fight", say: "My potions, for when I'm hurt after a fight.", open: "Glug glug!",
-        x: 620, box: [565, 215, 110, 160], tab: "care", keys: ["drink"], empty: "I'm fine just now! Potions are for after a fight." },
+        x: 680, box: [622, 180, 115, 160], tab: "care", keys: ["drink"], empty: "I'm fine just now! Potions are for after a fight." },
+      { id: "paint", icon: "🎨", name: "My kitchen paint pots", hint: "Decorate my kitchen", say: "My paint pots! Let's make my kitchen pretty.", open: "What shall we change in here?",
+        x: 785, box: [745, 350, 75, 82], tab: "home", keys: KITCHEN_SPOTS },
     ] },
     { id: "bedroom", name: "HER BEDROOM", things: [
       { id: "door", icon: "🚪", name: "My front door", hint: "Out into Lumi Town", say: "My front door! Shall we go out into town?", open: "Off we go!",
-        x: 280, box: [234, 192, 82, 166], act: "door" },
+        x: 236, box: [194, 192, 82, 166], act: "door" },
       { id: "toychest", icon: "🧸", name: "My toy chest", hint: "Play with my toys", say: "My toy chest! All my favourite toys.", open: "Playtime? Pick a toy, any toy!",
-        x: 390, box: [350, 405, 82, 75], tab: "toys" },
+        x: 386, box: [346, 362, 82, 72], tab: "toys" },
       { id: "trophy", icon: "🏆", name: "My trophy shelf", hint: "Everything I've found and won", say: "My treasures! Everything I've found and won.", open: "Look at all my treasures!",
         x: 430, box: [370, 95, 75, 55], tab: "collection" },
       { id: "paint", icon: "🎨", name: "My paint pots", hint: "Decorate my room", say: "My paint pots! Let's make my room pretty.", open: "What shall we change?",
-        x: 545, box: [515, 410, 64, 60], tab: "home" },
+        x: 505, box: [465, 385, 75, 50], tab: "home", skip: ELSEWHERE },
       { id: "bed", icon: "🛏", name: "My bed", hint: "Cuddles and naps", say: "My bed. Cuddles and naps happen here.", open: "A cuddle? Or a little nap?",
-        x: 640, box: [575, 330, 125, 140], tab: "care" },
+        x: 726, box: [665, 290, 125, 140], tab: "care" },
     ] },
     { id: "den", name: "THE DEN", things: [
       { id: "wardrobe", icon: "👗", name: "My wardrobe", hint: "My clothes", say: "My wardrobe! So many outfits.", open: "What shall I wear?",
-        x: 370, box: [305, 205, 130, 270], tab: "closet" },
+        x: 310, box: [240, 155, 140, 275], tab: "closet" },
       { id: "terminal", icon: "🖥", name: "My terminal", hint: "My name, colour, sound and reminders", say: "My terminal. Beep boop, my settings!", open: "Beep boop! What shall we change?",
-        x: 500, box: [440, 290, 120, 180], tab: "settings" },
+        x: 500, box: [440, 245, 120, 185], tab: "settings" },
+      { id: "paint", icon: "🎨", name: "My den paint pots", hint: "Decorate my den", say: "My paint pots! Let's make my den pretty.", open: "What shall we change in here?",
+        x: 605, box: [565, 350, 75, 82], tab: "home", keys: DEN_SPOTS },
       { id: "capsules", icon: "🎁", name: "My capsule machine", hint: "Capsules, furniture and clothes", say: "My capsule machine! What's inside this time?", open: "Turn the handle... what's inside?",
-        x: 630, box: [580, 250, 100, 225], tab: "shop" },
+        x: 690, box: [640, 205, 105, 225], tab: "shop" },
     ] },
   ];
   const START = { room: "bedroom", at: 4 }; // A first visit: by the paint pots (layout index: after the way to the kitchen), about where she always stood.
-  const EDGE = { left: 300, right: 700 };    // Where she stands on a "next room" row: at the edge she'll walk through.
+  const EDGE = { left: 180, right: 820 };    // Where she stands on a "next room" row: at the edge she'll walk through.
+  const REACH = [150, 850];                  // The stretch of each room with things in it: a narrow screen pans within it to follow her (game.js roomPan).
 
   function room(id) { return ROOMS.find(function (r) { return r.id === id; }) || ROOMS[1]; } // An unknown room is her bedroom.
   function index(id) { return ROOMS.indexOf(room(id)); } // A room's place in the flat, left to right.
@@ -106,8 +116,10 @@
     });
   }
 
-  function cardRows(list, thing, back) { // A card: the tab's rows (only `keys`, when the thing names some), then the way back to the room.
-    const shown = thing.keys ? list.filter(function (row) { return thing.keys.indexOf(row.key) >= 0; }) : list.slice();
+  function cardRows(list, thing, back, open) { // A card: the tab's rows (only `keys`, or all but `skip`), then the way back to the room.
+    // `open`: a spot's own full list is open (Home), so its pieces all show; the narrowing is for the list of spots.
+    const keep = function (row) { return thing.keys ? thing.keys.indexOf(row.key) >= 0 : thing.skip ? thing.skip.indexOf(row.key) < 0 : true; };
+    const shown = open ? list.slice() : list.filter(keep);
     if (!shown.length) shown.push({ key: "card-empty", icon: thing.icon, name: thing.name, hint: thing.empty || "Nothing here just now", note: thing.empty || "Nothing here just now." });
     shown.push({ key: "card-back", icon: "↩", name: "Back to the room", hint: "Escape, Back or B does it too", local: back });
     return shown;
@@ -125,7 +137,7 @@
     room(id).things.forEach(function (t) {
       out += '<rect x="' + t.box[0] + '" y="' + t.box[1] + '" width="' + t.box[2] + '" height="' + t.box[3] + '" rx="10" fill="transparent" class="lp-rm-hit" data-click="thing:' + t.id + '"/>';
     });
-    if (mine) out += '<ellipse cx="' + mine.x + '" cy="478" rx="44" ry="9" fill="none" class="lp-tw-mark" stroke="var(--pet-glow)" stroke-width="2.5" stroke-dasharray="6 4"/>';
+    if (mine) out += '<ellipse cx="' + mine.x + '" cy="432" rx="44" ry="9" fill="none" class="lp-tw-mark" stroke="var(--pet-glow)" stroke-width="2.5" stroke-dasharray="6 4"/>';
     return out;
   }
 
@@ -150,6 +162,6 @@
     return { left: i > 0 ? ROOMS[i - 1] : null, right: i < ROOMS.length - 1 ? ROOMS[i + 1] : null };
   }
 
-  return { ROOMS: ROOMS, START: START, room: room, layout: layout, clean: clean, enter: enter, step: step, hop: hop, spot: spot,
+  return { ROOMS: ROOMS, START: START, REACH: REACH, KITCHEN_SPOTS: KITCHEN_SPOTS, DEN_SPOTS: DEN_SPOTS, room: room, layout: layout, clean: clean, enter: enter, step: step, hop: hop, spot: spot,
            rows: rows, cardRows: cardRows, guide: guide, hits: hits, find: find, nearest: nearest, tabs: tabs, neighbours: neighbours };
 });

@@ -5189,6 +5189,17 @@
   const NUDGE = { plant: 82 }; // Plants are drawn beside the door but stand between the lamp and Lumi, clear of both.
   const REPEATED = { wallpaper: TILES, floor: TILES, view: WINDOWS, frame: WINDOWS, curtains: WINDOWS };
 
+  // A wall or floor painted one plain colour ("#rrggbb", room mode's paint pots; the server allows nothing else there):
+  // the colour itself, with house.js's usual shading, so it sits in the room like a wallpaper.
+  const HEX = /^#[0-9a-f]{6}$/;
+  const PAINT = {
+    wallpaper: function (colour) { return rect(0, 0, 400, 352, colour) + rect(0, 0, 400, 90, "#000", 'opacity=".12"') + rect(0, 300, 400, 52, "#fff", 'opacity=".05"') + rect(0, 340, 400, 12, "#000", 'opacity=".28"'); },
+    floor: function (colour) {
+      let boards = "";
+      for (let y = 380; y < 500; y += 30) boards += rect(0, y, 400, 1.5, "#000", 'opacity=".14"'); // floorboards
+      return rect(0, 350, 400, 150, colour) + rect(0, 350, 400, 3, "#fff", 'opacity=".2"') + boards;
+    },
+  };
   const BARE = { wallpaper: "wall-bare", floor: "floor-bare", door: "door-bare" }; // What an empty wall, floor or door looks like before she unpacks her own (every flat has a door).
   // Her door is pressable (Lumi Pet goes through it to Lumi Dungeons, game.js doorPress): an invisible box over the
   // door's usual place catches the press, so even a door drawn with gaps (beads, a portal) answers anywhere on it.
@@ -5207,15 +5218,20 @@
       WINDOWS.map(function (x) { return '<path d="' + opening + '" transform="translate(' + x + ' 0)" fill="#000"/>'; }).join("") + "</mask></defs>";
     // `extra.only`: just these layers (room mode's kitchen and den: her wallpaper, floor and windows, none of her furniture).
     const layers = extra && extra.only ? LAYERS.filter(function (spot) { return extra.only.indexOf(spot) >= 0; }) : LAYERS;
+    // `extra.shift`: {spot: [dx, dy]} moves a single-place spot (and "boxes") from where it usually stands: room mode
+    // spreads her furniture across the room and stands it back from the front edge, clear of its lower bar.
+    const shift = (extra && extra.shift) || {}, moved = function (spot) { return shift[spot] || [0, 0]; };
     return defs + layers.map(function (spot) {
-      const id = Object.prototype.hasOwnProperty.call(ART, house[spot]) ? house[spot] : BARE[spot], draw = id ? ART[id] : null;
+      const painted = PAINT[spot] && HEX.test(house[spot] || "") ? house[spot] : null; // a plain painted wall or floor
+      const id = Object.prototype.hasOwnProperty.call(ART, house[spot]) ? house[spot] : BARE[spot];
+      const draw = painted ? function () { return PAINT[spot](painted); } : id ? ART[id] : null;
       let art = draw && !(spot === "view" && open) ? draw() : ""; // An object this file doesn't know simply isn't drawn.
       if (art && spot === "view") art = group(art, 'clip-path="url(#lp-view-clip)"');
       if (art && spot === "door") art += DOOR_HIT; // The door's press box, drawn on top of it.
-      const places = REPEATED[spot] || [MIDDLE + (NUDGE[spot] || 0)];
-      return group(art ? places.map(function (x) { return group(art, 'transform="translate(' + x + ' 0)"'); }).join("") : "",
+      const places = REPEATED[spot] || [MIDDLE + (NUDGE[spot] || 0) + moved(spot)[0]], dy = REPEATED[spot] ? 0 : moved(spot)[1]; // (walls, floors and windows never move)
+      return group(art ? places.map(function (x) { return group(art, 'transform="translate(' + x + " " + dy + ')"'); }).join("") : "",
         'data-spot="' + spot + '"' + (spot === "wallpaper" ? ' mask="url(#lp-wall-mask)"' : "") + (spot === "view" && open ? ' data-open="true"' : "") + (spot === "door" ? ' data-click="door"' : ""));
-    }).join("") + (extra && extra.boxes ? group(group(ART.boxes(extra.boxes), 'transform="translate(' + MIDDLE + ' 0)"'), 'data-boxes="' + extra.boxes + '"') : "");
+    }).join("") + (extra && extra.boxes ? group(group(ART.boxes(extra.boxes), 'transform="translate(' + (MIDDLE + moved("boxes")[0]) + " " + moved("boxes")[1] + ')"'), 'data-boxes="' + extra.boxes + '"') : "");
   }
 
   return { LAYERS: LAYERS, ART: ART, CLIPS: CLIPS, WINDOWS: WINDOWS, WIDE: WIDE, render: render };

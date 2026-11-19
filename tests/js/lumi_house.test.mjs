@@ -5,12 +5,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 const H = createRequire(import.meta.url)("../../mnemerynne/web/static/games/lumi-pet/house.js");
+createRequire(import.meta.url)("../../mnemerynne/web/static/games/lumi-pet/room-styles.js"); // room mode's things add their 15 styles each to H.ART
 const catalog = JSON.parse(readFileSync(new URL("../../mnemerynne/lumipet_data/house.json", import.meta.url), "utf8"));
-const firsts = Object.fromEntries(catalog.spots.map(spot => [spot.id, spot.items[0].id]));
+const owned = catalog.spots.filter(spot => !spot.same_as);                              // (the kitchen's and den's walls share the bedroom's pieces)
+const bedroom = owned.filter(spot => !spot.room);                                         // her furniture: house.js's layers (room mode's things are room-styles.js's)
+const firsts = Object.fromEntries(bedroom.map(spot => [spot.id, spot.items[0].id]));
 
 test("every spot has a layer and every object a drawing with no broken numbers", () => {
-  assert.deepEqual([...H.LAYERS].sort(), catalog.spots.map(spot => spot.id).sort());
-  for (const spot of catalog.spots) for (const item of spot.items) {
+  assert.deepEqual([...H.LAYERS].sort(), bedroom.map(spot => spot.id).sort());
+  for (const spot of owned) for (const item of spot.items) {
     assert.equal(typeof H.ART[item.id], "function", item.id + " needs art");
     const art = H.ART[item.id]();
     assert.equal(/NaN|undefined|Infinity/.test(art), false, item.id + " drew a broken number");

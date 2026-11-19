@@ -391,7 +391,7 @@
   function rows() { // What is on offer now, as plain rows: the list and the remote both read from here.
     if (tab === ROOM) return Ru.rows(roomAt, { open: openCard, walk: roomWalk, door: adventure }); // Room mode: the things where she is.
     const list = tabRows();
-    return roomCard ? Ru.cardRows(list, roomCard, closeCard) : list; // A card: the tab's rows (some of them), then back to the room.
+    return roomCard ? Ru.cardRows(list, roomCard, closeCard, Boolean(opened.home || (tint && tint.spot))) : list; // A card: the tab's rows (some of them), then back to the room.
   }
 
   function tabRows() { // What the selected tab offers.
@@ -422,8 +422,9 @@
       return { key: toy.id, icon: toy.icon, name: toy.name, send: { action: "play", item: toy.id },
         hint: (toy.rarity ? toy.rarity[0].toUpperCase() + toy.rarity.slice(1) + " · " : "") + toy.minutes + " min · " + R.signed(toy.joy, "joy") + " · " + R.signed(toy.energy, "energy") };
     });
+    if (name === "home" && tint && tint.spot) return tintRows(); // Painting a wall or floor: the colour sliders.
     if (name === "closet" || name === "home") { // One row per place on Lumi, or per spot in the house; ◀ ▶ flip its choices (picker-ui.js).
-      const ctx = { snap: snap, open: opened[name], flip: flip, go: function (change) {
+      const ctx = { snap: snap, open: opened[name], flip: flip, paint: openPaint, go: function (change) {
         if ("open" in change) { opened[name] = change.open; picks[tab] = change.open ? 1 : (change.pick || 0); }
       } };
       return name === "home" ? Pk.homeRows(ctx) : Pk.closetRows(ctx);
@@ -548,11 +549,22 @@
     roomMove({ room: roomAt.room, at: Ru.nearest(roomAt.room, x) }); lastList = ""; render();
   }
 
+  function roomPan(x) { // How far to slide the room's drawing sideways so Lumi, at x, is in view: 0 when the screen shows the whole flat's width.
+    const box = room.getBoundingClientRect();
+    if (!box.width || !box.height) return 0;
+    const shown = box.width / Math.max(box.width / 1000, box.height / 500); // Drawing units across the screen (the drawing is cropped to fill it).
+    const reach = Math.max(0, (Ru.REACH[1] - Ru.REACH[0] - shown) / 2);        // How far a pan may go before showing past the room's things.
+    return Math.round(Math.max(-reach, Math.min(reach, x - 500)));             // Centre on her, never past either end.
+  }
+
   function drawRoom(preview) { // Room mode's picture: the room she's in (house.js walls, room-art.js things), and her standing at her spot.
-    const here = Ru.room(roomAt.room), spot = Ru.spot(roomAt), house = Object.assign({}, snap.pet.house);
-    if (preview && here.id === "bedroom") house[preview[0]] = preview[1]; // Decorating: the piece tried on, in her bedroom.
+    const here = Ru.room(roomAt.room), spot = Ru.spot(roomAt);
+    const trying = tint && tint.spot ? [tint.spot, tintHex()] : preview || null; // a colour being painted, or a piece tried on
+    const house = RA.view(here.id, snap.pet.house, trying); // this room's own wall and floor (else the bedroom's), with that in it
     room.dataset.rooms = here.id;
-    room.style.setProperty("--gx", String((spot ? spot.x : 500) - 500)); // game.css walks her there.
+    const x = spot ? spot.x : 500, pan = roomPan(x); // A narrow screen follows her across the room; a wide one shows it all.
+    houseArt.setAttribute("viewBox", pan + " 0 1000 500");
+    room.style.setProperty("--gx", String(x - 500 - pan)); // game.css walks her there (from the middle of what's shown).
     $("lp-place").textContent = here.name;
     const scenery = document.querySelector(".parallax"), backdrop = Boolean(scenery) && getComputedStyle(scenery).display !== "none";
     const boxes = here.id === "bedroom" && snap.boxes ? snap.boxes.left : 0;
@@ -560,7 +572,7 @@
     if (signature === lastHouse) return; // Only redrawn when she moves, or the room changes.
     lastHouse = signature;
     room.dataset.open = String(backdrop && house.view === "view-city"); // Her windows open onto the page's scenery in every room.
-    houseArt.innerHTML = (here.id === "bedroom" ? H.render(house, backdrop, { boxes: boxes }) : H.render(house, backdrop, { only: RA.SHELL })) +
+    houseArt.innerHTML = (here.id === "bedroom" ? H.render(house, backdrop, { boxes: boxes, shift: RA.BEDROOM_SHIFT }) : H.render(house, backdrop, { only: RA.SHELL })) + // her furniture spread out (room-art.js)
       RA.scene(here.id, house) + Ru.hits(here.id, roomAt.at); // All authored in house.js, room-art.js and room-ui.js; nothing a person typed.
   }
 
@@ -595,7 +607,7 @@
   function drawRoomBits(on) { // Room mode's extras around the picture: her speech bubble, the lower bar, the arrows to the next rooms.
     const guide = $("lp-guide"), ways = on && !roomCard ? Ru.neighbours(roomAt) : { left: null, right: null };
     $("gm").dataset.card = String(on && Boolean(roomCard)); // game.css shows the right-hand panel only for an open menu.
-    if (!on) { delete room.dataset.rooms; guide.hidden = true; $("lp-place").textContent = PLACE; }
+    if (!on) { delete room.dataset.rooms; guide.hidden = true; $("lp-place").textContent = PLACE; if (houseArt.getAttribute("viewBox") !== "0 0 1000 500") houseArt.setAttribute("viewBox", "0 0 1000 500"); } // unpanned again
     else { guide.hidden = false; guide.textContent = $("lp-message").textContent; } // Her bubble says what she last said.
     drawThings(on);
     [["left", $("lp-way-left")], ["right", $("lp-way-right")]].forEach(function (pair) {
@@ -624,23 +636,32 @@
     tint = { r: now[0], g: now[1], b: now[2] }; picks[tab] = 1;
   }
 
+  function openPaint(spot, colour) { // Home → a wall or floor → Paint it a colour: the sliders, on its colour now (or a soft lilac).
+    const now = R.hexRgb(colour || "#b98aa9");
+    tint = { r: now[0], g: now[1], b: now[2], spot: spot }; picks[tab] = 1; lastList = "";
+  }
+
   function tintHex() { return R.rgbHex([tint.r, tint.g, tint.b]); }
 
   function nudge(part, by) { tint[part] = Math.max(0, Math.min(255, tint[part] + by)); render(); } // One slider moved by a key.
 
   function tintRows() { // The colour drawer: a row each for red, green and blue (◀ ▶ move it; the sliders do too), then keep it.
-    const names = { r: ["Red", "🔴"], g: ["Green", "🟢"], b: ["Blue", "🔵"] }, rows = [{ key: "tint-back", icon: "‹", name: "Back to Settings", hint: "Her colour stays as it was", local: function () { tint = null; picks[tab] = 1; } }];
+    // With tint.spot it paints that wall or floor instead of colouring her (room mode's paint pots), shown in the room as it moves.
+    const names = { r: ["Red", "🔴"], g: ["Green", "🟢"], b: ["Blue", "🔵"] }, painting = tint.spot;
+    const rows = [painting ? { key: "tint-back", icon: "‹", name: "Back", hint: "The paint stays as it was", local: function () { tint = null; picks[tab] = 1; } }
+      : { key: "tint-back", icon: "‹", name: "Back to Settings", hint: "Her colour stays as it was", local: function () { tint = null; picks[tab] = 1; } }];
     ["r", "g", "b"].forEach(function (part) {
       rows.push({ key: "tint-" + part, icon: names[part][1], name: names[part][0] + " " + tint[part], hint: "◀ ▶ less or more · Enter jumps up a step · or slide it below",
         turn: function (by) { nudge(part, by * 8); }, local: function () { tint[part] = (tint[part] + 32) % 288 > 255 ? 0 : tint[part] + 32; } });
     });
+    if (painting) { rows.push({ key: "tint-save", icon: "🎨", name: "Paint it " + tintHex().toUpperCase(), hint: "Free · paint over it any time", send: { action: "paint", spot: painting, colour: tintHex() } }); return rows; }
     rows.push({ key: "tint-save", icon: "✓", name: "Keep " + tintHex().toUpperCase(), hint: "Her very own colour, everywhere she goes", send: { action: "colour", colour: tintHex() } });
     if (snap.pet.colour) rows.push({ key: "tint-glow", icon: "✦", name: "Her glow's own colours", hint: "Back to " + snap.pet.glow + "'s colours (her element stays the same)", send: { action: "colour", colour: "" } });
     return rows;
   }
 
   function drawTint() { // Her colours in the room (and on her), and the sliders while the drawer is open.
-    const panel = $("lp-tint"), look = tint ? R.tint(tintHex()) : snap.pet.colour ? R.tint(snap.pet.colour) : null;
+    const panel = $("lp-tint"), look = tint && !tint.spot ? R.tint(tintHex()) : snap.pet.colour ? R.tint(snap.pet.colour) : null; // (painting a wall leaves her as she is)
     ["glow", "body", "shadow"].forEach(function (part) { if (look) room.style.setProperty("--pet-" + part, look[part]); else room.style.removeProperty("--pet-" + part); });
     panel.hidden = !tint;
     if (!tint) return;
@@ -1126,6 +1147,7 @@
     }
     const house = Object.assign({}, snap.pet.house);
     if (preview) house[preview[0]] = preview[1];
+    if (tint && tint.spot) house[tint.spot] = tintHex(); // Painting her wall or floor: the colour as it moves (other rooms' show in room mode).
     const scenery = document.querySelector(".parallax"), backdrop = Boolean(scenery) && getComputedStyle(scenery).display !== "none"; // The neon theme's drifting cities.
     const boxes = snap.boxes ? snap.boxes.left : 0, signature = JSON.stringify(house) + backdrop + boxes;
     if (signature === lastHouse) return; // Redrawing would restart the window's scrolling, so only when it changed.
@@ -1434,6 +1456,7 @@
       else if (send.action === "buy") { say("Bought: " + thing.name + ". " + data.said.paid + " coins well spent."); effect("cuddle", "✧"); }
       else if (send.action === "unpack") { const got = data.said; say("Box open! " + got.name + (got.put_out ? ": Lumi puts it out at once." : ". Something's already there, so she tucks it away for now (Home).") + (got.left ? " " + got.left + " boxes to go." : " That's the last box. She's all moved in!")); effect("play", "📦"); }
       else if (send.action === "name") { say("Hello, " + data.pet.name + "! What a lovely name."); effect("cuddle", "♡"); }
+      else if (send.action === "paint") { tint = null; picks[tab] = 1; say("Fresh paint! I love it."); effect("cuddle", "✧ 🎨"); }
       else if (send.action === "colour") { tint = null; picks[tab] = 1; say(data.pet.colour ? "Ooh, " + data.pet.colour.toUpperCase() + "! That's her very own colour now." : "Back to her glow's own colours."); effect("cuddle", "✧ ✦"); }
       else if (send.action === "stat") { const names = snap.battle.rules.stat_names; say(names[send.item] + " is " + data.progress.stats[send.item] + " now · " + data.progress.stat_points.left + " points left."); effect("cuddle", "↑"); }
       else if (send.action === "stats_auto") { const names = snap.battle.rules.stat_names, placed = data.said.placed; say("Auto placed them: " + Object.keys(placed).map(function (key) { return "+" + placed[key] + " " + names[key].toLowerCase(); }).join(", ") + "."); effect("play", "✨"); }
@@ -1519,6 +1542,7 @@
   });
   $("lp-squeeze").addEventListener("pointerdown", function (event) { event.preventDefault(); if (snap && gardening()) { pressOnce(); render(); } });
   touchy.addEventListener("change", function () { if (snap) render(); });
+  window.addEventListener("resize", function () { if (snap && roomOn()) { lastHouse = ""; render(); } }); // Room mode: a new shape, a new pan.
 
   window.addEventListener("beforeinstallprompt", function (event) { // The browser can install this page as an app: keep its offer for the Settings row.
     event.preventDefault(); installOffer = event; lastList = "";

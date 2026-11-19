@@ -102,6 +102,7 @@ test("the page draws every skill, lights the wires she has walked, and can be pr
 
 // ---- The Collection tab
 const AlbumArt = require("../../mnemerynne/web/static/games/lumi-pet/collection-art.js");
+require("../../mnemerynne/web/static/games/lumi-pet/room-styles.js"); // room mode's things draw in the gallery too
 function album(pet = {}, mine = {}) {
   const flowers = garden.flowers.map((flower, i) => ({ ...flower, unlocked: i < 2 }));
   return { ...snap(pet), house, closet, catalog: items, garden: { flowers, decor: { owned: mine, placed: {}, spare: {} } }, garden_decor: garden.decor,
@@ -120,7 +121,7 @@ test("the collection counts everything there is, by shelf, and what she has of i
   assert.equal(count("mods"), battle.mods.length);
   assert.deepEqual([count("flowers"), count("garden")], [42, 225]);
   const owned = id => shelves.find(shelf => shelf.id === id).items.filter(item => item.owned).length;
-  assert.equal(owned("home"), house.spots.filter(spot => !/-none$/.test(spot.items[0].id) && !spot.items[0].worn).length, "A new Lumi has only what came with the house: the view outside (she has just moved in)");
+  assert.equal(owned("home"), house.spots.filter(spot => spot.items.length && !/-none$/.test(spot.items[0].id) && !spot.items[0].worn).length, "A new Lumi has only what came with the house: the view outside (she has just moved in)");
   assert.deepEqual([owned("finds"), owned("closet"), owned("mods"), owned("flowers"), owned("garden")], [0, 0, 0, 2, 0]);
   assert.equal(owned("toys"), items.toys.filter(toy => !toy.price && !toy.rarity).length);
   const totals = Album.totals(shelves);

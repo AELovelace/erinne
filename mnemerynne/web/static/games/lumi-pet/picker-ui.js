@@ -22,8 +22,13 @@
 
   function capital(text) { return text[0].toUpperCase() + text.slice(1); }
 
-  function homeRows(ctx) { // ctx: { snap, open (a spot id, or null for the list of spots), flip, go(change) }
-    const snap = ctx.snap, pet = snap.pet, go = ctx.go;
+  function homeRows(ctx) { // ctx: { snap, open (a spot id, or null for the list of spots), flip, go(change), paint(spot, colour) }
+    const snap = ctx.snap, pet = snap.pet, go = ctx.go, HEX = /^#[0-9a-f]{6}$/;
+    // Room mode (2026-11-19): the kitchen's and den's walls and floors share the bedroom's pieces (`same_as`), and any
+    // wall or floor can be painted a plain colour instead ("#rrggbb"). Until a room has its own, it shows the bedroom's.
+    function base(entry) { return entry.same_as ? snap.house.spots.find(function (other) { return other.id === entry.same_as; }) || entry : entry; } // whose pieces it takes
+    function out(entry) { const own = pet.house[entry.id]; return own !== undefined ? own : entry.same_as ? pet.house[entry.same_as] : undefined; } // what shows there now
+    function put(entry, id) { return entry.same_as ? { action: "decorate", item: id, spot: entry.id } : { action: "decorate", item: id }; } // into this room's spot
     function mine(piece) { return (!piece.price && !piece.found && !piece.rarity && !piece.worn && !piece.prize) || pet.decor.indexOf(piece.id) >= 0; } // Free with the house, or already hers.
     function hidden(piece) { return (piece.found || piece.rarity || piece.worn || piece.prize) && !mine(piece); } // A dungeon trophy, Star Capsule or Lumi-Soft prize, or packed box she hasn't got: it can't be bought.
     function ask(piece) { return "Here's the " + piece.name + " in the room. Choose it again to buy it for " + piece.price + " coins."; } // Try before you buy.
@@ -34,11 +39,14 @@
     const spot = snap.house.spots.find(function (entry) { return entry.id === ctx.open; });
     const above = snap.boxes && snap.boxes.left ? 1 : 0; // The moving-box row sits above the spots while any are left.
     if (spot) return [{ key: "back", icon: "‹", name: "Back to the house", hint: spot.name, local: function () { go({ open: null, pick: above + snap.house.spots.indexOf(spot) }); } }]
-      .concat(spot.items.map(function (piece) {
-        const here = pet.house[spot.id] === piece.id, owned = mine(piece);
+      .concat(base(spot).paintable && ctx.paint ? [{ key: "paint", icon: "🎨", // A wall or floor: any colour at all, free, with sliders.
+        name: HEX.test(out(spot) || "") ? "Painted " + out(spot).toUpperCase() + ": change the colour" : "Paint it a colour", hint: "Red, green and blue sliders · free, and painted over any time",
+        local: function () { ctx.paint(spot.id, HEX.test(out(spot) || "") ? out(spot) : null); } }] : [])
+      .concat(base(spot).items.map(function (piece) {
+        const here = out(spot) === piece.id, owned = mine(piece);
         const row = { key: piece.id, icon: here ? "✓" : owned ? "○" : piece.worn ? "📦" : hidden(piece) ? "🔒" : "✧", name: piece.name, label: piece.name, preview: [spot.id, piece.id],
           hint: here ? "In the room now" : owned ? "Yours · Enter puts it out" : piece.worn ? "Her own · still in moving box " + piece.box : piece.found ? "Found in " + where(piece) + (spot.id === "trophy" ? "'s vault" : " · a rare find") : piece.prize ? "Lumi-Soft prize · " + piece.how : piece.rarity ? capital(piece.rarity) + " · only from a capsule" : piece.price + " coins · choose to see it, again to buy" };
-        if (here) row.note = piece.name + " is already in the room."; else if (!hidden(piece)) { row.send = { action: "decorate", item: piece.id }; if (!owned) row.ask = ask(piece); }
+        if (here) row.note = piece.name + " is already in the room."; else if (!hidden(piece)) { row.send = put(spot, piece.id); if (!owned) row.ask = ask(piece); }
         else row.note = piece.worn ? "That's still in moving box " + piece.box + ". Lumi unpacks one a day." : piece.found ? piece.name + " can't be bought. It's waiting somewhere in " + where(piece) + "." // Each locked kind says where it comes from.
           : piece.prize ? piece.name + " is a Lumi-Soft prize. " + piece.how + "." : piece.name + " only comes from a capsule.";
         return row;
@@ -48,8 +56,10 @@
       ? { key: "unpack", icon: "📦", name: "Unpack a moving box", hint: "Box " + (boxes.total - boxes.left + 1) + " of " + boxes.total + ": " + boxes.next, send: { action: "unpack" } }
       : { key: "unpack", icon: "📦", name: "Moving boxes: " + boxes.left + " left", hint: "One a day · next: " + boxes.next, note: "Lumi has unpacked enough for one day. Another box tomorrow!" });
     return top.concat(snap.house.spots.map(function (entry) {
-      const choices = entry.items.filter(mine); // ◀ ▶ step only through what is hers (free with the house, bought, won, found or unpacked).
-      const ids = choices.map(function (piece) { return piece.id; }), placed = pet.house[entry.id];
+      const choices = base(entry).items.filter(mine); // ◀ ▶ step only through what is hers (free with the house, bought, won, found or unpacked).
+      const ids = choices.map(function (piece) { return piece.id; }), placed = out(entry);
+      if (HEX.test(placed || "") && ids.indexOf(ctx.flip[entry.id]) < 0) return { key: entry.id, icon: "🎨", name: entry.name, label: "painted " + placed, options: ids, shown: null, flipKey: entry.id, preview: null, // painted a colour
+        hint: "Painted " + placed.toUpperCase() + " · " + (ids.length ? "◀ ▶ through yours, or " : "") + "Enter for paint and papers", local: function () { go({ open: entry.id }); } };
       const shown = ids.indexOf(ctx.flip[entry.id]) >= 0 ? ctx.flip[entry.id] : placed;
       const piece = choices.find(function (found) { return found.id === shown; }) || null;
       const more = ids.length > (piece && piece.id === placed ? 1 : 0); // Something else of hers to flip to.
@@ -57,7 +67,7 @@
         hint: "Bare for now · " + (ids.length ? "◀ ▶ through yours, or " : "") + "Enter to see what you could buy", local: function () { go({ open: entry.id }); } };
       const row = { key: entry.id, icon: "⌂", name: entry.name, label: piece.name, options: ids, shown: piece.id, flipKey: entry.id, preview: [entry.id, piece.id],
         hint: (more ? "◀ " + piece.name + " ▶" : piece.name) + " · " + (piece.id === placed ? "in the room · Enter for more" : "yours · Enter puts it out") };
-      if (piece.id === placed) row.local = function () { go({ open: entry.id }); }; else row.send = { action: "decorate", item: piece.id };
+      if (piece.id === placed) row.local = function () { go({ open: entry.id }); }; else row.send = put(entry, piece.id);
       return row;
     }));
   }

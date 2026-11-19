@@ -15,10 +15,11 @@ test("every one of Lumi Pet's tabs is reached from some thing in her flat, and n
   assert.equal(door.act, "door", "The front door goes straight out to Lumi Town, as the room's door always has");
 });
 
-test("everything pressable sits in the middle every screen shows, and its box is around where she stands", () => {
+test("everything pressable is spread across what a computer shows, stands clear of the lower bar, and is where she stands", () => {
   for (const r of Ru.ROOMS) for (const t of r.things) {
     const [x, y, w, h] = t.box;
-    assert.ok(x >= 230 && x + w <= 715, r.id + "/" + t.id + " is inside x 230-715");
+    assert.ok(x >= 180 && x + w <= 820, r.id + "/" + t.id + " is inside x 180-820");
+    assert.ok(y + h <= RA.FLOOR + 6, r.id + "/" + t.id + ": its foot is above the lower bar (y " + (y + h) + ")");
     assert.ok(y >= 0 && y + h <= 500 && w > 0 && h > 0, r.id + "/" + t.id + " is inside the picture");
     assert.ok(t.x >= x - 20 && t.x <= x + w + 20, r.id + "/" + t.id + ": she stands by it");
   }
@@ -32,7 +33,16 @@ test("Lumi speaks for herself: every thing and every way through has her own fir
     if (s.tab) assert.ok(s.open, r.id + "/" + s.id + " has a line for when its menu opens");
   }
   const rows = Ru.rows({ room: "kitchen", at: 0 }, { open() {}, walk() {}, door() {} });
-  assert.deepEqual(rows.map(row => row.say.slice(0, 7)), ["My frid", "My bowl", "My poti", "This wa"], "The lower bar gets her words with each row");
+  assert.deepEqual(rows.map(row => row.say.slice(0, 7)), ["My frid", "My bowl", "My poti", "My pain", "This wa"], "The lower bar gets her words with each row");
+});
+
+test("room mode stands every drawn thing and her furniture back from the front edge, clear of the lower bar", () => {
+  const sketched = { fridge: 472, bowl: 466, counter: 418, potions: 330, paints: 470, wardrobe: 472, terminal: 472, capsules: 472 }; // each thing's foot as first drawn
+  for (const [room, things] of Object.entries(RA.PLACE)) for (const [name, at] of Object.entries(things))
+    assert.ok(sketched[name] + at[1] <= RA.FLOOR + 2, room + "/" + name + " stands at or behind the floor line");
+  const furniture = { toychest: 473, bed: 460, boxes: 492, rug: 470 }; // house.js's lowest pieces, as drawn for the classic room
+  for (const [spot, foot] of Object.entries(furniture)) assert.ok(foot + RA.BEDROOM_SHIFT[spot][1] <= RA.FLOOR + 2, spot + " is stood back in room mode");
+  assert.ok(Ru.hits("bedroom", 1).includes('cy="' + (RA.FLOOR + 2) + '"'), "Her ring is on the floor line");
 });
 
 test("◀ ▶ walk thing to thing, through to the next room at the ends, and stop at the flat's ends", () => {
@@ -42,7 +52,7 @@ test("◀ ▶ walk thing to thing, through to the next room at the ends, and sto
   at = Ru.step(at, 1); assert.equal(Ru.spot(at).id, "bed");
   at = Ru.step(at, 1); assert.deepEqual([at.room, Ru.spot(at).id], ["den", "wardrobe"], "Past the bed: straight into the den, at its first thing");
   at = Ru.step(at, -1); assert.deepEqual([at.room, Ru.spot(at).id], ["bedroom", "bed"], "And back, at the bedroom's last thing");
-  at = Ru.hop(at, -1); assert.deepEqual([at.room, Ru.spot(at).id], ["kitchen", "potions"], "⏮ a whole room left: arriving from the right");
+  at = Ru.hop(at, -1); assert.deepEqual([at.room, Ru.spot(at).id], ["kitchen", "paint"], "⏮ a whole room left: arriving from the right");
   at = Ru.step(Ru.step(Ru.step(at, -1), -1), -1); assert.deepEqual([at.room, Ru.spot(at).id], ["kitchen", "fridge"], "The kitchen is the flat's left end");
   at = Ru.hop(Ru.hop(Ru.hop(at, 1), 1), 1); assert.equal(at.room, "den", "And the den its right end");
   assert.deepEqual(Ru.clean({ room: "attic", at: 99 }).room, "bedroom", "A remembered place that isn't one comes home to the bedroom");
@@ -87,4 +97,50 @@ test("the drawings: every room draws, its things can be pressed, and the bedroom
   const bare = RA.scene("bedroom", {}), owned = RA.scene("bedroom", { bed: "x", toychest: "x", trophy: "x" });
   assert.ok(bare.length > owned.length, "Just moved in: a mattress, a box of toys and a plank stand in for what she hasn't got");
   assert.equal(owned, RA.scene("bedroom", { bed: "x", toychest: "x", trophy: "x", rug: "x" }), "Once she owns them, her own furniture shows instead");
+});
+
+const RS = require("../../mnemerynne/web/static/games/lumi-pet/room-styles.js");
+const Pk = require("../../mnemerynne/web/static/games/lumi-pet/picker-ui.js");
+const houseCatalog = JSON.parse(require("node:fs").readFileSync(new URL("../../mnemerynne/lumipet_data/house.json", import.meta.url), "utf8"));
+
+test("every room thing comes in the catalog's 15 styles, each drawn, unbroken and looking different", () => {
+  const roomSpots = houseCatalog.spots.filter(spot => spot.room);
+  assert.deepEqual(roomSpots.map(spot => spot.id).sort(), [...RS.THINGS].sort());
+  for (const spot of roomSpots) {
+    assert.deepEqual(spot.items.map(item => item.id), RS.SETS.map(set => spot.id + "-" + set.id), spot.id + ": a piece per set, in order");
+    const drawn = spot.items.map(item => RS.draw(spot.id, item.id));
+    drawn.forEach((markup, n) => assert.ok(markup.length > 200 && !/NaN|undefined|Infinity/.test(markup), spot.items[n].id + " draws"));
+    assert.equal(new Set(drawn).size, 15, spot.id + ": all 15 look different");
+    for (const item of spot.items) assert.equal(typeof H.ART[item.id], "function", item.id + " is in house.js's ART for the Collection");
+  }
+  assert.equal(RS.draw("fridge", "nonsense"), RS.draw("fridge", "fridge-plain"), "An unknown style is drawn Plain");
+});
+
+test("each room shows its own wall and floor, or the bedroom's until it has one, and tries pieces and paint in place", () => {
+  const house = { wallpaper: "wall-dusk", floor: "floor-moss", "den-wall": "#ff8ecb", fridge: "fridge-galaxy" };
+  assert.deepEqual([RA.view("kitchen", house).wallpaper, RA.view("kitchen", house).floor], ["wall-dusk", "floor-moss"], "The kitchen follows the bedroom");
+  assert.equal(RA.view("den", house).wallpaper, "#ff8ecb", "The den is painted pink");
+  assert.equal(RA.view("kitchen", house, ["kitchen-floor", "#123456"]).floor, "#123456", "A colour being painted shows as it moves");
+  assert.ok(RA.scene("kitchen", house).includes("#2a1b52"), "Her galaxy fridge, in the kitchen");
+  assert.ok(RA.scene("den", {}).length > 0 && RA.scene("kitchen", {}).includes(RS.draw("paints", "paints-plain").slice(0, 60)), "Every room has its paint pots");
+});
+
+test("each room's paint pots open just that room's spots; a shared wall lists the bedroom's papers, can be painted, and says which room", () => {
+  const kitchenPots = Ru.room("kitchen").things.find(t => t.id === "paint"), bedPots = Ru.room("bedroom").things.find(t => t.id === "paint");
+  const snap = { pet: { house: { wallpaper: "wall-dusk" }, decor: ["wall-dusk"] }, house: houseCatalog, boxes: { left: 0 }, dungeon: {} };
+  const painted = [];
+  const rows = Pk.homeRows({ snap, open: null, flip: {}, go() {}, paint: (spot, colour) => painted.push([spot, colour]) });
+  assert.deepEqual(Ru.cardRows(rows, kitchenPots, () => {}).map(r => r.key), [...Ru.KITCHEN_SPOTS, "card-back"]);
+  const mine = Ru.cardRows(rows, bedPots, () => {}).map(r => r.key);
+  assert.ok(mine.includes("wallpaper") && mine.includes("paints") && !mine.includes("fridge") && !mine.includes("den-wall"), "The bedroom's pots: her own furniture");
+  const wall = rows.find(r => r.key === "kitchen-wall");
+  assert.equal(wall.label, "Dusk plum", "The kitchen shows the bedroom's paper until it has its own");
+  const open = Pk.homeRows({ snap, open: "kitchen-wall", flip: {}, go() {}, paint: (spot, colour) => painted.push([spot, colour]) });
+  assert.equal(open[1].key, "paint"); open[1].local();
+  assert.deepEqual(painted, [["kitchen-wall", null]], "Paint it a colour: the sliders, for the kitchen's wall");
+  const stars = open.find(r => r.key === "wall-stars");
+  assert.deepEqual(stars.send, { action: "decorate", item: "wall-stars", spot: "kitchen-wall" }, "Bought or put up for this room only");
+  assert.deepEqual(Ru.cardRows(open, kitchenPots, () => {}, true).length, open.length + 1, "Inside a spot, all its papers show");
+  const paintedSnap = { ...snap, pet: { ...snap.pet, house: { ...snap.pet.house, "kitchen-wall": "#abcdef" } } };
+  assert.match(Pk.homeRows({ snap: paintedSnap, open: null, flip: {}, go() {} }).find(r => r.key === "kitchen-wall").hint, /Painted #ABCDEF/);
 });

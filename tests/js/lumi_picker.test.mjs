@@ -7,7 +7,7 @@ const Pk = createRequire(import.meta.url)("../../mnemerynne/web/static/games/lum
 const data = name => JSON.parse(readFileSync(new URL("../../mnemerynne/lumipet_data/" + name, import.meta.url), "utf8"));
 const house = data("house.json"), closet = data("closet.json");
 // A Lumi who has bought the tier-1 piece (the old free starter) for every spot, and put it out.
-const firsts = Object.fromEntries(house.spots.map(spot => [spot.id, spot.items.find(item => !item.worn).id]));
+const firsts = Object.fromEntries(house.spots.filter(spot => !spot.same_as).map(spot => [spot.id, spot.items.find(item => !item.worn).id])); // (shared walls have no pieces of their own)
 const starters = Object.values(firsts).filter(id => house.spots.some(spot => spot.items.some(item => item.id === id && item.price)));
 
 function lists(pet = {}, open = null, flip = {}, boxes = { left: 0 }) {

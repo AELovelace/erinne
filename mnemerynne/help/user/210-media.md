@@ -138,14 +138,16 @@ Each app's **Settings** tab has **Open** rows for the other two.
 | Room | Thing | What it opens |
 |---|---|---|
 | **Kitchen** | The fridge, her bowl | **Pantry** (her food) |
+| | The kitchen's paint pots | Decorating the kitchen (see **Decorating each room** below) |
 | | The potion shelf | Drinks a potion straight away, with no menu (only when she's hurt; otherwise she says so) |
 | **Bedroom** | The front door | Out into **Lumi Town** |
 | | The toy chest | **Toys** |
 | | The trophy shelf | **Collection** |
-| | The paint pots | **Home** (decorating, and unpacking moving boxes) |
+| | The paint pots | Decorating her bedroom (**Home**, and unpacking moving boxes) |
 | | Her bed | **Care**: cuddle, nap, a potion, through the door |
 | **Den** | The wardrobe | **Closet** (what she wears) |
 | | The terminal | **Settings** |
+| | The den's paint pots | Decorating the den |
 | | The capsule machine | **Shop** |
 
 - **Remote or keyboard:** **Left/Right** walk Lumi to the next thing in the lower bar. Past the last one, she walks through to the next room. **Previous/Next** (Page Up/Page Down, **[** **]**) jump a whole room. **Enter** uses the thing she's at. In a menu, **Up/Down** choose and **Enter** does it, as in the lists. **Escape**, **Back**, a gamepad's **B**, or the menu's last row, **Back to the room**, closes it. Escape leaves the game only when no menu is open.
@@ -154,6 +156,10 @@ Each app's **Settings** tab has **Open** rows for the other two.
 - The kitchen and the den wear her own wallpaper, floor and windows from **Home**. Until she has unpacked a bed, a toy chest or a trophy shelf, a mattress, a cardboard box of toys and a plank shelf stand in for them.
 - Each device remembers which room she was in.
 - On a computer, her stats are one bar along the top: the LUMI PET header with **Tummy**, **Energy**, **Joy** and **Health**, then her name, level, happy moments, last little memory and coins. Lumi Pet no longer lists the keys on screen; they're all here.
+- **Decorating each room:** every room has its own paint pots, and they open just that room's things.
+  - **Walls and floors per room.** The kitchen and the den each have their own **wallpaper** and **floor**. Until you change them, they look like the bedroom's. Every wallpaper and floor works in every room, so buying one once covers all three. Any wall or floor can also be **painted a plain colour**: open it and choose **Paint it a colour**, then set the red, green and blue sliders (◀ ▶ on a remote, or slide them). The room shows the colour as you go, and **Paint it …** keeps it. Paint is free, and you can paper or paint over it any time.
+  - **15 styles of everything.** The fridge, her food bowl, the counter, the potion shelf, the wardrobe, the terminal, the capsule machine and the paint pots each come in the same 15 styles: Plain, Mint retro, Strawberry, Woodland, Candy stripe, Chrome, Berry gingham, Sprout, Bubblegum, Kitty, Frosted, Neon grid, Holographic, Galaxy and Starlight. Plain comes with the flat. The next five are in the paint pots' menu for coins (80 to 240). The other nine only come from capsules: Berry gingham, Sprout and Bubblegum are common, Kitty and Frosted uncommon, Neon grid and Holographic rare, Galaxy epic and Starlight legendary. They're in the Collection's **For the house** shelf too.
+  - The paint pots' style shows in every room. With room mode off, all of these are in the **Home** tab's list as well.
 - **Settings → Room mode** (on the den's terminal) turns it off, and Lumi Pet goes back to the tabs and lists. Turn it on again from **Settings** there. It's saved with your Lumi, so it follows you to every device. Lumi Dungeons and Lumi's Garden aren't affected.
 
 **Lumi Town** 🏘 is outside her front door. In Lumi Pet, press the **door** in her room, or choose **Through the door** at the end of **Care**, and she trots out into town. The door is on the left of her room, so on a squarer screen or a phone the panel can hide it; the Care row always works. Lumi Town has no card on the Games page: her door is the way in. It's a neon city where it's always night. Towers with lit windows stand under a smoggy pink sky, with wires and hologram billboards overhead. Every place has its own neon sign, the signs shine back off the wet road, steam rises from the grates, and a light rain falls. The street lights, the LUMI TOWN sign and the ring where Lumi is about to walk glow in her own colour. If your device is set to reduce motion, the rain stops and the steam holds still. The town has two streets. The **High Street** has six places, and Lumi walks to whichever one you pick (**Up/Down/Left/Right** on a remote or keyboard, or press a place):

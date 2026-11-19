@@ -213,7 +213,8 @@ def test_a_vault_offers_a_trophy_she_doesnt_have_yet(conn):
 
 
 def test_every_place_has_a_decor_set_with_a_piece_for_every_spot():
-    spots = sorted(spot["id"] for spot in lumipet.HOUSE["spots"] if spot["id"] != "trophy")
+    spots = sorted(spot["id"] for spot in lumipet.HOUSE["spots"] if spot["id"] != "trophy"
+                   and not spot.get("room") and "same_as" not in spot)            # her bedroom's furniture (room mode's things aren't found)
     assert set(D.SETS) == set(ENVS)
     for env, pieces in D.SETS.items():
         assert sorted(piece["spot"] for piece in pieces) == spots, env

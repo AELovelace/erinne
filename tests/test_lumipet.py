@@ -251,11 +251,46 @@ def test_the_shipped_catalog_is_valid_and_bad_ones_are_refused(tmp_path):
 
 
 # --------------------------------------------------------------------------- the house
+ROOM_THINGS = ("fridge", "bowl", "counter", "potions", "wardrobe", "terminal", "capsules", "paints")
+BEDROOM_SPOTS = [s for s in lumipet.HOUSE["spots"] if not s.get("room") and "same_as" not in s]   # her furniture, as before room mode
+
+
+def test_room_things_come_in_fifteen_styles_split_like_her_furniture():
+    for spot in (s for s in lumipet.HOUSE["spots"] if s.get("room")):
+        assert spot["id"] in ROOM_THINGS and len(spot["items"]) == 15
+        assert spot["items"][0] == {"id": spot["id"] + "-plain", "name": spot["items"][0]["name"], "price": 0}     # the plain one is free
+        assert sum(1 for i in spot["items"] if i["price"]) == 5                                                 # five in the Shop
+        rarities = [i["rarity"] for i in spot["items"] if "rarity" in i]
+        assert rarities == ["common"] * 3 + ["uncommon"] * 2 + ["rare"] * 2 + ["epic", "legendary"]             # nine from capsules
+        assert all(i in lumipet._PRIZES for i in (lumipet._DECOR[x["id"]] for x in spot["items"] if "rarity" in x))
+    assert sorted(s["id"] for s in lumipet.HOUSE["spots"] if s.get("room")) == sorted(ROOM_THINGS)
+
+
+def test_each_room_can_have_its_own_wallpaper_floor_or_paint(conn, alice):
+    _state(conn, alice, T0)                                                                          # her save exists
+    _set(conn, alice, decor=["wall-dusk"], house={"wallpaper": "wall-dusk"})
+    out = _act(conn, alice, "decorate", T0, item="wall-dusk", spot="kitchen-wall")["pet"]["house"]     # hers already: free in any room
+    assert out["kitchen-wall"] == "wall-dusk" and out["wallpaper"] == "wall-dusk" and "den-wall" not in out   # the den still follows the bedroom
+    with pytest.raises(lumipet.PetError):
+        _act(conn, alice, "decorate", T0, item="wall-dusk", spot="kitchen-floor")                    # a wallpaper isn't a floor
+    with pytest.raises(lumipet.PetError):
+        _act(conn, alice, "decorate", T0, item="fridge-mint", spot="den-wall")                      # nor a fridge
+    out = _act(conn, alice, "paint", T0, spot="den-floor", colour="#FFAA00")["pet"]["house"]
+    assert out["den-floor"] == "#ffaa00"                                                             # free, and kept lower case
+    assert _act(conn, alice, "paint", T0, spot="wallpaper", colour="#123456")["pet"]["house"]["wallpaper"] == "#123456"
+    for spot, colour in (("bed", "#123456"), ("den-wall", "red"), ("attic", "#123456")):
+        with pytest.raises(lumipet.PetError):
+            _act(conn, alice, "paint", T0, spot=spot, colour=colour)                                 # only walls and floors, only real colours
+    out = _act(conn, alice, "decorate", T0, item="wall-dusk", spot="wallpaper")["pet"]["house"]       # and papered over again
+    assert out["wallpaper"] == "wall-dusk"
+
+
 def test_a_new_house_is_bare_she_has_just_moved_in(conn, alice):
     house = _state(conn, alice, T0)
-    assert house["pet"]["house"] == {"curtains": "curtain-none", "view": "view-city", "trophy": "trophy-none"}   # nothing, the outside, an empty bracket
+    things = {spot: spot + "-plain" for spot in ROOM_THINGS}                                      # room mode's plain things come with the flat
+    assert house["pet"]["house"] == {"curtains": "curtain-none", "view": "view-city", "trophy": "trophy-none", **things}   # nothing, the outside, an empty bracket
     assert house["pet"]["decor"] == [] and house["boxes"] == {"left": 14, "total": 14, "next": "Mattress on the floor", "ready": True}
-    spots = house["house"]["spots"]
+    spots = [spot for spot in house["house"]["spots"] if not spot.get("room") and "same_as" not in spot]   # her bedroom's own spots
     sold = lambda spot: [item for item in spot["items"] if "rarity" not in item and "found" not in item and not item.get("worn") and "prize" not in item]   # noqa: E731
     assert len(spots) == 16 and all(len(sold(spot)) == 5 for spot in spots[:15])                  # 75 pieces to buy, as before
     assert sum(item.get("worn", False) for spot in spots for item in spot["items"]) == 14            # one worn piece in each box
@@ -426,7 +461,7 @@ def test_lumi_soft_decor_is_refused_until_the_game_grants_it_then_swaps_freely(c
 
 
 def test_every_spot_has_one_lumi_soft_prize_and_none_is_ever_sold_or_rolled():
-    for spot in lumipet.HOUSE["spots"]:
+    for spot in BEDROOM_SPOTS:                                                  # room mode's things and shared walls have none
         prizes = [item for item in spot["items"] if "prize" in item]
         assert [item["id"] for item in prizes] == ["soft-" + spot["id"]] and prizes[0]["how"], spot["id"]
     assert all("prize" not in prize for prize in lumipet._PRIZES)
@@ -531,7 +566,7 @@ def test_the_moon_capsule_costs_more_and_only_holds_the_rare_end(conn, alice):
 def test_every_place_has_at_least_ten_capsule_prizes():
     for slot in lumipet.CLOSET["slots"]:
         assert len(slot["items"]) >= 10, slot["id"]
-    for spot in lumipet.HOUSE["spots"]:
+    for spot in BEDROOM_SPOTS:                                                  # room mode's things have nine each (their own test)
         if spot["id"] != "trophy":                                              # trophies are found in the dungeon instead
             assert sum("rarity" in item for item in spot["items"]) >= 10, spot["id"]
     assert sum("rarity" in toy for toy in lumipet.CATALOG["toys"]) >= 10

@@ -321,7 +321,7 @@ class PetAction(BaseModel):
     """What the person chose to do with Lumi. Only choices: which thing and how many. The server decides every result."""
     model_config = ConfigDict(extra="forbid")
     action: Literal["cuddle", "feed", "play", "nap", "wake", "buy", "decorate", "wear", "capsule", "glow", "import", "storyteller",
-                    "learn", "respec", "equip", "mod", "potions", "heal", "drink", "garden_reminders", "town_seen", "room_mode",
+                    "learn", "respec", "equip", "mod", "potions", "heal", "drink", "garden_reminders", "town_seen", "room_mode", "paint",
                     "unpack", "name", "colour", "stat", "stats_auto", "auto_stats", "stats_reset", "kit"]
     item: str | None = Field(default=None, max_length=40)
     count: int = Field(default=1, ge=1, le=lumipet.MAX_HELD, strict=True)
@@ -330,6 +330,7 @@ class PetAction(BaseModel):
     slot: int | None = Field(default=None, ge=0, le=9, strict=True)             # which mod slot, for "mod"
     name: str | None = Field(default=None, max_length=40)                       # what to call her, for "name"
     colour: str | None = Field(default=None, max_length=7)                      # "#rrggbb" or "" (her glow's own), for "colour"
+    spot: str | None = Field(default=None, max_length=40)                       # which spot, for "decorate" into another room's wall or floor, and "paint"
 
 
 @router.get("/api/media/games/lumi-pet/state")
@@ -345,7 +346,7 @@ def pet_act(body: PetAction, user=Depends(pet_user), conn=Depends(get_games_db))
     try:
         with transaction(conn):
             return lumipet.act(conn, user["id"], body.action, item=body.item, count=body.count, moments=body.moments,
-                               glow=body.glow, slot=body.slot, name=body.name, colour=body.colour)
+                               glow=body.glow, slot=body.slot, name=body.name, colour=body.colour, spot=body.spot)
     except lumipet.PetError as refused:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(refused)) from None
 

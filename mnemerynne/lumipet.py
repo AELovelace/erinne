@@ -113,6 +113,13 @@ def load_house(path: Path | None = None) -> dict:
         if not isinstance(spot, dict) or not _ID.match(str(spot.get("id", ""))) or spot["id"] in seen or not spot.get("name"):
             raise ValueError("Lumi's house has a bad or repeated spot.")
         seen.add(spot["id"])
+        if "same_as" in spot:
+            # Another room's wall or floor (room mode, 2026-11-19): it takes the same pieces as an earlier spot (her
+            # bedroom's wallpaper or floor), so anything she owns for one goes up in any room, and has none of its own.
+            base = next((other for other in data["spots"] if other.get("id") == spot["same_as"]), None)
+            if base is None or base is spot or "same_as" in base or spot.get("items") or data["spots"].index(base) > data["spots"].index(spot):
+                raise ValueError(f"The {spot['id']} spot must share an earlier spot's pieces and have none of its own.")
+            continue
         if not isinstance(spot.get("items"), list) or not spot["items"]:
             raise ValueError(f"The {spot['id']} spot needs something to put in it.")
         for item in spot["items"]:
@@ -385,15 +392,31 @@ def _eat(conn: sqlite3.Connection, user_id: int, pet: dict, share: float) -> Non
         lumibattle.mend(pet, share)
 
 
+_COLOUR_PAINT = re.compile(r"^#[0-9a-f]{6}$")                 # a free paint colour on a paintable wall or floor
+_SPOTS = {spot["id"]: spot for spot in HOUSE["spots"]}
+
+
+def _takes(spot_id: str) -> str:
+    """Whose pieces a spot takes: its own, or (another room's wall or floor) the spot it shares them with."""
+    return _SPOTS[spot_id].get("same_as", spot_id)
+
+
 def placed(pet: dict) -> dict[str, str]:
     """What stands in every spot: the person's choice where it is still valid, else the spot's free first object, unless
     that is a worn piece still in its box: then the spot is bare and left out (the page draws bare walls and floor).
-    Worked out on reading, so a spot added to the catalog later, or an object removed from it, never breaks a save."""
+    A paintable spot may hold a paint colour ("#rrggbb") instead. A shared spot (the kitchen's or den's wall or floor)
+    left unchosen is left out: the page shows the bedroom's there. Worked out on reading, so a spot added to the
+    catalog later, or an object removed from it, never breaks a save."""
     out = {}
     for spot in HOUSE["spots"]:
         chosen = pet["house"].get(spot["id"])
-        if _DECOR.get(chosen, {}).get("spot") == spot["id"]:
+        paintable = _SPOTS[_takes(spot["id"])].get("paintable")
+        if isinstance(chosen, str) and paintable and _COLOUR_PAINT.match(chosen):
             out[spot["id"]] = chosen
+        elif _DECOR.get(chosen, {}).get("spot") == _takes(spot["id"]):
+            out[spot["id"]] = chosen
+        elif "same_as" in spot:
+            continue                                      # nothing chosen for this room yet: it follows the bedroom's
         elif not spot["items"][0].get("worn"):
             out[spot["id"]] = spot["items"][0]["id"]
     return out
@@ -419,7 +442,7 @@ def _moment(pet: dict, memory: str) -> None:
 
 def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None = None, count: int = 1,
         moments: int = 0, glow: str | None = None, slot: int | None = None, name: str | None = None,
-        colour: str | None = None, now: int | None = None, rng=None) -> dict:
+        colour: str | None = None, spot: str | None = None, now: int | None = None, rng=None) -> dict:
     """One thing the person chose to do. Call inside a transaction: the pet, and any coins, save together or not at all.
     The pet is caught up first, so a refused action never changes what time already did (store.js act)."""
     now = now_ms() if now is None else now
@@ -497,12 +520,24 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
             raise PetError(f"That's a {PRIZE_GAMES[piece['prize']]} prize: {piece['how']}.")
         if piece.get("worn") and item not in pet["decor"]:   # Lumi's own old things: still in a moving box
             raise PetError(f"That's still packed in a moving box. Lumi unpacks one a day (box {piece['box']} of {len(BOXES)}).")
+        # Where it goes: its own spot, or (`spot`) another room's wall or floor that shares its pieces (room mode).
+        target = spot if spot is not None else piece["spot"]
+        if target not in _SPOTS or _takes(target) != piece["spot"]:
+            raise PetError("That doesn't go there.")
         if piece["price"] and item not in pet["decor"]:
             if not coins.spend(conn, user_id, piece["price"], GAME, "decor"):
                 raise PetError("Not enough coins for that.")
             pet["decor"].append(item)
             said = {"bought": item, "count": 1, "paid": piece["price"]}
-        pet["house"][piece["spot"]] = item
+        pet["house"][target] = item
+    elif action == "paint":
+        # A wall or floor painted one plain colour (room mode, 2026-11-19): free, and as easily painted over again.
+        cleaned = (colour or "").strip().lower()
+        if spot not in _SPOTS or not _SPOTS[_takes(spot)].get("paintable"):
+            raise PetError("Only walls and floors can be painted.")
+        if not _COLOUR_PAINT.match(cleaned):
+            raise PetError("A colour is # and six hex digits, like #ff8ecb.")
+        pet["house"][spot] = cleaned
     elif action == "wear":
         # Put an accessory on, or take it off if she's already wearing it. One that's sold and not yet hers is bought
         # first; one that only comes from the Star Capsule can't be bought at all.
