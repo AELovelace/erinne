@@ -82,15 +82,19 @@
        stall (the Market stall she's at, or null) and stallRows(id) (its rows: game.js builds them from the shops' lists),
        go({enter} | {leave} | {street} | {stall}) and open(slug, place, words),
        chat (local chat, 2026-11-19; optional): { on (the chat list is open), phrases [{id, icon, text}], people
-       [{id, name, muted}] (who's here, to mute), open(), close(), say(phraseId), type(), mute(id) }. */
+       [{id, name, muted, block}] (who's here, to mute; block: a guest in her own flat), open(), close(), say(phraseId), type(), mute(id), block(id) },
+       visit (friends' flats, 2026-11-19; optional): open the list of flats to visit (a row on each street's map). */
   function chatRows(chat) { // Chatting: the quick phrases (a remote or a pad can say them), typing, muting, and back.
     return chat.phrases.map(function (p) {
       return { key: "say-" + p.id, icon: p.icon, name: "“" + p.text + "”", hint: "Say it to everyone here", local: function () { chat.say(p.id); } };
     }).concat([{ key: "say-type", icon: "⌨", name: "Type a message", hint: "T opens it too · Enter sends · Escape closes", local: function () { chat.type(); } }])
-      .concat((chat.people || []).map(function (who) {
-        return { key: "mute-" + who.id, icon: who.muted ? "🔈" : "🔇", name: (who.muted ? "Unmute " : "Mute ") + who.name,
-                 hint: who.muted ? "Hear what they say again" : "Stop seeing what they say, on this device", local: function () { chat.mute(who.id); } };
-      }))
+      .concat((chat.people || []).reduce(function (out, who) {
+        out.push({ key: "mute-" + who.id, icon: who.muted ? "🔈" : "🔇", name: (who.muted ? "Unmute " : "Mute ") + who.name,
+                   hint: who.muted ? "Hear what they say again" : "Stop seeing what they say, on this device", local: function () { chat.mute(who.id); } });
+        if (who.block && chat.block) out.push({ key: "block-" + who.id, icon: "🚫", name: "Show " + who.name + " out", // (her own flat: a guest)
+                   hint: "They go home and can't visit again (Settings can unblock)", local: function () { chat.block(who.id); } });
+        return out;
+      }, []))
       .concat([{ key: "say-back", icon: "‹", name: "Back", hint: "Escape, Back or B does it too", local: function () { chat.close(); } }]);
   }
 
@@ -101,6 +105,7 @@
   function rows(ctx) {
     if (ctx.chat && ctx.chat.on) return chatRows(ctx.chat);
     const said = ctx.chat ? [sayRow(ctx.chat)] : [];
+    const flats = ctx.visit ? [{ key: "flats", icon: "🏠", name: "Visit a friend's flat", hint: "Knock on someone's door, or walk in where it's open", local: function () { ctx.visit(); } }] : [];
     const here = inside(ctx.at);
     if (!here) { // A map: one row per place on this street, the way to the other street, and whether others see her here.
       const way = STREETS[ctx.street] || STREETS.high;
@@ -114,7 +119,7 @@
         { key: "street-" + way.other, icon: way.id === "high" ? "➜" : "⬅", name: way.walk, hint: way.hint, local: function () { ctx.go({ street: way.other }); } },
         { key: "seen", icon: "👀", name: "Show me in town: " + (ctx.seen === false ? "off" : "on"),
           hint: ctx.seen === false ? "Nobody sees your Lumi here, and you still see theirs" : "Others in Lumi Town see your Lumi, in her clothes, with her name", send: { action: "town_seen" } },
-      ]).concat(said);
+      ]).concat(flats).concat(said);
     }
     if (here.id === "market" && ctx.stall) { // At a stall: what it sells (game.js), then back to the stalls.
       const stall = here.games.find(function (g) { return g.stall === ctx.stall; });

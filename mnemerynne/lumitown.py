@@ -94,6 +94,13 @@ class Town:
             p = self.people.get(user_id)
             return place(p["at"], p["street"], p["inside"]) if p else None
 
+    def seen_at(self, user_id: int) -> float | None:
+        """When this person last said where they are in town (this Town's clock), or None."""
+        with self.lock:
+            self._sweep(self.clock())
+            p = self.people.get(user_id)
+            return p["seen"] if p else None
+
     def said(self, line: dict) -> None:
         """Remember a line in its place (line["place"]), with the time it was said."""
         with self.lock:

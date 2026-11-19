@@ -239,6 +239,38 @@
     return best;
   }
 
+  // ---- Visiting someone else's flat (lumihouse.py, docs/plans/lumi-pet-social.md phase 3): the same rooms and things,
+  // but look-only. A visitor's own Lumi speaks, about the host's things (never "my"). {host}: their name; {lumi}: their Lumi's.
+  const GUEST = {
+    fridge: "No snacking from {host}'s fridge! Well... maybe one.", bowl: "That's {lumi}'s bowl. I won't touch it~",
+    potions: "{host}'s potions! Such pretty bottles.", paint: "{host} decorated in here. So pretty!",
+    toychest: "{lumi}'s toys! Maybe we can play together later.", trophy: "Look at all {lumi}'s treasures!",
+    bed: "A comfy bed. Not mine though!", wardrobe: "{lumi} has such nice clothes!", terminal: "Beep boop? Better not touch.",
+    capsules: "{host}'s capsule machine! What's inside, I wonder?",
+  };
+  function fill(words, names) { return words.replace(/\{host\}/g, names.host).replace(/\{lumi\}/g, names.lumi); }
+
+  function guestLine(thing, names) { // What a visitor's Lumi says pressing one of the host's things (names: {host, lumi}).
+    return thing.act === "door" ? "Back out into town? Thanks for having me!" : fill(GUEST[thing.id] || "Ooh, {host}'s things!", names);
+  }
+
+  function guestRows(at, ctx, names) { // A visitor's list of a room: the same spots, named for the host, look-only.
+    // ctx.look(thing, index): walk to it and say guestLine; ctx.walk(state): another room; ctx.door(): leave the flat.
+    const here = clean(at);
+    return layout(here.room).map(function (s, i) {
+      const theirs = { door: "front door", toychest: "toy chest", trophy: "trophy shelf", paint: "paint pots", bowl: "bowl" };
+      if (s.go) {
+        const to = room(s.go), short = to.name.replace(/^HER |^THE /, "").toLowerCase();
+        return { key: "go-" + s.go, icon: s.icon, name: "To the " + short, hint: "Walk through", say: "This way to the " + short + "!",
+                 local: function () { ctx.walk(enter(s.go, s.side === "left" ? "right" : "left")); } };
+      }
+      const noun = theirs[s.id] || s.name.replace(/^My (kitchen |den )?/, "").toLowerCase();
+      return { key: "thing-" + s.id, icon: s.icon, name: names.host + "'s " + noun, hint: s.act === "door" ? "Back out into Lumi Town" : "Just looking",
+               say: s.act === "door" ? "The way out, back to town." : fill(GUEST[s.id] || "{host}'s " + noun + ".", names),
+               local: function () { if (s.act === "door") ctx.door(); else ctx.look(s, i); } };
+    });
+  }
+
   function tabs() { // Every tab some thing opens (tests: each of Lumi Pet's tabs must be reachable from a room).
     const out = [];
     ROOMS.forEach(function (r) { r.things.forEach(function (t) { if (t.tab && out.indexOf(t.tab) < 0) out.push(t.tab); }); });
@@ -252,5 +284,6 @@
 
   return { ROOMS: ROOMS, START: START, REACH: REACH, KITCHEN_SPOTS: KITCHEN_SPOTS, DEN_SPOTS: DEN_SPOTS, room: room, layout: layout, clean: clean, enter: enter, step: step, hop: hop, spot: spot,
            rows: rows, cardRows: cardRows, guide: guide, hits: hits, find: find, nearest: nearest, tabs: tabs, neighbours: neighbours,
-           FRONT: FRONT, BACK: BACK, blocks: blocks, free: free, move: move, reach: reach, scale: scale, point: point, shadow: shadow }; // free walking
+           FRONT: FRONT, BACK: BACK, blocks: blocks, free: free, move: move, reach: reach, scale: scale, point: point, shadow: shadow, // free walking
+           guestRows: guestRows, guestLine: guestLine }; // visiting
 });

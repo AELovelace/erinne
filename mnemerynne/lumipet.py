@@ -224,6 +224,7 @@ def _fresh(now: int) -> dict:
             "outfit": {}, "closet": [], "storyteller": "library", "garden_reminders": True,
             "town_seen": True,                             # others in Lumi Town see her there (lumitown.py; Settings' "Show me in town")
             "room_mode": True,                             # Lumi Pet's walk-and-click rooms (game.js room mode); off: the lists, as before
+            "door": "knock", "blocked": [],                # visitors to her flat (lumihouse.py): knock, open or closed; who may never come in
             "name": "Lumi", "colour": None,               # what her friends see her called; her own colour (None: her glow's)
             "moved_in": MOVE_IN, "unpacked": 0, "box_day": "",   # she has just moved in: boxes unpacked so far, and the day of the last
             **lumibattle.fresh_fields()}
@@ -331,6 +332,41 @@ def town_seen(conn: sqlite3.Connection, user_id: int) -> bool:
     except ValueError:
         pet = {}
     return pet.get("town_seen", True) is not False
+
+
+DOORS = ("knock", "open", "closed")                       # her front door, for visitors (lumihouse.py): the first is the default
+BLOCKED_MAX = 200                                         # a guard on the block list's length
+
+
+def _peek(conn: sqlite3.Connection, user_id: int) -> dict | None:
+    """Her save as it is, without catching her up or counting a visit (None if this person has no Lumi yet)."""
+    row = conn.execute("SELECT data FROM lumi_pets WHERE user_id = ?", (user_id,)).fetchone()
+    if row is None:
+        return None
+    try:
+        pet = json.loads(row["data"])
+    except ValueError:
+        return None
+    return pet if isinstance(pet, dict) else None
+
+
+def door(conn: sqlite3.Connection, user_id: int) -> tuple[str, list[int]]:
+    """Her front door for visitors (knock, open or closed) and who she has blocked. Only reads, like look().
+    Someone with no Lumi yet has no flat to visit: closed."""
+    pet = _peek(conn, user_id)
+    if pet is None:
+        return "closed", []
+    blocked = [uid for uid in pet.get("blocked", []) if isinstance(uid, int)]
+    return (pet.get("door") if pet.get("door") in DOORS else DOORS[0]), blocked
+
+
+def house_view(conn: sqlite3.Connection, user_id: int) -> dict:
+    """Her flat as a visitor sees it (lumihouse.py): what stands in every spot (placed), how many moving boxes are
+    still packed, and her look. Never her coins, meters, pockets, settings or anything else in her save."""
+    pet = _peek(conn, user_id) or {}
+    pet.setdefault("house", {})
+    house = placed({**pet, "house": pet["house"] if isinstance(pet["house"], dict) else {}})
+    return {"house": house, "boxes": max(0, len(BOXES) - int(pet.get("unpacked", 0) or 0)), "look": look(conn, user_id)}
 
 
 def _save(conn: sqlite3.Connection, user_id: int, pet: dict) -> None:
@@ -621,6 +657,23 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
         pet["garden_reminders"] = not pet.get("garden_reminders", True)
     elif action == "town_seen":                           # whether others in Lumi Town see her there (lumitown.py)
         pet["town_seen"] = not pet.get("town_seen", True)
+    elif action == "door":                                # her front door for visitors (lumihouse.py): `item` sets it, else the next one
+        doors = list(DOORS)
+        now_door = pet.get("door") if pet.get("door") in DOORS else DOORS[0]
+        if item is not None and item not in DOORS:
+            raise PetError("A door is knock, open or closed.")
+        pet["door"] = item or doors[(doors.index(now_door) + 1) % len(doors)]
+        said = {"door": pet["door"]}
+    elif action in ("block", "unblock"):                  # someone who may never visit her flat (or may again); `item` is their account id
+        if not (item or "").isdigit() or int(item) == user_id:
+            raise PetError("Choose someone to block.")
+        blocked = [uid for uid in pet.get("blocked", []) if isinstance(uid, int) and uid != int(item)]
+        if action == "block":
+            if len(blocked) >= BLOCKED_MAX:
+                raise PetError("That's a lot of people blocked already.")
+            blocked.append(int(item))
+        pet["blocked"] = blocked
+        said = {action: int(item)}
     elif action == "room_mode":                           # Settings → Room mode: walk her rooms and press things, or use the lists
         pet["room_mode"] = not pet.get("room_mode", True)  # an old save without it counts as on (the default since 2026-11-19)
     elif action == "storyteller":

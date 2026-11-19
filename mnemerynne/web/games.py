@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from mnemerynne import arcade, events, lobby, lumilaunch, lumisoft, lumitown, runner, showdown
+from mnemerynne import arcade, events, lobby, lumihouse, lumilaunch, lumisoft, lumitown, runner, showdown
 from mnemerynne.rooms_bus import sse
 from mnemerynne import bfgguf, casino, casino_remote, claude_chat, coins, games, lumi_tv, lumidungeon, lumiparty, lumipet, lumitales, prism, push, users
 from mnemerynne.db import read_transaction, transaction
@@ -320,13 +320,22 @@ class TownSay(BaseModel):
     phrase: str | None = Field(default=None, pattern=r"^[a-z][a-z-]{0,23}$")
 
 
+def _where_now(user_id: int) -> str | None:
+    """Where this person is now: in a flat or in town, whichever they said most recently (both forget after a while)."""
+    in_house, in_town = lumihouse.HOUSES.seen_at(user_id), lumitown.TOWN.seen_at(user_id)
+    if in_house is not None and (in_town is None or in_house >= in_town):
+        return lumihouse.HOUSES.where(user_id)
+    return lumitown.TOWN.where(user_id)
+
+
 @router.post("/api/media/games/lumi-pet/town/say")
 def pet_town_say(body: TownSay, user=Depends(pet_user), conn=Depends(get_games_db)):
-    """Say something where this Lumi is in town: everyone in the same place hears it (their streams, or a TV's next
-    POST). Only someone others can see may speak, and not too fast (lumitown SAY_*)."""
-    if not lumipet.town_seen(conn, user["id"]):
+    """Say something where this Lumi is: in town, or in a room of someone's flat (lumihouse.py). Everyone in the same
+    place hears it (their streams, or a TV's next POST). In town only someone others can see may speak; never too fast
+    (lumitown SAY_*)."""
+    where = _where_now(user["id"])
+    if (where is None or not where.startswith("house:")) and not lumipet.town_seen(conn, user["id"]):   # (a hidden Lumi isn't recorded in town at all)
         raise HTTPException(status.HTTP_409_CONFLICT, "Turn on Show me in town first, so everyone can see who's talking.")
-    where = lumitown.TOWN.where(user["id"])
     if where is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Step out into Lumi Town first!")
     person = users.get_user_by_id(conn, user["id"])
@@ -345,9 +354,11 @@ def pet_town_say(body: TownSay, user=Depends(pet_user), conn=Depends(get_games_d
 
 @router.get("/api/media/games/lumi-pet/town/stream")
 async def pet_town_stream(request: Request, user=Depends(pet_user)):
-    """Lumi Town, live (a computer's or phone's page; a TV polls): "said" for each line said where this Lumi is now
-    (not her own: the page shows those from its POST), "moved" when someone arrives, leaves or moves (the page then
-    asks who's here), and a ping every 15 s."""
+    """Lumi Town and the flats, live (a computer's or phone's page; a TV polls): "said" for each line said where this
+    Lumi is now (not her own: the page shows those from its POST), "moved" when someone arrives, leaves or moves (the
+    page then asks who's here), "walk" when someone in her room of a flat steps somewhere, "knock" when someone knocks
+    on her door, "answer" when a door she knocked on is answered, "home" when a host has shown her out, and a ping
+    every 15 s."""
     me = user["id"]
 
     async def stream():
@@ -363,12 +374,22 @@ async def pet_town_stream(request: Request, user=Depends(pet_user)):
                 if waiting in done:
                     _, data = waiting.result()
                     waiting = asyncio.ensure_future(feed.__anext__())
-                    if data.get("kind") == "moved":
+                    kind = data.get("kind")
+                    if kind == "moved":
                         yield sse("moved", {})
-                    elif data.get("kind") == "said":
+                    elif kind == "said":
                         said = data.get("line") or {}
-                        if said.get("uid") != me and said.get("place") == lumitown.TOWN.where(me):
+                        if said.get("uid") != me and said.get("place") == _where_now(me):
                             yield sse("said", said)
+                    elif kind == "walk":                                      # someone in her room of a flat
+                        if data.get("uid") != me and data.get("place") == _where_now(me):
+                            yield sse("walk", data)
+                    elif kind == "knock" and data.get("host") == me:          # at her door
+                        yield sse("knock", {})
+                    elif kind == "answer" and data.get("guest") == me:        # her knock, answered
+                        yield sse("answer", {"host": data.get("host"), "yes": bool(data.get("yes"))})
+                    elif kind == "home" and me in (data.get("out") or []):    # shown out of a flat
+                        yield sse("home", {"host": data.get("host")})
                 if time.monotonic() - beat >= 15:
                     beat = time.monotonic()
                     yield b": ping\n\n"
@@ -379,6 +400,151 @@ async def pet_town_stream(request: Request, user=Depends(pet_user)):
     release_db(request)     # the stream needs no database: don't hold this request's connection while it stays open
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ---- Visiting each other's flats (lumihouse.py, docs/plans/lumi-pet-social.md phase 3, 2026-11-19). Someone's flat is
+# their Lumi Pet room mode, drawn from house_view for a visitor; the front door (lumipet.door) says who may come in.
+
+def _person(conn, uid: int):
+    """An account that's still active, or None."""
+    person = users.get_user_by_id(conn, uid)
+    return person if person is not None and person["active"] else None
+
+
+@router.get("/api/media/games/lumi-pet/houses")
+def pet_houses(user=Depends(pet_user), conn=Depends(get_games_db)):
+    """Whose flats this person may visit (or knock at): everyone with a Lumi, a door that isn't closed and who hasn't
+    blocked them. Those at home first. Never their own."""
+    me, flats = user["id"], []
+    for row in conn.execute("SELECT user_id FROM lumi_pets ORDER BY user_id LIMIT 500").fetchall():
+        uid = row["user_id"]
+        if uid == me:
+            continue
+        door, blocked = lumipet.door(conn, uid)
+        person = _person(conn, uid)
+        if person is None or lumihouse.access(door, blocked, uid, me, lumihouse.HOUSES) == "closed":
+            continue
+        flats.append({"id": uid, "name": person["username"], "lumi": lumipet.look(conn, uid)["name"], "door": door,
+                      "home": lumihouse.HOUSES.home(uid), "visitors": len(lumihouse.HOUSES.inside(uid, but=uid))})
+    flats.sort(key=lambda f: (not f["home"], f["name"].lower()))
+    return {"flats": flats[:50]}
+
+
+@router.get("/api/media/games/lumi-pet/houses/{host}")
+def pet_house(host: int, user=Depends(pet_user), conn=Depends(get_games_db)):
+    """Someone's flat, as a visitor sees it (lumipet.house_view), when they may come in; otherwise only whose it is and
+    whether they can knock. A closed door, or a block, is only ever "That door is closed"."""
+    person = _person(conn, host)
+    if person is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "There's no flat there.")
+    door, blocked = lumipet.door(conn, host)
+    way = lumihouse.access(door, blocked, host, user["id"], lumihouse.HOUSES)
+    if way == "closed":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "That door is closed.")
+    seen = {"id": host, "name": person["username"], "door": door, "access": way, "home": lumihouse.HOUSES.home(host)}
+    if way in ("own", "in"):
+        return {**seen, **lumipet.house_view(conn, host)}
+    return {**seen, "look": lumipet.look(conn, host)}
+
+
+@router.post("/api/media/games/lumi-pet/houses/{host}/knock")
+def pet_knock(host: int, user=Depends(pet_user), conn=Depends(get_games_db)):
+    """Knock on someone's door. An open door (or one already opened to you) just lets you in; a knocking door needs
+    the host at home, who hears it at once (their stream, or their page's next POST)."""
+    me = user["id"]
+    if _person(conn, host) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "There's no flat there.")
+    door, blocked = lumipet.door(conn, host)
+    way = lumihouse.access(door, blocked, host, me, lumihouse.HOUSES)
+    if way == "closed":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "That door is closed.")
+    if way in ("own", "in"):
+        return {"in": True}
+    if not lumihouse.HOUSES.home(host):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Nobody's in. Try again later!")
+    if events.count(f"lumi-knock:{me}", 10) > 3:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Give them a moment to come to the door!")
+    try:
+        knock = lumihouse.HOUSES.knock(me, host)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from None
+    events.publish_sync(lumitown.CHANNEL, {"kind": "knock", "host": host})
+    return {"in": False, "knock": knock["id"]}
+
+
+@router.get("/api/media/games/lumi-pet/knocks/{knock_id}")
+def pet_knock_state(knock_id: str, user=Depends(pet_user)):
+    """A knock's answer, for the one who knocked (a TV's way to hear it): None while waiting; gone once forgotten."""
+    knock = lumihouse.HOUSES.knock_of(knock_id[:40])
+    if knock is None or knock["guest"] != user["id"]:
+        return {"answer": None, "gone": True}
+    return {"answer": knock["answer"], "gone": False}
+
+
+class KnockAnswer(BaseModel):
+    """The host's answer to a knock on their own door."""
+    model_config = ConfigDict(extra="forbid")
+    yes: bool
+
+
+@router.post("/api/media/games/lumi-pet/knocks/{knock_id}/answer")
+def pet_knock_answer(knock_id: str, body: KnockAnswer, user=Depends(pet_user)):
+    """Let them in, or not now. Only the host whose door it is can answer."""
+    try:
+        knock = lumihouse.HOUSES.answer(knock_id[:40], user["id"], body.yes)
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from None
+    events.publish_sync(lumitown.CHANNEL, {"kind": "answer", "guest": knock["guest"], "host": user["id"], "yes": body.yes})
+    return {"answer": body.yes}
+
+
+class HouseHere(BaseModel):
+    """Where this Lumi stands in a flat: whose (None: her own), which room, and where on its floor (room-ui.js units)."""
+    model_config = ConfigDict(extra="forbid")
+    host: int | None = Field(default=None, ge=1, strict=True)
+    room: Literal["kitchen", "bedroom", "den"]
+    x: float = Field(ge=0, le=1000)
+    y: float = Field(ge=0, le=500)
+    face: Literal[-1, 1] = 1
+
+
+@router.post("/api/media/games/lumi-pet/houses/here")
+def pet_house_here(body: HouseHere, user=Depends(pet_user), conn=Depends(get_games_db)):
+    """A flat, every few seconds and as her Lumi walks: say where she stands (her own flat: the host is home), and hear
+    who else is there and where, the last lines said in her room, the knocks at her own door, and (a TV) any news.
+    A visitor who may no longer come in is told so (403): the page walks her home."""
+    me = user["id"]
+    host = body.host or me
+    if host != me:
+        if _person(conn, host) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "There's no flat there.")
+        door, blocked = lumipet.door(conn, host)
+        if lumihouse.access(door, blocked, host, me, lumihouse.HOUSES) != "in":
+            was = lumihouse.HOUSES.where(me)
+            if was and was.startswith(f"house:{host}:"):
+                lumihouse.HOUSES.leave(me)
+                events.publish_sync(lumitown.CHANNEL, {"kind": "moved"})
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Time to go home!")
+    where = lumihouse.place(host, body.room)
+    x, y = round(body.x, 1), round(body.y, 1)
+    if lumihouse.HOUSES.visit(me, host, body.room, x, y, body.face):
+        events.publish_sync(lumitown.CHANNEL, {"kind": "moved"})        # arrived, or another room: the others look again
+    else:
+        events.publish_sync(lumitown.CHANNEL, {"kind": "walk", "place": where, "uid": me, "x": x, "y": y, "face": body.face})
+    people = []
+    for p in lumihouse.HOUSES.inside(host, but=me):
+        person = _person(conn, p["id"])
+        if person is not None:
+            people.append({**p, "name": person["username"], "look": lumipet.look(conn, p["id"]), "host": p["id"] == host})
+    knocks = []
+    if host == me:
+        for k in lumihouse.HOUSES.waiting(me):
+            guest = _person(conn, k["guest"])
+            if guest is not None:
+                knocks.append({"id": k["id"], "guest": k["guest"], "name": guest["username"],
+                               "lumi": lumipet.look(conn, k["guest"])["name"]})
+    return {"here": people, "place": where, "lines": lumitown.TOWN.recent(where), "phrases": lumitown.phrases(),
+            "you": me, "home": lumihouse.HOUSES.home(host), "knocks": knocks}
 
 
 @router.post("/api/media/games/lumi-pet/visit")
@@ -394,7 +560,8 @@ class PetAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: Literal["cuddle", "feed", "play", "nap", "wake", "buy", "decorate", "wear", "capsule", "glow", "import", "storyteller",
                     "learn", "respec", "equip", "mod", "potions", "heal", "drink", "garden_reminders", "town_seen", "room_mode", "paint",
-                    "unpack", "name", "colour", "stat", "stats_auto", "auto_stats", "stats_reset", "kit"]
+                    "unpack", "name", "colour", "stat", "stats_auto", "auto_stats", "stats_reset", "kit",
+                    "door", "block", "unblock"]                                                     # visitors to her flat (lumihouse.py)
     item: str | None = Field(default=None, max_length=40)
     count: int = Field(default=1, ge=1, le=lumipet.MAX_HELD, strict=True)
     moments: int = Field(default=0, ge=0, le=lumipet.MAX_MOMENTS, strict=True)   # only read by "import", once
@@ -409,7 +576,7 @@ class PetAction(BaseModel):
 def pet_state(user=Depends(pet_user), conn=Depends(get_games_db)):
     """Lumi as she is right now, caught up from the last time anyone looked. A paired TV shows its owner's pet."""
     with transaction(conn):
-        return lumipet.state(conn, user["id"])
+        return _named(conn, lumipet.state(conn, user["id"]))
 
 
 @router.post("/api/media/games/lumi-pet/act")
@@ -417,10 +584,26 @@ def pet_act(body: PetAction, user=Depends(pet_user), conn=Depends(get_games_db))
     """One care action or purchase. A refusal (too soon, not enough coins) changes nothing and says why."""
     try:
         with transaction(conn):
-            return lumipet.act(conn, user["id"], body.action, item=body.item, count=body.count, moments=body.moments,
+            done = lumipet.act(conn, user["id"], body.action, item=body.item, count=body.count, moments=body.moments,
                                glow=body.glow, slot=body.slot, name=body.name, colour=body.colour, spot=body.spot)
     except lumipet.PetError as refused:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(refused)) from None
+    said = done.get("said") or {}
+    if said.get("door") == "closed" or "block" in said:            # her door shut, or someone blocked: guests go home (lumihouse.py)
+        out = lumihouse.HOUSES.send_home(user["id"], said.get("block"))
+        if out:
+            events.publish_sync(lumitown.CHANNEL, {"kind": "home", "host": user["id"], "out": out})
+            events.publish_sync(lumitown.CHANNEL, {"kind": "moved"})
+    return _named(conn, done)
+
+
+def _named(conn, data: dict) -> dict:
+    """The page's Settings list of who she has blocked needs their names (the save keeps only account ids)."""
+    names = []
+    for uid in (data.get("pet") or {}).get("blocked") or []:
+        person = users.get_user_by_id(conn, uid) if isinstance(uid, int) else None
+        names.append({"id": uid, "name": person["username"] if person else f"someone ({uid})"})
+    return {**data, "blocked": names}
 
 
 class FightStart(BaseModel):

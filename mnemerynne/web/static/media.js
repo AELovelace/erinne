@@ -1101,7 +1101,7 @@
      that place in the town instead of closing. The panel's Stop, or anything cast to the TV, closes the game outright
      (screenMode.command). */
   const gameFrame = $("mc-game-frame");
-  const PLACE = /^[a-z][a-z-]{0,23}$/;   // a town place's id, as the town sends it (static/games/lumi-pet/town-ui.js)
+  const PLACE = /^[a-z][a-z0-9-]{0,23}$/;   // a town place's id, as the town sends it (static/games/lumi-pet/town-ui.js), or "visit-<id>" (someone's flat, lumihouse.py)
   const games = {
     current: null, sub: "", back: null,   // back: {game, at} to return to when this game is left, or null
 

@@ -199,3 +199,18 @@ test("Say something is on the map and inside a place, and opens the chat list", 
   assert.deepEqual(said, ["open", "say:hi", "say:gg", "type", "mute:7", "mute:9", "close"]);
   assert.ok(!Tw.rows({ ...base, at: null, chat: undefined }).some(r => r.key === "say"), "no chat given (older callers): no row");
 });
+
+test("each street's map has a way to friends' flats; at home the chat list can show a guest out", () => {
+  let opened = 0;
+  const map = Tw.rows({ at: null, street: "market", go() {}, open() {}, visit: () => opened++ });
+  const row = map.find(r => r.key === "flats");
+  assert.ok(row, "the Visit a friend's flat row");
+  row.local(); assert.equal(opened, 1);
+  assert.ok(!Tw.rows({ at: "arcade", street: "high", go() {}, open() {}, visit() {} }).some(r => r.key === "flats"), "only on the maps");
+  const shown = [];
+  const chat = { on: true, phrases: [], people: [{ id: 4, name: "jane", muted: false, block: true }, { id: 5, name: "kim", muted: false }],
+                 say() {}, type() {}, close() {}, mute() {}, block: id => shown.push(id) };
+  const list = Tw.chatRows(chat).map(r => r.key);
+  assert.deepEqual(list, ["say-type", "mute-4", "block-4", "mute-5", "say-back"], "Show out only for a guest in her own flat");
+  Tw.chatRows(chat).find(r => r.key === "block-4").local(); assert.deepEqual(shown, [4]);
+});

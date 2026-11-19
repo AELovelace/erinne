@@ -216,3 +216,23 @@ test("snap walking still works from any free place: ◀ ▶ go to the next spot 
   assert.equal(Ru.spot(next).id, "bed");
   assert.equal(next.y, Ru.FRONT, "A snap step stands her at the front of the thing");
 });
+
+// ---- Visiting someone's flat (lumihouse.py, phase 3): the same spots, named for the host, look-only, in the visitor's words.
+test("a visitor's rows: the same spots, named for the host, never 'my', and the door leads out", () => {
+  const asked = [], names = { host: "bob", lumi: "Pip" };
+  const ctx = { look: (t, i) => asked.push(["look", t.id, i]), walk: s => asked.push(["walk", s.room]), door: () => asked.push(["door"]) };
+  for (const r of Ru.ROOMS) {
+    const rows = Ru.guestRows({ room: r.id, at: 0 }, ctx, names), own = Ru.rows({ room: r.id, at: 0 }, { open() {}, walk() {}, door() {} });
+    assert.deepEqual(rows.map(x => x.key), own.map(x => x.key), r.id + ": the same spots in the same order (the cursor and lower bar line up)");
+    for (const row of rows) {
+      assert.doesNotMatch(row.name + " " + row.say, /\bmy\b/i, r.id + "/" + row.key + ": never 'my' (it's theirs)");
+      assert.doesNotMatch(row.name + " " + row.say, /\{|\}/, r.id + "/" + row.key + ": every name filled in");
+    }
+  }
+  const bedroom = Ru.guestRows({ room: "bedroom", at: 0 }, ctx, names);
+  assert.equal(bedroom.find(r => r.key === "thing-bed").name, "bob's bed");
+  bedroom.forEach(r => r.local());
+  assert.deepEqual(asked, [["walk", "kitchen"], ["door"], ["look", "toychest", 2], ["look", "trophy", 3], ["look", "paint", 4], ["look", "bed", 5], ["walk", "den"]]);
+  assert.match(Ru.guestLine(Ru.room("kitchen").things[0], names), /bob's fridge/);
+  assert.match(Ru.guestLine(Ru.room("bedroom").things[0], names), /town/, "their door: back out into town");
+});

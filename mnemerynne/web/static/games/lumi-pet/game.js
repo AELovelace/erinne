@@ -46,7 +46,14 @@
   // (one past the real ones): its rows are the things where she is, and its cursor is where she stands. A thing opens a
   // card: the real tab's rows (roomCard is that thing), with the way back. roomAt is remembered on this device.
   const ROOM = TABS.length, PLACE = $("lp-place").textContent;
-  let roomAt = Ru ? Ru.clean(G.store.get("room-at", null)) : null, roomCard = null, lastThings = ""; // (lastThings: what the lower bar last drew)
+  // Visiting someone's flat (mnemerynne/lumihouse.py, docs/plans/lumi-pet-social.md phase 3): Lumi Pet opened at
+  // ?at=visit-<their account id>. Their rooms, drawn from their own save; her own Lumi walks them; things are look-only.
+  // Nothing about a visit is kept on this device (her own room-at stays as it was).
+  const VISIT = APP === "lumi-pet" ? (function (m) { return m ? Number(m[1]) : null; })(/^visit-(\d{1,9})$/.exec(new URLSearchParams(location.search).get("at") || "")) : null;
+  let roomAt = Ru ? (VISIT ? Ru.clean({ room: "bedroom", at: 1 }) : Ru.clean(G.store.get("room-at", null))) : null, roomCard = null, lastThings = ""; // (lastThings: what the lower bar last drew; a visit starts inside the front door)
+  let visitView = null, visitDoor = null, visitKnock = null, knockAsked = 0, knockPolled = 0; // their flat once in; whose door this is; a knock waiting
+  let houseFolk = [], housePinged = 0, housePingTimer = 0, houseSig = "", knocksWaiting = []; // who else is in this flat; the last check-in; knocks at her own door
+  let flatsOn = false, flats = null; // Lumi Town: the list of friends' flats is open, and what it holds (null: still asking)
   // Free walking (see "Free walking" below):
   const SPEED = { x: 260, y: 130 };   // Drawing units a second, across and in depth (the floor is shallow, so depth is slower).
   const holds = {};                   // who → {x, y}: what each keyboard, pad and panel holds right now (common.js, gamepad.js)
@@ -130,7 +137,7 @@
                         garden: "Lanterns, planters and pretty things for the garden." };
 
   function townGo(change) { // A town row that stays in the town: walk into a place or out, round the corner to the other street, or up to a stall.
-    chatOn = false; // Walking somewhere puts the phrases away.
+    chatOn = false; flatsOn = false; // Walking somewhere puts the phrases (and the flats) away.
     if (change.street) { // Off the end of the street, round the corner: she comes out by its first place, or back by the Casino.
       townStreet = Tw.STREETS[change.street] ? change.street : "high"; townAt = null; marketStall = null; marketDrawer = null;
       picks[tab] = townStreet === "market" ? 0 : Tw.index("casino");
@@ -158,13 +165,13 @@
     G.sound.unlock(); G.sound.tone(659.25, .12, 0, .12); G.sound.tone(880, .16, .1, .1); // The shop bell.
   }
 
-  function townOpen(slug, back, words) { // Off to a game or one of Lumi's apps: she hops to the door and it opens. Leaving it walks back to `back` (a place), or nowhere (her house).
+  function townOpen(slug, back, words, at) { // Off to a game or one of Lumi's apps: she hops to the door and it opens. Leaving it walks back to `back` (a place), or nowhere (her house).
     if (room.dataset.leaving === "true") return; // One press is enough.
     if (townAt) { townPicks[townAt] = picks[tab]; G.store.set("town-picks", townPicks); } // Coming back puts her on the same cabinet.
     room.dataset.leaving = "true"; // game.css: a little hop, and she's gone in.
     say(words || "Let's play! ✨");
     G.sound.unlock(); [587.33, 739.99, 880].forEach(function (f, i) { G.sound.tone(f, 0.12, i * 0.08, 0.16); });
-    setTimeout(function () { openApp(slug, back ? { back: back } : {}); }, 600);
+    setTimeout(function () { openApp(slug, Object.assign(back ? { back: back } : {}, at ? { at: at } : {})); }, 600); // (at: where it opens: a friend's flat, "visit-<id>")
     setTimeout(function () { delete room.dataset.leaving; }, 2500); // Still here (a refused swap, or the browser's Back): she's back on the map.
   }
 
@@ -289,10 +296,20 @@
   }
 
   function townListen() { // A computer or phone hears lines and moves at once (GET town/stream); a TV's play pass can't ride a stream, so it polls.
-    if (!TOWN || townFeed || player || !window.EventSource) return;
+    if (!(TOWN || roomOn()) || townFeed || player || !window.EventSource) return;
     townFeed = new EventSource(API + "town/stream"); // (It reconnects by itself after a blip.)
     townFeed.addEventListener("said", function (event) { try { hear([JSON.parse(event.data)]); } catch (e) { /* a garbled line is skipped */ } });
-    townFeed.addEventListener("moved", function () { clearTimeout(movedSoon); movedSoon = setTimeout(townHere, 300); }); // Someone came, went or moved: who's here now (once, for a burst)
+    townFeed.addEventListener("moved", function () { clearTimeout(movedSoon); movedSoon = setTimeout(TOWN ? townHere : housePing, 300); }); // Someone came, went or moved: who's here now (once, for a burst)
+    townFeed.addEventListener("walk", function (event) { // Someone in her room of a flat took a step.
+      try {
+        const step = JSON.parse(event.data), p = houseFolk.find(function (q) { return q.id === step.uid; });
+        if (!p) { housePingSoon(); return; }
+        p.x = step.x; p.y = step.y; p.face = step.face; placeFolk(p);
+      } catch (e) { /* a garbled step is skipped */ }
+    });
+    townFeed.addEventListener("knock", function () { housePing(); }); // Someone at her door: the check-in brings who.
+    townFeed.addEventListener("answer", function (event) { try { knockAnswered(JSON.parse(event.data)); } catch (e) { /* skipped */ } });
+    townFeed.addEventListener("home", function () { goneHome(); }); // The host has shut the door, or shown her out.
   }
 
   function hear(lines) { // New lines said where she is: into the log, and over the speaker's Lumi for a few seconds. Text only, never markup.
@@ -352,14 +369,195 @@
   }
 
   function chatCtx() { // The town list's chat (town-ui.js chatRows): who's here to mute, and what each row does.
-    const people = visitors.filter(sharesPlace)
-      .map(function (v) { return { id: v.id, name: v.name, muted: muted.has(v.id) }; });
+    const people = (TOWN ? visitors.filter(sharesPlace) : houseFolk.filter(function (p) { return p.room === roomAt.room; }))
+      .map(function (v) { return { id: v.id, name: v.name, muted: muted.has(v.id), block: !TOWN && !VISIT && !v.host }; }); // (at home: guests can be shown out)
     return { on: chatOn, phrases: phrases, people: people,
              open: function () { chatOn = true; picks[tab] = 0; say("What shall I say?"); },
              close: function () { chatOn = false; picks[tab] = 0; },
              say: function (id) { townSay({ phrase: id }); },
              type: function () { chatTyping(true); },
-             mute: chatMute };
+             mute: chatMute, block: blockGuest };
+  }
+
+  // ---- Flats (mnemerynne/lumihouse.py, phase 3): a visit's door, knocks, and who else is in the flat.
+  function visitNames() { return { host: visitView.name, lumi: (visitView.look && visitView.look.name) || "Lumi" }; } // Whose flat, for the guest lines (room-ui.js).
+
+  function visitStart() { // Lumi Pet opened to visit someone's flat: in we go, or knock, or a closed door.
+    G.api(API + "houses/" + VISIT).then(function (data) {
+      visitDoor = data;
+      if (data.access === "own") { location.replace(location.pathname); return; } // Her own flat: just Lumi Pet.
+      if (data.access === "in") {
+        visitView = data; visitKnock = null; roomAt = Ru.clean({ room: "bedroom", at: 1 });
+        say("Hello, " + data.name + "! What a lovely flat~ ✨");
+        housePing();
+      } else say(data.name + "'s front door. " + (data.home ? "Shall I knock?" : "It's very quiet in there…"));
+      lastList = ""; lastHouse = ""; render();
+    }).catch(function (refused) { visitDoor = { name: "", access: "closed" }; say(refused.message || "That door is closed."); lastList = ""; render(); });
+  }
+
+  function doorRows() { // On someone's doorstep: knock (or wait), or go back to town.
+    const name = visitDoor && visitDoor.name ? visitDoor.name : "their", out = [];
+    if (visitDoor && visitDoor.access === "knock") out.push(visitKnock
+      ? { key: "knock-wait", icon: "⏳", name: "Waiting at the door…", hint: "You knocked at " + name + "'s door", say: "Waiting…", note: "Waiting for " + name + " to come to the door…" }
+      : { key: "knock", icon: "🚪", name: "Knock on " + name + "'s door", hint: visitDoor.home ? name + " is home" : "Nobody seems to be in", say: "Knock knock?", local: knock });
+    out.push({ key: "back-town", icon: "🏘", name: "Back to town", hint: "Out into Lumi Town", say: "Back to town?", local: leaveVisit });
+    return out;
+  }
+
+  function knock() { // Knock on their door: an open one just lets her in; otherwise wait for an answer (the stream, or knockCheck).
+    G.api(API + "houses/" + VISIT + "/knock", {}).then(function (data) {
+      if (data.in) { visitStart(); return; }
+      visitKnock = data.knock; knockAsked = knockPolled = Date.now();
+      say("Knock knock! 🚪 Waiting for " + visitDoor.name + "…");
+      G.sound.unlock(); G.sound.tone(330, .08, 0, .2); G.sound.tone(330, .08, .22, .2); // Two little knocks.
+      lastList = ""; render();
+    }).catch(function (refused) { say(refused.message); });
+  }
+
+  function knockAnswered(answer) { // Their answer to her knock: in she comes, or not now.
+    if (!visitKnock) return;
+    visitKnock = null;
+    if (answer.yes) { say(visitDoor.name + " let you in! ✨"); visitStart(); return; }
+    say("Not right now. Maybe later!"); lastList = ""; render();
+  }
+
+  function knockCheck() { // A TV (no stream) asks after its knock every few seconds; anyone gives up after a minute.
+    knockPolled = Date.now();
+    if (Date.now() - knockAsked > 60000) { visitKnock = null; say("Nobody came to the door. Maybe they're busy!"); lastList = ""; render(); return; }
+    const asked = visitKnock;
+    G.api(API + "knocks/" + asked).then(function (state) {
+      if (asked !== visitKnock) return;
+      if (state.answer !== null) knockAnswered({ yes: state.answer });
+      else if (state.gone) { visitKnock = null; say("Nobody came to the door. Maybe they're busy!"); lastList = ""; render(); }
+    }).catch(function () { /* asked again in a moment */ });
+  }
+
+  function guestLook(thing, at) { // Visiting: she walks to one of their things and says something about it (never uses it). Their door leads out.
+    if (typeof at === "number") roomMove({ room: roomAt.room, at: at });
+    if (!visitView) return;
+    if (thing.act === "door") { leaveVisit(); return; }
+    say(Ru.guestLine(thing, visitNames()));
+  }
+
+  function leaveVisit() { // Out of their front door (or off the doorstep), back into Lumi Town.
+    if (room.dataset.leaving === "true") return;
+    room.dataset.leaving = "true";
+    say(visitView ? "Bye bye! Thanks for having me~ 👋" : "Back to town!");
+    G.sound.unlock(); [783.99, 659.25, 523.25].forEach(function (f, i) { G.sound.tone(f, 0.12, i * 0.09, 0.16); });
+    setTimeout(function () { openApp("lumi-town", { at: "home" }); }, 700);
+    setTimeout(function () { delete room.dataset.leaving; }, 2500);
+  }
+
+  function goneHome() { // The host shut the door or showed her out: a polite goodbye.
+    if (!VISIT || !visitView) return;
+    visitView = null; houseFolk = []; drawHouseFolk();
+    say("Time to go home! 👋");
+    setTimeout(function () { openApp("lumi-town", { at: "home" }); }, 1500);
+  }
+
+  function knockRows() { // Someone at her own door: let them in, or not now.
+    const out = [];
+    knocksWaiting.forEach(function (k) {
+      out.push({ key: "let-" + k.id, icon: "🚪", name: "Let " + k.name + " in", hint: k.name + "'s " + k.lumi + " is knocking", say: k.name + " is at my door!", local: function () { answerKnock(k, true); } });
+      out.push({ key: "nope-" + k.id, icon: "🙅", name: "Not now, " + k.name, hint: "They'll hear you're busy", say: "Maybe later?", local: function () { answerKnock(k, false); } });
+    });
+    return out;
+  }
+
+  function answerKnock(k, yes) {
+    knocksWaiting = knocksWaiting.filter(function (w) { return w.id !== k.id; }); lastList = "";
+    G.api(API + "knocks/" + k.id + "/answer", { yes: yes }).then(function () {
+      say(yes ? "Come in, " + k.name + "! ✨" : "Not right now, " + k.name + ".");
+    }).catch(function (refused) { say(refused.message); }).then(function () { render(); });
+  }
+
+  function sayRows() { // Chatting in a flat: when there's someone to talk to (or she's a guest).
+    if (!(VISIT || houseFolk.some(function (p) { return p.room === roomAt.room; }))) return [];
+    return [{ key: "say", icon: "💬", name: "Say something", hint: "Everyone in this room hears it", say: "Shall I say something?",
+              local: function () { chatOn = true; picks[ROOM] = 0; say("What shall I say?"); } }];
+  }
+
+  function blockGuest(id) { // At home: show a guest out, and they can't come back (Settings can unblock them).
+    const who = houseFolk.find(function (p) { return p.id === id; });
+    G.api(API + "act", { action: "block", item: String(id) }).then(function (data) {
+      take(data); chatOn = false;
+      say((who ? who.name : "They") + " has gone home, and can't visit again unless you unblock them in Settings.");
+    }).catch(function (refused) { say(refused.message); }).then(function () { lastList = ""; render(); });
+  }
+
+  function housePingSoon() { if (!housePingTimer && roomOn() && !TOWN) housePingTimer = setTimeout(housePing, 250); } // after a step: once per quarter second at most
+
+  function housePing() { // Say where she stands in this flat (her own: she's home), and hear who else is here, what's said, and knocks.
+    clearTimeout(housePingTimer); housePingTimer = 0;
+    if (!snap || TOWN || !roomOn() || (VISIT && !visitView)) return;
+    housePinged = Date.now();
+    townListen();
+    G.api(API + "houses/here", { host: VISIT, room: roomAt.room, x: roomAt.x, y: roomAt.y, face: facing }).then(function (data) {
+      if (data.place && data.place !== chatPlace) { chatPlace = data.place; chatLog = []; drawLog(); }
+      if (data.phrases) phrases = data.phrases;
+      if (data.you) myId = data.you;
+      hear(data.lines || []);
+      houseFolk = (data.here || []).filter(function (p) { return p && p.look; });
+      const fresh = (data.knocks || []).filter(function (k) { return !knocksWaiting.some(function (w) { return w.id === k.id; }); });
+      knocksWaiting = data.knocks || [];
+      if (fresh.length) { // Someone at her door: a bubble and a little knock.
+        say(fresh[0].name + "'s " + fresh[0].lumi + " is knocking! 🚪");
+        G.sound.tone(392, .08, 0, .2); G.sound.tone(392, .08, .22, .2);
+      }
+      drawHouseFolk();
+      const sig = JSON.stringify([houseFolk.map(function (p) { return [p.id, p.room]; }), knocksWaiting.map(function (k) { return k.id; })]);
+      if (sig !== houseSig) { houseSig = sig; lastList = ""; render(); } // Someone came or went: the list and the lower bar change.
+    }).catch(function (refused) { if (refused.status === 403 && VISIT) goneHome(); });
+  }
+
+  function drawHouseFolk() { // Everyone else in her room of this flat, at full room size, where they stand. Rebuilt only when who's here changes.
+    if (!folkArt || TOWN) return;
+    const here = roomOn() ? houseFolk.filter(function (p) { return p.room === roomAt.room; }) : [];
+    const sig = JSON.stringify([roomAt.room, here.map(function (p) { return [p.id, p.look, p.name, p.host]; })]);
+    if (sig !== folkSig) {
+      folkSig = sig;
+      folkArt.replaceChildren.apply(folkArt, here.map(houseFigure));
+    }
+    here.forEach(placeFolk);
+  }
+
+  function houseFigure(p) { // One of the others: her shadow, her shapes in her look (lumiMarkup: authored), a name tag and a speech line (text only).
+    const ns = "http://www.w3.org/2000/svg", g = document.createElementNS(ns, "g"), body = document.createElementNS(ns, "g");
+    g.setAttribute("class", "lp-folk-one lp-folk-guest lp-folk-house"); g.dataset.id = "guest-" + Number(p.id);
+    body.setAttribute("class", "lp-folk-body");
+    body.innerHTML = '<ellipse cx="0" cy="2" rx="50" ry="11" fill="url(#lp-rm-shade)"/>' +
+      '<svg x="-75" y="-127" width="150" height="141" viewBox="0 0 320 300" overflow="visible">' + lumiMarkup(p.look) + "</svg>"; // (feet at y 0, as hers: room-ui.js)
+    const tag = document.createElementNS(ns, "text"), said = document.createElementNS(ns, "text");
+    tag.setAttribute("class", "lp-folk-name lp-folk-tag"); tag.setAttribute("y", "24");
+    tag.textContent = (p.look.name || "Lumi") + " · " + p.name + (p.host ? " 🏠" : "");
+    said.setAttribute("class", "lp-folk-say lp-folk-big"); said.setAttribute("y", "-150");
+    g.append(body, tag, said);
+    return g;
+  }
+
+  function placeFolk(p) { // Stand one of the others where they are, their size for that depth, facing their way.
+    const g = folkArt && folkArt.querySelector('[data-id="guest-' + Number(p.id) + '"]');
+    if (!g) return;
+    const s = Ru.scale(p.y);
+    g.style.transform = "translate(" + p.x + "px, " + p.y + "px)";
+    g.firstChild.style.transform = "scale(" + (p.face < 0 ? -s : s) + ", " + s + ")";
+  }
+
+  function openFlats() { // Lumi Town's list of friends' flats (GET houses): whose door she may knock at, or walk through.
+    flatsOn = true; flats = null; picks[tab] = 0; chatOn = false;
+    say("Whose flat shall we visit? 🏠");
+    G.api(API + "houses").then(function (data) { flats = data.flats || []; }).catch(function () { flats = []; }).then(function () { lastList = ""; render(); });
+  }
+
+  function flatsRows() {
+    const out = flats === null ? [{ key: "flats-wait", icon: "⏳", name: "Looking up the flats…", hint: "One moment", note: "One moment…" }]
+      : flats.map(function (f) {
+        return { key: "flat-" + f.id, icon: f.home ? "🏠" : "🏚", name: f.name + "'s flat",
+                 hint: (f.home ? f.name + " is home" : "Nobody's home") + " · " + (f.door === "open" ? "door open" : "knock first") + (f.visitors ? " · " + f.visitors + " visiting" : ""),
+                 local: function () { flatsOn = false; townOpen("lumi-pet", null, "Off to " + f.name + "'s flat! 🏠", "visit-" + f.id); } };
+      });
+    if (flats && !flats.length) out.push({ key: "flats-none", icon: "🏘", name: "No flats to visit yet", hint: "Friends with a Lumi and an open door show here", note: "Nobody's flat is open to visit just now." });
+    return out.concat([{ key: "flats-back", icon: "‹", name: "Back", hint: "Escape, Back or B does it too", local: function () { flatsOn = false; picks[tab] = 0; } }]);
   }
 
   function folkFigure(id, look, kind, words) { // One Lumi on the layer: her shapes in her look (lumiMarkup), a name tag, and a speech line.
@@ -481,15 +679,26 @@
   }
 
   function rows() { // What is on offer now, as plain rows: the list and the remote both read from here.
-    if (tab === ROOM) return Ru.rows(roomAt, { open: openCard, walk: roomWalk, door: adventure }); // Room mode: the things where she is.
+    if (tab === ROOM) return roomRows(); // Room mode: the things where she is (or someone else's, visiting).
     const list = tabRows();
     return roomCard ? Ru.cardRows(list, roomCard, closeCard, Boolean(opened.home || (tint && tint.spot))) : list; // A card: the tab's rows (some of them), then back to the room.
   }
 
+  function roomRows(bar) { // The room's own list: its spots, then (last, so the spots keep their places) knocks at her door and chatting.
+    // bar: for the lower bar, which never shows the phrases.
+    if (chatOn && !bar) return Tw.chatRows(chatCtx());
+    if (VISIT) {
+      if (!visitView) return doorRows(); // Still on the doorstep.
+      return Ru.guestRows(roomAt, { look: guestLook, walk: roomWalk, door: leaveVisit }, visitNames()).concat(sayRows());
+    }
+    return Ru.rows(roomAt, { open: openCard, walk: roomWalk, door: adventure }).concat(knockRows()).concat(sayRows());
+  }
+
   function tabRows() { // What the selected tab offers.
     const pet = snap.pet, c = snap.catalog, name = TABS[tab], asleep = sceneNow().asleep;
+    if (name === "town" && flatsOn) return flatsRows(); // Lumi Town: choosing a friend's flat to visit.
     if (name === "town") return Tw.rows({ at: townAt, street: townStreet, desk: DESK, away: Boolean(exploring()), retro: RETRO_ON, seen: pet.town_seen !== false,
-      stall: marketStall, stallRows: stallRows, go: townGo, open: townOpen, chat: chatCtx() }); // Lumi Town: a street's places, the games inside one, a Market stall's wares, or what to say.
+      stall: marketStall, stallRows: stallRows, go: townGo, open: townOpen, chat: chatCtx(), visit: openFlats }); // Lumi Town: a street's places, the games inside one, a Market stall's wares, or what to say.
     if (name === "care") {
       if (awayRows().length) return awayRows(); // She isn't in her room: nothing to cuddle until she is back (the Pantry can still send her a snack).
       const health = snap.health, sore = !health.out && health.hp < health.max; // Hurt, and at home to do something about it.
@@ -552,6 +761,15 @@
     settings.push({ key: "sound", icon: "♪", name: "Sound: " + (G.sound.isOn() ? "on" : "off"), hint: "Little chimes", local: function () { G.sound.toggle(); } });
     if (APP === "lumi-pet") settings.push({ key: "town-seen", icon: "👀", name: "Show me in Lumi Town: " + (pet.town_seen === false ? "off" : "on"), // Also on the town's own map.
       hint: pet.town_seen === false ? "Nobody sees your Lumi in town; you still see theirs" : "Others in Lumi Town see your Lumi there, in her clothes, with her name", send: { action: "town_seen" } });
+    if (APP === "lumi-pet") { // Visitors to her flat (lumihouse.py): her front door, and anyone she has blocked.
+      const door = pet.door || "knock";
+      settings.push({ key: "door", icon: "🚪", name: "My front door: " + { knock: "knock first", open: "open to everyone", closed: "closed" }[door],
+        hint: { knock: "Visitors knock, and you let them in · next: open", open: "Anyone in Lumi Town can walk in · next: closed", closed: "Nobody can visit · next: knock first" }[door],
+        send: { action: "door" } });
+      (snap.blocked || []).forEach(function (b) { // (their names: people's own words, shown as text by the list)
+        settings.push({ key: "unblock-" + b.id, icon: "🚫", name: "Unblock " + b.name, hint: "They can visit your flat again", send: { action: "unblock", item: String(b.id) } });
+      });
+    }
     if (APP === "lumi-pet") settings.push({ key: "room-mode", icon: "🏠", name: "Room mode: " + (pet.room_mode === false ? "off" : "on"), // Walk her flat and press things, or these lists.
       hint: pet.room_mode === false ? "Lists, as before · on: walk Lumi's flat and press the fridge, the bed, the wardrobe…" : "Walk Lumi's flat and press things · off: just the lists", send: { action: "room_mode" } });
     if (WHO) settings.push({ key: "switch-player", icon: "⇄", name: "Switch player", hint: "Playing " + (player ? player.name + "'s" : "this TV's own") + " Lumi · someone else presses OK on their remote", local: function () { forgetPlayer("Who's playing next?"); } }); // A shared TV: hand it to the next person.
@@ -571,14 +789,14 @@
 
   // ---- Room mode: walking her flat, opening and closing cards (room-ui.js has the rooms, room-art.js the new things).
   function roomOn() { // Room mode is showing: Lumi Pet, her setting on (old saves count as on), and nobody choosing a player or on the couch.
-    return APP === "lumi-pet" && Boolean(Ru) && Boolean(snap) && snap.pet.room_mode !== false && !picking && !couching();
+    return APP === "lumi-pet" && Boolean(Ru) && Boolean(snap) && (Boolean(VISIT) || snap.pet.room_mode !== false) && !picking && !couching();
   }
 
   function syncRoom() { // Keep the tab in step with room mode: the room's own rows when no card is open, the lists when it's off.
     const on = roomOn();
     if (!on) { roomCard = null; if (tab === ROOM) changeTab(0); }
     else if (!roomCard && tab !== ROOM) changeTab(ROOM); // Switched on (from Settings' list), or a card closed.
-    if (on) picks[ROOM] = roomAt.at; // The room's cursor is where she stands.
+    if (on && !chatOn && !(VISIT && !visitView)) picks[ROOM] = roomAt.at; // The room's cursor is where she stands (in a list of phrases, or on a doorstep, it's the list's own).
     $("gm").dataset.rooms = String(on); // game.css folds the tabs away.
     return on;
   }
@@ -587,13 +805,15 @@
     target = null; // A snap move (a remote, the lower bar, a thing pressed) ends any free walk to a clicked spot.
     const next = Ru.clean(to), crossing = next.room !== roomAt.room, moved = crossing || next.at !== roomAt.at || next.x !== roomAt.x; // Measured before she goes.
     roomAt = next; picks[ROOM] = roomAt.at;
-    G.store.set("room-at", roomAt);
+    if (!VISIT) G.store.set("room-at", roomAt); // (a visit isn't remembered: home is where she was)
+    housePingSoon();                             // the others in the flat see her step
     if (moved) { G.sound.unlock(); G.sound.tone(crossing ? 587.33 : 523.25, .08, 0, .06); } // A higher step through a doorway.
   }
 
   function roomWalk(to) { roomMove(to); lastList = ""; render(); } // A "To the kitchen" row, or an edge arrow.
 
   function openCard(thing, at) { // Use a thing: she walks to it and its card opens (that tab's rows).
+    if (VISIT) { guestLook(thing, at); return; } // Someone else's: she only looks (and their door leads out).
     if (typeof at === "number") roomMove({ room: roomAt.room, at: at });
     if (thing.act === "door") { adventure(); return; } // The front door: straight out into town, as ever.
     const to = TABS.indexOf(thing.tab);
@@ -617,6 +837,7 @@
   }
 
   function roomKey(action, arrow, meta) { // The keys in room mode. True when used here; false lets the usual handling run (a card's list, Enter, Play).
+    if (chatOn || (VISIT && !visitView)) return false; // The phrases, or a doorstep: the arrows go through the list.
     if (tab === ROOM) {
       if (arrow && meta && meta.held) return true; // A held key, pad or panel button: free walking (onHold) moves her, not a snap step.
       if (arrow) { roomMove(Ru.step(roomAt, action === "left" || action === "up" ? -1 : 1)); lastList = ""; render(); return true; }
@@ -674,14 +895,14 @@
     return size > 1 ? { x: x / size, y: y / size } : { x: x, y: y };
   }
 
-  function canWalk() { return roomOn() && tab === ROOM && !roomCard && room.dataset.leaving !== "true"; } // The room is showing, no menu open, not going out of the door.
+  function canWalk() { return roomOn() && tab === ROOM && !roomCard && !chatOn && !(VISIT && !visitView) && room.dataset.leaving !== "true"; } // The room is showing, no menu open, not going out of the door.
 
   function startWalk() { if (!walkFrame) { walkLast = 0; walkFrame = requestAnimationFrame(walkTick); } } // Start the loop (once).
 
   function stopWalk() { // Nothing walks her: CSS animations back on, and her place remembered on this device.
     walkFrame = 0; walkLast = 0;
     if (room.dataset.walking) delete room.dataset.walking;
-    if (!walkSaved) { walkSaved = true; G.store.set("room-at", roomAt); }
+    if (!walkSaved) { walkSaved = true; if (!VISIT) G.store.set("room-at", roomAt); }
   }
 
   function walkTick(now) { // One frame of walking.
@@ -713,12 +934,14 @@
     if (next.room !== before.room) { G.sound.tone(587.33, .08, 0, .06); target = null; } // Through a doorway: the doorway's step.
     if (next.room !== before.room || next.at !== before.at) { lastList = ""; render(); } // A new room, or a new spot (her bubble, the lower bar, the list)
     else placeLumi();                                                                        // otherwise only where she is
+    housePingSoon();                                                                         // and the others in the flat see her walk
     walkFrame = requestAnimationFrame(walkTick);
   }
 
   function placeLumi() { // Where she stands, drawn: the pan that keeps her in view, her place, size and facing (game.css), her shadow, the thing in reach.
     const pan = roomPan(roomAt.x);
     houseArt.setAttribute("viewBox", pan + " 0 1000 500");
+    if (folkArt) folkArt.setAttribute("viewBox", pan + " 0 1000 500"); // the others in the flat pan with the room
     room.style.setProperty("--gx", String(Math.round(roomAt.x - 500 - pan))); // from the middle of what's shown
     room.style.setProperty("--gy", String(Math.round(roomAt.y)));             // her feet
     room.style.setProperty("--gs", Ru.scale(roomAt.y).toFixed(3));            // a little smaller further back
@@ -742,11 +965,13 @@
   function drawRoom(preview) { // Room mode's picture: the room she's in (house.js walls, room-art.js things), and her standing at her spot.
     const here = Ru.room(roomAt.room);
     const trying = tint && tint.spot ? [tint.spot, tintHex()] : preview || null; // a colour being painted, or a piece tried on
-    const house = RA.view(here.id, snap.pet.house, trying); // this room's own wall and floor (else the bedroom's), with that in it
+    const own = VISIT ? (visitView ? visitView.house : {}) : snap.pet.house; // visiting: their flat as they decorated it (lumipet.house_view)
+    const house = RA.view(here.id, own, VISIT ? null : trying); // this room's own wall and floor (else the bedroom's), with that in it
     room.dataset.rooms = here.id;
-    $("lp-place").textContent = here.name;
+    const whose = VISIT && (visitView || visitDoor) ? (visitView || visitDoor).name : ""; // (a person's own name: text only)
+    $("lp-place").textContent = whose ? whose.toUpperCase() + "'S " + (visitView ? here.name.replace(/^HER |^THE /, "") : "FRONT DOOR") : here.name; // (not in yet: their doorstep)
     const scenery = document.querySelector(".parallax"), backdrop = Boolean(scenery) && getComputedStyle(scenery).display !== "none";
-    const boxes = here.id === "bedroom" && snap.boxes ? snap.boxes.left : 0;
+    const boxes = here.id !== "bedroom" ? 0 : VISIT ? (visitView ? visitView.boxes : 0) : (snap.boxes ? snap.boxes.left : 0);
     const signature = JSON.stringify(["room", here.id, house, backdrop, boxes]);
     if (signature !== lastHouse) { // Only redrawn when the room or what's in it changes: walking just moves her and her shadow (placeLumi).
       lastHouse = signature;
@@ -755,14 +980,15 @@
         RA.scene(here.id, house) + Ru.hits(here.id, roomAt); // All authored in house.js, room-art.js and room-ui.js; nothing a person typed.
     }
     placeLumi(); // A narrow screen follows her across the room (the pan); a wide one shows it all.
+    drawHouseFolk(); // Whoever else is in this room of the flat.
   }
 
   function drawThings(on) { // Room mode's lower bar: the things in this room (and the ways through), each with Lumi's bubble saying what it is.
     const bar = $("lp-things");
     bar.hidden = !on;
     if (!on) { lastThings = ""; return; }
-    const list = Ru.rows(roomAt, { open: openCard, walk: roomWalk, door: adventure }); // The same rows the room's list has.
-    const current = roomCard ? Ru.find(roomAt.room, roomCard.id) : roomAt.at; // Her spot, or the thing whose menu is open.
+    const list = roomRows(true); // The same rows the room's list has (never the phrases).
+    const current = roomCard ? Ru.find(roomAt.room, roomCard.id) : (VISIT && !visitView) || chatOn ? picks[ROOM] : roomAt.at; // Her spot, the thing whose menu is open, or (a doorstep, the phrases) the list's cursor.
     const signature = roomAt.room + "|" + list.map(function (row) { return row.key; }).join("|");
     if (signature !== lastThings) { // Rebuilt only when she changes room, so a button being pressed is never swapped mid-press.
       lastThings = signature;
@@ -786,8 +1012,8 @@
   }
 
   function drawRoomBits(on) { // Room mode's extras around the picture: her speech bubble, the lower bar, the arrows to the next rooms.
-    const guide = $("lp-guide"), ways = on && !roomCard ? Ru.neighbours(roomAt) : { left: null, right: null };
-    $("gm").dataset.card = String(on && Boolean(roomCard)); // game.css shows the right-hand panel only for an open menu.
+    const guide = $("lp-guide"), ways = on && !roomCard && !(VISIT && !visitView) ? Ru.neighbours(roomAt) : { left: null, right: null };
+    $("gm").dataset.card = String(on && (Boolean(roomCard) || chatOn)); // game.css shows the right-hand panel only for an open menu (or the phrases, with the chat log).
     if (!on) { delete room.dataset.rooms; guide.hidden = true; $("lp-place").textContent = PLACE; if (houseArt.getAttribute("viewBox") !== "0 0 1000 500") houseArt.setAttribute("viewBox", "0 0 1000 500"); } // unpanned again
     else { guide.hidden = false; guide.textContent = $("lp-message").textContent; } // Her bubble says what she last said.
     drawThings(on);
@@ -1638,6 +1864,8 @@
       else if (send.action === "unpack") { const got = data.said; say("Box open! " + got.name + (got.put_out ? ": Lumi puts it out at once." : ". Something's already there, so she tucks it away for now (Home).") + (got.left ? " " + got.left + " boxes to go." : " That's the last box. She's all moved in!")); effect("play", "📦"); }
       else if (send.action === "name") { say("Hello, " + data.pet.name + "! What a lovely name."); effect("cuddle", "♡"); }
       else if (send.action === "paint") { tint = null; picks[tab] = 1; say("Fresh paint! I love it."); effect("cuddle", "✧ 🎨"); }
+      else if (send.action === "door") say({ knock: "Visitors will knock first, and I'll let them in. 🚪", open: "My door is open to everyone! ✨", closed: "Door closed. No visitors for now." }[data.said.door]);
+      else if (send.action === "unblock") say("They can visit again.");
       else if (send.action === "colour") { tint = null; picks[tab] = 1; say(data.pet.colour ? "Ooh, " + data.pet.colour.toUpperCase() + "! That's her very own colour now." : "Back to her glow's own colours."); effect("cuddle", "✧ ✦"); }
       else if (send.action === "stat") { const names = snap.battle.rules.stat_names; say(names[send.item] + " is " + data.progress.stats[send.item] + " now · " + data.progress.stat_points.left + " points left."); effect("cuddle", "↑"); }
       else if (send.action === "stats_auto") { const names = snap.battle.rules.stat_names, placed = data.said.placed; say("Auto placed them: " + Object.keys(placed).map(function (key) { return "+" + placed[key] + " " + names[key].toLowerCase(); }).join(", ") + "."); effect("play", "✨"); }
@@ -1660,7 +1888,7 @@
     const arrow = ["left", "right", "up", "down"].indexOf(action) >= 0;
     if (action === "next" || action === "prev" || action === "play" || arrow) pendingConfirm = null; // Only a second Enter confirms.
     if (roomOn() && syncRoom() && roomKey(action, arrow, meta)) return; // Room mode: the arrows walk her flat; in a card, ⏮ ⏭ go back.
-    if (TOWN && !chatOn && (arrow || action === "next" || action === "prev")) { townMove(action); return; } // Lumi Town: every arrow walks her (it has no other tabs to change to); while chatting they go through the phrases.
+    if (TOWN && !chatOn && !flatsOn && (arrow || action === "next" || action === "prev")) { townMove(action); return; } // Lumi Town: every arrow walks her (it has no other tabs to change to); while chatting they go through the phrases.
     if (albuming()) { albumKey(action); return; } // So has the Collection's gallery.
     if (room.dataset.browse === "true" && arrow && browserKey(action)) return; // The party browser: arrows move over the cards.
     if (treeing()) { skillsKey(action); return; } // The skill tree has its own keys too: the arrows move over the skills.
@@ -1697,7 +1925,7 @@
   }
   G.onAction(onKey, { directEnter: function () { return true; } });
   function backStep() { // Escape, Backspace, a pad's B: one step back inside the game (true), or nothing to go back from (false: leave the game).
-    if (TOWN && chatOn) { chatOn = false; picks[tab] = 0; lastList = ""; render(); return true; } // The town's phrases: back to the places.
+    if (chatOn || flatsOn) { chatOn = false; flatsOn = false; picks[tab] = 0; lastList = ""; render(); return true; } // The phrases, or the list of flats: back to the places (or the room).
     return roomOn() && closeCard(); // Room mode: a card closes.
   }
   if (G.onBack) G.onBack(backStep);
@@ -1718,7 +1946,7 @@
     $("lp-chat-input").addEventListener("keydown", function (event) { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); chatTyping(false); } });
   }
   document.addEventListener("keydown", function (event) { // T in Lumi Town opens the typing box (never while typing already).
-    if ((event.key !== "t" && event.key !== "T") || event.ctrlKey || event.metaKey || event.altKey || !TOWN || !snap) return;
+    if ((event.key !== "t" && event.key !== "T") || event.ctrlKey || event.metaKey || event.altKey || !snap || !(TOWN || roomOn())) return;
     if (event.target && event.target.matches && event.target.matches("input, select, textarea")) return;
     event.preventDefault(); chatTyping(true);
   });
@@ -1841,7 +2069,9 @@
     if (!snap) return;
     const task = snap.pet.task;
     if ((task && serverNow() >= task.finishesAt) || Date.now() - polled > 15000) { polled = Date.now(); refresh(); }
-    if (TOWN) { folkWander(); if (Date.now() - townPolled > 5000) townHere(); } // Lumi Town: the townsfolk, and who else is in town (every five seconds).
+    if (TOWN) { folkWander(); if (Date.now() - townPolled > 5000) townHere(); }
+    if (!TOWN && roomOn() && Date.now() - housePinged > 5000) housePing(); // A flat (her own, or a visit): who's here, every five seconds.
+    if (visitKnock && Date.now() - knockPolled > 3000) knockCheck();      // Waiting at a door: has anyone come? // Lumi Town: the townsfolk, and who else is in town (every five seconds).
     if (gardening()) { // The garden: send the presses made this second, and look in more often so the numbers move.
       lumiWanders();
       flushPresses();
@@ -1931,6 +2161,7 @@
     else if (awayRows().length) say(exploring() ? "Lumi is out exploring. Lumi Dungeons is where she is." : "Lumi is in the middle of a fight, over in Lumi Dungeons."); // She is busy in another of her apps.
     else if (APP === "lumi-dungeons") say("Where shall we go? Pick a place to explore, or find a fight in the arena.");
     announceDone(); welcomeHome(); render(); // (A fresh trip home outranks a finished nap: it is said last.)
+    if (VISIT) visitStart(); else if (roomOn()) housePing(); // A visit: their door. At home: she's home (visitors can knock).
   }).catch(function () {
     say("Lumi can't be reached just now. She'll be here when the connection is back.");
   }); }

@@ -189,6 +189,18 @@ new `place-chat.js` (pure: bubble layout, phrase list, rate-limit messages) + ga
 
 ## Phase 3: Visiting houses
 
+> **Built 2026-11-19.** How it differs from the sketch below:
+> - `lumihouse.py` (not `lumiplaces.py`): `Houses` (who's in which flat and where they stand, knocks, 3-hour passes)
+>   and `access()`. Town presence stays in `lumitown.py`; `_where_now` picks whichever a person reported last.
+> - A visit is Lumi Pet at `?at=visit-<id>` (media.js's `at` pattern now allows digits). Before you're in, you stand
+>   on their doorstep with Knock / Back to town.
+> - Entry is the town list's **🏠 Visit a friend's flat** on each street's map; pressing someone's Lumi in town isn't
+>   wired up (the folk layer takes no presses).
+> - The others in a flat are drawn on the folk layer at room size and walk live (`walk` events from each page's
+>   `POST houses/here`, sent at most four times a second while walking, and every 5 s).
+> - "Sit on the bed / play with a toy" guest acts weren't built: things are purely look-only, with a line each.
+> - Blocking is **Show <name> out** in the host's 💬 list; **Unblock** rows in Settings. No push notification for knocks.
+
 ### Getting there
 - **In town**: press someone's Lumi → "Visit <name>'s flat". (Their Lumi is right there, so it's natural.)
 - **Lumi Town has a "Flats" door** on the high street → a list of whose flats are open right now / to you.

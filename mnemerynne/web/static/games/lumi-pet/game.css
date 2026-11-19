@@ -377,6 +377,15 @@
 .lp-folk { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; display: none; overflow: visible; }
 .lp-room[data-town] .lp-folk { display: block; }
 .lp-room[data-town][data-leaving="true"] .lp-folk { opacity: .6; }
+/* Visiting flats (game.js drawHouseFolk, lumihouse.py; 2026-11-19): the host and other guests in her room of a flat, on
+   the same layer, at full room size (feet where they stand, smaller further back), walking as their pages say they walk. */
+.lp-room[data-rooms] .lp-folk { display: block; }
+.lp-room[data-rooms][data-leaving="true"] .lp-folk { opacity: .6; }
+.lp-folk-house { transition: transform .3s linear; }
+.lp-folk-house .lp-folk-body { transition: transform .3s; }
+.lp-folk-house .lp-folk-name { font-size: 20px; stroke-width: 5px; }
+.lp-folk-house .lp-folk-say.lp-folk-big { font-size: 24px; stroke-width: 10px; }
+@media (prefers-reduced-motion: reduce) { .lp-folk-house, .lp-folk-house .lp-folk-body { transition: none; } }
 .lp-folk-one { transition: transform 3s linear; }
 .lp-folk-guest { transition: transform .45s ease; }
 .lp-folk-flip[data-flip="true"] { transform: scaleX(-1); }
