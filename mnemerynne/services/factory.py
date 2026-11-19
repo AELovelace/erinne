@@ -45,6 +45,8 @@ def create_service(name: str, settings: Settings | None = None, services=None) -
         await asyncio.gather(task, return_exceptions=True)
     settings = settings or get_settings()
     secret_key = security.check_secret_key(settings) or secrets.token_urlsafe(48)   # the same key: the same cookies
+    if security.exposed(settings) and not settings.public_url:                       # parity with web.app.create_app
+        log.warning("MNEMERYNNE_PUBLIC_URL is not set; links and OAuth addresses follow the request's Host.")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

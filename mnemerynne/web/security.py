@@ -30,10 +30,19 @@ class InsecureConfig(RuntimeError):
     """The server would run with settings that aren't safe where it's reachable."""
 
 
+def behind_proxy(settings: Settings) -> bool:
+    """True when a reverse proxy (the box's front door) forwards to us. FORWARDED_ALLOW_IPS
+    is set only when a proxy sits in front, so any value means outside traffic reaches us
+    through it even though uvicorn itself binds to loopback."""
+    return bool(settings.forwarded_allow_ips.strip())
+
+
 def exposed(settings: Settings) -> bool:
     """True when other machines can reach the server: it has a public address,
-    or listens on more than loopback."""
-    return bool(settings.public_url) or settings.host not in _LOOPBACK_HOSTS
+    listens on more than loopback, or sits behind a reverse proxy (front door).
+    Without the last case a front-door install (host 127.0.0.1) that forgot to set
+    PUBLIC_URL would skip the secret-key check while still being internet-facing."""
+    return bool(settings.public_url) or settings.host not in _LOOPBACK_HOSTS or behind_proxy(settings)
 
 
 def https_only(settings: Settings) -> bool:

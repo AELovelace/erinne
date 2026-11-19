@@ -77,6 +77,21 @@ def test_development_on_loopback_may_run_without_a_key(tmp_path):
     assert security.check_secret_key(_settings(tmp_path, secret_key="short-key")) == "short-key"
 
 
+def test_secret_key_enforced_behind_a_front_door(tmp_path):
+    # Bound to loopback with no public_url, but a reverse proxy forwards to us: FORWARDED_ALLOW_IPS
+    # makes the app internet-reachable, so missing/short keys must still be refused (audit 1.8).
+    behind = {"forwarded_allow_ips": "127.0.0.1,10.1.1.20"}
+    assert security.behind_proxy(_settings(tmp_path, **behind))
+    assert security.exposed(_settings(tmp_path, **behind))        # exposed despite loopback host + empty public_url
+    with pytest.raises(security.InsecureConfig):
+        security.check_secret_key(_settings(tmp_path, **behind))                       # missing key
+    with pytest.raises(security.InsecureConfig):
+        security.check_secret_key(_settings(tmp_path, secret_key="short-key", **behind))  # too short
+    assert security.check_secret_key(_settings(tmp_path, secret_key=GOOD_KEY, **behind)) == GOOD_KEY
+    # A bare FORWARDED_ALLOW_IPS unset (normal local dev) stays unexposed.
+    assert not security.behind_proxy(_settings(tmp_path))
+
+
 def test_server_refuses_to_start_without_a_key_when_public(tmp_path):
     with pytest.raises(security.InsecureConfig):
         create_app(_settings(tmp_path, public_url="https://erynne.example.org"))

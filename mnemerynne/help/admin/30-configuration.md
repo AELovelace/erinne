@@ -10,7 +10,7 @@ No inline comments in the file: systemd would keep them as part of the value.
 |---|---|---|
 | `DATA_DIR` | `data` (`/var/lib/mnemerynne` on the server) | Database, blobs, versions, proposals, temp files, `synonyms.txt`, `router.json`, `mnemerynne.mcpb`. |
 | `HOST`, `PORT` | `127.0.0.1`, `38200` | Where the web app listens. Keep loopback behind the proxy. |
-| `SECRET_KEY` | empty | Signs sessions and encrypts stored credentials (API secrets, Microsoft 365 links, balancer key, Claude keys). Required, 32+ characters, whenever `PUBLIC_URL` is set or the host isn't loopback. Changing it loses every stored credential. Keep a copy off the box. |
+| `SECRET_KEY` | empty | Signs sessions and encrypts stored credentials (API secrets, Microsoft 365 links, balancer key, Claude keys). Required, 32+ characters, whenever the server is reachable from outside: `PUBLIC_URL` is set, the host isn't loopback, or it's behind a reverse proxy (`FORWARDED_ALLOW_IPS` set). Changing it loses every stored credential. Keep a copy off the box. |
 | `SESSION_MAX_AGE` | 86400 | Seconds a browser stays signed in. |
 | `SESSION_HTTPS_ONLY` | unset | Cookie only over HTTPS. Unset: on whenever `PUBLIC_URL` is https. |
 | `PUBLIC_URL` | empty | The address people use, e.g. `https://erynne.example.internal`. Links handed to Claude and the OAuth issuer are built on it. |

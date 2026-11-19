@@ -5,12 +5,13 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="MNEMERYNNE_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="MNEMERYNNE_", env_file=".env", extra="ignore",
+                                      populate_by_name=True)   # lets tests/code set fields by name even when they have an env alias
 
     # Storage
     data_dir: Path = Path("data")
@@ -25,8 +26,16 @@ class Settings(BaseSettings):
     # nginx sends file bytes (X-Accel-Redirect, web/sendfile.py) for requests that came through the box's front
     # door with its accel locations (`front-door.sh accel on` sets both). Off: Python sends every file itself.
     accel: bool = False
+    # The reverse proxy / front door uvicorn trusts for X-Forwarded-* headers
+    # (deploy/linux/front-door.sh sets it; uvicorn reads the same variable). It is
+    # set only when something sits in front of us, so any value means the app is
+    # reachable from outside even while bound to loopback -> security.exposed() is
+    # true and the secret-key rules below are enforced. No MNEMERYNNE_ prefix: it's
+    # uvicorn's own variable, so read it under its bare name (and the prefixed one).
+    forwarded_allow_ips: str = Field(
+        "", validation_alias=AliasChoices("FORWARDED_ALLOW_IPS", "MNEMERYNNE_FORWARDED_ALLOW_IPS"))
     # Signs sessions and encrypts stored credentials. A server others can reach
-    # (public_url set, or host not loopback) refuses to start without a real one.
+    # (public_url set, host not loopback, or behind a reverse proxy) refuses to start without a real one.
     secret_key: str = ""
     session_max_age: int = 24 * 3600
     # Session cookie only over HTTPS. Unset: on whenever public_url is https.
