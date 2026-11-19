@@ -26,14 +26,16 @@
   const OUT = 'stroke="' + LINE + '" stroke-width="3"';                              // The outline every piece has.
 
   // ---- The kitchen.
+  const FRIDGE_BACK = -55; // How far back (up the floor) the fridge stands: against the wall, with floor in front of it.
   function fridge() { // A tall rounded fridge with a freezer door, a glowing handle and a few magnets. Opens the Pantry.
-    return shadow(380, 472, 62) +
+    return group(shadow(380, 472, 62) +
       rect(328, 222, 104, 250, "#e9eef7", 'rx="16" ' + OUT) +                                   // the body
       path("M328 300 H432", "none", 'stroke="' + LINE + '" stroke-width="3"') +               // freezer above, fridge below
       rect(414, 244, 7, 38, GLOW, 'rx="3"') + rect(414, 318, 7, 70, GLOW, 'rx="3"') +         // handles in her glow
       circle(352, 330, 7, "#ff8ecb") + rect(366, 344, 16, 12, "#ffdc83", 'rx="2"') +         // magnets
       path("M348 360 l6 -10 l6 10 z", "#70ebea") +
-      rect(344, 236, 40, 30, "#fff", 'rx="3" opacity=".9"') + path("M350 246 H378 M350 254 H372", "none", 'stroke="#c9a8ff" stroke-width="2"'); // a little shopping list
+      rect(344, 236, 40, 30, "#fff", 'rx="3" opacity=".9"') + path("M350 246 H378 M350 254 H372", "none", 'stroke="#c9a8ff" stroke-width="2"'), // a little shopping list
+      'transform="translate(0 ' + FRIDGE_BACK + ')"');
   }
 
   function bowl() { // Her food bowl on a mat, always a little full: the free snacks. Opens the Pantry too.
@@ -52,8 +54,8 @@
     return rect(568, 300, 104, 10, "#8a5a3b", 'rx="3" ' + OUT) +                               // the shelf
       path("M580 310 L590 330 M660 310 L650 330", "none", 'stroke="' + LINE + '" stroke-width="4"') + // its brackets
       bottle(592, "#ff6b8b", 40) + bottle(620, "#70ebea", 52) + bottle(648, "#8be9a8", 38) +
-      rect(598, 220, 44, 44, INK, 'rx="8" opacity=".85"') +                                   // a little neon sign above it:
-      group(path("M620 228 V256 M606 242 H634", "none", 'stroke="' + GLOW + '" stroke-width="6" stroke-linecap="round"'), 'class="lp-tw-glow"'); // a glowing cross, for mending
+      rect(600, 188, 40, 40, INK, 'rx="8" opacity=".85"') +                                   // a little neon sign above it, clear of the bottles:
+      group(path("M620 196 V220 M608 208 H632", "none", 'stroke="' + GLOW + '" stroke-width="6" stroke-linecap="round"'), 'class="lp-tw-glow"'); // a glowing cross, for mending
   }
 
   function counter() { // A low kitchen counter between the fridge and the shelf, so the kitchen reads as one at a glance.

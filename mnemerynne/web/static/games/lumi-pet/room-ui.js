@@ -24,7 +24,7 @@
   const ROOMS = [
     { id: "kitchen", name: "HER KITCHEN", things: [
       { id: "fridge", icon: "🧊", name: "My fridge", hint: "Snacks and treats", say: "My fridge! Snacks and treats live in here.", open: "Something tasty? I'll share!",
-        x: 380, box: [325, 215, 110, 260], tab: "pantry" },
+        x: 380, box: [325, 160, 110, 265], tab: "pantry" },
       { id: "bowl", icon: "🥣", name: "My bowl", hint: "Free snacks, always there", say: "My bowl! It's never, ever empty.", open: "Ooh, what's in my bowl today?",
         x: 500, box: [455, 395, 90, 70], tab: "pantry" },
       { id: "potions", icon: "🧪", name: "My potion shelf", hint: "Mends me after a fight", say: "My potions, for when I'm hurt after a fight.", open: "Glug glug!",
