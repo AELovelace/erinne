@@ -354,12 +354,20 @@
 .lp-room[data-town] .lp-caption { display: none; } /* The places' own signs and the label say it. */
 .lp-room[data-town][data-leaving="true"] .lp-pet-wrap { transform: translateY(calc(-16 * var(--u))) scale(.5); opacity: 0; transition: transform .55s ease-in, opacity .55s ease-in; } /* In through the door. */
 .lp-house [data-click^="place:"], .lp-house [data-click^="game:"], .lp-house [data-click="leave"] { cursor: pointer; }
-.lp-house .lp-tw-on { filter: drop-shadow(0 0 7px #ff8ecb) brightness(1.08); }
-.lp-house .lp-tw-mark { animation: lp-tw-mark 1.4s ease-in-out infinite alternate; }
+.lp-house .lp-tw-on { filter: drop-shadow(0 0 7px var(--pet-glow, #ff8ecb)) brightness(1.08); }   /* What the cursor is on glows in Lumi's own colour. */
+.lp-house .lp-tw-mark { stroke: var(--pet-glow, #ff8ecb); animation: lp-tw-mark 1.4s ease-in-out infinite alternate; }   /* The dashed ring where she's going, in her colour too. */
 .lp-house .lp-tw-glow { animation: lp-tw-glow 2.6s ease-in-out infinite alternate; }
 @keyframes lp-tw-mark { from { opacity: .45; } to { opacity: 1; } }
 @keyframes lp-tw-glow { from { opacity: .65; } to { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .lp-room[data-town] .lp-pet-wrap { transition: none; } .lp-house .lp-tw-mark, .lp-house .lp-tw-glow { animation: none; } }
+/* The cyberpunk town (town-art.js, 2026-11-19): a few lights take Lumi's glow (lp-tw-pet fills, lp-tw-pet-line strokes), the rain
+   slides down a tile of drops drawn twice (so it loops with no seam), and the road grates' steam rises and settles. */
+.lp-house .lp-tw-pet { fill: var(--pet-glow, #ff8ecb); }
+.lp-house .lp-tw-pet-line { stroke: var(--pet-glow, #ff8ecb); }
+.lp-house .lp-tw-rain { animation: lp-tw-rain 1.2s linear infinite; }
+.lp-house .lp-tw-steam { transform-box: fill-box; transform-origin: 50% 100%; animation: lp-tw-steam 3.4s ease-in-out infinite alternate; }
+@keyframes lp-tw-rain { from { transform: translateY(0); } to { transform: translateY(560px); } }   /* 560: the height of the tile, so the second copy lands where the first began. */
+@keyframes lp-tw-steam { from { transform: translateY(4px) scale(.9); opacity: .5; } to { transform: translateY(-6px) scale(1.1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .lp-room[data-town] .lp-pet-wrap { transition: none; } .lp-house .lp-tw-mark, .lp-house .lp-tw-glow, .lp-house .lp-tw-steam { animation: none; } .lp-house .lp-tw-rain { display: none; } }
 .lp-tabs[data-count="1"] { display: none; } /* Lumi Town has one list: no tabs to pick between. */
 .lp-room[data-town-still] .lp-pet-wrap { transition: none; } /* Opening the town: she's already at the door, not sliding in from the middle. */
 .lp-room[data-town] .lp-room-top { text-shadow: 0 0 4px #1a0f2e, 0 0 10px #1a0f2e; } /* Readable over a bright daytime sky. */
