@@ -24,10 +24,53 @@
     if (framed) window.parent.postMessage(Object.assign({ type: "mnemerynne-game-" + kind }, extra || {}), location.origin);
   }
 
-  function act(action, controller, remote) { // A signed panel input keeps its identity (and says which remote it was); local keys and older games need neither.
+  function act(action, controller, remote, meta) { // A signed panel input keeps its identity (and says which remote it was); local keys and older games need neither.
     sound.unlock();
-    if (onAction) onAction(action, controller, remote);
+    if (onAction) onAction(action, controller, remote, meta); // meta: { held: true } on a direction that MGame.onHold is also walking (see below)
   }
+
+  // ---- Held walking (Lumi Pet's free walking, 2026-11-19), opt-in through MGame.onHold(fn). A game that asks gets
+  // fn(who, x, y) whenever a held direction changes: who is "keys" (arrows and WASD), or "panel:<controller>" (a remote
+  // panel in gamepad mode, the Tab5 or a phone, whose buttons say when they go up as well as down). x and y are -1..1,
+  // y -1 being up. A remote panel's press mode (mnemerynne-game-key) has no "let go", so it stays a single press.
+  // The direction actions still arrive as before, tagged { held: true }, so menus keep working and the game can skip
+  // them where the hold already moves something. Games that never call onHold see no change at all.
+  const WAYS = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] }; // a direction as a step on x and y
+  let onHold = null;
+  const holding = {};   // who → { key: direction } of what's held right now (key: the keyboard's e.code, or the pad button)
+  const heldKeys = {};  // e.code → direction: the keyup lets go of the same key even if Shift changed its letter in between
+
+  function way(held) { // The walking direction of a set of held directions: opposite ones cancel, each axis -1..1.
+    let x = 0, y = 0;
+    Object.keys(held).forEach(function (key) { const step = WAYS[held[key]]; x += step[0]; y += step[1]; });
+    return { x: Math.max(-1, Math.min(1, x)), y: Math.max(-1, Math.min(1, y)) };
+  }
+
+  function hold(who, key, direction, down) { // One direction held or let go; tells the game only when the walking direction changed.
+    if (!onHold) return;
+    const held = holding[who] || (holding[who] = {}), before = way(held);
+    if (down && WAYS[direction]) held[key] = direction; else delete held[key];
+    const after = way(held);
+    if (after.x !== before.x || after.y !== before.y) onHold(who, after.x, after.y);
+  }
+
+  function letGo() { // The window lost focus or was hidden: every held direction is let go, so nobody walks off on their own.
+    Object.keys(heldKeys).forEach(function (code) { delete heldKeys[code]; });
+    Object.keys(holding).forEach(function (who) {
+      const was = way(holding[who]);
+      holding[who] = {};
+      if (onHold && (was.x || was.y)) onHold(who, 0, 0);
+    });
+  }
+  window.addEventListener("blur", letGo);
+  document.addEventListener("visibilitychange", function () { if (document.hidden) letGo(); });
+
+  document.addEventListener("keyup", function (e) { // A held arrow or WASD let go (always, even if the focus moved into a text box meanwhile).
+    const direction = heldKeys[e.code];
+    if (!direction) return;
+    delete heldKeys[e.code];
+    hold("keys", e.code, direction, false);
+  });
 
   document.addEventListener("keydown", function (e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -44,6 +87,11 @@
     const tag = (e.target && e.target.tagName) || "";
     if (action === "enter" && tag === "BUTTON" && !(directEnter && directEnter() && !tabNavigation)) return; // Casino tables can make Enter submit a bet regardless of old focus.
     e.preventDefault();
+    if (onHold && WAYS[action]) { // Held walking: remember which key holds which way (repeats change nothing), and tag the action.
+      if (!e.repeat) { heldKeys[e.code] = action; hold("keys", e.code, action, true); }
+      act(action, undefined, undefined, { held: true });
+      return;
+    }
     act(action);
   });
 
@@ -55,8 +103,10 @@
     // A remote panel in gamepad mode (media/remotes.py PAD_BUTTONS): a button going down is the game's action, as a
     // press is (A or Start: enter or play; L / R: prev / next); going up, and X, Y, B and Select, mean nothing here.
     if (data.type === "mnemerynne-game-pad" && data.down === true && data.button === "b" && onBack) { sound.unlock(); onBack(); return; } // B is "back" where a game has one.
+    const padHeld = data.type === "mnemerynne-game-pad" && Boolean(onHold) && Boolean(WAYS[data.button]); // a panel D-pad button, with held walking on
+    if (padHeld) hold("panel:" + (typeof data.controller === "string" ? data.controller : "?"), data.button, data.button, data.down === true); // down walks, up stops
     if (data.type === "mnemerynne-game-pad" && data.down === true && PAD_ACTIONS[data.button]) act(PAD_ACTIONS[data.button],
-      typeof data.controller === "string" ? data.controller : undefined, Number.isInteger(data.remote) ? data.remote : undefined);
+      typeof data.controller === "string" ? data.controller : undefined, Number.isInteger(data.remote) ? data.remote : undefined, padHeld ? { held: true } : undefined);
     if (data.type === "mnemerynne-game-scale" && document.documentElement.classList.contains("tv") &&
         Number.isFinite(data.scale) && data.scale >= .75 && data.scale <= 3) {
       document.documentElement.style.setProperty("--ui-scale", String(data.scale)); // Reuse the UI's rem scale, never multiply it twice.
@@ -152,6 +202,8 @@
     reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
     onAction: function (fn, options) { onAction = fn; directEnter = options && options.directEnter; }, // Optional direct Enter controls; older games keep native buttons.
     onBack: function (fn) { onBack = fn; }, // fn() → true when Escape / Backspace / a pad's B went back a step in the game (false: leave the game, as before)
+    onHold: function (fn) { onHold = fn; letGo(); }, // Held walking: fn(who, x, y) as a held direction changes (see "Held walking" above); null turns it off
+    letGo: letGo,                                    // let go of everything held (a game opening a text box, say)
     tap: act,                                                // the game's own buttons and taps, as actions
     report: function (sub) { toParent("state", { sub: String(sub || "").slice(0, 300) }); },   // the line a remote shows
     close: function () { toParent("close"); },

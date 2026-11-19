@@ -40,8 +40,10 @@ GAMES: tuple[Game, ...] = (
     # shows its own tabs, and opens the others from Settings. Split from the one Lumi Pet page at Doll's request, 2026-11-10.
     Game(slug="lumi-pet", name="Lumi Pet", icon="✨",
          description="A little neon companion to feed, cuddle, dress and make a home for. She gets hungry, sleepy and lonely while you’re away. Your first visit each day pays coins.",
-         controls="⏮ ⏭ change tab · ▲ ▼ choose · ◀ ▶ options · Enter does it", track_keys=True,
+         controls="Arrows, WASD, a gamepad or a middle-click walk her · Enter or E uses what she's by · ⏮ ⏭ next room · a remote's ◀ ▶ step thing to thing",
+         track_keys=True,
          shelf="Lumi", kit="lumi-pet",                    # a shelf of her own, first on the page
+         extras=("gamepad.js",),                          # gamepads walk her (free walking, 2026-11-19)
          tabs=("care", "pantry", "toys", "closet", "home", "shop", "collection", "settings")),
     Game(slug="lumi-dungeons", name="Lumi Dungeons", icon="🗝",
          description="Take Lumi down through twelve dungeons of rooms, puzzle doors and treasure, or into the arena for a fight. Learn skills, fit mods, and bring the loot home.",

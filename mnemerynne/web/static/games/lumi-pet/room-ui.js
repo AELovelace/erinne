@@ -9,7 +9,15 @@
 
    A room is one 1000 x 500 picture like her bedroom (house.js). Every screen shows about x 290-710 of it, so
    everything pressable sits there. Walking is "snap" walking: ◀ ▶ take her from one thing to the next, and past
-   the last thing into the next room, so a TV remote never has to steer. */
+   the last thing into the next room, so a TV remote never has to steer.
+
+   Free walking (Doll's design, 2026-11-19, docs/plans/lumi-pet-social.md phase 1): held arrows, WASD, a gamepad, the
+   Tab5's pad, and a middle-click walk her anywhere on the floor, left and right (x) and toward or away from the window
+   (y, her feet: FRONT at the lower bar, BACK by the wall). Everything in the flat stands against the wall, so each
+   thing blocks the floor from its front edge back to the wall: she walks into the gaps between things, never behind
+   one, and is always drawn in front of whatever she overlaps. Things hung on the wall (`wall: true`) block nothing.
+   A place is { room, at, x, y }: `at` is the spot she's at (the room's list cursor, her bubble), x and y where she
+   stands. Snap walking still moves by `at` (x and y follow); free walking moves x and y (`at` follows). */
 (function (root, make) {
   const ui = make();
   if (typeof module === "object" && module.exports) module.exports = ui; else root.LumiPetRoom = ui;
@@ -33,17 +41,17 @@
       { id: "bowl", icon: "🥣", name: "My bowl", hint: "Free snacks, always there", say: "My bowl! It's never, ever empty.", open: "Ooh, what's in my bowl today?",
         x: 470, box: [425, 375, 90, 58], tab: "pantry" },
       { id: "potions", icon: "🧪", name: "My potion shelf", hint: "Mends me after a fight", say: "My potions, for when I'm hurt after a fight.", open: "Glug glug!",
-        x: 680, box: [622, 180, 115, 160], tab: "care", keys: ["drink"], empty: "I'm fine just now! Potions are for after a fight." },
+        x: 680, wall: true, box: [622, 180, 115, 160], tab: "care", keys: ["drink"], empty: "I'm fine just now! Potions are for after a fight." },
       { id: "paint", icon: "🎨", name: "My kitchen paint pots", hint: "Decorate my kitchen", say: "My paint pots! Let's make my kitchen pretty.", open: "What shall we change in here?",
         x: 785, box: [745, 350, 75, 82], tab: "home", keys: KITCHEN_SPOTS },
     ] },
     { id: "bedroom", name: "HER BEDROOM", things: [
       { id: "door", icon: "🚪", name: "My front door", hint: "Out into Lumi Town", say: "My front door! Shall we go out into town?", open: "Off we go!",
-        x: 236, box: [194, 192, 82, 166], act: "door" },
+        x: 236, wall: true, box: [194, 192, 82, 166], act: "door" },
       { id: "toychest", icon: "🧸", name: "My toy chest", hint: "Play with my toys", say: "My toy chest! All my favourite toys.", open: "Playtime? Pick a toy, any toy!",
         x: 386, box: [346, 362, 82, 72], tab: "toys" },
       { id: "trophy", icon: "🏆", name: "My trophy shelf", hint: "Everything I've found and won", say: "My treasures! Everything I've found and won.", open: "Look at all my treasures!",
-        x: 430, box: [370, 95, 75, 55], tab: "collection" },
+        x: 430, wall: true, box: [370, 95, 75, 55], tab: "collection" },
       { id: "paint", icon: "🎨", name: "My paint pots", hint: "Decorate my room", say: "My paint pots! Let's make my room pretty.", open: "What shall we change?",
         x: 505, box: [465, 385, 75, 50], tab: "home", skip: ELSEWHERE },
       { id: "bed", icon: "🛏", name: "My bed", hint: "Cuddles and naps", say: "My bed. Cuddles and naps happen here.", open: "A cuddle? Or a little nap?",
@@ -81,22 +89,90 @@
     return out;
   }
 
-  function clean(at) { // A remembered place (this device's G.store) made safe: a real room and a spot in it.
+  // ---- Free walking's floor (all in the room's 1000 x 500 drawing units).
+  const FRONT = 430, BACK = 372;      // Her feet: at the front (just above the lower bar) and furthest back (by the wall, which meets the floor at y 352).
+  const HALF = 26;                    // Half her width at her feet: how close she may come to a thing's side.
+  const NEAR = 30;                    // A thing is in reach when she stands within this of its sides (or in front of it).
+  const SHRINK = 0.18;                // How much smaller she is at the back than at the front.
+  const EXTRA = { kitchen: [[540, 660, 412]] }; // Blocks that aren't things: the kitchen counter (room-art.js PLACE), [left, right, front].
+
+  function blocks(id) { // Each floor-standing thing's patch of floor, [left, right, front]: from its front edge back to the wall.
+    const out = room(id).things.filter(function (t) { return !t.wall; }).map(function (t) {
+      return [t.box[0], t.box[0] + t.box[2], Math.min(FRONT - 6, t.box[1] + t.box[3] - 14)]; // its press box's foot, a little in (shadows and bases overlap)
+    });
+    return out.concat(EXTRA[id] || []);
+  }
+
+  function free(id, x, y) { // May she stand with her feet at x, y? (Never inside a thing's patch of floor.)
+    return !blocks(id).some(function (b) { return x > b[0] - HALF && x < b[1] + HALF && y < b[2]; });
+  }
+
+  function settle(id, x, y) { // The nearest y in front of x, y where she may stand (FRONT always is: every patch ends above it).
+    let feet = Math.max(BACK, Math.min(FRONT, y));
+    while (!free(id, x, feet) && feet < FRONT) feet = Math.min(FRONT, feet + 2);
+    return feet;
+  }
+
+  function spotNear(id, x) { // The spot nearest x (things and the ways through): her bubble and the list cursor while she walks.
+    let best = 0, gap = Infinity;
+    layout(id).forEach(function (s, i) { const d = Math.abs(s.x - x); if (d < gap) { gap = d; best = i; } });
+    return best;
+  }
+
+  function clean(at) { // A remembered place (this device's G.store) made safe: a real room, a spot in it, and where she stands.
+    // An old save ({room, at}) or a snap move stands her at the spot (at the front); a free walk's ({room, x, y}) keeps her there.
     const id = at && typeof at.room === "string" ? room(at.room).id : START.room, spots = layout(id);
-    const n = at && Number.isInteger(at.at) ? at.at : START.at;
-    return { room: id, at: Math.max(0, Math.min(spots.length - 1, n)) };
+    if (at && Number.isFinite(at.x)) {
+      const x = Math.max(EDGE.left, Math.min(EDGE.right, at.x)), y = settle(id, x, Number.isFinite(at.y) ? at.y : FRONT);
+      const near = reachAt(id, x);                                     // her spot: the thing in reach, else the nearest spot
+      return { room: id, at: near >= 0 ? near : spotNear(id, x), x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
+    }
+    const n = at && Number.isInteger(at.at) ? at.at : START.at, i = Math.max(0, Math.min(spots.length - 1, n));
+    return { room: id, at: i, x: spots[i].x, y: FRONT };
+  }
+
+  function move(at, dx, dy) { // Free walking: one step by dx, dy. Each axis on its own, so she slides along a thing she bumps;
+    // past a side edge she walks through to the next room (at the same depth), and the flat's ends stop her.
+    const here = clean(at), id = here.room;
+    let x = here.x + (dx || 0), y = Math.max(BACK, Math.min(FRONT, here.y + (dy || 0)));
+    if (!free(id, x, here.y)) x = here.x;                               // bumped a thing sideways: stay
+    if (!free(id, x, y)) y = here.y;                                    // bumped one going back: stay
+    const i = index(id), side = x < EDGE.left ? -1 : x > EDGE.right ? 1 : 0;
+    if (side && ROOMS[i + side]) {                                      // through to the next room, just inside its other edge
+      const to = ROOMS[i + side].id, nx = side < 0 ? EDGE.right - 4 : EDGE.left + 4;
+      return clean({ room: to, x: nx, y: settle(to, nx, y) });
+    }
+    return clean({ room: id, x: x, y: y });                             // (clean keeps her inside the flat's ends)
+  }
+
+  function reachAt(id, x) { // The thing in reach at x in room id (its layout index), or -1: the one within NEAR whose spot is closest.
+    let best = -1, gap = Infinity;
+    layout(id).forEach(function (s, i) {
+      if (s.go) return;
+      const d = Math.abs(x - s.x), inside = x >= s.box[0] - NEAR && x <= s.box[0] + s.box[2] + NEAR;
+      if (inside && d < gap) { gap = d; best = i; }
+    });
+    return best;
+  }
+
+  function reach(at) { const here = clean(at); return reachAt(here.room, here.x); } // The thing in reach where she stands, or -1.
+
+  function scale(y) { return 1 - SHRINK * (FRONT - Math.max(BACK, Math.min(FRONT, y))) / (FRONT - BACK); } // Her size at feet y: 1 at the front.
+
+  function point(id, x, y) { // Where a press on the floor walks her: inside the room's walking stretch and floor band.
+    return { room: room(id).id, x: Math.max(EDGE.left, Math.min(EDGE.right, x)), y: Math.max(BACK, Math.min(FRONT, y)) };
   }
 
   function enter(id, side) { // Arriving in a room from one side: standing at the first thing on that side (not on the way back out).
     const spots = layout(id), things = spots.map(function (s, i) { return s.go ? -1 : i; }).filter(function (i) { return i >= 0; });
-    return { room: id, at: side === "right" ? things[things.length - 1] : things[0] };
+    return clean({ room: id, at: side === "right" ? things[things.length - 1] : things[0] }); // (x and y: at that thing, at the front)
   }
 
   function step(at, by) { // ◀ (-1) or ▶ (+1): the next spot that way. A "next room" spot walks straight through; the flat's ends stop her.
     const here = clean(at), spots = layout(here.room), to = here.at + by;
     if (to < 0 || to >= spots.length) return here;               // the end of the flat
     const spot = spots[to];
-    return spot.go ? enter(spot.go, by > 0 ? "left" : "right") : { room: here.room, at: to };
+    return spot.go ? enter(spot.go, by > 0 ? "left" : "right") : clean({ room: here.room, at: to });
   }
 
   function hop(at, by) { // ⏮ ⏭: the whole next room that way (or stay, at the flat's ends).
@@ -131,14 +207,26 @@
   }
 
   function hits(id, at) { // Invisible press boxes over a room's things (game.js listens for data-click="thing:id" and "go:room"),
-    // and the dashed ring at Lumi's feet where she's standing (the town's own mark, game.css .lp-tw-mark). All authored here.
-    const here = clean({ room: id, at: at }), spots = layout(id), mine = spots[here.at];
+    // and her soft shadow on the floor where she's standing (Doll, 2026-11-19: a shadow, not a dashed ring, so she stands
+    // on the floor instead of floating). All authored here.
+    // `at`: a spot's index (snap), or a place {x, y} (free walking). The shadow has id lp-rm-shadow, so game.js can slide
+    // it as she walks (shadow()) without redrawing the room; the thing in reach gets class lp-rm-near (its glow).
+    const here = typeof at === "object" && at ? clean(Object.assign({}, at, { room: id })) : clean({ room: id, at: at });
+    const near = reach(here), nearId = near >= 0 ? layout(id)[near].id : null;
     let out = "";
     room(id).things.forEach(function (t) {
-      out += '<rect x="' + t.box[0] + '" y="' + t.box[1] + '" width="' + t.box[2] + '" height="' + t.box[3] + '" rx="10" fill="transparent" class="lp-rm-hit" data-click="thing:' + t.id + '"/>';
+      out += '<rect x="' + t.box[0] + '" y="' + t.box[1] + '" width="' + t.box[2] + '" height="' + t.box[3] + '" rx="10" fill="transparent" class="lp-rm-hit' + (t.id === nearId ? " lp-rm-near" : "") + '" data-click="thing:' + t.id + '"/>';
     });
-    if (mine) out += '<ellipse cx="' + mine.x + '" cy="432" rx="44" ry="9" fill="none" class="lp-tw-mark" stroke="var(--pet-glow)" stroke-width="2.5" stroke-dasharray="6 4"/>';
+    const r = shadow(here);
+    out += '<defs><radialGradient id="lp-rm-shade"><stop offset="0" stop-color="#000" stop-opacity=".55"/><stop offset=".55" stop-color="#000" stop-opacity=".3"/>' + // dark under her,
+      '<stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient></defs>' +                                                  // fading out at the edge: a cheap soft shadow
+      '<ellipse id="lp-rm-shadow" class="lp-rm-shadow" cx="' + r.cx + '" cy="' + r.cy + '" rx="' + r.rx + '" ry="' + r.ry + '" fill="url(#lp-rm-shade)"/>';
     return out;
+  }
+
+  function shadow(at) { // Her shadow on the floor under her paws, smaller further back: {cx, cy, rx, ry} for game.js to move as she walks.
+    const s = scale(at.y);
+    return { cx: Math.round(at.x), cy: Math.round(at.y + 2), rx: Math.round(50 * s), ry: Math.round(11 * s) };
   }
 
   function find(id, thingId) { // A thing's place in its room's layout (a press on the drawing), or -1.
@@ -163,5 +251,6 @@
   }
 
   return { ROOMS: ROOMS, START: START, REACH: REACH, KITCHEN_SPOTS: KITCHEN_SPOTS, DEN_SPOTS: DEN_SPOTS, room: room, layout: layout, clean: clean, enter: enter, step: step, hop: hop, spot: spot,
-           rows: rows, cardRows: cardRows, guide: guide, hits: hits, find: find, nearest: nearest, tabs: tabs, neighbours: neighbours };
+           rows: rows, cardRows: cardRows, guide: guide, hits: hits, find: find, nearest: nearest, tabs: tabs, neighbours: neighbours,
+           FRONT: FRONT, BACK: BACK, blocks: blocks, free: free, move: move, reach: reach, scale: scale, point: point, shadow: shadow }; // free walking
 });

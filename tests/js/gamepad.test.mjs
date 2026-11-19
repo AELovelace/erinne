@@ -85,3 +85,50 @@ test("a browser that refuses the Gamepad API changes nothing", () => {
   assert.deepEqual(said, []);
   assert.equal(P.start(() => {}), false);                                 // no navigator.getGamepads in Node
 });
+
+// Held walking (Lumi Pet's free walking, 2026-11-19): opt-in, analog on the stick, full on the D-pad.
+function holdRig() { // a poller with onHold, recording both the actions and the walking directions
+  const said = [], walks = [], state = { pads: [] };
+  const poller = P.create(() => state.pads, (action, who, meta) => said.push([action, who, meta]), (who, x, y) => walks.push([who, x, y]));
+  return { said, walks, state, poller };
+}
+
+test("without onHold, a direction action carries no third argument (older games see no change)", () => {
+  const said = [], state = { pads: [pad(0, [15])] };
+  P.create(() => state.pads, (...args) => said.push(args)).poll(0);
+  assert.deepEqual(said, [["right", "pad:0"]]);
+});
+
+test("with onHold, directions are tagged held; OK isn't", () => {
+  const { said, state, poller } = holdRig();
+  state.pads = [pad(0, [0, 15])]; poller.poll(0);
+  assert.deepEqual(said.find(([a]) => a === "right"), ["right", "pad:0", { held: true }]);
+  assert.deepEqual(said.find(([a]) => a === "enter"), ["enter", "pad:0", undefined]);
+});
+
+test("the stick walks analog past the dead zone; resting under it is still", () => {
+  const { walks, state, poller } = holdRig();
+  state.pads = [pad(0, [], [0.1, -0.1])]; poller.poll(0);
+  assert.equal(walks.length, 0, "inside the dead zone nothing walks");
+  state.pads = [pad(0, [], [1, 0])]; poller.poll(16);
+  assert.deepEqual(walks.pop(), ["pad:0", 1, 0]);
+  state.pads = [pad(0, [], [0.575, 0])]; poller.poll(32);              // half-way past the dead zone: half speed
+  assert.deepEqual(walks.pop(), ["pad:0", 0.5, 0]);
+  state.pads = [pad(0, [], [0.575, 0])]; poller.poll(48);
+  assert.equal(walks.length, 0, "no news while the direction stays the same");
+  state.pads = [pad(0, [], [0, 0])]; poller.poll(64);
+  assert.deepEqual(walks.pop(), ["pad:0", 0, 0]);
+});
+
+test("the D-pad is a full step and wins over the stick; diagonals and up are -y", () => {
+  const { walks, state, poller } = holdRig();
+  state.pads = [pad(0, [12, 14], [0.9, 0.9])]; poller.poll(0);
+  assert.deepEqual(walks.pop(), ["pad:0", -1, -1]);
+});
+
+test("an unplugged pad stops walking", () => {
+  const { walks, state, poller } = holdRig();
+  state.pads = [pad(1, [15])]; poller.poll(0);
+  state.pads = []; poller.poll(16);
+  assert.deepEqual(walks, [["pad:1", 1, 0], ["pad:1", 0, 0]]);
+});

@@ -390,14 +390,22 @@
 /* ---- Room mode (Doll's design, 2026-11-19; game.js drawRoom/drawRoomBits, room-ui.js, room-art.js): Lumi walks her flat
    and the things in it are the menus. The tabs fold away; the list on the right is the room's things, or an open card. */
 .gm[data-rooms="true"] .lp-tabs { display: none; }
-.lp-room[data-rooms] .lp-pet-wrap { width: calc(150 * var(--u)); left: calc(50% + (var(--gx, 0) - 75) * var(--u)); bottom: calc(50% - 180 * var(--u)); transition: left .7s ease-in-out; cursor: pointer; } /* She walks to the thing (--gx from the drawing's middle); press her for a cuddle. */
+.lp-room[data-rooms] .lp-pet-wrap { width: calc(150 * var(--gs, 1) * var(--u)); left: calc(50% + (var(--gx, 0) - 75 * var(--gs, 1)) * var(--u)); bottom: calc(50% + (250 - var(--gy, 430) - 17 * var(--gs, 1)) * var(--u));
+  transition: left .7s ease-in-out, bottom .7s ease-in-out, width .7s ease-in-out; cursor: pointer; } /* She walks to the thing (--gx from the drawing's middle, --gy her feet, --gs smaller further back); press her for a cuddle.
+  Her drawing has a little empty space under her paws (they end at y 272 of its 300), so she's set 17 units (times her size) lower: paws on the floor, over her shadow. */
+.lp-house .lp-rm-shadow { transition: cx .7s ease-in-out, cy .7s ease-in-out, rx .7s ease-in-out, ry .7s ease-in-out; pointer-events: none; } /* Her shadow (room-ui.js) glides with her on a snap step. */
+.lp-room[data-rooms][data-walking] .lp-rm-shadow { transition: none; }
+.lp-room[data-away="true"] .lp-rm-shadow, .lp-room[data-leaving="true"] .lp-rm-shadow { opacity: 0; } /* No Lumi, no shadow (out exploring, or slipping out of the door). */
+.lp-room[data-rooms] .lp-pet { scale: var(--face, 1) 1; } /* Facing the way she last walked (the individual `scale` property, so it adds to her breathing animation's transform). */
+.lp-room[data-rooms][data-walking] .lp-pet-wrap, .lp-room[data-rooms][data-walking] .lp-guide { transition: none; } /* Free walking moves her every frame: easing would trail behind. */
+.lp-house .lp-rm-hit.lp-rm-near { fill: rgba(255, 255, 255, .06); stroke: var(--pet-glow, #ff8ecb); stroke-width: 2; stroke-dasharray: 5 5; } /* The thing in reach: Enter, E or A uses it. */
 .lp-room[data-rooms][data-leaving="true"] .lp-pet-wrap { transform: scale(.8) translateY(calc(-10 * var(--u))); } /* Already at the door: she just slips out of it. */
 .lp-house .lp-rm-hit { cursor: pointer; transition: fill .2s; }
 .lp-house .lp-rm-hit:hover { fill: rgba(255, 255, 255, .07); stroke: var(--pet-glow, #ff8ecb); stroke-width: 2; stroke-dasharray: 5 5; } /* A soft dashed glow: this can be pressed. */
 .lp-house [data-click^="thing:"] { pointer-events: all; } /* A press anywhere in the box counts, even over a gap in the drawing. */
-.lp-guide { position: absolute; z-index: 3; left: clamp(30%, calc(50% + var(--gx, 0) * var(--u)), 70%); bottom: calc(50% - 36 * var(--u)); transform: translateX(-50%); max-width: min(46%, 22rem);
+.lp-guide { position: absolute; z-index: 3; left: clamp(30%, calc(50% + var(--gx, 0) * var(--u)), 70%); bottom: calc(50% + (250 - var(--gy, 430) + 127 * var(--gs, 1)) * var(--u)); transform: translateX(-50%); max-width: min(46%, 22rem);
   margin: 0; padding: .35rem .8rem; border-radius: 1rem; background: #fff5fbee; color: #2a1838; font-size: .8rem; line-height: 1.3; text-align: center;
-  box-shadow: 0 0 14px var(--pet-glow, #ff8ecb); transition: left .7s ease-in-out; pointer-events: none; } /* Lumi's speech bubble, over her head, following her. */
+  box-shadow: 0 0 14px var(--pet-glow, #ff8ecb); transition: left .7s ease-in-out, bottom .7s ease-in-out; pointer-events: none; } /* Lumi's speech bubble, over her head (127 units above the floor line, less when she's smaller), following her. */
 .lp-guide::after { content: ""; position: absolute; left: 50%; bottom: -.45rem; margin-left: -.45rem; border: .45rem solid transparent; border-bottom: 0; border-top-color: #fff5fbee; } /* Its little tail. */
 .lp-way { position: absolute; z-index: 3; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: .3rem; padding: .5rem .7rem; border-radius: 1rem;
   border: 1px solid var(--pet-glow, #ff8ecb); background: #0e0b1acc; color: #ffe9f5; font-size: .75rem; letter-spacing: .06em; cursor: pointer; } /* The way to the next room. */

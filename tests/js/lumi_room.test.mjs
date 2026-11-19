@@ -42,12 +42,13 @@ test("room mode stands every drawn thing and her furniture back from the front e
     assert.ok(sketched[name] + at[1] <= RA.FLOOR + 2, room + "/" + name + " stands at or behind the floor line");
   const furniture = { toychest: 473, bed: 460, boxes: 492, rug: 470 }; // house.js's lowest pieces, as drawn for the classic room
   for (const [spot, foot] of Object.entries(furniture)) assert.ok(foot + RA.BEDROOM_SHIFT[spot][1] <= RA.FLOOR + 2, spot + " is stood back in room mode");
-  assert.ok(Ru.hits("bedroom", 1).includes('cy="' + (RA.FLOOR + 2) + '"'), "Her ring is on the floor line");
+  assert.ok(Ru.hits("bedroom", 1).includes('cy="' + (RA.FLOOR + 2) + '"'), "Her shadow is on the floor line");
 });
 
 test("◀ ▶ walk thing to thing, through to the next room at the ends, and stop at the flat's ends", () => {
   let at = Ru.clean(null);
-  assert.deepEqual(at, Ru.START);
+  assert.deepEqual([at.room, at.at], [Ru.START.room, Ru.START.at]);
+  assert.deepEqual([at.x, at.y], [Ru.spot(at).x, Ru.FRONT], "A snap place stands her at its spot, at the front");
   assert.equal(Ru.spot(at).id, "paint");
   at = Ru.step(at, 1); assert.equal(Ru.spot(at).id, "bed");
   at = Ru.step(at, 1); assert.deepEqual([at.room, Ru.spot(at).id], ["den", "wardrobe"], "Past the bed: straight into the den, at its first thing");
@@ -87,7 +88,7 @@ test("the drawings: every room draws, its things can be pressed, and the bedroom
     const markup = RA.scene(r.id) + Ru.hits(r.id, 1);
     assert.ok(!/undefined|NaN/.test(markup), r.id + " has nothing broken in it");
     for (const t of r.things) assert.ok(markup.includes('data-click="thing:' + t.id + '"'), r.id + "/" + t.id + " can be pressed");
-    assert.equal((markup.match(/class="lp-tw-mark"/g) || []).length, 1, r.id + ": one ring where she stands");
+    assert.equal((markup.match(/id="lp-rm-shadow"/g) || []).length, 1, r.id + ": one shadow where she stands");
   }
   const house = { wallpaper: Object.keys(H.ART).find(k => k.startsWith("wall-")), bed: Object.keys(H.ART).find(k => k.startsWith("bed-")) };
   const shell = H.render(house, false, { only: RA.SHELL });
@@ -143,4 +144,75 @@ test("each room's paint pots open just that room's spots; a shared wall lists th
   assert.deepEqual(Ru.cardRows(open, kitchenPots, () => {}, true).length, open.length + 1, "Inside a spot, all its papers show");
   const paintedSnap = { ...snap, pet: { ...snap.pet, house: { ...snap.pet.house, "kitchen-wall": "#abcdef" } } };
   assert.match(Pk.homeRows({ snap: paintedSnap, open: null, flip: {}, go() {} }).find(r => r.key === "kitchen-wall").hint, /Painted #ABCDEF/);
+});
+
+// ---- Free walking (docs/plans/lumi-pet-social.md phase 1, 2026-11-19): held keys, pads and a middle-click walk her
+// anywhere on the floor; things block the floor from their front back to the wall; past a side she's in the next room.
+function walkFor(at, dx, dy, steps) { for (let i = 0; i < steps; i++) at = Ru.move(at, dx, dy); return at; }
+
+test("an old {room, at} save still loads, standing her at that spot, at the front", () => {
+  const at = Ru.clean({ room: "den", at: 1 });
+  assert.deepEqual(at, { room: "den", at: 1, x: Ru.layout("den")[1].x, y: Ru.FRONT });
+});
+
+test("she walks freely along the front and back into the gaps, and every place she stands is free", () => {
+  let at = Ru.clean({ room: "bedroom", x: 600, y: Ru.FRONT });
+  at = walkFor(at, 0, -4, 40);
+  assert.equal(at.y, Ru.BACK, "In the gap by the bed she walks right back to the wall");
+  assert.ok(Ru.free("bedroom", at.x, at.y));
+  at = walkFor(at, 0, 4, 40);
+  assert.equal(at.y, Ru.FRONT, "...and forward again, no further than the front");
+});
+
+test("things block the floor from their front back to the wall: she slides along, never into one", () => {
+  for (const r of Ru.ROOMS) for (const t of r.things) {
+    if (t.wall) continue;
+    const mid = t.box[0] + t.box[2] / 2;
+    const at = walkFor(Ru.clean({ room: r.id, x: mid, y: Ru.FRONT }), 0, -4, 40);
+    assert.ok(at.y > t.box[1] + t.box[3] - 20, r.id + "/" + t.id + ": she stops at its front (y " + at.y + ")");
+    assert.ok(Ru.free(r.id, at.x, at.y));
+  }
+  const counter = walkFor(Ru.clean({ room: "kitchen", x: 600, y: Ru.FRONT }), 0, -4, 40);
+  assert.ok(counter.y >= 412, "The kitchen counter blocks too, though it's no thing of its own");
+  const shelf = walkFor(Ru.clean({ room: "kitchen", x: 700, y: Ru.FRONT }), 0, -4, 40);
+  assert.equal(shelf.y, Ru.BACK, "A wall shelf blocks nothing: she walks right under it");
+  const side = Ru.clean({ room: "den", x: 500, y: Ru.BACK });           // right inside the terminal's patch of floor
+  assert.ok(side.y >= 416 && Ru.free("den", side.x, side.y), "A place inside a thing's patch is moved out in front of it (y " + side.y + ")");
+});
+
+test("past a side edge she's in the next room at the same depth; the flat's ends stop her", () => {
+  let at = Ru.clean({ room: "bedroom", x: 200, y: 420 });
+  at = walkFor(at, -5, 0, 10);
+  assert.equal(at.room, "kitchen");
+  assert.ok(at.x > 780 && Ru.free("kitchen", at.x, at.y), "Arriving just inside the kitchen's right edge, on free floor");
+  at = walkFor(at, -5, 0, 200);
+  assert.equal(at.room, "kitchen", "The kitchen is the flat's left end");
+  assert.ok(at.x >= 180);
+  at = walkFor(Ru.clean({ room: "den", x: 700, y: Ru.FRONT }), 5, 0, 100);
+  assert.equal(at.room, "den", "And the den its right end");
+});
+
+test("walking updates her spot (bubble and list cursor), and a thing is in reach only when she's near it", () => {
+  const bed = Ru.find("bedroom", "bed"), bedSpot = Ru.layout("bedroom")[bed];
+  let at = Ru.clean({ room: "bedroom", x: bedSpot.x, y: Ru.FRONT });
+  assert.equal(at.at, bed);
+  assert.equal(Ru.reach(at), bed);
+  at = Ru.clean({ room: "bedroom", x: 600, y: Ru.FRONT });
+  assert.equal(Ru.reach(at), -1, "Between the paint pots and the bed: nothing in reach");
+  assert.ok(Ru.hits("bedroom", { x: bedSpot.x, y: Ru.FRONT }).includes('class="lp-rm-hit lp-rm-near" data-click="thing:bed"'), "The thing in reach glows");
+  assert.ok(!Ru.hits("bedroom", { x: 600, y: Ru.FRONT }).includes("lp-rm-near"));
+});
+
+test("she's a little smaller further back, and so is her shadow", () => {
+  assert.equal(Ru.scale(Ru.FRONT), 1);
+  assert.ok(Ru.scale(Ru.BACK) < 0.85 && Ru.scale(Ru.BACK) > 0.75);
+  assert.ok(Ru.shadow({ x: 500, y: Ru.BACK }).rx < Ru.shadow({ x: 500, y: Ru.FRONT }).rx);
+  assert.deepEqual(Ru.point("den", 5000, -10), { room: "den", x: 820, y: Ru.BACK }, "A press anywhere becomes a place on the floor");
+});
+
+test("snap walking still works from any free place: ◀ ▶ go to the next spot from wherever she is", () => {
+  const at = Ru.clean({ room: "bedroom", x: 610, y: 400 });
+  const next = Ru.step(at, 1);
+  assert.equal(Ru.spot(next).id, "bed");
+  assert.equal(next.y, Ru.FRONT, "A snap step stands her at the front of the thing");
 });

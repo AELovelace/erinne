@@ -47,6 +47,11 @@
   // card: the real tab's rows (roomCard is that thing), with the way back. roomAt is remembered on this device.
   const ROOM = TABS.length, PLACE = $("lp-place").textContent;
   let roomAt = Ru ? Ru.clean(G.store.get("room-at", null)) : null, roomCard = null, lastThings = ""; // (lastThings: what the lower bar last drew)
+  // Free walking (see "Free walking" below):
+  const SPEED = { x: 260, y: 130 };   // Drawing units a second, across and in depth (the floor is shallow, so depth is slower).
+  const holds = {};                   // who → {x, y}: what each keyboard, pad and panel holds right now (common.js, gamepad.js)
+  let target = null;                  // A clicked spot {room, x, y} she's walking to, or null
+  let walkFrame = 0, walkLast = 0, walkSaved = true, facing = 1; // The loop's frame and clock; whether G.store has her latest place; which way she faces
   function freshPicks() { return TABS.map(function () { return 0; }).concat([0]); } // Every tab's cursor, and the room's.
   let snap = null, offset = 0, tab = 0, picks = freshPicks(), busy = false, visited = false;
   let battleView = null, finished = null, lastFoe = ""; // Which Battle list is open, the fight that just ended, and the enemy last drawn.
@@ -492,8 +497,9 @@
   }
 
   function roomMove(to) { // She walks to another spot (or room): remembered on this device, with a soft step.
-    const crossing = to.room !== roomAt.room, moved = crossing || to.at !== roomAt.at; // Measured before she goes.
-    roomAt = Ru.clean(to); picks[ROOM] = roomAt.at;
+    target = null; // A snap move (a remote, the lower bar, a thing pressed) ends any free walk to a clicked spot.
+    const next = Ru.clean(to), crossing = next.room !== roomAt.room, moved = crossing || next.at !== roomAt.at || next.x !== roomAt.x; // Measured before she goes.
+    roomAt = next; picks[ROOM] = roomAt.at;
     G.store.set("room-at", roomAt);
     if (moved) { G.sound.unlock(); G.sound.tone(crossing ? 587.33 : 523.25, .08, 0, .06); } // A higher step through a doorway.
   }
@@ -519,11 +525,13 @@
   function closeCard() { // Back to the room, standing where she was. True when a card was open.
     if (!roomCard) return false;
     roomCard = null; changeTab(ROOM); lastList = ""; render();
+    startWalk(); // A key still held from the menu walks her on at once.
     return true;
   }
 
-  function roomKey(action, arrow) { // The keys in room mode. True when used here; false lets the usual handling run (a card's list, Enter, Play).
+  function roomKey(action, arrow, meta) { // The keys in room mode. True when used here; false lets the usual handling run (a card's list, Enter, Play).
     if (tab === ROOM) {
+      if (arrow && meta && meta.held) return true; // A held key, pad or panel button: free walking (onHold) moves her, not a snap step.
       if (arrow) { roomMove(Ru.step(roomAt, action === "left" || action === "up" ? -1 : 1)); lastList = ""; render(); return true; }
       if (action === "next" || action === "prev") { roomMove(Ru.hop(roomAt, action === "prev" ? -1 : 1)); lastList = ""; render(); return true; }
       return false; // Enter uses the spot (its row), Play drinks a potion.
@@ -532,7 +540,7 @@
     return false;
   }
 
-  function roomPress(event) { // Mouse and touch in room mode: a thing (walk to it and use it), or the floor (walk to the nearest thing).
+  function roomPress(event) { // Mouse and touch in room mode: a thing (walk to it and use it), or the floor (walk to just there).
     if (!roomOn() || room.dataset.leaving === "true") return;
     const hit = event.target.closest("[data-click]");
     if (hit && hit.dataset.click.indexOf("thing:") === 0) {
@@ -541,12 +549,99 @@
       return;
     }
     if (tint || (roomCard && (opened.home || opened.closet))) return; // Trying a colour or a piece on: the room is a preview, so a stray press doesn't walk off.
+    walkTo(event);
+  }
+
+  function floorAt(event) { // Where on the room's 1000 x 500 drawing a press was (or null where the browser can't say).
     const matrix = houseArt.getScreenCTM && houseArt.getScreenCTM();
-    if (!matrix) return;
+    if (!matrix) return null;
     const point = houseArt.createSVGPoint(); point.x = event.clientX; point.y = event.clientY;
-    const x = point.matrixTransform(matrix.inverse()).x; // Where on the 1000-wide drawing the press was.
-    if (roomCard) { roomCard = null; changeTab(ROOM); } // Walking away closes the card.
-    roomMove({ room: roomAt.room, at: Ru.nearest(roomAt.room, x) }); lastList = ""; render();
+    return point.matrixTransform(matrix.inverse());
+  }
+
+  function walkTo(event) { // A press on the floor (or a middle-click anywhere): she walks there, never using anything on the way.
+    const at = floorAt(event);
+    if (!at) return;
+    if (roomCard) { roomCard = null; changeTab(ROOM); lastList = ""; render(); } // Walking away closes the card.
+    target = Ru.clean(Ru.point(roomAt.room, at.x, at.y)); // Clamped to the room's floor, and (clean) out in front of any thing pressed on: somewhere she can stand. She walks round things in the way.
+    startWalk();
+  }
+
+  // ---- Free walking (docs/plans/lumi-pet-social.md phase 1, Doll's design 2026-11-19). Held arrows and WASD
+  // (common.js MGame.onHold), a gamepad (gamepad.js MPad, its stick analog), the Tab5's or a phone's pad in gamepad mode,
+  // and a press on the floor all walk her, a little each animation frame, through room-ui.js move() (which keeps her
+  // off the things and carries her through to the next room). The loop only runs while something walks her.
+  // A TV remote's single presses stay snap steps (roomKey).
+  // (Its state is declared with roomAt, near the top: SPEED, holds, target, walkFrame, walkLast, walkSaved, facing.)
+
+  function onHold(who, x, y) { // A keyboard, pad or panel holds a direction (x, y each -1..1), or lets go (0, 0).
+    if (x || y) { holds[who] = { x: x, y: y }; target = null; } // The keys take over from a click's walk.
+    else delete holds[who];
+    startWalk();
+  }
+
+  function heldWay() { // Everything held, added up, no faster than one stick pushed all the way (a diagonal isn't quicker).
+    let x = 0, y = 0;
+    Object.keys(holds).forEach(function (who) { x += holds[who].x; y += holds[who].y; });
+    const size = Math.hypot(x, y);
+    return size > 1 ? { x: x / size, y: y / size } : { x: x, y: y };
+  }
+
+  function canWalk() { return roomOn() && tab === ROOM && !roomCard && room.dataset.leaving !== "true"; } // The room is showing, no menu open, not going out of the door.
+
+  function startWalk() { if (!walkFrame) { walkLast = 0; walkFrame = requestAnimationFrame(walkTick); } } // Start the loop (once).
+
+  function stopWalk() { // Nothing walks her: CSS animations back on, and her place remembered on this device.
+    walkFrame = 0; walkLast = 0;
+    if (room.dataset.walking) delete room.dataset.walking;
+    if (!walkSaved) { walkSaved = true; G.store.set("room-at", roomAt); }
+  }
+
+  function walkTick(now) { // One frame of walking.
+    walkFrame = 0;
+    const dt = walkLast ? Math.min(0.05, (now - walkLast) / 1000) : 0; walkLast = now; // (Capped: a slow frame never jumps her across the room.)
+    let way = heldWay(), left = Infinity;
+    if (!(way.x || way.y) && target) { // A click's walk: straight toward the spot.
+      const dx = target.x - roomAt.x, dy = target.y - roomAt.y, size = Math.hypot(dx, dy);
+      if (target.room !== roomAt.room || size < 2) target = null;
+      else { way = { x: dx / size, y: dy / size }; left = size; }
+    }
+    if (!canWalk() || !(way.x || way.y)) { if (!canWalk()) target = null; stopWalk(); return; }
+    room.dataset.walking = "true"; // game.css: no easing while she walks (it would trail behind her)
+    let sx = way.x * SPEED.x * dt, sy = way.y * SPEED.y * dt;
+    const step = Math.hypot(sx, sy);
+    if (step > left) { sx *= left / step; sy *= left / step; } // The last step of a click's walk lands exactly on the spot.
+    if (sx) facing = sx < 0 ? -1 : 1;
+    const before = roomAt, still = function (at) { return at.room === before.room && at.x === before.x && at.y === before.y; };
+    let next = Ru.move(roomAt, sx, sy);
+    if (target && dt && next.room === before.room) { // A click's walk: did that step get her closer?
+      const gap = function (at) { return Math.hypot(target.x - at.x, target.y - at.y); };
+      if (gap(before) - gap(next) < Math.hypot(sx, sy) / 2) { // Less than half a step closer: a thing is in the way.
+        const around = Ru.move(roomAt, 0, SPEED.y * dt);       // Step toward the front, round its base (the front is always clear)...
+        if (!still(around)) next = around;
+        else if (still(next)) target = null;                   // ...and if nothing moves her at all, she's as close as she can get.
+      }
+    }
+    roomAt = next; picks[ROOM] = roomAt.at; walkSaved = false;
+    if (next.room !== before.room) { G.sound.tone(587.33, .08, 0, .06); target = null; } // Through a doorway: the doorway's step.
+    if (next.room !== before.room || next.at !== before.at) { lastList = ""; render(); } // A new room, or a new spot (her bubble, the lower bar, the list)
+    else placeLumi();                                                                        // otherwise only where she is
+    walkFrame = requestAnimationFrame(walkTick);
+  }
+
+  function placeLumi() { // Where she stands, drawn: the pan that keeps her in view, her place, size and facing (game.css), her shadow, the thing in reach.
+    const pan = roomPan(roomAt.x);
+    houseArt.setAttribute("viewBox", pan + " 0 1000 500");
+    room.style.setProperty("--gx", String(Math.round(roomAt.x - 500 - pan))); // from the middle of what's shown
+    room.style.setProperty("--gy", String(Math.round(roomAt.y)));             // her feet
+    room.style.setProperty("--gs", Ru.scale(roomAt.y).toFixed(3));            // a little smaller further back
+    room.style.setProperty("--face", String(facing));
+    const shade = document.getElementById("lp-rm-shadow"), r = Ru.shadow(roomAt);
+    if (shade) ["cx", "cy", "rx", "ry"].forEach(function (k) { // Her shadow: as attributes (every browser), and as CSS too, so game.css can ease it along with her on a snap step
+      shade.setAttribute(k, r[k]); shade.style.setProperty(k, r[k] + "px");
+    });
+    const near = Ru.reach(roomAt), mark = near >= 0 ? "thing:" + Ru.layout(roomAt.room)[near].id : "";
+    houseArt.querySelectorAll(".lp-rm-hit").forEach(function (box) { box.classList.toggle("lp-rm-near", box.dataset.click === mark); });
   }
 
   function roomPan(x) { // How far to slide the room's drawing sideways so Lumi, at x, is in view: 0 when the screen shows the whole flat's width.
@@ -558,22 +653,21 @@
   }
 
   function drawRoom(preview) { // Room mode's picture: the room she's in (house.js walls, room-art.js things), and her standing at her spot.
-    const here = Ru.room(roomAt.room), spot = Ru.spot(roomAt);
+    const here = Ru.room(roomAt.room);
     const trying = tint && tint.spot ? [tint.spot, tintHex()] : preview || null; // a colour being painted, or a piece tried on
     const house = RA.view(here.id, snap.pet.house, trying); // this room's own wall and floor (else the bedroom's), with that in it
     room.dataset.rooms = here.id;
-    const x = spot ? spot.x : 500, pan = roomPan(x); // A narrow screen follows her across the room; a wide one shows it all.
-    houseArt.setAttribute("viewBox", pan + " 0 1000 500");
-    room.style.setProperty("--gx", String(x - 500 - pan)); // game.css walks her there (from the middle of what's shown).
     $("lp-place").textContent = here.name;
     const scenery = document.querySelector(".parallax"), backdrop = Boolean(scenery) && getComputedStyle(scenery).display !== "none";
     const boxes = here.id === "bedroom" && snap.boxes ? snap.boxes.left : 0;
-    const signature = JSON.stringify(["room", here.id, roomAt.at, house, backdrop, boxes]);
-    if (signature === lastHouse) return; // Only redrawn when she moves, or the room changes.
-    lastHouse = signature;
-    room.dataset.open = String(backdrop && house.view === "view-city"); // Her windows open onto the page's scenery in every room.
-    houseArt.innerHTML = (here.id === "bedroom" ? H.render(house, backdrop, { boxes: boxes, shift: RA.BEDROOM_SHIFT }) : H.render(house, backdrop, { only: RA.SHELL })) + // her furniture spread out (room-art.js)
-      RA.scene(here.id, house) + Ru.hits(here.id, roomAt.at); // All authored in house.js, room-art.js and room-ui.js; nothing a person typed.
+    const signature = JSON.stringify(["room", here.id, house, backdrop, boxes]);
+    if (signature !== lastHouse) { // Only redrawn when the room or what's in it changes: walking just moves her and her shadow (placeLumi).
+      lastHouse = signature;
+      room.dataset.open = String(backdrop && house.view === "view-city"); // Her windows open onto the page's scenery in every room.
+      houseArt.innerHTML = (here.id === "bedroom" ? H.render(house, backdrop, { boxes: boxes, shift: RA.BEDROOM_SHIFT }) : H.render(house, backdrop, { only: RA.SHELL })) + // her furniture spread out (room-art.js)
+        RA.scene(here.id, house) + Ru.hits(here.id, roomAt); // All authored in house.js, room-art.js and room-ui.js; nothing a person typed.
+    }
+    placeLumi(); // A narrow screen follows her across the room (the pan); a wide one shows it all.
   }
 
   function drawThings(on) { // Room mode's lower bar: the things in this room (and the ways through), each with Lumi's bubble saying what it is.
@@ -1467,7 +1561,8 @@
     }).catch(function (refused) { say(refused.message); }).then(function () { busy = false; render(); });
   }
 
-  function onKey(action, controller, remote) { // Keyboard, TV remote, and the on-screen arrow pad. Everywhere: ◀ ▶ change tab, ▲ ▼ or ⏮ ⏭ move through the list, Enter chooses.
+  function onKey(action, controller, remote, meta) { // Keyboard, TV remote, gamepad, and the on-screen arrow pad. Everywhere: ◀ ▶ change tab, ▲ ▼ or ⏮ ⏭ move through the list, Enter chooses.
+    // meta.held: a direction that free walking (onHold) is also moving her by (common.js, gamepad.js).
     if (couching()) { couchKey(action, controller, remote); return; } // A couch party: every remote is its own person.
     if (picking) { pickPlayer(action, controller); return; } // Who's playing? waits for someone's OK.
     if (player && Date.now() - player.at > player.idle * 1000) { forgetPlayer("Nobody pressed anything for a while. Who's playing?"); return; } // A long-idle TV asks again.
@@ -1477,7 +1572,7 @@
     if (!snap) return;
     const arrow = ["left", "right", "up", "down"].indexOf(action) >= 0;
     if (action === "next" || action === "prev" || action === "play" || arrow) pendingConfirm = null; // Only a second Enter confirms.
-    if (roomOn() && syncRoom() && roomKey(action, arrow)) return; // Room mode: the arrows walk her flat; in a card, ⏮ ⏭ go back.
+    if (roomOn() && syncRoom() && roomKey(action, arrow, meta)) return; // Room mode: the arrows walk her flat; in a card, ⏮ ⏭ go back.
     if (TOWN && (arrow || action === "next" || action === "prev")) { townMove(action); return; } // Lumi Town: every arrow walks her (it has no other tabs to change to).
     if (albuming()) { albumKey(action); return; } // So has the Collection's gallery.
     if (room.dataset.browse === "true" && arrow && browserKey(action)) return; // The party browser: arrows move over the cards.
@@ -1515,6 +1610,18 @@
   }
   G.onAction(onKey, { directEnter: function () { return true; } });
   if (G.onBack) G.onBack(function () { return roomOn() && closeCard(); }); // Escape, Backspace or a pad's B closes a card (and only then leaves the game).
+  if (G.onHold) G.onHold(onHold); // Held arrows, WASD and a panel's pad: free walking in room mode (elsewhere the loop just stops at once).
+  if (window.MPad) window.MPad.start(function (action, who, meta) { // A gamepad (Xbox, PlayStation, most USB pads; gamepad.js, loaded for Lumi Pet).
+    G.sound.unlock();
+    if (action === "back") { if (roomOn()) closeCard(); return; } // B / Circle: out of a menu, back to the room
+    if (action === "home") return;                                // the Xbox / PS button: the browser's, not ours
+    onKey(action, undefined, undefined, meta);                    // A, Start, LB / RB and the D-pad, as the keys
+  }, onHold);                                                     // the stick (analog) and the D-pad walk her
+  document.addEventListener("keydown", function (event) { // E uses the thing in reach, as Enter does (room mode only; never while typing).
+    if ((event.key !== "e" && event.key !== "E") || event.ctrlKey || event.metaKey || event.altKey || !roomOn() || tab !== ROOM) return;
+    if (event.target && event.target.matches && event.target.matches("input, select, textarea")) return;
+    event.preventDefault(); onKey("enter");
+  });
 
   // ---- Touch: the arrow pad and the press button (templates/games/lumi-pet.html), and installing this app (each of Lumi's three has its own manifest: web/app.py lumi_manifest).
   const touchy = window.matchMedia("(pointer: coarse), (max-width: 700px)"); // A touch screen, or a phone-sized window.
@@ -1580,6 +1687,12 @@
   });
 
   houseArt.addEventListener("click", function (event) { if (roomOn()) roomPress(event); else doorPress(event); }); // Room mode's things and floor; otherwise her room's door, through to Lumi Town.
+  houseArt.addEventListener("mousedown", function (event) { // A middle-click in room mode: she walks just there (and never uses anything).
+    if (event.button !== 1 || !roomOn() || room.dataset.leaving === "true") return;
+    event.preventDefault(); // (no browser autoscroll)
+    pendingConfirm = null; walkTo(event);
+  });
+  houseArt.addEventListener("auxclick", function (event) { if (event.button === 1 && roomOn()) event.preventDefault(); }); // Nor a middle-click's other browser habits.
   $("lp-pet").addEventListener("click", function () { // Room mode: press Lumi herself for a cuddle (the bed's card has it too).
     if (!roomOn() || busy || room.dataset.leaving === "true") return;
     submit({ key: "cuddle", send: { action: "cuddle" } });
