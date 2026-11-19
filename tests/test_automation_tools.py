@@ -95,43 +95,31 @@ def test_m365_security_reads_with_the_apps_token_and_names_a_missing_permission(
         world["tools"].m365_security(conn, world["callers"]["boss"], "everything")
 
 
-def test_security_feeds_parse_rss_kev_and_nvd_and_keep_to_their_keywords(conn, world, automations_conn):
-    runs = automations_conn                     # automations.db (Phase 9)
+def test_an_admins_own_rss_feed_keeps_to_its_keywords_beside_the_defaults(conn, world, automations_conn, settings):
+    """An admin's own feed (the defaults are tests/test_security_feeds.py's): RSS entries kept to its keywords, one
+    item per CVE they name, cached until the feed's next poll; a DOCTYPE is refused."""
+    from mnemerynne import security_feeds
+
     recent = (datetime.now(timezone.utc) - timedelta(days=2))
-    old = (datetime.now(timezone.utc) - timedelta(days=40))
     rss = (f'<?xml version="1.0"?><rss><channel>'
-           f'<item><title>FortiOS SSL-VPN flaw</title><link>https://fortiguard.example/1</link>'
+           f'<item><title>FortiOS SSL-VPN flaw CVE-2026-0003</title><link>https://fortiguard.example/1</link>'
            f'<description>&lt;p&gt;Patch FortiOS now&lt;/p&gt;</description><pubDate>{recent.strftime("%a, %d %b %Y %H:%M:%S +0000")}</pubDate></item>'
            f'<item><title>Unrelated product</title><link>https://x.example/2</link><pubDate>{recent.strftime("%a, %d %b %Y %H:%M:%S +0000")}</pubDate></item>'
-           f'<item><title>Old FortiOS issue</title><link>https://x.example/3</link><pubDate>{old.strftime("%a, %d %b %Y %H:%M:%S +0000")}</pubDate></item>'
            f'</channel></rss>').encode()
-    kev = {"vulnerabilities": [{"cveID": "CVE-2026-0001", "vendorProject": "Microsoft", "product": "Exchange",
-                                "vulnerabilityName": "RCE", "dateAdded": recent.strftime("%Y-%m-%d"),
-                                "shortDescription": "Remote code execution", "requiredAction": "Patch", "dueDate": "2026-11-15"}]}
-    nvd = {"vulnerabilities": [{"cve": {"id": "CVE-2026-0002", "published": recent.strftime("%Y-%m-%dT%H:%M:%S.000"),
-                                        "descriptions": [{"lang": "en", "value": "Opera PMS issue"}],
-                                        "metrics": {"cvssMetricV31": [{"cvssData": {"baseScore": 9.8}}]}}}]}
     calls = []
 
     def handler(request):
         calls.append(request.url.host)
-        if request.url.host == "rss.example":
-            return httpx.Response(200, content=rss)
-        if request.url.host == "kev.example":
-            return httpx.Response(200, json=kev)
-        return httpx.Response(200, json=nvd)
-    briefings.TRANSPORT = httpx.MockTransport(handler)
-    for name, url, kind, words in (("Fortinet", "https://rss.example/feed", "rss", "fortios"),
-                                   ("KEV", "https://kev.example/kev.json", "json_kev", "exchange, opera"),
-                                   ("NVD", "https://nvd.example/rest/json/cves/2.0", "nvd", "opera")):
-        runs.execute("INSERT INTO automation_feeds(name, url, kind, keywords) VALUES (?, ?, ?, ?)", (name, url, kind, words))
+        return httpx.Response(200, content=rss) if request.url.host == "rss.example" else httpx.Response(503)
+    security_feeds.TRANSPORT = httpx.MockTransport(handler)
+    security_feeds.ensure_defaults(automations_conn)
+    automations_conn.execute("UPDATE automation_feeds SET enabled = 0")              # only ours, here
+    automations_conn.execute("INSERT INTO automation_feeds(name, url, kind, keywords) VALUES "
+                             "('Fortinet', 'https://rss.example/feed', 'rss', 'fortios')")
     out, _ = world["tools"].security_feeds(conn, world["callers"]["alice"], since_days=7)
-    by = {f["feed"]: f for f in out["feeds"]}
-    assert [i["title"] for i in by["Fortinet"]["items"]] == ["FortiOS SSL-VPN flaw"]
-    assert by["Fortinet"]["items"][0]["summary"] == "Patch FortiOS now"
-    assert by["KEV"]["items"][0]["title"].startswith("CVE-2026-0001: Microsoft Exchange")
-    assert by["NVD"]["items"][0]["cvss"] == 9.8
+    assert [(i["cve"], i["title"]) for i in out["items"]] == [("CVE-2026-0003", "FortiOS SSL-VPN flaw CVE-2026-0003")]
+    assert out["items"][0]["summary"] == "Patch FortiOS now" and out["items"][0]["sources"] == ["rss"]
     world["tools"].security_feeds(conn, world["callers"]["alice"])
-    assert len(calls) == 3                                              # cached for an hour
-    with pytest.raises(ValueError):
-        briefings._parse_xml_feed(b'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "b">]><rss/>')
+    assert calls == ["rss.example"]                                                  # not due again for a day
+    with pytest.raises(security_feeds.FeedError):
+        security_feeds.parse_xml_feed(b'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "b">]><rss/>')

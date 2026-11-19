@@ -8,14 +8,13 @@
 - m365_security (admins): open Defender alerts, risky users, the latest Secure Score and risky sign-ins
   per Microsoft 365 tenant, read with the app's own token. They need application permissions on the
   Entra app (GRAPH_PERMISSIONS); a 403 says which.
-- security_feeds: the admin's outside feeds (RSS/Atom advisories, CISA KEV, NVD), fetched at most
-  hourly, kept to the feed's keywords.
+- security_feeds: the security feeds (security_feeds.py, T-21): default feeds (CISA KEV, NVD, MSRC, Mozilla,
+  GitHub, nginx, Oracle) plus the admins' own, one item per CVE, joined with Wazuh's installed packages.
 """
 
 from __future__ import annotations
 
 import json
-import re
 import shutil
 import sqlite3
 import subprocess
@@ -24,22 +23,18 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from xml.etree import ElementTree
 
 import httpx
 
 from mnemerynne import m365, messages, notices, rooms, scratchpad, updates
 from mnemerynne.config import Settings
 
-FEED_SECONDS = 3600
 AUDIT_SECONDS = 6 * 3600
-FEED_MAX_BYTES = 8 * 1024 * 1024
-FEED_ITEMS = 40
 GRAPH_PERMISSIONS = {"alerts": "SecurityAlert.Read.All", "risky_users": "IdentityRiskyUser.Read.All",
                      "secure_score": "SecurityEvents.Read.All", "sign_ins": "AuditLog.Read.All"}
 SECURITY_KINDS = tuple(GRAPH_PERMISSIONS)
 
-# Tests: an httpx transport for the feeds, and pip-audit's output in place of running it.
+# Tests: an httpx transport (unused since the feeds moved to security_feeds.py), and pip-audit's output.
 TRANSPORT: httpx.BaseTransport | None = None
 AUDIT_OUTPUT: str | None = None
 _audit = {"at": 0.0, "value": None}
@@ -188,105 +183,12 @@ def _security(graph: "m365.Graph", kind: str) -> dict:
 
 
 # ------------------------------------------------------------------- feeds
-def security_feeds(conn: sqlite3.Connection, since_days: int = 7) -> dict:
-    since_days = max(1, min(int(since_days or 7), 90))
-    cutoff = datetime.now(timezone.utc) - timedelta(days=since_days)
-    rows = conn.execute("SELECT * FROM automation_feeds WHERE enabled = 1 ORDER BY name").fetchall()
-    if not rows:
-        return {"feeds": [], "note": "No security feeds are set up (Access → Automator → Security feeds)."}
-    out = []
-    for row in rows:
-        try:
-            items = _cached_items(conn, row)
-        except (httpx.HTTPError, ValueError, ElementTree.ParseError) as exc:
-            out.append({"feed": row["name"], "error": f"Couldn't read it: {type(exc).__name__}."})
-            continue
-        words = [w.strip().lower() for w in row["keywords"].split(",") if w.strip()]
-        kept = [i for i in items if (_parsed(i.get("published")) or cutoff) >= cutoff
-                and (not words or any(w in (i["title"] + " " + i.get("summary", "")).lower() for w in words))]
-        out.append({"feed": row["name"], "items": kept[:FEED_ITEMS], "matched": len(kept)})
-    return {"since_days": since_days, "feeds": out}
+def security_feeds(conn: sqlite3.Connection, since_days: int = 7, settings: Settings | None = None, *,
+                   product: str | None = None, min_cvss: float | None = None, kev_only: bool = False,
+                   affects_us_only: bool = False) -> dict:
+    """The security feeds (T-21): one item per CVE across every feed, joined with Wazuh's inventory, plus each
+    feed's health. The work is security_feeds.query's; this keeps the briefing tools' entry point."""
+    from mnemerynne import security_feeds as feeds
 
-
-def _cached_items(conn: sqlite3.Connection, row: sqlite3.Row) -> list[dict]:
-    fresh = row["fetched_at"] and (datetime.now(timezone.utc) - _parsed(row["fetched_at"] + "Z")).total_seconds() < FEED_SECONDS
-    if fresh and row["cache"]:
-        return json.loads(row["cache"])
-    items = fetch_feed(row["url"], row["kind"], row["keywords"])
-    from mnemerynne import automations
-
-    with automations.on(conn) as feeds:              # automations.db (Phase 9)
-        feeds.execute("UPDATE automation_feeds SET cache = ?, fetched_at = strftime('%Y-%m-%dT%H:%M:%S', 'now') "
-                      "WHERE id = ?", (json.dumps(items), row["id"]))
-    return items
-
-
-def fetch_feed(url: str, kind: str, keywords: str = "") -> list[dict]:
-    params = None
-    if kind == "nvd":
-        words = [w.strip() for w in keywords.split(",") if w.strip()]
-        start = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%S.000")
-        params = {"pubStartDate": start, "pubEndDate": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000"),
-                  "resultsPerPage": "200", **({"keywordSearch": words[0]} if len(words) == 1 else {})}
-    with httpx.Client(transport=TRANSPORT, timeout=20.0, follow_redirects=True,
-                      headers={"User-Agent": "Mnemerynne-Automator"}) as client:
-        r = client.get(url, params=params)
-        r.raise_for_status()
-        if len(r.content) > FEED_MAX_BYTES:
-            raise ValueError("feed too large")
-    if kind == "json_kev":
-        data = r.json()
-        return [{"title": f"{v.get('cveID')}: {v.get('vendorProject')} {v.get('product')} — {v.get('vulnerabilityName')}",
-                 "summary": (v.get("shortDescription") or "")[:400], "published": v.get("dateAdded"),
-                 "action": v.get("requiredAction"), "due": v.get("dueDate"),
-                 "link": f"https://nvd.nist.gov/vuln/detail/{v.get('cveID')}"}
-                for v in sorted(data.get("vulnerabilities", []), key=lambda v: v.get("dateAdded") or "", reverse=True)][:500]
-    if kind == "nvd":
-        data = r.json()
-        out = []
-        for item in data.get("vulnerabilities", []):
-            cve = item.get("cve") or {}
-            desc = next((d.get("value") for d in cve.get("descriptions", []) if d.get("lang") == "en"), "")
-            metrics = cve.get("metrics") or {}
-            score = next((m[0].get("cvssData", {}).get("baseScore") for k, m in metrics.items() if m), None)
-            out.append({"title": cve.get("id", ""), "summary": desc[:400], "published": cve.get("published"),
-                        "cvss": score, "link": f"https://nvd.nist.gov/vuln/detail/{cve.get('id')}"})
-        return out
-    return _parse_xml_feed(r.content)
-
-
-def _parse_xml_feed(content: bytes) -> list[dict]:
-    if b"<!DOCTYPE" in content[:2000].upper() or b"<!ENTITY" in content[:5000].upper():
-        raise ValueError("feeds with a DOCTYPE aren't read")
-    root = ElementTree.fromstring(content)
-    out = []
-    atom = "{http://www.w3.org/2005/Atom}"
-    for item in root.iter("item"):
-        out.append({"title": (item.findtext("title") or "").strip(), "link": (item.findtext("link") or "").strip(),
-                    "summary": _plain(item.findtext("description") or "")[:400],
-                    "published": (item.findtext("pubDate") or "").strip()})
-    for entry in root.iter(atom + "entry"):
-        link = entry.find(atom + "link")
-        out.append({"title": (entry.findtext(atom + "title") or "").strip(),
-                    "link": link.get("href", "") if link is not None else "",
-                    "summary": _plain(entry.findtext(atom + "summary") or entry.findtext(atom + "content") or "")[:400],
-                    "published": (entry.findtext(atom + "updated") or entry.findtext(atom + "published") or "").strip()})
-    return out[:200]
-
-
-def _plain(html: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html)).strip()
-
-
-def _parsed(text: str | None) -> datetime | None:
-    if not text:
-        return None
-    text = text.strip()
-    for fmt in ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S",
-                "%Y-%m-%d", "%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M:%S %Z"):
-        try:
-            got = datetime.strptime(text.replace("Z", "+0000") if "%z" in fmt else text.rstrip("Z"), fmt)
-            return got if got.tzinfo else got.replace(tzinfo=timezone.utc)
-        except ValueError:
-            continue
-    return None
+    return feeds.query(conn, settings, since_days, product=product, min_cvss=min_cvss, kev_only=kev_only,
+                       affects_us_only=affects_us_only)

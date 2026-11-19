@@ -36,6 +36,20 @@ def _no_agent_model(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_security_feed_network():
+    """The security feeds (T-21) poll when read: no test reaches the real CISA/NVD/vendors. A test that wants feeds
+    sets security_feeds.TRANSPORT to its own fake; everything else gets a 503, which only marks the feed broken."""
+    import httpx
+
+    from mnemerynne import security_feeds
+    security_feeds.TRANSPORT = httpx.MockTransport(lambda request: httpx.Response(503))
+    security_feeds.clear_cache()
+    yield
+    security_feeds.TRANSPORT = None
+    security_feeds.clear_cache()
+
+
+@pytest.fixture(autouse=True)
 def _close_lent_connections():
     """db.lend keeps a few feature-file connections per process: closed after each test, so its files can go."""
     yield

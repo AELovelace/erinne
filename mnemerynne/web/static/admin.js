@@ -1573,35 +1573,150 @@
     box.appendChild(hookForm);
 
     box.appendChild(el("h3", "ax-h", "Security feeds"));
-    box.appendChild(el("p", "small muted", "Outside advisories Erynne may read for a security digest: an RSS or Atom " +
-      "feed, CISA's Known Exploited Vulnerabilities JSON, or an NVD CVE search. Keywords (the products you run, " +
-      "comma-separated) keep only what concerns you."));
-    if (data.feeds.length) {
-      box.appendChild(table(["Name", "Kind", "Keywords", "Fetched", ""], data.feeds.map(function (f) {
-        const del = el("button", "link small danger", "Delete");
-        del.type = "button";
-        del.addEventListener("click", function () {
-          if (confirm("Delete the feed " + f.name + "?")) send("DELETE", "/api/admin/automations/feeds/" + f.id);
-        });
-        return [f.name, f.kind, f.keywords || "everything", f.fetched_at || "–", del];
-      })));
+    const secBox = el("div", "ax-security");                          // filled by renderSecurity (its own API)
+    box.appendChild(secBox);
+    loadSecurity(secBox);
+  }
+
+  /* Security feeds (T-21): the defaults ship with Mnemerynne, so this is mostly switches. Each feed shows its
+     health (last success, error) because a broken feed must never look like "nothing new". Products hold the
+     match keys: CPEs, keywords and the Wazuh package names the affects_us join looks for. */
+  async function loadSecurity(secBox) {
+    try { renderSecurity(secBox, await api("GET", "/api/admin/automations/security-feeds")); }
+    catch (e) { secBox.replaceChildren(el("p", "error", e.message)); }
+  }
+
+  function renderSecurity(secBox, data) {
+    secBox.replaceChildren();
+    async function send(method, url, body) {                          // every change answers with the whole section
+      showError("");
+      try { renderSecurity(secBox, await api(method, url, body)); }
+      catch (err) { showError(err.message); }
     }
+    function button(text, cls, onClick) {                             // a small link-style button
+      const b = el("button", "link small" + (cls ? " " + cls : ""), text);
+      b.type = "button";
+      b.addEventListener("click", onClick);
+      return b;
+    }
+    function when(iso) { return iso ? iso.replace("T", " ").replace("Z", " UTC") : "never"; }
+    const listText = function (list) { return (list || []).join(", "); };
+    const listOf = function (text) { return text.split(",").map(function (s) { return s.trim(); }).filter(Boolean); };
+
+    secBox.appendChild(el("p", "small muted", "Where the security_feeds tool (and Erynne's security digest) gets new " +
+      "vulnerabilities: CISA KEV, NVD, Microsoft, Mozilla, GitHub's Git advisories, nginx.org and Oracle are set up " +
+      "already. One item per CVE, joined with Wazuh's installed packages to say which machines are affected. Enter " +
+      "the NVD API key, and check the products below (the Windows Server versions we still run)."));
+    if (data.note) secBox.appendChild(el("p", "small", data.note));
+
+    // ---- the feeds, with their health
+    secBox.appendChild(table(["Feed", "Health", "Every", ""], data.feeds.map(function (f) {
+      const health = el("span", "small");
+      if (!f.enabled) health.textContent = "off";
+      else if (f.error) { health.className = "small error"; health.textContent = f.error + " (last worked: " + when(f.last_success) + ")"; }
+      else health.textContent = f.last_success ? "worked " + when(f.last_success) + " · " + f.items_last_fetch + " items" : "not polled yet";
+      const name = el("span");
+      name.append(el("strong", null, f.name), el("br"), el("span", "small muted", f.kind + " · " + f.url));
+      if (f.note) name.append(el("br"), el("span", "small muted", f.note));
+      const actions = el("span", "small");
+      actions.append(button(f.enabled ? "Turn off" : "Turn on", "", function () {
+        send("PATCH", "/api/admin/automations/feeds/" + f.id, { enabled: !f.enabled });
+      }));
+      if (f.enabled) {
+        actions.append(document.createTextNode(" · "), button("Poll now", "", function () {
+          send("POST", "/api/admin/automations/feeds/" + f.id + "/poll");
+        }));
+      }
+      if (f.kind === "nvd") {                                         // NVD's API key, stored encrypted
+        actions.append(document.createTextNode(" · "), button(f.has_key ? "Change API key" : "Enter API key", "", function () {
+          const key = prompt("NVD API key (empty clears it):", "");
+          if (key !== null) send("PATCH", "/api/admin/automations/feeds/" + f.id, { api_key: key });
+        }));
+      }
+      actions.append(document.createTextNode(" · "), button("Edit", "", function () {
+        const url = prompt("Address of " + f.name + ":", f.url);
+        if (url === null) return;
+        const hours = prompt("Poll every how many hours?", String(f.interval_hours));
+        if (hours === null) return;
+        send("PATCH", "/api/admin/automations/feeds/" + f.id, { url: url.trim(), interval_hours: Number(hours) });
+      }));
+      if (!f.default) {                                               // the shipped feeds are switched off, not deleted
+        actions.append(document.createTextNode(" · "), button("Delete", "danger", function () {
+          if (confirm("Delete the feed " + f.name + "?")) send("DELETE", "/api/admin/automations/feeds/" + f.id);
+        }));
+      }
+      return [name, health, f.interval_hours + " h", actions];
+    })));
+
+    // ---- add a feed of our own
     const feedForm = el("form", "ax-new");
     const feedName = agentInput("text", ""), feedUrl = agentInput("text", ""), feedWords = agentInput("text", "");
     feedName.placeholder = "Name"; feedUrl.placeholder = "https://…"; feedWords.placeholder = "Keywords (optional)";
     const feedKind = el("select");
-    [["rss", "RSS"], ["atom", "Atom"], ["json_kev", "CISA KEV (JSON)"], ["nvd", "NVD CVE API"]].forEach(function (k) {
+    [["rss", "RSS"], ["atom", "Atom"], ["json_kev", "CISA KEV (JSON)"], ["nvd", "NVD CVE API"], ["github", "GitHub advisories"],
+     ["html", "Web page (CVE ids)"]].forEach(function (k) {
       const o = el("option", null, k[1]); o.value = k[0]; feedKind.appendChild(o);
     });
     const addFeed = el("button", "small", "Add feed");
     addFeed.type = "submit";
     feedForm.append(feedName, feedKind, feedUrl, feedWords, addFeed);
-    feedForm.addEventListener("submit", function (e) {
+    feedForm.addEventListener("submit", async function (e) {
       e.preventDefault();
-      send("POST", "/api/admin/automations/feeds", { name: feedName.value.trim(), url: feedUrl.value.trim(),
-        kind: feedKind.value, keywords: feedWords.value.trim() });
+      showError("");
+      try {
+        await api("POST", "/api/admin/automations/feeds", { name: feedName.value.trim(), url: feedUrl.value.trim(),
+          kind: feedKind.value, keywords: feedWords.value.trim() });
+        loadSecurity(secBox);
+      } catch (err) { showError(err.message); }
     });
-    box.appendChild(feedForm);
+    secBox.appendChild(feedForm);
+
+    // ---- the products we run, and how items are matched to them
+    secBox.appendChild(el("h4", null, "Products we watch"));
+    secBox.appendChild(el("p", "small muted", "CPEs match NVD records (a trailing * matches any suffix); keywords match " +
+      "KEV and vendor titles (ALL-CAPS ones match exactly); package names are what Wazuh's Installed packages lists, " +
+      "for affects_us. The ones marked off are the plan's \"worth adding later\"."));
+    secBox.appendChild(table(["Product", "CPEs", "Keywords", "Wazuh packages", ""], data.products.map(function (p) {
+      const name = el("span");
+      name.append(el("strong", null, p.name), el("span", "small muted", " · " + p.vendor + (p.enabled ? "" : " · off")));
+      if (p.note) name.append(el("br"), el("span", "small muted", p.note));
+      const actions = el("span", "small");
+      actions.append(button(p.enabled ? "Turn off" : "Turn on", "", function () {
+        send("PATCH", "/api/admin/automations/products/" + p.id, { enabled: !p.enabled });
+      }), document.createTextNode(" · "), button("Edit", "", function () {
+        const cpes = prompt("CPEs (comma-separated):", listText(p.cpes));
+        if (cpes === null) return;
+        const words = prompt("Keywords (comma-separated):", listText(p.keywords));
+        if (words === null) return;
+        const pkgs = prompt("Wazuh package names (comma-separated, * wildcards):", listText(p.packages));
+        if (pkgs === null) return;
+        send("PATCH", "/api/admin/automations/products/" + p.id, { cpes: listOf(cpes), keywords: listOf(words), packages: listOf(pkgs) });
+      }), document.createTextNode(" · "), button("Delete", "danger", function () {
+        if (confirm("Stop watching " + p.name + "?")) send("DELETE", "/api/admin/automations/products/" + p.id);
+      }));
+      return [name, el("span", "small", listText(p.cpes) || "–"), el("span", "small", listText(p.keywords) || "–"),
+              el("span", "small", listText(p.packages) || "–"), actions];
+    })));
+    const prodForm = el("form", "ax-new");
+    const pKey = agentInput("text", ""), pName = agentInput("text", ""), pVendor = agentInput("text", ""),
+          pCpes = agentInput("text", ""), pWords = agentInput("text", ""), pPkgs = agentInput("text", "");
+    pKey.placeholder = "key (e.g. putty)"; pName.placeholder = "Name"; pVendor.placeholder = "Vendor";
+    pCpes.placeholder = "CPEs"; pWords.placeholder = "Keywords"; pPkgs.placeholder = "Wazuh packages";
+    const addProd = el("button", "small", "Add product");
+    addProd.type = "submit";
+    prodForm.append(pKey, pName, pVendor, pCpes, pWords, pPkgs, addProd);
+    prodForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      send("POST", "/api/admin/automations/products", { key: pKey.value.trim(), name: pName.value.trim(),
+        vendor: pVendor.value.trim(), cpes: listOf(pCpes.value), keywords: listOf(pWords.value), packages: listOf(pPkgs.value) });
+    });
+    secBox.appendChild(prodForm);
+
+    // ---- the Wazuh push
+    secBox.appendChild(el("h4", null, "Wazuh"));
+    secBox.appendChild(el("p", "small muted", "A new item that is in KEV (or CVSS 9 and up) and affects our machines is " +
+      "written once, as one JSON line, to " + data.log + ". Add this to the Wazuh agent's ossec.conf on this server:"));
+    secBox.appendChild(el("pre", "small", data.localfile));
   }
 
   async function loadAutomations() {

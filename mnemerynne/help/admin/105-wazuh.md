@@ -85,3 +85,7 @@ An API made from the older Wazuh preset (four operations) keeps its address, cre
 - **Update preset operations** also rewrites the four it has (Alert summary, Alerts, Failed logins, Alerts from an IP) to the new versions with the filters and shapes. Edits you made to those four are replaced; whether each is enabled stays as it was, and operations you added yourself aren't touched.
 
 Then add **Wazuh manager** (and, if you want the changes, **Wazuh manager actions**) as new APIs.
+
+## Security feeds
+
+[Security feeds](security-feeds.md) read the **Wazuh** preset's *Installed packages* index to say which machines a new CVE affects. They also write one JSON line per urgent item to a log for the Wazuh agent on this server to pick up (rules 100350–100359).

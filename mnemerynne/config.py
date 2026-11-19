@@ -200,6 +200,10 @@ class Settings(BaseSettings):
     # that survives the boot drive (e.g. the NAS's storage array), never inside
     # share_root, where SMB users could read the copied secret key.
     backup_dir: Path = Path("/var/backups/mnemerynne")
+    # Security feeds (mnemerynne/security_feeds.py, T-21): the JSON-lines log Wazuh's agent on this server reads
+    # (<localfile><log_format>json</log_format>), one line per new KEV/critical item that affects us. Empty:
+    # <data_dir>/logs/security-feeds.json.
+    security_feeds_log: Path | None = None
     # The settings file is copied beside each database snapshot: it holds the
     # secret key that API credentials and Microsoft 365 links are encrypted
     # with. Empty: not copied.

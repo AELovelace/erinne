@@ -97,6 +97,7 @@ Also in the database (Access → Settings): the **admin group** (default `Domain
 | Setting | Default | Meaning |
 |---|---|---|
 | `BACKUP_DIR` | `/var/backups/mnemerynne` | Where `backup` writes and `restore` reads. On a disk that outlives the boot drive; never inside the share. |
+| `SECURITY_FEEDS_LOG` | `<data_dir>/logs/security-feeds.json` | The JSON-lines log Wazuh's agent reads for urgent [security feed](security-feeds.md) items. |
 | `BACKUP_ENV_FILE` | `/etc/mnemerynne/mnemerynne.env` | Copied beside each snapshot (it holds the secret key). Empty: not copied. |
 | `MCP_CALLS_DAYS`, `API_CALLS_DAYS`, `AGENT_CALLS_DAYS` | 90 | Logs of Claude's tool calls, internal API calls and Erynne's tool calls; 0 keeps them forever. |
 | `GRAPH_RUNS_DAYS` | 30 | Per-step timings of answers. |

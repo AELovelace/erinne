@@ -277,12 +277,15 @@ class Scheduler:
                     await asyncio.sleep(5)
 
         listener = asyncio.create_task(listen())
+        feeds_polling: asyncio.Task | None = None
         try:
             while True:
                 try:
                     await self.tick()
                 except Exception:
                     log.exception("Automator's scheduler tick failed")
+                if feeds_polling is None or feeds_polling.done():     # T-21: the security feeds that are due, in a
+                    feeds_polling = asyncio.create_task(self._poll_feeds())   # thread, never blocking the runs
                 try:
                     await asyncio.wait_for(woken.wait(), TICK)
                 except asyncio.TimeoutError:
@@ -291,6 +294,22 @@ class Scheduler:
         finally:
             listener.cancel()
             await asyncio.gather(listener, return_exceptions=True)
+
+    async def _poll_feeds(self) -> None:
+        """Poll the security feeds that are due (each has its own interval; security_feeds.poll_due), whether or
+        not Automator is on: the feeds serve the security_feeds tool too."""
+        from mnemerynne import security_feeds
+
+        def work() -> None:
+            conn = connect(self.settings)
+            try:
+                security_feeds.poll_due(conn, self.settings)
+            finally:
+                conn.close()
+        try:
+            await asyncio.to_thread(work)
+        except Exception:
+            log.exception("Polling the security feeds failed")
 
     async def tick(self) -> list[int]:
         """Claim what's due (and what other processes queued) and start it, and deliver the reports they saved;

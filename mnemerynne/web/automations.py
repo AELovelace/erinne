@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import apis, automations as auto, automations_run, events, group_refs, rooms
+from mnemerynne import apis, automations as auto, automations_run, events, group_refs, rooms, security_feeds
 from mnemerynne.automations_run import footnotes
 from mnemerynne.db import transaction
 from mnemerynne.ingest import markdown
@@ -38,8 +38,10 @@ TEMPLATES = (
      "schedule": {"every": "day", "at": "08:00", "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]},
      "deliver": {"inbox": True},
      "prompt": "Write today's security digest: Mnemerynne updates waiting (and any flagged as touching services "
-               "or packages), open Microsoft 365 security alerts and risky users, and new advisories in the "
-               "security feeds for the products we run. Say what needs doing first. If nothing is new, answer "
+               "or packages), open Microsoft 365 security alerts and risky users, and from security_feeds: known "
+               "exploited vulnerabilities (kev_only) and CVSS 7+ items that affect our machines (affects_us_only, "
+               "min_cvss 7), KEV that affects us first, with the machines. Name any feed whose feed_status has an "
+               "error. Say what needs doing first. If nothing is new and every feed works, answer "
                f"with exactly {auto.QUIET}."},
     {"key": "health", "name": "API health check", "runner": "erynne",
      "schedule": {"every": "hours", "n": 4}, "deliver": {"inbox": True},
@@ -294,9 +296,24 @@ def _admin_status(conn: sqlite3.Connection) -> dict:
             "destinations": [{"id": d["id"], "name": d["name"], "url": d["url"], "format": d["format"],
                               "secret": bool(d["secret_enc"]), "group": group_refs.label(conn, d["group_ref"])}
                              for d in conn.execute("SELECT * FROM automation_destinations ORDER BY name").fetchall()],
-            "feeds": [{"id": f["id"], "name": f["name"], "url": f["url"], "kind": f["kind"], "keywords": f["keywords"],
-                       "enabled": bool(f["enabled"]), "fetched_at": f["fetched_at"]}
-                      for f in conn.execute("SELECT * FROM automation_feeds ORDER BY name").fetchall()]}
+            "feeds": _feeds(conn)}
+
+
+def _feeds(conn: sqlite3.Connection) -> list[dict]:
+    """Every security feed with its health (T-21): the defaults Mnemerynne ships (put in on first look) and the
+    admins' own. Never the API key itself: `has_key` says whether one is saved."""
+    with security_feeds._db(conn) as fdb:
+        if fdb is None:
+            return []
+        security_feeds.ensure_defaults(fdb)
+        return [{"id": f["id"], "key": f["key"] or "", "default": f["key"] is not None, "name": f["name"],
+                 "url": f["url"], "kind": f["kind"], "keywords": f["keywords"],
+                 "products": json.loads(f["products"] or "[]"), "note": f["note"], "enabled": bool(f["enabled"]),
+                 "interval_hours": round(f["interval_seconds"] / 3600, 2), "has_key": f["secret_enc"] is not None,
+                 "last_attempt": f["last_attempt"] or "", "last_success": f["last_success"] or "",
+                 "error": f["error"] or "", "items_last_fetch": f["items_last_fetch"],
+                 "next_poll": security_feeds.iso(security_feeds.next_due(f)) if f["enabled"] else ""}
+                for f in fdb.execute("SELECT * FROM automation_feeds ORDER BY id").fetchall()]
 
 
 async def _group(request: Request, conn: sqlite3.Connection, text: str) -> str:
@@ -402,8 +419,9 @@ def add_feed(body: FeedBody, user=Depends(admin_user), conn: sqlite3.Connection 
     url = body.url.strip()
     if not url.startswith("https://") or " " in url:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "A feed's address must start with https://.")
-    if body.kind not in ("rss", "atom", "json_kev", "nvd"):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The kind is rss, atom, json_kev or nvd.")
+    if body.kind not in security_feeds.KINDS:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            f"The kind is one of {', '.join(security_feeds.KINDS)}.")
     try:
         with transaction(conn):
             conn.execute("INSERT INTO automation_feeds(name, url, kind, keywords, enabled) VALUES (?, ?, ?, ?, ?)",
@@ -423,3 +441,148 @@ def delete_feed(feed_id: int, user=Depends(admin_user), conn: sqlite3.Connection
         conn.execute("DELETE FROM automation_feeds WHERE id = ?", (feed_id,))
         _log(conn, user, "automations.feed_delete", row["name"], "")
     return _admin_status(conn)
+
+
+# ----------------------------------------------------------- security feeds (T-21)
+# The defaults ship with Mnemerynne (security_feeds.DEFAULT_FEEDS/DEFAULT_PRODUCTS); here admins switch them on and
+# off, enter the NVD API key, poll one now, and adjust the products' CPEs, keywords and Wazuh package names (e.g. the
+# Windows Server versions we still run).
+class FeedPatch(BaseModel):
+    enabled: bool | None = None
+    url: str | None = Field(None, max_length=1000)
+    keywords: str | None = Field(None, max_length=1000)
+    interval_hours: float | None = Field(None, ge=0.5, le=168)
+    api_key: str | None = Field(None, max_length=500)      # "" clears it
+
+
+class ProductBody(BaseModel):
+    key: str | None = Field(None, max_length=40, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    name: str | None = Field(None, min_length=1, max_length=120)
+    vendor: str | None = Field(None, max_length=120)
+    cpes: list[str] | None = Field(None, max_length=50)
+    keywords: list[str] | None = Field(None, max_length=50)
+    packages: list[str] | None = Field(None, max_length=50)
+    enabled: bool | None = None
+
+
+def _security_status(request: Request, conn: sqlite3.Connection) -> dict:
+    """What the admin page's Security feeds section shows: feeds with health, products, and the Wazuh log."""
+    settings = request.app.state.settings
+    feeds = _feeds(conn)                                     # puts the defaults in first
+    with security_feeds._db(conn) as fdb:
+        prods = security_feeds.products(fdb, enabled_only=False) if fdb is not None else []
+    return {"feeds": feeds, "products": prods, "kinds": list(security_feeds.KINDS),
+            "log": str(security_feeds.log_path(settings)), "localfile": security_feeds.wazuh_localfile(settings)}
+
+
+def _clean(values: list[str] | None) -> str | None:
+    """A list from the page as stored JSON (blanks dropped); None when it wasn't sent."""
+    return None if values is None else json.dumps([v.strip() for v in values if v and v.strip()][:50])
+
+
+@admin_router.get("/security-feeds")
+def security_status(request: Request, user=Depends(admin_user),
+                    conn: sqlite3.Connection = Depends(get_automations_db)):
+    """The feeds with their health, the products we watch, and where the Wazuh log goes."""
+    return _security_status(request, conn)
+
+
+@admin_router.patch("/feeds/{feed_id}")
+def patch_feed(feed_id: int, body: FeedPatch, request: Request, user=Depends(admin_user),
+               conn: sqlite3.Connection = Depends(get_automations_db)):
+    """Switch a feed on or off, change its address, keywords or interval, or save (or clear) its API key."""
+    with transaction(conn):
+        row = conn.execute("SELECT * FROM automation_feeds WHERE id = ?", (feed_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No such feed")
+        changes: dict = {}
+        if body.enabled is not None:
+            changes["enabled"] = int(body.enabled)
+        if body.url is not None:
+            url = body.url.strip()
+            if not url.startswith("https://") or " " in url:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "A feed's address must start with https://.")
+            changes["url"] = url
+        if body.keywords is not None:
+            changes["keywords"] = body.keywords.strip()
+        if body.interval_hours is not None:
+            changes["interval_seconds"] = int(body.interval_hours * 3600)
+        if body.api_key is not None:                        # encrypted with MNEMERYNNE_SECRET_KEY, never shown again
+            key = body.api_key.strip()
+            changes["secret_enc"] = apis.encrypt_secret(request.app.state.settings, key) if key else None
+        if changes:
+            what = ", ".join(("API key " + ("saved" if changes["secret_enc"] else "cleared")) if k == "secret_enc"
+                             else k for k in changes)
+            changes["backoff_until"] = None                 # a change is a reason to try again now
+            conn.execute("UPDATE automation_feeds SET " + ", ".join(f"{k} = ?" for k in changes) + " WHERE id = ?",
+                         (*changes.values(), feed_id))
+            _log(conn, user, "automations.feed_change", row["name"], what)
+    return _security_status(request, conn)
+
+
+@admin_router.post("/feeds/{feed_id}/poll")
+async def poll_feed(feed_id: int, request: Request, user=Depends(admin_user),
+                    conn: sqlite3.Connection = Depends(get_automations_db)):
+    """Poll one (enabled) feed now, and push anything urgent to Wazuh as a scheduled poll would."""
+    if conn.execute("SELECT 1 FROM automation_feeds WHERE id = ?", (feed_id,)).fetchone() is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such feed")
+    security_feeds.clear_cache()
+    settings = request.app.state.settings
+    done = await anyio.to_thread.run_sync(lambda: security_feeds.poll_due(conn, settings, only=feed_id))
+    out = _security_status(request, conn)
+    out["polled"] = done
+    if not done:
+        out["note"] = "Nothing was polled: the feed is off, or another poll is running (try again in a minute)."
+    return out
+
+
+@admin_router.post("/products", status_code=status.HTTP_201_CREATED)
+def add_product(body: ProductBody, request: Request, user=Depends(admin_user),
+                conn: sqlite3.Connection = Depends(get_automations_db)):
+    """A product of our own to watch (key, name, vendor, CPEs, keywords, Wazuh package names)."""
+    if not body.key or not body.name:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "A product needs a key and a name.")
+    try:
+        with transaction(conn):
+            conn.execute("INSERT INTO security_products(key, name, vendor, cpes, keywords, packages, enabled) "
+                         "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                         (body.key, body.name.strip(), (body.vendor or "").strip(), _clean(body.cpes or []),
+                          _clean(body.keywords or []), _clean(body.packages or []), int(body.enabled is not False)))
+            _log(conn, user, "automations.security_product", body.name.strip(), body.key)
+    except sqlite3.IntegrityError:
+        raise HTTPException(status.HTTP_409_CONFLICT, "There's already a product with that key.") from None
+    return _security_status(request, conn)
+
+
+@admin_router.patch("/products/{product_id}")
+def patch_product(product_id: int, body: ProductBody, request: Request, user=Depends(admin_user),
+                  conn: sqlite3.Connection = Depends(get_automations_db)):
+    """A product's name, vendor, CPEs, keywords, Wazuh package names, or on/off."""
+    with transaction(conn):
+        row = conn.execute("SELECT name FROM security_products WHERE id = ?", (product_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No such product")
+        given = {"name": body.name.strip() if body.name else None,
+                 "vendor": body.vendor.strip() if body.vendor is not None else None,
+                 "cpes": _clean(body.cpes), "keywords": _clean(body.keywords), "packages": _clean(body.packages),
+                 "enabled": None if body.enabled is None else int(body.enabled)}
+        changes = {k: v for k, v in given.items() if v is not None}
+        if changes:
+            conn.execute("UPDATE security_products SET " + ", ".join(f"{k} = ?" for k in changes) +
+                         ", updated_at = datetime('now') WHERE id = ?", (*changes.values(), product_id))
+            _log(conn, user, "automations.security_product_change", row["name"], ", ".join(changes))
+    security_feeds.clear_cache()                            # new package names: read the inventory again
+    return _security_status(request, conn)
+
+
+@admin_router.delete("/products/{product_id}")
+def delete_product(product_id: int, request: Request, user=Depends(admin_user),
+                   conn: sqlite3.Connection = Depends(get_automations_db)):
+    """Stop watching a product (a default one stays deleted: it's not put back)."""
+    with transaction(conn):
+        row = conn.execute("SELECT name FROM security_products WHERE id = ?", (product_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No such product")
+        conn.execute("DELETE FROM security_products WHERE id = ?", (product_id,))
+        _log(conn, user, "automations.security_product_delete", row["name"], "")
+    return _security_status(request, conn)

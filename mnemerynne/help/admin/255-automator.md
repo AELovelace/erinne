@@ -13,7 +13,7 @@ Automator runs jobs on a schedule for the people allowed to use it: a morning br
   - **Slack:** an incoming-webhook message.
   - **Signing:** with a secret, each post carries `X-Mnemerynne-Signature: sha256=<HMAC of the body>`.
   - **Retries:** failures are tried three times.
-- **Security feeds:** the outside sources `security_feeds` reads (see below).
+- **Security feeds:** the vulnerability feeds `security_feeds` reads. CISA KEV, NVD, Microsoft, Mozilla, GitHub's Git advisories, nginx.org and Oracle ship set up; see [Security feeds](security-feeds.md).
 
 Every change is logged in Recent changes (`settings.automations*`, `automations.*`).
 
@@ -56,10 +56,7 @@ These are tools for Erynne and Claude, in chat and in automations:
   | risky users | `IdentityRiskyUser.Read.All` |
   | Secure Score | `SecurityEvents.Read.All` |
   | risky sign-ins | `AuditLog.Read.All` (Entra ID P1/P2) |
-- **security_feeds:** the feeds above, fetched at most hourly and kept to each feed's keywords. The kinds:
-  - **RSS/Atom:** vendor advisories.
-  - **CISA KEV:** `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json`.
-  - **NVD:** `https://services.nvd.nist.gov/rest/json/cves/2.0`, with one keyword per feed.
+- **security_feeds** `(since_days, product, min_cvss, kev_only, affects_us_only)`: new CVEs in what we run, one item per CVE across the feeds, with `affects_us` (which Wazuh agents run a version below the fix) and `feed_status` (each feed's health, so a broken feed is never mistaken for a quiet one). See [Security feeds](security-feeds.md).
 
 ## Claude's tools
 

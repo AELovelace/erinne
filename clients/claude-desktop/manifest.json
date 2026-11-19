@@ -178,7 +178,7 @@
     },
     {
       "name": "security_feeds",
-      "description": "New security advisories from the feeds your admins set up"
+      "description": "New CVEs in what we run (KEV, NVD, vendors), which machines they affect, and feed health"
     },
     {
       "name": "list_automations",
