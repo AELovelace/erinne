@@ -133,12 +133,12 @@ Lumi is a little glowing fairy cat, and she has three apps on the **Lumi** shelf
 
 Each app's **Settings** tab has **Open** rows for the other two.
 
-**Room mode:** Lumi Pet opens in **room mode**: no tabs, just Lumi in her flat, and the things in it are what you do. Lumi walks to a thing and says what it's for, and using it opens a **card** with the same choices that tab's list would show. The flat has three rooms, left to right:
+**Room mode:** Lumi Pet opens in **room mode**: no tabs, just Lumi in her flat, and the things in it are what you do. Along the bottom of the room, a **lower bar** has a button for each thing in the room, and Lumi's speech bubble over the one she's at (or the one you point at) says what it is, in her own words ("My fridge! Snacks and treats live in here."). Using a thing that needs a menu opens it in the **right-hand panel**, with the same choices that tab's list would show. With no menu open, that panel is out of the way, and the room has the screen. What Lumi says shows in a bubble over her head. The flat has three rooms, left to right:
 
 | Room | Thing | What it opens |
 |---|---|---|
 | **Kitchen** | The fridge, her bowl | **Pantry** (her food) |
-| | The potion shelf | **Drink a potion** (only when she's hurt; otherwise it says so) |
+| | The potion shelf | Drinks a potion straight away, with no menu (only when she's hurt; otherwise she says so) |
 | **Bedroom** | The front door | Out into **Lumi Town** |
 | | The toy chest | **Toys** |
 | | The trophy shelf | **Collection** |
@@ -148,11 +148,12 @@ Each app's **Settings** tab has **Open** rows for the other two.
 | | The terminal | **Settings** |
 | | The capsule machine | **Shop** |
 
-- **Remote or keyboard:** **Left/Right** walk Lumi to the next thing. Past the last one, she walks through to the next room. **Previous/Next** (Page Up/Page Down, **[** **]**) jump a whole room. **Enter** uses the thing she's at. In a card, **Up/Down** choose and **Enter** does it, as in the lists. **Escape**, **Back**, a gamepad's **B**, or the card's last row, **Back to the room**, closes the card. Escape leaves the game only when no card is open.
-- **Mouse or touch:** press a thing to walk there and open it, press the floor to walk to the nearest thing, press **Lumi** herself for a cuddle, and press the **◀ kitchen** / **den ▶** arrows at the room's edges to change room.
-- The list on the right always shows the room's things (or the open card), so screen readers and keyboard Tab reach everything.
+- **Remote or keyboard:** **Left/Right** walk Lumi to the next thing in the lower bar. Past the last one, she walks through to the next room. **Previous/Next** (Page Up/Page Down, **[** **]**) jump a whole room. **Enter** uses the thing she's at. In a menu, **Up/Down** choose and **Enter** does it, as in the lists. **Escape**, **Back**, a gamepad's **B**, or the menu's last row, **Back to the room**, closes it. Escape leaves the game only when no menu is open.
+- **Mouse or touch:** press a thing in the room or in the lower bar to walk there and use it. Press the floor to walk to the nearest thing, press **Lumi** herself for a cuddle, and press the **◀ kitchen** / **den ▶** arrows at the room's edges to change room. On a phone the lower bar sits at the foot of the screen, and a menu opens under the room.
+- The lower bar's buttons are real buttons, so keyboard Tab and screen readers reach every thing, and what Lumi says is read out.
 - The kitchen and the den wear her own wallpaper, floor and windows from **Home**. Until she has unpacked a bed, a toy chest or a trophy shelf, a mattress, a cardboard box of toys and a plank shelf stand in for them.
 - Each device remembers which room she was in.
+- On a computer, her stats are one bar along the top: the LUMI PET header with **Tummy**, **Energy**, **Joy** and **Health**, then her name, level, happy moments, last little memory and coins. Lumi Pet no longer lists the keys on screen; they're all here.
 - **Settings → Room mode** (on the den's terminal) turns it off, and Lumi Pet goes back to the tabs and lists. Turn it on again from **Settings** there. It's saved with your Lumi, so it follows you to every device. Lumi Dungeons and Lumi's Garden aren't affected.
 
 **Lumi Town** 🏘 is outside her front door. In Lumi Pet, press the **door** in her room, or choose **Through the door** at the end of **Care**, and she trots out into town. The door is on the left of her room, so on a squarer screen or a phone the panel can hide it; the Care row always works. Lumi Town has no card on the Games page: her door is the way in. It's a neon city where it's always night. Towers with lit windows stand under a smoggy pink sky, with wires and hologram billboards overhead. Every place has its own neon sign, the signs shine back off the wet road, steam rises from the grates, and a light rain falls. The street lights, the LUMI TOWN sign and the ring where Lumi is about to walk glow in her own colour. If your device is set to reduce motion, the rain stops and the steam holds still. The town has two streets. The **High Street** has six places, and Lumi walks to whichever one you pick (**Up/Down/Left/Right** on a remote or keyboard, or press a place):

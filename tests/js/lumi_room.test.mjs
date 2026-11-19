@@ -24,6 +24,17 @@ test("everything pressable sits in the middle every screen shows, and its box is
   }
 });
 
+test("Lumi speaks for herself: every thing and every way through has her own first-person words", () => {
+  for (const r of Ru.ROOMS) for (const [at, s] of Ru.layout(r.id).entries()) {
+    assert.match(s.say, /^(My |This way to )/, r.id + "/" + (s.id || s.go) + ": her bubble is in her own words");
+    assert.doesNotMatch(s.say + " " + (s.open || ""), /(Lumi|her|she)/i, r.id + "/" + (s.id || s.go) + ": never about herself in the third person");
+    assert.equal(Ru.guide({ room: r.id, at: at }), s.say);
+    if (s.tab) assert.ok(s.open, r.id + "/" + s.id + " has a line for when its menu opens");
+  }
+  const rows = Ru.rows({ room: "kitchen", at: 0 }, { open() {}, walk() {}, door() {} });
+  assert.deepEqual(rows.map(row => row.say.slice(0, 7)), ["My frid", "My bowl", "My poti", "This wa"], "The lower bar gets her words with each row");
+});
+
 test("◀ ▶ walk thing to thing, through to the next room at the ends, and stop at the flat's ends", () => {
   let at = Ru.clean(null);
   assert.deepEqual(at, Ru.START);

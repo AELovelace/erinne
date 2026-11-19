@@ -46,8 +46,7 @@
   // (one past the real ones): its rows are the things where she is, and its cursor is where she stands. A thing opens a
   // card: the real tab's rows (roomCard is that thing), with the way back. roomAt is remembered on this device.
   const ROOM = TABS.length, PLACE = $("lp-place").textContent;
-  const KEYS_ROOM = "◀ ▶ walk to the next thing · past the last, the next room<br>Enter uses it · ⏮ ⏭ the next room<br>In a card: ▲ ▼ choose · Escape / Back / B goes back to the room<br>Mouse: press a thing, the floor, or Lumi for a cuddle";
-  let roomAt = Ru ? Ru.clean(G.store.get("room-at", null)) : null, roomCard = null;
+  let roomAt = Ru ? Ru.clean(G.store.get("room-at", null)) : null, roomCard = null, lastThings = ""; // (lastThings: what the lower bar last drew)
   function freshPicks() { return TABS.map(function () { return 0; }).concat([0]); } // Every tab's cursor, and the room's.
   let snap = null, offset = 0, tab = 0, picks = freshPicks(), busy = false, visited = false;
   let battleView = null, finished = null, lastFoe = ""; // Which Battle list is open, the fight that just ended, and the enemy last drawn.
@@ -362,7 +361,11 @@
     syncParty();
   }
 
-  function say(text) { $("lp-message").textContent = text; } // The live region announces it to screen readers too.
+  function say(text) { // The live region announces it to screen readers too; in room mode it's also her speech bubble.
+    $("lp-message").textContent = text;
+    const bubble = $("lp-guide");
+    if (bubble) bubble.textContent = text;
+  }
 
   function effect(action, symbol) { // A brief expression in the room after an interaction.
     room.dataset.action = action; $("lp-effect").textContent = symbol; effectUntil = Date.now() + 4000;
@@ -502,7 +505,14 @@
     const to = TABS.indexOf(thing.tab);
     if (to < 0) return; // Not a tab this app has (can't happen in Lumi Pet; kept safe).
     changeTab(to); roomCard = thing; picks[tab] = 0; lastList = "";
-    say(thing.say); // Lumi the guide: her line for it, read out by screen readers too.
+    const offered = rows().filter(function (row) { return row.key !== "card-back"; });
+    if (thing.keys && offered.length === 1) { // One choice (the potion shelf): no menu, she just does it.
+      const only = offered[0];
+      roomCard = null; changeTab(ROOM);
+      if (only.note && !only.send) say(only.note); else if (only.local) only.local(); else if (only.send) submit(only);
+      return;
+    }
+    say(Ru.guide(roomAt, thing)); // Lumi the guide: what she says as its menu opens (right-hand panel).
   }
 
   function closeCard() { // Back to the room, standing where she was. True when a card was open.
@@ -554,10 +564,40 @@
       RA.scene(here.id, house) + Ru.hits(here.id, roomAt.at); // All authored in house.js, room-art.js and room-ui.js; nothing a person typed.
   }
 
-  function drawRoomBits(on) { // Room mode's extras around the picture: the guide's bubble, the arrows to the next rooms, the keys.
+  function drawThings(on) { // Room mode's lower bar: the things in this room (and the ways through), each with Lumi's bubble saying what it is.
+    const bar = $("lp-things");
+    bar.hidden = !on;
+    if (!on) { lastThings = ""; return; }
+    const list = Ru.rows(roomAt, { open: openCard, walk: roomWalk, door: adventure }); // The same rows the room's list has.
+    const current = roomCard ? Ru.find(roomAt.room, roomCard.id) : roomAt.at; // Her spot, or the thing whose menu is open.
+    const signature = roomAt.room + "|" + list.map(function (row) { return row.key; }).join("|");
+    if (signature !== lastThings) { // Rebuilt only when she changes room, so a button being pressed is never swapped mid-press.
+      lastThings = signature;
+      bar.replaceChildren.apply(bar, list.map(function (row, index) {
+        const button = document.createElement("button"), icon = document.createElement("span"), bubble = document.createElement("span"), name = document.createElement("b");
+        button.type = "button"; button.className = "lp-thing"; button.dataset.thing = row.key;
+        icon.className = "lp-thing-icon"; icon.textContent = row.icon; icon.setAttribute("aria-hidden", "true");
+        bubble.className = "lp-thing-say"; name.textContent = row.name; // Her bubble: what it is, then her words for it.
+        bubble.append(name, document.createTextNode(" " + (row.say || row.hint)));
+        button.append(icon, bubble);
+        button.addEventListener("click", function () { // Walk to it and use it (a menu opens on the right where it needs one).
+          pendingConfirm = null;
+          if (roomCard) { roomCard = null; changeTab(ROOM); } // Another thing: this menu closes first.
+          roomMove({ room: roomAt.room, at: index });
+          row.local(); lastList = ""; render();
+        });
+        return button;
+      }));
+    }
+    Array.from(bar.children).forEach(function (button, index) { button.setAttribute("aria-pressed", String(index === current)); });
+  }
+
+  function drawRoomBits(on) { // Room mode's extras around the picture: her speech bubble, the lower bar, the arrows to the next rooms.
     const guide = $("lp-guide"), ways = on && !roomCard ? Ru.neighbours(roomAt) : { left: null, right: null };
+    $("gm").dataset.card = String(on && Boolean(roomCard)); // game.css shows the right-hand panel only for an open menu.
     if (!on) { delete room.dataset.rooms; guide.hidden = true; $("lp-place").textContent = PLACE; }
-    else { guide.hidden = false; guide.textContent = Ru.guide(roomAt, roomCard); $("lp-keys").innerHTML = KEYS_ROOM; } // Fixed text from this file.
+    else { guide.hidden = false; guide.textContent = $("lp-message").textContent; } // Her bubble says what she last said.
+    drawThings(on);
     [["left", $("lp-way-left")], ["right", $("lp-way-right")]].forEach(function (pair) {
       const to = ways[pair[0]];
       pair[1].hidden = !to;

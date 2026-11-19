@@ -33,7 +33,8 @@ export async function checkLumiPetRooms(page, base) { // Room mode (room-ui.js):
   await page.waitForSelector(row("thing-paint") + '[aria-pressed="true"]');
   assert.equal(await page.$eval("#gm", el => el.dataset.rooms), "true");
   assert.ok(await page.$eval(".lp-tabs", el => getComputedStyle(el).display === "none"), "No tabs in room mode");
-  assert.match(await text(page, "#lp-guide"), /paint pots/i, "Lumi says what she's standing at");
+  assert.match(await text(page, '.lp-thing[aria-pressed="true"] .lp-thing-say'), /My paint pots!/, "The lower bar: Lumi says what she's at, in her own words");
+  assert.equal(await page.$eval("#gm", el => el.dataset.card), "false", "No menu open: no right-hand panel");
   await page.keyboard.press("ArrowRight"); // ▶ to her bed, ▶ again through to the den
   await page.waitForSelector(row("thing-bed") + '[aria-pressed="true"]');
   await page.keyboard.press("ArrowRight");
@@ -47,12 +48,13 @@ export async function checkLumiPetRooms(page, base) { // Room mode (room-ui.js):
   await page.keyboard.press("Enter"); // The apple: fed through the fridge's card, exactly as from the Pantry tab
   await said(page, "Apple!");
   assert.ok(await page.$(row("card-back")), "A card ends with the way back");
+  assert.equal(await page.$eval("#gm", el => el.dataset.card), "true", "Her pantry needs a menu: the right-hand panel shows it");
   await page.keyboard.press("Escape"); // Escape closes the card, not the game
   await page.waitForSelector(row("thing-fridge") + '[aria-pressed="true"]');
   assert.equal(page.url(), base + "/media/games/lumi-pet");
-  await page.click('.lp-house [data-click="thing:potions"]'); // She isn't hurt: the shelf says why, rather than offering nothing
-  await page.waitForSelector(row("card-empty"));
-  await page.keyboard.press("Escape");
+  await page.click('.lp-thing[data-thing="thing-potions"]'); // The lower bar. One choice at most: no menu; she isn't hurt, so she says why
+  await said(page, "I'm fine just now");
+  assert.equal(await page.$eval("#gm", el => el.dataset.card), "false");
   await page.click("#lp-way-right"); // The edge arrow: into the bedroom, then the den's terminal for Settings
   await page.waitForSelector(row("thing-door"));
   await page.click("#lp-way-right");

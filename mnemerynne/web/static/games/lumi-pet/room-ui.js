@@ -18,26 +18,37 @@
 
   // The flat, left to right. Each thing: where Lumi stands to use it (x), its press box over the drawing [x, y, w, h],
   // which tab's rows it opens (tab), and optionally only some of them (keys), and what's said when that leaves none (empty).
-  // act: "door" goes straight out through her front door (no card). In the bedroom, the boxes sit over house.js's own
-  // furniture (its 400-wide block starts at x 300); in the kitchen and the den over room-art.js's things.
+  // Lumi's own words, always first person: `say` is her bubble over it in the lower bar (what it is), `open` what she
+  // says when its menu opens. act: "door" goes straight out through her front door (no menu). In the bedroom, the boxes
+  // sit over house.js's own furniture (its 400-wide block starts at x 300); in the kitchen and the den over room-art.js's things.
   const ROOMS = [
     { id: "kitchen", name: "HER KITCHEN", things: [
-      { id: "fridge", icon: "🧊", name: "The fridge", hint: "Snacks and treats", say: "Something tasty? I'll share!", x: 380, box: [325, 215, 110, 260], tab: "pantry" },
-      { id: "bowl", icon: "🥣", name: "Her bowl", hint: "Free snacks, always there", say: "My bowl! It's never empty.", x: 500, box: [455, 395, 90, 70], tab: "pantry" },
-      { id: "potions", icon: "🧪", name: "The potion shelf", hint: "Mend her after a fight", say: "Potions, for when I'm hurt.", x: 620, box: [565, 215, 110, 160], tab: "care", keys: ["drink"],
-        empty: "Lumi is fine just now. Potions are for mending her after a fight." },
+      { id: "fridge", icon: "🧊", name: "My fridge", hint: "Snacks and treats", say: "My fridge! Snacks and treats live in here.", open: "Something tasty? I'll share!",
+        x: 380, box: [325, 215, 110, 260], tab: "pantry" },
+      { id: "bowl", icon: "🥣", name: "My bowl", hint: "Free snacks, always there", say: "My bowl! It's never, ever empty.", open: "Ooh, what's in my bowl today?",
+        x: 500, box: [455, 395, 90, 70], tab: "pantry" },
+      { id: "potions", icon: "🧪", name: "My potion shelf", hint: "Mends me after a fight", say: "My potions, for when I'm hurt after a fight.", open: "Glug glug!",
+        x: 620, box: [565, 215, 110, 160], tab: "care", keys: ["drink"], empty: "I'm fine just now! Potions are for after a fight." },
     ] },
     { id: "bedroom", name: "HER BEDROOM", things: [
-      { id: "door", icon: "🚪", name: "The front door", hint: "Out into Lumi Town", say: "Shall we go out into town?", x: 280, box: [234, 192, 82, 166], act: "door" },
-      { id: "toychest", icon: "🧸", name: "The toy chest", hint: "Play with her toys", say: "Playtime? Pick a toy!", x: 390, box: [350, 405, 82, 75], tab: "toys" },
-      { id: "trophy", icon: "🏆", name: "The trophy shelf", hint: "Her collection: everything she's found and won", say: "Look at all my treasures!", x: 430, box: [370, 95, 75, 55], tab: "collection" },
-      { id: "paint", icon: "🎨", name: "The paint pots", hint: "Decorate her room", say: "Let's make the room pretty!", x: 545, box: [515, 410, 64, 60], tab: "home" },
-      { id: "bed", icon: "🛏", name: "Her bed", hint: "Cuddles, naps, and care", say: "Cuddle? Or a little nap?", x: 640, box: [575, 330, 125, 140], tab: "care" },
+      { id: "door", icon: "🚪", name: "My front door", hint: "Out into Lumi Town", say: "My front door! Shall we go out into town?", open: "Off we go!",
+        x: 280, box: [234, 192, 82, 166], act: "door" },
+      { id: "toychest", icon: "🧸", name: "My toy chest", hint: "Play with my toys", say: "My toy chest! All my favourite toys.", open: "Playtime? Pick a toy, any toy!",
+        x: 390, box: [350, 405, 82, 75], tab: "toys" },
+      { id: "trophy", icon: "🏆", name: "My trophy shelf", hint: "Everything I've found and won", say: "My treasures! Everything I've found and won.", open: "Look at all my treasures!",
+        x: 430, box: [370, 95, 75, 55], tab: "collection" },
+      { id: "paint", icon: "🎨", name: "My paint pots", hint: "Decorate my room", say: "My paint pots! Let's make my room pretty.", open: "What shall we change?",
+        x: 545, box: [515, 410, 64, 60], tab: "home" },
+      { id: "bed", icon: "🛏", name: "My bed", hint: "Cuddles and naps", say: "My bed. Cuddles and naps happen here.", open: "A cuddle? Or a little nap?",
+        x: 640, box: [575, 330, 125, 140], tab: "care" },
     ] },
     { id: "den", name: "THE DEN", things: [
-      { id: "wardrobe", icon: "👗", name: "The wardrobe", hint: "Her clothes", say: "What shall I wear?", x: 370, box: [305, 205, 130, 270], tab: "closet" },
-      { id: "terminal", icon: "🖥", name: "The terminal", hint: "Settings: her name, colour, sound and reminders", say: "Beep boop! Settings live in here.", x: 500, box: [440, 290, 120, 180], tab: "settings" },
-      { id: "capsules", icon: "🎁", name: "The capsule machine", hint: "The shop: capsules, furniture and clothes", say: "Turn the handle... what's inside?", x: 630, box: [580, 250, 100, 225], tab: "shop" },
+      { id: "wardrobe", icon: "👗", name: "My wardrobe", hint: "My clothes", say: "My wardrobe! So many outfits.", open: "What shall I wear?",
+        x: 370, box: [305, 205, 130, 270], tab: "closet" },
+      { id: "terminal", icon: "🖥", name: "My terminal", hint: "My name, colour, sound and reminders", say: "My terminal. Beep boop, my settings!", open: "Beep boop! What shall we change?",
+        x: 500, box: [440, 290, 120, 180], tab: "settings" },
+      { id: "capsules", icon: "🎁", name: "My capsule machine", hint: "Capsules, furniture and clothes", say: "My capsule machine! What's inside this time?", open: "Turn the handle... what's inside?",
+        x: 630, box: [580, 250, 100, 225], tab: "shop" },
     ] },
   ];
   const START = { room: "bedroom", at: 4 }; // A first visit: by the paint pots (layout index: after the way to the kitchen), about where she always stood.
@@ -46,11 +57,17 @@
   function room(id) { return ROOMS.find(function (r) { return r.id === id; }) || ROOMS[1]; } // An unknown room is her bedroom.
   function index(id) { return ROOMS.indexOf(room(id)); } // A room's place in the flat, left to right.
 
+  function way(to, side) { // A spot at a room's edge that walks through to the next room, in Lumi's words.
+    const short = to.name.replace(/^HER |^THE /, "").toLowerCase(), mine = to.name.indexOf("HER ") === 0; // "kitchen"; and whose it is
+    return { go: to.id, side: side, x: EDGE[side], icon: side === "left" ? "◀" : "▶", name: "To " + (mine ? "my " : "the ") + short, hint: "Walk through",
+             say: "This way to " + (mine ? "my " : "the ") + short + "!" };
+  }
+
   function layout(id) { // A room's spots in walking order: a way into the room on the left, its things, a way on the right.
     const i = index(id), out = [];
-    if (i > 0) out.push({ go: ROOMS[i - 1].id, side: "left", x: EDGE.left, icon: "◀", name: "To " + ROOMS[i - 1].name.toLowerCase().replace(/^her |^the /, "the "), hint: "Walk through" });
+    if (i > 0) out.push(way(ROOMS[i - 1], "left"));
     room(id).things.forEach(function (thing) { out.push(thing); });
-    if (i < ROOMS.length - 1) out.push({ go: ROOMS[i + 1].id, side: "right", x: EDGE.right, icon: "▶", name: "To " + ROOMS[i + 1].name.toLowerCase().replace(/^her |^the /, "the "), hint: "Walk through" });
+    if (i < ROOMS.length - 1) out.push(way(ROOMS[i + 1], "right"));
     return out;
   }
 
@@ -84,8 +101,8 @@
     // ctx.open(thing, index): open its card (game.js); ctx.walk(state): go to another room; ctx.door(): out of the front door.
     const here = clean(at);
     return layout(here.room).map(function (s, i) {
-      if (s.go) return { key: "go-" + s.go, icon: s.icon, name: s.name, hint: s.hint, local: function () { ctx.walk(enter(s.go, s.side === "left" ? "right" : "left")); } };
-      return { key: "thing-" + s.id, icon: s.icon, name: s.name, hint: s.hint, local: function () { if (s.act === "door") ctx.door(); else ctx.open(s, i); } };
+      if (s.go) return { key: "go-" + s.go, icon: s.icon, name: s.name, hint: s.hint, say: s.say, local: function () { ctx.walk(enter(s.go, s.side === "left" ? "right" : "left")); } };
+      return { key: "thing-" + s.id, icon: s.icon, name: s.name, hint: s.hint, say: s.say, local: function () { if (s.act === "door") ctx.door(); else ctx.open(s, i); } };
     });
   }
 
@@ -96,11 +113,9 @@
     return shown;
   }
 
-  function guide(at, thing) { // What Lumi says in her speech bubble: the open card's thing, or what she's standing at.
+  function guide(at, thing) { // Lumi's words for a spot (her bubble in the lower bar), or for an open menu (`thing`): always first person.
     const s = thing || spot(at);
-    if (!s) return "";
-    if (s.go) return s.name + " ▸";
-    return thing ? s.say : s.name + " · " + s.hint;
+    return !s ? "" : thing ? s.open || s.say : s.say;
   }
 
   function hits(id, at) { // Invisible press boxes over a room's things (game.js listens for data-click="thing:id" and "go:room"),
