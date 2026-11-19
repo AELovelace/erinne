@@ -154,6 +154,42 @@ def test_task_markers_render_as_disabled_checkboxes_only_when_asked():
     assert "[ ]" in markdown.render_html(TASKS)
 
 
+def test_emoji_boxes_only_when_the_front_matter_asks():
+    from mnemerynne.ingest import markdown
+    html = markdown.render_html("---\ncheckboxes: emoji\n---\n" + TASKS, tasks=True)
+    assert '<label class="md-task-emoji"><input type="checkbox" class="md-task" data-line="5" disabled' in html
+    assert html.count('class="md-task-face"') == 2                 # both tasks, not the plain item
+    toml = markdown.render_html('+++\ncheckboxes = "emoji"\n+++\n' + TASKS, tasks=True)
+    assert "md-task-emoji" in toml
+    assert "md-task-emoji" not in markdown.render_html("---\nt: 1\n---\n" + TASKS, tasks=True)   # plain by default
+    assert "md-task-emoji" not in markdown.render_html(TASKS + "\ncheckboxes: emoji\n", tasks=True)  # body doesn't count
+
+
+AUDIT = "---\ncheckboxes: emoji\n---\n- 🟥 **T-01** critical\n- 🟧 **T-02** high\n- 🟨 **T-03** medium\n- [ ] **T-04** plain\n"
+
+
+def test_criticality_colours_are_boxes_in_emoji_files_only():
+    from mnemerynne.ingest import markdown
+    html = markdown.render_html(AUDIT, tasks=True)
+    for colour in ("🟥", "🟧", "🟨", "⬜"):
+        assert f'data-open="{colour}"' in html                       # each box shows its own colour while open
+    assert "🟥 " not in html.replace('data-open="🟥"', "")             # the square became the box, not text
+    plain = markdown.render_html(AUDIT.replace("checkboxes: emoji", "t: 1"), tasks=True)
+    assert plain.count('class="md-task"') == 1 and "🟥" in plain        # elsewhere a square is just text
+
+
+def test_ticking_a_colour_keeps_it_for_unticking():
+    from mnemerynne.ingest import markdown
+    edits = markdown.toggle_task(AUDIT, 4, True, who="edith", today="2026-11-19")
+    assert edits == {4: "- ✅ **T-02** high *(done 2026-11-19, edith, was 🟧)*"}
+    ticked = markdown.apply_lines(AUDIT, edits)
+    assert 'data-open="🟧"' in markdown.render_html(ticked, tasks=True)   # a done box remembers its colour
+    back = markdown.toggle_task(ticked, 4, False, who="edith", today="2026-11-20")
+    assert back == {4: "- 🟧 **T-02** high"}                              # criticality restored, stamp gone
+    with pytest.raises(markdown.TaskError):
+        markdown.toggle_task(AUDIT.replace("checkboxes: emoji", "t: 1"), 3, True, who="e", today="2026-11-19")
+
+
 def test_toggle_task_marks_stamps_and_round_trips():
     from mnemerynne.ingest import markdown
     edits = markdown.toggle_task(TASKS, 2, True, who="alice", today="2026-11-19")

@@ -47,6 +47,28 @@ A list item that starts with `[ ]` is an open task. One that starts with `[x]` o
 - If someone changed the file after you opened the page, your click is refused, the box goes back, and the page
   reloads so you can tick it on the file as it is now.
 
+**Emoji boxes.** A file can ask for ⬜ / ✅ emoji instead of plain checkboxes (the security audit lists do) by
+starting with this front matter:
+
+```
+---
+checkboxes: emoji
+---
+```
+
+They click, save and stamp exactly like plain boxes; only the look changes, and only in that file.
+
+In those files 🟥 (critical), 🟧 (high) and 🟨 (medium) also count as open boxes, and keep their colour on screen:
+
+```
+- 🟥 **T-01** Critical thing
+- 🟧 **T-02** High thing
+- ✅ **T-03** Done thing
+```
+
+Ticking one writes ✅ and remembers the colour in the stamp, *(done 2026-11-19, yourname, was 🟥)*, so
+unticking puts the right colour back. In any other file a coloured square is just text.
+
 Only list items count: `[ ]` in the middle of a sentence stays text. Rooms, notices and messages show the
 markers as plain text.
 

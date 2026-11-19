@@ -594,6 +594,15 @@ li.task-item > input.md-task, li.task-item > p:first-child > input.md-task { pos
 input.md-task { width: 1.05em; height: 1.05em; margin: 0; accent-color: var(--rose-deep); cursor: pointer; }
 input.md-task:disabled { cursor: default; opacity: .85; }
 input.md-task:focus-visible { outline: 2px solid var(--rose-deep); outline-offset: 2px; }
+/* Emoji boxes (front matter "checkboxes: emoji", for the security audit lists): the real checkbox stays, invisible,
+   on top of a ⬜ / ✅ face, so clicking, Space on the keyboard and screen readers all still work. */
+li.task-item > label.md-task-emoji, li.task-item > p:first-child > label.md-task-emoji { position: absolute; left: -1.6em; top: .05em; }
+label.md-task-emoji { display: inline-block; position: relative; line-height: 1.2; }
+label.md-task-emoji > input.md-task { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; }  /* clickable, unseen */
+.md-task-face::before { content: attr(data-open); }                          /* open: 🟥 / 🟧 / 🟨 criticality, or ⬜ */
+input.md-task:checked + .md-task-face::before { content: "✅"; }             /* done */
+input.md-task:disabled + .md-task-face { opacity: .85; }
+input.md-task:focus-visible + .md-task-face { outline: 2px solid var(--rose-deep); outline-offset: 2px; border-radius: 3px; }
 .help-body > :first-child, .wiki-body > :first-child { margin-top: 0; }
 .help-body h1, .wiki-body h1 { font-size: 1.6rem; }
 .help-body h2, .wiki-body h2 { font-size: 1.25rem; margin-top: 1.6rem; }
