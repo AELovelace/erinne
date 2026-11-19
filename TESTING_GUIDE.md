@@ -30,6 +30,28 @@ Not automated: the page was checked once in headless Chrome with a throwaway pre
 
 On the NAS, download a multi-gigabyte share folder through the public hostname. Check that it starts at once and finishes, and that 7-Zip and Windows' **Extract all** both open it.
 
+## Files: Share and links
+
+Run `.venv/Scripts/python.exe -m pytest tests/test_sharing.py -q -p no:cacheprovider`. It covers:
+- a file shared with one person: it opens for them only, shows as "Shared with me" in Properties, and is view-only;
+- **Can edit** saving in the editor, and removing a share (by its maker, not by the person it was shared with);
+- Mnemerynne groups and everyone; sharing again changes the share instead of adding one;
+- you can only give what you have (no **Edit** from read-only, nothing from places you can't open, not yourself);
+- a share stands still while its maker has lost access, and comes back with it; shares are never passed on;
+- a shared folder opens from itself down: the folders above it, their files and the library stay hidden, and Properties' path starts at "Shared with me";
+- a folder shared **Can edit** takes uploads;
+- links: 43 URL-safe characters that name nothing, only a SHA-256 stored, rebuilt to copy again, 7 days by default;
+- a link page and its download for someone signed out (attachment, `octet-stream`, no-referrer, noindex, a CSP that allows nothing);
+- every dead link (made up, one character off, turned off, expired, too short, too long) is the same bare 404;
+- a folder link opens only inside its folder.
+
+In Chrome: `PUPPETEER_MODULE=… CHROME_PATH=… node tests/share-browser.mjs` (python/retro_preview.py with alice, bob and carol).
+1. Alice shares a file with Bob through the dialog, then makes a link: the link lasts 7 days and **Edit** is greyed out for it.
+2. Bob finds it under 🤝 **Shared with me**, where **Share** is off.
+3. Signed out, the link opens its page and downloads, and a made-up link is a bare "Not found".
+
+It fails on any script error. Screenshots: `runs/share/`.
+
 ## SoundCloud in Media
 
 Run `.venv/Scripts/python.exe -m pytest tests/test_soundcloud.py -q -p no:cacheprovider`. It uses a stand-in for SoundCloud's API and covers:

@@ -472,6 +472,19 @@ input.c-check { width: 1rem; height: 1rem; margin: 0; accent-color: var(--rose);
 .props-switch input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--rose); }
 .props-switch input:disabled { opacity: .55; }
 .props-switch + p { margin: .15rem 0 .2rem 1.5rem; }
+/* Files' share dialog (files.js showShare): who has it, and a row of choices to add someone. */
+.share-list { list-style: none; margin: 0; padding: 0; }
+.share-list li { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; padding: .45rem 0;
+                 border-top: 1px solid var(--line); font-size: .9rem; }
+.share-list li:first-child { border-top: 0; }
+.share-list .who { flex: 1 1 10rem; overflow-wrap: anywhere; }
+.share-list .link-url { flex: 1 1 100%; font: .8rem/1.3 ui-monospace, monospace; overflow-wrap: anywhere;
+                        color: var(--muted); user-select: all; }
+.share-list .expired { color: var(--muted); text-decoration: line-through; }
+.share-add { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .5rem; }
+.share-add label { display: flex; flex-direction: column; gap: .2rem; font-size: .8rem; color: var(--muted); }
+.share-add label[hidden] { display: none; }          /* Everyone and links pick nobody */
+.share-add select { width: 100%; }
 button.danger-fill { background: var(--error); }
 .picker-tree { max-height: 50vh; overflow-y: auto; overflow-x: hidden; border: 1px solid var(--line); border-radius: 10px; padding: .3rem; }
 .picker-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
@@ -574,6 +587,13 @@ button.danger-fill { background: var(--error); }
 .doc img, .help-body img, .wiki-body img, .message-text img, .notice-body img { max-width: 100%; height: auto; }
 .doc table, .help-body table, .wiki-body table { display: block; max-width: 100%; overflow-x: auto; }
 .doc code, .help-body code, .wiki-body code { overflow-wrap: anywhere; }
+/* Task lists (markdown.render_html tasks=True): "- [ ] ..." items get a checkbox instead of a bullet. The box is
+   disabled (read-only) until tasks.js / mdeditor.js enable it where a tick can be saved. */
+li.task-item { list-style: none; position: relative; }
+li.task-item > input.md-task, li.task-item > p:first-child > input.md-task { position: absolute; left: -1.5em; top: .2em; }
+input.md-task { width: 1.05em; height: 1.05em; margin: 0; accent-color: var(--rose-deep); cursor: pointer; }
+input.md-task:disabled { cursor: default; opacity: .85; }
+input.md-task:focus-visible { outline: 2px solid var(--rose-deep); outline-offset: 2px; }
 .help-body > :first-child, .wiki-body > :first-child { margin-top: 0; }
 .help-body h1, .wiki-body h1 { font-size: 1.6rem; }
 .help-body h2, .wiki-body h2 { font-size: 1.25rem; margin-top: 1.6rem; }

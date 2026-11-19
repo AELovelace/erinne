@@ -74,11 +74,47 @@
       const room = preview.scrollHeight - preview.clientHeight;
       const ratio = room > 0 ? preview.scrollTop / room : 0;
       preview.innerHTML = data.html;   // server-rendered Markdown (HTML in the source is escaped there)
+      preview.querySelectorAll("input.md-task").forEach(function (b) { b.disabled = false; });   // tickable here
       preview.scrollTop = ratio * (preview.scrollHeight - preview.clientHeight);
     } catch (e) {
       if (e.name !== "AbortError") setStatus("Preview unavailable: " + e.message, "error");
     }
   }
+
+  // ---------------------------------------------------------- task boxes
+  // A box ticked in the preview changes the source (the same marker and done stamp as the file view,
+  // worked out by the server: POST /api/markdown/tasks); it isn't saved until Save, like any typing.
+  function replaceLines(edits) {
+    if (editor.operation && editor.replaceRange) {          // CodeMirror: one undo step for the lot
+      editor.operation(function () {
+        edits.forEach(function (e) {
+          editor.replaceRange(e.text, { line: e.line, ch: 0 }, { line: e.line, ch: editor.getLine(e.line).length });
+        });
+      });
+    } else {                                                // the plain textarea
+      const lines = editor.getValue().split("\n");
+      edits.forEach(function (e) { lines[e.line] = e.text + (lines[e.line].endsWith("\r") ? "\r" : ""); });
+      editor.setValue(lines.join("\n"));
+      onChange();
+    }
+  }
+
+  preview.addEventListener("change", async function (e) {
+    const box = e.target;
+    if (!box.matches || !box.matches("input.md-task")) return;   // not a task box
+    const text = editor.getValue(), done = box.checked;
+    box.disabled = true;
+    try {
+      const data = await api("POST", "/api/markdown/tasks", { text: text, line: Number(box.dataset.line), done: done });
+      if (editor.getValue() !== text) { box.checked = !done; return; }   // typed meanwhile: the lines moved
+      replaceLines(data.edits);                             // the change event re-renders the preview
+    } catch (err) {
+      box.checked = !done;
+      setStatus(err.message, "error");
+    } finally {
+      box.disabled = false;
+    }
+  });
 
   // ------------------------------------------------------------ load, save
   async function load() {

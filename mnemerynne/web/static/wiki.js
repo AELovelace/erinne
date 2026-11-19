@@ -151,6 +151,10 @@
     $("wiki-head").hidden = false;
     const body = $("wiki-page");
     body.innerHTML = page.html;   // rendered by the server from the page's Markdown (HTML in it is escaped)
+    $("wiki-task-status").textContent = "";
+    if (page.can_write && page.version && window.ErynneTasks) {   // task boxes tick and save (tasks.js)
+      window.ErynneTasks.attach(body, { fileId: id, version: page.version, status: $("wiki-task-status") });
+    }
     const pane = body.closest(".ax-pane");
     if (push && window.Erynne.narrow.matches) {   // a phone: fold the page list and bring the page into view
       $("wiki-side").open = false;

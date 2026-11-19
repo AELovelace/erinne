@@ -5,9 +5,14 @@
   <a class="brand" href="/"><span class="blossom" aria-hidden="true">🌸</span>{{ assistant_name }}</a>
   <strong>{{ file.display_name }}</strong>
   <span class="muted">{{ file.collection_name }}</span>
-  <a class="push-right" href="/files/{{ file.id }}/raw">Download</a>
+  {#- Edit: a text or Markdown file this person may change opens in the split editor (web/editor.py). -#}
+  {% if edit_url %}<a class="push-right" href="{{ edit_url }}">Edit</a>{% endif %}
+  <a {% if not edit_url %}class="push-right" {% endif %}href="/files/{{ file.id }}/raw">Download</a>
+  <span id="task-status" class="small muted" aria-live="polite"></span>
 </header>
-<main class="doc">
+{#- data-task-file / data-task-version: tasks.js saves a ticked box against this version (web/files.py). -#}
+<main class="doc"{% if version %} data-task-file="{{ file.id }}" data-task-version="{{ version }}"{% endif %}>
   {{ content | safe }}
 </main>
+{% if version %}<script src="{{ static('tasks.js') }}"></script>{% endif %}
 {% endblock %}

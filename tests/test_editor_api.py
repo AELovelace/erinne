@@ -138,3 +138,72 @@ def test_editor_page_and_vendored_codemirror(settings, conn, world):
         assert c.get("/static/mdeditor.js").status_code == 200
         files_page = c.get("/files").text
         assert 'data-act="edit"' in files_page
+
+
+# ------------------------------------------------------------------ task lists
+TASKS = "# Tasks\n\n- [ ] **T-01 first** line one\n  wraps here\n- ✅ **T-02 done** already\n- plain item\n"
+
+
+def test_task_markers_render_as_disabled_checkboxes_only_when_asked():
+    from mnemerynne.ingest import markdown
+    html = markdown.render_html("---\nt: 1\n---\n" + TASKS, tasks=True)
+    assert '<li class="task-item"><input type="checkbox" class="md-task" data-line="5" disabled' in html   # front matter counted
+    assert 'data-line="7" checked disabled' in html and "<li>plain item</li>" in html
+    assert "[ ]" not in html
+    assert "md-task" not in markdown.render_html(TASKS)          # Rooms, notices and the rest: unchanged
+    assert "[ ]" in markdown.render_html(TASKS)
+
+
+def test_toggle_task_marks_stamps_and_round_trips():
+    from mnemerynne.ingest import markdown
+    edits = markdown.toggle_task(TASKS, 2, True, who="alice", today="2026-11-19")
+    assert edits == {2: "- ✅ **T-01 first** line one", 3: "  wraps here *(done 2026-11-19, alice)*"}
+    ticked = markdown.apply_lines(TASKS, edits)
+    assert markdown.apply_lines(ticked, markdown.toggle_task(ticked, 2, False, who="x", today="y")) == TASKS
+    crlf = TASKS.replace("\n", "\r\n")                                # Windows line endings kept
+    assert markdown.apply_lines(crlf, markdown.toggle_task(crlf, 2, True, who="a", today="d")).count("\r\n") == crlf.count("\r\n")
+    x_style = "- [x] one\n- [ ] two\n"                                # the file's own habit: [x]
+    assert markdown.toggle_task(x_style, 1, True, who="a", today="d")[1] == "- [x] two *(done d, a)*"
+    for line, done in ((5, True), (4, True), (2, False), (99, True)):  # not a task / already so / no such line
+        with pytest.raises(markdown.TaskError):
+            markdown.toggle_task(TASKS, line, done, who="a", today="d")
+
+
+def test_ticking_a_box_in_the_file_view_saves_a_version(settings, conn, world, monkeypatch):
+    monkeypatch.setattr(editor_pages, "_today", lambda: "2026-11-19")
+    fid = _add(conn, settings, world["brand"], "tasks.md", TASKS.encode(), user=world["alice"])
+    version = editing.sha256(TASKS.encode())
+    with TestClient(_app(settings)) as c:
+        _login(c, "alice")
+        page = c.get(f"/files/{fid}/view")
+        assert f'href="/edit/{fid}?back=/files/{fid}/view">Edit</a>' in page.text        # Edit, left of Download
+        assert f'data-task-version="{version}"' in page.text and "tasks.js" in page.text
+        assert "script-src 'self'" in page.headers["content-security-policy"]
+
+        r = c.post(f"/api/files/{fid}/tasks", json={"line": 2, "done": True, "version": version})
+        assert r.status_code == 200 and 'data-line="2" checked' in r.json()["html"]
+        saved = store.content_path(conn, settings, fid).read_text(encoding="utf-8")
+        assert "- ✅ **T-01 first** line one\n  wraps here *(done 2026-11-19, alice)*\n" in saved
+        assert r.json()["version"] == editing.sha256(saved.encode())
+        assert c.get(f"/api/files/{fid}/versions").json()["versions"][0]["change"] == "ticked a task"
+        stale = c.post(f"/api/files/{fid}/tasks", json={"line": 2, "done": False, "version": version})
+        assert stale.status_code == 409                                                  # page out of date
+
+        _login(c, "bob")                                                                 # reads, can't write
+        page = c.get(f"/files/{fid}/view")
+        assert ">Edit</a>" not in page.text and "data-task-version" not in page.text
+        assert "script-src" not in page.headers["content-security-policy"]
+        assert 'class="md-task"' in page.text                                            # still shown, disabled
+        assert c.post(f"/api/files/{fid}/tasks", json={"line": 4, "done": False,
+                                                       "version": r.json()["version"]}).status_code == 403
+
+
+def test_preview_tasks_return_line_edits(settings, conn, world, monkeypatch):
+    monkeypatch.setattr(editor_pages, "_preview_limiter", security.RateLimiter())
+    monkeypatch.setattr(editor_pages, "_today", lambda: "2026-11-19")
+    with TestClient(_app(settings)) as c:
+        _login(c, "alice")
+        r = c.post("/api/markdown/tasks", json={"text": TASKS, "line": 4, "done": False})
+        assert r.json() == {"edits": [{"line": 4, "text": "- [ ] **T-02 done** already"}]}
+        assert c.post("/api/markdown/tasks", json={"text": TASKS, "line": 5, "done": True}).status_code == 409
+        assert 'class="md-task"' in c.post("/api/markdown/preview", json={"text": TASKS}).json()["html"]

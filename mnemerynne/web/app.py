@@ -45,6 +45,7 @@ log = logging.getLogger("mnemerynne.web")
 # imported (registry.web_drops): the web app slims down to pages, sign-in, admin and settings (Phase 11).
 WEB_ROUTERS = (
     "mnemerynne.web.files:router", "mnemerynne.web.chat:router", "mnemerynne.web.memories:router",
+    "mnemerynne.web.shares:router", "mnemerynne.web.shares:links_router",   # Files' Share button, /s/ links
     "mnemerynne.web.scratchpad:router",           # the Scratchpad page: the agents' boards, and directions to them
     "mnemerynne.web.admin:router", "mnemerynne.web.tokens:router", "mnemerynne.web.apis:router",
     "mnemerynne.web.admin_apis:router", "mnemerynne.web.agent:router", "mnemerynne.web.m365:router",

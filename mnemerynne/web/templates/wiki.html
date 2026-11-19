@@ -21,6 +21,7 @@
         <div class="wiki-actions">
           <a id="wiki-edit" class="button-like" target="_blank" hidden>Edit</a>
           <a id="wiki-open" class="small" target="_blank" rel="noopener" hidden>Open in Files</a>
+          <span id="wiki-task-status" class="small muted" aria-live="polite"></span>{# tasks.js: a ticked box saving #}
         </div>
       </div>
       <article class="wiki-body" id="wiki-page">
@@ -44,5 +45,6 @@
 </main>
 {% endif %}
 <script src="{{ static('picker.js') }}"></script>
+<script src="{{ static('tasks.js') }}"></script>
 <script src="{{ static('wiki.js') }}"></script>
 {% endblock %}

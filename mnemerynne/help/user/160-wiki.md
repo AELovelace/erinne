@@ -28,6 +28,28 @@ The editor shows the Markdown source on the left and a live preview on the right
 
 The same editor opens from **Edit** in Files for any text or Markdown file you can change, not only wiki pages.
 
+## Task lists
+
+A list item that starts with `[ ]` is an open task. One that starts with `[x]` or ✅ is done. In a page view
+(Files → Open, or the wiki) and in the editor's preview, they show as checkboxes:
+
+```
+- [ ] **T-06** Apply the noise rules
+- ✅ **T-05** Teramind on the PCI server
+```
+
+- **Where you can change the file**, click a box to tick it. That saves straight away: the `[ ]` becomes ✅
+  (or `[x]`, if the file already ticks with `[x]`), and *(done 2026-11-19, yourname)* is added to the end of the
+  task's first paragraph. Clicking it again reopens it: back to `[ ]`, and that stamp is removed. Every tick
+  keeps the previous version under [Versions](versions.md), like any save.
+- **Where you can only read**, the boxes show the state but can't be clicked.
+- **In the editor's preview**, a click changes the text on the left. It is saved with **Save**, like your typing.
+- If someone changed the file after you opened the page, your click is refused, the box goes back, and the page
+  reloads so you can tick it on the file as it is now.
+
+Only list items count: `[ ]` in the middle of a sentence stays text. Rooms, notices and messages show the
+markers as plain text.
+
 ## When two people edit the same page
 
 If someone else saved the page while you were editing, your save is refused and a bar offers two ways out:
@@ -44,6 +66,7 @@ A page open in Word or Excel on the file share (an Office lock file next to it) 
 | `# Title`, `## Section`, `### Sub-section` | headings (citations and links can point at them) |
 | `**bold**`, `*italic*`, `` `code` `` | **bold**, *italic*, `code` |
 | `- item` or `1. item` | bulleted or numbered lists |
+| `- [ ] task`, `- [x] task` or `- ✅ task` | a task with a checkbox you can click (see [Task lists](#task-lists)) |
 | `[text](Guides/other-page.md)` | a link to another wiki page (relative to this page's folder; `../` goes up) |
 | `[text](other-page.md#section)` | a link to a heading in another page |
 | `[text](https://example.com)` | an outside link |

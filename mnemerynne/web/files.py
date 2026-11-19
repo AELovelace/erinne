@@ -32,6 +32,7 @@ log = logging.getLogger(__name__)
 # resources, no framing by other sites.
 _VIEW_CSP = ("default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; "
              "form-action 'none'; frame-ancestors 'self'")
+_VIEW_CSP_TASKS = _VIEW_CSP + "; script-src 'self'; connect-src 'self'"   # a Markdown view whose boxes can be ticked
 # Images that are safe to show inline. Never SVG: it can carry scripts.
 _INLINE_IMAGES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 _TEXT_PREVIEW_BYTES = 64 * 1024
@@ -84,10 +85,10 @@ def _file_json(row: sqlite3.Row, access: fs.Access) -> dict:
         "view_url": view,
         "download_url": f"/files/{row['id']}/raw",
         "can_delete": access.can_write(row["collection_id"], row["folder_id"]),
-        # Text and Markdown files the person may change open in the browser editor (web/editor.py).
+        # Text and Markdown files the person may change open in the browser editor (web/editor.py): their place
+        # is writable, or the file itself was shared with them "Can edit".
         "edit_url": (f"/edit/{row['id']}" if editing.format_of(row["display_name"]) == "text"
-                     and row["deleted_at"] is None and access.can_write(row["collection_id"], row["folder_id"])
-                     else None),
+                     and row["deleted_at"] is None and access.can_write_file(row) else None),
         # "claude:alice" / "erynne:alice": last changed by Claude, or by Erynne's
         # proposal that alice applied (Versions can undo it)
         "edited_via": row["edited_via"] if "edited_via" in row.keys() else None,
@@ -113,7 +114,7 @@ def _readable_file(conn: sqlite3.Connection, access: fs.Access, file_id: int) ->
 
 def _writable_file(conn: sqlite3.Connection, access: fs.Access, file_id: int) -> sqlite3.Row:
     row = _readable_file(conn, access, file_id)   # which also asked the share about this folder just now
-    if not access.can_write(row["collection_id"], row["folder_id"]):
+    if not access.can_write_file(row):            # its place, or the file shared with them "Can edit"
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't change files here")
     return row
 
@@ -206,10 +207,14 @@ def _can_reembed(request: Request, conn: sqlite3.Connection, user, collection_id
     return (row["kind"] == "private" and row["owner_user_id"] == user["id"]) or is_admin(request, conn, user)
 
 
-def _where(conn: sqlite3.Connection, collection_id: int, folder_id: int | None) -> str:
+def _where(conn: sqlite3.Connection, collection_id: int, folder_id: int | None, access: fs.Access | None = None) -> str:
+    top = access.share_top(collection_id, folder_id) if access is not None else None
+    path = fs.folder_path(conn, folder_id)
+    if top is not None:                              # reached through a share: from the shared folder down only
+        return " / ".join(["Shared with me"] + [p["name"] for p in path[[p["id"] for p in path].index(top):]])
     coll = conn.execute("SELECT kind, name FROM collections WHERE id = ?", (collection_id,)).fetchone()
     parts = [permissions.PRIVATE_LABEL if coll and coll["kind"] == "private" else (coll["name"] if coll else "?")]
-    return " / ".join(parts + [p["name"] for p in fs.folder_path(conn, folder_id)])
+    return " / ".join(parts + [p["name"] for p in path])
 
 
 @router.get("/api/properties")
@@ -223,16 +228,18 @@ def properties(request: Request, type: Literal["file", "folder"], id: int, user=
         if row["deleted_at"] is not None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")
         cid, fid = row["collection_id"], row["folder_id"]
-        reach = access.reaches[cid]
+        reach = access.reaches.get(cid)               # None: reached only through a share
         chunks = conn.execute("SELECT count(*) FROM chunks WHERE file_id = ?", (id,)).fetchone()[0]
         vectors = conn.execute("SELECT count(*) FROM chunk_vec WHERE rowid IN (SELECT id FROM chunks WHERE file_id = ?)",
                                (id,)).fetchone()[0]
-        return {**_file_json(row, access), "where": _where(conn, cid, fid),
+        # A file shared by itself shows no place: where it lives in its library isn't the person's to see.
+        where = _where(conn, cid, fid, access) if access.can_read(cid, fid) else "Shared with me"
+        return {**_file_json(row, access), "where": where,
                 "search": {"status": row["status"], "progress": row["progress"], "error": row["error"],
                            "chunks": chunks, "embedded": vectors},
                 "claude_connected": connected,
-                "claude_see": _claude_json(reach.claude_state(fid, own=row["claude_hidden"]),
-                                           access.can_write(cid, fid)),
+                "claude_see": (_claude_json(reach.claude_state(fid, own=row["claude_hidden"]), access.can_write(cid, fid))
+                               if reach is not None else _claude_json((False, False), False)),
                 "ai_edit": editing.edit_state(conn, user["id"], cid, fid, fid, row["ai_edit"], row["ai_no_edit"]),
                 "can_reembed": _can_reembed(request, conn, user, cid) and row["status"] not in fs.REEMBED_SKIP}
     folder = conn.execute("SELECT * FROM folders WHERE id = ? AND deleted_at IS NULL", (id,)).fetchone()
@@ -249,11 +256,15 @@ def properties(request: Request, type: Literal["file", "folder"], id: int, user=
         inside)}
     chunks = conn.execute(f"SELECT count(*) FROM chunks c JOIN files f ON f.id = c.file_id "
                           f"WHERE f.folder_id IN ({marks}) AND f.deleted_at IS NULL", inside).fetchone()[0]
-    return {**_folder_json(folder), "where": _where(conn, cid, folder["parent_id"]),
+    top = access.share_top(cid, id)
+    where = "Shared with me" if top == id else _where(conn, cid, folder["parent_id"], access)
+    reach = access.reaches.get(cid)
+    return {**_folder_json(folder), "where": where,
             "files": sum(counts.values()), "folders": len(inside) - 1,
             "search": {"by_status": counts, "chunks": chunks},
             "claude_connected": connected,
-            "claude_see": _claude_json(access.reaches[cid].claude_state(id), access.can_write(cid, id)),
+            "claude_see": (_claude_json(reach.claude_state(id), access.can_write(cid, id)) if reach is not None
+                           else _claude_json((False, False), False)),
             "ai_edit": editing.edit_state(conn, user["id"], cid, id, folder["parent_id"], folder["ai_edit"],
                                           folder["ai_no_edit"]),
             "can_reembed": _can_reembed(request, conn, user, cid)}
@@ -445,7 +456,8 @@ def _upload_target(conn: sqlite3.Connection, user, collection_id: int | None,
     """Where an upload may go, checked the same way for one request and for parts: (access, the collection)."""
     access = fs.Access.of(conn, user["id"])
     target = collection_id if collection_id is not None else permissions.private_collection_id(conn, user["id"])
-    if target not in access.writable:
+    # Their own rights somewhere in the collection, or a folder shared with them "Can edit" (checked exactly below).
+    if target not in access.writable and not access.can_write(target, folder_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't upload to this collection")
     _fs_errors(lambda: fs.require_folder(conn, target, folder_id))
     access.confirm(target, folder_id)              # an upload changes something: ask the share now
@@ -754,18 +766,28 @@ def _text_view(conn: sqlite3.Connection, settings: Settings, row: sqlite3.Row) -
 def view_markdown(request: Request, file_id: int, user=Depends(page_user),
                   conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
     """Markdown rendered, or the text of a document, code or text file."""
-    row = _readable_file(conn, fs.Access.of(conn, user["id"]), file_id)
+    access = fs.Access.of(conn, user["id"])
+    row = _readable_file(conn, access, file_id)
     if row["kind"] in ("md", "txt", "doc", "code") and (tv := _tv_frame(request, conn, file_id, "view")) is not None:
         return tv
+    # Edit (next to Download): text and Markdown files the person may change, back to this view afterwards.
+    edit_url = _file_json(row, access)["edit_url"]
+    edit_url = f"{edit_url}?back=/files/{file_id}/view" if edit_url else None
+    version = None                                     # set when task boxes can be ticked here (tasks.js)
     if row["kind"] == "md":
-        html = markdown.render_html(markdown.decode(_blob_file(settings, row, prefer_ocr=False, conn=conn).read_bytes()))
+        data = _blob_file(settings, row, prefer_ocr=False, conn=conn).read_bytes()
+        html = markdown.render_html(markdown.decode(data), tasks=True)   # "- [ ]" items as checkboxes
+        if edit_url:
+            version = editing.sha256(data)             # a tick is saved against this (409 if it changed)
     elif row["kind"] in ("txt", "doc", "code"):
         html = _text_view(conn, settings, row)
     else:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No text view for this kind of file")
     response = request.app.state.templates.TemplateResponse(
-        request, "file_view.html", {"file": row, "content": html})
-    response.headers["Content-Security-Policy"] = _VIEW_CSP
+        request, "file_view.html", {"file": row, "content": html, "edit_url": edit_url, "version": version})
+    # The view runs no scripts, except tasks.js (our own file) where the boxes can be ticked; the
+    # Markdown's own HTML is escaped by the renderer either way, and inline scripts stay blocked.
+    response.headers["Content-Security-Policy"] = _VIEW_CSP_TASKS if version else _VIEW_CSP
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 

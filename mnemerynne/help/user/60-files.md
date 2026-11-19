@@ -36,13 +36,14 @@ You can upload only where you can change files: your File box, and libraries or 
 |---|---|
 | **New folder** | A folder here. |
 | **Open** | Preview the file in a new tab, or open the folder. |
-| **Edit** | Text and Markdown files you can change: the browser editor ([The organisation wiki](wiki.md#the-editor)). |
+| **Edit** | Text and Markdown files you can change: the browser editor ([The organisation wiki](wiki.md#the-editor)). The page view (Open) has an **Edit** button too, left of Download, for the same files. |
 | **Download** | One file downloads as it is. Several files, or a folder, come down as **one zip** with the folders inside kept as they are. See [Downloading folders and many files](#downloading-folders-and-many-files). |
 | **Rename** | Rename a file or folder (a file keeps its extension). Names must suit Windows too: no `\ / : * ? " < > \|`, no trailing dot or space. |
 | **Move to…** / **Copy to…** | Pick a destination in any location you can write to. A copy of a file keeps its search index. |
 | **Delete** | To the [recycle bin](recycle-bin.md). |
 | **Re-embed** | Read the selection (or everything here) again for search. |
 | **Properties** | Details, search state and the Claude / AI edit switches ([Properties](properties.md)). |
+| **Share** | Share one file or folder with a person, a group, everyone, or anyone with a link. See [Sharing](#sharing). |
 | **Restore**, **Delete forever**, **Empty bin** | In a recycle bin. |
 
 Actions you can't use here are greyed out.
@@ -58,6 +59,38 @@ Select a folder, several files, or everything (**Select all**), then **Download*
 - If a file can't be read while the zip is made (say it was moved on the share that moment), the zip has a **Not included.txt** naming it.
 - Up to 20,000 files at a time. For more, download a few folders at a time.
 - The download link works for an hour, for you only. If a download stops halfway, download it again from Files.
+
+## Sharing
+
+Select one file or folder and choose **Share** (or right-click → **Share…**). The dialog lists who has it through shares, and lets you add:
+
+| Share with | Who gets it |
+|---|---|
+| **A person** | One account. |
+| **A domain group** | Everyone in one of the groups on the NAS (the domain's groups), as its members change. |
+| **A Mnemerynne group** | Everyone in a group an admin made under Access. |
+| **Everyone with an account** | Every active Mnemerynne account. |
+| **Anyone with the link** | Whoever has the link, without signing in. |
+
+- **They can:** **View** (open and download) or **Edit** (also save changes in the browser editor, and in a shared folder add and change files). You can only give **Edit** for something you can change yourself.
+- **For:** until removed, or 1, 7 or 30 days. A link lasts **7 days** unless you choose otherwise.
+- Sharing a **folder** shares everything in it, including files added later. People see it as the top: the folders above it stay hidden from them.
+- Shares work **in Mnemerynne only**. The permissions on the share itself (what Explorer shows) don't change, so a share never opens anything over `\\server\share`.
+- A share lasts only while **you** could still open the item yourself. If you lose access, or your account is switched off, your shares stop working until you get it back.
+- Things shared with you can't be shared on. SharePoint files can't be shared here; share them in SharePoint.
+- **Remove** (or **Turn off** for a link) takes a share back at once. You can remove the shares you made, and people who can change the item can remove any of its shares.
+
+### Shared with me
+
+**🤝 Shared with me** in the tree lists what people shared with you. Files open, download and (with **Edit**) change as anywhere else. A shared folder opens with everything in it, and the path above it starts at "Shared with me".
+
+### Anyone with the link
+
+- The link is random and names nothing: no file name, number or folder, so links can't be guessed or counted through. It looks like `https://…/s/kQ9x…` (43 characters after `/s/`).
+- Links are always **view only**. Opening one shows the file's name and a **Download** button, or a shared folder's list, where files download when clicked. Nothing opens as a page in the browser.
+- Anyone can pass a link on, so only use one for what you'd be happy to see forwarded.
+- A link that was turned off, has expired, or never existed shows the same plain "Not found".
+- **Copy link** in the dialog copies it again whenever you need it.
 
 ## Searching file names
 

@@ -41,6 +41,14 @@ Staff on the LAN who open the public hostname may arrive from the router's addre
 
 On a LAN-only install Caddy's `tls internal` is its own CA. Install its root certificate (`/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt`) on staff PCs as a trusted root (Group Policy for many), and give it to the Claude Desktop extension as `ca.pem` when packing.
 
+## Shares and links from Files
+
+People can share files and folders from Files (**Share**: [Files](../user/files.md#sharing)) with a person, a Mnemerynne or domain group, everyone with an account, or anyone with a link. These live in the database (`item_shares`, `mnemerynne/sharing.py`) and never change the share's permissions on disk.
+
+- **A share only works while its maker could still do it themselves.** If their account is switched off or they lose access to the item, every share and link they made stops at once, and comes back if they get access back. Nothing is re-shared: what reaches someone through a share can't be shared on.
+- **Links** (`/s/<token>`) need no sign-in, so they reach the internet wherever the box does. The token is 256 bits made from `MNEMERYNNE_SECRET_KEY` and a random value saved with the share. The database keeps only its SHA-256, so a copy of the database alone can't open any link. **Changing the secret key turns every link off**, which is also the way to end them all at once. Links are always view-only and always download (nothing a person uploaded is shown as a page), with `no-referrer`, `noindex` and no caching. Every dead link (wrong, expired, turned off, binned) is the same bare 404, and `/s/` allows 60 asks a minute per address.
+- To end someone's links without switching their account off, remove them in Files' Share dialog (anyone who can change the item can). To see every link, query `SELECT * FROM item_shares WHERE kind = 'link'` on the box.
+
 ## Cutting someone off
 
-Deactivate the account (Access → Accounts → Can sign in): sessions and Claude connections end at once. Or only **Revoke Claude tokens**. Removing them from a domain group takes effect within 5 minutes through the AD snapshot.
+Deactivate the account (Access → Accounts → Can sign in): sessions and Claude connections end at once, and every share and link they made stops working. Or only **Revoke Claude tokens**. Removing them from a domain group takes effect within 5 minutes through the AD snapshot.

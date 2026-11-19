@@ -169,6 +169,7 @@ PUBLIC_LIMITS: list[tuple[str, frozenset[str] | None, int, int]] = [
     ("/api/media/kiosk/controllers/redeem", frozenset({"POST"}), 30, 60),   # a screen box's helper (🎮 Controllers)
     ("/media/screen/controllers/open", frozenset({"POST"}), 30, 60),
     ("/healthz/full", None, 12, 60),          # each ask probes the models live; a monitor asks every 30-60 s
+    ("/s/", None, 60, 60),                    # "anyone with the link" pages: no sign-in (web/shares.py)
 ]
 
 

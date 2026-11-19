@@ -12,6 +12,7 @@ renderer as the file view, so what the editor shows is what Files will show.
 
 from __future__ import annotations
 
+import datetime
 import io
 import sqlite3
 
@@ -62,7 +63,7 @@ def _text_file(conn: sqlite3.Connection, settings: Settings, access: fs.Access, 
 def _out(conn: sqlite3.Connection, access: fs.Access, file_id: int, version: str, text: str | None = None) -> dict:
     row = fs.file_row(conn, file_id)
     out = {**_file_json(row, access), "version": version,
-           "can_write": access.can_write(row["collection_id"], row["folder_id"]) and row["deleted_at"] is None}
+           "can_write": access.can_write_file(row) and row["deleted_at"] is None}   # a "Can edit" share counts
     if text is not None:
         out["content"] = text
     return out
@@ -146,7 +147,73 @@ def preview(body: PreviewBody, user=Depends(api_user)):
     """The editor's live preview: the same rendering as the file view (raw HTML escaped, links checked)."""
     if not _preview_limiter.allow(f"preview:{user['id']}", PREVIEW_PER_MINUTE, 60):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "The preview is refreshing too often; it catches up in a moment.")
-    return {"html": markdown.render_html(body.text)}
+    return {"html": markdown.render_html(body.text, tasks=True)}
+
+
+# ---------------------------------------------------------------- task lists
+# A ticked or unticked checkbox (markdown.render_html(tasks=True) draws them; tasks.js on the file view
+# and the wiki, mdeditor.js in the editor's preview). The change itself is markdown.toggle_task: the
+# marker and a "*(done date, who)*" stamp, nothing else in the file moves.
+class TaskBody(BaseModel):
+    line: int = Field(ge=0, le=10_000_000)   # the item's first line (0-based), from data-line
+    done: bool                               # True: tick it; False: open it again
+    version: str = Field(min_length=1, max_length=64)   # the version the page was rendered from
+
+
+def _stamp_name(user) -> str:
+    """Who ticked it, as the done stamp writes it (no characters that would end the stamp early)."""
+    return "".join(ch for ch in user["username"] if ch not in "()*\r\n") or "someone"
+
+
+def _today() -> str:
+    return datetime.date.today().isoformat()   # the box's own date, like the rest of the file times
+
+
+@router.post("/api/files/{file_id}/tasks")
+def toggle_task(file_id: int, body: TaskBody, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db),
+                settings: Settings = Depends(get_settings)):
+    """Tick or untick one task in a saved file and save it (a version is kept, like any edit). 409 when
+    the file changed since `version`; the page should reload. Returns the new version and the page."""
+    access = fs.Access.of(conn, user["id"])
+    _, text, version = _text_file(conn, settings, access, file_id, write=True)
+    if version != body.version:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This file changed since the page was opened. "
+                                                      "Reload it and tick the box again.")
+    try:
+        edits = markdown.toggle_task(text, body.line, body.done, who=_stamp_name(user), today=_today())
+    except markdown.TaskError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
+    new_text = markdown.apply_lines(text, edits)
+    try:
+        raw = store.content_path(conn, settings, file_id).read_bytes()
+        data = (b"\xef\xbb\xbf" if raw.startswith(b"\xef\xbb\xbf") else b"") + new_text.encode("utf-8")   # keep a BOM
+        version = editing.replace_content(conn, settings, file_id, data, expected=body.version,
+                                          actor_id=user["id"], via="web",
+                                          summary="ticked a task" if body.done else "reopened a task")
+    except editing.EditError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    except share.ShareError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    return {"version": version, "html": markdown.render_html(new_text, tasks=True)}
+
+
+class PreviewTaskBody(BaseModel):
+    text: str = Field("", max_length=PREVIEW_MAX_CHARS)
+    line: int = Field(ge=0, le=10_000_000)
+    done: bool
+
+
+@router.post("/api/markdown/tasks")
+def preview_task(body: PreviewTaskBody, user=Depends(api_user)):
+    """The editor's preview: the line changes for a tick, applied to the unsaved text in the editor
+    (nothing is saved here; the person presses Save as usual)."""
+    if not _preview_limiter.allow(f"preview:{user['id']}", PREVIEW_PER_MINUTE, 60):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many changes at once; try again in a moment.")
+    try:
+        edits = markdown.toggle_task(body.text, body.line, body.done, who=_stamp_name(user), today=_today())
+    except markdown.TaskError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
+    return {"edits": [{"line": n, "text": s} for n, s in sorted(edits.items())]}
 
 
 # --------------------------------------------------------------------- pages

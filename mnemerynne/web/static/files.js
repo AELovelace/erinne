@@ -120,6 +120,7 @@
     if (params.has("q")) {
       return { mode: "search", q: params.get("q"), cid: null, fid: null };
     }
+    if (params.get("shared") === "1") return { mode: "shared", cid: null, fid: null, q: "" };   // Shared with me
     const cid = params.has("c") ? Number(params.get("c")) : null;
     if (params.get("trash") === "1") return { mode: "trash", cid: cid, fid: null, q: "" };
     return { mode: "browse", cid: cid, fid: params.has("f") ? Number(params.get("f")) : null, q: "" };
@@ -128,6 +129,7 @@
   function go(target) {
     const params = new URLSearchParams();
     if (target.mode === "search") params.set("q", target.q);
+    else if (target.mode === "shared") params.set("shared", "1");
     else {
       params.set("c", target.cid);
       if (target.mode === "trash") params.set("trash", "1");
@@ -139,7 +141,10 @@
 
   async function refresh(keepSelection) {
     const target = readHash();
-    if (target.mode !== "search" && (target.cid === null || !locationOf(target.cid))) {
+    // A folder shared with the person lives in a library they don't otherwise have: no location, but a folder.
+    const viaShare = target.mode === "browse" && target.fid && !locationOf(target.cid);
+    if (target.mode !== "search" && target.mode !== "shared" && !viaShare
+        && (target.cid === null || !locationOf(target.cid))) {
       const home = state.locations[0];
       if (!home) return;
       go({ mode: "browse", cid: home.id, fid: null });
@@ -153,11 +158,12 @@
     try {
       if (state.mode === "browse") await loadBrowse();
       else if (state.mode === "trash") await loadTrash();
+      else if (state.mode === "shared") await loadShared();
       else await loadSearch();
     } catch (e) {
       if (e.status === 404 && state.mode === "browse" && state.fid) {
-        toast("That folder no longer exists.", true);
-        go({ mode: "browse", cid: state.cid, fid: null });
+        toast("That folder no longer exists, or isn't shared with you any more.", true);
+        go(viaShare ? { mode: "shared" } : { mode: "browse", cid: state.cid, fid: null });
         return;
       }
       toast(e.message, true);
@@ -175,9 +181,22 @@
     state.claude = !!data.claude;   // Claude connected: show the Claude column
     state.canReembed = !!data.can_reembed;   // own inbox, or an admin
     state.ai = !!data.ai;   // Claude connected or Erynne's tools: show the AI edit column
+    state.sharedFrom = data.shared_from || null;   // inside a folder shared with them: the path starts there
     // Expand the tree down to where we are.
     state.expanded.add("c:" + state.cid);
     data.path.forEach(function (p) { state.expanded.add("f:" + p.id); });
+  }
+
+  // Shared with me: the files and folders people shared with this person (web/shares.py).
+  async function loadShared() {
+    const data = await api("GET", "/api/shares/with-me");
+    state.items = data.items;
+    state.path = [];
+    state.canWrite = false;                        // nothing to upload into here; folders open to their own rights
+    state.sharedFrom = null;
+    state.claude = false;
+    state.ai = false;
+    state.canReembed = false;
   }
 
   async function loadTrash() {
@@ -186,6 +205,7 @@
       .concat(data.files.map(function (f) { return Object.assign({ type: "file" }, f); }));
     state.path = [];
     state.canWrite = true;
+    state.sharedFrom = null;
     state.expanded.add("c:" + state.cid);
   }
 
@@ -193,6 +213,7 @@
     const data = await api("GET", "/api/search-names?q=" + encodeURIComponent(state.q));
     state.items = data.folders.concat(data.files);
     state.path = [];
+    state.sharedFrom = null;
     state.canWrite = false;  // per item: can_delete / location writable
   }
 
@@ -255,6 +276,10 @@
       }
       frag.appendChild(node);
     }
+    frag.appendChild(treeNode("🤝 Shared with me", {          // what people shared with this person
+      depth: 0, expandable: false, current: state.mode === "shared" || (state.mode === "browse" && !!state.sharedFrom),
+      onOpen: function () { go({ mode: "shared" }); },
+    }));
     tree.replaceChildren(frag);
   }
 
@@ -315,11 +340,18 @@
       nav.appendChild(el("span", "crumb current", "Search results for “" + state.q + "”"));
       return;
     }
+    if (state.mode === "shared") {
+      nav.appendChild(el("span", "crumb current", "Shared with me"));
+      return;
+    }
     const loc = locationOf(state.cid);
-    const root = el("button", "crumb", loc ? loc.name : "");
+    const shared = state.mode === "browse" && !!state.sharedFrom;    // the folders above the shared one stay hidden
+    const root = el("button", "crumb", shared ? "Shared with me" : loc ? loc.name : "");
     root.type = "button";
-    root.addEventListener("click", function () { go({ mode: "browse", cid: state.cid, fid: null }); });
-    makeDropTarget(root, loc && loc.writable ? { cid: state.cid, fid: null } : null);
+    root.addEventListener("click", function () {
+      go(shared ? { mode: "shared" } : { mode: "browse", cid: state.cid, fid: null });
+    });
+    makeDropTarget(root, !shared && loc && loc.writable ? { cid: state.cid, fid: null } : null);
     nav.appendChild(root);
     if (state.mode === "trash") {
       nav.appendChild(el("span", "crumb-sep", "›"));
@@ -376,13 +408,15 @@
     list.replaceChildren(frag);
 
     const note = $("fm-note");
-    note.hidden = state.mode !== "trash";
+    note.hidden = state.mode !== "trash" && state.mode !== "shared";
     note.textContent = state.mode === "trash"
       ? "Deleted items stay here for " + TRASH_DAYS + " days, then they're removed for good. They don't show up in answers."
+      : state.mode === "shared" ? "Files and folders people shared with you. A shared folder opens with everything in it."
       : "";
     const empty = $("fm-empty");
     empty.hidden = items.length > 0;
     empty.textContent = state.mode === "trash" ? "The recycle bin is empty."
+      : state.mode === "shared" ? "Nothing has been shared with you yet."
       : state.mode === "search" ? "Nothing matches that name."
       : state.canWrite ? "This folder is empty. Drop files here, or use Upload." : "This folder is empty.";
     updateToolbar();
@@ -616,6 +650,7 @@
   }
 
   function canWriteItem(item) {
+    if (state.mode === "shared") return item.type === "file" ? !!item.can_delete : !!item.can_write;
     if (state.mode === "browse" || state.mode === "trash") return state.canWrite;
     if (item.type === "file") return !!item.can_delete;
     return folderWritable(item.collection_id, item.id);
@@ -636,6 +671,7 @@
       if (needs.includes("files") && (!items.length || items.some(function (i) { return i.type !== "file"; }))) ok = false;
       if (needs.includes("reembed") && !state.canReembed) ok = false;
       if (needs.includes("editable") && !(items.length === 1 && items[0].edit_url)) ok = false;
+      if (needs.includes("share") && !canShare(items)) ok = false;
       node.disabled = !ok;
     });
     const empty = document.querySelector('[data-act="empty-bin"]');
@@ -651,6 +687,11 @@
     const sel = $("btn-select");
     sel.setAttribute("aria-pressed", String(state.selecting));
     sel.textContent = state.selecting ? (items.length ? items.length + " selected · Done" : "Done") : "Select";
+  }
+
+  // One file or folder from the person's own places: what came to them through a share isn't passed on.
+  function canShare(items) {
+    return items.length === 1 && (state.mode === "browse" || state.mode === "search") && !state.sharedFrom;
   }
 
   // ---------------------------------------------------------------- actions
@@ -719,6 +760,7 @@
         case "retry": await api("POST", "/api/files/" + items[0].id + "/retry"); await refresh(true); break;
         case "reembed": await reembed(items); break;
         case "properties": if (items[0]) await showProperties(items[0]); break;
+        case "share": if (items[0]) await showShare(items[0]); break;
         case "properties-here": await showProperties({ type: "folder", id: state.fid, name: "" }); break;
       }
     } catch (e) {
@@ -971,6 +1013,135 @@
                 claudeSwitch(p, "edit", p.ai_edit, "AI can edit " + (p.type === "folder" ? "files in it" : "this file")));
   }
 
+  // ------------------------------------------------------------------ share
+  /* The Share dialog: who has this file or folder through shares (and its links, to copy again), and a row
+     of choices to add a person, a group, everyone, or anyone with a link. Shares live in Mnemerynne only. */
+  let shareTargets = null;                         // the picker's people and groups, read once per page
+  let shareItem = null;                            // what the open dialog shares
+  let shareState = null;                           // its last answer from /api/shares
+
+  const SHARE_HINTS = {
+    user: "Only this person. It shows under “Shared with me” in their Files.",
+    group: "Everyone in this Mnemerynne group, as it changes.",
+    ad_group: "Everyone in this domain group (the groups on the NAS), as it changes.",
+    everyone: "Everyone with an active Mnemerynne account.",
+    link: "Anyone who has the link can download it, without signing in. Links are view-only; anyone can be sent one.",
+  };
+
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch (e) { return false; }
+  }
+
+  function expiryText(s) {
+    if (s.expired) return "expired";
+    if (!s.expires_at) return "until removed";
+    return "until " + dateLabel(s.expires_at);
+  }
+
+  function renderShareList() {
+    const list = $("share-list");
+    list.replaceChildren();
+    if (!shareState.shares.length) {
+      list.appendChild(el("li", "muted", "Not shared with anyone yet. Only the people the share's own permissions allow can open it."));
+      return;
+    }
+    shareState.shares.forEach(function (s) {
+      const li = el("li");
+      const icon_ = { user: "👤", group: "👥", ad_group: "🏢", everyone: "🌐", link: "🔗" }[s.kind];
+      const who = el("span", "who" + (s.expired ? " expired" : ""), icon_ + " " + s.name);
+      const right = el("span", "muted small", (s.can_write ? "Can edit" : "Can view") + " · " + expiryText(s));
+      li.append(who, right);
+      if (s.kind === "link" && s.url) {
+        const copy = el("button", "small", "Copy link");
+        copy.type = "button";
+        copy.addEventListener("click", async function () {
+          toast(await copyText(s.url) ? "Link copied." : "Couldn't copy: select the link and copy it.", false);
+        });
+        li.appendChild(copy);
+      }
+      if (s.can_remove) {
+        const remove = el("button", "small link danger", s.kind === "link" ? "Turn off" : "Remove");
+        remove.type = "button";
+        remove.title = s.kind === "link" ? "The link stops working for everyone" : "Stop sharing with " + s.name;
+        remove.addEventListener("click", async function () {
+          remove.disabled = true;
+          $("share-error").textContent = "";
+          try {
+            await api("DELETE", "/api/shares/" + s.id);
+            shareState = await api("GET", "/api/shares?type=" + shareItem.type + "&id=" + shareItem.id);
+            renderShareList();
+          } catch (e) { $("share-error").textContent = e.message; remove.disabled = false; }
+        });
+        li.appendChild(remove);
+      }
+      if (s.kind === "link" && s.url) li.appendChild(el("span", "link-url", s.url));   // selectable, to copy by hand
+      list.appendChild(li);
+    });
+  }
+
+  function shareKindChanged() {
+    const kind = $("share-kind").value;
+    const target = $("share-target");
+    const options = { user: shareTargets.users, group: shareTargets.groups,
+                      ad_group: shareTargets.ad_groups.map(function (g) { return { id: g, name: g }; }) }[kind];
+    $("share-target-wrap").hidden = !options;
+    target.replaceChildren();
+    (options || []).forEach(function (o) { const opt = el("option", null, o.name); opt.value = o.id; target.appendChild(opt); });
+    const right = $("share-right");
+    const canEdit = kind !== "link" && shareState.can_edit;      // links are view-only; you give only what you have
+    right.querySelector('option[value="edit"]').disabled = !canEdit;
+    if (!canEdit) right.value = "view";
+    $("share-days").value = kind === "link" ? String(shareState.link_days) : "";
+    let hint = SHARE_HINTS[kind];
+    if (options && !options.length) {
+      hint = kind === "ad_group" ? "No domain groups: this box isn't joined to a domain, or its directory is away."
+        : kind === "group" ? "No Mnemerynne groups yet (an admin makes them under Access)." : "Nobody else has an account yet.";
+    }
+    if (kind === "link" && !shareState.links) hint = "Links need MNEMERYNNE_SECRET_KEY set on the server.";
+    $("share-hint").textContent = hint;
+    $("share-add").disabled = (options && !options.length) || (kind === "link" && !shareState.links);
+  }
+
+  async function showShare(item) {
+    const dlg = $("dlg-share");
+    shareItem = item;
+    $("share-title").textContent = "Share “" + item.name + "”";
+    $("share-error").textContent = "";
+    $("share-list").replaceChildren(el("li", "muted", "Loading…"));
+    if (!dlg.open) dlg.showModal();
+    try {
+      if (!shareTargets) shareTargets = await api("GET", "/api/shares/targets");
+      shareState = await api("GET", "/api/shares?type=" + item.type + "&id=" + item.id);
+    } catch (e) { $("share-list").replaceChildren(el("li", "error", e.message)); return; }
+    renderShareList();
+    shareKindChanged();
+  }
+
+  async function addShare() {
+    const kind = $("share-kind").value;
+    const days = $("share-days").value;
+    const body = { type: shareItem.type, id: shareItem.id, kind: kind, can_write: $("share-right").value === "edit",
+                   expires_days: days === "" ? null : Number(days) };
+    if (!$("share-target-wrap").hidden) {
+      const value = $("share-target").value;
+      body.target = kind === "ad_group" ? value : Number(value);
+    }
+    const btn = $("share-add");
+    btn.disabled = true;
+    $("share-error").textContent = "";
+    try {
+      shareState = await api("POST", "/api/shares", body);
+      renderShareList();
+      if (shareState.link) {
+        toast(await copyText(shareState.link) ? "Link made and copied. Anyone who has it can download this."
+          : "Link made: copy it from the list.");
+      } else {
+        toast("Shared.");
+      }
+    } catch (e) { $("share-error").textContent = e.message; }
+    finally { btn.disabled = false; shareKindChanged(); }
+  }
+
   // ----------------------------------------------------------- context menu
   function showContextMenu(x, y) {
     const menu = $("ctx");
@@ -988,6 +1159,11 @@
     if (state.mode === "trash") {
       add("Restore", "restore", items.length > 0);
       add("Delete forever", "purge", items.length > 0, true);
+    } else if (state.mode === "shared") {
+      add("Open", "open", items.length === 1);
+      if (items.length === 1 && items[0].edit_url) add("Edit", "edit");
+      add(items.length === 1 && items[0].type === "file" ? "Download" : "Download as zip", "download", items.length > 0);
+      add("Properties…", "properties", items.length === 1);
     } else if (items.length) {
       add("Open", "open", items.length === 1);
       if (items.length === 1 && items[0].edit_url) add("Edit", "edit");
@@ -1002,6 +1178,7 @@
       add("Delete", "trash", write, true);
       menu.appendChild(el("hr"));
       add("Properties…", "properties", items.length === 1);
+      if (canShare(items)) add("Share…", "share");
     } else {
       add("New folder", "new-folder", state.mode === "browse" && state.canWrite);
       add("Upload files…", "upload-files", state.mode === "browse" && state.canWrite);
@@ -1696,6 +1873,8 @@
   document.querySelectorAll("dialog [data-close]").forEach(function (b) {
     b.addEventListener("click", function () { b.closest("dialog").close(); });
   });
+  $("share-kind").addEventListener("change", shareKindChanged);     // the Share dialog (showShare)
+  $("share-add").addEventListener("click", addShare);
 
   // Keyboard, when focus is in the list (not in a text field or dialog).
   $("list").addEventListener("keydown", function (e) {

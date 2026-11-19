@@ -18,11 +18,11 @@
       </div>
       <button type="button" class="tool fm-desk" data-act="new-folder" data-mode="browse" data-needs="write">New folder</button>
       <span class="sep fm-desk" data-mode="browse search"></span>
-      <button type="button" class="tool fm-desk" data-act="open" data-mode="browse search" data-needs="one">Open</button>
-      <button type="button" class="tool fm-desk" data-act="edit" data-mode="browse search" data-needs="one editable"
+      <button type="button" class="tool fm-desk" data-act="open" data-mode="browse search shared" data-needs="one">Open</button>
+      <button type="button" class="tool fm-desk" data-act="edit" data-mode="browse search shared" data-needs="one editable"
               title="Edit a text or Markdown file in the browser">Edit</button>
       {#- One file downloads as it is; several, or a folder, come down as one zip (downloads.py). -#}
-      <button type="button" class="tool fm-desk" data-act="download" data-mode="browse search" data-needs="some"
+      <button type="button" class="tool fm-desk" data-act="download" data-mode="browse search shared" data-needs="some"
               title="One file downloads as it is; several files or a folder come as one zip">Download</button>
       <button type="button" class="tool fm-desk" data-act="rename" data-mode="browse search" data-needs="one write">Rename</button>
       <button type="button" class="tool fm-desk" data-act="move" data-mode="browse search" data-needs="some write">Move to…</button>
@@ -30,7 +30,10 @@
       <button type="button" class="tool danger fm-desk" data-act="trash" data-mode="browse search" data-needs="some write">Delete</button>
       <button type="button" class="tool fm-desk" data-act="reembed" data-mode="browse" data-needs="reembed"
               title="Read and embed the selected items again, or everything here when nothing is selected">Re-embed</button>
-      <button type="button" class="tool fm-desk" data-act="properties" data-mode="browse search" data-needs="one">Properties</button>
+      <button type="button" class="tool fm-desk" data-act="properties" data-mode="browse search shared" data-needs="one">Properties</button>
+      {#- Share one file or folder: with people, groups, everyone, or anyone with a link (web/shares.py). -#}
+      <button type="button" class="tool fm-desk" data-act="share" data-mode="browse search" data-needs="one share"
+              title="Share with people, groups, everyone, or anyone with a link">Share</button>
       <button type="button" class="tool fm-desk" data-act="restore" data-mode="trash" data-needs="some">Restore</button>
       <button type="button" class="tool danger fm-desk" data-act="purge" data-mode="trash" data-needs="some">Delete forever</button>
       <button type="button" class="tool danger fm-desk" data-act="empty-bin" data-mode="trash">Empty bin</button>
@@ -38,7 +41,7 @@
       <button type="button" class="tool fm-phone" id="btn-select" aria-pressed="false">Select</button>
       <button type="button" class="tool fm-phone" id="btn-actions" aria-haspopup="menu">Actions ▾</button>
       {#- On every screen: ticks everything listed here (Ctrl+A with a keyboard), or clears it again. -#}
-      <button type="button" class="tool" id="btn-select-all" data-act="select-all" data-mode="browse search trash"
+      <button type="button" class="tool" id="btn-select-all" data-act="select-all" data-mode="browse search trash shared"
               title="Select everything here (Ctrl+A)">Select all</button>
       <span class="grow"></span>
       <input type="search" id="fm-search" placeholder="Search file names" aria-label="Search file names" autocomplete="off">
@@ -115,6 +118,50 @@
   </header>
   <ul id="queue-list" aria-live="polite"></ul>
 </section>
+
+<dialog class="dlg glass props share" id="dlg-share" aria-labelledby="share-title">
+  <form method="dialog">
+    <h2 id="share-title">Share</h2>
+    <p class="small muted">Shares work in Mnemerynne only. The folder permissions on the share itself don't change.</p>
+    <h3 class="props-h">Who has it</h3>
+    <ul class="share-list" id="share-list" aria-live="polite"></ul>
+    <h3 class="props-h">Add</h3>
+    <div class="share-add">
+      <label>Share with
+        <select id="share-kind">
+          <option value="user">A person</option>
+          <option value="ad_group">A domain group</option>
+          <option value="group">A Mnemerynne group</option>
+          <option value="everyone">Everyone with an account</option>
+          <option value="link">Anyone with the link</option>
+        </select>
+      </label>
+      <label id="share-target-wrap">Who
+        <select id="share-target"></select>
+      </label>
+      <label>They can
+        <select id="share-right">
+          <option value="view">View</option>
+          <option value="edit">Edit</option>
+        </select>
+      </label>
+      <label>For
+        <select id="share-days">
+          <option value="">Until removed</option>
+          <option value="1">1 day</option>
+          <option value="7">7 days</option>
+          <option value="30">30 days</option>
+        </select>
+      </label>
+    </div>
+    <p class="small muted" id="share-hint"></p>
+    <p class="error small" id="share-error"></p>
+    <div class="dlg-actions">
+      <button type="button" class="link" value="cancel" data-close>Close</button>
+      <button type="button" id="share-add">Share</button>
+    </div>
+  </form>
+</dialog>
 
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 

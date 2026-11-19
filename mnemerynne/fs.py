@@ -60,6 +60,12 @@ class Unavailable(FsError):
     status = 503
 
 
+def _row_file_id(row) -> int | None:
+    """A file row's id: `id` from file_row() and listings, `file_id` from queries over chunks (Claude's tools)."""
+    keys = row.keys()
+    return row["id"] if "id" in keys else row["file_id"] if "file_id" in keys else None
+
+
 @dataclass
 class Access:
     """What one user may read and write, looked up once per request:
@@ -76,10 +82,39 @@ class Access:
     _sp_ok: dict[int, bool] = field(default_factory=dict, repr=False)
     _sp_ids: set[int] | None = field(default=None, repr=False)
     _confirmed: set[tuple[int, int | None]] = field(default_factory=set, repr=False)
+    # Files and folders shared with the person (sharing.py), on top of their own rights. Looked up the first time
+    # their own rights don't cover something; off for Claude's view and for checking a sharer's own rights.
+    shares: bool = True
+    _shared: object = field(default=None, repr=False)
 
     @classmethod
-    def of(cls, conn: sqlite3.Connection, user_id: int) -> "Access":
-        return cls(user_id, permissions.reach(conn, user_id), lambda: permissions.reach(conn, user_id), conn=conn)
+    def of(cls, conn: sqlite3.Connection, user_id: int, *, shares: bool = True) -> "Access":
+        return cls(user_id, permissions.reach(conn, user_id), lambda: permissions.reach(conn, user_id), conn=conn,
+                   shares=shares)
+
+    def _granted(self):
+        """What shares give this person (sharing.Granted), read once per Access; empty when shares are off."""
+        from mnemerynne import sharing
+        if self._shared is None:
+            self._shared = (sharing.granted(self.conn, self.user_id) if self.shares and self.conn is not None
+                            and not self.claude else sharing.Granted())
+        return self._shared
+
+    def share_top(self, collection_id: int, folder_id: int | None) -> int | None:
+        """The shared folder this place is reached through, when the person's own rights don't reach it: where
+        their path starts (the folders above it stay hidden). None when their own rights reach it."""
+        r = self._reach(collection_id, folder_id)
+        if folder_id is None or (r is not None and folder_id in r.visible()):
+            return None
+        g = self._granted()
+        if not g.can_read(collection_id, folder_id):
+            return None
+        roots = g.roots.get(collection_id, set())
+        step = folder_id
+        while step is not None and step not in roots:
+            step = (r.parents.get(step) if r is not None and step in r.parents
+                    else self.conn.execute("SELECT parent_id FROM folders WHERE id = ?", (step,)).fetchone()[0])
+        return step
 
     @classmethod
     def for_claude(cls, conn: sqlite3.Connection, user_id: int) -> "Access":
@@ -106,11 +141,20 @@ class Access:
 
     def can_read(self, collection_id: int, folder_id: int | None) -> bool:
         r = self._reach(collection_id, folder_id)
-        return r is not None and r.can_read(folder_id)
+        if r is not None and r.can_read(folder_id):
+            return True
+        return self.shares and self._granted().can_read(collection_id, folder_id)   # a folder shared with them
 
     def can_write(self, collection_id: int, folder_id: int | None) -> bool:
         r = self._reach(collection_id, folder_id)
-        return r is not None and r.can_write(folder_id)
+        if r is not None and r.can_write(folder_id):
+            return True
+        return self.shares and self._granted().can_write(collection_id, folder_id)
+
+    def can_write_file(self, row) -> bool:
+        """May change this file's contents: its place is writable, or the file itself was shared "Can edit"."""
+        return self.can_write(row["collection_id"], row["folder_id"]) or (
+            self.shares and self._granted().files.get(_row_file_id(row), False))
 
     SETTLE_LIMIT = 500                                 # folders one page may read from the share on a first look
 
@@ -141,7 +185,9 @@ class Access:
         SharePoint agrees, which costs a round trip."""
         if self.claude and row["claude_hidden"]:
             return False
-        return self.can_read(row["collection_id"], row["folder_id"])
+        if self.can_read(row["collection_id"], row["folder_id"]):
+            return True
+        return self.shares and _row_file_id(row) in self._granted().files          # the file itself was shared
 
     def can_read_file(self, row) -> bool:
         """can_reach_file, and for a SharePoint file the person's own account can open it there."""
@@ -175,11 +221,16 @@ class Access:
         unknown = next((f for f in folder_ids if r is None or f not in r.parents), None)
         if unknown is not None:
             r = self._reach(collection_id, unknown)
-        return r.visible() if r else set()
+        own = r.visible() if r else set()
+        if not self.shares:
+            return own
+        return own | self._granted().read.get(collection_id, set())   # shared folders and below, never above
 
     def see(self, collection_id: int, folder_id: int | None) -> None:
         """May open this place to look around (maybe only to reach a folder below)."""
         self._reach(collection_id, folder_id)
+        if self.shares and self._granted().can_read(collection_id, folder_id):
+            return                                     # inside a folder shared with them
         # Same 404 whether it doesn't exist or isn't yours: no existence leaks.
         if collection_id not in self.readable or (folder_id is not None and folder_id not in self.visible(collection_id)):
             raise NotFound("Not found")
@@ -449,7 +500,11 @@ def browse(conn: sqlite3.Connection, access: Access, collection_id: int, folder_
         (collection_id, folder_id or 0)).fetchall() if access.can_read(collection_id, folder_id) else []
     access.prefetch(files)
     files = [f for f in files if access.can_read_file(f)]
-    return {"folders": folders, "files": files, "path": folder_path(conn, folder_id),
+    path = folder_path(conn, folder_id)
+    top = access.share_top(collection_id, folder_id)   # reached through a shared folder: the path starts there
+    if top is not None:
+        path = path[next(i for i, p in enumerate(path) if p["id"] == top):]
+    return {"folders": folders, "files": files, "path": path, "shared_from": top,
             "can_write": access.can_write(collection_id, folder_id)}
 
 

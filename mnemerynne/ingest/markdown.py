@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from markdown_it import MarkdownIt
+from markdown_it.token import Token
 
 from mnemerynne.ingest import Segment
 
@@ -121,13 +122,128 @@ def _rewrite_links(tokens, rewrite: Callable[[str], str]) -> None:
                 child.attrSet("src", rewrite(child.attrGet("src")))
 
 
-def render_html(text: str, link_rewriter: Callable[[str], str] | None = None) -> str:
+# ------------------------------------------------------------------- task lists
+# A list item whose text starts with "[ ]" (open), "[x]"/"[X]" or "✅" (done) is a task. With tasks=True,
+# render_html draws it as a checkbox carrying the item's source line (data-line, 0-based in the whole
+# file, front matter included). The box is disabled: tasks.js / mdeditor.js enable it where a click
+# can save. A click comes back as toggle_task(), which re-parses the text, so a stale or forged line
+# number is refused instead of changing the wrong line.
+_TASK_MARK = re.compile(r"^(\[ \]|\[[xX]\]|✅️?)[ \t]+")    # on the item's inline text
+_TASK_LINE = re.compile(r"^(?P<lead>[ \t]*(?:>[ \t]?)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+)"
+                        r"(?P<mark>\[ \]|\[[xX]\]|✅️?)(?=[ \t])")   # on the raw source line
+_DONE_STAMP = re.compile(r"[ \t]*\*\(done \d{4}-\d{2}-\d{2}, [^()*\n]*\)\*[ \t]*$")   # what ticking appends
+_DONE_MARKS = ("[x]", "[X]", "✅", "✅️")
+
+
+class TaskError(ValueError):
+    """The line isn't a task (any more), or it is already in the asked state."""
+
+
+def _body_and_offset(text: str) -> tuple[str, int]:
+    """The text the parser sees, and how many lines the front matter took off the top."""
+    normal = text.replace("\r\n", "\n").replace("\r", "\n")
+    body = strip_front_matter(normal)
+    return body, normal[:len(normal) - len(body)].count("\n")
+
+
+@dataclass
+class _Task:
+    line: int      # the item's first line (in the whole file)
+    last: int      # the last line of the item's first paragraph (where a done stamp goes)
+    done: bool
+    inline: object  # the paragraph's inline token (render_html strips the marker off it)
+    mark_len: int   # characters of marker + spacing to strip
+
+
+def _tasks(tokens, offset: int) -> list[_Task]:
+    """Every task item: a list item whose first block is a paragraph that starts with a marker."""
+    found = []
+    for i, tok in enumerate(tokens[:-2]):
+        para, inline = tokens[i + 1], tokens[i + 2]
+        if tok.type != "list_item_open" or not tok.map or para.type != "paragraph_open" \
+                or inline.type != "inline" or not para.map or para.map[0] != tok.map[0]:
+            continue                                   # not an item that opens with a paragraph
+        m = _TASK_MARK.match(inline.content)
+        if not m:
+            continue                                   # an ordinary list item
+        found.append(_Task(tok.map[0] + offset, para.map[1] - 1 + offset, m.group(1) in _DONE_MARKS,
+                           inline, len(m.group(0))))
+        tok.attrJoin("class", "task-item")             # the <li> gets class="task-item" (no bullet: erynne.css)
+    return found
+
+
+def _strip_mark(inline, n: int) -> None:
+    """Take the first n characters (the marker) off the item's rendered text."""
+    for child in inline.children or []:
+        if n <= 0 or child.type != "text":
+            break
+        cut = min(n, len(child.content))
+        child.content = child.content[cut:]
+        n -= cut
+
+
+def _checkbox(task: _Task) -> Token:
+    """The <input> drawn in front of a task's text (built here, never from the source: safe as HTML)."""
+    box = Token("html_inline", "", 0)
+    box.content = (f'<input type="checkbox" class="md-task" data-line="{task.line}"'
+                   f'{" checked" if task.done else ""} disabled aria-label="Done"> ')
+    return box
+
+
+def render_html(text: str, link_rewriter: Callable[[str], str] | None = None, *, tasks: bool = False) -> str:
     """HTML for the file view. Raw HTML in the source is escaped, not rendered.
-    `link_rewriter` maps each link target (after the allowlist) to the one to show."""
+    `link_rewriter` maps each link target (after the allowlist) to the one to show.
+    `tasks` draws task-list items ("- [ ] ...", "- ✅ ...") as checkboxes (file view, wiki, editor)."""
     md = _parser()
-    body = strip_front_matter(text)
+    body, offset = _body_and_offset(text)
     tokens = md.parse(body)
     _headings(tokens)  # sets id attributes, identical to the anchors in segments()
     if link_rewriter is not None:
         _rewrite_links(tokens, link_rewriter)
+    if tasks:
+        for task in _tasks(tokens, offset):
+            _strip_mark(task.inline, task.mark_len)         # "[ ] " leaves the text...
+            task.inline.children.insert(0, _checkbox(task))  # ...and a checkbox takes its place
     return md.renderer.render(tokens, md.options, {})
+
+
+def toggle_task(text: str, line: int, done: bool, *, who: str, today: str) -> dict[int, str]:
+    """The lines to change to tick (done=True) or untick the task starting on `line`, as
+    {line number: new line} (line endings not included; the line count never changes).
+
+    Ticking writes the document's own done marker (✅ unless the file already ticks with [x]) and
+    appends "*(done YYYY-MM-DD, who)*" to the end of the item's first paragraph. Unticking writes
+    "[ ]" and removes that stamp. TaskError when the line isn't a task or is already that way."""
+    if "\r" in text.replace("\r\n", ""):               # old-Mac line endings: the parser's lines aren't ours
+        raise TaskError("This file's line endings can't be ticked here; edit it instead.")
+    body, offset = _body_and_offset(text)
+    tasks = {t.line: t for t in _tasks(_parser().parse(body), offset)}
+    task = tasks.get(line)
+    if task is None:
+        raise TaskError("That line isn't a task any more. Reload the page to see the file as it is now.")
+    if task.done == done:
+        raise TaskError("That task is already " + ("ticked." if done else "open."))
+    lines = [s.rstrip("\r") for s in text.replace("\r\n", "\n").split("\n")]
+    m = _TASK_LINE.match(lines[line])
+    if m is None:                                      # parsed as a task, but not in a shape we rewrite
+        raise TaskError("This task's line is in a shape that can't be ticked here; edit it instead.")
+    if done:
+        ticks = [lines[t.line] for t in tasks.values() if t.done]
+        mark = "[x]" if ticks and all("✅" not in s for s in ticks) else "✅"   # follow the file's habit
+    else:
+        mark = "[ ]"
+    edits = {line: m.group("lead") + mark + lines[line][m.end():]}
+    last = edits.get(task.last, lines[task.last])
+    if done:
+        edits[task.last] = last.rstrip() + f" *(done {today}, {who})*"   # what the hardening lists ask for
+    else:
+        edits[task.last] = _DONE_STAMP.sub("", last)                      # only our own stamp, at the end
+    return {n: s for n, s in edits.items() if s != lines[n]}
+
+
+def apply_lines(text: str, edits: dict[int, str]) -> str:
+    """`text` with whole lines replaced, keeping its line endings (\\n or \\r\\n) as they were."""
+    parts = text.split("\n")
+    for n, new in edits.items():
+        parts[n] = new + ("\r" if parts[n].endswith("\r") else "")
+    return "\n".join(parts)

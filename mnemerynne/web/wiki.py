@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from mnemerynne import fs, share, wiki
+from mnemerynne import editing, fs, share, wiki
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import markdown, store
@@ -67,7 +67,8 @@ def wiki_page_html(file_id: int, user=Depends(api_user), conn: sqlite3.Connectio
             or not wiki.is_page(row["display_name"]) or not fs.is_live_folder(conn, row["folder_id"]):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such wiki page")
     try:
-        text = markdown.decode(store.content_path(conn, settings, file_id).read_bytes())
+        data = store.content_path(conn, settings, file_id).read_bytes()
+        text = markdown.decode(data)
     except share.ShareUnavailable as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     except OSError:
@@ -77,7 +78,8 @@ def wiki_page_html(file_id: int, user=Depends(api_user), conn: sqlite3.Connectio
     can_write = access.can_write(row["collection_id"], row["folder_id"])
     return {"id": file_id, "name": row["display_name"], "title": wiki.title_of(row["display_name"]),
             "folder_id": row["folder_id"], "path": [p["name"] for p in fs.folder_path(conn, row["folder_id"])],
-            "html": markdown.render_html(text, link_rewriter=wiki.rewriter(conn, access, library["id"], row)),
+            "html": markdown.render_html(text, link_rewriter=wiki.rewriter(conn, access, library["id"], row), tasks=True),
+            "version": editing.sha256(data),   # a ticked task box is saved against this (tasks.js)
             "can_write": can_write, "edit_url": f"/edit/{file_id}?back=/wiki/{file_id}" if can_write else None,
             "view_url": f"/files/{file_id}/view", "updated_at": row["updated_at"], "edited_via": row["edited_via"]}
 
