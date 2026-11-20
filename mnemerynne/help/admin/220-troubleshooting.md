@@ -32,6 +32,7 @@ Access → Recent changes for who changed what; Claude activity for Claude; the 
 ## Files and indexing
 
 - **Stuck in Queued**: the worker isn't running, or the embedder is down (`journalctl -u mnemerynne-embedder`). Large PDFs with OCR take a long time; `journalctl -u mnemerynne-worker -f` shows progress.
+- **Embedder crash-loops with `invalid device: CUDA0`**: llama.cpp can't see the 1050 Ti, usually because the NVIDIA driver's packages are gone (`rpm -qa '*nvidia*'`, `nvidia-smi`). Reinstall RPM Fusion's `akmod-nvidia-580xx xorg-x11-drv-nvidia-580xx-cuda` (dry run with `--assumeno` first), build the module with `akmods --force`, and reboot if the version differs from the loaded one. Don't reboot while `modinfo nvidia` finds nothing. `preinstall.sh` now protects the driver from removal.
 - **Failed**: Properties shows the error. Corrupt PDFs, wrong extensions, non-UTF-8 text. `Retry indexing` after fixing.
 - **Stored only**: a kind this version can't read, or over the size limits. After an update that added kinds, `reclassify`.
 - **Old .doc/.ppt not searchable**: LibreOffice isn't installed (`dnf install libreoffice-core libreoffice-writer libreoffice-impress`), then `reclassify`.

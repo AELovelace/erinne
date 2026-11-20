@@ -18,6 +18,8 @@
 #                          from `pactl list cards` (Kiosk settings lists them), or leave
 #                          the choice to PipeWire
 #   --youtube-any-codec    let YouTube send VP9/AV1 (decoded on the CPU) instead of H.264 (the GPU)
+#   --allow-cpu-drawing    let Firefox fall back to drawing on the CPU when it distrusts the GPU (by default
+#                          it's made to draw, run WebGL and decode video on the GPU; --gpu-drawing turns that back on)
 #   --no-auto-updates      don't install security updates nightly (dnf automatic, rebooting if needed)
 #   --no-wifi-setup        no setup hotspot (and the start page is a plain local file)
 #   --volume 0-100         the system volume (default 100; Media sets its own on top)
@@ -66,6 +68,7 @@ RELEASE_TAG='^screen-v[0-9]+\.[0-9]+\.[0-9]+$'
 URL=""
 AUDIO=hdmi
 YOUTUBE_H264=1
+GPU_DRAWING=1                    # 1: Firefox is made to use the GPU (drawing, WebGL, video), not its CPU fallbacks
 AUTO_UPDATES=1
 WIFI_SETUP=1
 VOLUME=100
@@ -128,6 +131,7 @@ MNEMERYNNE_URL=$URL
 AUDIO_OUTPUT=$AUDIO
 WIFI_SETUP=$(yes_no "$WIFI_SETUP")
 YOUTUBE_H264=$(yes_no "$YOUTUBE_H264")
+GPU_DRAWING=$(yes_no "$GPU_DRAWING")
 AUTO_UPDATES=$(yes_no "$AUTO_UPDATES")
 SYSTEM_VOLUME=$VOLUME
 DISPLAY_MODE=$DISPLAY_MODE
@@ -150,6 +154,7 @@ load_options() {
     v=$(conf_value AUDIO_OUTPUT); valid_audio "$v" && AUDIO=$v
     v=$(conf_value WIFI_SETUP); [[ $v == no ]] && WIFI_SETUP=0
     v=$(conf_value YOUTUBE_H264); [[ $v == no ]] && YOUTUBE_H264=0
+    v=$(conf_value GPU_DRAWING); [[ $v == no ]] && GPU_DRAWING=0          # boxes from before this option: GPU (the default)
     v=$(conf_value AUTO_UPDATES); [[ $v == no ]] && AUTO_UPDATES=0
     v=$(conf_value SYSTEM_VOLUME); [[ $v =~ ^[0-9]{1,3}$ && $v -le 100 ]] && VOLUME=$v
     v=$(conf_value DISPLAY_MODE); valid_display "$v" && DISPLAY_MODE=$v
@@ -172,6 +177,15 @@ cp /usr/local/share/mnemerynne-screen/user.js "$PROFILE/user.js"
 /usr/local/bin/mnemerynne-screen-audio >/dev/null 2>&1 &     # the sound output; it reads the settings itself
 /usr/local/bin/mnemerynne-screen-display || true            # the TV's picture (DISPLAY_MODE), before Firefox draws
 export MOZ_ENABLE_WAYLAND=1
+# Video decoding (VA-API) on the GPU the TV is plugged into: with two GPUs, Firefox would otherwise take
+# the first render node, which may be a card with no TV (or nouveau). Not on nouveau, which can't decode.
+for card in /sys/class/drm/card[0-9]; do
+    [ -e "$card/device/driver" ] || continue
+    [ "$(basename "$(readlink -f "$card/device/driver")")" = nouveau ] && continue      # skip nouveau: no VA-API worth having
+    grep -qx connected "$card"-*/status 2>/dev/null || continue                        # only the card with the TV
+    node=$(ls -d "$card"/device/drm/renderD* 2>/dev/null | head -n 1)                    # that card's render node
+    [ -n "$node" ] && export MOZ_DRM_DEVICE=/dev/dri/${node##*/} && break               # Firefox decodes on it
+done
 START=file:///usr/local/share/mnemerynne-screen/start.html
 # The helper's page (wifi-setup.py): it waits for the server, offers the setup hotspot when there's no
 # network, and has Kiosk settings. The plain file only if the helper isn't answering.
@@ -369,6 +383,18 @@ user_pref("dom.gamepad.enabled", true);                         // game controll
 user_pref("network.lna.blocking", false);                       // the TV page asks this box's helper (127.0.0.1) to pair
 user_pref("network.lna.enabled", false);                        // controllers; Firefox's local-network guard would stop it
 EOF
+    if [[ $GPU_DRAWING == 1 ]]; then
+        cat <<'EOF'
+// The GPU first (--allow-cpu-drawing turns this off): Firefox's blocklist puts older Intel graphics on
+// software drawing and WebGL, which makes Retro's games and the page crawl on the CPU. Make it use the GPU.
+user_pref("gfx.webrender.all", true);                           // the page is composited on the GPU
+user_pref("gfx.webrender.software", false);                     // not on the CPU fallback
+user_pref("layers.acceleration.force-enabled", true);           // even on a GPU Firefox's blocklist names
+user_pref("webgl.force-enabled", true);                         // WebGL (Retro's games) on the GPU, blocklist or not
+user_pref("webgl.disabled", false);
+user_pref("widget.dmabuf.force-enabled", true);                 // decoded video frames stay on the GPU (no CPU copy)
+EOF
+    fi
     if [[ $YOUTUBE_H264 == 1 ]]; then
         cat <<'EOF'
 // YouTube in H.264, which the GPU decodes; it sends VP9 or AV1 otherwise, decoded on the CPU.
@@ -725,6 +751,7 @@ check() {
         done
     done
     note "GPUs: ${drivers:-none found}"
+    if [[ $(conf_value GPU_DRAWING) == no ]]; then note "drawing: Firefox decides (--allow-cpu-drawing); it may draw on the CPU"; else ok "drawing: Firefox is made to use the GPU"; fi
     case $tv_driver in
         i915|xe|amdgpu|radeon) ok "the TV is on $tv_card ($tv_driver): games and the page draw on the GPU" ;;
         nvidia) ok "the TV is on $tv_card (NVIDIA's own driver)" ;;
@@ -824,6 +851,8 @@ parse_args() {
             --no-wifi-setup) WIFI_SETUP=0 ;;
             --wifi-setup) WIFI_SETUP=1 ;;
             --youtube-h264) YOUTUBE_H264=1 ;;
+            --allow-cpu-drawing) GPU_DRAWING=0 ;;
+            --gpu-drawing) GPU_DRAWING=1 ;;
             --auto-updates) AUTO_UPDATES=1 ;;
             --volume) VOLUME=${2:-}; shift
                       [[ $VOLUME =~ ^[0-9]{1,3}$ && $VOLUME -le 100 ]] || die "--volume is 0 to 100" ;;
@@ -873,8 +902,9 @@ main() {
     URL=$(clean_url "$URL") || exit 1
     [[ $URL == https://* ]] || note "warning: $URL isn't HTTPS; the screen key would cross the network in the clear"
 
-    printf 'Mnemerynne screen for %s (sound: %s at %s%%, picture: %s at %s%%, YouTube: %s, nightly updates: %s, Wi-Fi setup: %s)\n' "$URL" \
-        "$AUDIO" "$VOLUME" "$DISPLAY_MODE" "$DISPLAY_SCALE" "$([[ $YOUTUBE_H264 == 1 ]] && echo H.264 || echo any codec)" \
+    printf 'Mnemerynne screen for %s (sound: %s at %s%%, picture: %s at %s%%, drawing: %s, YouTube: %s, nightly updates: %s, Wi-Fi setup: %s)\n' "$URL" \
+        "$AUDIO" "$VOLUME" "$DISPLAY_MODE" "$DISPLAY_SCALE" "$([[ $GPU_DRAWING == 1 ]] && echo GPU || echo "Firefox decides")" \
+        "$([[ $YOUTUBE_H264 == 1 ]] && echo H.264 || echo any codec)" \
         "$([[ $AUTO_UPDATES == 1 ]] && echo yes || echo no)" "$([[ $WIFI_SETUP == 1 ]] && echo hotspot || echo no)"
     if [[ $PACKAGES == 1 ]]; then install_packages; fi
     make_user

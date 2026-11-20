@@ -93,6 +93,20 @@ def test_youtube_is_asked_for_h264_unless_told_otherwise():
     assert 'media.autoplay.default", 0' in bash("render_user_js").stdout
 
 
+def test_firefox_is_made_to_use_the_gpu_unless_told_otherwise():
+    gpu = bash("render_user_js").stdout
+    assert 'gfx.webrender.all", true' in gpu and 'webgl.force-enabled", true' in gpu
+    assert 'gfx.webrender.software", false' in gpu and 'layers.acceleration.force-enabled", true' in gpu
+    cpu = bash("GPU_DRAWING=0; render_user_js").stdout
+    assert "webrender.all" not in cpu and "webgl.force-enabled" not in cpu
+    assert 'media.ffmpeg.vaapi.enabled", true' in cpu       # video decoding on the GPU either way
+
+
+def test_the_session_decodes_on_the_tvs_gpu():
+    session = bash("render_session").stdout
+    assert "MOZ_DRM_DEVICE=/dev/dri/" in session and "nouveau" in session
+
+
 def test_the_start_page_waits_for_the_server():
     page = bash("URL=https://erynne.example.com; render_start").stdout
     assert 'const SERVER = "https://erynne.example.com"' in page
@@ -222,6 +236,8 @@ def test_install_under_a_root_and_run_again(tmp_path):
     assert "WIFI_SETUP=yes\n" in conf
     assert "address=/#/10.42.0.1" in (root / "etc/NetworkManager/dnsmasq-shared.d/mnemerynne-screen.conf").read_text()
     assert "vp9" not in (root / "usr/local/share/mnemerynne-screen/user.js").read_text()
+    assert "GPU_DRAWING=yes\n" in conf                     # the GPU by default
+    assert "webgl.force-enabled" in (root / "usr/local/share/mnemerynne-screen/user.js").read_text()
     session = (root / "usr/local/bin/mnemerynne-screen-session").read_text()
     assert "firefox --kiosk" in session and "start.html" in session and "http://127.0.0.1:9187/" in session
     subprocess.run([BASH, "-n", posix(root / "usr/local/bin/mnemerynne-screen-session")], check=True)
@@ -242,6 +258,13 @@ def test_install_under_a_root_and_run_again(tmp_path):
     conf = (root / "etc" / "mnemerynne-screen.conf").read_text()
     assert "MNEMERYNNE_URL=https://other.example.com\n" in conf and "AUDIO_OUTPUT=auto\n" in conf
     assert "WIFI_SETUP=no\n" in conf and "AUTO_UPDATES=no\n" in conf and "dnf install" not in out
+    # --allow-cpu-drawing is kept by --reconfigure (Kiosk settings) and undone by --gpu-drawing.
+    run("--keep-options", "--no-packages", "--allow-cpu-drawing", root=root)
+    run("--reconfigure", root=root)
+    assert "GPU_DRAWING=no\n" in (root / "etc" / "mnemerynne-screen.conf").read_text()
+    assert "webgl.force-enabled" not in (root / "usr/local/share/mnemerynne-screen/user.js").read_text()
+    run("--keep-options", "--no-packages", "--gpu-drawing", root=root)
+    assert "GPU_DRAWING=yes\n" in (root / "etc" / "mnemerynne-screen.conf").read_text()
     assert '"Allow": ["https://other.example.com"]' in (root / "etc/firefox/policies/policies.json").read_text()
     # --keep-options with one changed: the rest stay.
     run("--keep-options", "--no-packages", "--volume", "35", "--wifi-setup", root=root)

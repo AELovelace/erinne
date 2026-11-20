@@ -194,6 +194,15 @@ that the RX 580 is `Vulkan0` when only Mesa's Radeon Vulkan driver is loaded.
 `mnemerynne-generator` loads only that driver, so it can't land on the 1050 Ti.
 It's safe to run again, for example after adding or removing a card.
 
+It also guards the NVIDIA driver (the 1050 Ti's, RPM Fusion's `*-nvidia-580xx`
+packages). It lists the installed driver packages in
+`/etc/dnf/protected.d/mnemerynne-nvidia.conf`, so no dnf command can remove them
+(upgrades still work). It dry-runs its `--allowerasing` installs and stops if one
+would remove a driver package. It warns when `/opt/llama.cpp` can't see `CUDA0`.
+On 2026-10-27 a `dnf swap` of the VA-API driver silently removed the whole driver.
+The embedder kept running from memory until it restarted on 2026-11-20, then
+crash-looped. The 1050 Ti is a Pascal card: keep it on the **580xx** branch.
+
 If the repo is private, `git clone` asks for a GitHub username and a personal
 access token (read-only, for this repo) instead of a password.
 

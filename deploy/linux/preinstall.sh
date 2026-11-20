@@ -24,12 +24,44 @@ GEN_MODEL=LFM2.5-2.6B-Q4_K_M.gguf
 step() { printf '\n== %s\n' "$*"; }
 die() { printf 'preinstall: %s\n' "$*" >&2; exit 1; }
 
+# The NVIDIA driver (RPM Fusion's nvidia / nvidia-580xx packages) runs the embedder on the 1050 Ti and
+# NVENC for Media. On 2026-10-27 this script's `dnf swap mesa-va-drivers mesa-va-drivers-freeworld`
+# erased all of it as a "dependency", with no remove line in dnf history; the running embedder kept
+# working from memory until a restart three weeks later. Two guards stop that happening again.
+NVIDIA_PKGS='^(akmod-nvidia|kmod-nvidia|xorg-x11-drv-nvidia|nvidia-modprobe|nvidia-persistenced|nvidia-settings)'
+
+# Guard 1: put the installed driver packages in dnf's protected list, so no dnf command (this
+# script, a hand-typed swap, dnf automatic) can remove them. Upgrades still work.
+protect_nvidia() {
+    local pkgs
+    pkgs=$(rpm -qa --qf '%{NAME}\n' | grep -E "$NVIDIA_PKGS" | grep -v -- '-kmodsrc$' | sort -u || true)   # installed driver packages, by name
+    [ -n "$pkgs" ] || return 0                                                       # no NVIDIA driver on this box: nothing to protect
+    install -d /etc/dnf/protected.d
+    printf '%s\n' "$pkgs" > /etc/dnf/protected.d/mnemerynne-nvidia.conf              # dnf refuses any transaction that removes these
+    echo "NVIDIA driver protected from removal: $(echo "$pkgs" | tr '\n' ' ')"
+}
+
+# Guard 2: dry-run a dnf command that may erase packages (--allowerasing, swap) and stop before it
+# removes any NVIDIA package. dnf5 lists removals under "Removing…" headings in its plan.
+dnf_guarded() {
+    local plan doomed
+    plan=$(dnf "$@" --assumeno 2>&1 || true)                                         # the plan only: --assumeno answers "no", so nothing changes
+    doomed=$(echo "$plan" | awk '
+        /^[A-Z][A-Za-z ]*:$/ { removing = ($0 ~ /^Removing/) ; next }               # a section heading: are we in a Removing… section?
+        removing && $1 !~ /^replacing$/ { print $1 }' | grep -E "$NVIDIA_PKGS" || true)   # package names in it that belong to the driver
+    [ -z "$doomed" ] || die "\`dnf $*\` would remove the NVIDIA driver ($(echo "$doomed" | tr '\n' ' ')); nothing changed. Resolve the conflict by hand first."
+    dnf -y "$@"                                                                      # safe: run it for real
+}
+
 [ "$(id -u)" = 0 ] || die "run with sudo"
 grep -q '^ID=fedora' /etc/os-release || die "this script is for Fedora"
 
 # The root volume on a default Fedora Server install is only 15 GB.
 free_gb=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
 [ "$free_gb" -ge 5 ] || die "only ${free_gb} GB free on /; grow it first (lvextend -r)"
+
+step "NVIDIA driver guard"
+protect_nvidia                                                                       # before any dnf below can touch the driver
 
 step "Packages"
 dnf install -y \
@@ -46,10 +78,11 @@ rpm -q rpmfusion-free-release >/dev/null 2>&1 \
     || dnf install -y "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$fedora.noarch.rpm"
 # install --allowerasing replaces ffmpeg-free and mesa-va-drivers where they are installed, and
 # simply installs where they aren't (a swap does nothing then).
+# Both go through dnf_guarded: --allowerasing is what took the NVIDIA driver once.
 if ! { command -v ffmpeg >/dev/null && ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_vaapi; }; then
-    dnf install -y --allowerasing ffmpeg
+    dnf_guarded install --allowerasing ffmpeg                                        # RPM Fusion ffmpeg in place of ffmpeg-free
 fi
-dnf install -y --allowerasing mesa-va-drivers-freeworld libva-utils
+dnf_guarded install --allowerasing mesa-va-drivers-freeworld libva-utils           # VAAPI H.264/HEVC for the RX 580
 command -v ffmpeg >/dev/null || die "ffmpeg didn't install; check that the RPM Fusion repository is enabled"
 
 step "mnemerynne user and folders"
@@ -88,8 +121,14 @@ echo "$devices" | grep -E '^\s*Vulkan0:' | grep -qF "$GPU_MATCH" \
 # Older installs pinned a device number here, which could point at the wrong card.
 rm -f /etc/systemd/system/mnemerynne-generator.service.d/gpu.conf
 rm -f /etc/systemd/system/mnemerynne-embedder.service.d/gpu.conf
-[ -x /opt/llama.cpp/llama-server ] || \
+if [ ! -x /opt/llama.cpp/llama-server ]; then
     echo "WARNING: no CUDA llama.cpp in /opt/llama.cpp; mnemerynne-embedder needs it (or run it on the CPU, see its unit)" >&2
+elif ! LD_LIBRARY_PATH=/opt/llama.cpp /opt/llama.cpp/llama-server --list-devices 2>&1 | grep -qE '^\s*CUDA0:'; then
+    # The embedder's card isn't visible: the driver is missing or doesn't match the loaded module.
+    # Say so now, not weeks later when the embedder next restarts.
+    echo "WARNING: /opt/llama.cpp sees no CUDA0, so mnemerynne-embedder won't start. Check nvidia-smi and" >&2
+    echo "         rpm -qa '*nvidia*' (the 1050 Ti needs RPM Fusion's 580xx driver), then reboot if it was updated." >&2
+fi
 systemctl daemon-reload
 
 step "Models in $MODELS"

@@ -75,7 +75,7 @@ DISPLAY_SCRIPT = "/usr/local/bin/mnemerynne-screen-display"
 DISPLAY_SCALES = (100, 150, 200, 300)    # percent, as install.sh's valid_scale
 JOBS = {"update": "mnemerynne-screen-update", "config": "mnemerynne-screen-config",
         "system": "mnemerynne-screen-osupdate"}
-JOB_NAMES = {"update": "updating the screen", "config": "changing the address", "system": "installing system updates"}
+JOB_NAMES = {"update": "updating the screen", "config": "changing the settings", "system": "installing system updates"}
 # The longest a job may run (systemd stops it then): a step that never returns can't leave the TV on
 # "Updating the screen…" for good. dnf on a slow line takes a while, so it's generous.
 JOB_LIMIT_SECONDS = 2 * 3600
@@ -789,6 +789,33 @@ class Kiosk:
             raise KioskError(f"Saved; it applies when the screen restarts ({err.strip() or 'the screen is not running'}).", 409)
         return scale
 
+    def playback(self) -> dict:
+        """The GPU overrides install.sh keeps (GPU_DRAWING, YOUTUBE_H264): yes unless the file says no."""
+        conf = self.conf()
+        return {"gpu_drawing": conf.get("GPU_DRAWING", "yes") != "no",      # Firefox made to draw on the GPU
+                "youtube_h264": conf.get("YOUTUBE_H264", "yes") != "no"}    # YouTube asked for H.264 (GPU-decoded)
+
+    def set_playback(self, token: str | None, gpu_drawing=None, youtube_h264=None) -> dict:
+        """Turn the GPU overrides on or off. Firefox's preferences are written by install.sh, so this runs it
+        (--reconfigure keeps every other option) as a job; the screen restarts with the new preferences."""
+        self.need(token)
+        if not all(v is None or isinstance(v, bool) for v in (gpu_drawing, youtube_h264)):
+            raise KioskError("Those switches are on or off.", 422)
+        if gpu_drawing is None and youtube_h264 is None:
+            raise KioskError("Nothing to change.", 422)
+        args = []
+        if gpu_drawing is not None:
+            args.append("--gpu-drawing" if gpu_drawing else "--allow-cpu-drawing")   # install.sh's own options
+        if youtube_h264 is not None:
+            args.append("--youtube-h264" if youtube_h264 else "--youtube-any-codec")
+        self.start_job("config", ["bash", self.source() + "/deploy/screen/install.sh", "--reconfigure", *args])
+        out = self.playback()                                                  # what it will be once the job is done
+        if gpu_drawing is not None:
+            out["gpu_drawing"] = gpu_drawing
+        if youtube_h264 is not None:
+            out["youtube_h264"] = youtube_h264
+        return out
+
     def screen(self, token: str | None) -> dict | None:
         """The screen's own settings on the server (the top bar), with a phone approval only."""
         found = self.need(token)
@@ -935,7 +962,7 @@ class Kiosk:
                "server": self.setup.server, "server_ok": self.setup.server_ok}
         if found is not None:
             out.update(via=found["via"], admin=found["admin"], screen=found["screen"], volume=self.volume(),
-                       details=self.details(), reboot_needed=self.reboot_needed())
+                       details=self.details(), reboot_needed=self.reboot_needed(), playback=self.playback())
         return out
 
 
@@ -1484,6 +1511,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._json(200, {"current": k.set_audio(token, str(body.get("output", "")))})
             elif path == "/api/kiosk/display-scale":
                 self._json(200, {"scale": k.set_display_scale(token, body.get("scale"))})
+            elif path == "/api/kiosk/playback":
+                self._json(202, {"playback": k.set_playback(token, body.get("gpu_drawing"), body.get("youtube_h264"))})
             elif path == "/api/kiosk/top-bar":
                 self._json(200, {"screen": k.set_top_bar(token, bool(body.get("on")))})
             elif path == "/api/kiosk/soundcloud":
@@ -1793,6 +1822,11 @@ label.switch input { width: 1.5rem; height: 1.5rem; accent-color: #ff2e97; }
             <option value="200">200%</option><option value="300">300%</option>
           </select></div>
         <p class="muted" id="display-note">Everything on the TV, these settings too. 200% on a 4K TV is the size of 1080p, but sharper.</p>
+        <label class="switch"><input type="checkbox" id="gpu-drawing"> Draw on the graphics card (GPU)</label>
+        <p class="muted">Pages, Retro's games and video use the GPU even when Firefox doesn't trust it. Turn off only if the picture glitches or the screen keeps restarting.</p>
+        <label class="switch"><input type="checkbox" id="youtube-h264"> YouTube in H.264 (the GPU decodes it)</label>
+        <p class="muted">Off lets YouTube send VP9 or AV1, which the processor decodes: fine at 1080p 30, struggles at 60.</p>
+        <p class="muted">Changing either restarts the screen.</p>
         <div class="row"><button class="secondary" type="button" id="screen-size">Screen size…</button>
           <span class="muted">For a TV that cuts off the edges of the picture.</span></div>
         <div class="row"><button class="secondary" type="button" id="text-size">Text size…</button>
@@ -1881,6 +1915,10 @@ async function load() {
   $("sc-form").hidden = !hasSoundCloud;
   if (hasSoundCloud && document.activeElement !== $("sc-profile")) $("sc-profile").value = scr.soundcloud_profile;
   $("volume").value = state.volume; $("volume-value").textContent = state.volume + "%";
+  if (state.playback) {                                   // the GPU overrides (an older box's helper has none)
+    $("gpu-drawing").checked = state.playback.gpu_drawing;
+    $("youtube-h264").checked = state.playback.youtube_h264;
+  }
   $("pin-state").textContent = state.pin_set ? "Set. The \\u201ccan't connect\\u201d page asks for it before the address can change."
     : "Not set. Without one, anyone at the TV can change the address while the screen can't connect.";
   $("remove-pin").hidden = !state.pin_set;
@@ -1983,6 +2021,15 @@ $("top-bar").addEventListener("change", async function () {
   try { await call("POST", "/api/kiosk/top-bar", { on: $("top-bar").checked });
         say($("top-bar").checked ? "The top bar shows when you go back to the TV." : "The top bar is off."); }
   catch (err) { say(err.message, true); load(); }
+});
+[["gpu-drawing", "gpu_drawing", "Drawing on the GPU", "Firefox chooses (it may draw on the processor)"],
+ ["youtube-h264", "youtube_h264", "YouTube in H.264", "YouTube in any codec"]].forEach(function (s) {
+  $(s[0]).addEventListener("change", async function () {
+    const body = {}; body[s[1]] = $(s[0]).checked;
+    try { await call("POST", "/api/kiosk/playback", body);
+          say(($(s[0]).checked ? s[2] : s[3]) + ". The screen restarts in a moment."); jobs(); }
+    catch (err) { say(err.message, true); load(); }
+  });
 });
 $("audio").addEventListener("change", async function () {
   try { await call("POST", "/api/kiosk/audio", { output: $("audio").value }); say("Sound now goes to " + $("audio").selectedOptions[0].textContent + "."); }

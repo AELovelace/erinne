@@ -14,7 +14,7 @@ How it works:
   the network and the server, then carries on.
 - **Wi-Fi from a phone:** with no network, the box offers its own Wi-Fi hotspot, and the TV shows how
   to join it and pick the box's network from your phone (step 5).
-- **Kiosk settings:** admins change the box's address, volume, top bar and text size, and install updates, from the
+- **Kiosk settings:** admins change the box's address, volume, top bar, text size and GPU switches, and install updates, from the
   TV's menu with a phone approval or a PIN (step 6).
 - **Game controllers:** Xbox One and PlayStation 5 controllers pair over Bluetooth from the TV's **🔗 Controllers**,
   with the remote, and then work as a remote and in the games (step 7).
@@ -61,7 +61,8 @@ Options:
 | Option | What it does |
 | --- | --- |
 | `--audio auto` | Let PipeWire choose the output, instead of HDMI. Kiosk settings lists the box's other outputs (`--audio card:CARD:PROFILE`). |
-| `--youtube-any-codec` | Let YouTube send VP9 or AV1. By default it's asked for H.264, which this GPU decodes. VP9 or AV1 are decoded on the CPU, which manages 1080p at 30 fps but struggles at 60 fps. |
+| `--youtube-any-codec` | Let YouTube send VP9 or AV1. By default it's asked for H.264, which this GPU decodes. VP9 or AV1 are decoded on the CPU, which manages 1080p at 30 fps but struggles at 60 fps. Kiosk settings changes it too (**YouTube in H.264**). |
+| `--allow-cpu-drawing` | Let Firefox fall back to drawing on the CPU. By default it's made to use the GPU for drawing the page, WebGL (Retro's games) and video, even when Firefox's blocklist distrusts the graphics (older Intel), and to decode video on the GPU the TV is plugged into. Use this only if the picture glitches or Firefox crashes; `--gpu-drawing` turns the GPU back on. Kiosk settings changes it too (**Draw on the graphics card**). Kept as `GPU_DRAWING`. |
 | `--no-auto-updates` | Don't install updates nightly. By default `dnf5-automatic` installs them and reboots when an update needs it. |
 | `--no-wifi-setup` | No setup hotspot. The start page and Kiosk settings are still there. |
 | `--volume 0-100` | The system volume (default 100). Kiosk settings changes it too. |
@@ -94,6 +95,7 @@ sudo bash install.sh --check
 | **RPM Fusion FFmpeg** / **H.264 (High) decodes** | Films play at all. |
 | **the GPU decodes H.264** | VA-API works with the i965 driver; video is cheap. If this says FAIL, video still plays, on the CPU. |
 | **GPUs** / **the TV is on cardN (driver)** | Which graphics drives the TV. Retro's games draw every frame on it (WebGL). **FAIL … nouveau**: the TV hangs off an NVIDIA card on the open nouveau driver, which can't clock up a GTX 700/900 or newer, so games crawl however fast the CPU is. Plug the TV into the motherboard's HDMI (turn the Intel graphics on in the BIOS), and take the NVIDIA card out or blacklist nouveau. |
+| **drawing: Firefox is made to use the GPU** | The default. **drawing: Firefox decides** means the box was set up with `--allow-cpu-drawing`, so Firefox may draw on the CPU (`llvmpipe`). |
 | **… answers** / **the screen page answers** | The box reaches the server, its certificate is trusted, and Media is turned on. |
 | **running on tty1** / **sound goes to HDMI** | The kiosk is up and sound goes to the TV. If the TV was off, give it 30 seconds after turning it on. |
 | **picture: …** | The mode the TV is in, its refresh rate and scaling (or, with the screen stopped, the TV's first mode), and the `--display` settings. |
@@ -144,6 +146,7 @@ They lock again after ten minutes untouched, or with **Lock**.
 | **SoundCloud profile** | Whose tracks, albums and likes the SoundCloud page in Media shows on this TV: the name after `soundcloud.com/`, or the profile's address. Empty shows the screen owner's. Needs a phone approval, like the top bar. It can also be set on the screen's row in Media → Screens. |
 | **Sound output** | **HDMI to the TV** (the default: it switches over as soon as the TV is on), **Automatic**, or any output the box's sound cards have, such as headphones or USB speakers. Applied at once and kept (`AUDIO_OUTPUT`). |
 | **System volume** | The sound card's level, kept across restarts. Media's own volume (− and +) is on top of it. |
+| **Draw on the graphics card (GPU)** / **YouTube in H.264** | The GPU overrides, both on by default: Firefox draws pages, Retro's games and video on the GPU even when its blocklist distrusts it, and YouTube is asked for H.264, which the GPU decodes. Turning either off runs the installer (`--allow-cpu-drawing` / `--youtube-any-codec`, everything else kept) under **Updates**, and the screen restarts. Kept as `GPU_DRAWING` and `YOUTUBE_H264`. |
 | **Display scaling** | **100%**, **150%**, **200%** or **300%** of everything on the TV, these settings and the start page too, like Windows' display scaling. Applied at once and kept (`DISPLAY_SCALE`). 200% on a 4K TV is the size of 1080p, drawn at 4K; the line under it says what the TV is at now. |
 | **Screen size…** | For a TV that crops the picture's edges: arrows until the pink frame shows whole, Enter to save. Back to the settings after. The phone's **Screen size** (Media → Screens) does the same. |
 | **Text size…** | Text and buttons on the TV's pages, bigger or smaller: ← → until it reads well from the couch, **0** for automatic, Enter to save. Back to the settings after. Kept on the server for this screen; the phone's **Text size** (Media → Screens) does the same. Automatic is normal size on a 1080p picture, 1.5× from 2400 pixels wide and 2× from 3000. |

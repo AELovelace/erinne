@@ -582,6 +582,27 @@ def test_kiosk_settings_open_the_tvs_text_size():
     assert 'state.server + "/media/screen?textsize=1"' in ws.SETTINGS_PAGE
 
 
+def test_the_gpu_switches_run_the_installer(kiosk):
+    k, run, server, clock, setup, conf = kiosk
+    with pytest.raises(ws.KioskError):
+        k.set_playback(None, gpu_drawing=False)                                     # locked
+    token = k.unlock_grant("good-grant")
+    assert k.state(token)["playback"] == {"gpu_drawing": True, "youtube_h264": True}   # both on by default
+    assert k.set_playback(token, gpu_drawing=False) == {"gpu_drawing": False, "youtube_h264": True}
+    started = _started(run)
+    assert "--unit=mnemerynne-screen-config" in started
+    assert started[-1].startswith("bash " + k.source() + "/deploy/screen/install.sh --reconfigure --allow-cpu-drawing;")
+    k.set_playback(token, gpu_drawing=True, youtube_h264=False)
+    assert "--reconfigure --gpu-drawing --youtube-any-codec;" in _started(run)[-1]
+    conf.write_text(conf.read_text() + "GPU_DRAWING=no\nYOUTUBE_H264=no\n")      # what install.sh would have written
+    assert k.playback() == {"gpu_drawing": False, "youtube_h264": False}
+    for bad in ({"gpu_drawing": "yes"}, {"youtube_h264": 1}, {}):                 # only real on/off, and something to do
+        with pytest.raises(ws.KioskError):
+            k.set_playback(token, **bad)
+    assert 'id="gpu-drawing"' in ws.SETTINGS_PAGE and 'id="youtube-h264"' in ws.SETTINGS_PAGE
+    assert '"/api/kiosk/playback"' in ws.SETTINGS_PAGE
+
+
 def test_display_scaling_is_kept_and_applied_now(kiosk):
     k, run, server, clock, setup, conf = kiosk
     real = run.__call__
