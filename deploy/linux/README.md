@@ -1180,6 +1180,30 @@ and fails under certbot. Forward 80 as well. Until then, Caddy's last certificat
 Going back: `sudo systemctl disable --now nginx && sudo systemctl enable --now caddy` (and `front-door.sh off`
 first, so the app has 38200 again).
 
+### The landing page (a public hostname with no sign-in)
+
+`deploy/landing/` is a static page about what Mnemerynne does, in the neon look (drifting pixel cities, neon
+rain, scanlines). It's meant for a hostname that shouldn't open the app, such as the old `mnemerynne.io` after
+the app moved to its own address. nginx serves it from `/var/www/mnemerynne-landing` with
+`nginx-mnemerynne-landing.conf`. That file has no `proxy_pass`, so nothing on that hostname reaches the app:
+no sign-in, no API, no `/mcp`. Every other path (including `/login`) is a 404, only GET is allowed, and a
+strict CSP allows only the page's own files.
+
+On a box where nginx holds HTTPS (the section above), with port 80 forwarded and the app already on its new
+hostname:
+
+```sh
+cd /opt/mnemerynne && sudo git pull
+sudo bash /opt/mnemerynne/deploy/linux/landing-install.sh mnemerynne.io
+```
+
+`landing-install.sh` copies the page and the app's city art into the web root and takes the hostname out of the
+edge file's `server_name` lines (with a backup, `mnemerynne-edge.conf.bak-<time>`). If there's no certificate
+for the hostname yet, it gets one with certbot. Then it writes `/etc/nginx/conf.d/mnemerynne-landing.conf` and
+reloads nginx. If `nginx -t` fails, it puts the files back and stops. It refuses if that hostname is the edge's
+only name, because that would leave the app with no address. Run it again after a `git pull` to refresh the
+page. To take the page down, delete `/etc/nginx/conf.d/mnemerynne-landing.conf` and reload nginx.
+
 ### One unit for every service (`mnemerynne@`)
 
 `mnemerynne@.service` is a template: `mnemerynne@sync`, `mnemerynne@games` and every service added to

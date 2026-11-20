@@ -1,0 +1,133 @@
+<!doctype html>
+<!-- Mnemerynne's public landing page: what it can do, in the neon look. It is served on its own by nginx
+     (deploy/linux/nginx-mnemerynne-landing.conf) from a static folder, never through the app, so there is no
+     sign-in here and no way to reach one. Installed by deploy/linux/landing-install.sh. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#12031f">
+  <meta name="description" content="Mnemerynne: a private document assistant, file server, wiki and team space that runs on your organisation's own server.">
+  <title>Mnemerynne</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="landing.css">
+</head>
+<body>
+  <div class="parallax" aria-hidden="true"></div>               <!-- the drifting pixel cities (landing.js) -->
+  <div class="rain" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+
+  <header class="bar">
+    <span class="brand"><span class="blossom" aria-hidden="true">🌸</span>Mnemerynne</span>
+    <nav class="bar-links" aria-label="On this page">
+      <a href="#ask">Ask</a><a href="#files">Files</a><a href="#together">Together</a><a href="#claude">Claude</a><a href="#more">More</a>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ------------------------------------------------------------------ hero -->
+    <section class="hero">
+      <p class="kicker">a private assistant for your organisation</p>
+      <h1 class="glitch" data-text="Mnemerynne">Mnemerynne</h1>
+      <p class="lede">Meet <strong>Erynne</strong>. She answers questions from your own documents and cites the exact page,
+        keeps everyone's files in one place, and runs on <em>your</em> server, so nothing leaves the building unless you say so.</p>
+      <ul class="chips" aria-label="At a glance">
+        <li>Cited answers</li><li>Your own server</li><li>Files &amp; versions</li><li>Wiki</li><li>Rooms</li><li>Claude-ready</li>
+      </ul>
+    </section>
+
+    <!-- ------------------------------------------------------------------ ask -->
+    <section id="ask" class="band">
+      <h2>Ask anything. Get the page it came from.</h2>
+      <div class="split">
+        <div class="panel chat" aria-label="An example question and answer">
+          <p class="q">How do I run the night audit?</p>
+          <p class="a">Close the cashier shifts first, then run <b>End of Day</b> before 2 am<sup>1</sup>. If a room still shows
+            as due out, check it out or extend it before you start<sup>2</sup>.</p>
+          <p class="src"><span>1</span> Front Office Manual · p. 412 <span>2</span> Night Audit Checklist · Step 3</p>
+        </div>
+        <ul class="panel ticks">
+          <li><b>Every claim is cited.</b> Click a number and the document opens at that page, heading, slide or row.</li>
+          <li><b>No guessing.</b> If your documents don't say, Erynne tells you so instead of making something up.</li>
+          <li><b>Only what you may see.</b> She searches your File box and the libraries shared with you, nothing else.</li>
+          <li><b>Follow-ups work.</b> "And at the other property?" picks up where you left off. Search one folder, or everything.</li>
+          <li><b>Reads it all.</b> PDFs (scanned ones too), Word, PowerPoint, Excel, Markdown, code and plain text.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------------------------ files -->
+    <section id="files" class="band">
+      <h2>A file server that remembers</h2>
+      <div class="grid">
+        <article class="panel"><h3>📁 Files</h3><p>A full file manager in the browser for your own File box and every shared library. It sits on the same folders as your Windows file share.</p></article>
+        <article class="panel"><h3>🕰 Versions</h3><p>Every change made through Erynne, Claude or the editor keeps the old copy. Restore any version in a click.</p></article>
+        <article class="panel"><h3>🗑 Recycle bin</h3><p>Deleting never destroys anything at once. Each location has its own bin.</p></article>
+        <article class="panel"><h3>👁 Previews</h3><p>PDFs, Markdown, documents, code and images open right in the page, with comments beside them.</p></article>
+        <article class="panel"><h3>💾 Desktop backup</h3><p>A small Windows and Linux app keeps chosen folders backed up to your File box, from the office or anywhere.</p></article>
+        <article class="panel"><h3>🔐 Real permissions</h3><p>Sign in with your domain account. The folder rights you already have decide what you, and Erynne, can open.</p></article>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------------------------ together -->
+    <section id="together" class="band">
+      <h2>Work together</h2>
+      <div class="grid">
+        <article class="panel"><h3>📖 Wiki</h3><p>Your organisation's own pages, edited in the browser with a live preview, task boxes you can tick, and conflict-safe saves. Erynne searches and cites them too.</p></article>
+        <article class="panel"><h3>💬 Rooms</h3><p>Team channels and direct messages, live as they're written, with mentions and an inbox.</p></article>
+        <article class="panel"><h3>✉ Messages</h3><p>Notes between colleagues, announcements for everyone, and word from Erynne when something you asked for is done.</p></article>
+        <article class="panel"><h3>🗨 Comments</h3><p>Questions and notes that live on the file itself, not lost in a chat.</p></article>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------------------------ claude -->
+    <section id="claude" class="band">
+      <h2>Bring your own Claude</h2>
+      <div class="split">
+        <ul class="panel ticks">
+          <li><b>A remote MCP server.</b> Connect Claude on the web, phone, Desktop or Claude Code with a normal sign-in.</li>
+          <li><b>Acts as you.</b> Claude searches, reads and (if you allow it) edits files with exactly your access, and only what's shared with Claude.</li>
+          <li><b>Proposals, not surprises.</b> Changes Erynne or Claude draft wait for your approval before anything happens.</li>
+          <li><b>Every look is logged.</b> Admins see each search and which files' text went back to Claude, and can cut a connection at once.</li>
+        </ul>
+        <div class="panel terminal" aria-label="Connecting Claude Code">
+          <p><span class="prompt">$</span> claude mcp add --transport http mnemerynne https://your-server/mcp</p>
+          <p class="dim">✓ Signed in to Mnemerynne.</p>
+          <p><span class="prompt">&gt;</span> find the latest PCI scan and summarise the open findings</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------------------------ more -->
+    <section id="more" class="band">
+      <h2>And then some</h2>
+      <div class="grid small">
+        <article class="panel"><h3>🛠 Tools</h3><p>Live lookups in your ticketing system and other internal APIs, Microsoft 365 mail and calendar.</p></article>
+        <article class="panel"><h3>⏰ Automator</h3><p>Scheduled jobs: a weekday morning briefing, a daily security digest, regular system checks.</p></article>
+        <article class="panel"><h3>🛡 Security feeds</h3><p>Vendor advisories and vulnerability news gathered in one place for IT.</p></article>
+        <article class="panel"><h3>🌐 Remote</h3><p>Open internal dashboards and consoles through Erynne, from wherever you can sign in.</p></article>
+        <article class="panel"><h3>📺 Media &amp; signage</h3><p>Films, music, live TV and radio, plus screens around the building with playlists and schedules.</p></article>
+        <article class="panel"><h3>🕹 Retro &amp; Lumi</h3><p>Classic console games in the browser, and a little pixel city to visit between tasks.</p></article>
+        <article class="panel"><h3>🎨 Themes</h3><p>Neon, sakura, corporate or your own brand: colours, logo and effects.</p></article>
+        <article class="panel"><h3>📱 Phones</h3><p>Every page works on a phone, and installs to the home screen like an app.</p></article>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------------------------ yours -->
+    <section class="band yours">
+      <div class="panel wide">
+        <h2>Yours, all the way down</h2>
+        <p>Mnemerynne runs on a server your organisation owns, next to your file share and your domain. Documents, questions
+          and answers stay there. Claude only joins in when someone connects it, and only sees what's shared with it.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>Mnemerynne · a private document assistant</p>
+    <p class="dim">Using it at work? Sign in at your organisation's own address.</p>
+  </footer>
+
+  <script src="landing.js" defer></script>
+</body>
+</html>
