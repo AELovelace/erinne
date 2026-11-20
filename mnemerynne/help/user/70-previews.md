@@ -17,6 +17,10 @@ Double-click a file in [Files](files.md), press **Open**, or open the details pa
 
 Office documents are shown as the text Erynne extracted, not as a rendering of the document. That is what she searches and cites, so it is useful for checking a citation, but for the formatted document use Download.
 
+## Page width
+
+On a big screen, the **Width** buttons in the middle of the top bar of an opened Markdown, text or document page set how wide the page is: **50%**, **75%** or **100%** of the window, or **Custom** for any width from 20% to 100% (type it, or use the arrows; the page resizes as you go). Your pick is remembered in this browser for every file you open. Until you pick one, pages use the usual reading width. The buttons are hidden on phones, where the page already fills the screen.
+
 ## Edit
 
 Text and Markdown files in a folder you can change also offer **Edit**, which opens the browser editor in a new tab. See [The organisation wiki](wiki.md#the-editor).

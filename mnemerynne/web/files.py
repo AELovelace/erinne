@@ -762,6 +762,18 @@ def _text_view(conn: sqlite3.Connection, settings: Settings, row: sqlite3.Row) -
     return "\n".join(parts)
 
 
+def _view_csp_width(request: Request) -> str:
+    """The read-only view's policy: still no scripts, except our one width picker (doc_width.js) by exact path.
+
+    A host-source with a path matches only that file, so nothing else on this origin (an uploaded file's /raw,
+    say) can run here. If the Host header were ever wrong the script just doesn't load, and the CSS-only
+    50/75/100% buttons still work (erynne.css, .doc-width)."""
+    host = request.headers.get("host", "").strip()
+    if not host or any(c in host for c in " ;,'\""):  # a Host we can't safely put in the header: no script at all
+        return _VIEW_CSP
+    return _VIEW_CSP + f"; script-src {host}/static/doc_width.js"   # this exact file only (its ?v= is ignored)
+
+
 @router.get("/files/{file_id}/view", response_class=HTMLResponse)
 def view_markdown(request: Request, file_id: int, user=Depends(page_user),
                   conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
@@ -787,7 +799,7 @@ def view_markdown(request: Request, file_id: int, user=Depends(page_user),
         request, "file_view.html", {"file": row, "content": html, "edit_url": edit_url, "version": version})
     # The view runs no scripts, except tasks.js (our own file) where the boxes can be ticked; the
     # Markdown's own HTML is escaped by the renderer either way, and inline scripts stay blocked.
-    response.headers["Content-Security-Policy"] = _VIEW_CSP_TASKS if version else _VIEW_CSP
+    response.headers["Content-Security-Policy"] = _VIEW_CSP_TASKS if version else _view_csp_width(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 

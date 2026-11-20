@@ -228,7 +228,9 @@ def test_ticking_a_box_in_the_file_view_saves_a_version(settings, conn, world, m
         _login(c, "bob")                                                                 # reads, can't write
         page = c.get(f"/files/{fid}/view")
         assert ">Edit</a>" not in page.text and "data-task-version" not in page.text
-        assert "script-src" not in page.headers["content-security-policy"]
+        csp = page.headers["content-security-policy"]                                    # only the width picker
+        assert csp.endswith("; script-src testserver/static/doc_width.js")             # not 'self': that file only
+        assert "connect-src" not in csp and 'class="doc-width"' in page.text
         assert 'class="md-task"' in page.text                                            # still shown, disabled
         assert c.post(f"/api/files/{fid}/tasks", json={"line": 4, "done": False,
                                                        "version": r.json()["version"]}).status_code == 403

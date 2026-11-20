@@ -1,18 +1,35 @@
 {% extends "base.html" %}
 {% block title %}{{ file.display_name }} · {{ product_name }}{% endblock %}
 {% block body %}
-<header class="topbar doc-bar">
-  <a class="brand" href="/"><span class="blossom" aria-hidden="true">🌸</span>{{ assistant_name }}</a>
-  <strong>{{ file.display_name }}</strong>
-  <span class="muted">{{ file.collection_name }}</span>
-  {#- Edit: a text or Markdown file this person may change opens in the split editor (web/editor.py). -#}
-  {% if edit_url %}<a class="push-right" href="{{ edit_url }}">Edit</a>{% endif %}
-  <a {% if not edit_url %}class="push-right" {% endif %}href="/files/{{ file.id }}/raw">Download</a>
-  <span id="task-status" class="small muted" aria-live="polite"></span>
+{#- Three parts so the width buttons sit in the true middle of the bar (erynne.css .bar-centred): name on the left,
+    width in the middle, Edit/Download on the right. On a phone the parts melt back into one wrapping row. -#}
+<header class="topbar doc-bar bar-centred">
+  <span class="bar-side bar-left">
+    <a class="brand" href="/"><span class="blossom" aria-hidden="true">🌸</span>{{ assistant_name }}</a>
+    <strong>{{ file.display_name }}</strong>
+    <span class="muted">{{ file.collection_name }}</span>
+  </span>
+  {#- Page width: 50 / 75 / 100% of the window, or Custom. The three presets are plain radios that erynne.css reads
+      with :has(), so they work with no script at all; doc_width.js remembers the choice in this browser and runs Custom. -#}
+  <span class="doc-width" role="radiogroup" aria-label="Page width">
+    <span class="small muted">Width</span>
+    <input type="radio" name="doc-width" id="dw-50" value="50"><label for="dw-50">50%</label>
+    <input type="radio" name="doc-width" id="dw-75" value="75"><label for="dw-75">75%</label>
+    <input type="radio" name="doc-width" id="dw-100" value="100"><label for="dw-100">100%</label>
+    <input type="radio" name="doc-width" id="dw-custom" value="custom"><label for="dw-custom" class="dw-custom">Custom</label>
+    <label class="dw-value"><input type="number" id="dw-value" min="20" max="100" step="5" value="60" aria-label="Custom width in percent">%</label>
+  </span>
+  <span class="bar-side bar-right">
+    {#- Edit: a text or Markdown file this person may change opens in the split editor (web/editor.py). -#}
+    {% if edit_url %}<a class="push-right" href="{{ edit_url }}">Edit</a>{% endif %}
+    <a {% if not edit_url %}class="push-right" {% endif %}href="/files/{{ file.id }}/raw">Download</a>
+    <span id="task-status" class="small muted" aria-live="polite"></span>
+  </span>
 </header>
 {#- data-task-file / data-task-version: tasks.js saves a ticked box against this version (web/files.py). -#}
 <main class="doc"{% if version %} data-task-file="{{ file.id }}" data-task-version="{{ version }}"{% endif %}>
   {{ content | safe }}
 </main>
+<script src="{{ static('doc_width.js') }}"></script>
 {% if version %}<script src="{{ static('tasks.js') }}"></script>{% endif %}
 {% endblock %}
