@@ -148,3 +148,52 @@ def test_houses_remember_and_forget(fresh):
     assert not houses.home(1) and houses.where(2) is None                                  # pages that stopped asking have left
     assert lumihouse.access("open", [5], 1, 5, houses) == "closed"
     assert lumihouse.access("knock", [], 1, 1, houses) == "own"
+
+
+# ---- Phase 4 (2026-11-19): emotes, the guestbook, house-warming coins.
+
+def test_emotes_are_seen_where_you_are(client, conn, directory, fresh):
+    _, heard = fresh
+    boss, jane, boss_id, jane_id = _two(client, conn, directory)
+    boss.post(API + "act", json={"action": "door", "item": "open"})
+    _home(boss)
+    _home(jane, boss_id)
+    assert {e["id"] for e in _home(jane, boss_id).json()["emotes"]} >= {"wave", "dance", "hug"}
+    waved = jane.post(API + "town/emote", json={"emote": "wave"})
+    assert waved.status_code == 200 and waved.json()["place"] == f"house:{boss_id}:bedroom"
+    assert {"kind": "emote", "place": f"house:{boss_id}:bedroom", "uid": jane_id, "emote": "wave"} in heard
+    assert jane.post(API + "town/emote", json={"emote": "wave"}).status_code == 429           # one a second
+    assert jane.post(API + "town/emote", json={"emote": "moonwalk"}).status_code == 422       # only the town's own
+
+
+def test_the_guestbook_is_kept_signed_only_by_guests_and_the_host_can_take_lines_out(client, conn, directory, fresh):
+    _, heard = fresh
+    boss, jane, boss_id, _ = _two(client, conn, directory)
+    book = API + f"houses/{boss_id}/guestbook"
+    assert jane.post(book, json={"text": "hi!"}).status_code == 403                           # not let in yet
+    assert boss.post(API + f"houses/{boss_id}/guestbook", json={"text": "me"}).status_code == 409   # not your own
+    boss.post(API + "act", json={"action": "door", "item": "open"})
+    signed = jane.post(book, json={"text": "  lovely\nflat!  "})
+    assert signed.status_code == 200, signed.text
+    line = signed.json()["guestbook"][-1]
+    assert (line["text"], line["name"]) == ("lovely flat!", "jane") and "uid" not in line      # cleaned; never who by account
+    assert {"kind": "guestbook", "host": boss_id} in heard                                      # the host's page looks again
+    assert jane.post(book, json={"text": "again"}).status_code == 429                         # once in a while
+    assert [e["text"] for e in jane.get(API + f"houses/{boss_id}").json()["guestbook"]] == ["lovely flat!"]   # visitors can read it
+    mine = boss.get(API + "state").json()["pet"]["guestbook"]
+    assert [e["text"] for e in mine] == ["lovely flat!"]                                       # kept in the host's save
+    gone = boss.post(API + "act", json={"action": "guestbook_remove", "item": mine[0]["id"]})
+    assert gone.status_code == 200 and gone.json()["pet"]["guestbook"] == []
+
+
+def test_house_warming_coins_once_a_day_per_flat(client, conn, directory):
+    boss, jane, boss_id, _ = _two(client, conn, directory)
+    boss.post(API + "act", json={"action": "door", "item": "open"})
+    before = jane.get("/api/media/games/coins").json()["coins"]
+    first = _home(jane, boss_id).json()
+    assert first["paid"] == 10 and first["coins"] == before + 10
+    assert _home(jane, boss_id, room="kitchen").json()["paid"] == 0                         # another room: not a new visit
+    jane.post(API + "town", json={"at": "home", "street": "high"})
+    lumihouse.HOUSES.leave(jane.post(API + "town", json={"at": "home", "street": "high"}).json()["you"])
+    assert _home(jane, boss_id).json()["paid"] == 0                                           # back again today: nothing more
+    assert _home(boss).json()["paid"] == 0                                                    # never for your own flat

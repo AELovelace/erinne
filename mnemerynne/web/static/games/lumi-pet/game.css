@@ -386,8 +386,29 @@
 .lp-folk-house .lp-folk-name { font-size: 20px; stroke-width: 5px; }
 .lp-folk-house .lp-folk-say.lp-folk-big { font-size: 24px; stroke-width: 10px; }
 @media (prefers-reduced-motion: reduce) { .lp-folk-house, .lp-folk-house .lp-folk-body { transition: none; } }
+
+/* Emotes (phase 4, game.js doEmote/folkEmote, lumitown.EMOTES): her own (room[data-emote]) and other people's
+   (.lp-folk-one.lp-emote-*, on the lp-folk-anim wrapper, so they never fight the transforms that place and flip them). */
+@keyframes lp-emote-wave { 0%, 100% { transform: rotate(0); } 20%, 60% { transform: rotate(-9deg); } 40%, 80% { transform: rotate(9deg); } }
+@keyframes lp-emote-dance { 0%, 50%, 100% { transform: translateY(0) rotate(0); } 25% { transform: translateY(-7%) rotate(-11deg); } 75% { transform: translateY(-7%) rotate(11deg); } }
+@keyframes lp-emote-jump { 0%, 100% { transform: translateY(0) scale(1); } 15% { transform: translateY(0) scale(1.08, .9); } 40% { transform: translateY(-20%) scale(.96, 1.06); } 65% { transform: translateY(0) scale(1.08, .9); } }
+@keyframes lp-emote-hug { 0%, 100% { transform: scale(1); } 30%, 70% { transform: scale(1.12, .9); } }
+@keyframes lp-emote-heart { 0%, 100% { transform: scale(1); } 25%, 65% { transform: scale(1.14); } 45% { transform: scale(.97); } }
+@keyframes lp-emote-yawn { 0%, 100% { transform: rotate(0) scaleY(1); } 40%, 70% { transform: rotate(-5deg) scaleY(.92); } }
+.lp-folk-anim { transform-box: fill-box; transform-origin: 50% 100%; }
+.lp-room[data-emote] .lp-pet { animation-duration: 1.8s; animation-timing-function: ease-in-out; animation-iteration-count: 1; }
+.lp-room[data-emote="wave"] .lp-pet, .lp-emote-wave .lp-folk-anim { animation-name: lp-emote-wave; }
+.lp-room[data-emote="dance"] .lp-pet, .lp-emote-dance .lp-folk-anim { animation-name: lp-emote-dance; }
+.lp-room[data-emote="jump"] .lp-pet, .lp-emote-jump .lp-folk-anim { animation-name: lp-emote-jump; }
+.lp-room[data-emote="hug"] .lp-pet, .lp-emote-hug .lp-folk-anim { animation-name: lp-emote-hug; }
+.lp-room[data-emote="heart"] .lp-pet, .lp-emote-heart .lp-folk-anim { animation-name: lp-emote-heart; }
+.lp-room[data-emote="yawn"] .lp-pet, .lp-emote-yawn .lp-folk-anim { animation-name: lp-emote-yawn; }
+.lp-folk-one[class*="lp-emote-"] .lp-folk-anim { animation-duration: 1.8s; animation-timing-function: ease-in-out; }
+@media (prefers-reduced-motion: reduce) { .lp-room[data-emote] .lp-pet, .lp-folk-one[class*="lp-emote-"] .lp-folk-anim { animation: none; } } /* the icon over their head still shows */
 .lp-folk-one { transition: transform 3s linear; }
 .lp-folk-guest { transition: transform .45s ease; }
+.lp-room[data-town] .lp-folk-guest { pointer-events: visiblePainted; cursor: pointer; } /* press someone's Lumi in town to visit their flat (game.js); the rest of the layer lets presses through */
+.lp-room[data-town] .lp-folk-guest:hover .lp-folk-name { fill: var(--pet-glow, #ff8ecb); }
 .lp-folk-flip[data-flip="true"] { transform: scaleX(-1); }
 .lp-room .lp-folk .lp-eyes-open { display: inline; }
 .lp-room .lp-folk .lp-eyes-closed { display: none; }

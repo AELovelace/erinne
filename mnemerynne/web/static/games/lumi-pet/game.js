@@ -54,6 +54,7 @@
   let visitView = null, visitDoor = null, visitKnock = null, knockAsked = 0, knockPolled = 0; // their flat once in; whose door this is; a knock waiting
   let houseFolk = [], housePinged = 0, housePingTimer = 0, houseSig = "", knocksWaiting = []; // who else is in this flat; the last check-in; knocks at her own door
   let flatsOn = false, flats = null; // Lumi Town: the list of friends' flats is open, and what it holds (null: still asking)
+  let bookOn = false, bookPending = null, typingFor = "chat"; // the guestbook's list is open; a line pressed once to remove; what the typing box is for
   // Free walking (see "Free walking" below):
   const SPEED = { x: 260, y: 130 };   // Drawing units a second, across and in depth (the floor is shallow, so depth is slower).
   const holds = {};                   // who → {x, y}: what each keyboard, pad and panel holds right now (common.js, gamepad.js)
@@ -269,6 +270,7 @@
   let visitors = [], townPolled = 0, folkSig = "", folkSay = Date.now() + 6000;
   // Local chat (docs/plans/lumi-pet-social.md phase 2, mnemerynne/lumitown.py): what's said where she is.
   let chatOn = false, phrases = [], chatPlace = "", townFeed = null, movedSoon = 0, chatLog = [], myId = null; // (myId: whose lines are "You")
+  let emoteList = [], emoteTimer = 0; // the emotes the server offers (lumitown.EMOTES); her own emote's end
   const heardIds = new Set(), mine = new Set(), muted = new Set(G.store.get("town-muted", [])); // lines already shown; my own lines; who this device has muted
 
   function townHere() { // Tell the server where she is (unless "Show me in town" is off) and hear who else is in town, and what's been said here.
@@ -279,6 +281,7 @@
     G.api(API + "town", { at: at, street: townStreet, inside: Boolean(townAt) }).then(function (data) {
       if (data.place && data.place !== chatPlace) { chatPlace = data.place; chatLog = []; drawLog(); } // A new place: its own chatter.
       if (data.phrases) phrases = data.phrases;
+      if (data.emotes) emoteList = data.emotes;
       if (data.you) myId = data.you;
       hear(data.lines || []); // (A TV, which has no stream, hears lines this way, every few seconds.)
       visitors = (data.here || []).filter(function (v) { return v && v.look && Tw.place(v.at); });
@@ -308,6 +311,8 @@
       } catch (e) { /* a garbled step is skipped */ }
     });
     townFeed.addEventListener("knock", function () { housePing(); }); // Someone at her door: the check-in brings who.
+    townFeed.addEventListener("guestbook", function () { refresh().then(function () { say("Someone signed my guestbook! 📖"); }); }); // her own: look again
+    townFeed.addEventListener("emote", function (event) { try { const e = JSON.parse(event.data); folkEmote(e.uid, e.emote); } catch (x) { /* skipped */ } });
     townFeed.addEventListener("answer", function (event) { try { knockAnswered(JSON.parse(event.data)); } catch (e) { /* skipped */ } });
     townFeed.addEventListener("home", function () { goneHome(); }); // The host has shut the door, or shown her out.
   }
@@ -354,11 +359,36 @@
     }).catch(function (refused) { say(refused.message); });
   }
 
-  function chatTyping(open) { // The box to type a line in (T, or Type a message). Held keys let go, so she doesn't walk while you type.
+  function chatTyping(open, mode) { // The box to type a line in (T, or Type a message; mode "book": a guestbook line). Held keys let go, so she doesn't walk while you type.
     const form = $("lp-chat-type"), input = $("lp-chat-input");
     if (!form) return;
+    if (open) {
+      typingFor = mode === "book" ? "book" : "chat";
+      input.placeholder = typingFor === "book" ? "A line for " + visitView.name + "'s guestbook…" : "Say something to everyone here…";
+      input.setAttribute("aria-label", input.placeholder.replace("…", ""));
+    }
     form.hidden = !open;
     if (open) { if (G.letGo) G.letGo(); input.focus(); } else { input.value = ""; input.blur(); }
+  }
+
+  function emoteIcon(id) { const e = emoteList.find(function (x) { return x.id === id; }); return e ? e.icon : "✨"; }
+
+  function doEmote(id) { // Her own emote: the server tells everyone where she is (their streams); she plays it at once.
+    G.api(API + "town/emote", { emote: id }).then(function () {
+      clearTimeout(emoteTimer);
+      room.dataset.emote = id; say(emoteIcon(id)); // game.css lp-emote-*: a little animation on her
+      emoteTimer = setTimeout(function () { delete room.dataset.emote; }, 1800);
+    }).catch(function (refused) { say(refused.message); });
+  }
+
+  function folkEmote(uid, id) { // Someone where she is waved, danced...: their Lumi plays it, with its icon over their head.
+    const g = folkArt && folkArt.querySelector('[data-id="guest-' + Number(uid) + '"]');
+    if (!g || !/^[a-z]{1,16}$/.test(id || "")) return;
+    const cls = "lp-emote-" + id, words = g.querySelector(".lp-folk-say");
+    g.classList.remove(cls); void g.getBoundingClientRect(); g.classList.add(cls); // (again from the start if it was already playing)
+    if (words) { words.textContent = emoteIcon(id); g.classList.add("saying"); }
+    clearTimeout(g.emoteUntil);
+    g.emoteUntil = setTimeout(function () { g.classList.remove(cls, "saying"); }, 1800);
   }
 
   function chatMute(id) { // Mute or unmute someone on this device: their lines stop (or start again) showing.
@@ -371,7 +401,7 @@
   function chatCtx() { // The town list's chat (town-ui.js chatRows): who's here to mute, and what each row does.
     const people = (TOWN ? visitors.filter(sharesPlace) : houseFolk.filter(function (p) { return p.room === roomAt.room; }))
       .map(function (v) { return { id: v.id, name: v.name, muted: muted.has(v.id), block: !TOWN && !VISIT && !v.host }; }); // (at home: guests can be shown out)
-    return { on: chatOn, phrases: phrases, people: people,
+    return { on: chatOn, phrases: phrases, people: people, emotes: emoteList, emote: doEmote,
              open: function () { chatOn = true; picks[tab] = 0; say("What shall I say?"); },
              close: function () { chatOn = false; picks[tab] = 0; },
              say: function (id) { townSay({ phrase: id }); },
@@ -471,10 +501,58 @@
     }).catch(function (refused) { say(refused.message); }).then(function () { render(); });
   }
 
-  function sayRows() { // Chatting in a flat: when there's someone to talk to (or she's a guest).
-    if (!(VISIT || houseFolk.some(function (p) { return p.room === roomAt.room; }))) return [];
-    return [{ key: "say", icon: "💬", name: "Say something", hint: "Everyone in this room hears it", say: "Shall I say something?",
-              local: function () { chatOn = true; picks[ROOM] = 0; say("What shall I say?"); } }];
+  function sayRows() { // Chatting in a flat (when there's someone to talk to, or she's a guest), and the guestbook.
+    const out = [];
+    if (VISIT || houseFolk.some(function (p) { return p.room === roomAt.room; })) out.push({ key: "say", icon: "💬", name: "Say something", hint: "Everyone in this room hears it",
+      say: "Shall I say something?", local: function () { chatOn = true; bookOn = false; picks[ROOM] = 0; say("What shall I say?"); } });
+    const book = bookEntries(), fresh = bookNew();
+    if (VISIT || book.length) out.push({ key: "book", icon: "📖", name: VISIT ? visitView.name + "'s guestbook" : "My guestbook" + (fresh ? " (" + fresh + " new)" : ""),
+      hint: book.length + (book.length === 1 ? " line" : " lines") + (VISIT ? " · read it, or sign it" : " from visitors"),
+      say: VISIT ? "A guestbook! Shall I sign it?" : "My guestbook! Who's been to visit?", local: openBook });
+    return out;
+  }
+
+  // ---- The guestbook (phase 4, lumipet.sign): visitors leave a line; unlike chat it's kept (the host's last 30).
+  function bookEntries() { return (VISIT ? visitView && visitView.guestbook : snap && snap.pet.guestbook) || []; }
+  function bookNew() { // Lines the host hasn't opened the guestbook to see yet (this device).
+    const seen = Number(G.store.get("book-seen", 0)) || 0;
+    return VISIT ? 0 : bookEntries().filter(function (e) { return e.at > seen; }).length;
+  }
+
+  function openBook() {
+    bookOn = true; chatOn = false; bookPending = null; picks[ROOM] = 0;
+    const book = bookEntries();
+    if (!VISIT && book.length) G.store.set("book-seen", book[book.length - 1].at); // read now
+    say(VISIT ? "Shall I write something nice?" : book.length ? "Look who's been to visit! 📖" : "Nobody has signed it yet.");
+  }
+
+  function bookRows() { // The guestbook, newest first: a visitor can sign it; the host can take a line out (press twice).
+    const out = [], when = function (at) { try { return new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" }); } catch (e) { return ""; } };
+    if (VISIT) out.push({ key: "book-sign", icon: "✍", name: "Sign " + visitView.name + "'s guestbook", hint: "A line they can read later · Enter sends · Escape closes",
+                          local: function () { chatTyping(true, "book"); } });
+    bookEntries().slice().reverse().forEach(function (e) { // (people's own words and names: the list shows them as text)
+      const row = { key: "book-" + e.id, icon: "📝", name: "“" + e.text + "”", hint: "— " + e.name + "'s " + e.lumi + " · " + when(e.at) };
+      if (VISIT) row.note = e.name + ": “" + e.text + "”";
+      else { row.hint += bookPending === e.id ? " · press again to take it out" : " · press to take it out"; row.local = function () { unsign(e); }; }
+      out.push(row);
+    });
+    if (!bookEntries().length) out.push({ key: "book-empty", icon: "📖", name: "No lines yet", hint: VISIT ? "Be the first!" : "Friends sign it when they visit",
+                                          note: VISIT ? "Be the first to sign it!" : "Nobody has signed it yet." });
+    return out.concat([{ key: "book-back", icon: "‹", name: "Back", hint: "Escape, Back or B does it too", local: function () { bookOn = false; bookPending = null; picks[ROOM] = 0; } }]);
+  }
+
+  function signBook(words) { // Visiting: write a line in their guestbook.
+    G.api(API + "houses/" + VISIT + "/guestbook", { text: words }).then(function (data) {
+      visitView.guestbook = data.guestbook;
+      say("Signed! ✍ " + visitView.name + " will see it.");
+    }).catch(function (refused) { say(refused.message); }).then(function () { lastList = ""; render(); });
+  }
+
+  function unsign(e) { // At home: take a line out of her guestbook. The first press asks; the second does it.
+    if (bookPending !== e.id) { bookPending = e.id; say("Press it again to take " + e.name + "'s line out."); return; }
+    bookPending = null;
+    G.api(API + "act", { action: "guestbook_remove", item: e.id }).then(function (data) { take(data); say("Taken out of the guestbook."); })
+      .catch(function (refused) { say(refused.message); }).then(function () { lastList = ""; render(); });
   }
 
   function blockGuest(id) { // At home: show a guest out, and they can't come back (Settings can unblock them).
@@ -495,7 +573,12 @@
     G.api(API + "houses/here", { host: VISIT, room: roomAt.room, x: roomAt.x, y: roomAt.y, face: facing }).then(function (data) {
       if (data.place && data.place !== chatPlace) { chatPlace = data.place; chatLog = []; drawLog(); }
       if (data.phrases) phrases = data.phrases;
+      if (data.emotes) emoteList = data.emotes;
       if (data.you) myId = data.you;
+      if (data.paid) { // A house-warming gift: the first visit today to this friend's flat.
+        say("A house-warming gift! +" + data.paid + " coins 🪙"); effect("cuddle", "+" + data.paid);
+        if (snap && typeof data.coins === "number") { snap.coins = data.coins; $("lp-coins").textContent = data.coins.toLocaleString(); }
+      }
       hear(data.lines || []);
       houseFolk = (data.here || []).filter(function (p) { return p && p.look; });
       const fresh = (data.knocks || []).filter(function (k) { return !knocksWaiting.some(function (w) { return w.id === k.id; }); });
@@ -526,7 +609,7 @@
     g.setAttribute("class", "lp-folk-one lp-folk-guest lp-folk-house"); g.dataset.id = "guest-" + Number(p.id);
     body.setAttribute("class", "lp-folk-body");
     body.innerHTML = '<ellipse cx="0" cy="2" rx="50" ry="11" fill="url(#lp-rm-shade)"/>' +
-      '<svg x="-75" y="-127" width="150" height="141" viewBox="0 0 320 300" overflow="visible">' + lumiMarkup(p.look) + "</svg>"; // (feet at y 0, as hers: room-ui.js)
+      '<g class="lp-folk-anim"><svg x="-75" y="-127" width="150" height="141" viewBox="0 0 320 300" overflow="visible">' + lumiMarkup(p.look) + "</svg></g>"; // (feet at y 0, as hers: room-ui.js; lp-folk-anim: where an emote plays)
     const tag = document.createElementNS(ns, "text"), said = document.createElementNS(ns, "text");
     tag.setAttribute("class", "lp-folk-name lp-folk-tag"); tag.setAttribute("y", "24");
     tag.textContent = (p.look.name || "Lumi") + " · " + p.name + (p.host ? " 🏠" : "");
@@ -564,7 +647,7 @@
     const ns = "http://www.w3.org/2000/svg", g = document.createElementNS(ns, "g"), flip = document.createElementNS(ns, "g");
     g.setAttribute("class", "lp-folk-one " + kind); g.dataset.id = id;
     flip.setAttribute("class", "lp-folk-flip");
-    flip.innerHTML = '<svg x="-24" y="-45" width="48" height="45" viewBox="0 0 320 300" overflow="visible">' + lumiMarkup(look) + "</svg>"; // Authored shapes; the look is the server's checked one.
+    flip.innerHTML = '<g class="lp-folk-anim"><svg x="-24" y="-45" width="48" height="45" viewBox="0 0 320 300" overflow="visible">' + lumiMarkup(look) + "</svg></g>"; // Authored shapes; the look is the server's checked one. (lp-folk-anim: where an emote plays)
     g.append(flip);
     if (words) { const tag = document.createElementNS(ns, "text"); tag.setAttribute("class", "lp-folk-name"); tag.setAttribute("y", "13"); tag.textContent = words; g.append(tag); } // A person's own words: text only.
     const said = document.createElementNS(ns, "text"); said.setAttribute("class", "lp-folk-say"); said.setAttribute("y", "-52"); g.append(said);
@@ -687,6 +770,7 @@
   function roomRows(bar) { // The room's own list: its spots, then (last, so the spots keep their places) knocks at her door and chatting.
     // bar: for the lower bar, which never shows the phrases.
     if (chatOn && !bar) return Tw.chatRows(chatCtx());
+    if (bookOn && !bar) return bookRows();
     if (VISIT) {
       if (!visitView) return doorRows(); // Still on the doorstep.
       return Ru.guestRows(roomAt, { look: guestLook, walk: roomWalk, door: leaveVisit }, visitNames()).concat(sayRows());
@@ -796,7 +880,7 @@
     const on = roomOn();
     if (!on) { roomCard = null; if (tab === ROOM) changeTab(0); }
     else if (!roomCard && tab !== ROOM) changeTab(ROOM); // Switched on (from Settings' list), or a card closed.
-    if (on && !chatOn && !(VISIT && !visitView)) picks[ROOM] = roomAt.at; // The room's cursor is where she stands (in a list of phrases, or on a doorstep, it's the list's own).
+    if (on && !chatOn && !bookOn && !(VISIT && !visitView)) picks[ROOM] = roomAt.at; // The room's cursor is where she stands (in a list of phrases, or on a doorstep, it's the list's own).
     $("gm").dataset.rooms = String(on); // game.css folds the tabs away.
     return on;
   }
@@ -837,7 +921,7 @@
   }
 
   function roomKey(action, arrow, meta) { // The keys in room mode. True when used here; false lets the usual handling run (a card's list, Enter, Play).
-    if (chatOn || (VISIT && !visitView)) return false; // The phrases, or a doorstep: the arrows go through the list.
+    if (chatOn || bookOn || (VISIT && !visitView)) return false; // The phrases, the guestbook, or a doorstep: the arrows go through the list.
     if (tab === ROOM) {
       if (arrow && meta && meta.held) return true; // A held key, pad or panel button: free walking (onHold) moves her, not a snap step.
       if (arrow) { roomMove(Ru.step(roomAt, action === "left" || action === "up" ? -1 : 1)); lastList = ""; render(); return true; }
@@ -895,7 +979,7 @@
     return size > 1 ? { x: x / size, y: y / size } : { x: x, y: y };
   }
 
-  function canWalk() { return roomOn() && tab === ROOM && !roomCard && !chatOn && !(VISIT && !visitView) && room.dataset.leaving !== "true"; } // The room is showing, no menu open, not going out of the door.
+  function canWalk() { return roomOn() && tab === ROOM && !roomCard && !chatOn && !bookOn && !(VISIT && !visitView) && room.dataset.leaving !== "true"; } // The room is showing, no menu open, not going out of the door.
 
   function startWalk() { if (!walkFrame) { walkLast = 0; walkFrame = requestAnimationFrame(walkTick); } } // Start the loop (once).
 
@@ -988,7 +1072,7 @@
     bar.hidden = !on;
     if (!on) { lastThings = ""; return; }
     const list = roomRows(true); // The same rows the room's list has (never the phrases).
-    const current = roomCard ? Ru.find(roomAt.room, roomCard.id) : (VISIT && !visitView) || chatOn ? picks[ROOM] : roomAt.at; // Her spot, the thing whose menu is open, or (a doorstep, the phrases) the list's cursor.
+    const current = roomCard ? Ru.find(roomAt.room, roomCard.id) : (VISIT && !visitView) || chatOn || bookOn ? picks[ROOM] : roomAt.at; // Her spot, the thing whose menu is open, or (a doorstep, the phrases) the list's cursor.
     const signature = roomAt.room + "|" + list.map(function (row) { return row.key; }).join("|");
     if (signature !== lastThings) { // Rebuilt only when she changes room, so a button being pressed is never swapped mid-press.
       lastThings = signature;
@@ -1002,7 +1086,7 @@
         button.addEventListener("click", function () { // Walk to it and use it (a menu opens on the right where it needs one).
           pendingConfirm = null;
           if (roomCard) { roomCard = null; changeTab(ROOM); } // Another thing: this menu closes first.
-          roomMove({ room: roomAt.room, at: index });
+          if (index < Ru.layout(roomAt.room).length && !(VISIT && !visitView)) roomMove({ room: roomAt.room, at: index }); // a spot: she walks to it (the buttons after the spots, chatting, the guestbook and knocks, and a doorstep's, have no spot)
           row.local(); lastList = ""; render();
         });
         return button;
@@ -1013,7 +1097,7 @@
 
   function drawRoomBits(on) { // Room mode's extras around the picture: her speech bubble, the lower bar, the arrows to the next rooms.
     const guide = $("lp-guide"), ways = on && !roomCard && !(VISIT && !visitView) ? Ru.neighbours(roomAt) : { left: null, right: null };
-    $("gm").dataset.card = String(on && (Boolean(roomCard) || chatOn)); // game.css shows the right-hand panel only for an open menu (or the phrases, with the chat log).
+    $("gm").dataset.card = String(on && (Boolean(roomCard) || chatOn || bookOn)); // game.css shows the right-hand panel only for an open menu (or the phrases, with the chat log).
     if (!on) { delete room.dataset.rooms; guide.hidden = true; $("lp-place").textContent = PLACE; if (houseArt.getAttribute("viewBox") !== "0 0 1000 500") houseArt.setAttribute("viewBox", "0 0 1000 500"); } // unpanned again
     else { guide.hidden = false; guide.textContent = $("lp-message").textContent; } // Her bubble says what she last said.
     drawThings(on);
@@ -1925,7 +2009,7 @@
   }
   G.onAction(onKey, { directEnter: function () { return true; } });
   function backStep() { // Escape, Backspace, a pad's B: one step back inside the game (true), or nothing to go back from (false: leave the game).
-    if (chatOn || flatsOn) { chatOn = false; flatsOn = false; picks[tab] = 0; lastList = ""; render(); return true; } // The phrases, or the list of flats: back to the places (or the room).
+    if (chatOn || flatsOn || bookOn) { chatOn = false; flatsOn = false; bookOn = false; bookPending = null; picks[tab] = 0; lastList = ""; render(); return true; } // The phrases, or the list of flats: back to the places (or the room).
     return roomOn() && closeCard(); // Room mode: a card closes.
   }
   if (G.onBack) G.onBack(backStep);
@@ -1940,7 +2024,7 @@
     $("lp-chat-type").addEventListener("submit", function (event) {
       event.preventDefault();
       const words = $("lp-chat-input").value.trim();
-      if (words) townSay({ text: words });
+      if (words && typingFor === "book") signBook(words); else if (words) townSay({ text: words });
       chatTyping(false);
     });
     $("lp-chat-input").addEventListener("keydown", function (event) { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); chatTyping(false); } });
@@ -2037,6 +2121,14 @@
     });
   });
   houseArt.addEventListener("click", townPress); // Lumi Town: its places, cabinets and tables.
+  if (folkArt) folkArt.addEventListener("click", function (event) { // Lumi Town: press someone's Lumi to visit their flat (phase 4).
+    const g = event.target.closest(".lp-folk-guest");
+    if (!g || !TOWN || room.dataset.leaving === "true") return;
+    const id = Number((g.dataset.id || "").replace("guest-", "")), who = visitors.find(function (v) { return v.id === id; });
+    if (!who) return;
+    event.stopPropagation();
+    townOpen("lumi-pet", null, "Off to " + who.name + "'s flat! 🏠", "visit-" + id); // their doorstep says whether the door is open
+  });
   window.addEventListener("pageshow", function (event) { // Back from a game (or another app) with the browser's Back: the page comes back as it was left, mid-hop through a door.
     if (event.persisted) delete room.dataset.leaving; // She's here again, and the next press goes somewhere at once.
   });

@@ -214,3 +214,13 @@ test("each street's map has a way to friends' flats; at home the chat list can s
   assert.deepEqual(list, ["say-type", "mute-4", "block-4", "mute-5", "say-back"], "Show out only for a guest in her own flat");
   Tw.chatRows(chat).find(r => r.key === "block-4").local(); assert.deepEqual(shown, [4]);
 });
+
+test("emotes sit after the phrases in the chat list, and each says which one", () => {
+  const done = [];
+  const chat = { on: true, phrases: [{ id: "hi", icon: "👋", text: "Hi!" }], emotes: [{ id: "wave", icon: "👋", text: "Wave" }, { id: "dance", icon: "💃", text: "Dance" }],
+                 people: [], say() {}, emote: id => done.push(id), type() {}, close() {}, mute() {} };
+  const rows = Tw.chatRows(chat);
+  assert.deepEqual(rows.map(r => r.key), ["say-hi", "emote-wave", "emote-dance", "say-type", "say-back"]);
+  rows.filter(r => r.key.startsWith("emote-")).forEach(r => r.local());
+  assert.deepEqual(done, ["wave", "dance"]);
+});

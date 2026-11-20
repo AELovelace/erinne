@@ -238,6 +238,15 @@ guest rows, `game.js` visiting state (whose flat, back to town), Settings: door 
 ---
 
 ## Phase 4: Polish (pick and choose)
+
+> **Built 2026-11-19** (Doll picked emotes, guestbook, house-warming coins, tap a Lumi to visit):
+> - Emotes: wave, dance, hug, jump, heart, yawn, in the 💬 list (so remotes and pads can), `POST town/emote`, an
+>   `emote` stream event; animations on an `lp-folk-anim` wrapper. No proximity "hug when together"; a TV misses others'.
+> - Guestbook: stored in the host's pet save (last 30), signed by let-in visitors, read in the house view, the host's
+>   lower bar shows new lines; press twice to take one out.
+> - House-warming: 10 coins for the first visit of the day per flat, 30 a day (`coins.reward`).
+> - Town: other people's Lumis take a press, opening a visit to their flat.
+> - Not built: the "who's visiting" badge on the Lumi Pet tile, and party invites from inside a flat.
 Emotes with animations (wave, dance, hug when two Lumis stand together), the guestbook, a "who's visiting" badge on
 the Lumi Pet tile, house-warming coins for the first visit of the day to someone else's flat (capped, like `pet_visit`),
 and party invites from inside a house ("Want to go to the dungeon together?").

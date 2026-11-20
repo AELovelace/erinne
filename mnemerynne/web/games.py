@@ -310,7 +310,7 @@ def pet_town(body: TownHere, user=Depends(pet_user), conn=Depends(get_games_db))
         here.append({"id": uid, "name": person["username"], "at": at, "street": street, "inside": inside, "look": lumipet.look(conn, uid)})
     where = lumitown.place(body.at, body.street, body.inside)           # (a hidden Lumi still hears what's said)
     return {"seen": seen, "here": here, "place": where, "lines": lumitown.TOWN.recent(where), "phrases": lumitown.phrases(),
-            "you": user["id"]}                                          # (so the page knows which lines are its own)
+            "emotes": lumitown.emotes(), "you": user["id"]}                                          # (so the page knows which lines are its own)
 
 
 class TownSay(BaseModel):
@@ -352,6 +352,29 @@ def pet_town_say(body: TownSay, user=Depends(pet_user), conn=Depends(get_games_d
     return {"line": said}
 
 
+class Emote(BaseModel):
+    """A little animation for everyone in the same place to see (lumitown.EMOTES)."""
+    model_config = ConfigDict(extra="forbid")
+    emote: str = Field(pattern=r"^[a-z]{1,16}$")
+
+
+@router.post("/api/media/games/lumi-pet/town/emote")
+def pet_emote(body: Emote, user=Depends(pet_user), conn=Depends(get_games_db)):
+    """Wave, dance, hug and so on, where this Lumi is (a street, a place, a room of a flat): everyone there sees it
+    on their stream. In town only someone others can see may; never more than one a second."""
+    if body.emote not in lumitown.EMOTES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That isn't one of the emotes.")
+    where = _where_now(user["id"])
+    if (where is None or not where.startswith("house:")) and not lumipet.town_seen(conn, user["id"]):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Turn on Show me in town first, so everyone can see you.")
+    if where is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Step out into Lumi Town first!")
+    if events.count(f"lumi-emote:{user['id']}", lumitown.EMOTE_GAP) > 1:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "One at a time!")
+    events.publish_sync(lumitown.CHANNEL, {"kind": "emote", "place": where, "uid": user["id"], "emote": body.emote})
+    return {"emote": body.emote, "place": where}
+
+
 @router.get("/api/media/games/lumi-pet/town/stream")
 async def pet_town_stream(request: Request, user=Depends(pet_user)):
     """Lumi Town and the flats, live (a computer's or phone's page; a TV polls): "said" for each line said where this
@@ -384,6 +407,11 @@ async def pet_town_stream(request: Request, user=Depends(pet_user)):
                     elif kind == "walk":                                      # someone in her room of a flat
                         if data.get("uid") != me and data.get("place") == _where_now(me):
                             yield sse("walk", data)
+                    elif kind == "emote":                                     # someone where she is waved, danced...
+                        if data.get("uid") != me and data.get("place") == _where_now(me):
+                            yield sse("emote", {"uid": data.get("uid"), "emote": data.get("emote")})
+                    elif kind == "guestbook" and data.get("host") == me:      # someone signed her guestbook
+                        yield sse("guestbook", {})
                     elif kind == "knock" and data.get("host") == me:          # at her door
                         yield sse("knock", {})
                     elif kind == "answer" and data.get("guest") == me:        # her knock, answered
@@ -498,6 +526,42 @@ def pet_knock_answer(knock_id: str, body: KnockAnswer, user=Depends(pet_user)):
     return {"answer": body.yes}
 
 
+class Signing(BaseModel):
+    """A line for someone's guestbook (cleaned like a chat line, lumitown.clean)."""
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(max_length=1000)
+
+
+@router.post("/api/media/games/lumi-pet/houses/{host}/guestbook")
+def pet_sign(host: int, body: Signing, user=Depends(pet_user), conn=Depends(get_games_db)):
+    """Sign someone's guestbook: only a visitor they've let in (or whose door is open), and once in a while (SIGN_GAP).
+    Unlike chat, it's kept: the last lumipet.GUESTBOOK_MAX lines, in the host's save, until the host takes one out."""
+    me = user["id"]
+    if host == me:
+        raise HTTPException(status.HTTP_409_CONFLICT, "That's your own guestbook! Friends sign it when they visit.")
+    if _person(conn, host) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "There's no flat there.")
+    door, blocked = lumipet.door(conn, host)
+    if lumihouse.access(door, blocked, host, me, lumihouse.HOUSES) != "in":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Come in first, then sign!")
+    try:
+        text = lumitown.clean(body.text)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    if events.count(f"lumi-sign:{me}:{host}", SIGN_GAP) > 1:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "You've signed already! Come back another time.")
+    person = _person(conn, me)
+    with transaction(conn):
+        book = lumipet.sign(conn, host, me, person["username"], lumipet.look(conn, me)["name"], text)
+    events.publish_sync(lumitown.CHANNEL, {"kind": "guestbook", "host": host})    # the host's page looks again
+    return {"guestbook": [{k: e[k] for k in ("id", "name", "lumi", "text", "at")} for e in book]}
+
+
+SIGN_GAP = 600              # one guestbook line per visitor per flat every ten minutes
+HOUSEWARMING = 10           # coins for the first visit of the day to a friend's flat (phase 4)...
+HOUSEWARMING_CAP = 30       # ...three flats' worth a day at most
+
+
 class HouseHere(BaseModel):
     """Where this Lumi stands in a flat: whose (None: her own), which room, and where on its floor (room-ui.js units)."""
     model_config = ConfigDict(extra="forbid")
@@ -527,6 +591,12 @@ def pet_house_here(body: HouseHere, user=Depends(pet_user), conn=Depends(get_gam
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Time to go home!")
     where = lumihouse.place(host, body.room)
     x, y = round(body.x, 1), round(body.y, 1)
+    was = lumihouse.HOUSES.where(me)
+    paid = 0
+    if host != me and not (was and was.startswith(f"house:{host}:")):   # just arrived in a friend's flat: a house-warming gift
+        with transaction(conn):                                          # (once a day per flat, HOUSEWARMING_CAP a day in all)
+            paid = coins.reward(conn, me, HOUSEWARMING, "lumi-housewarming", HOUSEWARMING_CAP,
+                                ref=f"lumi-housewarm:{me}:{host}:{coins.today(conn)}")
     if lumihouse.HOUSES.visit(me, host, body.room, x, y, body.face):
         events.publish_sync(lumitown.CHANNEL, {"kind": "moved"})        # arrived, or another room: the others look again
     else:
@@ -544,7 +614,8 @@ def pet_house_here(body: HouseHere, user=Depends(pet_user), conn=Depends(get_gam
                 knocks.append({"id": k["id"], "guest": k["guest"], "name": guest["username"],
                                "lumi": lumipet.look(conn, k["guest"])["name"]})
     return {"here": people, "place": where, "lines": lumitown.TOWN.recent(where), "phrases": lumitown.phrases(),
-            "you": me, "home": lumihouse.HOUSES.home(host), "knocks": knocks}
+            "emotes": lumitown.emotes(), "you": me, "home": lumihouse.HOUSES.home(host), "knocks": knocks,
+            "paid": paid, "coins": coins.peek(conn, me) if paid else None}               # (a house-warming gift, just now)
 
 
 @router.post("/api/media/games/lumi-pet/visit")
@@ -561,7 +632,7 @@ class PetAction(BaseModel):
     action: Literal["cuddle", "feed", "play", "nap", "wake", "buy", "decorate", "wear", "capsule", "glow", "import", "storyteller",
                     "learn", "respec", "equip", "mod", "potions", "heal", "drink", "garden_reminders", "town_seen", "room_mode", "paint",
                     "unpack", "name", "colour", "stat", "stats_auto", "auto_stats", "stats_reset", "kit",
-                    "door", "block", "unblock"]                                                     # visitors to her flat (lumihouse.py)
+                    "door", "block", "unblock", "guestbook_remove"]                                 # visitors to her flat (lumihouse.py)
     item: str | None = Field(default=None, max_length=40)
     count: int = Field(default=1, ge=1, le=lumipet.MAX_HELD, strict=True)
     moments: int = Field(default=0, ge=0, le=lumipet.MAX_MOMENTS, strict=True)   # only read by "import", once

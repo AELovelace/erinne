@@ -153,6 +153,24 @@ def line(user_id: int, name: str, lumi: str, where: str, *, text: str | None = N
             "phrase": phrase, "at": int(time.time() * 1000)}
 
 
+# Emotes (phase 4, 2026-11-19): a little animation everyone in the same place sees (game.js emote, game.css lp-emote-*).
+# id → (icon, words for the list). Never stored; a TV, which has no stream, simply doesn't see other people's.
+EMOTES = {
+    "wave": ("👋", "Wave"),
+    "dance": ("💃", "Dance"),
+    "hug": ("🤗", "Hug"),
+    "jump": ("✨", "Jump for joy"),
+    "heart": ("💖", "Send a heart"),
+    "yawn": ("💤", "Yawn"),
+}
+EMOTE_GAP = 1.0            # one emote a second, at most
+
+
+def emotes() -> list[dict]:
+    """The emotes, for the page's list: [{id, icon, text}]."""
+    return [{"id": key, "icon": icon, "text": words} for key, (icon, words) in EMOTES.items()]
+
+
 def phrases() -> list[dict]:
     """The quick phrases, for the page's list: [{id, icon, text}]."""
     return [{"id": key, "icon": icon, "text": words} for key, (icon, words) in PHRASES.items()]

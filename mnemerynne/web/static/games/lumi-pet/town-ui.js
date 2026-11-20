@@ -82,12 +82,15 @@
        stall (the Market stall she's at, or null) and stallRows(id) (its rows: game.js builds them from the shops' lists),
        go({enter} | {leave} | {street} | {stall}) and open(slug, place, words),
        chat (local chat, 2026-11-19; optional): { on (the chat list is open), phrases [{id, icon, text}], people
-       [{id, name, muted, block}] (who's here, to mute; block: a guest in her own flat), open(), close(), say(phraseId), type(), mute(id), block(id) },
+       [{id, name, muted, block}] (who's here, to mute; block: a guest in her own flat), emotes [{id, icon, text}],
+       open(), close(), say(phraseId), emote(id), type(), mute(id), block(id) },
        visit (friends' flats, 2026-11-19; optional): open the list of flats to visit (a row on each street's map). */
   function chatRows(chat) { // Chatting: the quick phrases (a remote or a pad can say them), typing, muting, and back.
     return chat.phrases.map(function (p) {
       return { key: "say-" + p.id, icon: p.icon, name: "“" + p.text + "”", hint: "Say it to everyone here", local: function () { chat.say(p.id); } };
-    }).concat([{ key: "say-type", icon: "⌨", name: "Type a message", hint: "T opens it too · Enter sends · Escape closes", local: function () { chat.type(); } }])
+    }).concat((chat.emotes || []).map(function (e) { // Emotes (phase 4): a little animation everyone here sees.
+      return { key: "emote-" + e.id, icon: e.icon, name: e.text, hint: "Everyone here sees it", local: function () { chat.emote(e.id); } };
+    })).concat([{ key: "say-type", icon: "⌨", name: "Type a message", hint: "T opens it too · Enter sends · Escape closes", local: function () { chat.type(); } }])
       .concat((chat.people || []).reduce(function (out, who) {
         out.push({ key: "mute-" + who.id, icon: who.muted ? "🔈" : "🔇", name: (who.muted ? "Unmute " : "Mute ") + who.name,
                    hint: who.muted ? "Hear what they say again" : "Stop seeing what they say, on this device", local: function () { chat.mute(who.id); } });

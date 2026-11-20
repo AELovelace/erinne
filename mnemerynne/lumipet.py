@@ -14,6 +14,7 @@ rather than in the middle of someone's purchase. Times are whole milliseconds, l
 from __future__ import annotations
 
 import json
+import secrets
 from math import floor
 import math
 import random
@@ -335,6 +336,7 @@ def town_seen(conn: sqlite3.Connection, user_id: int) -> bool:
 
 
 DOORS = ("knock", "open", "closed")                       # her front door, for visitors (lumihouse.py): the first is the default
+GUESTBOOK_MAX = 30                                        # the guestbook keeps her last 30 lines (phase 4): older ones fall out
 BLOCKED_MAX = 200                                         # a guard on the block list's length
 
 
@@ -366,7 +368,28 @@ def house_view(conn: sqlite3.Connection, user_id: int) -> dict:
     pet = _peek(conn, user_id) or {}
     pet.setdefault("house", {})
     house = placed({**pet, "house": pet["house"] if isinstance(pet["house"], dict) else {}})
-    return {"house": house, "boxes": max(0, len(BOXES) - int(pet.get("unpacked", 0) or 0)), "look": look(conn, user_id)}
+    return {"house": house, "boxes": max(0, len(BOXES) - int(pet.get("unpacked", 0) or 0)), "look": look(conn, user_id),
+            "guestbook": [{k: entry[k] for k in ("id", "name", "lumi", "text", "at")} for entry in _guestbook(pet)]}   # (never who by account)
+
+
+def _guestbook(pet: dict) -> list[dict]:
+    """Her guestbook's lines, oldest first, each {id, uid, name, lumi, text, at}; anything malformed left out."""
+    keep = ("id", "uid", "name", "lumi", "text", "at")
+    return [e for e in pet.get("guestbook", []) if isinstance(e, dict) and all(k in e for k in keep)]
+
+
+def sign(conn: sqlite3.Connection, host: int, guest: int, name: str, lumi: str, text: str, now: int | None = None) -> list[dict]:
+    """A visitor signs the host's guestbook (lumihouse.py checks they may be there; `text` is already cleaned). Written
+    into the host's save without catching her up or counting a visit. Call inside a transaction. Returns the guestbook."""
+    pet = _peek(conn, host)
+    if pet is None:
+        raise PetError("There's no guestbook there.")
+    book = _guestbook(pet)
+    book.append({"id": secrets.token_hex(6), "uid": guest, "name": name, "lumi": lumi, "text": text,
+                 "at": now_ms() if now is None else now})
+    pet["guestbook"] = book[-GUESTBOOK_MAX:]
+    _save(conn, host, pet)
+    return pet["guestbook"]
 
 
 def _save(conn: sqlite3.Connection, user_id: int, pet: dict) -> None:
@@ -664,6 +687,8 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
             raise PetError("A door is knock, open or closed.")
         pet["door"] = item or doors[(doors.index(now_door) + 1) % len(doors)]
         said = {"door": pet["door"]}
+    elif action == "guestbook_remove":                    # take a line out of her guestbook (`item`: its id)
+        pet["guestbook"] = [e for e in _guestbook(pet) if e["id"] != item]
     elif action in ("block", "unblock"):                  # someone who may never visit her flat (or may again); `item` is their account id
         if not (item or "").isdigit() or int(item) == user_id:
             raise PetError("Choose someone to block.")
