@@ -484,24 +484,24 @@
 
 /* ---- Lumi Pet's own layout (Doll's design, 2026-11-19). Her stats are one bar along the top: the LUMI PET header with
    her four meters, name, level, happy moments, last memory and coins (the left panel folded into it). The key hints are
-   gone: the help page has them, and a remote, keyboard or mouse all just work. Lumi Dungeons and Lumi's Garden are unchanged. */
-.gm[data-game="lumi-pet"] #lp-keys { display: none; }
+   gone: the help page has them, and a remote, keyboard or mouse all just work. Since Lumi City (2026-11-19, Doll: "the rest of the game") it's every Lumi app's: Lumi City, Lumi Dungeons and Lumi's Garden have the same bar. */
+.gm[data-kit="lumi-pet"] #lp-keys { display: none; }
 @media (min-width: 1001px) {
-  .gm[data-game="lumi-pet"] { grid-template-columns: minmax(0, 1fr) max(14rem, calc(var(--lp-wide) / 3.5)); grid-template-rows: auto minmax(0, 1fr); align-items: start; }
-  .gm[data-game="lumi-pet"] .lp-intro { grid-column: 1 / -1; grid-row: 1; align-self: start; display: flex; align-items: center; gap: clamp(.8rem, 1.6vw, 1.8rem); padding: .55rem 1.2rem; }
-  .gm[data-game="lumi-pet"] .lp-intro :is(.gm-eyebrow, .lp-lead, .lp-note, .lp-save) { display: none; } /* The header keeps only what's live. */
-  .gm[data-game="lumi-pet"] .lp-intro .gm-title { flex: none; margin: 0; font-size: 1.5rem; white-space: nowrap; }
-  .gm[data-game="lumi-pet"] .lp-intro .gm-title span { display: inline; margin-left: .3rem; } /* LUMI PET on one line. */
-  .gm[data-game="lumi-pet"] .lp-meters { flex: 1 1 24rem; min-width: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .9rem; margin: 0; }
-  .gm[data-game="lumi-pet"] .lp-meter { grid-template-columns: minmax(0, 1fr) auto; gap: .15rem .4rem; font-size: .6rem; } /* Label and number over the bar, as on a phone. */
-  .gm[data-game="lumi-pet"] .lp-meter .lp-bar { grid-column: 1 / -1; grid-row: 2; }
-  .gm[data-game="lumi-pet"] .lp-stats { flex: 0 1 auto; min-width: 0; display: flex; gap: 1.2rem; margin: 0; }
-  .gm[data-game="lumi-pet"] .lp-stats div { min-width: 0; padding: 0; border: 0; }
-  .gm[data-game="lumi-pet"] .lp-stats dt { font-size: .55rem; white-space: nowrap; }
-  .gm[data-game="lumi-pet"] .lp-stats dd { max-width: 12rem; margin: .15rem 0 0; overflow: hidden; font-size: .85rem; white-space: nowrap; text-overflow: ellipsis; }
-  .gm[data-game="lumi-pet"] #lp-moments { font-size: .85rem; }
-  .gm[data-game="lumi-pet"] .lp-controls { grid-column: 2; grid-row: 2; align-self: start; }
-  .gm[data-game="lumi-pet"] .lp-room-top { top: 5.4rem; } /* The room's name, clear of the stats bar over it. */
+  .gm[data-kit="lumi-pet"] { grid-template-columns: minmax(0, 1fr) max(14rem, calc(var(--lp-wide) / 3.5)); grid-template-rows: auto minmax(0, 1fr); align-items: start; }
+  .gm[data-kit="lumi-pet"] .lp-intro { grid-column: 1 / -1; grid-row: 1; align-self: start; display: flex; align-items: center; gap: clamp(.8rem, 1.6vw, 1.8rem); padding: .55rem 1.2rem; }
+  .gm[data-kit="lumi-pet"] .lp-intro :is(.gm-eyebrow, .lp-lead, .lp-note, .lp-save) { display: none; } /* The header keeps only what's live. */
+  .gm[data-kit="lumi-pet"] .lp-intro .gm-title { flex: none; margin: 0; font-size: 1.5rem; white-space: nowrap; }
+  .gm[data-kit="lumi-pet"] .lp-intro .gm-title span { display: inline; margin-left: .3rem; } /* LUMI PET on one line. */
+  .gm[data-kit="lumi-pet"] .lp-meters { flex: 1 1 24rem; min-width: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .9rem; margin: 0; }
+  .gm[data-kit="lumi-pet"] .lp-meter { grid-template-columns: minmax(0, 1fr) auto; gap: .15rem .4rem; font-size: .6rem; } /* Label and number over the bar, as on a phone. */
+  .gm[data-kit="lumi-pet"] .lp-meter .lp-bar { grid-column: 1 / -1; grid-row: 2; }
+  .gm[data-kit="lumi-pet"] .lp-stats { flex: 0 1 auto; min-width: 0; display: flex; gap: 1.2rem; margin: 0; }
+  .gm[data-kit="lumi-pet"] .lp-stats div { min-width: 0; padding: 0; border: 0; }
+  .gm[data-kit="lumi-pet"] .lp-stats dt { font-size: .55rem; white-space: nowrap; }
+  .gm[data-kit="lumi-pet"] .lp-stats dd { max-width: 12rem; margin: .15rem 0 0; overflow: hidden; font-size: .85rem; white-space: nowrap; text-overflow: ellipsis; }
+  .gm[data-kit="lumi-pet"] #lp-moments { font-size: .85rem; }
+  .gm[data-kit="lumi-pet"] .lp-controls { grid-column: 2; grid-row: 2; align-self: start; }
+  .gm[data-kit="lumi-pet"] .lp-room-top { top: 5.4rem; } /* The room's name, clear of the stats bar over it. */
 }
 
 /* Room mode: the right-hand panel is only for a menu that needs one (her bowl, the paint pots, the wardrobe...). With none
@@ -529,7 +529,7 @@
 .lp-things:is(:hover, :focus-within) .lp-thing[aria-pressed="true"]:not(:hover, :focus-visible) .lp-thing-say { display: none; } /* One bubble at a time: the one you're pointing at. */
 .gm[data-card="true"] .lp-thing[aria-pressed="true"]:not(:hover, :focus-visible) .lp-thing-say { display: none; } /* A menu is open: she's saying her line over her head. */
 @media (min-width: 701px) { .lp-room[data-rooms] .lp-caption { top: 12%; bottom: auto; } } /* Her state, up under the room's name: the bottom is the lower bar's. */
-@media (min-width: 1001px) { .gm[data-game="lumi-pet"] .lp-room[data-rooms] .lp-caption { top: 8.6rem; } } /* Under the stats bar and the room's name. */
+@media (min-width: 1001px) { .gm[data-kit="lumi-pet"] .lp-room[data-rooms] .lp-caption { top: 8.6rem; } } /* Under the stats bar and the room's name. */
 @media (max-width: 700px) {
   .gm[data-rooms="true"]:not([data-card="true"]) .lp-room { height: min(125vw, 70dvh); } /* No menu open: a taller room, but not so tall the drawing zooms past her things. */
   .gm[data-rooms="true"]:not([data-card="true"]) .lp-things { position: fixed; bottom: max(.8rem, env(safe-area-inset-bottom, 0px)); } /* The lower bar at the screen's foot, under a thumb. */
@@ -537,3 +537,9 @@
   .lp-things { gap: .3rem; padding: .3rem .4rem; }
   .lp-thing-say { max-width: 11rem; font-size: .7rem; }
 }
+
+/* Lumi City (2026-11-19, Doll: the top and bottom bars everywhere, not only at home). The town is shown like her flat:
+   the lower bar holds what's in reach and the town's own rows (Go to…, Where am I?, Say something...), the right-hand
+   panel opens only for a list (the lift, Lumi Realty's counters, Go to…), and her words are in a bubble over her head
+   (game.js drawTownBits). Her bubble sits just over her: she's smaller in town than in her flat. */
+.lp-room[data-town]:not([data-town="map"]) .lp-guide { bottom: calc(50% + (250 - var(--gy, 430) + 92 * var(--gs, 1)) * var(--u)); }

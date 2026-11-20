@@ -545,9 +545,13 @@
   // ---- The town's list -------------------------------------------------------------------------------------------
   function backRow(words) { return { key: "list-back", icon: "‹", name: words || "Back", hint: "Escape, Back or B does it too", local: function () { townList = null; marketStall = null; marketDrawer = null; picks[tab] = 0; } }; }
 
-  function townRows() { // What the panel offers in Lumi City: a list that's open, else what's in reach first, then the town's own rows.
+  function townRows() { // What the panel offers in Lumi City: a list that's open (the phrases, the lift, an office counter...), else the town's own rows.
     if (chatOn) return Tw.chatRows(chatCtx());
     if (townList) return listRows(townList);
+    return baseTownRows();
+  }
+
+  function baseTownRows() { // The town's own rows: what's in reach first, then Go to…, Where am I?... (the lower bar shows these, like her flat's things)
     const out = [];
     if (townAt && townSpace) { // inside: every thing in here (walk to it and use it), the one in reach first, so a remote and a screen reader reach them all
       const things = townSpace.things.slice().sort(function (a, b) { return (b === nearThing) - (a === nearThing); });
@@ -954,7 +958,7 @@
     if (visitDoor && visitDoor.access === "knock") out.push(visitKnock
       ? { key: "knock-wait", icon: "⏳", name: "Waiting at the door…", hint: "You knocked at " + name + "'s door", say: "Waiting…", note: "Waiting for " + name + " to come to the door…" }
       : { key: "knock", icon: "🚪", name: "Knock on " + name + "'s door", hint: visitDoor.home ? name + " is home" : "Nobody seems to be in", say: "Knock knock?", local: knock });
-    out.push({ key: "back-town", icon: "🏘", name: "Back to town", hint: "Out into Lumi Town", say: "Back to town?", local: leaveVisit });
+    out.push({ key: "back-town", icon: "🏘", name: "Back to town", hint: "Back out into Lumi City", say: "Back to town?", local: leaveVisit });
     return out;
   }
 
@@ -1328,7 +1332,7 @@
         if (pet.potions) potion.send = { action: "drink" }; else potion.note = "No potions left. Lumi Dungeons sells them, on its Battle tab.";
         list.push(potion);
       }
-      list.push({ key: "adventure", icon: "🏘", name: "Through the door", hint: "Out into Lumi Town: the tavern, the arcade, the casino, the garden and the Lumi-Soft field", local: adventure }); // Her room's door as a row, for remotes, keyboards and phones too narrow to show it.
+      list.push({ key: "adventure", icon: "🏘", name: "Through the door", hint: "Out into Lumi City: Lumi Heights' lobby, then the whole city", local: adventure }); // Her room's door as a row, for remotes, keyboards and phones too narrow to show it.
       return list;
     }
     if (name === "pantry") return c.snacks.concat(c.treats).filter(function (food) { return !food.price || pet.inventory[food.id]; }).map(function (food) {
@@ -1375,7 +1379,7 @@
       turn: function (by) { submit({ key: "glow", send: { action: "glow", glow: Pk.turn(R.PALETTES, pet.glow, by) } }); } });
     if (has("dungeon")) settings.push({ key: "storyteller", icon: "✎", name: "Storyteller: " + (pet.storyteller === "live" ? "Live" : "Library"), hint: "Who writes the dungeon's lines: the game's library, or a model as you go", send: { action: "storyteller" } });
     settings.push({ key: "sound", icon: "♪", name: "Sound: " + (G.sound.isOn() ? "on" : "off"), hint: "Little chimes", local: function () { G.sound.toggle(); } });
-    if (APP === "lumi-pet") settings.push({ key: "town-seen", icon: "👀", name: "Show me in Lumi Town: " + (pet.town_seen === false ? "off" : "on"), // Also on the town's own map.
+    if (APP === "lumi-pet") settings.push({ key: "town-seen", icon: "👀", name: "Show me in Lumi City: " + (pet.town_seen === false ? "off" : "on"), // Also on the town's own map.
       hint: pet.town_seen === false ? "Nobody sees your Lumi in town; you still see theirs" : "Others in Lumi Town see your Lumi there, in her clothes, with her name", send: { action: "town_seen" } });
     if (APP === "lumi-pet") { // Visitors to her flat (lumihouse.py): her front door, and anyone she has blocked.
       const door = pet.door || "knock";
@@ -1397,7 +1401,7 @@
     Object.keys(APPS).forEach(function (slug) { // Lumi's other two apps.
       if (slug !== APP) settings.push({ key: "open-" + slug, icon: APPS[slug][0], name: "Open " + APPS[slug][1], hint: APPS[slug][2], local: function () { openApp(slug); } });
     });
-    if (APP === "lumi-dungeons" || APP === "lumi-garden") settings.push({ key: "town", icon: "🏘", name: "Back to town", hint: "Lumi Town: her house, the arcade, the casino and the Lumi-Soft field", // Out of the tavern's door, or the garden's gate.
+    if (APP === "lumi-dungeons" || APP === "lumi-garden") settings.push({ key: "town", icon: "🏘", name: "Back to town", hint: "Lumi City: Lumi Heights, the Arcade, the Casino, Lumi Realty and her house", // Out of the tavern's door, or the garden's gate.
       local: function () { openApp("lumi-town", { at: APP === "lumi-garden" ? "garden" : "tavern" }); } });
     if (!inApp && !framed) settings.push({ key: "install", icon: "⬇", name: "Install " + NAME, hint: "Its own icon on your home screen, opening straight here", local: installApp }); // In a browser tab: each of Lumi's apps can be an app of its own.
     return settings;
@@ -1413,7 +1417,7 @@
     if (!on) { roomCard = null; if (tab === ROOM) changeTab(0); }
     else if (!roomCard && tab !== ROOM) changeTab(ROOM); // Switched on (from Settings' list), or a card closed.
     if (on && !chatOn && !bookOn && !(VISIT && !visitView)) picks[ROOM] = roomAt.at; // The room's cursor is where she stands (in a list of phrases, or on a doorstep, it's the list's own).
-    $("gm").dataset.rooms = String(on); // game.css folds the tabs away.
+    $("gm").dataset.rooms = String(on || TOWN); // game.css folds the tabs away (Lumi City is laid out like her flat: the lower bar, and the panel only for a list).
     return on;
   }
 
@@ -1643,6 +1647,40 @@
         pair[1].setAttribute("aria-label", "Walk to the " + short);
       }
     });
+  }
+
+  function drawTownBits() { // Lumi City laid out like her flat (Doll, 2026-11-19): the lower bar of what's here, her bubble, the right-hand panel only while a list is open.
+    const guide = $("lp-guide"), placed = Boolean(snap) && Boolean(townAt ? insideAt : cityAt);
+    $("gm").dataset.card = String(Boolean(townList) || chatOn);            // game.css: the panel shows only for a list (the lift, Go to…, an office counter, the phrases)
+    guide.hidden = !placed; guide.textContent = $("lp-message").textContent; // her words, over her head
+    drawTownBar(placed);
+  }
+
+  function drawTownBar(on) { // Lumi City's lower bar: what's in reach, the other things here (inside) or the town's rows (out in the city), each with her bubble.
+    const bar = $("lp-things");
+    bar.hidden = !on;
+    if (!on) { lastThings = ""; return; }
+    const list = baseTownRows();                                            // (the first is what's in reach, when anything is)
+    const signature = "town|" + list.map(function (row) { return row.key + ":" + row.name; }).join("|");
+    if (signature !== lastThings) { // rebuilt only when what's here changes, so a button being pressed is never swapped mid-press
+      lastThings = signature;
+      bar.replaceChildren.apply(bar, list.map(function (row) {
+        const button = document.createElement("button"), icon = document.createElement("span"), bubble = document.createElement("span"), name = document.createElement("b");
+        button.type = "button"; button.className = "lp-thing"; button.dataset.thing = row.key;
+        icon.className = "lp-thing-icon"; icon.textContent = row.icon; icon.setAttribute("aria-hidden", "true");
+        bubble.className = "lp-thing-say"; name.textContent = row.name; // her bubble: what it is, then what it does
+        bubble.append(name, document.createTextNode(" " + (row.say || row.hint || "")));
+        button.append(icon, bubble);
+        button.addEventListener("click", function () { // use it: a walk, a list in the panel, or (Show me in town) the server
+          pendingConfirm = null; chatOn = false; townList = null;
+          if (row.local) row.local(); else if (row.send) submit(row);
+          lastList = ""; render();
+        });
+        return button;
+      }));
+    }
+    const near = nearThing ? (townAt ? "thing-" + nearThing.id : "use") : "";
+    Array.from(bar.children).forEach(function (button) { button.setAttribute("aria-pressed", String(Boolean(near) && button.dataset.thing === near)); });
   }
 
   function changeTab(to) { // Open a category afresh: its sub-lists closed, nothing half-chosen.
@@ -2363,6 +2401,7 @@
     drawOutfit(TABS[tab] === "closet" && pick && pick.wear);
     drawDungeon();
     if (APP === "lumi-pet") drawRoomBits(rooming); // After the dungeon's keys: room mode's own.
+    if (TOWN) drawTownBits();                      // Lumi City's: the lower bar, her bubble, the panel only for a list
     drawGarden();
     drawSkills();
     drawAlbum();

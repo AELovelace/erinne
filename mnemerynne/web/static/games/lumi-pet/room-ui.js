@@ -47,7 +47,7 @@
         x: 785, box: [745, 350, 75, 82], tab: "home", keys: KITCHEN_SPOTS },
     ] },
     { id: "bedroom", name: "HER BEDROOM", things: [
-      { id: "door", icon: "🚪", name: "My front door", hint: "Out into Lumi Town", say: "My front door! Shall we go out into town?", open: "Off we go!",
+      { id: "door", icon: "🚪", name: "My front door", hint: "Out into Lumi City", say: "My front door! Shall we go out into town?", open: "Off we go!",
         x: 236, wall: true, box: [194, 192, 82, 166], act: "door" },
       { id: "toychest", icon: "🧸", name: "My toy chest", hint: "Play with my toys", say: "My toy chest! All my favourite toys.", open: "Playtime? Pick a toy, any toy!",
         x: 386, box: [346, 362, 82, 72], tab: "toys" },

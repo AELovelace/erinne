@@ -164,7 +164,7 @@
   }
 
   function homeRow(home) { // Lumi Dungeons' way out (Doll's design, 2026-11-11): out of the tavern into Lumi Town (2026-11-12), where her house is. `home` opens the town.
-    return { key: "go-home", icon: "🏘", name: "Back to town", hint: "Out the tavern door into Lumi Town · her house is there too", local: home };
+    return { key: "go-home", icon: "🏘", name: "Back to town", hint: "Out the tavern door into Lumi City · Downtown, by Lumi Heights", local: home };
   }
 
   function rows(ctx) { // ctx: { snap, play, dismissed, care (the snack-and-potion list is open), go(change), home (opens Lumi Pet, or null) }
