@@ -371,6 +371,25 @@
 .lp-tabs[data-count="1"] { display: none; } /* Lumi Town has one list: no tabs to pick between. */
 .lp-room[data-town-still] .lp-pet-wrap { transition: none; } /* Opening the town: she's already at the door, not sliding in from the middle. */
 .lp-room[data-town] .lp-room-top { text-shadow: 0 0 4px #1a0f2e, 0 0 10px #1a0f2e; } /* Readable over a bright daytime sky. */
+/* Lumi City (Doll's design, 2026-11-19; docs/plans/lumi-city.md). Out in the city she's drawn inside the city's own picture
+   (game.js cityFigure, city-art.js's rows), so the page's own Lumi steps aside there; inside a place she's the page's Lumi
+   again, walking its floor like her flat (--gx from the middle, --gy her feet, --gs smaller further back, --face her way). */
+.lp-room[data-town="city"] .lp-pet-wrap { visibility: hidden; }
+.lp-room[data-town]:not([data-town="map"]):not([data-town="city"]) .lp-pet-wrap { width: calc(84 * var(--gs, 1) * var(--u)); left: calc(50% + (var(--gx, 0) - 42 * var(--gs, 1)) * var(--u));
+  bottom: calc(50% + (250 - var(--gy, 466) - 8 * var(--gs, 1)) * var(--u)); }   /* inside: a step closer, a little smaller at the back */
+.lp-room[data-town] .lp-pet { scale: var(--face, 1) 1; }                         /* facing the way she last walked */
+.lp-room[data-town][data-walking] .lp-pet-wrap, .lp-room[data-town][data-walking] .lp-guide { transition: none; } /* free walking moves her every frame */
+.lp-house .lp-cw-folk, .lp-house .lp-cw-lumi { pointer-events: none; }           /* nobody's Lumi takes a press: presses go to the doors and the ground */
+.lp-house .lp-cw-me { transition: none; }                                         /* hers follows the keys exactly */
+.lp-house .lp-cw-thing .lp-cw-ring { display: none; }                             /* a doorstep's ring shows only while it's in reach */
+.lp-house .lp-cw-thing.lp-cw-near .lp-cw-ring { display: inline; }
+.lp-house .lp-cw-thing.lp-cw-near > g:not(.lp-cw-lumi) { filter: brightness(1.12); } /* and what's in reach brightens a touch */
+.lp-house [data-click^="thing:"] { cursor: pointer; }
+.lp-house .lp-in-hit { transition: stroke-opacity .2s; stroke: var(--pet-glow, #ff8ecb); stroke-width: 2; stroke-opacity: 0; }
+.lp-house .lp-in-hit:hover { stroke-opacity: .55; }                               /* inside: a soft outline on what the mouse is over */
+.lp-house .lp-cw-lumi .lp-folk-name { font-size: 17px; stroke-width: 4px; }               /* (the city's camera is zoomed out: bigger letters to match)
+.lp-house .lp-cw-lumi .lp-folk-say { font-size: 18px; stroke-width: 7px; }
+.tv .lp-house .lp-cw-thing.lp-cw-near > g:not(.lp-cw-lumi) { filter: none; }      /* (a TV box: no filters) */
 
 /* Lumi Town's townsfolk and visitors (game.js drawFolk; town-folk.js): a layer over the town picture in its own coordinates,
    never pressable. They stroll by transform only (cheap on a TV box), and they're awake whatever the hour. */
@@ -407,7 +426,7 @@
 @media (prefers-reduced-motion: reduce) { .lp-room[data-emote] .lp-pet, .lp-folk-one[class*="lp-emote-"] .lp-folk-anim { animation: none; } } /* the icon over their head still shows */
 .lp-folk-one { transition: transform 3s linear; }
 .lp-folk-guest { transition: transform .45s ease; }
-.lp-room[data-town] .lp-folk-guest { pointer-events: visiblePainted; cursor: pointer; } /* press someone's Lumi in town to visit their flat (game.js); the rest of the layer lets presses through */
+.lp-room[data-town] .lp-folk-guest { pointer-events: none; } /* (Lumi City, 2026-11-19: visits are by walking to a door now, so a Lumi takes no press) */
 .lp-room[data-town] .lp-folk-guest:hover .lp-folk-name { fill: var(--pet-glow, #ff8ecb); }
 .lp-folk-flip[data-flip="true"] { transform: scaleX(-1); }
 .lp-room .lp-folk .lp-eyes-open { display: inline; }

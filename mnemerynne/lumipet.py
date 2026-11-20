@@ -228,7 +228,27 @@ def _fresh(now: int) -> dict:
             "door": "knock", "blocked": [],                # visitors to her flat (lumihouse.py): knock, open or closed; who may never come in
             "name": "Lumi", "colour": None,               # what her friends see her called; her own colour (None: her glow's)
             "moved_in": MOVE_IN, "unpacked": 0, "box_day": "",   # she has just moved in: boxes unpacked so far, and the day of the last
+            "home_town": None,                             # Lumi City (lumicity.py): "left" (LefTown) or "right" (Right-City); None: not picked yet
+            "estate": _fresh_estate(),                     # Lumi City: house styles and yard pieces she owns, and her house's rooms
             **lumibattle.fresh_fields()}
+
+
+def _fresh_estate() -> dict:
+    """What she owns for a house in Lumi City (lumicity.py): house styles, yard pieces, and how her house's own rooms
+    are furnished ({spot: piece}, the same shape as her flat's `house`). Her furniture (`decor`) is shared by both homes."""
+    return {"styles": [], "yard": [], "rooms": {}}
+
+
+def estate_of(pet: dict) -> dict:
+    """Her estate, made whole in place: an old save (or a broken one) gets the missing parts, so callers never check."""
+    estate = pet.get("estate") if isinstance(pet.get("estate"), dict) else {}   # anything that isn't a dict starts again
+    for key, empty in _fresh_estate().items():
+        if not isinstance(estate.get(key), type(empty)):   # a missing or mistyped part: empty
+            estate[key] = empty
+    pet["estate"] = estate                                # put back, in case it was replaced
+    if pet.get("home_town") not in (None, "left", "right"):
+        pet["home_town"] = None                           # a home town that isn't one of the two: not picked yet
+    return estate
 
 
 def advance(pet: dict, now: int) -> None:
@@ -281,6 +301,7 @@ def load(conn: sqlite3.Connection, user_id: int, now: int | None = None, *, seen
         lumibattle.settle_points(pet)
     if saved is not None and saved.get("moved_in") != MOVE_IN:   # from before the move-in: the house starts again, coins back
         _move_in(conn, user_id, pet)
+    estate_of(pet)                                        # from before Lumi City (or a broken estate): its empty parts
     advance(pet, now)
     if seen:
         pet["seen"] = now
@@ -362,14 +383,29 @@ def door(conn: sqlite3.Connection, user_id: int) -> tuple[str, list[int]]:
     return (pet.get("door") if pet.get("door") in DOORS else DOORS[0]), blocked
 
 
-def house_view(conn: sqlite3.Connection, user_id: int) -> dict:
-    """Her flat as a visitor sees it (lumihouse.py): what stands in every spot (placed), how many moving boxes are
-    still packed, and her look. Never her coins, meters, pockets, settings or anything else in her save."""
+HOMES = ("flat", "house")                                 # her flat in Lumi Heights (free, forever), and her house on a plot in Lumi City
+
+
+def house_view(conn: sqlite3.Connection, user_id: int, home: str = "flat") -> dict:
+    """Her flat (or, home="house", her house on her Lumi City plot) as a visitor sees it (lumihouse.py): what stands in
+    every spot (placed), how many moving boxes are still packed, and her look. Never her coins, meters, pockets,
+    settings or anything else in her save. The house's rooms are her estate's own; its moving boxes are always 0
+    (she unpacks those in her flat). Both homes share one guestbook."""
     pet = _peek(conn, user_id) or {}
-    pet.setdefault("house", {})
-    house = placed({**pet, "house": pet["house"] if isinstance(pet["house"], dict) else {}})
-    return {"house": house, "boxes": max(0, len(BOXES) - int(pet.get("unpacked", 0) or 0)), "look": look(conn, user_id),
+    if home == "house":
+        rooms = estate_of(pet)["rooms"]                   # the house's own rooms, furnished from the same furniture she owns
+        house, packed = placed({**pet, "house": rooms}), 0
+    else:
+        pet.setdefault("house", {})
+        house = placed({**pet, "house": pet["house"] if isinstance(pet["house"], dict) else {}})
+        packed = max(0, len(BOXES) - int(pet.get("unpacked", 0) or 0))   # boxes still to unpack in her flat
+    return {"house": house, "boxes": packed, "look": look(conn, user_id),
             "guestbook": [{k: entry[k] for k in ("id", "name", "lumi", "text", "at")} for entry in _guestbook(pet)]}   # (never who by account)
+
+
+def has_plot(conn: sqlite3.Connection, user_id: int) -> bool:
+    """Whether this person owns a plot in Lumi City (lumicity.py's lumi_plots), so has a house to furnish or visit."""
+    return conn.execute("SELECT 1 FROM lumi_plots WHERE user_id = ?", (user_id,)).fetchone() is not None
 
 
 def _guestbook(pet: dict) -> list[dict]:
@@ -407,7 +443,9 @@ def snapshot(conn: sqlite3.Connection, user_id: int, pet: dict, now: int) -> dic
         run = {"over": None, "hp": run_view["hp"], "satchel": {"potions": run_view["satchel"]["potions"]}, "fight": None}
     else:
         run_view = lumidungeon.view(run, pet)
-    return {"pet": {**pet, **{meter: round(pet[meter], 1) for meter in DECAY}, "house": placed(pet), "outfit": worn}, "now": now,
+    estate = estate_of(pet)                               # Lumi City: her styles, yard pieces, and her house's rooms placed like the flat's
+    return {"pet": {**pet, **{meter: round(pet[meter], 1) for meter in DECAY}, "house": placed(pet), "outfit": worn,
+                    "estate": {**estate, "rooms": placed({"house": estate["rooms"]})}}, "now": now,
             "coins": coins.peek(conn, user_id), "catalog": CATALOG, "house": HOUSE, "closet": CLOSET,
             "battle": {key: lumibattle.CATALOG[key] for key in ("basics", "trees", "mods")} | {"rules": lumibattle.RULES},
             "progress": lumibattle.summary(pet), "fight": lumibattle.current(conn, user_id),
@@ -499,15 +537,36 @@ def _moment(pet: dict, memory: str) -> None:
     pet["memory"] = memory
 
 
+def _roll(pool: list[dict], odds: dict[str, int], rng) -> tuple[dict, str]:
+    """One capsule's roll: a rarity first, by `odds` ({rarity: chance out of 100}, in order), then equally among the
+    `pool`'s prizes of that rarity, so adding more commons never changes the odds of a legendary (MommyBot's gacha
+    rolled the same way). Shared by the Star and Moon Capsules here and Lumi City's Keepsake Capsule (lumicity.py).
+    Returns (the prize, its rarity). Every rarity the odds can give must have a prize in the pool."""
+    roll, rolled = rng.randrange(100), RARITIES[-1]       # a number 0..99; the last rarity if the odds fall short
+    for rarity, chance in odds.items():
+        if roll < chance:                                 # the roll landed in this rarity's share
+            rolled = rarity
+            break
+        roll -= chance                                    # past it: on to the next rarity's share
+    choices = [prize for prize in pool if prize["rarity"] == rolled]   # everything of that rarity, owned or not
+    return choices[rng.randrange(len(choices))], rolled   # one of them, all equally likely
+
+
 def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None = None, count: int = 1,
         moments: int = 0, glow: str | None = None, slot: int | None = None, name: str | None = None,
-        colour: str | None = None, spot: str | None = None, now: int | None = None, rng=None) -> dict:
+        colour: str | None = None, spot: str | None = None, home: str = "flat", now: int | None = None, rng=None) -> dict:
     """One thing the person chose to do. Call inside a transaction: the pet, and any coins, save together or not at all.
-    The pet is caught up first, so a refused action never changes what time already did (store.js act)."""
+    The pet is caught up first, so a refused action never changes what time already did (store.js act).
+    `home`: which home "decorate" and "paint" furnish, her flat (the default) or her house on her Lumi City plot."""
     now = now_ms() if now is None else now
     pet = load(conn, user_id, now)
     thing = _ITEMS.get(item) if item is not None else None
     said = None                                           # what just happened, for the page to say
+    if home not in HOMES:
+        raise PetError("Lumi only has a flat and a house.")
+    if home == "house" and action in ("decorate", "paint") and not has_plot(conn, user_id):
+        raise PetError("I haven't got a house yet! The office in Downtown sells plots.")
+    rooms = estate_of(pet)["rooms"] if home == "house" else pet["house"]   # where decorate and paint put things
 
     if action == "cuddle":
         _cool(pet, "cuddle", now)
@@ -588,7 +647,7 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
                 raise PetError("Not enough coins for that.")
             pet["decor"].append(item)
             said = {"bought": item, "count": 1, "paid": piece["price"]}
-        pet["house"][target] = item
+        rooms[target] = item                              # into her flat's spot, or her house's (owned once, placed in each)
     elif action == "paint":
         # A wall or floor painted one plain colour (room mode, 2026-11-19): free, and as easily painted over again.
         cleaned = (colour or "").strip().lower()
@@ -596,7 +655,7 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
             raise PetError("Only walls and floors can be painted.")
         if not _COLOUR_PAINT.match(cleaned):
             raise PetError("A colour is # and six hex digits, like #ff8ecb.")
-        pet["house"][spot] = cleaned
+        rooms[spot] = cleaned                             # her flat's wall or floor, or her house's
     elif action == "wear":
         # Put an accessory on, or take it off if she's already wearing it. One that's sold and not yet hers is bought
         # first; one that only comes from the Star Capsule can't be bought at all.
@@ -632,14 +691,7 @@ def act(conn: sqlite3.Connection, user_id: int, action: str, *, item: str | None
             raise PetError(f"Lumi already has everything the {kind['name']} holds!")
         if not coins.spend(conn, user_id, kind["price"], GAME, "capsule"):
             raise PetError("Not enough coins for that.")
-        roll, rolled = rng.randrange(100), RARITIES[-1]
-        for rarity, chance in kind["odds"].items():
-            if roll < chance:
-                rolled = rarity
-                break
-            roll -= chance
-        choices = [prize for prize in pool if prize["rarity"] == rolled]
-        won = choices[rng.randrange(len(choices))]
+        won, rolled = _roll(pool, kind["odds"], rng)      # a rarity by the odds, then one of that rarity's prizes
         said = {"capsule": won["id"], "name": won["name"], "rarity": rolled, "paid": kind["price"]}
         if owned(won):                                    # what she has stays as it is; only the coins change
             said |= {"duplicate": True, "buyback": coins.buyback(conn, user_id, (won["price"] or CLOSET["values"][rolled]) // 2, GAME)}

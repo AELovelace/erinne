@@ -14,6 +14,10 @@ every few seconds and as its Lumi walks), knocks waiting for an answer (KNOCK_SE
 means a moment until everyone has said where they are again, and anyone let in knocks again. The host is "home" while
 their own Lumi Pet room mode is open (their page reports itself in its own flat, like a guest does).
 
+Someone who owns a plot in Lumi City (lumicity.py) has a second home, their house, with the same three rooms furnished
+separately (lumipet.house_view home="house"). It uses the same front door, block list and passes as the flat, but it is
+a different place (place(): "home:<host>:<room>" rather than "house:<host>:<room>"), so the two homes' folk never mix.
+
 Pages hear what happens on the event bus (events.py, lumitown.CHANNEL), through the same stream as the town:
 {"kind": "walk"} (someone moved in a flat's room: their place, x, y, facing), {"kind": "moved"} (someone arrived or left),
 {"kind": "knock", "host"} (for the host), {"kind": "answer", "guest", "yes"} (for the knocker) and
@@ -32,11 +36,13 @@ PASS_SECONDS = 3 * 3600    # someone let in may stay, or come back, for three ho
 MAX_PEOPLE = 200           # guards: never more than this many remembered at once
 MAX_KNOCKS = 200
 ROOMS = ("kitchen", "bedroom", "den")   # room-ui.js ROOMS: where someone can stand in a flat
+HOMES = ("flat", "house")                # her flat in Lumi Heights, and (Lumi City, 2026-11-19) her house on a plot: the same rooms
 
 
-def place(host: int, room: str) -> str:
-    """Where a line said in a flat is heard: one room of one flat."""
-    return f"house:{host}:{room}"
+def place(host: int, room: str, home: str = "flat") -> str:
+    """Where a line said in someone's home is heard: one room of their flat ("house:<host>:<room>", as before Lumi City)
+    or of their house on a Lumi City plot ("home:<host>:<room>"), so the two homes' folk never hear each other."""
+    return f"house:{host}:{room}" if home == "flat" else f"home:{host}:{room}"
 
 
 class Houses:
@@ -45,7 +51,7 @@ class Houses:
     def __init__(self, clock=time.monotonic) -> None:
         self.clock = clock
         self.lock = threading.Lock()
-        self.people: dict[int, dict] = {}            # user → {host, room, x, y, face, seen}
+        self.people: dict[int, dict] = {}            # user → {host, room, home, x, y, face, seen}
         self.knocks: dict[str, dict] = {}            # id → {id, guest, host, at, answer (None, True or False)}
         self.passes: dict[tuple[int, int], float] = {}   # (host, guest) → until
 
@@ -55,28 +61,28 @@ class Houses:
         self.passes = {k: until for k, until in self.passes.items() if until > now}
 
     # ---- Who's where.
-    def visit(self, user_id: int, host: int, room: str, x: float, y: float, face: int) -> bool:
-        """This person's Lumi stands at x, y in a room of `host`'s flat, now. True when that's somewhere new (arrived,
-        or another room), so the others hear of it at once."""
+    def visit(self, user_id: int, host: int, room: str, x: float, y: float, face: int, home: str = "flat") -> bool:
+        """This person's Lumi stands at x, y in a room of `host`'s flat (or, home="house", their house), now. True when
+        that's somewhere new (arrived, another room, or the other home), so the others hear of it at once."""
         with self.lock:
             now = self.clock()
             self._sweep(now)
             was = self.people.get(user_id)
             if was is None and len(self.people) >= MAX_PEOPLE:
                 return False
-            self.people[user_id] = {"host": host, "room": room, "x": x, "y": y, "face": face, "seen": now}
-            return was is None or (was["host"], was["room"]) != (host, room)
+            self.people[user_id] = {"host": host, "room": room, "home": home, "x": x, "y": y, "face": face, "seen": now}
+            return was is None or (was["host"], was["room"], was["home"]) != (host, room, home)
 
     def leave(self, user_id: int) -> bool:
         with self.lock:
             return self.people.pop(user_id, None) is not None
 
     def where(self, user_id: int) -> str | None:
-        """The place (one room of one flat) this person is in now, or None."""
+        """The place (one room of one home: place()) this person is in now, or None."""
         with self.lock:
             self._sweep(self.clock())
             p = self.people.get(user_id)
-            return place(p["host"], p["room"]) if p else None
+            return place(p["host"], p["room"], p["home"]) if p else None
 
     def seen_at(self, user_id: int) -> float | None:
         """When this person last said where they are in a flat (their clock), or None."""
@@ -85,19 +91,20 @@ class Houses:
             p = self.people.get(user_id)
             return p["seen"] if p else None
 
-    def inside(self, host: int, but: int | None = None) -> list[dict]:
-        """Everyone in `host`'s flat now (the host too, if home), except `but`: [{id, room, x, y, face}]."""
+    def inside(self, host: int, but: int | None = None, home: str | None = None) -> list[dict]:
+        """Everyone in `host`'s homes now (the host too, if in), except `but`: [{id, room, home, x, y, face}]. `home`
+        ("flat" or "house"): only those in that one, so a house's folk never see the flat's."""
         with self.lock:
             self._sweep(self.clock())
-            return [{"id": uid, "room": p["room"], "x": p["x"], "y": p["y"], "face": p["face"]}
-                    for uid, p in self.people.items() if p["host"] == host and uid != but]
+            return [{"id": uid, "room": p["room"], "home": p["home"], "x": p["x"], "y": p["y"], "face": p["face"]}
+                    for uid, p in self.people.items() if p["host"] == host and uid != but and home in (None, p["home"])]
 
-    def home(self, host: int) -> bool:
-        """Whether the host is in their own flat now (their Lumi Pet room mode is open)."""
+    def home(self, host: int, home: str | None = None) -> bool:
+        """Whether the host is in their own home now (their Lumi Pet room mode is open there): either one, or `home`."""
         with self.lock:
             self._sweep(self.clock())
             p = self.people.get(host)
-            return bool(p) and p["host"] == host
+            return bool(p) and p["host"] == host and home in (None, p["home"])
 
     # ---- Knocks and passes.
     def knock(self, guest: int, host: int) -> dict:

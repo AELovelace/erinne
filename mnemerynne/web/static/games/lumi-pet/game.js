@@ -49,7 +49,11 @@
   // Visiting someone's flat (mnemerynne/lumihouse.py, docs/plans/lumi-pet-social.md phase 3): Lumi Pet opened at
   // ?at=visit-<their account id>. Their rooms, drawn from their own save; her own Lumi walks them; things are look-only.
   // Nothing about a visit is kept on this device (her own room-at stays as it was).
-  const VISIT = APP === "lumi-pet" ? (function (m) { return m ? Number(m[1]) : null; })(/^visit-(\d{1,9})$/.exec(new URLSearchParams(location.search).get("at") || "")) : null;
+  // Lumi City (2026-11-19): ?at=house-<id> is the house on someone's plot, their second home (its own rooms); her own
+  // house is HOME2: her rooms as she decorated them there (lumipet estate.rooms), decorated just like her flat.
+  const AT_HOUSE = APP === "lumi-pet" && /^house-\d{1,9}$/.test(new URLSearchParams(location.search).get("at") || "");
+  let VISIT = APP === "lumi-pet" ? (function (m) { return m ? Number(m[1]) : null; })(/^(?:visit|house)-(\d{1,9})$/.exec(new URLSearchParams(location.search).get("at") || "")) : null;
+  let HOME2 = false; // in her own house (found out when its door answers "own")
   let roomAt = Ru ? (VISIT ? Ru.clean({ room: "bedroom", at: 1 }) : Ru.clean(G.store.get("room-at", null))) : null, roomCard = null, lastThings = ""; // (lastThings: what the lower bar last drew; a visit starts inside the front door)
   let visitView = null, visitDoor = null, visitKnock = null, knockAsked = 0, knockPolled = 0; // their flat once in; whose door this is; a knock waiting
   let houseFolk = [], housePinged = 0, housePingTimer = 0, houseSig = "", knocksWaiting = []; // who else is in this flat; the last check-in; knocks at her own door
@@ -85,13 +89,16 @@
   // she's inside (the Arcade, the Casino or the Lumi-Soft field), or null on the map; the list's cursor is where she
   // stands. The page opens where ?at= says (media.js sends it when a game opened from here closes), and remembers on
   // this device which cabinet or table each place's cursor was on.
-  const TOWN = APP === "lumi-town", KEYS_TOWN = "▲ ▼ ◀ ▶ walk to a place · ▶ off the end: Market Street · Enter goes in<br>Inside: ▲ ▼ choose a game or a stall · Enter plays or buys<br>Mouse: press a place, a cabinet, a stall or a signpost<br>Escape / Back returns";
-  const arrival = TOWN ? Tw.arrive(new URLSearchParams(location.search).get("at")) : null, townPicks = TOWN ? G.store.get("town-picks", {}) : {};
-  // Market Street (2026-11-14): which street's map she's on, and in the Market, the stall she's at (and, at Garden things,
-  // which of the garden's decoration drawers is open: garden-ui.js). RETRO_ON: Media → Retro is on, so the café is open.
-  let townAt = arrival ? arrival.inside : null, townStreet = arrival ? arrival.street : "high", marketStall = null, marketDrawer = null;
-  const RETRO_ON = $("gm").dataset.retro === "1";
-  if (arrival) picks[0] = townAt ? Math.max(0, Math.min(Number(townPicks[townAt]) || 0, Tw.place(townAt).games.length - 1)) : arrival.cursor; // Back from a game: on its cabinet.
+  // Lumi City (Doll's design, 2026-11-19; docs/plans/lumi-city.md) replaced the two-street map: she walks the city freely.
+  const TOWN = APP === "lumi-town", KEYS_TOWN = "Arrows, WASD, a stick or a middle-click walk her · Enter or E uses what's in reach<br>⏮ ⏭ go through the list (a whole block, out in the city) · T talks<br>A TV remote's arrows hop to the next door or corner<br>Mouse: press a door, a sign or the ground · Escape / Back returns";
+  const C = window.LumiCity, CA = window.LumiCityArt, TI = window.LumiTownInside, WK = window.LumiWalker; // the city's map and pictures, the insides, the walker
+  const START_AT = TOWN ? new URLSearchParams(location.search).get("at") || "" : "", townPicks = TOWN ? G.store.get("town-picks", {}) : {}; // where the page opens; each place's last cabinet
+  let townAt = null, townSpace = null, insideAt = null;           // the place she's inside (null: out in the city), its room (town-inside.js), her feet in it
+  let cityMap = null, cityData = null, cityAt = null, cityTowns = ""; // the city (city-map.js), GET city's answer, her feet out in it, the towns it was built for
+  let route = null, routeThen = null, townList = null;            // a walk she's on (points), what she does at its end, a list open in the panel
+  let hallDoors = null, nearThing = null, townStarted = false;    // a floor's eight doors (GET heights), what's in reach, whether she's been placed yet
+  let marketStall = null, marketDrawer = null, cityParts = {}, citySig = ""; // the Market's stall she's at (and its garden drawer); the city's drawn parts
+  const RETRO_ON = $("gm").dataset.retro === "1";                 // Media → Retro is on, so the café is open
   const DESK = !TV && window.matchMedia("(any-pointer: fine)").matches; // A mouse and keyboard are here: Lumi-Soft can be played (media.js offers it only there too).
 
   function serverNow() { return Date.now() + offset; } // The server's clock, so timers agree across devices.
@@ -127,96 +134,595 @@
   function adventure() { // Her room's door (Doll's design, 2026-11-11; Lumi Town 2026-11-12): she trots off through it, out into Lumi Town.
     if (room.dataset.leaving === "true") return; // Already on her way: one press is enough.
     room.dataset.leaving = "true"; // game.css: she trots towards the door and fades.
-    say("Off into town! 🏘");
+    say(HOME2 ? "Out into the yard! 🏡" : "Off into town! 🏘");
     G.sound.unlock(); [523.25, 659.25, 783.99].forEach(function (f, i) { G.sound.tone(f, 0.14, i * 0.09, 0.18); }); // Three little steps up: off she goes.
-    setTimeout(function () { openApp("lumi-town", { at: "home" }); }, 700); // Long enough to see her go. She comes out in front of her own house.
+    const out = HOME2 ? G.store.get("visit-back", "home") : snap.pet.home_town === "right" ? "lobby-r" : "lobby-l"; // her house's front door opens onto its plot (the town said which); her flat's onto Lumi Heights' lobby (Lumi City, 2026-11-19)
+    setTimeout(function () { openApp("lumi-town", { at: out }); }, 700); // Long enough to see her go.
     setTimeout(function () { delete room.dataset.leaving; }, 2500); // Back in place if this page is still showing (a refused swap, or the browser's Back).
   }
 
-  // ---- Lumi Town: the map and the places on it (town-ui.js has the words and the lists, town-art.js the drawings).
+  // ---- Lumi City (Doll's design, 2026-11-19; docs/plans/lumi-city.md): the old Lumi Town grown into a city to walk about
+  // in freely. Out in the city she walks the streets of LefTown, Downtown and Right-City (city-map.js, drawn by
+  // city-art.js); inside a place she walks its floor (town-inside.js), like her flat. Whatever she walks up to is "in
+  // reach" (a doorstep, a cabinet, the lift...), the first row of the list, and Enter (or E, or a press on it) uses it.
+  // A TV remote's single presses hop from stop to stop; "Go to…" walks her anywhere by herself.
   const STALL_HELLO = { store: "Everything a little Lumi could want~", capsules: "Turn the handle... what's inside?", seeds: "Every seed here grows in the Stardust Garden.",
                         garden: "Lanterns, planters and pretty things for the garden." };
+  const T_SPEED = { city: { x: 340, y: 215 }, inside: { x: 260, y: 130 } }; // drawing units a second: the city's tiles are wider than deep
+  const ZOOM = 1.6;                                                     // the city's camera shows 1.6 times as much as a room does (1600 x 800 units): a city, not a room
+  const MAIL = ["No letters today. Just a Lumi Realty flyer! 🏡", "A postcard from the Stardust Garden! 🌸", "A coupon for the Retro café. Free cocoa! ☕",
+                "Nothing but a little glitter. Someone's been sparkly~ ✨", "A note: “Welcome to Lumi Heights!” 💌"];
+  let cityAsked = 0, townPinged = 0, townPingTimer = 0; // when GET city was last asked; the last presence check-in and the next one waiting
 
-  function townGo(change) { // A town row that stays in the town: walk into a place or out, round the corner to the other street, or up to a stall.
-    chatOn = false; flatsOn = false; // Walking somewhere puts the phrases (and the flats) away.
-    if (change.street) { // Off the end of the street, round the corner: she comes out by its first place, or back by the Casino.
-      townStreet = Tw.STREETS[change.street] ? change.street : "high"; townAt = null; marketStall = null; marketDrawer = null;
-      picks[tab] = townStreet === "market" ? 0 : Tw.index("casino");
-      say(townStreet === "market" ? "Market Street! The Retro café and the Market~" : "Back on the High Street. Where next?");
-      townHere();
-      return;
-    }
-    if ("stall" in change) { // In the Market: up to a stall, or back from it to the row of stalls.
-      const market = Tw.inside(townAt);
-      if (!market) return;
-      if (change.stall) { marketStall = change.stall; marketDrawer = null; picks[tab] = 0; say(STALL_HELLO[change.stall] || ""); }
-      else { picks[tab] = Math.max(0, market.games.findIndex(function (g) { return g.stall === marketStall; })); marketStall = null; marketDrawer = null; }
-      return;
-    }
-    if (change.leave) { const was = townAt; townAt = null; marketStall = null; marketDrawer = null; picks[tab] = Tw.index(was); say("Back out in Lumi Town. Where next?"); townHere(); return; }
-    const place = Tw.place(change.enter);
-    if (!place) return;
-    picks[tab] = Tw.index(place.id); // She walks up to it first.
-    if (place.retro) { townOpen("retro", place.id, place.going); return; } // The Retro café: Media → Retro, and back out in front of the café.
-    if (place.app) { townOpen(place.app, place.home ? null : place.id, place.going); return; } // Her house, the tavern, the garden: Lumi's own apps. Her house is home: leaving it doesn't come back here.
-    townAt = place.id; marketStall = null; marketDrawer = null;
+  function homeTown() { // Where she lives: her own choice (the office's or her first trip's), else LefTown.
+    const me = cityData && cityData.me;
+    return (me && me.home_town) || (snap && snap.pet.home_town) || "left";
+  }
+  function meId() { return cityData && cityData.me ? cityData.me.id : null; } // her account's id (the server's)
+  function lotData(id) { return cityData ? cityData.lots.find(function (l) { return l.id === id; }) || null : null; } // GET city's word on a lot
+  function lotOnMap(id) { return cityMap ? cityMap.lots.find(function (l) { return l.id === id; }) || null : null; } // where a lot is
+  function myLot() { const id = cityData && cityData.me && cityData.me.plot; return id ? lotOnMap(id) : null; } // her own plot, or null
+  function coinsNow() { return snap ? snap.coins : 0; }
+  function money(n) { return Number(n || 0).toLocaleString(); }
+  function aptOf(uid) { const f = 1 + Math.floor((uid - 1) / 8), d = (uid - 1) % 8 + 1; return { floor: f, door: d, label: f + "ABCDEFGH"[d - 1] }; } // (mirrors lumicity.apartment, for walking a visitor back to a door)
+
+  function cityLoad() { // GET city: the towns, every lot and who owns it, her plot, the catalog, the layout.
+    cityAsked = Date.now();
+    return G.api(API + "city").then(cityTake).catch(function () { /* asked again in a few seconds */ });
+  }
+
+  function cityTake(data) { // Keep the city's answer: the map is built again only when a town grew.
+    if (!data || !data.layout) return;
+    cityData = data;
+    if (snap && data.me && typeof data.me.coins === "number") { snap.coins = data.me.coins; $("lp-coins").textContent = money(data.me.coins); }
+    const towns = JSON.stringify(data.towns);
+    if (towns !== cityTowns || !cityMap) { cityTowns = towns; cityMap = C.build(data.layout, data.towns); if (cityAt) cityAt = C.clean(cityMap, cityAt); }
+    cityParts = {}; citySig = ""; lastList = "";                          // the lots' pictures are drawn afresh
+    townStart();
+    if (snap) render();
+  }
+
+  function townStart() { // Once both her save and the city are here: where she starts (?at=), and the first look round.
+    if (townStarted || !snap || !cityMap) return;
+    townStarted = true;
+    if (TI.parse(START_AT)) { enterInside(START_AT, true); return; }     // back from a game: inside its place, at its cabinet
+    cityAt = C.arrive(cityMap, START_AT, homeTown());                     // a doorstep, a plot, or (fresh into town) her own town's gate
+    nearThing = townReach();
+    if (!START_AT && !cityData.me.home_town && !myLot()) { townList = { kind: "home-town" }; picks[tab] = 0; say("Welcome to Lumi City! Where shall we live? 🏡"); } // (only walking in fresh: back from a game she just carries on; the list's "Choose where to live" row is always there)
+    else say(START_AT ? "Back out in Lumi City! " + streetName() + "." : "Through the gate into " + TI.TOWN_NAME[homeTown()] + "! ✨");
     townHere();
-    picks[tab] = Math.max(0, Math.min(Number(townPicks[place.id]) || 0, place.games.length - 1)); // On the cabinet she last played here.
-    say(place.hello);
-    G.sound.unlock(); G.sound.tone(659.25, .12, 0, .12); G.sound.tone(880, .16, .1, .1); // The shop bell.
   }
 
-  function townOpen(slug, back, words, at) { // Off to a game or one of Lumi's apps: she hops to the door and it opens. Leaving it walks back to `back` (a place), or nowhere (her house).
-    if (room.dataset.leaving === "true") return; // One press is enough.
-    if (townAt) { townPicks[townAt] = picks[tab]; G.store.set("town-picks", townPicks); } // Coming back puts her on the same cabinet.
-    room.dataset.leaving = "true"; // game.css: a little hop, and she's gone in.
-    say(words || "Let's play! ✨");
-    G.sound.unlock(); [587.33, 739.99, 880].forEach(function (f, i) { G.sound.tone(f, 0.12, i * 0.08, 0.16); });
-    setTimeout(function () { openApp(slug, Object.assign(back ? { back: back } : {}, at ? { at: at } : {})); }, 600); // (at: where it opens: a friend's flat, "visit-<id>")
-    setTimeout(function () { delete room.dataset.leaving; }, 2500); // Still here (a refused swap, or the browser's Back): she's back on the map.
+  function streetName() { return cityMap && cityAt ? C.streetAt(cityMap, cityAt.x, cityAt.y) : "Lumi City"; } // where she is, in words
+
+  // ---- Inside a place --------------------------------------------------------------------------------------------
+  function hallCtx(id) { // A floor's doors (from the server) and which one is hers, for town-inside.js.
+    const p = TI.parse(id), apt = cityData && cityData.me ? cityData.me.apt : null;
+    return { doors: hallDoors && hallDoors.id === id ? hallDoors.doors : null, mine: apt && p && p.kind === "hall" && p.floor === apt.floor && p.town === homeTown() ? apt.door : 0 };
   }
 
-  function townMove(action) { // The arrows in the town. On the map ◀ ▶ walk along a row and ▲ ▼ cross to the other row; ▶ off the High Street's
-    // right-hand end goes round the corner to Market Street, and ◀ off its left-hand end comes back. Inside, every arrow goes along the line.
-    const count = rows().length, by = action === "left" || action === "up" || action === "prev" ? -1 : 1, at = picks[tab];
-    if (!count) return;
-    if (!townAt) {
-      const places = Tw.street(townStreet).length;
-      if (townStreet === "high" && action === "right" && at < places && at % 3 === 2) { townGo({ street: "market" }); render(); return; }
-      if (townStreet === "market" && action === "left" && at === 0) { townGo({ street: "high" }); render(); return; }
-      if ((action === "up" || action === "down") && townStreet === "high" && at < 6) { picks[tab] = (at + 3) % 6; render(); return; } // Two rows of three: straight across the street.
+  function loadHall(id) { // GET heights/<town>/<floor>: who lives behind each of the floor's eight doors.
+    const p = TI.parse(id);
+    G.api(API + "heights/" + p.town + "/" + p.floor).then(function (data) {
+      hallDoors = { id: id, doors: data.doors || [] };
+      if (townAt === id) { townSpace = TI.space(id, hallCtx(id)); nearThing = townReach(); lastHouse = ""; lastList = ""; render(); }
+    }).catch(function () { hallDoors = { id: id, doors: [] }; });
+  }
+
+  function stepThrough() { // Through a door: she's simply there on the other side (no sliding across the screen from where she was).
+    room.dataset.townStill = "true";
+    requestAnimationFrame(function () { requestAnimationFrame(function () { delete room.dataset.townStill; }); });
+  }
+
+  function enterInside(id, fresh) { // Walk in: a lobby, a floor of flats, the office, the Arcade...
+    const p = TI.parse(id);
+    if (!p) return;
+    route = null; routeThen = null; townList = null; chatOn = false; marketStall = null; marketDrawer = null; picks[tab] = 0;
+    if (p.kind === "hall" && !(hallDoors && hallDoors.id === id)) { hallDoors = { id: id, doors: null }; loadHall(id); }
+    townAt = id; townSpace = TI.space(id, hallCtx(id)); insideAt = townSpace.start; stepThrough();
+    if (fresh && p.kind === "games") { // back from a game: by the cabinet she played
+      const at = townSpace.things.findIndex(function (t) { return t.id === townPicks[id]; });
+      if (at >= 0) insideAt = townSpace.walk.stand(at);
     }
-    picks[tab] = (at + by + count) % count;
+    nearThing = townReach();
+    say(townSpace.hello);
+    G.sound.unlock(); G.sound.tone(659.25, .12, 0, .12); G.sound.tone(880, .16, .1, .1); // the shop bell
+    lastHouse = ""; lastList = ""; townHere();
+  }
+
+  function leaveInside() { // Out of the door: back onto the street in front of it (a floor of flats: down to its lobby).
+    const was = townAt, p = TI.parse(was);
+    if (p && p.kind === "hall") { enterInside(TI.lobbyId(p.town)); say("Ding! The lobby."); return; }
+    townAt = null; townSpace = null; townList = null; marketStall = null; marketDrawer = null; route = null; routeThen = null; picks[tab] = 0; stepThrough();
+    cityAt = (cityMap && C.door(cityMap, was)) || (cityMap ? C.arrive(cityMap, was, homeTown()) : null);
+    nearThing = townReach();
+    say("Back out on " + streetName() + ". Where next?");
+    lastHouse = ""; lastList = ""; townHere();
+  }
+
+  function townOpen(slug, back, words, at) { // Off to a game or one of Lumi's apps: she hops in through the door. Leaving it walks back to `back` (a place, a plot), or nowhere (her flat).
+    if (room.dataset.leaving === "true") return;                         // one press is enough
+    room.dataset.leaving = "true";                                       // game.css: a little hop, and she's gone in
+    say(words || "Let's play! ✨");
+    G.sound.unlock(); [587.33, 739.99, 880].forEach(function (f, i) { G.sound.tone(f, 0.12, i * 0.09, 0.16); });
+    setTimeout(function () { openApp(slug, Object.assign(back ? { back: back } : {}, at ? { at: at } : {})); }, 600);
+    setTimeout(function () { delete room.dataset.leaving; }, 2500);      // still here (a refused swap, or the browser's Back): she's back in town
+  }
+
+  function visit(kind, host, back, name) { // To someone's flat ("visit-<id>") or house ("house-<id>"): their doorstep, and the way back here afterwards.
+    G.store.set("visit-back", back);                                     // Lumi Pet walks her back out here (leaveVisit)
+    townOpen("lumi-pet", null, kind === "house" ? "Off to " + name + "'s house! 🏡" : "Knock knock at " + name + "'s door! 🚪", kind + "-" + host);
+  }
+
+  function useInside(t) { // Use a thing inside: play a cabinet, a stall, the lift, a door...
+    if (!t) return;
+    const act = t.act, p = TI.parse(townAt);
+    if (act === "leave") { leaveInside(); return; }
+    if (act.indexOf("game:") === 0) { // a cabinet or table
+      const g = t.game;
+      if (g.desk && !DESK) { say(g.name + " needs a mouse and keyboard: play it on a computer."); return; } // a TV remote or a phone can't aim the Star Scope
+      townPicks[townAt] = t.id; G.store.set("town-picks", townPicks);
+      townOpen(g.slug, townAt, "Let's play " + g.name + "! ✨"); return;
+    }
+    if (act.indexOf("stall:") === 0) { marketStall = act.slice(6); marketDrawer = null; townList = { kind: "stall" }; picks[tab] = 0; say(STALL_HELLO[marketStall] || ""); return; }
+    if (act === "elevator") { openFloors(p.town); return; }
+    if (act === "directory") { openDirectory(p.town); return; }
+    if (act === "mail") { say(MAIL[Math.floor(Math.random() * MAIL.length)]); effect("cuddle", "✉"); return; }
+    if (act === "look") { say(t.say); return; }
+    if (act.indexOf("door:") === 0) { // a front door on a floor of Lumi Heights
+      const d = t.door || {}, label = p.floor + TI.LETTERS[Number(act.slice(5)) - 1];
+      if (d.mine) { townOpen("lumi-pet", null, "Home sweet home! 🏠"); return; }          // her own flat
+      if (d.id && d.name) { visit("visit", d.id, townAt, d.name); return; }            // a friend's: their doorstep
+      say(d.id ? "That door is closed. Maybe another day!" : "Nobody lives in flat " + label + " yet. 🗝"); return;
+    }
+    if (["land", "listings", "styles", "yard", "capsule"].indexOf(act) >= 0) { townList = { kind: act }; picks[tab] = 0; say(t.say); return; } // the office's counters
+    say(t.say);
+  }
+
+  // ---- Out in the city -------------------------------------------------------------------------------------------
+  function useCity(t) { // Use what she's walked up to in the city: go into a place, home, a friend's house, a sign, a gate.
+    if (!t) return;
+    if (t.kind === "place") {
+      const id = t.id;
+      if (TI.parse(id)) { enterInside(id); return; }                     // the lobbies, the office, the Arcade, the Casino, the Market, the field
+      if (id === "tavern") { townOpen("lumi-dungeons", "tavern", exploring() ? "Lumi's friends are waiting at the Lantern & Paw! 🍺" : "Into the Lantern & Paw! 🍺"); return; }
+      if (id === "garden") { townOpen("lumi-garden", "garden", "Through the gate into the Stardust Garden! 🌸"); return; }
+      if (id === "cafe") { if (RETRO_ON) townOpen("retro", "cafe", "Into the Retro café! 🕹☕"); else say("The Retro café is closed: an admin opens it by turning Retro on (Settings → Entertainment → Media → Retro)."); return; }
+      return;
+    }
+    if (t.kind === "lot") {
+      const data = lotData(t.id), lot = t.lot;
+      if (data && data.owner && data.owner.id === meId()) { townOpen("lumi-pet", "plot-" + t.id, "Home to my house! 🏡", "house-" + data.owner.id); return; }
+      if (data && data.owner) { visit("house", data.owner.id, "plot-" + t.id, data.owner.name); return; }
+      say(lot.address + " is for sale: " + money(data ? data.suggested : 0) + " coins. Ask at Lumi Realty, Downtown! 🏡"); return;
+    }
+    if (t.kind === "sign") { const s = t.sign; say(s.town ? "This is " + s.words + ", " + TI.TOWN_NAME[s.town] + ". Block " + s.block + "." : "Lumi Way, right in the middle of Downtown!"); return; }
+    if (t.kind === "gate") { townList = { kind: "leave", side: t.gate.town }; picks[tab] = 0; say("The " + TI.TOWN_NAME[t.gate.town] + " gate. Off somewhere?"); }
+  }
+
+  function thingWords(t) { // What the first row says about whatever's in reach (city or inside): {icon, name, hint}.
+    if (townAt) return { icon: t.icon, name: t.name, hint: t.hint };
+    if (t.kind === "place") { const p = t.place; return { icon: p.icon, name: p.name, hint: p.id === "cafe" && !RETRO_ON ? "Closed until Retro is turned on" : p.hint }; }
+    if (t.kind === "lot") {
+      const data = lotData(t.id) || {}, lot = t.lot;
+      if (data.owner && data.owner.id === meId()) return { icon: "🏡", name: "My house", hint: lot.address + " · home, sweet second home" };
+      if (data.owner) return { icon: "🏠", name: data.owner.name + "'s house", hint: lot.address + (data.list_price ? " · for sale: " + money(data.list_price) + " coins" : " · knock, or walk in where it's open") };
+      return { icon: "🪧", name: "Plot for sale", hint: lot.address + " · " + money(data.suggested) + " coins at Lumi Realty" };
+    }
+    if (t.kind === "sign") return { icon: "🪧", name: t.sign.words, hint: t.sign.town ? TI.TOWN_NAME[t.sign.town] + " · block " + t.sign.block : "Downtown" };
+    return { icon: "🚪", name: TI.TOWN_NAME[t.gate.town] + " gate", hint: "The way out of the city" };
+  }
+
+  function townReach() { // What's in reach where she stands: a thing inside, or a doorstep, sign or gate out in the city (or null).
+    if (townAt && townSpace && insideAt) { const i = townSpace.walk.reach(insideAt); return i >= 0 ? townSpace.things[i] : null; }
+    if (!townAt && cityMap && cityAt) return C.reach(cityMap, cityAt);
+    return null;
+  }
+
+  function useNear() { if (!nearThing) return false; if (townAt) useInside(nearThing); else useCity(nearThing); return true; } // Enter, E, or the first row
+
+  function walkRoute(points, then) { // Walk her along a route (city) or to a spot (inside), and maybe do something when she gets there.
+    townList = null; chatOn = false;
+    route = points && points.length ? points : null; routeThen = then || null;
+    if (!route) { if (then) then(); return; }
+    startWalk();
+  }
+
+  function goTo(t, use) { // Walk up to a thing (its doorstep, or where she stands to use it) and, if `use`, use it there.
+    if (!t) return;
+    if (townAt) {
+      const i = townSpace.things.indexOf(t), spot = i >= 0 ? townSpace.walk.stand(i) : insideAt;
+      walkRoute([spot], use ? function () { nearThing = townReach(); useInside(t); lastList = ""; render(); } : null);
+      return;
+    }
+    walkRoute(C.path(cityMap, cityAt, { x: t.x, y: t.y }), use ? function () { nearThing = townReach(); useCity(t); lastList = ""; render(); } : null);
+  }
+
+  function townSnap(action) { // A TV remote's press (no key held): hop to the next stop that way.
+    if (townAt) {
+      const i = townSpace.walk.step(insideAt, action === "left" || action === "up" ? -1 : 1);
+      if (i >= 0) walkRoute([townSpace.walk.stand(i)]);
+      return;
+    }
+    const s = C.step(cityMap, cityAt, action);
+    if (s) walkRoute(C.path(cityMap, cityAt, s)); else say("That's as far as this street goes!");
+  }
+
+  function townKey(action, arrow, meta) { // The keys in Lumi City. True when used here; false lets the usual handling run (Enter chooses the row).
+    if (!snap || (!cityMap && !townAt)) return arrow;                    // (still loading: nothing to walk on yet)
+    if (chatOn || townList) { // A list is open: the arrows go through it, and ◀ ▶ turn a row's own choice (a price) where it has one
+      const list = rows(), row = list[picks[tab]];
+      if ((action === "left" || action === "right") && row && row.turn) { row.turn(action === "left" ? -1 : 1); lastList = ""; render(); return true; }
+      if (arrow || action === "next" || action === "prev") {
+        const by = action === "up" || action === "left" || action === "prev" ? -1 : 1;
+        if (list.length) picks[tab] = (picks[tab] + by + list.length) % list.length;
+        render(); return true;
+      }
+      return false;
+    }
+    if (arrow && meta && meta.held) return true;                         // a held key, stick or pad: free walking moves her
+    if (arrow) { townSnap(action); return true; }
+    if (action === "next" || action === "prev") { // ⏮ ⏭: out in the city a whole block; inside, through the list
+      if (!townAt && cityMap) { walkRoute(C.path(cityMap, cityAt, C.hop(cityMap, cityAt, action === "prev" ? -1 : 1))); return true; }
+      const count = rows().length; if (count) picks[tab] = (picks[tab] + (action === "prev" ? count - 1 : 1)) % count;
+      render(); return true;
+    }
+    return false;
+  }
+
+  function townPress(event) { // Mouse and touch in Lumi City: a thing (walk to it and use it), or the ground (walk there).
+    if (!TOWN || !snap || room.dataset.leaving === "true") return;
+    const hit = event.target.closest("[data-click]"), click = hit ? hit.dataset.click : "";
+    if (townAt && townSpace) {
+      const old = { "game:": "", "stall:": "" }, id = click.indexOf("thing:") === 0 ? click.slice(6) : click === "leave" ? "exit"
+        : Object.keys(old).reduce(function (found, k) { return found || (click.indexOf(k) === 0 ? click.slice(k.length) : ""); }, ""); // the old pictures' own presses too
+      const t = id ? townSpace.things.find(function (x) { return x.id === id; }) : null;
+      if (t) { goTo(t, true); render(); return; }
+    } else if (cityMap && click.indexOf("thing:") === 0) {
+      const what = click.slice(6), kind = what.split(":")[0], id = what.slice(kind.length + 1);
+      const t = C.things(cityMap).find(function (x) { return x.kind === kind && (x.id === id || x.id === id.replace(/^gate-/, "gate-")); });
+      if (t) { goTo(t, true); render(); return; }
+    }
+    townWalkTo(event);
+  }
+
+  function townWalkTo(event) { // A press on the ground (or a middle-click anywhere): she walks there and uses nothing.
+    const at = floorAt(event);
+    if (!at) return;
+    if (townAt && townSpace) walkRoute([townSpace.walk.point(at.x, at.y)]);
+    else if (cityMap && cityAt) walkRoute(C.path(cityMap, cityAt, C.nearestFree(cityMap, at.x, at.y)));
     render();
   }
 
-  function townPress(event) { // Mouse and touch in Lumi Town: a place on the map, a cabinet or table inside, or the exit mat. It does what its row does.
-    const hit = event.target.closest("[data-click]");
-    if (!TOWN || !hit || !snap) return;
-    const what = hit.dataset.click.split(":"), key = { place: "place-", game: "game-", stall: "stall-", street: "street-" }[what[0]];
-    const at = rows().findIndex(function (row) { return row.key === (key ? key + what[1] : what[0]); });
-    if (at < 0) return;
-    picks[tab] = at; choose();
+  // ---- Walking (the free-walk loop's Lumi City half; game.js walkTick hands over to townTick) --------------------
+  function townWalkable() { // The space she's walking on now: {kind, at, free, speed}, or null.
+    if (!TOWN || !snap) return null;
+    if (townAt && townSpace && insideAt) return { kind: "inside", at: insideAt, free: townSpace.walk.free, speed: T_SPEED.inside };
+    if (!townAt && cityMap && cityAt) return { kind: "city", at: cityAt, free: C.freeFn(cityMap), speed: T_SPEED.city };
+    return null;
   }
 
-  function drawTown() { // Lumi Town: a street's map or a place's inside (town-art.js), with Lumi standing where the cursor is.
-    const here = Tw.inside(townAt), places = Tw.street(townStreet), way = Tw.STREETS[townStreet], night = sceneNow().night;
-    const onPlace = places[picks[tab]] || null; // On a map, the walk and "Show me in town" rows stand her by the signpost.
-    const cursor = here && marketStall ? Math.max(0, here.games.findIndex(function (g) { return g.stall === marketStall; })) // at a stall: she stays at it
-      : here ? picks[tab] : onPlace ? onPlace.id : "street:" + way.other;
-    const at = TwA.spot(townAt, cursor, here ? here.games.length : 0);
-    if (!room.dataset.town) { room.dataset.townStill = "true"; requestAnimationFrame(function () { requestAnimationFrame(function () { delete room.dataset.townStill; }); }); } // The first draw: she's simply there (game.css), and walks from then on.
-    room.dataset.town = here ? here.id : "map"; room.dataset.street = townStreet; room.dataset.open = "false"; // No windows onto the page's scenery: the town paints its own sky.
-    room.style.setProperty("--gx", String(at.x - 500)); room.style.setProperty("--gy", String(at.y)); // game.css walks her there.
-    $("lp-place").textContent = here ? here.room : townStreet === "market" ? "MARKET STREET" : "LUMI TOWN";
-    const signature = JSON.stringify(["town", townStreet, townAt, cursor, night]);
-    if (signature !== lastHouse) { // Only redrawn when she moves, goes in or out, changes street, or day turns to night.
-      lastHouse = signature;
-      houseArt.innerHTML = TwA.scene({ street: townStreet, at: townAt, cursor: cursor, games: here ? here.games.map(function (g) { return g.slug || g.stall; }) : [],
-        label: here ? "" : onPlace ? onPlace.name : way.walk, night: night }); // Markup authored in town-art.js; the label is escaped there.
-      try { history.replaceState(null, "", location.pathname + "?at=" + (townAt || (onPlace || places[0]).id)); } catch (e) { /* the address is a nicety */ } // A reload, or the browser's Back from a game, lands here again.
+  function townCanWalk() { return Boolean(townWalkable()) && !townList && !chatOn && room.dataset.leaving !== "true"; } // no list open, not going through a door
+
+  function townTick(now) { // One frame of walking in Lumi City.
+    walkFrame = 0;
+    const dt = walkLast ? Math.min(0.05, (now - walkLast) / 1000) : 0; walkLast = now; // (capped: a slow frame never jumps her)
+    const sp = townWalkable(), way = heldWay();
+    if (!sp || !townCanWalk() || (!(way.x || way.y) && !route)) { if (!townCanWalk()) { route = null; routeThen = null; } townStopWalk(); return; }
+    room.dataset.walking = "true";                                       // game.css: no easing while she walks
+    let next, arrived = null;
+    if (way.x || way.y) { route = null; routeThen = null; next = WK.slide(sp.free, sp.at, way.x * sp.speed.x * dt, way.y * sp.speed.y * dt); } // the keys take over from a walk she was on
+    else {
+      const went = WK.follow(sp.free, sp.at, route, sp.speed.x * dt);
+      next = { x: went.x, y: went.y }; route = went.route.length ? went.route : null;
+      if (went.done) { arrived = routeThen; route = null; routeThen = null; }
     }
+    if (Math.abs(next.x - sp.at.x) > 0.01) facing = next.x < sp.at.x ? -1 : 1;
+    if (sp.kind === "city") cityAt = next; else insideAt = next;
+    townMoved();
+    if (arrived) { townStopWalk(); arrived(); return; }                  // there: use it
+    walkFrame = requestAnimationFrame(walkTick);
+  }
+
+  function townStopWalk() { // Nothing walks her: CSS easing back, and everyone told where she stopped.
+    walkFrame = 0; walkLast = 0;
+    if (room.dataset.walking) { delete room.dataset.walking; townHereSoon(true); }
+  }
+
+  function townMoved() { // After a step: what's in reach now, her place in the picture, and (now and then) the others told.
+    const was = nearThing ? nearThing.id : null;
+    nearThing = townReach();
+    if ((nearThing ? nearThing.id : null) !== was) { if (nearThing) say(townAt ? nearThing.say : thingWords(nearThing).name + " · " + thingWords(nearThing).hint); lastList = ""; render(); }
+    else drawTown();
+    townHereSoon(false);
+  }
+
+  function townHereSoon(now) { // Tell the server where she stands: at most four times a second while walking, and once when she stops.
+    if (now) { clearTimeout(townPingTimer); townPingTimer = 0; townHere(); return; }
+    if (!townPingTimer) townPingTimer = setTimeout(function () { townPingTimer = 0; townHere(); }, Math.max(0, 250 - (Date.now() - townPinged)));
+  }
+
+  // ---- Drawing ---------------------------------------------------------------------------------------------------
+  function shownSize() { // How much of the 1000 x 500 drawing the screen shows (it's cropped to fill it): [width, height] in drawing units.
+    const box = room.getBoundingClientRect(), k = Math.max(box.width / 1000, box.height / 500) || 1;
+    return box.width && box.height ? [box.width / k, box.height / k] : [1000, 500];
+  }
+
+  function cityView() { // The camera: centred on her, never past the city's ends or its top and bottom.
+    const tw = cityMap.tile[0], s = shownSize().map(function (n) { return n * ZOOM; }), W = 1000 * ZOOM, Hv = 500 * ZOOM; // (in city units: the camera is ZOOM times a room's)
+    const L = cityMap.x0 * tw - 60, R = cityMap.x1 * tw + 60, H = cityMap.height;
+    const x = Math.max(L - (W - s[0]) / 2, Math.min(R - (W + s[0]) / 2, cityAt.x - W / 2));
+    const y = Math.max(-(Hv - s[1]) / 2 - 20, Math.min(H - (Hv + s[1]) / 2 + 20, cityAt.y - Hv * 0.56));
+    return { x: Math.round(x), y: Math.round(y) };
+  }
+
+  function myLook() { const p = snap.pet; return { glow: p.glow, colour: p.colour || null, outfit: p.outfit || {}, name: p.name || "Lumi" }; } // her own look, for drawing her in the city
+
+  function cityFigure(id, look, words, size) { // One Lumi in the city's picture (or on an inside's folk layer): her shapes in her look, a name tag, a speech line.
+    const ns = "http://www.w3.org/2000/svg", g = document.createElementNS(ns, "g"), flip = document.createElementNS(ns, "g"), w = size || 62, h = Math.round(w * 300 / 320);
+    g.setAttribute("class", "lp-folk-one lp-cw-lumi" + (id === "me" ? " lp-cw-me" : id.indexOf("npc-") === 0 ? " lp-folk-npc" : " lp-folk-guest")); g.dataset.id = id;
+    flip.setAttribute("class", "lp-folk-flip");
+    flip.innerHTML = '<ellipse cx="0" cy="1" rx="' + Math.round(w * 0.36) + '" ry="' + Math.round(w * 0.09) + '" fill="#000" opacity=".35"/>' + // a soft shadow at her paws
+      '<g class="lp-folk-anim"><svg x="' + (-w / 2) + '" y="' + (-h + 2) + '" width="' + w + '" height="' + h + '" viewBox="0 0 320 300" overflow="visible">' + lumiMarkup(look) + "</svg></g>"; // authored shapes; the look is the server's checked one
+    g.append(flip);
+    if (words) { const tag = document.createElementNS(ns, "text"); tag.setAttribute("class", "lp-folk-name"); tag.setAttribute("y", "15"); tag.textContent = words; g.append(tag); } // a person's own words: text only
+    const said = document.createElementNS(ns, "text"); said.setAttribute("class", "lp-folk-say"); said.setAttribute("y", String(-h - 6)); g.append(said);
+    return g;
+  }
+
+  function cityPut(node, x, y, faceLeft) { // Stand a Lumi at x, y in the city, in the row of the picture her feet are on (so whoever's in front is drawn in front).
+    node.style.transform = "translate(" + Math.round(x) + "px, " + Math.round(y) + "px)"; // (CSS, so the townsfolk's and visitors' steps ease; hers has no easing: game.css .lp-cw-me)
+    node.firstChild.dataset.flip = faceLeft ? "true" : "false";
+    const row = Math.max(0, Math.min(cityMap.rows - 1, Math.floor(y / cityMap.tile[1]))), slot = houseArt.querySelector('.lp-cw-folk[data-row="' + row + '"]');
+    if (slot && node.parentNode !== slot) slot.appendChild(node);
+  }
+
+  function drawTown() { // Lumi City: the city around her, or the place she's inside, and everyone else where they stand.
+    room.dataset.town = townAt ? TI.parse(townAt).kind : "city";
+    room.dataset.open = "false";                                          // the town paints its own sky
+    if (townAt && townSpace) { drawInside(); return; }
+    if (!cityMap || !cityAt) { // still asking the server for the city
+      $("lp-place").textContent = "LUMI CITY";
+      if (lastHouse !== "city-wait") { lastHouse = "city-wait"; houseArt.innerHTML = '<rect x="-200" y="-100" width="1400" height="700" fill="#0b0618"/><text x="500" y="260" font-size="18" fill="#ffe9f5" text-anchor="middle">Walking into town…</text>'; }
+      return;
+    }
+    drawCity();
+  }
+
+  function drawCity() { // The chunks near the camera (each drawn once and kept), then her and everyone placed.
+    const map = cityMap, tw = map.tile[0], night = sceneNow().night, view = cityView();
+    $("lp-place").textContent = streetName().toUpperCase();
+    const left = view.x - 340, right = view.x + 1000 * ZOOM + 340;        // a margin either side: walking a little doesn't redraw
+    const shown = map.chunks.filter(function (ch) { return ch.c1 * tw > left && ch.c0 * tw < right; });
+    const sig = JSON.stringify(["city", shown.map(function (ch) { return ch.id; }), night]);
+    if (sig !== citySig || lastHouse !== sig) { // a new part of the city came into view (or the lots changed): draw it, then put everyone back in
+      citySig = sig; lastHouse = sig;
+      const lots = {};
+      (cityData.lots || []).forEach(function (l) { lots[l.id] = l; });
+      const parts = shown.map(function (ch) { const k = ch.id + ":" + night; return cityParts[k] || (cityParts[k] = CA.chunk(map, ch, lots, night)); });
+      houseArt.innerHTML = CA.scene(map, parts, { x: left, w: right - left }, night); // authored in city-art.js and estate-art.js; owners' names escaped there
+      cityFolkAll();
+      try { history.replaceState(null, "", location.pathname + "?at=" + C.nearestDoor(map, cityAt)); } catch (e) { /* the address is a nicety */ }
+    }
+    placeCity(view);
+  }
+
+  function placeCity(view) { // Move the camera and her; light up whatever's in reach.
+    view = view || cityView();
+    houseArt.setAttribute("viewBox", view.x + " " + view.y + " " + 1000 * ZOOM + " " + 500 * ZOOM);
+    if (folkArt) folkArt.replaceChildren();                               // (the city draws everyone in its own picture)
+    let me = houseArt.querySelector('[data-id="me"]');
+    if (!me) me = cityFigure("me", myLook(), "", 64);
+    cityPut(me, cityAt.x, cityAt.y, facing < 0);
+    const mark = nearThing ? nearThing.kind + ":" + nearThing.id : "";
+    houseArt.querySelectorAll(".lp-cw-thing").forEach(function (g) { g.classList.toggle("lp-cw-near", g.dataset.thing === mark); });
+    room.style.setProperty("--gx", String(Math.round((cityAt.x - view.x) / ZOOM - 500))); // her speech bubble follows her (in a room's units)
+    room.style.setProperty("--gy", String(Math.round((cityAt.y - view.y) / ZOOM)));
+    room.style.setProperty("--gs", "0.45");
+  }
+
+  function drawInside() { // A place's inside: its picture (with the thing in reach lit), her on its floor, and everyone else in here.
+    const sp = townSpace, night = sceneNow().night, on = nearThing ? nearThing.id : null;
+    $("lp-place").textContent = sp.name;
+    const sig = JSON.stringify(["in", sp.id, on, night, hallDoors && hallDoors.id === sp.id ? hallDoors.doors : null]);
+    if (sig !== lastHouse) {
+      lastHouse = sig;
+      houseArt.innerHTML = TI.art(sp, { on: on, night: night });          // authored in town-inside.js and town-art.js; names escaped there
+      try { history.replaceState(null, "", location.pathname + "?at=" + sp.id); } catch (e) { /* the address is a nicety */ }
+    }
+    const s = shownSize(), panels = room.getBoundingClientRect().width > 1000; // a wide screen: the side panels float over the picture, leaving about x 290-710 clear
+    const seen = panels ? Math.min(s[0], 440) : s[0], reach = Math.max(0, (sp.reach[1] - sp.reach[0] - seen) / 2); // so a long hallway pans to keep her (and what she's near) out from under them
+    const pan = Math.round(Math.max(-reach, Math.min(reach, insideAt.x - 500)));     // a narrow screen follows her along a long hallway
+    houseArt.setAttribute("viewBox", pan + " 0 1000 500");
+    if (folkArt) folkArt.setAttribute("viewBox", pan + " 0 1000 500");
+    room.style.setProperty("--gx", String(Math.round(insideAt.x - 500 - pan)));
+    room.style.setProperty("--gy", String(Math.round(insideAt.y)));
+    room.style.setProperty("--gs", sp.walk.scale(insideAt.y).toFixed(3));
+    room.style.setProperty("--face", String(facing));
     drawFolk();
+  }
+
+  // ---- The town's list -------------------------------------------------------------------------------------------
+  function backRow(words) { return { key: "list-back", icon: "‹", name: words || "Back", hint: "Escape, Back or B does it too", local: function () { townList = null; marketStall = null; marketDrawer = null; picks[tab] = 0; } }; }
+
+  function townRows() { // What the panel offers in Lumi City: a list that's open, else what's in reach first, then the town's own rows.
+    if (chatOn) return Tw.chatRows(chatCtx());
+    if (townList) return listRows(townList);
+    const out = [];
+    if (townAt && townSpace) { // inside: every thing in here (walk to it and use it), the one in reach first, so a remote and a screen reader reach them all
+      const things = townSpace.things.slice().sort(function (a, b) { return (b === nearThing) - (a === nearThing); });
+      things.forEach(function (t) { out.push({ key: "thing-" + t.id, icon: t.icon, name: t.name, hint: t === nearThing ? "Right here · Enter" : t.hint, local: function () { if (t === nearThing) useInside(t); else goTo(t, true); } }); });
+    } else if (cityMap) {
+      if (nearThing) { const w = thingWords(nearThing); out.push({ key: "use", icon: w.icon, name: w.name, hint: w.hint, local: useNear }); } // out in the city: whatever's in reach first
+      out.push({ key: "goto", icon: "🧭", name: "Go to…", hint: "Home, the office, a place, a friend's house: she walks there", local: function () { townList = { kind: "goto" }; picks[tab] = 0; say("Where shall we go?"); } });
+      out.push({ key: "where", icon: "📍", name: "Where am I?", hint: streetName(), local: function () { say("We're on " + streetName() + "." + (myLot() ? " Home is " + myLot().address + "." : "")); } });
+      if (cityData && !cityData.me.home_town && !myLot()) out.push({ key: "home-town", icon: "🏡", name: "Choose where to live", hint: "LefTown or Right-City", local: function () { townList = { kind: "home-town" }; picks[tab] = 0; } });
+    }
+    out.push({ key: "seen", icon: "👀", name: "Show me in town: " + (snap.pet.town_seen === false ? "off" : "on"),
+      hint: snap.pet.town_seen === false ? "Nobody sees your Lumi here, and you still see theirs" : "Others in Lumi City see your Lumi, in her clothes, with her name", send: { action: "town_seen" } });
+    out.push({ key: "say", icon: "💬", name: "Say something", hint: "Everyone near you hears it: a phrase, or type your own", local: function () { chatCtx().open(); } });
+    return out;
+  }
+
+  function goPlaces() { // "Go to…": home, her house, the office and every place, friends' houses, the gates.
+    const out = [], map = cityMap, mineLot = myLot(), town = homeTown();
+    const go = function (key, icon, name, hint, t) { out.push({ key: key, icon: icon, name: name, hint: hint, local: function () { say("Off we go! 🧭"); goTo(t, true); } }); };
+    const placeThing = function (id) { return C.things(map).find(function (t) { return t.kind === "place" && t.id === id; }); };
+    go("go-home", "🏢", "Home: " + (town === "right" ? "Lumi Heights East" : "Lumi Heights West"), "My apartment building" + (cityData.me.apt ? " · flat " + cityData.me.apt.label : ""), placeThing(TI.lobbyId(town)));
+    if (mineLot) go("go-house", "🏡", "My house", mineLot.address, C.things(map).find(function (t) { return t.kind === "lot" && t.id === mineLot.id; }));
+    map.places.forEach(function (p) { if (p.id !== TI.lobbyId(town)) go("go-" + p.id, p.icon, p.name, p.hint, placeThing(p.id)); });
+    (cityData.lots || []).filter(function (l) { return l.owner && l.owner.id !== meId(); }).forEach(function (l) { // everyone's houses
+      const lot = lotOnMap(l.id);
+      if (lot) go("go-lot-" + l.id, "🏠", l.owner.name + "'s house", lot.address, C.things(map).find(function (t) { return t.kind === "lot" && t.id === l.id; }));
+    });
+    ["left", "right"].forEach(function (side) { go("go-gate-" + side, "🚪", TI.TOWN_NAME[side] + " gate", "The way out, at the " + side + " end", C.things(map).find(function (t) { return t.id === "gate-" + side; })); });
+    return out.concat([backRow()]);
+  }
+
+  function openFloors(town) { // The lift: the lobby, and every floor where someone lives (GET heights/<town>).
+    townList = { kind: "floors", town: town, floors: null }; picks[tab] = 0; say("Going up! Which floor?");
+    G.api(API + "heights/" + town).then(function (data) { if (townList && townList.kind === "floors") { townList.floors = data.floors || []; lastList = ""; render(); } })
+      .catch(function () { if (townList && townList.kind === "floors") { townList.floors = []; lastList = ""; render(); } });
+  }
+
+  function openDirectory(town) { // The front desk: who lives in this building (GET houses), to walk to their door.
+    townList = { kind: "directory", town: town, flats: null }; picks[tab] = 0; say("Who shall we visit? 🛎");
+    G.api(API + "houses").then(function (data) { if (townList && townList.kind === "directory") { townList.flats = (data.flats || []).filter(function (f) { return (f.town || "left") === town; }); lastList = ""; render(); } })
+      .catch(function () { if (townList && townList.kind === "directory") { townList.flats = []; lastList = ""; render(); } });
+  }
+
+  function toDoor(town, apt) { // From the lobby up to a flat's door: the lift to its floor, then she walks to the door.
+    enterInside(TI.hallId(town, apt.floor));
+    const t = townSpace.things.find(function (x) { return x.id === "door-" + apt.door; });
+    if (t) goTo(t, false);
+  }
+
+  function estate(send, words) { // Ask Lumi Realty (POST estate): the city's new state comes back, with what she says about it.
+    if (busy) return;
+    busy = true; pendingConfirm = null;
+    G.api(API + "estate", send).then(function (data) {
+      cityTake(data);
+      const said = data.said || {};
+      say(said.text || words || "Done! ✨");
+      if (said.won) effect("play", "✧ ✦ ✧"); else effect("cuddle", "🏡");
+      refresh();                                                           // her save changed too (coins, home town, what she owns)
+    }).catch(function (refused) { say(refused.message); }).then(function () { busy = false; lastList = ""; render(); });
+  }
+
+  function sure(key, ask, send, words) { // A row that spends coins (or gives up a plot): the first press asks, the second does it.
+    return function () { if (pendingConfirm !== key) { pendingConfirm = key; say(ask); return; } estate(send, words); };
+  }
+
+  function listRows(list) { // The rows of a list open in the town's panel.
+    const me = cityData ? cityData.me : null, cat = cityData ? cityData.catalog : null, mineLot = myLot(), mineData = mineLot ? lotData(mineLot.id) : null;
+    if (list.kind === "goto") return goPlaces();
+    if (list.kind === "home-town") return ["left", "right"].map(function (side) {
+      return { key: "town-" + side, icon: side === "left" ? "🌷" : "⭐", name: "Live in " + TI.TOWN_NAME[side], hint: side === "left" ? "Flower lanes off Petal Avenue · Lumi Heights West" : "Star streets off Starlight Boulevard · Lumi Heights East",
+               local: function () { townList = null; estate({ action: "home_town", item: side }, "Welcome home to " + TI.TOWN_NAME[side] + "! 🏡"); } };
+    }).concat([backRow("Decide later")]);
+    if (list.kind === "leave") return [
+      { key: "leave-home", icon: "🏠", name: "Home to my flat", hint: "Back to her room (Lumi Pet)", local: function () { townList = null; townOpen("lumi-pet", null, "Home again! 🏠"); } },
+      { key: "leave-games", icon: "🎮", name: "Leave Lumi City", hint: "Back to Games", local: function () { townList = null; if (framed) G.close(); else location.href = "/media"; } },
+      backRow("Stay in town")];
+    if (list.kind === "floors") {
+      const here = TI.parse(townAt), out = [];
+      if (here && here.kind === "hall") out.push({ key: "floor-lobby", icon: "🛎", name: "Lobby", hint: "Down to the front desk and the street door", local: function () { enterInside(TI.lobbyId(list.town)); } });
+      if (list.floors === null) out.push({ key: "floors-wait", icon: "⏳", name: "The lift is coming…", hint: "One moment", note: "One moment…" });
+      else (list.floors || []).forEach(function (f) {
+        const mine = me && me.apt && me.apt.floor === f && homeTown() === list.town;
+        if (here && here.kind === "hall" && here.floor === f) return;     // (already on this floor)
+        out.push({ key: "floor-" + f, icon: mine ? "🏠" : "⏫", name: "Floor " + f + (mine ? " (home)" : ""), hint: mine ? "My flat is " + me.apt.label : "Eight front doors", local: function () { enterInside(TI.hallId(list.town, f)); } });
+      });
+      if (me && me.apt && homeTown() === list.town && !(list.floors || []).includes(me.apt.floor)) out.push({ key: "floor-" + me.apt.floor, icon: "🏠", name: "Floor " + me.apt.floor + " (home)", hint: "My flat is " + me.apt.label, local: function () { enterInside(TI.hallId(list.town, me.apt.floor)); } });
+      return out.concat([backRow()]);
+    }
+    if (list.kind === "directory") {
+      const out = [];
+      if (me && me.apt && homeTown() === list.town) out.push({ key: "dir-me", icon: "🏠", name: "My flat (" + me.apt.label + ")", hint: "Up the lift and home", local: function () { toDoor(list.town, me.apt); } });
+      if (list.flats === null) out.push({ key: "dir-wait", icon: "⏳", name: "Looking at the list…", hint: "One moment", note: "One moment…" });
+      else if (!list.flats.length) out.push({ key: "dir-none", icon: "🛎", name: "Nobody else lives here yet", hint: "Friends with a Lumi who live in " + TI.TOWN_NAME[list.town] + " show here", note: "Nobody else lives here yet." });
+      else list.flats.forEach(function (f) {
+        const apt = f.apt || aptOf(f.id);
+        out.push({ key: "dir-" + f.id, icon: f.home ? "💡" : "🚪", name: f.name + " · flat " + apt.label, hint: (f.home ? f.name + " is home" : "Nobody's home") + " · " + (f.door === "open" ? "door open" : "knock first"),
+                   local: function () { toDoor(list.town, apt); say("Up to flat " + apt.label + "! ⏫"); } });
+      });
+      return out.concat([backRow()]);
+    }
+    if (list.kind === "stall") return stallRows(marketStall).concat([backRow("Back to the stalls")]);
+    if (!cityData) return [backRow()];
+    if (list.kind === "land") { // office land: cheapest first; her own plot first if she has one
+      const out = [];
+      if (mineLot) out.push({ key: "my-plot", icon: "🏡", name: "My plot: " + mineLot.address, hint: mineData && mineData.list_price ? "For sale at " + money(mineData.list_price) + " coins" : "List it, sell it, or change the house", local: function () { townList = { kind: "plot", price: null }; picks[tab] = 0; } });
+      const free = cityData.lots.filter(function (l) { return !l.owner; }).sort(function (a, b) { return a.suggested - b.suggested || (a.id < b.id ? -1 : 1); });
+      free.slice(0, 40).forEach(function (l) {
+        const lot = lotOnMap(l.id);
+        if (!lot) return;
+        const row = { key: "buy-" + l.id, icon: l.frontage === "avenue" ? "🌟" : "🪧", name: lot.address, hint: money(l.suggested) + " coins" + (l.frontage === "avenue" ? " · on the avenue" : "") + (mineLot ? " · you have a home already" : "") };
+        if (mineLot) row.note = "One plot each: sell yours first to buy another.";
+        else row.local = sure(row.key, "Buy " + lot.address + " for " + money(l.suggested) + " coins? Choose it again to buy.", { action: "buy", plot: l.id });
+        out.push(row);
+      });
+      if (!free.length) out.push({ key: "land-none", icon: "🏗", name: "Every plot is taken", hint: "The town grows a new block soon", note: "Every plot is taken just now." });
+      return out.concat([backRow()]);
+    }
+    if (list.kind === "listings") {
+      const out = [], sold = cityData.lots.filter(function (l) { return l.owner && l.list_price; }).sort(function (a, b) { return a.list_price - b.list_price; });
+      sold.forEach(function (l) {
+        const lot = lotOnMap(l.id), mine = l.owner.id === meId();
+        if (!lot) return;
+        const row = { key: "listing-" + l.id, icon: mine ? "🏡" : "📌", name: lot.address, hint: money(l.list_price) + " coins from " + (mine ? "you" : l.owner.name) + " · suggested " + money(l.suggested) };
+        if (mine) row.note = "That's your own listing."; else if (mineLot) row.note = "One plot each: sell yours first to buy another.";
+        else row.local = sure(row.key, "Buy " + lot.address + " from " + l.owner.name + " for " + money(l.list_price) + " coins? Choose it again to buy.", { action: "buy_listing", plot: l.id, price: l.list_price, version: l.version });
+        out.push(row);
+      });
+      if (!sold.length) out.push({ key: "listing-none", icon: "📌", name: "Nothing on the board", hint: "Neighbours' plots for sale show here", note: "Nobody is selling just now." });
+      return out.concat([backRow()]);
+    }
+    if (list.kind === "plot") { // her own plot: list it (◀ ▶ the price), take it off, sell to the office, the house style and the yard
+      if (!mineLot || !mineData) return [{ key: "no-plot", icon: "🪧", name: "No plot yet", hint: "Land for sale is at the counter", note: "You don't own a plot yet." }, backRow()];
+      const L = cityData.layout.price, low = Math.ceil(mineData.suggested * L.list_min), high = Math.floor(mineData.suggested * L.list_max), stepBy = Math.max(50, Math.round(mineData.suggested * 0.05 / 50) * 50);
+      if (list.price === null) list.price = mineData.list_price || mineData.suggested;
+      const out = [{ key: "plot-list", icon: "🏷", name: (mineData.list_price ? "Change the price: " : "List it for ") + money(list.price) + " coins", hint: "◀ ▶ the price · " + money(low) + " to " + money(high) + " · suggested " + money(mineData.suggested),
+        turn: function (by) { list.price = Math.max(low, Math.min(high, list.price + by * stepBy)); },
+        local: sure("plot-list", "Put " + mineLot.address + " up for " + money(list.price) + " coins? Choose it again.", { action: "list", price: list.price }) }];
+      if (mineData.list_price) out.push({ key: "plot-unlist", icon: "✋", name: "Take it off the market", hint: "Listed at " + money(mineData.list_price) + " coins", local: function () { estate({ action: "unlist" }); } });
+      const back = Math.round(mineData.suggested * L.sell_office);
+      out.push({ key: "plot-sell", icon: "💰", name: "Sell it to the office: " + money(back) + " coins", hint: "At once, for half the suggested price · the house and yard things stay yours",
+                 local: sure("plot-sell", "Sell " + mineLot.address + " to Lumi Realty for " + money(back) + " coins? Choose it again.", { action: "sell" }) });
+      out.push({ key: "plot-styles", icon: "🏠", name: "Change the house", hint: "Thirty styles", local: function () { townList = { kind: "styles" }; picks[tab] = 0; } });
+      out.push({ key: "plot-yard", icon: "🌷", name: "Decorate the yard", hint: "Fence, mailbox, path, lamp and ornament", local: function () { townList = { kind: "yard" }; picks[tab] = 0; } });
+      return out.concat([backRow()]);
+    }
+    if (list.kind === "styles") return (cat.styles || []).map(function (s) {
+      const owned = me.styles.indexOf(s.id) >= 0 || !s.price, up = mineData && mineData.style === s.id;
+      const row = { key: "style-" + s.id, icon: up ? "✓" : owned ? s.icon : "✧", name: s.name, hint: up ? "My house now" : owned ? "Yours · Enter puts it up" + (mineLot ? "" : " (once you own a plot)") : money(s.price) + " coins · " + s.hint };
+      if (up) row.note = s.name + " is my house already!";
+      else if (owned) { if (mineLot) row.local = function () { estate({ action: "style_set", item: s.id }, "Ta-da! A " + s.name + "! 🏡"); }; else row.note = "Buy a plot first, then the house goes up on it."; }
+      else row.local = sure(row.key, "Buy the " + s.name + " for " + money(s.price) + " coins? Choose it again.", { action: "style_buy", item: s.id });
+      return row;
+    }).concat([backRow()]);
+    if (list.kind === "yard") return (cat.slots || []).map(function (slot) {
+      const put = mineData && mineData.yard ? mineData.yard[slot.id] : "", item = (cat.yard[slot.id] || []).find(function (i) { return i.id === put; });
+      return { key: "slot-" + slot.id, icon: slot.icon, name: slot.name + ": " + (item ? item.name : "nothing yet"), hint: "Enter to choose", local: function () { townList = { kind: "yard-slot", slot: slot.id }; picks[tab] = 0; } };
+    }).concat([{ key: "yard-capsule", icon: "🎁", name: cat.capsule.name, hint: money(cat.capsule.price) + " coins · yard treasures you can only win", local: function () { townList = { kind: "capsule" }; picks[tab] = 0; } }, backRow()]);
+    if (list.kind === "yard-slot") {
+      const slot = list.slot, put = mineData && mineData.yard ? mineData.yard[slot] : "";
+      const out = [{ key: "yard-none", icon: "○", name: "Nothing here", hint: "Clear this spot", local: function () { if (mineLot) estate({ action: "yard_set", slot: slot, item: "" }, "Cleared!"); else say("Buy a plot first!"); } }];
+      (cat.yard[slot] || []).forEach(function (i) {
+        const owned = me.yard.indexOf(i.id) >= 0, here = put === i.id;
+        const row = { key: "yard-" + i.id, icon: here ? "✓" : owned ? i.icon : i.price ? "✧" : "🔒", name: i.name, hint: here ? "In the yard now" : owned ? "Yours · Enter puts it out" : i.price ? money(i.price) + " coins · " + i.hint : i.rarity + " · only from the " + cat.capsule.name };
+        if (here) row.note = i.name + " is out already.";
+        else if (owned) row.local = function () { if (mineLot) estate({ action: "yard_set", slot: slot, item: i.id }, i.name + " is out! 🌷"); else say("Buy a plot first, then the yard is yours to decorate."); };
+        else if (i.price) row.local = sure(row.key, "Buy the " + i.name + " for " + money(i.price) + " coins? Choose it again.", { action: "yard_buy", item: i.id });
+        else row.note = i.name + " only comes from the " + cat.capsule.name + ".";
+        out.push(row);
+      });
+      return out.concat([backRow("Back to the yard")]);
+    }
+    if (list.kind === "capsule") return [
+      { key: "capsule-turn", icon: "🎁", name: "Turn the " + cat.capsule.name, hint: money(cat.capsule.price) + " coins · a repeat pays back half its value", local: sure("capsule-turn", "Turn it for " + money(cat.capsule.price) + " coins? Choose it again.", { action: "capsule" }) },
+      backRow()];
+    return [backRow()];
   }
 
   // ---- Shopping at the Market (2026-11-14): Lumi Pet's and Lumi's Garden's own lists, in town (Doll: "shop right in town").
@@ -273,38 +779,49 @@
   let emoteList = [], emoteTimer = 0; // the emotes the server offers (lumitown.EMOTES); her own emote's end
   const heardIds = new Set(), mine = new Set(), muted = new Set(G.store.get("town-muted", [])); // lines already shown; my own lines; who this device has muted
 
-  function townHere() { // Tell the server where she is (unless "Show me in town" is off) and hear who else is in town, and what's been said here.
+  function townHere() { // Tell the server where she stands (unless "Show me in town" is off), and hear who else is near, and what's been said here.
     if (!TOWN || !snap) return;
-    townPolled = Date.now();
+    const inside = Boolean(townAt), spot = inside ? insideAt : cityAt;
+    if (!spot || (!inside && !cityMap)) return;                           // not placed yet
+    townPolled = Date.now(); townPinged = Date.now();
     townListen();
-    const places = Tw.street(townStreet), at = townAt || (places[picks[tab]] || places[0]).id;
-    G.api(API + "town", { at: at, street: townStreet, inside: Boolean(townAt) }).then(function (data) {
+    const body = { at: inside ? townAt : "city", inside: inside, x: Math.round(spot.x), y: Math.round(spot.y), face: facing < 0 ? -1 : 1 }; // (Lumi City: where she stands, not just which place)
+    if (!inside) body.district = C.district(cityMap, spot.x);             // which block she's in: who's near, and who hears her
+    G.api(API + "town", body).then(function (data) {
       if (data.place && data.place !== chatPlace) { chatPlace = data.place; chatLog = []; drawLog(); } // A new place: its own chatter.
       if (data.phrases) phrases = data.phrases;
       if (data.emotes) emoteList = data.emotes;
       if (data.you) myId = data.you;
       hear(data.lines || []); // (A TV, which has no stream, hears lines this way, every few seconds.)
-      visitors = (data.here || []).filter(function (v) { return v && v.look && Tw.place(v.at); });
-      visitors.forEach(function (v) { // A hello, once a visit, for someone on this street.
-        if (greeted.has(v.id) || Tw.place(v.at).street !== townStreet) return;
+      visitors = (data.here || []).filter(function (v) { return v && v.look && Number.isFinite(v.x) && Number.isFinite(v.y); }); // the server sends only who's near (the same place, or within a block)
+      visitors.forEach(function (v) { // A hello, once a visit, for someone near.
+        if (greeted.has(v.id)) return;
         greeted.add(v.id);
-        say(v.name + "'s " + (v.look.name || "Lumi") + " is in town! 👋");
+        say(v.name + "'s " + (v.look.name || "Lumi") + " is here! 👋");
       });
       drawFolk();
     }).catch(function () { /* the town is fine on its own */ });
   }
 
-  function sharesPlace(v) { // A visitor in the same place as her (so they hear each other): inside the same place, or both out on this street.
-    return townAt ? v.inside === true && v.at === townAt : !v.inside && Tw.place(v.at).street === townStreet;
+  function sharesPlace(v) { // A visitor where she is (so they're drawn here): inside the same place, or both out in the city.
+    return townAt ? v.inside === true && v.at === townAt : !v.inside;
   }
+
+  function folkNode(id) { return houseArt.querySelector('[data-id="' + id + '"]') || (folkArt && folkArt.querySelector('[data-id="' + id + '"]')); } // a Lumi's figure, in the city's picture or on the folk layer
 
   function townListen() { // A computer or phone hears lines and moves at once (GET town/stream); a TV's play pass can't ride a stream, so it polls.
     if (!(TOWN || roomOn()) || townFeed || player || !window.EventSource) return;
     townFeed = new EventSource(API + "town/stream"); // (It reconnects by itself after a blip.)
     townFeed.addEventListener("said", function (event) { try { hear([JSON.parse(event.data)]); } catch (e) { /* a garbled line is skipped */ } });
     townFeed.addEventListener("moved", function () { clearTimeout(movedSoon); movedSoon = setTimeout(TOWN ? townHere : housePing, 300); }); // Someone came, went or moved: who's here now (once, for a burst)
-    townFeed.addEventListener("walk", function (event) { // Someone in her room of a flat took a step.
+    townFeed.addEventListener("city", function () { if (TOWN) cityLoad(); }); // Lumi City: a plot was bought, sold, listed or built on: look again
+    townFeed.addEventListener("walk", function (event) { // Someone near her took a step: in the city, in a place, or in her room of a flat.
       try {
+        if (TOWN) { // Lumi City: move their Lumi (someone new nearby: ask who's here)
+          const s = JSON.parse(event.data), v = visitors.find(function (q) { return q.id === s.uid; });
+          if (!v) { clearTimeout(movedSoon); movedSoon = setTimeout(townHere, 300); return; }
+          v.x = s.x; v.y = s.y; v.face = s.face; if (s.district) v.district = s.district; placeVisitor(v); return;
+        }
         const step = JSON.parse(event.data), p = houseFolk.find(function (q) { return q.id === step.uid; });
         if (!p) { housePingSoon(); return; }
         p.x = step.x; p.y = step.y; p.face = step.face; placeFolk(p);
@@ -328,7 +845,7 @@
       chatLog.push(line); fresh = true;
       if (chatLog.length > 6) chatLog.shift();
       if (mine.has(line.id)) return;                                     // Her own: drawn by townSay.
-      const words = folkArt && folkArt.querySelector('[data-id="guest-' + Number(line.uid) + '"] .lp-folk-say');
+      const said = folkNode("guest-" + Number(line.uid)), words = said && said.querySelector(".lp-folk-say"); // (in the city's picture, or on the folk layer)
       if (words) { // Their Lumi's speech line, as the townsfolk's (game.css .lp-folk-say).
         words.textContent = line.text.length > 30 ? line.text.slice(0, 29) + "…" : line.text; // short over her head (the panel's log has it all)
         words.parentNode.classList.add("saying");
@@ -377,12 +894,14 @@
     G.api(API + "town/emote", { emote: id }).then(function () {
       clearTimeout(emoteTimer);
       room.dataset.emote = id; say(emoteIcon(id)); // game.css lp-emote-*: a little animation on her
+      const me = TOWN ? houseArt.querySelector('[data-id="me"]') : null;  // Lumi City: she's drawn in the city's picture, so her figure plays it
+      if (me) { me.classList.remove("lp-emote-" + id); void me.getBoundingClientRect(); me.classList.add("lp-emote-" + id); setTimeout(function () { me.classList.remove("lp-emote-" + id); }, 1800); }
       emoteTimer = setTimeout(function () { delete room.dataset.emote; }, 1800);
     }).catch(function (refused) { say(refused.message); });
   }
 
   function folkEmote(uid, id) { // Someone where she is waved, danced...: their Lumi plays it, with its icon over their head.
-    const g = folkArt && folkArt.querySelector('[data-id="guest-' + Number(uid) + '"]');
+    const g = folkNode("guest-" + Number(uid));
     if (!g || !/^[a-z]{1,16}$/.test(id || "")) return;
     const cls = "lp-emote-" + id, words = g.querySelector(".lp-folk-say");
     g.classList.remove(cls); void g.getBoundingClientRect(); g.classList.add(cls); // (again from the start if it was already playing)
@@ -413,8 +932,13 @@
   function visitNames() { return { host: visitView.name, lumi: (visitView.look && visitView.look.name) || "Lumi" }; } // Whose flat, for the guest lines (room-ui.js).
 
   function visitStart() { // Lumi Pet opened to visit someone's flat: in we go, or knock, or a closed door.
-    G.api(API + "houses/" + VISIT).then(function (data) {
+    G.api(API + "houses/" + VISIT + (AT_HOUSE ? "?home=house" : "")).then(function (data) {
       visitDoor = data;
+      if (data.access === "own" && AT_HOUSE) { // her own house: her second home's rooms, hers to decorate
+        HOME2 = true; VISIT = null; visitDoor = null; roomAt = Ru.clean({ room: "bedroom", at: 1 });
+        if (snap) take(snap);                                            // (take swaps in the house's rooms)
+        say("Home sweet second home! 🏡"); lastList = ""; lastHouse = ""; housePing(); render(); return;
+      }
       if (data.access === "own") { location.replace(location.pathname); return; } // Her own flat: just Lumi Pet.
       if (data.access === "in") {
         visitView = data; visitKnock = null; roomAt = Ru.clean({ room: "bedroom", at: 1 });
@@ -474,7 +998,7 @@
     room.dataset.leaving = "true";
     say(visitView ? "Bye bye! Thanks for having me~ 👋" : "Back to town!");
     G.sound.unlock(); [783.99, 659.25, 523.25].forEach(function (f, i) { G.sound.tone(f, 0.12, i * 0.09, 0.16); });
-    setTimeout(function () { openApp("lumi-town", { at: "home" }); }, 700);
+    setTimeout(function () { openApp("lumi-town", { at: G.store.get("visit-back", "home") }); }, 700); // back out to where she came from: the hallway outside their flat, or the street by their house
     setTimeout(function () { delete room.dataset.leaving; }, 2500);
   }
 
@@ -482,7 +1006,7 @@
     if (!VISIT || !visitView) return;
     visitView = null; houseFolk = []; drawHouseFolk();
     say("Time to go home! 👋");
-    setTimeout(function () { openApp("lumi-town", { at: "home" }); }, 1500);
+    setTimeout(function () { openApp("lumi-town", { at: G.store.get("visit-back", "home") }); }, 1500);
   }
 
   function knockRows() { // Someone at her own door: let them in, or not now.
@@ -570,7 +1094,7 @@
     if (!snap || TOWN || !roomOn() || (VISIT && !visitView)) return;
     housePinged = Date.now();
     townListen();
-    G.api(API + "houses/here", { host: VISIT, room: roomAt.room, x: roomAt.x, y: roomAt.y, face: facing }).then(function (data) {
+    G.api(API + "houses/here", { host: VISIT, room: roomAt.room, x: roomAt.x, y: roomAt.y, face: facing, home: AT_HOUSE ? "house" : "flat" }).then(function (data) {
       if (data.place && data.place !== chatPlace) { chatPlace = data.place; chatLog = []; drawLog(); }
       if (data.phrases) phrases = data.phrases;
       if (data.emotes) emoteList = data.emotes;
@@ -626,77 +1150,81 @@
     g.firstChild.style.transform = "scale(" + (p.face < 0 ? -s : s) + ", " + s + ")";
   }
 
-  function openFlats() { // Lumi Town's list of friends' flats (GET houses): whose door she may knock at, or walk through.
-    flatsOn = true; flats = null; picks[tab] = 0; chatOn = false;
-    say("Whose flat shall we visit? 🏠");
-    G.api(API + "houses").then(function (data) { flats = data.flats || []; }).catch(function () { flats = []; }).then(function () { lastList = ""; render(); });
+  // ---- Who else is about in Lumi City (2026-11-19): the townsfolk strolling Downtown's pavements, and everyone else's
+  // Lumis near her (POST town says who: the same place, or within a block). Out in the city they're drawn in the city's
+  // own picture, row by row (city-art.js), so whoever stands further forward is in front; inside a place, on the folk
+  // layer over its picture. (Visits happen by walking to a door now: tap-a-Lumi-to-visit is gone, Doll 2026-11-19.)
+  function npcSpot(n, i) { // A townsfolk's stroll along one of Downtown's pavements: {s (their stroll), y, min, max}.
+    const ch = cityMap.chunks.find(function (c) { return c.kind === "downtown"; }), tw = cityMap.tile[0], th = cityMap.tile[1];
+    const min = (ch.c0 + 1) * tw, max = (ch.c1 - 1) * tw;                  // Downtown, end to end
+    const s = strolls[n.id] || (strolls[n.id] = { x: min + (max - min) * ((i * 0.37 + 0.13) % 1), until: 0, left: false });
+    return { s: s, y: (n.street === "market" ? cityMap.layout.avenue[1] + 1.6 : cityMap.layout.avenue[0] - 0.4) * th, min: min, max: max }; // the High Street folk up top, Market Street's down below
   }
 
-  function flatsRows() {
-    const out = flats === null ? [{ key: "flats-wait", icon: "⏳", name: "Looking up the flats…", hint: "One moment", note: "One moment…" }]
-      : flats.map(function (f) {
-        return { key: "flat-" + f.id, icon: f.home ? "🏠" : "🏚", name: f.name + "'s flat",
-                 hint: (f.home ? f.name + " is home" : "Nobody's home") + " · " + (f.door === "open" ? "door open" : "knock first") + (f.visitors ? " · " + f.visitors + " visiting" : ""),
-                 local: function () { flatsOn = false; townOpen("lumi-pet", null, "Off to " + f.name + "'s flat! 🏠", "visit-" + f.id); } };
+  function cityPutStyle(node, x, y, faceLeft) { // Stand a Lumi on the folk layer (inside a place): moved by CSS, so a step eases.
+    node.style.transform = "translate(" + Math.round(x) + "px, " + Math.round(y) + "px)";
+    node.firstChild.dataset.flip = faceLeft ? "true" : "false";
+  }
+
+  function placeVisitor(v) { // Move someone else's Lumi to where they stand now.
+    const g = folkNode("guest-" + v.id);
+    if (!g) { drawFolk(); return; }
+    if (townAt) cityPutStyle(g, v.x, v.y, v.face < 0); else if (cityMap) cityPut(g, v.x, v.y, v.face < 0);
+  }
+
+  function cityFolkAll() { folkSig = ""; drawFolk(); } // After the city's picture is drawn afresh: everyone back into it.
+
+  function drawFolk() { // Who's about: in the city, the townsfolk and everyone near; inside a place, whoever else is in here.
+    if (!TOWN) return;
+    const night = snap ? sceneNow().night : false, want = new Set();
+    if (townAt) { // inside: on the folk layer, at their own place on the floor
+      if (!folkArt || !townSpace) return;
+      houseArt.querySelectorAll(".lp-cw-lumi").forEach(function (g) { g.remove(); });
+      visitors.filter(sharesPlace).forEach(function (v) {
+        const id = "guest-" + v.id; want.add(id);
+        let g = folkArt.querySelector('[data-id="' + id + '"]');
+        if (!g) { g = cityFigure(id, v.look, (v.look.name || "Lumi") + " · " + v.name, 92); g.classList.add("lp-folk-house"); folkArt.append(g); }
+        cityPutStyle(g, v.x, v.y, v.face < 0);
       });
-    if (flats && !flats.length) out.push({ key: "flats-none", icon: "🏘", name: "No flats to visit yet", hint: "Friends with a Lumi and an open door show here", note: "Nobody's flat is open to visit just now." });
-    return out.concat([{ key: "flats-back", icon: "‹", name: "Back", hint: "Escape, Back or B does it too", local: function () { flatsOn = false; picks[tab] = 0; } }]);
-  }
-
-  function folkFigure(id, look, kind, words) { // One Lumi on the layer: her shapes in her look (lumiMarkup), a name tag, and a speech line.
-    const ns = "http://www.w3.org/2000/svg", g = document.createElementNS(ns, "g"), flip = document.createElementNS(ns, "g");
-    g.setAttribute("class", "lp-folk-one " + kind); g.dataset.id = id;
-    flip.setAttribute("class", "lp-folk-flip");
-    flip.innerHTML = '<g class="lp-folk-anim"><svg x="-24" y="-45" width="48" height="45" viewBox="0 0 320 300" overflow="visible">' + lumiMarkup(look) + "</svg></g>"; // Authored shapes; the look is the server's checked one. (lp-folk-anim: where an emote plays)
-    g.append(flip);
-    if (words) { const tag = document.createElementNS(ns, "text"); tag.setAttribute("class", "lp-folk-name"); tag.setAttribute("y", "13"); tag.textContent = words; g.append(tag); } // A person's own words: text only.
-    const said = document.createElementNS(ns, "text"); said.setAttribute("class", "lp-folk-say"); said.setAttribute("y", "-52"); g.append(said);
-    return g;
-  }
-
-  function folkPlace(g, x, y, facingLeft) { g.style.transform = "translate(" + x + "px, " + y + "px)"; g.firstChild.dataset.flip = facingLeft ? "true" : "false"; }
-
-  function drawFolk() { // Who's out: the townsfolk on this street's map, and visitors on it (or in the place she's in). Rebuilt only when that changes.
-    if (!TOWN || !folkArt) return;
-    const night = sceneNow().night, here = townAt, npcs = here ? [] : TF.folkOn(townStreet, night);
-    const guests = visitors.filter(sharesPlace); // Only who's really in the same place: inside this one, or out on this street's map.
-    const signature = JSON.stringify([townStreet, here, night, npcs.map(function (n) { return n.id; }), guests.map(function (v) { return [v.id, v.at, v.name, v.look]; })]);
-    if (signature === folkSig) return;
-    folkSig = signature;
-    folkArt.replaceChildren();
-    npcs.forEach(function (n, i) {
-      const s = strolls[n.id] || (strolls[n.id] = { x: TF.start(n, i), until: 0 }), g = folkFigure("npc-" + n.id, n.look, "lp-folk-npc", "");
-      folkArt.append(g); folkPlace(g, s.x, TF.y(n), false);
+      Array.from(folkArt.children).forEach(function (g) { if (!want.has(g.dataset.id)) g.remove(); });
+      return;
+    }
+    if (!cityMap || !cityAt || !houseArt.querySelector(".lp-cw-folk")) return;
+    if (folkArt) folkArt.replaceChildren();
+    TF.FOLK.filter(function (n) { return !night || n.night; }).forEach(function (n, i) { // the townsfolk (the night owls only, at night)
+      const id = "npc-" + n.id, spot = npcSpot(n, i); want.add(id);
+      let g = houseArt.querySelector('[data-id="' + id + '"]');
+      if (!g) g = cityFigure(id, n.look, "", 56);
+      cityPut(g, spot.s.x, spot.y, spot.s.left);
     });
-    const crowd = {};
-    guests.forEach(function (v) { // Visitors stand by the place they're at (inside: by the door), side by side.
-      const n = crowd[v.at] = (crowd[v.at] || 0) + 1, base = here ? { x: 500, y: 474 } : TwA.spot(null, v.at), side = n % 2 ? 1 : -1;
-      const x = Math.max(TF.WALK_MIN, Math.min(TF.WALK_MAX, base.x + side * (34 + 30 * Math.floor((n - 1) / 2))));
-      const g = folkFigure("guest-" + v.id, v.look, "lp-folk-guest", (v.look.name || "Lumi") + " · " + v.name);
-      folkArt.append(g); folkPlace(g, x, base.y, side < 0);
+    visitors.filter(sharesPlace).forEach(function (v) { // everyone near her, out in the city
+      const id = "guest-" + v.id; want.add(id);
+      let g = houseArt.querySelector('[data-id="' + id + '"]');
+      if (!g) g = cityFigure(id, v.look, (v.look.name || "Lumi") + " · " + v.name, 62);
+      cityPut(g, v.x, v.y, v.face < 0);
     });
+    houseArt.querySelectorAll(".lp-cw-lumi").forEach(function (g) { if (g.dataset.id !== "me" && !want.has(g.dataset.id)) g.remove(); }); // gone home, or out of range
   }
 
-  function folkWander() { // Once a second in town: a townsfolk Lumi whose pause is over strolls on, and now and then one says something.
-    if (!TOWN || townAt || G.reducedMotion || !folkArt) return;
-    const now = Date.now(), night = sceneNow().night, out = TF.folkOn(townStreet, night);
+  function folkWander() { // Once a second in the city: a townsfolk Lumi whose pause is over strolls on, and now and then one says something.
+    if (!TOWN || townAt || !cityMap || G.reducedMotion) return;
+    const now = Date.now(), night = sceneNow().night, out = TF.FOLK.filter(function (n) { return !night || n.night; });
     out.forEach(function (n, i) {
-      const s = strolls[n.id] || (strolls[n.id] = { x: TF.start(n, i), until: 0 });
+      const spot = npcSpot(n, i), s = spot.s;
       if (now < s.until) return;
-      const to = TF.next(s.x, [Math.random(), Math.random()]), seconds = Math.abs(to - s.x) / 35, g = folkArt.querySelector('[data-id="npc-' + n.id + '"]');
-      s.until = now + seconds * 1000 + TF.pause(Math.random()); // A stroll at about 35 units a second, then a while standing about.
-      if (g) { g.style.transitionDuration = seconds.toFixed(1) + "s"; folkPlace(g, to, TF.y(n), to < s.x); }
-      s.x = to;
+      const by = (70 + Math.random() * 140) * (Math.random() < 0.5 ? -1 : 1), to = Math.max(spot.min, Math.min(spot.max, s.x + by)); // a stroll, turning back at Downtown's ends
+      const seconds = Math.abs(to - s.x) / 35, g = houseArt.querySelector('[data-id="npc-' + n.id + '"]');
+      s.until = now + seconds * 1000 + TF.pause(Math.random()); s.left = to < s.x; s.x = to;   // about 35 units a second, then a while standing about
+      if (g) { g.style.transitionDuration = seconds.toFixed(1) + "s"; cityPut(g, to, spot.y, s.left); }
     });
     if (now < folkSay || !out.length) return;
     folkSay = now + 9000 + Math.random() * 9000;
-    const who = out[Math.floor(Math.random() * out.length)], words = folkArt.querySelector('[data-id="npc-' + who.id + '"] .lp-folk-say');
+    const who = out[Math.floor(Math.random() * out.length)], words = houseArt.querySelector('[data-id="npc-' + who.id + '"] .lp-folk-say');
     if (!words) return;
-    words.textContent = TF.line(townStreet, night, Math.random());
+    words.textContent = TF.line(who.street, night, Math.random());
     words.parentNode.classList.add("saying");
     setTimeout(function () { words.parentNode.classList.remove("saying"); }, 4200);
   }
-
   function welcomeHome() { // Lumi Pet, after a dungeon trip: her welcome-home line, once per trip on this device (dungeon-ui.js welcome).
     const run = snap && snap.dungeon ? snap.dungeon.run : null;
     if (APP !== "lumi-pet" || !run || G.store.get("welcomed-run", null) === run.id) return;
@@ -730,8 +1258,14 @@
 
   function take(data) { // Keep the server's answer and how far this device's clock is from the server's.
     snap = data; offset = data.now - Date.now(); polled = Date.now();
+    if (HOME2 && snap.pet) { // her own house (Lumi City): its rooms stand in for her flat's, so drawing and the Home menu just work; no moving boxes there
+      snap.pet.house = (snap.pet.estate && snap.pet.estate.rooms) || {};
+      snap.boxes = { left: 0, total: 0, ready: false, next: "" };
+    }
     $("lp-coins").textContent = data.coins.toLocaleString();
     syncParty();
+    if (TOWN && !cityAsked) cityLoad();                                   // Lumi City: the map, the lots and who owns them
+    if (TOWN) townStart();
   }
 
   function say(text) { // The live region announces it to screen readers too; in room mode it's also her speech bubble.
@@ -780,9 +1314,7 @@
 
   function tabRows() { // What the selected tab offers.
     const pet = snap.pet, c = snap.catalog, name = TABS[tab], asleep = sceneNow().asleep;
-    if (name === "town" && flatsOn) return flatsRows(); // Lumi Town: choosing a friend's flat to visit.
-    if (name === "town") return Tw.rows({ at: townAt, street: townStreet, desk: DESK, away: Boolean(exploring()), retro: RETRO_ON, seen: pet.town_seen !== false,
-      stall: marketStall, stallRows: stallRows, go: townGo, open: townOpen, chat: chatCtx(), visit: openFlats }); // Lumi Town: a street's places, the games inside one, a Market stall's wares, or what to say.
+    if (name === "town") return townRows(); // Lumi City: what's in reach, Go to…, a list that's open (the lift, the office...), or what to say.
     if (name === "care") {
       if (awayRows().length) return awayRows(); // She isn't in her room: nothing to cuddle until she is back (the Pantry can still send her a snack).
       const health = snap.health, sore = !health.out && health.hp < health.max; // Hurt, and at home to do something about it.
@@ -889,7 +1421,7 @@
     target = null; // A snap move (a remote, the lower bar, a thing pressed) ends any free walk to a clicked spot.
     const next = Ru.clean(to), crossing = next.room !== roomAt.room, moved = crossing || next.at !== roomAt.at || next.x !== roomAt.x; // Measured before she goes.
     roomAt = next; picks[ROOM] = roomAt.at;
-    if (!VISIT) G.store.set("room-at", roomAt); // (a visit isn't remembered: home is where she was)
+    if (!VISIT && !HOME2) G.store.set("room-at", roomAt); // (a visit, or her house, isn't remembered: home is where she was)
     housePingSoon();                             // the others in the flat see her step
     if (moved) { G.sound.unlock(); G.sound.tone(crossing ? 587.33 : 523.25, .08, 0, .06); } // A higher step through a doorway.
   }
@@ -986,10 +1518,11 @@
   function stopWalk() { // Nothing walks her: CSS animations back on, and her place remembered on this device.
     walkFrame = 0; walkLast = 0;
     if (room.dataset.walking) delete room.dataset.walking;
-    if (!walkSaved) { walkSaved = true; if (!VISIT) G.store.set("room-at", roomAt); }
+    if (!walkSaved) { walkSaved = true; if (!VISIT && !HOME2) G.store.set("room-at", roomAt); }
   }
 
   function walkTick(now) { // One frame of walking.
+    if (TOWN) { townTick(now); return; }                                  // Lumi City walks her its own way (its streets, its insides, routes)
     walkFrame = 0;
     const dt = walkLast ? Math.min(0.05, (now - walkLast) / 1000) : 0; walkLast = now; // (Capped: a slow frame never jumps her across the room.)
     let way = heldWay(), left = Infinity;
@@ -1877,7 +2410,7 @@
     if (!snap) return;
     const row = rows()[picks[tab]];
     if (!row) return;
-    if (row.local) { pendingConfirm = null; row.local(); lastList = ""; render(); return; } // Nothing to ask the server: it works at once, even while an answer is on its way.
+    if (row.local) { if (pendingConfirm !== row.key) pendingConfirm = null; row.local(); lastList = ""; render(); return; } // Nothing to ask the server: it works at once, even while an answer is on its way.
     if (row.cycle && !row.send) { setCycle(row, 1); return; } // The co-op fight's Aim row: Enter aims at the next creature.
     if (busy) return; // One request at a time.
     if (!row.send) { say(row.note || "That's already in the room."); return; }
@@ -1972,7 +2505,7 @@
     const arrow = ["left", "right", "up", "down"].indexOf(action) >= 0;
     if (action === "next" || action === "prev" || action === "play" || arrow) pendingConfirm = null; // Only a second Enter confirms.
     if (roomOn() && syncRoom() && roomKey(action, arrow, meta)) return; // Room mode: the arrows walk her flat; in a card, ⏮ ⏭ go back.
-    if (TOWN && !chatOn && !flatsOn && (arrow || action === "next" || action === "prev")) { townMove(action); return; } // Lumi Town: every arrow walks her (it has no other tabs to change to); while chatting they go through the phrases.
+    if (TOWN && townKey(action, arrow, meta)) return; // Lumi Town: every arrow walks her (it has no other tabs to change to); while chatting they go through the phrases.
     if (albuming()) { albumKey(action); return; } // So has the Collection's gallery.
     if (room.dataset.browse === "true" && arrow && browserKey(action)) return; // The party browser: arrows move over the cards.
     if (treeing()) { skillsKey(action); return; } // The skill tree has its own keys too: the arrows move over the skills.
@@ -2009,7 +2542,7 @@
   }
   G.onAction(onKey, { directEnter: function () { return true; } });
   function backStep() { // Escape, Backspace, a pad's B: one step back inside the game (true), or nothing to go back from (false: leave the game).
-    if (chatOn || flatsOn || bookOn) { chatOn = false; flatsOn = false; bookOn = false; bookPending = null; picks[tab] = 0; lastList = ""; render(); return true; } // The phrases, or the list of flats: back to the places (or the room).
+    if (chatOn || flatsOn || bookOn || (TOWN && townList)) { chatOn = false; flatsOn = false; bookOn = false; bookPending = null; if (TOWN && townList) { townList = null; marketStall = null; marketDrawer = null; } picks[tab] = 0; lastList = ""; render(); return true; } // The phrases, or the list of flats: back to the places (or the room).
     return roomOn() && closeCard(); // Room mode: a card closes.
   }
   if (G.onBack) G.onBack(backStep);
@@ -2035,7 +2568,7 @@
     event.preventDefault(); chatTyping(true);
   });
   document.addEventListener("keydown", function (event) { // E uses the thing in reach, as Enter does (room mode only; never while typing).
-    if ((event.key !== "e" && event.key !== "E") || event.ctrlKey || event.metaKey || event.altKey || !roomOn() || tab !== ROOM) return;
+    if ((event.key !== "e" && event.key !== "E") || event.ctrlKey || event.metaKey || event.altKey || !((roomOn() && tab === ROOM) || (TOWN && snap))) return; // (Lumi City too)
     if (event.target && event.target.matches && event.target.matches("input, select, textarea")) return;
     event.preventDefault(); onKey("enter");
   });
@@ -2066,7 +2599,7 @@
   });
   $("lp-squeeze").addEventListener("pointerdown", function (event) { event.preventDefault(); if (snap && gardening()) { pressOnce(); render(); } });
   touchy.addEventListener("change", function () { if (snap) render(); });
-  window.addEventListener("resize", function () { if (snap && roomOn()) { lastHouse = ""; render(); } }); // Room mode: a new shape, a new pan.
+  window.addEventListener("resize", function () { if (snap && (roomOn() || TOWN)) { lastHouse = ""; render(); } }); // (Lumi City: a new shape, a new camera) // Room mode: a new shape, a new pan.
 
   window.addEventListener("beforeinstallprompt", function (event) { // The browser can install this page as an app: keep its offer for the Settings row.
     event.preventDefault(); installOffer = event; lastList = "";
@@ -2105,11 +2638,11 @@
 
   houseArt.addEventListener("click", function (event) { if (roomOn()) roomPress(event); else doorPress(event); }); // Room mode's things and floor; otherwise her room's door, through to Lumi Town.
   houseArt.addEventListener("mousedown", function (event) { // A middle-click in room mode: she walks just there (and never uses anything).
-    if (event.button !== 1 || !roomOn() || room.dataset.leaving === "true") return;
+    if (event.button !== 1 || !(roomOn() || TOWN) || room.dataset.leaving === "true") return;
     event.preventDefault(); // (no browser autoscroll)
-    pendingConfirm = null; walkTo(event);
+    pendingConfirm = null; if (TOWN) townWalkTo(event); else walkTo(event);
   });
-  houseArt.addEventListener("auxclick", function (event) { if (event.button === 1 && roomOn()) event.preventDefault(); }); // Nor a middle-click's other browser habits.
+  houseArt.addEventListener("auxclick", function (event) { if (event.button === 1 && (roomOn() || TOWN)) event.preventDefault(); }); // Nor a middle-click's other browser habits.
   $("lp-pet").addEventListener("click", function () { // Room mode: press Lumi herself for a cuddle (the bed's card has it too).
     if (!roomOn() || busy || room.dataset.leaving === "true") return;
     submit({ key: "cuddle", send: { action: "cuddle" } });
@@ -2120,15 +2653,8 @@
       roomWalk(Ru.enter($(id).dataset.go, id === "lp-way-left" ? "right" : "left"));
     });
   });
-  houseArt.addEventListener("click", townPress); // Lumi Town: its places, cabinets and tables.
-  if (folkArt) folkArt.addEventListener("click", function (event) { // Lumi Town: press someone's Lumi to visit their flat (phase 4).
-    const g = event.target.closest(".lp-folk-guest");
-    if (!g || !TOWN || room.dataset.leaving === "true") return;
-    const id = Number((g.dataset.id || "").replace("guest-", "")), who = visitors.find(function (v) { return v.id === id; });
-    if (!who) return;
-    event.stopPropagation();
-    townOpen("lumi-pet", null, "Off to " + who.name + "'s flat! 🏠", "visit-" + id); // their doorstep says whether the door is open
-  });
+  houseArt.addEventListener("click", townPress); // Lumi City: a door, a sign, a cabinet, or the ground.
+  // (Tapping someone's Lumi in town no longer opens a visit: in Lumi City you walk to their door. Doll, 2026-11-19.)
   window.addEventListener("pageshow", function (event) { // Back from a game (or another app) with the browser's Back: the page comes back as it was left, mid-hop through a door.
     if (event.persisted) delete room.dataset.leaving; // She's here again, and the next press goes somewhere at once.
   });
@@ -2161,7 +2687,7 @@
     if (!snap) return;
     const task = snap.pet.task;
     if ((task && serverNow() >= task.finishesAt) || Date.now() - polled > 15000) { polled = Date.now(); refresh(); }
-    if (TOWN) { folkWander(); if (Date.now() - townPolled > 5000) townHere(); }
+    if (TOWN) { folkWander(); if (Date.now() - townPolled > 5000) townHere(); if (!cityData && Date.now() - cityAsked > 5000) cityLoad(); } // Lumi City: the townsfolk, who's near (every five seconds), and the city if it hasn't come yet
     if (!TOWN && roomOn() && Date.now() - housePinged > 5000) housePing(); // A flat (her own, or a visit): who's here, every five seconds.
     if (visitKnock && Date.now() - knockPolled > 3000) knockCheck();      // Waiting at a door: has anyone come? // Lumi Town: the townsfolk, and who else is in town (every five seconds).
     if (gardening()) { // The garden: send the presses made this second, and look in more often so the numbers move.
@@ -2249,7 +2775,7 @@
     if (location.hash === "#garden" && !has("garden")) { location.replace("/media/games/lumi-garden"); return; } // An old "flowers are ready" reminder or home-screen shortcut, from when the garden was a tab of Lumi Pet.
     if (trip()) { tab = TABS.indexOf("dungeon"); say(snap.fight ? snap.fight.log.slice(-3).join(" ") : trip().say); } // A trip was waiting: pick it up where it stopped.
     else if (snap.fight && has("battle")) { tab = TABS.indexOf("battle"); say(snap.fight.log.slice(-3).join(" ")); } // A fight was waiting: pick it up where it stopped.
-    else if (TOWN) say(townAt ? Tw.place(townAt).hello : exploring() ? "Lumi Town! Lumi is out exploring: the Lantern & Paw is where she set off from." : "Lumi Town! Where shall we go?"); // Out of a door, or back from a game.
+    else if (TOWN) { if (!townStarted) say("Walking into Lumi City… 🏙"); } // (townStart says hello once the city is here: out of a door, or back from a game)
     else if (awayRows().length) say(exploring() ? "Lumi is out exploring. Lumi Dungeons is where she is." : "Lumi is in the middle of a fight, over in Lumi Dungeons."); // She is busy in another of her apps.
     else if (APP === "lumi-dungeons") say("Where shall we go? Pick a place to explore, or find a fight in the arena.");
     announceDone(); welcomeHome(); render(); // (A fresh trip home outranks a finished nap: it is said last.)

@@ -541,5 +541,11 @@
     return { x: row[Math.min(cursor, row.length - 1)], y: 452 };
   }
 
-  return { MAP: MAP, MARKET: MARKET, SIGNS: SIGNS, STATIONS: STATIONS, SNUG: SNUG, stations: stations, scene: scene, spot: spot };
+  // The drawing kit, shared with Lumi City's pictures (city-art.js, town-inside.js: Doll's design, 2026-11-19), so the
+  // city's streets, the apartment lobby and the real-estate office are drawn in the very same neon as the old town.
+  const KIT = { rect: rect, circle: circle, oval: oval, path: path, line: line, text: text, group: group, glow: glow, esc: esc, dice: dice, r1: r1, hit: hit,
+                marker: marker, pet: pet, petLine: petLine, tube: tube, box: box, neon: neon, reflect: reflect, wire: wire, holo: holo, vent: vent, sky: sky, city: city,
+                tree: tree, lamp: lamp, vending: vending, shopfront: shopfront, label: label, exitMat: exitMat, NEON: NEON, HOT: HOT, INK: INK, STEEL: STEEL, SHINE: SHINE };
+
+  return { MAP: MAP, MARKET: MARKET, SIGNS: SIGNS, STATIONS: STATIONS, SNUG: SNUG, stations: stations, scene: scene, spot: spot, BUILD: BUILD, KIT: KIT };
 });

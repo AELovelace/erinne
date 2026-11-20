@@ -13,7 +13,13 @@ in memory, for LINE_SECONDS, then gone; never written to a database. A line is t
 characters, one line, at most TEXT_MAX characters) or one of the PHRASES, so a TV remote or a gamepad can chat
 without a keyboard. Pages hear new lines and moves at once on the event bus (CHANNEL, events.py), through their
 stream (GET .../town/stream); a TV (whose play pass a stream can't carry) hears them on its next POST instead.
-Someone may say a line every SAY_GAP seconds and SAY_BURST lines in SAY_WINDOW (events.count, so across processes)."""
+Someone may say a line every SAY_GAP seconds and SAY_BURST lines in SAY_WINDOW (events.count, so across processes).
+
+Lumi City (2026-11-19, docs/plans/lumi-city.md): the town is one long free-walk city. Out in the city, a Lumi is in a
+district ("down" for Downtown, "l3" for LefTown's block 3, "r2" for Right-City's block 2) at a point (x, y, facing);
+inside a building she's in that place, as before. Chat and emotes are heard in the same place only ("city:<district>"
+or "in:<place>"), but people are SEEN, and their steps ("walk" events) reach, everyone out in the city within one
+block either side (near()), so someone walking up the street appears before they arrive."""
 
 from __future__ import annotations
 
@@ -27,7 +33,7 @@ from collections import deque
 SEEN_SECONDS = 20          # a page that stopped asking (closed, hidden, gone to a game) drops out after this
 MAX_PEOPLE = 200           # a guard: never more than this many remembered at once
 
-CHANNEL = "lumi-town"      # the event bus channel: {"kind": "said", "line": {...}} or {"kind": "moved"}
+CHANNEL = "lumi-town"      # the event bus channel: {"kind": "said", "line": {...}}, {"kind": "moved"}, {"kind": "walk", ...}, {"kind": "city"}
 TEXT_MAX = 140             # a typed line, at most (after cleaning)
 LINES_KEPT = 30            # lines remembered per place, for someone who walks in
 LINE_SECONDS = 600         # ...and only for this long (ten minutes): an empty room has no stale chatter
@@ -51,7 +57,8 @@ PHRASES = {
 
 
 class Town:
-    """Where each person was last seen: {user_id: {"at", "street", "inside", "seen"}}, and what's been said where."""
+    """Where each person was last seen: {user_id: {"at", "inside", "district", "x", "y", "face", "seen"}}, and what's
+    been said where."""
 
     def __init__(self, clock=time.monotonic) -> None:
         self.clock = clock
@@ -62,37 +69,48 @@ class Town:
     def _sweep(self, now: float) -> None:
         self.people = {uid: p for uid, p in self.people.items() if now - p["seen"] < SEEN_SECONDS}
 
-    def visit(self, user_id: int, at: str, street: str, inside: bool = False) -> bool:
-        """This person's Lumi is at `at` (a place id) on `street` (inside that place, or out on the street's map), now.
-        True when that's somewhere new (they arrived in town, or moved), so the others hear of it at once."""
+    def visit(self, user_id: int, at: str, district: str | None = None, inside: bool = False, x: float | None = None,
+              y: float | None = None, face: int = 1) -> str | None:
+        """This person's Lumi is near `at` (a place id or a door) in `district` (out in the city), or inside `at`, now,
+        standing at x, y and facing left (-1) or right (1). Returns "moved" when that's a new place (she arrived in
+        town, went in or out, or crossed into another district), so the others look again at once; "walk" when only
+        where she stands or faces changed (a step to pass on); None when nothing did."""
         with self.lock:
             now = self.clock()
             self._sweep(now)
             was = self.people.get(user_id)
             if was is None and len(self.people) >= MAX_PEOPLE:
-                return False
-            self.people[user_id] = {"at": at, "street": street, "inside": inside, "seen": now}
-            return was is None or place(was["at"], was["street"], was["inside"]) != place(at, street, inside)
+                return None                               # the town is full: not recorded
+            self.people[user_id] = {"at": at, "inside": inside, "district": district, "x": x, "y": y, "face": face, "seen": now}
+            if was is None or place(was["at"], was["district"], was["inside"]) != place(at, district, inside):
+                return "moved"                            # somewhere new
+            if (was["x"], was["y"], was["face"], was["at"]) != (x, y, face, at):
+                return "walk"                             # the same place, a step on
+            return None
 
     def leave(self, user_id: int) -> bool:
         """Forget this person (Show me in town turned off). True when they were here (the others hear they've gone)."""
         with self.lock:
             return self.people.pop(user_id, None) is not None
 
-    def here(self, but: int | None = None) -> list[tuple[int, str, str, bool]]:
-        """Everyone seen lately, except `but`: [(user_id, at, street, inside)], the most recently seen first."""
+    def here(self, but: int | None = None, around: str | None = None) -> list[dict]:
+        """Everyone seen lately, except `but`: [{id, at, inside, district, x, y, face}], the most recently seen first.
+        `around` (a place()): only those someone there can see: the same place inside, or out in the city within one
+        block (near()). None: everyone in town."""
         with self.lock:
             now = self.clock()
             self._sweep(now)
-            found = sorted(((uid, p) for uid, p in self.people.items() if uid != but), key=lambda item: -item[1]["seen"])
-            return [(uid, p["at"], p["street"], p["inside"]) for uid, p in found]
+            found = sorted(((uid, p) for uid, p in self.people.items() if uid != but
+                            and (around is None or near(around, place(p["at"], p["district"], p["inside"])))),
+                           key=lambda item: -item[1]["seen"])
+            return [{"id": uid, **{key: p[key] for key in ("at", "inside", "district", "x", "y", "face")}} for uid, p in found]
 
     def where(self, user_id: int) -> str | None:
         """The place (place()) this person is in now, or None if they aren't in town (or are hidden)."""
         with self.lock:
             self._sweep(self.clock())
             p = self.people.get(user_id)
-            return place(p["at"], p["street"], p["inside"]) if p else None
+            return place(p["at"], p["district"], p["inside"]) if p else None
 
     def seen_at(self, user_id: int) -> float | None:
         """When this person last said where they are in town (this Town's clock), or None."""
@@ -119,9 +137,34 @@ class Town:
             return [line for _, line in list(kept)[-count:]]
 
 
-def place(at: str, street: str, inside: bool) -> str:
-    """Where a line is heard: inside one place ("in:arcade"), or out on a street's map ("street:high")."""
-    return f"in:{at}" if inside else f"street:{street}"
+def place(at: str, district: str | None, inside: bool) -> str:
+    """Where a line is heard: inside one place ("in:arcade"), or out in one district of the city ("city:down",
+    "city:l3", "city:r2"; no district is Downtown)."""
+    return f"in:{at}" if inside else f"city:{district or 'down'}"
+
+
+def block(district: str | None) -> int:
+    """A district's place along the city, counted in blocks from Downtown: 0 for Downtown, -n for LefTown's block n
+    (it's to the left), +n for Right-City's block n."""
+    if not district or district == "down":
+        return 0
+    try:
+        n = int(district[1:])                             # "l3" → 3
+    except ValueError:
+        return 0                                          # (never happens: the route checks the pattern)
+    return -n if district[0] == "l" else n
+
+
+def near(a: str | None, b: str | None) -> bool:
+    """Whether someone in place `a` sees (and hears the steps of) someone in place `b`: the same place, or both out in
+    the city no more than one block apart. Chat and emotes stay with the same place only."""
+    if a is None or b is None:
+        return False
+    if a == b:
+        return True
+    if a.startswith("city:") and b.startswith("city:"):   # both out in the city: a block either side is in view
+        return abs(block(a[5:]) - block(b[5:])) <= 1
+    return False
 
 
 _SPACES = re.compile(r"\s+")

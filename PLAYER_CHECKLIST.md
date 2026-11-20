@@ -112,3 +112,25 @@ Games follow **Screens → Text size**, including while a game is already open. 
 12. **Friends in town:** with two people in Lumi Town at once (say, a TV and a phone), check each sees the other's Lumi, dressed as she is, with her name and theirs, by the place they're at, and a hello line.
     - Turn **Show me in town** off on one: within a few seconds the other no longer sees her, but she still sees them.
     - Turn it back on and check she reappears.
+
+## Lumi City (2026-11-19)
+
+> Replaces the Lumi Town map above (the two streets are gone); the Market's stalls, Lumi-Soft and the café still work as items 5, 9 and 10 say, inside the city.
+
+1. **Out of her flat:** in Lumi Pet, press her door. Check you come out in **Lumi Heights West**'s lobby (or East, for Right-City). The first time out in the city, check Lumi asks where you'll live; pick a town.
+2. **Walking:** walk with the arrow keys, WASD, a gamepad's stick and D-pad, the Tab5 or phone panel in gamepad mode, and a middle-click. Check she stays on the streets and pavements (never through a building, a hedge or a plot), and slides along walls rather than sticking.
+3. **The lobby and floors:** walk up to the lift and choose your floor. Check the hallway shows eight doors, a ♥ on yours, a light under the door of anyone home, and names only on doors that aren't closed. Your door goes home to Lumi Pet. The front desk lists who lives there; choosing someone walks you to their door.
+4. **Visiting a flat:** with a second person, walk to their door and knock. Check the knock flow works as before, and that their front door brings you back out into their hallway.
+5. **No tap-to-visit:** check pressing someone's Lumi in the city does nothing.
+6. **The city:** walk out of the lobby. Check Downtown's places (Arcade, Tavern, Lumi Realty, Casino, Market, Retro café, Garden gate, Lumi-Soft field, both Lumi Heights), the street sign at each block's corner, the street name at the top changing as she walks, and that buildings in front of her hide her as she walks behind them.
+7. **Go to… and Where am I?:** check Go to… walks her to each place by herself and goes in, and that Where am I? names the street.
+8. **A TV remote:** check single presses hop door to door and corner to corner, Previous/Next jump a block, and Enter uses what's in reach.
+9. **Insides:** walk into the Arcade, the Casino, the Market and the field. Check walking up to a cabinet, table or stall and pressing Enter plays it or opens it, the exit mat goes back out, and leaving a game comes back by the same cabinet.
+10. **The gates:** walk to the far end of LefTown and of Right-City. Check the gate offers Home to my flat / Leave Lumi City / Stay in town.
+11. **Lumi Realty:** check Land for sale lists plots cheapest first (avenue plots, and plots nearer Downtown, cost more). Buy one (two presses): check the coins go down and the plot shows a Starter Cottage with your name. Check Neighbours' plots, My plot (list it with ◀ ▶ setting the price, take it off, sell to the office for half), House styles (buy, then put up) and the yard (buy, put out, clear).
+12. **Keepsake Capsule:** turn it a few times; check prizes show in the yard lists and a repeat pays back half.
+13. **Your house:** walk up to it and press Enter. Check it opens in Lumi Pet with its own rooms, the paint pots decorate it without changing your flat, and the front door goes back out onto your plot.
+14. **A friend's house:** with a second person who owns a plot, Go to… their house, knock, and check you see their house's rooms (not their flat's).
+15. **Selling to a neighbour:** list a plot on one account and buy it from the board on the other. Check the seller gets the coins, the buyer owns it with a Starter Cottage, and the seller's styles and yard things are still theirs.
+16. **Growth:** on a test server with `start_blocks: 1`, buy every plot in a town. Check a new block appears at that town's gate, the old addresses haven't moved, and you still arrive on the same tile inside the gate.
+17. **Two people:** check each sees the other walking (on the same block or the next), chat reaches only those nearby, and **Show me in town** off hides you.

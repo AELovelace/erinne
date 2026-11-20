@@ -259,6 +259,35 @@ def test_a_reference_only_ever_pays_once(conn, alice):
     assert coins.peek(conn, alice) == 1010
 
 
+def test_a_transfer_moves_coins_between_players_once_and_never_overdraws(conn, alice, bob):
+    with transaction(conn):
+        assert coins.transfer(conn, alice, bob, 300, "lumi-city", "plot", ref="deal-1") is True    # bob's purse opens to take it
+        assert coins.transfer(conn, alice, bob, 300, "lumi-city", "plot", ref="deal-1") is False   # the same deal never pays twice
+        assert coins.transfer(conn, alice, bob, 5000, "lumi-city", "plot") is False                # more than she has: refused...
+        assert coins.transfer(conn, alice, alice, 10, "lumi-city") is False                        # ...and so is paying herself
+        assert coins.transfer(conn, alice, bob, 0, "lumi-city") is False                           # and paying nothing
+    assert (coins.peek(conn, alice), coins.peek(conn, bob)) == (700, 1300)                          # nothing else moved
+    deal = _ledger(conn, "lumi-city_plot")
+    assert [(d["from_account"], d["to_account"], d["amount"], d["ref"]) for d in deal] == [(f"user:{alice}", f"user:{bob}", 300, "deal-1")]
+
+
+def test_a_transfer_to_a_deleted_account_moves_nothing(conn, alice):
+    with transaction(conn):
+        assert coins.transfer(conn, alice, 9999, 100, "lumi-city") is False
+    assert coins.peek(conn, alice) == coins.START
+
+
+def test_a_payout_comes_from_the_house_and_pays_once(conn, alice):
+    before = _house(conn)
+    with transaction(conn):
+        assert coins.payout(conn, alice, 2500, "lumi-city", "sell", ref="sold-1") is True
+        assert coins.payout(conn, alice, 2500, "lumi-city", "sell", ref="sold-1") is False         # once, by its reference
+        assert coins.payout(conn, alice, 0, "lumi-city", "sell") is False
+        assert coins.payout(conn, 9999, 10, "lumi-city", "sell") is False                          # no such account
+    assert coins.peek(conn, alice) == coins.START + 2500 and _house(conn) == before - 2500         # the house paid it
+    assert [d["from_account"] for d in _ledger(conn, "lumi-city_sell")] == [coins.HOUSE]
+
+
 def test_lumi_pets_visit_pays_once_a_day(conn, alice):
     with transaction(conn):
         assert coins.pet_visit(conn, alice) == coins.PET_VISIT

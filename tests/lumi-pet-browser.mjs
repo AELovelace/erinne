@@ -234,9 +234,9 @@ export async function checkLumiPet(browser, page, base) { // Exercise real contr
   assert.equal(await page.$eval("[data-lp-row]", el => el.dataset.lpRow), "go-home", "The ending offers the way back to town first");
   assert.ok(await page.$('[data-lp-row="go-home"][aria-pressed="true"]'), "...with the cursor on it");
   await Promise.all([page.waitForNavigation(), page.click(row("go-home"))]); // Back to town, out of the tavern's door...
-  await page.waitForSelector(row("place-home"));
+  await page.waitForFunction(() => document.getElementById("lp-room").dataset.town === "city"); // out onto Lumi Way, in front of the tavern (Lumi City, 2026-11-19)
   assert.equal(await page.evaluate(() => location.pathname), "/media/games/lumi-town");
-  await Promise.all([page.waitForNavigation(), page.click(row("place-home"))]); // ...and home: Lumi Pet, which welcomes her back.
+  await page.goto(base + "/media/games/lumi-pet"); // ...and home (in the city it's up Lumi Heights' lift to her door: lumi-city-browser.mjs walks that), where Lumi Pet welcomes her back.
   await page.waitForSelector(row("cuddle"));
   assert.equal(await page.evaluate(() => location.pathname), "/media/games/lumi-pet");
   await page.waitForFunction(() => /^(Home early from Moonlit Shrine|Carried home from Moonlit Shrine)/.test(document.getElementById("lp-message").textContent));
@@ -548,38 +548,39 @@ export async function checkLumiPetFrame(page) { // Parent-origin remote messages
   // Lumi Town (Doll's design, 2026-11-12): no card of its own; her door opens it in the same frame, and a game opened
   // from it walks back into it when it's left (media.js games.back), by the bar's Back or by Escape.
   const inFrame = async slug => { const f = await (await page.waitForSelector("#mc-game-frame")).contentFrame(); await f.waitForFunction(s => document.getElementById("gm")?.dataset.game === s, {}, slug); return f; };
-  assert.equal(await page.evaluate(() => [...document.querySelectorAll(".mc-card .mc-label")].some(l => l.textContent === "Lumi Town")), false, "No Lumi Town card: the door is the way in");
+  assert.equal(await page.evaluate(() => [...document.querySelectorAll(".mc-card .mc-label")].some(l => l.textContent === "Lumi City")), false, "No Lumi City card: the door is the way in");
   await page.evaluate(() => [...document.querySelectorAll(".mc-card")].find(b => b.querySelector(".mc-label").textContent === "Lumi Pet").click());
   const pet = await inFrame("lumi-pet");
   await pet.waitForSelector(row("adventure"));
   await pet.click(row("adventure"));
-  await page.waitForFunction(() => document.getElementById("mc-game-title").textContent === "Lumi Town");
+  await page.waitForFunction(() => document.getElementById("mc-game-title").textContent === "Lumi City");
   let town = await inFrame("lumi-town");
-  await town.waitForSelector(row("place-arcade"));
-  await town.click(row("place-arcade"));
-  await town.waitForSelector(row("game-snake"));
-  await town.click(row("game-snake"));
+  const kind = (frame, k) => frame.waitForFunction(w => document.getElementById("lp-room").dataset.town === w, { timeout: 30000 }, k); // where she is in Lumi City (2026-11-19)
+  const tap = async (frame, key) => { await frame.waitForSelector(row(key), { timeout: 30000 }); await frame.$eval(row(key), el => el.click()); };
+  await kind(town, "lobby");                                            // out of her flat's door: Lumi Heights' lobby
+  await tap(town, "thing-exit"); await kind(town, "city");             // out onto the street
+  await tap(town, "goto"); await tap(town, "go-arcade"); await kind(town, "games"); // Go to… walks her there and in
+  await tap(town, "thing-snake");
   await page.waitForFunction(() => document.getElementById("mc-game-title").textContent === "Lumi Conga");
   await page.click("#mc-game-back"); // Leaving the game: back into the arcade, not out to Games.
-  await page.waitForFunction(() => document.getElementById("mc-game-title").textContent === "Lumi Town");
+  await page.waitForFunction(() => document.getElementById("mc-game-title").textContent === "Lumi City");
   town = await inFrame("lumi-town");
-  await town.waitForSelector(row("game-snake"));
-  assert.equal(await town.$eval('[data-lp-row][aria-pressed="true"]', el => el.dataset.lpRow), "game-snake", "...on the cabinet she played");
-  await town.click(row("leave"));
-  await town.waitForSelector(row("place-tavern"));
-  await town.click(row("place-tavern"));
-  await page.waitForFunction(() => document.getElementById("mc-game-title").textContent === "Lumi Dungeons");
+  await kind(town, "games");
+  assert.equal(await town.$eval("[data-lp-row]", el => el.dataset.lpRow), "thing-snake", "...by the cabinet she played");
+  await tap(town, "thing-exit"); await kind(town, "city");
+  await tap(town, "goto"); await tap(town, "go-tavern");
+  await page.waitForFunction(() => document.getElementById("mc-game-title").textContent === "Lumi Dungeons", { timeout: 30000 });
   const tavern = await inFrame("lumi-dungeons");
   await tavern.waitForSelector("#lp-house [data-tavern]");
   await tavern.focus("#lp-list button");
   await page.keyboard.press("Escape"); // Escape inside a game opened from the town: back out of the tavern's door.
-  await page.waitForFunction(() => document.getElementById("mc-game-title").textContent === "Lumi Town");
+  await page.waitForFunction(() => document.getElementById("mc-game-title").textContent === "Lumi City");
   town = await inFrame("lumi-town");
-  await town.waitForSelector(row("place-tavern"));
-  assert.equal(await town.$eval('[data-lp-row][aria-pressed="true"]', el => el.dataset.lpRow), "place-tavern", "In front of the tavern");
+  await kind(town, "city");
+  await town.waitForFunction(() => /Tavern/.test((document.querySelector('[data-lp-row="use"]') || {}).textContent || ""), { timeout: 15000 }); // in front of the tavern, its door in reach
   await page.click("#mc-game-back"); // From the town itself, Back goes to Games as ever.
   await page.waitForFunction(() => document.getElementById("mc-game").hidden);
-  console.log("Lumi Pet: Media card, frame remote controls, status report, opening Lumi's Garden from inside the frame, Escape, and Lumi Town's way back from its games passed");
+  console.log("Lumi Pet: Media card, frame remote controls, status report, opening Lumi's Garden from inside the frame, Escape, and Lumi City's way back from its games passed");
 }
 
 export async function checkLumiPetGarden(browser, page, base) { // The Stardust Garden in a real browser: keyboard, mouse, both minigames, a reload.
@@ -1008,127 +1009,90 @@ export async function checkLumiApps(browser, page, base) { // One pet in three a
     await tab.setViewport({ width: 1920, height: 1080 });
     await tab.waitForFunction(() => document.querySelector('#lp-house [data-click="door"] rect[fill="transparent"]')); // Her room always has a door, even before its box is unpacked.
     const door = await tab.$('#lp-house [data-click="door"] rect[fill="transparent"]');
-    const box = await door.boundingBox(), panel = await tab.$eval(".lp-intro", el => el.getBoundingClientRect().right);
+    const box = await door.boundingBox(), panel = await tab.$eval(".lp-intro", el => { const r = el.getBoundingClientRect(); return r.height > r.width ? r.right : 0; }); // (since the stats bar, 2026-11-19, the intro may be a bar across the top rather than a side panel)
     const left = Math.max(box.x, panel), spot = [(left + box.x + box.width) / 2, box.y + box.height / 2];
     assert.ok(box.x + box.width - left > 40, "At TV size most of the door shows beside the panel: " + JSON.stringify([box, panel]));
     assert.equal(await tab.evaluate(xy => document.elementFromPoint(xy[0], xy[1]).closest("[data-click]")?.dataset.click, spot), "door", "Nothing covers the door's visible part");
     await Promise.all([tab.waitForNavigation(), tab.mouse.click(spot[0], spot[1])]);
-    await tab.waitForSelector(row("place-tavern"));
-    assert.equal(await tab.evaluate(() => location.pathname + location.search), "/media/games/lumi-town?at=home");
-    const pressed = () => tab.$eval('[data-lp-row][aria-pressed="true"]', el => el.dataset.lpRow);
-    assert.equal(await pressed(), "place-home", "Out of her door, she stands in front of her own house");
-    assert.deepEqual(await tab.$$eval("[data-lp-row]", rows => rows.map(r => r.dataset.lpRow)), ["place-arcade", "place-tavern", "place-casino", "place-home", "place-garden", "place-field", "street-market", "seen"]);
+    // Lumi City (2026-11-19, docs/plans/lumi-city.md): her door opens onto Lumi Heights' lobby; the city is walked freely,
+    // and every place is reached by walking (Go to… walks her there). lumi-city-browser.mjs walks the rest of the city.
+    const kind = k => tab.waitForFunction(w => document.getElementById("lp-room").dataset.town === w, { timeout: 30000 }, k);
+    const tap = async key => { await tab.waitForSelector(row(key), { timeout: 30000 }); await tab.$eval(row(key), el => el.click()); };
+    const keys = () => tab.$$eval("[data-lp-row]", rows => rows.map(r => r.dataset.lpRow));
+    await kind("lobby");
+    assert.equal(await tab.evaluate(() => location.pathname + location.search), "/media/games/lumi-town?at=lobby-l");
     assert.equal(await tab.$eval(".lp-tabs", el => getComputedStyle(el).display), "none", "One list: no tabs");
-    assert.equal(await tab.$eval("#lp-place", el => el.textContent), "LUMI TOWN");
+    assert.equal(await tab.$eval("#lp-place", el => el.textContent), "LUMI HEIGHTS WEST");
     await tab.screenshot({ path: "runs/casino-browser/lumi-town.png" });
-    for (const size of [[1440, 1000], [1920, 1080], [390, 844]]) { // Every place shows, and nothing covers it, on a squarer screen, a TV and a phone.
-      await tab.setViewport({ width: size[0], height: size[1] });
-      for (const id of ["arcade", "tavern", "casino", "home", "garden", "field"]) {
-        const box = await (await tab.$('#lp-house [data-click="place:' + id + '"]')).boundingBox(), middle = [box.x + box.width / 2, box.y + box.height / 2];
-        assert.equal(await tab.evaluate(xy => document.elementFromPoint(xy[0], xy[1])?.closest("[data-click]")?.dataset.click, middle), "place:" + id, id + " shows at " + size.join("x"));
-      }
-    }
     await tab.setViewport({ width: 1440, height: 1000 });
-    await tab.keyboard.press("ArrowRight"); // ◀ ▶ walk along the lane, ▲ ▼ cross the street.
-    await tab.waitForFunction(() => document.querySelector('[aria-pressed="true"]').dataset.lpRow === "place-garden");
-    await tab.keyboard.press("ArrowUp");
-    await tab.waitForFunction(() => document.querySelector('[aria-pressed="true"]').dataset.lpRow === "place-tavern");
-    assert.equal(await tab.$eval("#lp-room", el => el.style.getPropertyValue("--gx")), "0", "Lumi walks to the tavern's door");
-    assert.ok(await tab.$('#lp-house [data-place="tavern"].lp-tw-on'), "...and it's lit");
-    await Promise.all([tab.waitForNavigation(), tab.keyboard.press("Enter")]); // In through the tavern's door: Lumi Dungeons.
+    await tap("thing-exit"); await kind("city");                          // out onto Lumi Way
+    assert.ok(await tab.$$eval("#lp-house .lp-folk-npc", folk => folk.length) >= 1, "Townsfolk are out on the street");
+    await tap("goto"); await tap("go-tavern");                            // walks there, and in through the tavern's door: Lumi Dungeons
+    await tab.waitForFunction(() => location.pathname === "/media/games/lumi-dungeons", { timeout: 30000 });
     await tab.waitForSelector(row("go-home"));
-    assert.equal(await tab.evaluate(() => location.pathname), "/media/games/lumi-dungeons");
     // Lumi Dungeons' lobby is the Lantern & Paw tavern (tavern-art.js), not her apartment.
     await tab.waitForSelector("#lp-house [data-tavern]");
     assert.equal(await tab.$('#lp-house [data-spot="door"]'), null, "None of her furniture in the tavern");
     assert.match(await tab.$eval(".lp-room-top span", el => el.textContent), /THE LANTERN & PAW/);
     assert.match(await tab.$eval(row("go-home"), el => el.textContent), /Back to town/);
     await tab.screenshot({ path: "runs/casino-browser/lumi-dungeons-tavern.png" });
-    await Promise.all([tab.waitForNavigation(), tab.click(row("go-home"))]); // Out the tavern's door: back in front of it on the map.
-    await tab.waitForSelector(row("place-tavern"));
+    await Promise.all([tab.waitForNavigation(), tab.click(row("go-home"))]); // Out the tavern's door: back in front of it in the city.
+    await kind("city");
     assert.equal(await tab.evaluate(() => location.search), "?at=tavern");
-    assert.equal(await pressed(), "place-tavern");
+    await tab.waitForFunction(() => /Tavern/.test((document.querySelector('[data-lp-row="use"]') || {}).textContent || ""), { timeout: 15000 });
     for (const [place, games, room] of [["arcade", ["breakout", "snake", "teacup-tower", "prism-drop", "lumi-launch"], "THE ARCADE"], ["casino", ["blackjack", "roulette", "horse-racing", "slots"], "LUMI’S LOUNGE"], ["field", ["lumi-soft"], "THE LUMI-SOFT FIELD"]]) {
-      await tab.click(row("place-" + place)); // Walk in: its games, then the way out.
-      await tab.waitForSelector(row("leave"));
-      assert.deepEqual(await tab.$$eval("[data-lp-row]", rows => rows.map(r => r.dataset.lpRow)), games.map(g => "game-" + g).concat("leave"));
+      await tap("goto"); await tap("go-" + place); await kind("games");  // walk there and in: its games, then the way out
+      const shown = (await keys()).filter(k => k.indexOf("thing-") === 0).sort();
+      assert.deepEqual(shown, games.map(g => "thing-" + g).concat("thing-exit").sort());
       assert.equal(await tab.$eval("#lp-place", el => el.textContent), room);
       assert.equal(await tab.evaluate(() => location.search), "?at=" + place, "A reload lands inside");
-      for (const slug of games) { // Each cabinet or table shows beside the panels at 1440×1000, and a press on it is its own.
-        const box = await (await tab.$('#lp-house [data-click="game:' + slug + '"]')).boundingBox(), middle = [box.x + box.width / 2, box.y + box.height / 2];
-        assert.equal(await tab.evaluate(xy => document.elementFromPoint(xy[0], xy[1])?.closest("[data-click]")?.dataset.click, middle), "game:" + slug, slug + " can be pressed in the picture");
+      for (const slug of games) { // Each cabinet or table can be pressed in the picture (the room pans to whatever she walks to).
+        assert.ok(await tab.$('#lp-house [data-click="thing:' + slug + '"]'), slug + " can be pressed in the picture");
       }
       await tab.screenshot({ path: "runs/casino-browser/lumi-town-" + place + ".png" });
-      await tab.click(row("leave"));
-      await tab.waitForSelector(row("place-" + place));
-      assert.equal(await pressed(), "place-" + place, "Back out in front of it");
+      await tap("thing-exit"); await kind("city");
+      await tab.waitForFunction(p => (document.querySelector('[data-lp-row="use"]') || {}).textContent, {}, place);
     }
-    // Market Street (2026-11-14): ▶ off the High Street's right-hand end, round the corner; the Market's stalls sell right there.
-    assert.ok(await tab.$$eval("#lp-folk .lp-folk-npc", folk => folk.length) >= 1, "Townsfolk are out on the street");
-    await tab.click(row("place-casino"));
-    await tab.waitForSelector(row("leave"));
-    await tab.click(row("leave"));
-    await tab.waitForFunction(() => document.querySelector('[aria-pressed="true"]').dataset.lpRow === "place-casino");
-    await tab.keyboard.press("ArrowRight");
-    await tab.waitForSelector(row("place-cafe"));
-    assert.deepEqual(await tab.$$eval("[data-lp-row]", rows => rows.map(r => r.dataset.lpRow)), ["place-cafe", "place-market", "street-high", "seen"]);
-    assert.equal(await tab.$eval("#lp-place", el => el.textContent), "MARKET STREET");
-    assert.equal(await pressed(), "place-cafe", "Round the corner, by the first shop");
-    for (const click of ["place:cafe", "place:market", "street:high"]) {
-      const box = await (await tab.$('#lp-house [data-click="' + click + '"]')).boundingBox(), middle = [box.x + box.width / 2, box.y + box.height / 2];
-      assert.equal(await tab.evaluate(xy => document.elementFromPoint(xy[0], xy[1])?.closest("[data-click]")?.dataset.click, middle), click, click + " shows and can be pressed");
-    }
-    await tab.screenshot({ path: "runs/casino-browser/lumi-town-market-street.png" });
-    await tab.click(row("place-market"));
-    await tab.waitForSelector(row("stall-store"));
-    assert.deepEqual(await tab.$$eval("[data-lp-row]", rows => rows.map(r => r.dataset.lpRow)), ["stall-store", "stall-capsules", "stall-seeds", "stall-garden", "leave"]);
+    // The Market (Downtown's south side): its stalls sell right there.
+    await tap("goto"); await tap("go-market"); await kind("games");
+    assert.deepEqual((await keys()).filter(k => k.indexOf("thing-") === 0).sort(), ["thing-capsules", "thing-exit", "thing-garden", "thing-seeds", "thing-store"]);
     assert.equal(await tab.$eval("#lp-place", el => el.textContent), "THE MARKET");
     await tab.screenshot({ path: "runs/casino-browser/lumi-town-market.png" });
     const purse = () => tab.$eval("#lp-coins", el => Number(el.textContent.replace(/\D/g, "")));
-    await tab.click(row("stall-store"));
-    await tab.waitForSelector(row("cookie"));
+    await tap("thing-store");
+    await tab.waitForSelector(row("cookie"), { timeout: 30000 });
     const before = await purse();
     await tab.click(row("cookie"));
     await tab.waitForFunction(was => Number(document.getElementById("lp-coins").textContent.replace(/\D/g, "")) < was, {}, before);
     assert.equal(await tab.evaluate(async () => (await (await fetch("/api/media/games/lumi-pet/state")).json()).pet.inventory.cookie > 0), true, "A cookie bought in town is in Lumi's pantry");
-    await tab.click(row("stall-back"));
-    await tab.click(row("stall-capsules"));
-    await tab.waitForSelector(row("capsule-seed"));
-    assert.deepEqual(await tab.$$eval("[data-lp-row]", rows => rows.map(r => r.dataset.lpRow)), ["capsule", "capsule-moon", "capsule-seed", "stall-back"]);
-    await tab.click(row("stall-back"));
+    await tap("list-back");
+    await tap("thing-capsules");
+    await tab.waitForSelector(row("capsule-seed"), { timeout: 30000 });
+    assert.deepEqual(await keys(), ["capsule", "capsule-moon", "capsule-seed", "list-back"]);
+    await tap("list-back");
     for (const [stall, first] of [["seeds", "powder"], ["garden", "powder"]]) {
-      await tab.click(row("stall-" + stall));
-      await tab.waitForSelector(row("stall-back"));
+      await tap("thing-" + stall);
+      await tab.waitForSelector(row("list-back"), { timeout: 30000 });
       assert.equal(await tab.$$eval("[data-lp-row]", rows => rows[0].dataset.lpRow), first, stall + " says how much starpowder there is");
       if (stall === "garden") assert.ok(await tab.$(row("store")), "The garden's spare store is there too");
-      await tab.click(row("stall-back"));
+      await tap("list-back");
     }
-    await tab.click(row("leave"));
-    await tab.waitForSelector(row("place-market"));
-    await tab.keyboard.press("ArrowLeft"); await tab.keyboard.press("ArrowLeft"); // ◀ off Market Street's left-hand end: back by the Casino.
-    await tab.waitForSelector(row("place-arcade"));
-    assert.equal(await pressed(), "place-casino");
-    assert.equal(await tab.$eval("#lp-place", el => el.textContent), "LUMI TOWN");
-    console.log("Lumi Town: Market Street round the corner, the Market's stalls (a cookie bought in town), townsfolk out");
-    await tab.click(row("place-arcade"));
-    await tab.waitForSelector(row("game-snake"));
-    await tab.click(row("game-snake")); // On its own (no Media around it) the town just goes to the game...
-    await tab.waitForSelector("#ar-canvas"); // (Not waitForNavigation: the town's own address update, history.replaceState, would count as one.)
+    await tap("thing-exit"); await kind("city");
+    console.log("Lumi City: out of her door into Lumi Heights, the tavern and back, the Arcade, Casino and field, the Market's stalls (a cookie bought in town), townsfolk out");
+    await tap("goto"); await tap("go-arcade"); await kind("games");
+    await tap("thing-snake"); // On its own (no Media around it) the town just goes to the game...
+    await tab.waitForSelector("#ar-canvas", { timeout: 30000 }); // (Not waitForNavigation: the town's own address update, history.replaceState, would count as one.)
     assert.equal(await tab.evaluate(() => location.pathname), "/media/games/snake");
-    await tab.goBack(); // ...and the browser's Back walks back into the arcade, on the same cabinet.
-    await tab.waitForSelector(row("game-snake"));
-    assert.equal(await pressed(), "game-snake");
-    await tab.click(row("leave"));
-    await tab.waitForSelector(row("place-home"));
-    const house = await (await tab.$('#lp-house [data-click="place:home"]')).boundingBox();
-    await tab.mouse.click(house.x + house.width / 2, house.y + house.height / 2); // A press on her house: home.
+    await tab.goBack(); // ...and the browser's Back walks back into the arcade.
+    await kind("games");
+    await tab.goto(base + "/media/games/lumi-pet");                        // home (in the city: up Lumi Heights' lift to her door)
     await tab.waitForSelector(row("cuddle"));
     assert.equal(await tab.evaluate(() => location.pathname), "/media/games/lumi-pet");
     await tab.waitForSelector(row("adventure")); // The door as a row, at the end of Care, for remotes and narrow phones.
     assert.equal(await tab.$$eval("[data-lp-row]", rows => rows[rows.length - 1].dataset.lpRow), "adventure");
     await Promise.all([tab.waitForNavigation(), tab.click(row("adventure"))]);
-    await tab.waitForSelector(row("place-home"));
-    await Promise.all([tab.waitForNavigation(), tab.click(row("place-home"))]);
+    await kind("lobby");
+    await tab.goto(base + "/media/games/lumi-pet");
     await tab.waitForSelector(row("cuddle"));
     assert.equal(await tab.evaluate(slug => fetch("/media/games/" + slug + "/manifest.webmanifest").then(answer => answer.status), "lumi-town"), 404, "Lumi Town is no app of its own");
     for (const slug of ["lumi-pet", "lumi-dungeons", "lumi-garden"]) { // Each is an app of its own, with its own icons.
@@ -1191,19 +1155,19 @@ export async function checkLumiTownFriends(alice, bob, base) {
   for (const [page, at] of [[alice, "arcade"], [bob, "casino"]]) {
     await page.setViewport({ width: 1440, height: 1000 });
     await page.goto(base + "/media/games/lumi-town?at=" + at);
-    await page.waitForSelector('[data-lp-row="game-breakout"], [data-lp-row="game-blackjack"]');
-    await page.click('[data-lp-row="leave"]');                       // out on the High Street, where the other is
-    await page.waitForSelector('[data-lp-row="place-arcade"]');
+    await page.waitForFunction(() => document.getElementById("lp-room").dataset.town === "games", { timeout: 30000 }); // (Lumi City, 2026-11-19: inside, walked about)
+    await page.waitForSelector('[data-lp-row="thing-exit"]'); await page.$eval('[data-lp-row="thing-exit"]', el => el.click()); // out onto Lumi Way, Downtown, where the other is
+    await page.waitForFunction(() => document.getElementById("lp-room").dataset.town === "city", { timeout: 30000 });
   }
-  const sees = (page, name) => page.waitForFunction(who => [...document.querySelectorAll("#lp-folk .lp-folk-guest .lp-folk-name")].some(n => n.textContent.endsWith("· " + who)), { timeout: 20000 }, name);
+  const sees = (page, name) => page.waitForFunction(who => [...document.querySelectorAll("#lp-house .lp-folk-guest .lp-folk-name")].some(n => n.textContent.endsWith("· " + who)), { timeout: 20000 }, name);
   await sees(alice, "bob");
   await sees(bob, "alice");
   await alice.screenshot({ path: "runs/casino-browser/lumi-town-friends.png" });
-  await alice.click('[data-lp-row="seen"]');
+  await alice.$eval('[data-lp-row="seen"]', el => el.click());
   await alice.waitForFunction(() => /off$/.test(document.querySelector('[data-lp-row="seen"]').lastChild.firstChild.nodeValue));   // the row's name, not its hint
-  await bob.waitForFunction(() => ![...document.querySelectorAll("#lp-folk .lp-folk-guest .lp-folk-name")].some(n => n.textContent.endsWith("· alice")), { timeout: 20000 });
+  await bob.waitForFunction(() => ![...document.querySelectorAll("#lp-house .lp-folk-guest .lp-folk-name")].some(n => n.textContent.endsWith("· alice")), { timeout: 20000 });
   await sees(alice, "bob");                                           // she still sees him
-  await alice.click('[data-lp-row="seen"]');
+  await alice.$eval('[data-lp-row="seen"]', el => el.click());
   await alice.waitForFunction(() => /on$/.test(document.querySelector('[data-lp-row="seen"]').lastChild.firstChild.nodeValue));   // the row's name, not its hint
   await sees(bob, "alice");
   console.log("Lumi Town with friends: each sees the other's Lumi; Show me in town off hides her, on brings her back");

@@ -56,10 +56,12 @@ GAMES: tuple[Game, ...] = (
     # Lumi Town (Doll's design, 2026-11-12): the town map behind her room's door, with her house, the tavern (Lumi Dungeons),
     # the garden (Lumi's Garden), and the Arcade, Casino and Lumi-Soft field to walk into (static/games/lumi-pet/town-ui.js).
     # A game opened from it comes back to it when it closes (media.js games.back). No card of its own: the door is the way in.
-    Game(slug="lumi-town", name="Lumi Town", icon="🏘",
-         description="Lumi's town: her house, the tavern, the garden, the Arcade, the Casino and the Lumi-Soft field.",
-         controls="▲ ▼ or ◀ ▶ choose a place · Enter goes in · Escape / Back returns", track_keys=True,
-         shelf="Lumi", kit="lumi-pet", tabs=("town",), hidden=True),
+    # Lumi City (Doll's design, 2026-11-19; docs/plans/lumi-city.md): the town grew into a city she walks about freely,
+    # LefTown, Downtown and Right-City, with Lumi Heights' apartments, plots to buy and sell at Lumi Realty, and houses.
+    Game(slug="lumi-town", name="Lumi City", icon="🏙",
+         description="Lumi's city: walk LefTown, Downtown and Right-City, visit friends at Lumi Heights, buy a plot and build a house, and play at the Arcade, the Casino and the Lumi-Soft field.",
+         controls="Arrows, WASD or a stick walk · Enter or E uses what's in reach · a remote's arrows hop door to door · Escape / Back returns", track_keys=True,
+         shelf="Lumi", kit="lumi-pet", tabs=("town",), hidden=True, extras=("gamepad.js",)),   # (a gamepad walks her too)
     Game(slug="prism-drop", name="Prism Drop", icon="🔮",
          description="Pick a pocket and Lumi drops her glowing ball through blocks, bombs, bonus pegs and sliding platforms, then flies down to fetch it. Ten drops, and your score pays coins.",
          controls="◀ ▶ pick a pocket · Enter drops · ▲ replays the last drop · ▼ sound on or off",

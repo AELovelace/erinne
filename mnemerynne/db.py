@@ -94,7 +94,8 @@ GAMES_TABLES = ("coin_accounts", "coin_transactions", "lumi_pets", "lumi_gardens
                 "lumisoft_runs")
 # Games tables that were born in games.db (migrations/games/, never in core), so nothing moves for them; their user_id
 # columns still need cleaning when a user goes.
-GAMES_OWN_TABLES = ("lumi_launch_runs", "lumi_launch_bests")
+GAMES_OWN_TABLES = ("lumi_launch_runs", "lumi_launch_bests",
+                    "lumi_plots")             # Lumi City's plots (migrations/games/0003): a gone account's plot goes back to the office
 MEDIA_TABLES = ("signage_groups", "media_artwork", "media_screens", "media_remotes", "media_screen_guests",
                 "media_sources", "media_albums", "media_items", "media_tv_shows", "media_progress", "signage_shows",
                 "signage_schedule", "signage_screens")       # parents before the tables that refer to them

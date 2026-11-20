@@ -5,11 +5,11 @@
   "lumi-pet": ("// A LITTLE LIGHT, JUST FOR YOU", "LUMI", "PET", "A soft place to land."),
   "lumi-dungeons": ("// DOWN WHERE THE TREASURE IS", "LUMI", "DUNGEONS", "Brave little paws."),
   "lumi-garden": ("// THE STARDUST GARDEN", "LUMI’S", "GARDEN", "Flowers, powder and patience."),
-  "lumi-town": ("// WHERE SHALL WE GO?", "LUMI", "TOWN", "Lanterns, music and somewhere to be."),
+  "lumi-town": ("// WHERE SHALL WE GO?", "LUMI", "CITY", "LefTown, Downtown and Right-City: walk anywhere."),
 }[game.slug] %}
 {%- set tab_names = {"care": "Care", "pantry": "Pantry", "toys": "Toys", "closet": "Closet", "home": "Home", "battle": "Battle",
   "skills": "Skills", "dungeon": "Dungeon", "garden": "Garden", "shop": "Shop", "collection": "Collection", "settings": "Settings", "town": "Town"} %}
-{%- set room_name = {"lumi-dungeons": "THE LANTERN & PAW", "lumi-town": "LUMI TOWN"}.get(game.slug, "THE STARLIGHT NOOK") %}
+{%- set room_name = {"lumi-dungeons": "THE LANTERN & PAW", "lumi-town": "LUMI CITY"}.get(game.slug, "THE STARLIGHT NOOK") %}
 <section class="lp-intro gm-panel" aria-label="Your companion">
   <p class="gm-eyebrow">{{ words[0] }}</p>
   <h1 class="gm-title">{{ words[1] }}<span>{{ words[2] }}</span></h1>
@@ -46,7 +46,7 @@
       in the same wide drawing, with a line of her health and satchel. -#}
   <svg class="lp-dungeon" id="lp-dungeon" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style="display: none"></svg>
   {#- Lumi Town's townsfolk, and everyone else's Lumis in town now (game.js drawFolk): over the town picture, in its own
-      coordinates, moved by transform only. Only other people's Lumis in town take a press (to visit their flat): everything else goes through to the places. -#}
+      coordinates, moved by transform only. Nobody's Lumi takes a press (Lumi City, 2026-11-19: visits are by walking to a door): presses go through to the places. -#}
   <svg class="lp-folk" id="lp-folk" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
   {#- Lumi Town's local chat (game.js hear/townSay, mnemerynne/lumitown.py): a box to type a line (T, or the list's Type a
       message); the lines said here are listed in the right-hand panel, under her message. -#}

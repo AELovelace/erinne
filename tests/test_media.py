@@ -1201,7 +1201,7 @@ def test_built_in_games_open_from_media_and_show_on_a_remote(client, conn, direc
     _turn_on(client)
     assert 'data-view="games"' in client.get("/media").text                # built in: listed with no setup
     listed = client.get("/api/media/games").json()["games"]
-    assert [g["slug"] for g in listed] == [g.slug for g in games.GAMES] and [g["name"] for g in listed[:5]] == ["Lumi Pet", "Lumi Dungeons", "Lumi’s Garden", "Lumi Town", "Prism Drop"]
+    assert [g["slug"] for g in listed] == [g.slug for g in games.GAMES] and [g["name"] for g in listed[:5]] == ["Lumi Pet", "Lumi Dungeons", "Lumi’s Garden", "Lumi City", "Prism Drop"]
     page = client.get("/media/games/prism-drop")
     assert page.status_code == 200
     for name in ("games/common.js", "games/common.css", "games/prism-drop/rules.js", "games/prism-drop/game.js",
@@ -1252,7 +1252,7 @@ def test_built_in_games_open_from_media_and_show_on_a_remote(client, conn, direc
     town = client.get("/media/games/lumi-town")                          # Lumi Town: the same kit, one list, its own scripts, no app of its own
     assert town.status_code == 200 and 'data-game="lumi-town" data-kit="lumi-pet"' in town.text and re.findall(r'data-lp-tab="([a-z]+)"', town.text) == ["town"]
     assert "/static/games/lumi-pet/town-ui.js?v=" in town.text and "/static/games/lumi-pet/town-art.js?v=" in town.text
-    assert "LUMI<span>TOWN</span>" in town.text and 'id="lp-place">LUMI TOWN<' in town.text
+    assert "LUMI<span>CITY</span>" in town.text and 'id="lp-place">LUMI CITY<' in town.text
     assert "lumi-town/manifest.webmanifest" not in town.text and client.get("/media/games/lumi-town/manifest.webmanifest").status_code == 404
     assert anonymous.get("/media/games/lumi-town").status_code == 401
     # Every place in the town opens a game that exists (town-ui.js names them by slug).

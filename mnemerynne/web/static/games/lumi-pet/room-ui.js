@@ -19,9 +19,10 @@
    A place is { room, at, x, y }: `at` is the spot she's at (the room's list cursor, her bubble), x and y where she
    stands. Snap walking still moves by `at` (x and y follow); free walking moves x and y (`at` follows). */
 (function (root, make) {
-  const ui = make();
-  if (typeof module === "object" && module.exports) module.exports = ui; else root.LumiPetRoom = ui;
-})(typeof self !== "undefined" ? self : this, function () {
+  const node = typeof module === "object" && module.exports;                    // Node (the tests) or a page
+  const ui = make(node ? require("./walker.js") : root.LumiWalker);             // the shared walker (walker.js, loaded before this file)
+  if (node) module.exports = ui; else root.LumiPetRoom = ui;
+})(typeof self !== "undefined" ? self : this, function (Walker) {
   "use strict";
 
   // The flat, left to right. Each thing: where Lumi stands to use it (x), its press box over the drawing [x, y, w, h],
@@ -134,9 +135,9 @@
   function move(at, dx, dy) { // Free walking: one step by dx, dy. Each axis on its own, so she slides along a thing she bumps;
     // past a side edge she walks through to the next room (at the same depth), and the flat's ends stop her.
     const here = clean(at), id = here.room;
-    let x = here.x + (dx || 0), y = Math.max(BACK, Math.min(FRONT, here.y + (dy || 0)));
-    if (!free(id, x, here.y)) x = here.x;                               // bumped a thing sideways: stay
-    if (!free(id, x, y)) y = here.y;                                    // bumped one going back: stay
+    const depth = Math.max(BACK, Math.min(FRONT, here.y + (dy || 0))) - here.y; // the step in depth, kept on the floor
+    const went = Walker.slide(function (fx, fy) { return free(id, fx, fy); }, here, dx || 0, depth); // the shared walker: each axis on its own, sliding along a thing she bumps
+    const x = went.x, y = went.y;
     const i = index(id), side = x < EDGE.left ? -1 : x > EDGE.right ? 1 : 0;
     if (side && ROOMS[i + side]) {                                      // through to the next room, just inside its other edge
       const to = ROOMS[i + side].id, nx = side < 0 ? EDGE.right - 4 : EDGE.left + 4;

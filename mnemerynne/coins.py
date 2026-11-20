@@ -96,6 +96,28 @@ def buyback(conn: sqlite3.Connection, user_id: int, amount: int, game: str) -> i
     return amount
 
 
+def transfer(conn: sqlite3.Connection, from_uid: int, to_uid: int, amount: int, game: str, what: str = "trade",
+             ref: str | None = None) -> bool:
+    """One player pays another, like buying a plot someone listed in Lumi City (lumicity.py). False: the buyer hasn't
+    enough coins, either account is gone, or this `ref` has already paid, and nothing moved. Checks the balance first,
+    like spend(), so a refusal never has to roll back the caller's transaction."""
+    balance = held(conn, from_uid)                        # opens the buyer's purse on their first trade
+    if amount <= 0 or from_uid == to_uid or balance is None or balance < amount:
+        return False                                      # broke, or nothing to pay, or paying herself
+    if held(conn, to_uid) is None:                        # opens the seller's purse too, so the coins have somewhere to land
+        return False                                      # (the seller's account has gone)
+    return _move(conn, _account(from_uid), _account(to_uid), amount, f"{game}_{what}", game, ref)   # False: that ref already paid
+
+
+def payout(conn: sqlite3.Connection, user_id: int, amount: int, game: str, what: str, ref: str | None = None) -> bool:
+    """The house pays this account for something it buys back, like a plot sold to Lumi City's office. From the house
+    account (it may run short, like the casino's), and with a `ref` so the same sale can only ever pay once.
+    False: nothing to pay, the account is gone, or that ref has already paid, and nothing moved."""
+    if amount <= 0 or held(conn, user_id) is None:        # opens the purse if this is her first coin
+        return False
+    return _move(conn, HOUSE, _account(user_id), amount, f"{game}_{what}", game, ref)   # False: paid before
+
+
 def today(conn: sqlite3.Connection) -> str:
     """The server's date, the one every daily limit counts by."""
     return conn.execute("SELECT date('now', 'localtime')").fetchone()[0]

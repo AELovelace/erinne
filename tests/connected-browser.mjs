@@ -12,6 +12,7 @@ import { checkArcadeLumi } from "./arcade-lumi-browser.mjs";
 import { checkGameScaling } from "./game-scaling-browser.mjs";
 import { checkLumiSoft } from "./lumi-soft-browser.mjs";
 import { checkLumiLaunch, checkLumiLaunchTV } from "./lumi-launch-browser.mjs";
+import { checkLumiCity } from "./lumi-city-browser.mjs";
 
 const modulePath = process.env.PUPPETEER_MODULE;
 const { default: puppeteer } = await import(modulePath ? pathToFileURL(modulePath).href : "puppeteer");
@@ -47,7 +48,9 @@ try {
     await roomModeOff(page); // New Lumis start in room mode (2026-11-19); these checks drive the lists, and checkLumiPetRooms turns it on for its own.
   }
   await mkdir("runs/casino-browser", { recursive: true });
-  if (process.env.LUMI_ROOMS_ONLY === "1") { // Focused iteration on room mode: walking her flat, its cards, the switch.
+  if (process.env.LUMI_CITY_ONLY === "1") { // Focused iteration on Lumi City (needs PREVIEW_COINS): Lumi Heights, the city, Lumi Realty, her house.
+    await checkLumiCity(alice, bob, base);
+  } else if (process.env.LUMI_ROOMS_ONLY === "1") { // Focused iteration on room mode: walking her flat, its cards, the switch.
     await checkLumiPetRooms(alice, base);
   } else if (process.env.LUMI_SOFT_ONLY === "1") { // Focused iteration on Lumi-Soft.
     await checkLumiSoft(bob, base);
@@ -77,7 +80,7 @@ try {
     await alice.evaluate(() => [...document.querySelectorAll(".mc-card")].find(b => b.querySelector(".mc-label").textContent === "Slot Machines").click());
     await checkSharedTV(alice, screen, base);
   } else {
-  await checkLumiPetRooms(alice, base);
+  if (process.env.SKIP_LUMI_ROOMS !== "1") await checkLumiPetRooms(alice, base); // (SKIP_LUMI_ROOMS=1: run everything after it while room mode's own check is being mended)
   await checkLumiPet(browser, alice, base);
   await checkLumiPetDoors(browser, alice, base);
   await checkLumiPetGarden(browser, alice, base);
