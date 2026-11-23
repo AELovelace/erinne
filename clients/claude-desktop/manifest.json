@@ -201,6 +201,10 @@
       "description": "(Alpha) Report an automation run's result for delivery"
     },
     {
+      "name": "cancel_automation_run",
+      "description": "(Alpha) Cancel an automation run that's still going"
+    },
+    {
       "name": "diagnose",
       "description": "Development diagnostics for admins, while switched on"
     },

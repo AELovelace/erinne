@@ -6,7 +6,7 @@ Automator runs jobs on a schedule for the people allowed to use it: a morning br
 
 - **Automator is on for this organisation:** off until an admin turns it on. While it's off, the tab and its API aren't there, nothing runs, and Claude's Automator tools refuse. Automations are kept for when it's back.
 - **Who may use it:** a group (several separated by `;`); empty means admins only. Admins always may. Someone who leaves the group, or whose account is turned off, has their automations paused at the next run, with a note saying why.
-- **Automations:** everyone's, with **Pause**. The owner is told and can turn it back on.
+- **Automations:** everyone's, with **Pause**. The owner is told and can turn it back on. While one of them has a run going, **Cancel run** stops that run (see [Cancelling a run](#cancelling-a-run)); the owner is told, and it's logged as `automations.cancel`.
 - **Webhooks:** where answers may go besides Mnemerynne. Only admins add addresses (https only); people pick from this list, optionally limited to a group.
   - **JSON:** posts `{automation, run_id, status, output, link}`.
   - **Teams:** an Adaptive Card for an incoming webhook or a Workflows "post to channel" trigger.
@@ -30,6 +30,36 @@ Every change is logged in Recent changes (`settings.automations*`, `automations.
 **Rooms:** an Erynne automation that posts in a room runs as Erynne in that room, reading only what *everyone in that room* may read, exactly as when she's @mentioned there. Its answer is posted for all of them, so it can't use the owner's private files or mail. A Claude automation (the owner's key or a routine) may post in a room too, but it works with the owner's own access. Saving one with a room is refused unless the owner ticks **Share what my access finds with everyone in this room** (stored as `deliver.room_share`). Its post is headed "run by Claude with *owner*'s access, shared by them". Rooms where Erynne is turned off aren't offered, for either runner.
 
 **Nothing to report:** an answer of exactly `NOTHING_TO_REPORT` (the templates ask for it, e.g. a health check with nothing wrong) is recorded as *nothing to report* and not delivered.
+
+## Run states
+
+A run (`automation_runs.status`) is in one of these:
+
+| State | Meaning | Still going? |
+|---|---|---|
+| `queued` | started in a process without the scheduler (the mcp service, the web app while the automations service runs); the scheduler claims it within seconds | yes |
+| `running` | Erynne or Claude is working on it, or a routine is being started | yes |
+| `waiting` | a Claude routine was started on claude.ai; waiting for its `report_automation_run` | yes |
+| `reported` | the routine's report was saved by another process; the scheduler delivers it | yes |
+| `done` | answered and delivered | no |
+| `quiet` | answered `NOTHING_TO_REPORT`; nothing delivered | no |
+| `failed` | something went wrong; the owner's Inbox says what | no |
+| `timed_out` | a routine didn't report within 2 hours | no |
+| `cancelled` | stopped by its owner, Claude on their behalf, or an admin; nothing delivered | no |
+
+## Cancelling a run
+
+A run that's still going (queued, running, waiting or reported) can be cancelled:
+- by its **owner**, with **Cancel** beside the run on the Automator page, in the run's live window, or on the automation's card (`POST /api/automations/runs/{id}/cancel`);
+- by **Claude**, for the owner, with `cancel_automation_run` (a connection that may edit, as for `run_automation`);
+- by an **admin**, with **Cancel run** under Settings → Automator (`POST /api/admin/automations/{automation_id}/cancel`).
+
+A cancelled run ends as `cancelled`, never `failed`: its error says who cancelled it, its raw output ends with a *Cancelled* step, nothing is delivered and nobody gets a "failed" note. What happens to the work:
+- **queued** or **reported:** the scheduler only picks up runs still in those states, so it never starts or delivers it.
+- **running** (Erynne, Claude with a key): the scheduler cancels the run's task. A cancel made in the scheduler's own process stops it at once; one made in another process stops it when the scheduler is woken (`automations:wake` in Valkey), or within 30 seconds without Valkey. A tool already working in a thread finishes, but its result is thrown away.
+- **waiting** (a Claude routine): nothing of Mnemerynne's is running, and Mnemerynne can't stop a session on claude.ai. The run is marked cancelled, it drops off `list_automation_tasks`, and a report that arrives later is refused: `report_automation_run` tells Claude the run was cancelled and to stop. Open the run's *Claude's session* link to stop the session itself on claude.ai if it's still working.
+
+A run that has already ended can't be cancelled (the API answers 409). Nothing that arrives after a cancel (the model's answer, a routine's report, a failure) changes the run: it stays `cancelled`. Cancelling doesn't pause the automation; its next scheduled run goes ahead.
 
 ## Limits
 
@@ -64,6 +94,7 @@ These are for Claude, through the connector:
 - `list_automations`;
 - `run_automation` (needs a connection that may edit);
 - `get_automation_run`;
-- `list_automation_tasks` and `report_automation_run`, for routines.
+- `cancel_automation_run` (needs a connection that may edit), to stop a run that's still going;
+- `list_automation_tasks` and `report_automation_run`, for routines. A report for a cancelled run is refused.
 
 Erynne doesn't get them: an automation never starts another.

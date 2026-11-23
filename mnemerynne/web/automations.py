@@ -146,6 +146,20 @@ def run_automation(automation_id: int, request: Request, user=Depends(_on),
     return {"run_id": run_id}
 
 
+@router.post("/api/automations/runs/{run_id}/cancel")
+def cancel_run(run_id: int, user=Depends(_on), conn: sqlite3.Connection = Depends(get_automations_db)):
+    """Stop one of the person's runs that's queued, running, waiting for Claude or about to be delivered: it ends
+    as 'cancelled' and nothing is delivered (automations_run.cancel). 409 when it has already ended."""
+    run = auto.get_run(conn, run_id)
+    if run is None or run["owner_id"] != user["id"]:   # theirs only, as starting it is
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such run")
+    with transaction(conn):
+        cancelled = automations_run.cancel(conn, run_id, user["username"])
+    if not cancelled:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"It has already ended ({auto.get_run(conn, run_id)['status']}).")
+    return _run_body(auto.get_run(conn, run_id))
+
+
 @router.get("/api/automations/{automation_id}/runs")
 def list_runs(automation_id: int, user=Depends(_on), conn: sqlite3.Connection = Depends(get_db)):
     try:
@@ -202,7 +216,7 @@ def approvals(user=Depends(_on), conn: sqlite3.Connection = Depends(get_db)):
     return {"approvals": items, "pending": sum(1 for i in items if i["proposal"]["status"] == "pending")}
 
 
-FINAL = ("done", "quiet", "failed", "timed_out")   # a run in one of these won't change any more
+FINAL = auto.FINAL         # a run in one of these won't change any more (cancelled too)
 STREAM_POLL = 2.0          # seconds between looks when no wake comes (Valkey down, another process's run)
 STREAM_BEAT = 15.0         # a comment this often keeps proxies from closing a quiet stream
 STREAM_GRACE = 10.0        # after the run is final, how long to wait for its last steps (a "finish" step)
@@ -250,7 +264,7 @@ async def _run_stream(settings, run_id: int, after: int, disconnected):
                 yield sse("status", {"status": seen})
             if seen in FINAL:
                 final_at = final_at or time.monotonic()
-                ended = not trace or trace[-1]["kind"] in ("finish", "error", "cut")
+                ended = not trace or trace[-1]["kind"] in ("finish", "error", "cut", "cancelled")
                 if ended or time.monotonic() - final_at > STREAM_GRACE:   # older runs have no "finish" step
                     yield sse("end", _run_body(run))
                     return
@@ -292,11 +306,19 @@ def _admin_status(conn: sqlite3.Connection) -> dict:
     return {"enabled": auto.enabled(conn), "group": group_refs.label(conn, auto.group(conn)),
             "automations": [{"id": r["id"], "owner": r["username"], "name": r["name"], "runner": r["runner"],
                              "when": auto.describe(json.loads(r["schedule"]), r["tz"]), "enabled": bool(r["enabled"]),
-                             "paused_reason": r["paused_reason"]} for r in auto.all_rows(conn)],
+                             "paused_reason": r["paused_reason"],
+                             "running_run_id": _running(conn, r["id"])}   # the admin page offers Cancel run
+                            for r in auto.all_rows(conn)],
             "destinations": [{"id": d["id"], "name": d["name"], "url": d["url"], "format": d["format"],
                               "secret": bool(d["secret_enc"]), "group": group_refs.label(conn, d["group_ref"])}
                              for d in conn.execute("SELECT * FROM automation_destinations ORDER BY name").fetchall()],
             "feeds": _feeds(conn)}
+
+
+def _running(conn: sqlite3.Connection, automation_id: int) -> int | None:
+    """The id of an automation's run that's still going, or None."""
+    found = auto.active_run(conn, automation_id)
+    return found["id"] if found is not None else None
 
 
 def _feeds(conn: sqlite3.Connection) -> list[dict]:
@@ -355,6 +377,22 @@ def admin_pause(automation_id: int, user=Depends(admin_user), conn: sqlite3.Conn
     with transaction(conn):
         auto.pause(conn, automation_id, f"an admin ({user['username']}) paused it.")
         _log(conn, user, "automations.pause", str(automation_id), row["name"])
+    return _admin_status(conn)
+
+
+@admin_router.post("/{automation_id}/cancel")
+def admin_cancel(automation_id: int, user=Depends(admin_user), conn: sqlite3.Connection = Depends(get_automations_db)):
+    """An admin stops any automation's run that's going (as they may pause any automation); its owner is told."""
+    row = auto.get(conn, automation_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such automation")
+    with transaction(conn):
+        run = auto.active_run(conn, automation_id)
+        if run is None or not automations_run.cancel(conn, run["id"], f"an admin ({user['username']})"):
+            raise HTTPException(status.HTTP_409_CONFLICT, "It has no run going.")
+        auto.tell(conn, row["owner_id"], f"An admin ({user['username']}) cancelled the run of your automation "
+                  f"“{row['name']}”.", f"/automations#run={run['id']}")   # the owner hears why it stopped
+        _log(conn, user, "automations.cancel", str(automation_id), f"{row['name']} (run {run['id']})")
     return _admin_status(conn)
 
 

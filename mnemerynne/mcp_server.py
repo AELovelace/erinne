@@ -59,7 +59,9 @@ log = logging.getLogger("mnemerynne.mcp")
 # 1.8.0: directions from the person (the Scratchpad page): notes with author "person", for one agent or everyone
 #        on a board, ride along with the next tool answer (`directions`); read_scratchpad takes `agent` and lists
 #        open directions first; write_scratchpad takes reply_to and for_agent.
-MCP_VERSION = "1.8.0"
+# 1.9.0: cancel_automation_run stops a run that's still going (it ends "cancelled"); report_automation_run refuses
+#        a cancelled run's report and says to stop.
+MCP_VERSION = "1.9.0"
 
 PAGE_WIDTH_PX = 1200     # rendered page width: small print stays legible, JPEG stays ~100-300 KB
 PAGE_MAX_PX = 2000       # cap on either side, for unusually long or wide pages
@@ -157,11 +159,13 @@ Briefings and security:
 
 Automator (alpha; only where an admin turned it on for the person):
 - list_automations shows the person's scheduled automations (a morning briefing, a security digest);
-  run_automation starts one now and get_automation_run reads its answer.
+  run_automation starts one now and get_automation_run reads its answer; cancel_automation_run stops
+  a run that's still going (it ends "cancelled" and nothing is delivered).
 - When you were started by a Mnemerynne automation (the task names a run id), do the task with these
   tools, then call report_automation_run with that run_id and your report as Markdown, citing as usual.
   If there's nothing worth reporting, report exactly NOTHING_TO_REPORT. list_automation_tasks lists
-  runs still waiting for a report.
+  runs still waiting for a report. If get_automation_run says your run is "cancelled", or the report
+  is refused because it was, stop: the person cancelled it and nothing more is wanted.
 
 Mail and calendar (only for people an admin put in the mail group, with a linked Microsoft 365 account;
 for everyone else these tools refuse with [not_allowed], so don't retry them):
@@ -1414,6 +1418,23 @@ class Tools:
         return {**automations.run_view(run), "automation": run["name"],
                 "link": f"{self.base}/automations#run={run_id}"}, []
 
+    def cancel_automation_run(self, conn, caller: Caller, run_id: int) -> tuple[dict, list[int]]:
+        """Stop one of the person's runs that's still going (queued, running, waiting for Claude, delivering): it
+        ends as 'cancelled' and nothing is delivered. Refused once it has ended."""
+        self._automator_user(conn, caller)
+        if not caller.can_edit:                       # as starting one: a search-only connection can't
+            raise ToolError("This connection can only search; cancelling a run needs one that may edit.")
+        run = automations.get_run(conn, run_id)
+        if run is None or run["owner_id"] != caller.user_id:
+            raise Refused("No such run.", "not_found")
+        user = conn.execute("SELECT username FROM users WHERE id = ?", (caller.user_id,)).fetchone()
+        with automations.on(conn) as runs, db.transaction(runs):     # automations.db (Phase 9)
+            cancelled = automations_run.cancel(runs, run_id, f"{user['username']} (through Claude)")
+        if not cancelled:
+            raise Refused(f"That run has already ended (it's {run['status']}).", "conflict")
+        return {"run_id": run_id, "status": "cancelled", "link": f"{self.base}/automations#run={run_id}",
+                "note": "Cancelled: it stops, and nothing is delivered."}, []
+
     def list_automation_tasks(self, conn, caller: Caller) -> tuple[dict, list[int]]:
         """Runs waiting for Claude (a routine was started for them): what to do, and the run_id to report."""
         self._automator_user(conn, caller)
@@ -1430,6 +1451,9 @@ class Tools:
         run = automations.get_run(conn, run_id)
         if run is None or run["owner_id"] != caller.user_id:
             raise Refused("No such run.", "not_found")
+        if run["status"] == "cancelled":              # its owner stopped it: the report is dropped, never delivered
+            raise Refused("That run was cancelled, so your report isn't needed: stop working on it and don't "
+                          "report it again.", "conflict")
         if run["status"] != "waiting":
             raise Refused(f"That run isn't waiting for a report (it's {run['status']}).", "conflict")
         if status not in ("done", "failed"):
@@ -1457,9 +1481,10 @@ class Tools:
             claimed = runs.execute("UPDATE automation_runs SET status = 'running' WHERE id = ? AND status = 'waiting'",
                                    (run_id,)).rowcount
         if not claimed:
-            raise Refused("That run was just reported.", "conflict")
+            raise Refused("That run was just reported or cancelled.", "conflict")
         if status == "failed":
-            scheduler._finish(run_id, "failed", "", [], "claude routine", text[:2000])
+            if not scheduler._finish(run_id, "failed", "", [], "claude routine", text[:2000]):
+                return {"run_id": run_id, "status": "cancelled"}, []   # cancelled a moment ago: it stays so
             return {"run_id": run_id, "status": "failed"}, []
         try:
             out = asyncio.run_coroutine_threadsafe(scheduler.complete(run_id, text, [], "claude routine"),
@@ -2171,6 +2196,13 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
         """(Alpha) One automation run: its status, the answer (Markdown with [n] citations and `sources`),
         and where it was delivered."""
         return await call(ctx, "get_automation_run", {"run_id": run_id}, tools.get_automation_run)
+
+    @server.tool(annotations=_EDITS)
+    async def cancel_automation_run(ctx: Context, run_id: int) -> dict:
+        """(Alpha) Cancel one of the person's automation runs that's still going (queued, running, or waiting
+        for a Claude routine's report): it stops, ends as "cancelled" and nothing is delivered. Refused once
+        the run has ended."""
+        return await call(ctx, "cancel_automation_run", {"run_id": run_id}, tools.cancel_automation_run)
 
     @server.tool(annotations=_READ_ONLY)
     async def list_automation_tasks(ctx: Context) -> dict:

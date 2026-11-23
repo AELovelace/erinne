@@ -9,8 +9,9 @@
   const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
   const RUNNERS = { erynne: "Erynne", claude_key: "Claude (your key)", claude_routine: "A Claude routine" };
   const STATUS = { queued: "starting…", running: "running…", waiting: "waiting for Claude…", reported: "delivering…",
-                   done: "done", quiet: "nothing to report", failed: "failed", timed_out: "timed out" };
-  const FINAL = ["done", "quiet", "failed", "timed_out"];   // a run in one of these won't change any more
+                   done: "done", quiet: "nothing to report", failed: "failed", timed_out: "timed out",
+                   cancelled: "cancelled" };
+  const FINAL = ["done", "quiet", "failed", "timed_out", "cancelled"];   // a run in one of these won't change any more
   const state = { data: null, selected: null, run: null };
 
   function showError(message) {
@@ -57,6 +58,21 @@
     return { label: label, box: box };
   }
 
+  /* Cancel a run that's going (queued, running, waiting for Claude, delivering): it stops and nothing is
+     delivered. after() runs once the server has said yes, to redraw what shows it. */
+  async function cancelRun(runId, name, after) {
+    if (!confirm("Cancel this run of “" + name + "”? It stops now and nothing is delivered.")) return;
+    showError("");
+    try {
+      await api("POST", "/api/automations/runs/" + runId + "/cancel");   // 409 if it ended meanwhile
+    } catch (err) { showError(err.message); }
+    if (after) after();                                               // redraw either way: it has ended
+  }
+
+  function cancelButton(runId, name, after) {                         // the red Cancel beside a running run
+    return button("Cancel", "link small danger", function () { cancelRun(runId, name, after); });
+  }
+
   // ------------------------------------------------------------- the list
   function renderList() {
     const box = $("auto-list");
@@ -81,6 +97,9 @@
       const actions = el("div", "ax-bar");
       actions.append(button("Open", "small", function () { open(a.id); }),
                      button("Run now", "small link", function () { runNow(a.id); }));
+      if (a.running && a.last_run) {                                  // its last run is still going
+        actions.appendChild(cancelButton(a.last_run.id, a.name, function () { load(state.selected); }));
+      }
       li.appendChild(actions);
       ul.appendChild(li);
     });
@@ -255,6 +274,9 @@
       li.append(b, document.createTextNode(" "), button("Raw output", "link small muted", function () {
         liveRun(r.run_id, a.name);                                    // the step-by-step trace, live if it's running
       }));
+      if (FINAL.indexOf(r.status) < 0) {                              // still going: it can be stopped
+        li.append(document.createTextNode(" "), cancelButton(r.run_id, a.name, function () { load(a.id); }));
+      }
       ul.appendChild(li);
     });
     const out = el("div", "automator-output");
@@ -274,6 +296,9 @@
     box.appendChild(button("Raw output (" + (r.trace ? r.trace.length : 0) + " steps)", "small", function () {
       liveRun(r.run_id, r.name);                                      // every step it took, with each tool's raw result
     }));
+    if (FINAL.indexOf(r.status) < 0) {                                // still going: offer to stop it
+      box.append(document.createTextNode(" "), cancelButton(r.run_id, r.name, function () { load(r.automation_id); }));
+    }
     if (r.proposals && r.proposals.length) {
       box.appendChild(button(r.proposals.length + (r.proposals.length === 1 ? " proposal" : " proposals") + " → Approvals",
                              "link small", function () { showTab("approvals"); }));
@@ -374,7 +399,8 @@
   // ------------------------------------------------------- the raw output, live
   const KINDS = { start: "Started", prompt: "Prompt", info: "Note", note: "Model's note", route: "Route", tool: "Tool",
                   proposal: "Proposal", sources: "Sources", delta: "Answer", answer: "Answer", routine: "Claude routine",
-                  approval: "Auto-approval", delivered: "Delivered", finish: "Finished", error: "Error", cut: "Cut" };
+                  approval: "Auto-approval", delivered: "Delivered", finish: "Finished", error: "Error", cut: "Cut",
+                  cancelled: "Cancelled" };
 
   function pretty(value) {                                            // a step's field as readable text
     if (typeof value === "string") {
@@ -435,7 +461,8 @@
       try { await navigator.clipboard.writeText(JSON.stringify(steps, null, 2)); copy.textContent = "Copied ✓"; }
       catch (e) { copy.textContent = "Couldn't copy"; }
     });
-    actions.append(copy, button("Close", "", function () { dlg.close(); }));
+    const stop = cancelButton(runId, name, null);                     // hidden once the run is over
+    actions.append(stop, copy, button("Close", "", function () { dlg.close(); }));
     dlg.append(head, follow.label, list, result, actions);
     document.body.appendChild(dlg);
 
@@ -449,6 +476,7 @@
 
     function finish(r) {
       ended = true;
+      stop.hidden = true;                                             // nothing left to cancel
       status.textContent = r.gone ? "gone" : (STATUS[r.status] || r.status);
       if (r.gone) { result.replaceChildren(el("p", "error small", "That run is gone.")); return; }
       result.replaceChildren();
@@ -471,6 +499,7 @@
       es.addEventListener("status", function (e) {
         const s = JSON.parse(e.data).status;
         status.textContent = STATUS[s] || s;
+        stop.hidden = FINAL.indexOf(s) >= 0;                          // Cancel only while it's going
       });
       es.addEventListener("end", function (e) { es.close(); finish(JSON.parse(e.data)); });
       es.onerror = function () {                                      // dropped: pick up where it left off

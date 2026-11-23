@@ -102,7 +102,7 @@ CONNECTOR_ONLY_TOOLS = {"create_folder", "rename_item", "move_item", "delete_ite
                         "read_scratchpad", "write_scratchpad", "claim_note", "resolve_note",
                         # Automator's: an automation never starts or reports automations itself.
                         "list_automations", "run_automation", "get_automation_run", "list_automation_tasks",
-                        "report_automation_run"}
+                        "report_automation_run", "cancel_automation_run"}
 # What the chat's tool panel calls each tool, by group.
 TOOL_GROUPS = {
     "Documents": {"search_documents": "Search documents", "read_passage": "Read passages",

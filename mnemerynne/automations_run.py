@@ -20,6 +20,11 @@ the change they're about commits (automations.tell).
 
 Delivery: the owner's Inbox (a note linking to the run), a room, a draft in their Outlook, webhooks.
 An answer of just automations.QUIET is not delivered (a health check with nothing wrong).
+
+Cancel (cancel(), from any process): the row becomes 'cancelled' in one UPDATE; the scheduler then cancels the
+run's asyncio task (Scheduler.stop, or Scheduler._reap at its next tick or wake for a cancel made elsewhere).
+A cancelled row is never overwritten: automations.finish_run skips it, so a late answer or a routine's late
+report can't turn it back into done or failed.
 """
 
 from __future__ import annotations
@@ -236,12 +241,38 @@ def save_report(conn, run_id: int, text: str) -> bool:
     return saved
 
 
+def cancel(conn, run_id: int, who: str) -> bool:
+    """Cancel a run, from any process, inside the caller's transaction on Automator's tables (`conn`): it ends as
+    'cancelled' and whatever runs it stops. False when it had already ended (then nothing changes).
+    - queued / reported: the scheduler only claims rows still in those states, so it never starts or delivers it.
+    - running here (Erynne, Claude with a key): the scheduler cancels the run's asyncio task (Scheduler.stop), at
+      once in its own process, else at its next tick or wake (Scheduler._reap).
+    - waiting (a Claude routine on claude.ai): nothing of ours is running; Mnemerynne can't stop the session on
+      claude.ai, but a report that comes later is refused (report_automation_run says it was cancelled)."""
+    if not auto.cancel_run(conn, run_id, who):
+        return False
+    add_steps(conn, run_id, [_step("cancelled", {"text": f"Cancelled by {who}."})])   # the raw output ends here
+
+    def after() -> None:                   # once the row says cancelled, so the runner sees it when it looks
+        if ACTIVE is not None:
+            ACTIVE.loop.call_soon_threadsafe(ACTIVE.stop, run_id)   # the scheduler is in this process
+        else:
+            _wake()                        # the scheduler's process: it reaps cancelled runs on every wake
+        try:
+            events.publish_sync(trace_channel(run_id), {})          # a watching page sees it end
+        except Exception:
+            pass
+    db.after_commit(conn, after)
+    return True
+
+
 def fail(settings: Settings, run_id: int, text: str, error: str) -> None:
-    """Record a failed run and tell its owner (any process)."""
+    """Record a failed run and tell its owner (any process). Nothing, if it was cancelled first."""
     conn = connect(settings)
     try:
         with db.transaction(conn):
-            auto.finish_run(conn, run_id, "failed", output=text, sources=[], error=error, model="claude routine")
+            if not auto.finish_run(conn, run_id, "failed", output=text, sources=[], error=error, model="claude routine"):
+                return                     # cancelled: it stays so, and nobody is told it failed
             add_steps(conn, run_id, [_step("error", {"text": error, "report": text})])   # the raw output says why
             run = auto.get_run(conn, run_id)
             auto.tell(conn, run["owner_id"], f"Your automation “{run['name']}” failed: {error}",
@@ -261,6 +292,8 @@ class Scheduler:
         self.get_directory, self.background = get_directory, background
         self.slots = asyncio.Semaphore(MAX_AT_ONCE)
         self.loop = asyncio.get_running_loop()
+        self.tasks: dict[int, asyncio.Task] = {}       # run id -> the task running or delivering it here (stop())
+        self.cancelled: set[int] = set()              # runs stopped on purpose: their CancelledError is swallowed
 
     # -------------------------------------------------------------- timing
     async def run_forever(self) -> None:
@@ -315,6 +348,7 @@ class Scheduler:
         """Claim what's due (and what other processes queued) and start it, and deliver the reports they saved;
         the run ids started."""
         claimed, reported = await asyncio.to_thread(self._claim_due)
+        await self._reap()                                 # runs another process cancelled: stop them here
         for run_id in claimed:
             self._spawn(run_id)
         for run_id in reported:
@@ -375,6 +409,42 @@ class Scheduler:
         task = self.loop.create_task(work if work is not None else self.execute(run_id))
         self.background.add(task)
         task.add_done_callback(self.background.discard)
+        self.tasks[run_id] = task                      # so a cancel can find it
+
+        def forget(done: asyncio.Task) -> None:
+            if self.tasks.get(run_id) is done:
+                del self.tasks[run_id]
+            self.cancelled.discard(run_id)
+        task.add_done_callback(forget)
+
+    # ------------------------------------------------------------- cancel
+    def stop(self, run_id: int) -> bool:
+        """Stop a cancelled run's task here (on the scheduler's loop); False when nothing runs it here (queued,
+        waiting for a routine, or already over). The row must already say 'cancelled' (cancel())."""
+        task = self.tasks.get(run_id)
+        if task is None or task.done():
+            return False
+        self.cancelled.add(run_id)                     # execute() swallows this CancelledError, not a shutdown's
+        task.cancel()
+        return True
+
+    async def _reap(self) -> list[int]:
+        """Stop the tasks here whose runs were cancelled elsewhere (the mcp service, the web app while the
+        automations service runs: they only change the row, then wake us). The run ids stopped."""
+        mine = [run_id for run_id, task in self.tasks.items() if not task.done() and run_id not in self.cancelled]
+        if not mine:
+            return []
+
+        def read() -> list[int]:
+            conn = connect(self.settings)
+            try:
+                marks = ", ".join("?" * len(mine))
+                return [r[0] for r in conn.execute(f"SELECT id FROM automation_runs WHERE status = 'cancelled' "
+                                                   f"AND id IN ({marks})", mine).fetchall()]
+            finally:
+                conn.close()
+        stopped = [run_id for run_id in await asyncio.to_thread(read) if self.stop(run_id)]
+        return stopped
 
     # ------------------------------------------------------------- running
     async def _deliver_report(self, run_id: int) -> None:
@@ -393,7 +463,17 @@ class Scheduler:
                                         "Delivering it failed.")
 
     async def execute(self, run_id: int) -> None:
-        async with self.slots:
+        """Run it (or, for a routine, fire it). Cancelled on purpose (stop()), it ends quietly: the row already says
+        'cancelled', its trace gets its last steps saved, and nothing is delivered."""
+        try:
+            await self._execute(run_id)
+        except asyncio.CancelledError:
+            if run_id not in self.cancelled:
+                raise                                      # the scheduler shutting down: not ours to swallow
+            log.info("Automation run %s was cancelled", run_id)
+
+    async def _execute(self, run_id: int) -> None:
+        async with self.slots:                             # a cancel while waiting for a slot ends it here
             conn = connect(self.settings)
             try:
                 run = auto.get_run(conn, run_id)
@@ -401,18 +481,21 @@ class Scheduler:
                 user = auto.owner(conn, row) if row else None
             finally:
                 conn.close()
-            if row is None or user is None:
-                return
+            if row is None or user is None or run["status"] == "cancelled":
+                return                                     # gone, or cancelled before it began
             trace = Trace(self.settings, run_id)          # the raw output, saved as it happens
             trace.add("start", trigger=run["trigger"], runner=row["runner"], automation=row["name"],
                       owner=user["username"], tools=json.loads(row["tools"]) or "every reading tool",
                       may_propose=bool(row["may_propose"]))
-            error = ""
+            error, stopped = "", False
             try:
                 if row["runner"] == "claude_routine":
                     await self._fire_routine(run_id, row, user, trace)
                     return
                 text, sources, model = await asyncio.wait_for(self._answer(row, user, trace), RUN_TIMEOUT)
+            except asyncio.CancelledError:
+                stopped = run_id in self.cancelled         # cancel() already wrote the row and its "cancelled" step
+                raise
             except asyncio.TimeoutError:
                 error = f"It took longer than {int(RUN_TIMEOUT // 60)} minutes and was stopped."
             except RunFailed as exc:
@@ -424,7 +507,9 @@ class Scheduler:
                 if error:
                     trace.add("error", text=error)
                     await asyncio.to_thread(self._finish, run_id, "failed", "", [], "", error)
-                if error or row["runner"] == "claude_routine":
+                if stopped:                                # the trace's last step: the page's stream ends on it
+                    trace.add("cancelled", text="Stopped: nothing more runs, and nothing is delivered.")
+                if error or stopped or row["runner"] == "claude_routine":
                     await trace.close()                    # everything saved before the page hears it ended
             if error:
                 return
@@ -550,7 +635,9 @@ class Scheduler:
         quiet = text.strip(" \t\r\n.*_`\"'") == auto.QUIET
         status = "quiet" if quiet else "done"
         try:
-            await asyncio.to_thread(self._finish, run_id, status, text, sources, model, "")
+            if not await asyncio.to_thread(self._finish, run_id, status, text, sources, model, ""):
+                trace.add("cancelled", text="It was cancelled before its answer was recorded; nothing is delivered.")
+                return {"status": "cancelled", "delivered": []}   # a late answer never un-cancels a run
             try:
                 approved = await asyncio.to_thread(self._approve_all, run_id)   # auto-approval, before it's sent on
             except Exception as exc:                       # never let it stop the delivery
@@ -573,15 +660,18 @@ class Scheduler:
         finally:
             await trace.close()                            # all of it saved before the page hears it ended
 
-    def _finish(self, run_id, status, text, sources, model, error) -> None:
+    def _finish(self, run_id, status, text, sources, model, error) -> bool:
+        """Record how it ended (and tell the owner if it failed); False when it was cancelled first."""
         conn = connect(self.settings)
         try:
             with db.transaction(conn):
-                auto.finish_run(conn, run_id, status, output=text, sources=sources, error=error, model=model)
+                if not auto.finish_run(conn, run_id, status, output=text, sources=sources, error=error, model=model):
+                    return False                           # cancelled: stays cancelled, nobody told it failed
                 if status == "failed":
                     run = auto.get_run(conn, run_id)
                     auto.tell(conn, run["owner_id"], f"Your automation “{run['name']}” failed: {error}",
                               f"/automations#run={run_id}")
+            return True
         finally:
             conn.close()
 
@@ -623,7 +713,8 @@ class Scheduler:
         conn = connect(self.settings)
         try:
             with db.transaction(conn):
-                conn.execute("UPDATE automation_runs SET status = 'waiting', claude_session_url = ? WHERE id = ?",
+                conn.execute("UPDATE automation_runs SET status = CASE status WHEN 'running' THEN 'waiting' "
+                             "ELSE status END, claude_session_url = ? WHERE id = ?",   # cancelled meanwhile: stays so
                              (session[:500], run_id))
         finally:
             conn.close()

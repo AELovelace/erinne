@@ -1534,7 +1534,20 @@
             }
           });
         }
-        return [a.owner, a.name, a.when, a.runner, action];
+        const cell = el("span");
+        cell.appendChild(action);
+        if (a.running_run_id) {                                     // a run is going: an admin may stop it
+          const stop = el("button", "link small danger", "Cancel run");
+          stop.type = "button";
+          stop.addEventListener("click", function () {
+            if (confirm("Cancel the run of “" + a.name + "” (" + a.owner + ") that's going now? It stops and " +
+                        "nothing is delivered; they're told.")) {
+              send("POST", "/api/admin/automations/" + a.id + "/cancel");   // cancels its running run
+            }
+          });
+          cell.append(document.createTextNode(" "), stop);
+        }
+        return [a.owner, a.name, a.when, a.runner, cell];
       })));
     }
 

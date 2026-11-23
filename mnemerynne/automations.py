@@ -404,7 +404,8 @@ def view(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
             "routine_url": row["routine_url"], "routine_token": "saved" if row["routine_token_enc"] else "",
             "enabled": bool(row["enabled"]), "paused_reason": row["paused_reason"],
             "next_run_at": row["next_run_at"] + " UTC" if row["next_run_at"] else None,
-            "last_run": dict(last) if last else None}
+            "last_run": dict(last) if last else None,
+            "running": bool(last and last["status"] in ACTIVE)}          # the page offers Cancel while it's going
 
 
 # -------------------------------------------------------------------- runs
@@ -416,16 +417,37 @@ def start_run(conn: sqlite3.Connection, row: sqlite3.Row, trigger: str, status: 
     return run_id
 
 
+ACTIVE = ("queued", "running", "waiting", "reported")              # a run in one of these may still change
+FINAL = ("done", "quiet", "failed", "timed_out", "cancelled")    # a run in one of these won't change any more
+
+
 def finish_run(conn: sqlite3.Connection, run_id: int, status: str, *, output: str = "", sources: list | None = None,
-               error: str = "", model: str = "") -> None:
-    conn.execute("UPDATE automation_runs SET status = ?, output = ?, sources = ?, error = ?, model = ?, "
-                 "finished_at = datetime('now') WHERE id = ?",
-                 (status, output, json.dumps(sources or []), error[:2000], model or "", run_id))
+               error: str = "", model: str = "") -> bool:
+    """Record how a run ended; False when it was cancelled first (a cancelled run stays cancelled: a late answer or
+    failure doesn't overwrite it)."""
+    return conn.execute("UPDATE automation_runs SET status = ?, output = ?, sources = ?, error = ?, model = ?, "
+                        "finished_at = datetime('now') WHERE id = ? AND status <> 'cancelled'",
+                        (status, output, json.dumps(sources or []), error[:2000], model or "", run_id)).rowcount == 1
+
+
+def cancel_run(conn: sqlite3.Connection, run_id: int, who: str) -> bool:
+    """Mark a run cancelled, if it's still going (ACTIVE); False when it had already ended (nothing changes then).
+    Only the row: automations_run.cancel also stops whatever is running it."""
+    return conn.execute("UPDATE automation_runs SET status = 'cancelled', finished_at = datetime('now'), error = ? "
+                        f"WHERE id = ? AND status IN ({', '.join('?' * len(ACTIVE))})",
+                        (f"Cancelled by {who}."[:2000], run_id, *ACTIVE)).rowcount == 1   # one UPDATE: no race
 
 
 def get_run(conn: sqlite3.Connection, run_id: int) -> sqlite3.Row | None:
     return conn.execute("SELECT r.*, a.owner_id, a.name FROM automation_runs r JOIN automations a "
                         "ON a.id = r.automation_id WHERE r.id = ?", (run_id,)).fetchone()
+
+
+def active_run(conn: sqlite3.Connection, automation_id: int) -> sqlite3.Row | None:
+    """The automation's run that's still going (queued, running, waiting or reported), if any: there's at most one."""
+    return conn.execute(f"SELECT * FROM automation_runs WHERE automation_id = ? AND status IN "
+                        f"({', '.join('?' * len(ACTIVE))}) ORDER BY id DESC LIMIT 1",
+                        (automation_id, *ACTIVE)).fetchone()
 
 
 def runs(conn: sqlite3.Connection, automation_id: int, limit: int = 20) -> list[sqlite3.Row]:

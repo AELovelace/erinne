@@ -30,7 +30,9 @@ Each automation lists its runs; open one to read the answer with its sources. **
 - each tool it called, with the arguments it sent and, under **raw**, the result that came back (long ones are cut short);
 - what it proposed, what was auto-approved, where the answer went, and any error.
 
-While a run is going, the steps appear live; closing the window doesn't stop the run. **Copy raw JSON** copies every step, which helps when you ask someone why a run went wrong. A run made through a room doesn't show its tool steps, and a Claude routine shows what it was sent and when it reported back, not its own steps.
+While a run is going, the steps appear live; closing the window doesn't stop the run.
+
+**Cancel** (beside a run that's still going, on the automation's card, and in the live window) stops it. The run ends as *cancelled*: nothing is sent anywhere and you don't get a "failed" note. Cancelling one run doesn't pause the automation; it still runs at its next time. For a Claude routine, Mnemerynne stops waiting and turns away its report if it comes later, but the session on claude.ai may keep going until Claude notices: open *Claude's session* to stop it there. A run that has already finished can't be cancelled. **Copy raw JSON** copies every step, which helps when you ask someone why a run went wrong. A run made through a room doesn't show its tool steps, and a Claude routine shows what it was sent and when it reported back, not its own steps.
 
 ## Approvals
 
@@ -41,4 +43,5 @@ The **Approvals** tab lists what your automations proposed, grouped by run: the 
 With Claude connected:
 - `list_automations` shows yours;
 - `run_automation` starts one;
-- `get_automation_run` reads an answer.
+- `get_automation_run` reads an answer;
+- `cancel_automation_run` stops a run that's still going.
