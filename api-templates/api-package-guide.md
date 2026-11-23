@@ -8,6 +8,10 @@ then enters the credential and chooses who may use it.
 
 A working example is [atera-read-write.json](atera-read-write.json) (actions);
 the built-in presets in `mnemerynne/apis.py` (`PRESETS`) show reading operations.
+[fleetboard.json](fleetboard.json) and [fleetboard-actions.json](fleetboard-actions.json)
+are a matched pair written for a project's own API: a read-only template and an
+actions template, each with its own scoped token, lean `{total, rows}` answers
+and a `reason` on every action that the project's audit log keeps.
 (The built-in Atera preset includes the same actions since 1.0.1, so one *Atera*
 entry covers reading and changes; the template remains the way to give the
 changes their own credential and group.)

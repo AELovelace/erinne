@@ -58,6 +58,18 @@ Keep actions in their own API or template with their own credential and group, s
 
 The built-in Atera preset holds the reading operations and, since 1.0.1, the changes too: Contact by email (reads personal data), Create ticket, Change ticket status, Change ticket priority, Add internal note and Resolve alert, all actions the person runs. One Atera entry with one credential covers both; delete the change operations from it to keep an entry read-only, and edit Add internal note's body to the technician the notes should come from. An existing Atera API gets the new operations with **Add preset operations**. The `atera-read-write.json` template remains the way to give the changes a separate credential and group; an install that added both "Atera" and "Atera (read-write)" should delete the second once the first has the actions, so Claude sees one entry.
 
+## Fleetboard
+
+Fleetboard (the server-load dashboard on this box, also a Remote app) has a service API for Erynne and Claude, and two templates in the repository: `api-templates/fleetboard.json` (**Fleetboard**, read-only) and `api-templates/fleetboard-actions.json` (**Fleetboard (changes)**). Upload both with **Upload template…** and **Add** each.
+
+- **Reads** (Fleetboard): Summary (up/down/silent, busiest, fullest disks, issues: the morning brief), Hosts (one lean row per host; `status=silent` lists hosts that went quiet), Host detail (`host=` id, name or hostname), Over thresholds, Disk forecast ("full in about N days", from 90 days of daily history), History (`metric` cpu, mem, load, temp, disk:<mount>, net:<interface>, gpu:<n>, over hours or days), Client audit (where each client listens, its binary's SHA-256, flags for exposed, unexpected or old clients), Activity (Fleetboard's audit log), Thresholds, Token check.
+- **Changes** (Fleetboard (changes), proposals the person runs): Add host, Rename host, Pause monitoring, Resume monitoring, Remove host (deletes its history; tick **Needs an admin's approval**), Set threshold (also moves the Wazuh disk and offline alerts). Each needs a reason, which Fleetboard's audit log keeps next to *Mnemerynne/Claude (token …)*. None of them runs anything on a machine: Fleetboard's clients have no write routes.
+- **Credentials**: two Fleetboard service tokens, made on the box with `sudo -u fleetboard fleetboard-server token add mnemerynne-read` and `… token add mnemerynne-act --scope act`. Each is printed once and stored in Fleetboard only as a hash. They are not the shared client token. A read token can't make changes even if pasted into the wrong API (Fleetboard answers 403 and logs the refusal). `fleetboard-server token revoke NAME` cuts one off at once; `fleetboard-server calls` lists every call.
+- **Address** `http://127.0.0.1:9281/api/v1`, no certificate (loopback). Group: IT.
+- **Claude**: the answers hold host names, addresses, OS versions and client hashes, no personal data about people. Turn *Claude can query this* on if that inventory may go to Anthropic.
+
+Fleetboard's own `docs/API.md` lists every route and field.
+
 **Batches.** Claude can propose several actions as one proposal (`propose_batch`, at most `MNEMERYNNE_PROPOSAL_BATCH_MAX` = 25): one card, one link, a tick box per change. If any item needs an admin's approval the whole batch goes to Approvals.
 
 ## Writing a template

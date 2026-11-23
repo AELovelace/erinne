@@ -1,0 +1,113 @@
+{
+  "format": "mnemerynne-api-template",
+  "name": "Fleetboard",
+  "base_url": "http://127.0.0.1:9281/api/v1",
+  "auth_type": "bearer",
+  "description": "Fleetboard's service API, **read-only**: every machine's load, disks, memory, temperatures and GPUs, silent hosts, a disk-full forecast, 90 days of daily history, a client audit (where each client listens, its binary's SHA-256) and Fleetboard's activity log. For the morning audit and capacity questions. Changes (add, rename, pause, resume or remove a host, set a threshold) are in the separate **Fleetboard (changes)** template.\n\n**Setup** (Fleetboard runs on this box, on 127.0.0.1:9281)\n\n1. On the Mnemerynne box, make a read-only token, as the Fleetboard user so the database keeps its owner: `sudo -u fleetboard fleetboard-server token add mnemerynne-read` (the scope is read unless you say `--scope act`). It is printed once; only its hash is stored.\n2. Paste it here as the credential (Bearer). It is not the shared client token: a leak of one doesn't open the other.\n3. No certificate: plain http on loopback.\n4. Set the AD group to IT (whoever may see server load).\n5. Press **Test** on *Token check*: it should say `read: true, act: false`.\n\n**Claude**: the answers hold host names, IP addresses and ports, OS versions, client binary hashes and Fleetboard's audit log (which names tokens and, for changes made in the dashboard, the address they came from). No personal data about people. Turn Claude's switch on if host inventory may go to Anthropic.\n\n**Revoking**: `sudo -u fleetboard fleetboard-server token revoke mnemerynne-read` refuses the token from its next request on. `fleetboard-server token list` shows when each token was last used, and `fleetboard-server calls` lists every call.",
+  "operations": [
+    {
+      "name": "Summary",
+      "description": "The fleet at a glance: hosts up, down, paused and silent; the five busiest hosts by CPU; the five fullest disks; every host's current issues; the thresholds in use. Start the morning audit here.",
+      "path": "/summary",
+      "params": [],
+      "cache_seconds": 30,
+      "example_questions": ["How are the servers doing?", "Give me the Fleetboard summary for the morning brief.", "Is anything wrong with our machines right now?", "Which servers are busiest?", "Which disks are fullest?"]
+    },
+    {
+      "name": "Hosts",
+      "description": "One row per host: status (up, down, paused, waiting), silent (no data for longer than offline_minutes), last_seen, data_age_s, client_version, schema, OS, uptime_h, cpu_pct, mem_pct, the fullest disk and its used %, hottest_c and how many issues it has. status=silent lists the hosts that went quiet; status=issues the ones with a problem.",
+      "path": "/hosts",
+      "params": [
+        {"name": "status", "type": "enum", "in": "query", "options": ["all", "up", "down", "paused", "waiting", "silent", "issues"], "default": "all", "help": "Only hosts in this state"},
+        {"name": "silent_minutes", "type": "int", "in": "query", "min": 1, "max": 10080, "help": "Count a host as silent after this many minutes without data (default: the offline_minutes threshold)"}
+      ],
+      "cache_seconds": 15,
+      "example_questions": ["List every machine Fleetboard watches.", "Which hosts have gone silent?", "Which servers are offline?", "What client version is each host running?", "When did each host last report?"]
+    },
+    {
+      "name": "Host detail",
+      "description": "One host in full: OS, kernel, uptime, CPU model and load, memory and swap in bytes, each disk (used_bytes, total_bytes, used_pct), each GPU and temperature sensor, the busiest network interfaces, where the client listens, its binary SHA-256, and the host's current issues.",
+      "path": "/host",
+      "params": [
+        {"name": "host", "type": "string", "in": "query", "required": true, "help": "Host id, name or hostname from Hosts"}
+      ],
+      "cache_seconds": 15,
+      "example_questions": ["Show me everything about rsync-box.", "What are the disks on the NAS?", "How hot is RDS 1's GPU?", "How much memory is the Mnemerynne box using?"]
+    },
+    {
+      "name": "Over thresholds",
+      "description": "Everything over a limit right now: disks at or above disk_pct, memory at or above mem_pct, sensors and GPUs at or above temp_c, and hosts silent for longer than offline_minutes. Each limit defaults to the stored threshold; give one to ask a different question.",
+      "path": "/over",
+      "params": [
+        {"name": "disk_pct", "type": "int", "in": "query", "min": 1, "max": 100, "help": "Disk used % (default: the disk_pct threshold, 90)"},
+        {"name": "mem_pct", "type": "int", "in": "query", "min": 1, "max": 100, "help": "Memory used % (default 90)"},
+        {"name": "temp_c", "type": "int", "in": "query", "min": 1, "max": 200, "help": "Degrees Celsius (default 85)"}
+      ],
+      "cache_seconds": 15,
+      "example_questions": ["Which disks are over 90% full?", "Is any machine running hot?", "Which servers are low on memory?", "Anything over the thresholds?", "Which disks are more than 80% full?"]
+    },
+    {
+      "name": "Disk forecast",
+      "description": "Per disk: used_pct, free_bytes, growth_bytes_per_day (a straight-line trend through the daily averages, or the hourly ones while history is short) and full_in_days / full_by. Sorted soonest-full first; disks that aren't growing have no date.",
+      "path": "/disks/forecast",
+      "params": [
+        {"name": "host", "type": "string", "in": "query", "help": "Only this host (id, name or hostname)"},
+        {"name": "days", "type": "int", "in": "query", "min": 2, "max": 90, "default": 14, "help": "Days of history the trend uses"},
+        {"name": "within_days", "type": "int", "in": "query", "min": 1, "max": 3650, "help": "Only disks expected to fill within this many days"}
+      ],
+      "cache_seconds": 300,
+      "example_questions": ["When will rsync-box's disk be full?", "Which disks will fill up this month?", "How fast is the NAS filling up?", "Do we need more storage soon?"]
+    },
+    {
+      "name": "History",
+      "description": "One metric of one host over time as min, avg and max per interval. metric is cpu, mem, load, temp (the hottest sensor), disk:<mount> (e.g. disk:/ or disk:C), net:<interface> or gpu:<n>; a bare disk, net or gpu gives every one. hours (up to 168) uses 10-second data for cpu/mem/load up to 24 h and hourly rollups otherwise; days (up to 90) uses daily rollups.",
+      "path": "/history",
+      "params": [
+        {"name": "host", "type": "string", "in": "query", "required": true, "help": "Host id, name or hostname"},
+        {"name": "metric", "type": "string", "in": "query", "required": true, "help": "cpu, mem, load, temp, disk:<mount>, net:<interface> or gpu:<n>"},
+        {"name": "hours", "type": "int", "in": "query", "min": 1, "max": 168, "help": "How many hours back (default 24)"},
+        {"name": "days", "type": "int", "in": "query", "min": 1, "max": 90, "help": "How many days back, one row per day (instead of hours)"},
+        {"name": "interval", "type": "enum", "in": "query", "options": ["auto", "10s", "1m", "5m", "15m", "1h", "6h", "1d"], "default": "auto", "help": "Bucket size"}
+      ],
+      "cache_seconds": 60,
+      "example_questions": ["How busy was RDS 1's CPU over the last day?", "Show the NAS disk usage over the last 30 days.", "What was rsync-box's memory like this week?", "How hot did the GPU get yesterday?", "Network traffic on the Mnemerynne box over the last 6 hours."]
+    },
+    {
+      "name": "Client audit",
+      "description": "Per host: client_version, schema, OS, arch, where the client listens (listen), its binary_sha256, and flags: listens on every address (check the firewall), binary differs from the other hosts on the same version and platform, older than the newest client, or doesn't report these (an older client).",
+      "path": "/clients",
+      "params": [
+        {"name": "flagged_only", "type": "enum", "in": "query", "options": ["true", "false"], "default": "false", "help": "Only hosts with a flag"}
+      ],
+      "cache_seconds": 60,
+      "example_questions": ["Are any Fleetboard clients exposed?", "Which hosts run an unexpected client binary?", "Which machines need a client update?", "Where does each Fleetboard client listen?"]
+    },
+    {
+      "name": "Activity",
+      "description": "Fleetboard's audit log, newest first: hosts added, changed, paused or removed, thresholds set, tokens made or revoked, and changes refused to read-only tokens; who did it (a dashboard address, or Mnemerynne/Claude with the token's name) and the reason given.",
+      "path": "/activity",
+      "params": [
+        {"name": "limit", "type": "int", "in": "query", "min": 1, "max": 200, "default": 50, "help": "How many entries"},
+        {"name": "host", "type": "string", "in": "query", "help": "Only entries about this host name"}
+      ],
+      "cache_seconds": 30,
+      "example_questions": ["What changed in Fleetboard recently?", "Who removed a host from Fleetboard?", "Did anyone pause monitoring on the NAS?", "Show the Fleetboard audit log."]
+    },
+    {
+      "name": "Thresholds",
+      "description": "The limits in use (disk_pct, disk_critical_pct, mem_pct, temp_c, offline_minutes) with their defaults and allowed ranges. Over thresholds, the summary and the Wazuh disk and offline alerts all use them.",
+      "path": "/thresholds",
+      "params": [],
+      "cache_seconds": 60,
+      "example_questions": ["What are the Fleetboard thresholds?", "At what disk percentage does Fleetboard warn?", "How long before a host counts as offline?"]
+    },
+    {
+      "name": "Token check",
+      "description": "The token's name and whether it may read and act. For the admin's first Test.",
+      "path": "/whoami",
+      "params": [],
+      "cache_seconds": 0,
+      "example_questions": ["Which Fleetboard token is Mnemerynne using?"]
+    }
+  ]
+}

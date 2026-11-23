@@ -1,0 +1,100 @@
+{
+  "format": "mnemerynne-api-template",
+  "name": "Fleetboard (changes)",
+  "base_url": "http://127.0.0.1:9281/api/v1",
+  "auth_type": "bearer",
+  "description": "Fleetboard changes that Erynne or Claude may **propose**: add a host, rename one, pause or resume its monitoring, remove it, or set a threshold. None of them runs until a person presses **Run it**. Every one is audited in Fleetboard as *Mnemerynne/Claude (token …)* with the reason the proposal carried, and shows in the read-only **Fleetboard** API's *Activity*. Keep **Fleetboard** for questions; this one is only for changes.\n\nNothing here runs commands on a machine: Fleetboard's clients have no write routes, and these change only Fleetboard's own host list and thresholds.\n\n**Setup**\n\n1. On the Mnemerynne box make a separate token that may act: `sudo -u fleetboard fleetboard-server token add mnemerynne-act --scope act`. It is printed once. Paste it here as the credential (Bearer).\n2. No certificate: plain http on loopback.\n3. Set the AD group to IT (whoever may change monitoring).\n4. On **Remove host**, tick **Needs an admin's approval**: it deletes the host and all its history and can't be undone. Consider it for **Set threshold** too, since thresholds also drive the Wazuh disk and offline alerts.\n5. Test on a spare host. Testing a change really makes it.\n6. Leave Claude's switch off until you've tried it from Erynne's chat.\n\nRevoke with `sudo -u fleetboard fleetboard-server token revoke mnemerynne-act`.",
+  "operations": [
+    {
+      "name": "Hosts",
+      "description": "Every host with its id, name, address and status (up, down, paused). Check it before proposing a change: actions take the host's id.",
+      "path": "/hosts",
+      "params": [],
+      "cache_seconds": 0,
+      "example_questions": ["What is the Fleetboard id of rsync-box?", "Is the NAS paused in Fleetboard?"]
+    },
+    {
+      "name": "Thresholds",
+      "description": "The current limits and their allowed ranges, to check before proposing Set threshold.",
+      "path": "/thresholds",
+      "params": [],
+      "cache_seconds": 0,
+      "example_questions": ["What is Fleetboard's disk threshold now?"]
+    },
+    {
+      "name": "Add host",
+      "action": true,
+      "description": "Start watching a machine. Fleetboard checks first that the address answers with the shared client token, and refuses (nothing saved) if it doesn't, with the reason.",
+      "method": "POST",
+      "path": "/hosts",
+      "body": {"name": "{{name}}", "address": "{{address}}", "reason": "{{reason}}"},
+      "params": [
+        {"name": "name", "type": "string", "in": "body", "required": true, "help": "Display name, e.g. NAS"},
+        {"name": "address", "type": "string", "in": "body", "required": true, "help": "host or IP, with :port if not 9280"},
+        {"name": "reason", "type": "text", "in": "body", "required": true, "help": "Why; goes in Fleetboard's audit log"}
+      ]
+    },
+    {
+      "name": "Rename host",
+      "action": true,
+      "description": "Change a host's display name in Fleetboard.",
+      "method": "POST",
+      "path": "/hosts/{id}/rename",
+      "body": {"name": "{{name}}", "reason": "{{reason}}"},
+      "params": [
+        {"name": "id", "type": "int", "in": "path", "required": true, "min": 1, "help": "The host's id from Hosts"},
+        {"name": "name", "type": "string", "in": "body", "required": true, "help": "The new name"},
+        {"name": "reason", "type": "text", "in": "body", "required": true, "help": "Why"}
+      ]
+    },
+    {
+      "name": "Pause monitoring",
+      "action": true,
+      "description": "Stop polling a host and stop its alerts (e.g. during planned work). Its history stays. Refused if it is already paused.",
+      "method": "POST",
+      "path": "/hosts/{id}/pause",
+      "body": {"reason": "{{reason}}"},
+      "params": [
+        {"name": "id", "type": "int", "in": "path", "required": true, "min": 1, "help": "The host's id from Hosts"},
+        {"name": "reason", "type": "text", "in": "body", "required": true, "help": "Why, e.g. the maintenance it's for"}
+      ]
+    },
+    {
+      "name": "Resume monitoring",
+      "action": true,
+      "description": "Poll a paused host again. Fleetboard checks first that it answers.",
+      "method": "POST",
+      "path": "/hosts/{id}/resume",
+      "body": {"reason": "{{reason}}"},
+      "params": [
+        {"name": "id", "type": "int", "in": "path", "required": true, "min": 1, "help": "The host's id from Hosts"},
+        {"name": "reason", "type": "text", "in": "body", "required": true, "help": "Why"}
+      ]
+    },
+    {
+      "name": "Remove host",
+      "action": true,
+      "description": "Stop watching a machine and delete all its history (24 h of samples, 7 days hourly, 90 days daily). Can't be undone; pausing keeps the history.",
+      "method": "POST",
+      "path": "/hosts/{id}/remove",
+      "body": {"reason": "{{reason}}"},
+      "params": [
+        {"name": "id", "type": "int", "in": "path", "required": true, "min": 1, "help": "The host's id from Hosts"},
+        {"name": "reason", "type": "text", "in": "body", "required": true, "help": "Why, e.g. decommissioned"}
+      ]
+    },
+    {
+      "name": "Set threshold",
+      "action": true,
+      "description": "Change one limit: disk_pct (50-99), disk_critical_pct (50-100, above disk_pct), mem_pct (50-100), temp_c (40-120) or offline_minutes (1-1440). It changes what Over thresholds reports and when the Wazuh disk and offline alerts fire.",
+      "method": "POST",
+      "path": "/thresholds/{name}",
+      "body": "{\"value\": {{value}}, \"reason\": \"{{reason}}\"}",
+      "params": [
+        {"name": "name", "type": "enum", "in": "path", "required": true, "options": ["disk_pct", "disk_critical_pct", "mem_pct", "temp_c", "offline_minutes"], "help": "Which limit"},
+        {"name": "value", "type": "int", "in": "body", "required": true, "min": 1, "max": 1440, "help": "The new value (each limit has its own range)"},
+        {"name": "reason", "type": "text", "in": "body", "required": true, "help": "Why"}
+      ]
+    }
+  ]
+}

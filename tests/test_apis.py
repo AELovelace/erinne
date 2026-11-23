@@ -571,3 +571,18 @@ def test_chat_explains_an_api_failure(settings, conn, directory):
         _upstream(lambda r: httpx.Response(403, json={"error": "wrong scope"}))
         final, _ = _ask(c, "What was occupancy last week?")
         assert final["status"] == "not_found" and "refused the credential" in final["answer"]
+
+
+@pytest.mark.parametrize("name", ["fleetboard.json", "fleetboard-actions.json", "atera-read-write.json",
+                                  "unifi-site-manager.json"])
+def test_the_shipped_api_templates_are_valid(name):
+    """Every template in api-templates/ passes the same checks an admin's upload does."""
+    from pathlib import Path
+    text = (Path(__file__).resolve().parent.parent / "api-templates" / name).read_text(encoding="utf-8")
+    t = apis.parse_template(text)                                # raises ApiError on anything wrong
+    assert t["operations"]
+    if name == "fleetboard-actions.json":                        # every Fleetboard change carries a reason
+        actions = [o for o in t["operations"] if o["action"]]
+        assert actions and all(any(p["name"] == "reason" for p in o["params"]) for o in actions)
+    if name == "fleetboard.json":                                # the read template has no actions at all
+        assert not any(o["action"] for o in t["operations"])
