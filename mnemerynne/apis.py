@@ -38,7 +38,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 import numpy as np
 
-from mnemerynne import wazuh_presets
+from mnemerynne import fleetboard_presets, wazuh_presets
 from mnemerynne.config import Settings
 
 TIMEOUT = 20.0
@@ -1352,6 +1352,10 @@ def parse_template(text: str) -> dict:
             "auth_login_path": login_path,
             "tls_check_hostname": 0 if t.get("tls_check_hostname") is False else 1,
             "one_at_a_time": 1 if t.get("one_at_a_time") is True else 0, "operations": out_ops}
+
+
+# Fleetboard and Fleetboard (changes): built in, read from api-templates/ through the same checks as an upload.
+PRESETS.extend(fleetboard_presets.load(parse_template))
 
 
 def uploaded_templates(conn: sqlite3.Connection) -> list[dict]:

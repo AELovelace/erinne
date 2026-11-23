@@ -586,3 +586,22 @@ def test_the_shipped_api_templates_are_valid(name):
         assert actions and all(any(p["name"] == "reason" for p in o["params"]) for o in actions)
     if name == "fleetboard.json":                                # the read template has no actions at all
         assert not any(o["action"] for o in t["operations"])
+
+
+def test_fleetboard_is_a_built_in_preset_pair(admin_client):
+    """Fleetboard and Fleetboard (changes) come built in, from the files in api-templates/."""
+    listed = {p["key"]: p for p in admin_client.get("/api/admin/apis").json()["presets"]}
+    assert listed["fleetboard"]["name"] == "Fleetboard"
+    assert listed["fleetboard-changes"]["name"] == "Fleetboard (changes)"
+    assert listed["fleetboard"]["base_url"] == "http://127.0.0.1:9281/api/v1"
+    reads = admin_client.post("/api/admin/apis", json={"preset": "fleetboard"}).json()
+    detail = admin_client.get(f"/api/admin/apis/{reads['id']}").json()
+    assert "Disk forecast" in [o["name"] for o in detail["operations"]]
+    assert not any(o["action"] for o in detail["operations"])                  # the read entry can't change anything
+    changes = admin_client.post("/api/admin/apis", json={"preset": "fleetboard-changes"}).json()
+    detail = admin_client.get(f"/api/admin/apis/{changes['id']}").json()
+    assert {o["name"] for o in detail["operations"] if o["action"]} == {
+        "Add host", "Rename host", "Pause monitoring", "Resume monitoring", "Remove host", "Set threshold"}
+    # An upload can't take the built-in name any more.
+    assert admin_client.post("/api/admin/apis/templates",
+                             json={"template": _template(name="Fleetboard")}).status_code == 409

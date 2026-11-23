@@ -11,7 +11,9 @@ the built-in presets in `mnemerynne/apis.py` (`PRESETS`) show reading operations
 [fleetboard.json](fleetboard.json) and [fleetboard-actions.json](fleetboard-actions.json)
 are a matched pair written for a project's own API: a read-only template and an
 actions template, each with its own scoped token, lean `{total, rows}` answers
-and a `reason` on every action that the project's audit log keeps.
+and a `reason` on every action that the project's audit log keeps. Mnemerynne
+also loads those two files as its built-in **Fleetboard** presets
+(`mnemerynne/fleetboard_presets.py`), so they are never uploaded by hand.
 (The built-in Atera preset includes the same actions since 1.0.1, so one *Atera*
 entry covers reading and changes; the template remains the way to give the
 changes their own credential and group.)
@@ -55,7 +57,7 @@ a time (as many rows as fit, with an offset to ask for the next ones), so
 | Field | Required | Meaning |
 |---|---|---|
 | `format` | yes | Always `"mnemerynne-api-template"`. |
-| `name` | yes | The API's name in Mnemerynne, at most 80 characters. Not `Wazuh`, `Wazuh manager`, `Wazuh manager actions` or `Atera` (those are built in). Uploading a file with the same name replaces the earlier upload. |
+| `name` | yes | The API's name in Mnemerynne, at most 80 characters. Not `Wazuh`, `Wazuh manager`, `Wazuh manager actions`, `Atera`, `Fleetboard` or `Fleetboard (changes)` (those are built in). Uploading a file with the same name replaces the earlier upload. |
 | `base_url` | yes | `https://…` (or `http://…`). Every operation's path is added to it, and requests can't leave it. |
 | `auth_type` | no | `none` (default), `bearer` (`Authorization: Bearer <secret>`), `header` (the secret in the header named by `auth_header`), or `basic` (user name `auth_user`, password = the secret). |
 | `auth_header` | for `header` | The header name, letters, digits and dashes, e.g. `X-API-Key`. |
