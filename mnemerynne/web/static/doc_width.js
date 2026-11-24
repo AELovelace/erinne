@@ -1,11 +1,13 @@
-// Page width picker for the file view (file_view.html). The 50/75/100% radios already work from CSS alone
-// (erynne.css .doc-width); this file remembers the pick in this browser and runs the Custom number box.
+// Page width picker (_width_picker.html), on the file view and the narrow pages (Automator, Proposals, Messages,
+// Access). The 50/75/100% radios already work from CSS alone (erynne.css .doc-width); this file remembers the pick
+// in this browser and runs the Custom number box.
 // It is the only script a read-only file view may run (web/files.py _view_csp_width), so it stays tiny.
 (function () {
   "use strict";
-  var KEY = "erynne.docWidth";                                 // localStorage key: "50" | "75" | "100" | "custom:NN"
   var bar = document.querySelector(".doc-width");
-  if (!bar) return;                                             // not a file view: nothing to do
+  if (!bar) return;                                             // no picker on this page: nothing to do
+  var KEY = bar.getAttribute("data-key") || "erynne.docWidth";  // documents and pages remember their own pick:
+                                                                // "50" | "75" | "100" | "custom:NN"
   bar.classList.add("dw-js");                                   // shows the Custom button (CSS hides it without us)
   var box = document.getElementById("dw-value");                // the Custom percent box
 

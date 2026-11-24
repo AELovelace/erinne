@@ -21,6 +21,8 @@ Office documents are shown as the text Erynne extracted, not as a rendering of t
 
 On a big screen, the **Width** buttons in the middle of the top bar of an opened Markdown, text or document page set how wide the page is: **50%**, **75%** or **100%** of the window, or **Custom** for any width from 20% to 100% (type it, or use the arrows; the page resizes as you go). Your pick is remembered in this browser for every file you open. Until you pick one, pages use the usual reading width. The buttons are hidden on phones, where the page already fills the screen.
 
+The same **Width** buttons sit on the right of the top bar on the pages that use a narrow centre column: **Automator**, **Proposals**, **Messages** and the list tabs under **Access** (Groups, Accounts, Approvals and so on). One pick covers all of those pages, and it is kept apart from the one for opened files, so a wide dashboard doesn't make your documents wide too.
+
 ## Edit
 
 Text and Markdown files in a folder you can change also offer **Edit**, which opens the browser editor in a new tab. See [The organisation wiki](wiki.md#the-editor).

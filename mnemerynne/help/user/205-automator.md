@@ -2,6 +2,8 @@
 
 **Automator** runs jobs for you on a schedule: a morning briefing on weekdays, a security digest every morning, a check on the systems you can query every few hours. Erynne (or Claude) does the job with your access and sends you the answer. It's there if an admin turned it on for you.
 
+On a big screen, the **Width** buttons on the right of the top bar make the page wider (50%, 75%, 100% of the window or Custom). See [Page width](previews.md#page-width).
+
 ## Making one
 
 **New automation** opens an empty one; **Start from a template** fills it in with a Morning briefing, a Security digest or an API health check, for you to adjust.

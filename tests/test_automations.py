@@ -159,6 +159,10 @@ def test_erynne_runs_it_with_the_tools_it_picked_and_the_answer_reaches_the_inbo
         a = made.json()
         assert a["when"] == "every day at 07:30 (UTC)" and a["next_run_at"]
         assert 'href="/automations"' in c.get("/").text
+        # The narrow pages carry the page width picker (_nav.html), saved apart from the file view's; Ask doesn't.
+        page = c.get("/automations").text
+        assert 'class="doc-width"' in page and 'data-key="erynne.pageWidth"' in page and "doc_width.js" in page
+        assert 'class="doc-width"' not in c.get("/").text
         run_id = c.post(f"/api/automations/{a['id']}/run").json()["run_id"]
         run = _wait(c, run_id)
         assert run["status"] == "done" and run["output"] == "Three things today [1]." and "<p>" in run["html"]

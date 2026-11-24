@@ -9,16 +9,8 @@
     <strong>{{ file.display_name }}</strong>
     <span class="muted">{{ file.collection_name }}</span>
   </span>
-  {#- Page width: 50 / 75 / 100% of the window, or Custom. The three presets are plain radios that erynne.css reads
-      with :has(), so they work with no script at all; doc_width.js remembers the choice in this browser and runs Custom. -#}
-  <span class="doc-width" role="radiogroup" aria-label="Page width">
-    <span class="small muted">Width</span>
-    <input type="radio" name="doc-width" id="dw-50" value="50"><label for="dw-50">50%</label>
-    <input type="radio" name="doc-width" id="dw-75" value="75"><label for="dw-75">75%</label>
-    <input type="radio" name="doc-width" id="dw-100" value="100"><label for="dw-100">100%</label>
-    <input type="radio" name="doc-width" id="dw-custom" value="custom"><label for="dw-custom" class="dw-custom">Custom</label>
-    <label class="dw-value"><input type="number" id="dw-value" min="20" max="100" step="5" value="60" aria-label="Custom width in percent">%</label>
-  </span>
+  {#- Page width: 50 / 75 / 100% of the window, or Custom (the shared picker, _width_picker.html). -#}
+  {% set width_key = "erynne.docWidth" %}{% include "_width_picker.html" %}
   <span class="bar-side bar-right">
     {#- Edit: a text or Markdown file this person may change opens in the split editor (web/editor.py). -#}
     {% if edit_url %}<a class="push-right" href="{{ edit_url }}">Edit</a>{% endif %}

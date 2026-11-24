@@ -40,6 +40,12 @@
   </button>
   {% if ns.current %}<strong class="nav-title">{{ ns.current }}</strong>{% endif %}
   <div class="bar-right">
+    {#- Pages with a narrow centre column get the width picker (erynne.css widens main.inbox, .messages-page and the
+        Access tab panels by it). One pick for all of them, kept apart from the file view's (width_key). -#}
+    {%- if active in ('automations', 'proposals', 'messages', 'admin') %}
+    {% set width_key = "erynne.pageWidth" %}{% include "_width_picker.html" %}
+    <script src="{{ static('doc_width.js') }}" defer></script>
+    {%- endif %}
     {#- A screen box has no browser buttons (the small bar's, in base.html, gives way to this bar). -#}
     {% if kiosk_back or (tv is defined and tv and tv.box) %}<a class="help-link kiosk-back" href="/media/screen" data-kiosk-back>📺 Back to TV</a>{% endif %}
     {% if tv is defined and tv and tv.box %}<span class="tv-history"><button type="button" data-tv-go="back" title="Back (Backspace)">‹</button><button type="button" data-tv-go="forward" title="Forward">›</button></span>{% endif %}

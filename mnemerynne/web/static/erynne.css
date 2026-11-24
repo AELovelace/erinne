@@ -603,6 +603,12 @@ body:has(#dw-100:checked) { --doc-w: 100%; }
 body:has(#dw-custom:checked) { --doc-w: var(--doc-w-custom, 60%); }                /* set on <html> by doc_width.js */
 @media (min-width: 801px) {                         /* big screens only: a pick saved on the desktop never squeezes a phone */
   body:has(.doc-width input[type="radio"]:checked) main.doc { max-width: none; width: calc(var(--doc-w) - 1.5rem); }
+  /* The same picker in the top bar of the narrow pages (_nav.html): Automator and Proposals (main.inbox), Messages,
+     and Access's list tabs (Groups, Accounts, ...; the Files tree and Settings already fill the page). */
+  body:has(.doc-width input[type="radio"]:checked) :is(main.inbox, main.messages-page) {
+    max-width: none; width: calc(var(--doc-w) - 1.5rem); }
+  body:has(.doc-width input[type="radio"]:checked) .ax-page > .inbox.admin[data-panel] {
+    max-width: none; width: var(--doc-w); }                                          /* % of the Access page itself */
 }
 @media (max-width: 800px) { .doc-width { display: none; } }                        /* a phone is already full width */
 .doc pre, .help-body pre, .wiki-body pre { overflow-x: auto; background: var(--petal-soft); padding: .8rem 1rem; border-radius: 10px; }
