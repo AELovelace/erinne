@@ -18,7 +18,7 @@ On a big screen, the **Width** buttons on the right of the top bar make the page
   - **Erynne**, with the tools you tick. Leave them all unticked for every tool that only reads.
   - **Claude (your key)**, if you use Claude in chat, under your saved key.
   - **A Claude routine** you made on claude.ai. Give it the Mnemerynne connector and an API trigger, then paste the trigger's address and token here. Claude does the job there and reports back.
-- **May propose changes:** off by default. When on, it may draft file edits, emails or system changes as proposals. They wait on the **Approvals** tab for you to apply.
+- **May propose changes:** off by default. When on, it may draft file edits, emails or system changes as proposals. They wait on the **Proposals** page (in the flower menu) for you to apply.
 - **Approve its proposals automatically:** off by default, and only there while *May propose changes* is on. When on, what the automation proposed is applied as you at the end of each run, with the same checks as pressing Apply yourself, so turn it on only for jobs you trust. Proposals that need a Mnemerynne admin (a whole library's AI edit, API actions marked for admin approval) still wait for one. The run's raw output says what was applied and what wasn't.
 - **Send the answer to:**
   - **your Inbox:** a note linking to the full answer;
@@ -36,13 +36,32 @@ Each automation lists its runs; open one to read the answer with its sources. **
 - each tool it called, with the arguments it sent and, under **raw**, the result that came back (long ones are cut short);
 - what it proposed, what was auto-approved, where the answer went, and any error.
 
+To see when your automations run and how long they take, use the [Timeline](#timeline) tab.
+
 While a run is going, the steps appear live; closing the window doesn't stop the run.
 
 **Cancel** (beside a run that's still going, on the automation's card, and in the live window) stops it. The run ends as *cancelled*: nothing is sent anywhere and you don't get a "failed" note. Cancelling one run doesn't pause the automation; it still runs at its next time. For a Claude routine, Mnemerynne stops waiting and turns away its report if it comes later, but the session on claude.ai may keep going until Claude notices: open *Claude's session* to stop it there. A run that has already finished can't be cancelled. **Copy raw JSON** copies every step, which helps when you ask someone why a run went wrong. A run made through a room doesn't show its tool steps, and a Claude routine shows what it was sent and when it reported back, not its own steps.
 
-## Approvals
+## Proposals
 
-The **Approvals** tab lists what your automations proposed, grouped by run: the ones waiting for you first, then those decided in the last two weeks, including any approved automatically. Apply or dismiss them there, just as under a chat answer. The number on the tab is how many are waiting. Your automation pauses (and your Inbox tells you) if you lose access to Automator; turn it back **On** once you have it again.
+What your automations propose waits on the **Proposals** page (in the flower menu), with everything else Erynne or Claude proposed for you. Apply or dismiss it there, just as under a chat answer. A run that proposed something links straight to it (**N proposals → Proposals**). Your automation pauses (and your Inbox tells you) if you lose access to Automator; turn it back **On** once you have it again.
+
+## Sorting
+
+**Sort** above the list puts your automations in **A–Z** order or by **Time of day**: the daily ones by the clock time they run, then the ones that run every so often, most frequent first. The Timeline's lanes follow the same order, and this browser remembers your pick.
+
+## Timeline
+
+The **Timeline** tab shows a whole day of runs, one lane per automation, from midnight to midnight in your own time. Use **‹ ›** to see yesterday or tomorrow. It refreshes itself every 15 seconds.
+
+- **Solid bars** are runs that happened: green when they finished, grey when there was nothing to report, red when they failed, hatched when cancelled.
+- **Striped, moving bars** are running right now. The lane glows, and its label says how long it has been going and about how long is left. A dashed outline runs from the **now** line to when it usually finishes. The tab itself says how many are running.
+- **Outlined slots** are scheduled runs, each as wide as that automation usually takes. Hover one to see when it should be done.
+- Hover any bar for its exact times; click a run to open its raw output; click a name to open the automation.
+
+The table under it says the same in words: what each automation is doing now (running, and how long is left; or when it runs next), how long it **usually takes**, its **longest** run, and how many runs the numbers come from.
+
+A run's time is measured from when it was **scheduled** to start (or when it started, for **Run now**) until its **last message went out** (or until it finished, when there was nothing to send). "Usually takes" is the average of its last 20 runs that finished well; failed and cancelled runs aren't counted. Runs from before this was added have no scheduled time, so they're measured from when they started.
 
 ## Through Claude
 

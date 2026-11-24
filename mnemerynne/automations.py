@@ -484,10 +484,21 @@ def prompt_file_view(conn: sqlite3.Connection, row: sqlite3.Row) -> dict | None:
 
 
 # -------------------------------------------------------------------- runs
-def start_run(conn: sqlite3.Connection, row: sqlite3.Row, trigger: str, status: str = "running") -> int:
-    """A new run: 'running' for the scheduler that runs it, 'queued' for one started in another process."""
-    run_id = conn.execute("INSERT INTO automation_runs(automation_id, trigger, status) VALUES (?, ?, ?)",
-                          (row["id"], trigger, status)).lastrowid
+def has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    """Whether a table has a column yet: automations.db's later migrations add some that core's copy never had."""
+    return any(c["name"] == column for c in conn.execute(f"PRAGMA table_info({table})"))
+
+
+def start_run(conn: sqlite3.Connection, row: sqlite3.Row, trigger: str, status: str = "running",
+              scheduled_for: str | None = None) -> int:
+    """A new run: 'running' for the scheduler that runs it, 'queued' for one started in another process.
+    scheduled_for: the time the scheduler claimed it for (a stamp), so the Timeline measures from then."""
+    if scheduled_for and has_column(conn, "automation_runs", "scheduled_for"):
+        run_id = conn.execute("INSERT INTO automation_runs(automation_id, trigger, status, scheduled_for) "
+                              "VALUES (?, ?, ?, ?)", (row["id"], trigger, status, scheduled_for)).lastrowid
+    else:
+        run_id = conn.execute("INSERT INTO automation_runs(automation_id, trigger, status) VALUES (?, ?, ?)",
+                              (row["id"], trigger, status)).lastrowid
     conn.execute("UPDATE automations SET last_run_id = ? WHERE id = ?", (run_id, row["id"]))
     return run_id
 
@@ -551,6 +562,75 @@ def expire_waiting(conn: sqlite3.Connection, at: datetime) -> int:
     return conn.execute("UPDATE automation_runs SET status = 'timed_out', finished_at = datetime('now'), "
                         "error = 'The Claude routine didn''t report back in time.' "
                         "WHERE status = 'waiting' AND started_at < ?", (stamp(at - ROUTINE_WAIT),)).rowcount
+
+
+# ---------------------------------------------------------------- timeline
+TIMELINE_SAMPLE = 20                     # finished runs per automation its average is taken over
+TIMELINE_MAX_SLOTS = 300                 # planned slots per automation in one window (every 15 min for 3 days)
+
+
+def iso(at: datetime) -> str:
+    """UTC as ISO 8601 with a Z, which every browser's Date reads."""
+    return at.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def run_span(run: sqlite3.Row) -> tuple[datetime, datetime | None]:
+    """When a run began and ended for the Timeline: from when it was scheduled (else when it started) until its
+    last message went out (else when it finished; None while it's still going)."""
+    keys = run.keys()
+    begin = (run["scheduled_for"] if "scheduled_for" in keys else None) or run["started_at"]
+    end = (run["delivered_at"] if "delivered_at" in keys else None) or run["finished_at"]
+    return parse_stamp(begin), (parse_stamp(end) if end and run["status"] not in ACTIVE else None)
+
+
+def run_stats(conn: sqlite3.Connection, automation_id: int) -> dict:
+    """How long it takes: average and longest over its last TIMELINE_SAMPLE runs that ended well (done, quiet)."""
+    rows = conn.execute("SELECT * FROM automation_runs WHERE automation_id = ? AND status IN ('done', 'quiet') "
+                        "AND finished_at IS NOT NULL ORDER BY id DESC LIMIT ?", (automation_id, TIMELINE_SAMPLE)).fetchall()
+    spans = [max(0.0, (end - begin).total_seconds()) for begin, end in map(run_span, rows) if end is not None]
+    if not spans:
+        return {"avg_seconds": None, "max_seconds": None, "measured": 0}
+    return {"avg_seconds": round(sum(spans) / len(spans), 1), "max_seconds": round(max(spans), 1), "measured": len(spans)}
+
+
+def planned(row: sqlite3.Row, start: datetime, end: datetime) -> list[datetime]:
+    """Its scheduled times in [start, end), from its next run on (nothing while it's paused)."""
+    if not row["enabled"] or not row["next_run_at"]:
+        return []
+    schedule = json.loads(row["schedule"])
+    at, out = parse_stamp(row["next_run_at"]), []
+    while at < end and len(out) < TIMELINE_MAX_SLOTS:
+        if at >= start:
+            out.append(at)
+        at = next_run(schedule, row["tz"], at)                # strictly after: the following time
+    return out
+
+
+def timeline(conn: sqlite3.Connection, user_id: int, start: datetime, end: datetime) -> dict:
+    """The Timeline tab: per automation, how long it takes (run_stats), its runs in the window (what really
+    happened, and any still going, wherever it began), and its planned times there. Times are ISO UTC."""
+    at_now = now()
+    lanes = []
+    for row in for_user(conn, user_id):
+        stats = run_stats(conn, row["id"])
+        runs = []
+        for run in conn.execute(
+                "SELECT * FROM automation_runs WHERE automation_id = ? AND (started_at >= ? OR status IN "
+                f"({', '.join('?' * len(ACTIVE))})) ORDER BY id DESC LIMIT 400",
+                (row["id"], stamp(start - timedelta(days=1)), *ACTIVE)):   # a day early: a slow run spanning midnight
+            begin, finish = run_span(run)
+            going = run["status"] in ACTIVE
+            if (finish or at_now) < start or begin >= end:
+                continue                                         # outside the window
+            runs.append({"run_id": run["id"], "status": run["status"], "trigger": run["trigger"],
+                         "start": iso(begin), "end": iso(finish) if finish else None, "running": going,
+                         "seconds": round(((finish or at_now) - begin).total_seconds(), 1)})
+        lanes.append({"id": row["id"], "name": row["name"], "runner": row["runner"], "enabled": bool(row["enabled"]),
+                      "paused_reason": row["paused_reason"], "schedule": json.loads(row["schedule"]), "tz": row["tz"],
+                      "when": describe(json.loads(row["schedule"]), row["tz"]), **stats,
+                      "next_run_at": iso(parse_stamp(row["next_run_at"])) if row["next_run_at"] else None,
+                      "runs": runs[::-1], "planned": [iso(t) for t in planned(row, max(start, at_now), end)]})
+    return {"start": iso(start), "end": iso(end), "now": iso(at_now), "sample": TIMELINE_SAMPLE, "automations": lanes}
 
 
 # -------------------------------------------------------- admin's choices

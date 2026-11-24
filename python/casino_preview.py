@@ -28,6 +28,42 @@ def _automator(conn, settings, alice_id):
               "```\nBrief me for the day: unread notes, announcements and anything urgent.\n```\n")
     got = store.receive(io.BytesIO(sample.encode()), "morning-briefing-prompt.md", settings)
     store.add_file(conn, settings, got, permissions.private_collection_id(conn, alice_id), alice_id)
+    _sample_runs(conn, settings, alice_id)
+
+
+def _sample_runs(conn, settings, alice_id):
+    """Three automations of alice's with a history, for the Timeline tab: a daily briefing (finished runs, one
+    failed), an every-hour check (short runs), and a Claude routine whose run is still going (waiting for its
+    report, so the preview's scheduler leaves it alone for two hours). Fake rows: nothing here really ran."""
+    from datetime import timedelta
+    from mnemerynne import automations as auto
+
+    alice = users.get_user_by_id(conn, alice_id)
+    now = auto.now()
+    made = {}
+    for name, schedule, runner in (("Morning briefing", {"every": "day", "at": "07:30"}, "erynne"),
+                                   ("API health check", {"every": "hours", "n": 1}, "erynne"),
+                                   ("Security digest", {"every": "day", "at": "08:00"}, "erynne")):
+        made[name] = auto.create(conn, settings, alice, None, {"name": name, "prompt": name, "schedule": schedule,
+                                                               "runner": runner})
+
+    def ran(name, ago_minutes, seconds, status="done"):                 # one finished run, `ago` minutes back
+        start = now - timedelta(minutes=ago_minutes)
+        conn.execute("INSERT INTO automation_runs(automation_id, trigger, status, started_at, finished_at) "
+                     "VALUES (?, 'schedule', ?, ?, ?)", (made[name], status, auto.stamp(start),
+                                                          auto.stamp(start + timedelta(seconds=seconds))))
+
+    for days, secs in ((0, 190), (1, 230), (2, 160)):                  # the briefing: about 3 minutes
+        ran("Morning briefing", 6 * 60 + days * 1440, secs)
+    ran("Morning briefing", 3 * 60, 25, "failed")
+    for hours in range(1, 12):                                         # the hourly check: 30-50 seconds
+        ran("API health check", hours * 60, 30 + hours * 2)
+    for days in (1, 2):                                                # the digest: about 4 minutes
+        ran("Security digest", 1440 * days, 240)
+    conn.execute("UPDATE automations SET runner = 'claude_routine' WHERE id = ?", (made["Security digest"],))
+    going = conn.execute("INSERT INTO automation_runs(automation_id, trigger, status, started_at) VALUES (?, 'manual', "
+                         "'waiting', ?)", (made["Security digest"], auto.stamp(now - timedelta(minutes=2)))).lastrowid
+    conn.execute("UPDATE automations SET last_run_id = ? WHERE id = ?", (going, made["Security digest"]))   # as start_run does
 
 
 def main():

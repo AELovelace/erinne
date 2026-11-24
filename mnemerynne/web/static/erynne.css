@@ -1284,11 +1284,11 @@ select { font: inherit; color: var(--ink); }
 .automator-runs { list-style: none; padding: 0; margin: .3rem 0; max-height: 12rem; overflow: auto; }
 .automator-answer { margin-top: .5rem; overflow-wrap: anywhere; }
 /* Automator hides parts of its editor and its tab panels with the hidden attribute (the room picker for non-Erynne
-   runners, the routine's fields, the schedule's two forms, the Approvals count). Classes such as .api-field
+   runners, the routine's fields, the schedule's two forms, the Timeline's running count). Classes such as .api-field
    (display: block) and .automator-grid (display: grid) would otherwise win over the browser's [hidden] rule and keep
    them showing: a room picked while Claude runs it was then silently dropped on save. */
 .automator [hidden] { display: none !important; }
-/* Automator's tabs, the auto-approve switch under "May propose", and the Approvals tab's run headings. */
+/* Automator's tabs, the auto-approve switch under "May propose", and the list's sort picker. */
 .automator > .ax-tabs { margin: .4rem 0 .8rem; }
 .automator-sub { margin-left: 1.6rem; }
 /* "Instructions" (automations.js promptEditor): the box, or a prompt file picked by searching names. */
@@ -1297,7 +1297,61 @@ select { font: inherit; color: var(--ink); }
 .automator-file-results { list-style: none; margin: 0; padding: 0; display: grid; gap: .15rem;
   max-height: 14rem; overflow-y: auto; }                                     /* 20 matches at most, scrolled */
 .automator-file-results:empty { display: none; }
-.automator-approval-head { margin-top: 1rem; gap: .6rem; align-items: baseline; flex-wrap: wrap; }
+.automator-sort { display: inline-flex; align-items: center; gap: .4rem; margin: 0 0 .6rem; }
+.automator-sort select { width: auto; margin: 0; padding: .1rem .4rem; }
+
+/* The Timeline tab (automations.js renderTimeline): one lane per automation, its name on the left and a 24-hour
+   track on the right. Bars are placed by left/width percentages of the day. */
+.tl-head { gap: .5rem; align-items: center; flex-wrap: wrap; justify-content: flex-start; }
+.tl-head .automator-sort { margin: 0 0 0 auto; }                              /* the sort sits at the far right */
+.tl-key { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; }
+.tl-key .tl-swatch { position: static; display: inline-block; width: 1.4rem; height: .7rem; margin-left: .6rem;
+  vertical-align: middle; animation: none; }                                  /* the key's samples sit in the text */
+.tl { display: grid; gap: .15rem; margin: .6rem 0 1.2rem; }
+.tl-lane { display: grid; grid-template-columns: minmax(9rem, 14rem) minmax(0, 1fr); gap: .6rem; align-items: center; }
+.tl-lane.is-paused { opacity: .55; }
+.tl-name { display: grid; text-align: left; padding: .15rem 0; min-width: 0; }
+.tl-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-track { position: relative; height: 1.9rem; border-radius: 6px; background: rgba(127, 127, 127, .07); }
+.tl-ruler .tl-track { height: 1.3rem; background: none; }
+.tl-hour { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+.tl-hour:first-child { transform: none; }                                     /* 00:00 stays inside the track */
+.tl-gridline { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(127, 127, 127, .15); }
+/* What ran, coloured by how it ended; at least a sliver wide, so a 5-second run still shows. The bars are buttons
+   (click: raw output), so these rules name the track too, to win over the themes' own button styles. */
+.tl-run, .tl-track > .tl-run { position: absolute; top: .25rem; bottom: .25rem; min-width: 4px; min-height: 0; padding: 0;
+  margin: 0; border: 0; border-radius: 3px; box-shadow: none; cursor: pointer; background: var(--ok-fg, #2e9e6a); }
+.tl-run.is-quiet, .tl-track > .tl-run.is-quiet { background: var(--muted, #888); }
+.tl-run.is-failed, .tl-run.is-timed_out,
+.tl-track > .tl-run.is-failed, .tl-track > .tl-run.is-timed_out { background: var(--bad-fg, #d33a5a); }
+.tl-run.is-cancelled, .tl-track > .tl-run.is-cancelled {
+  background: repeating-linear-gradient(45deg, var(--muted, #888) 0 3px, transparent 3px 6px); }
+/* Running now: rose and cyan stripes that slide, and the whole lane glows, so it's obvious at a glance. */
+.tl-run.is-running, .tl-track > .tl-run.is-running { min-width: 8px; top: .1rem; bottom: .1rem;
+  background: repeating-linear-gradient(45deg, var(--rose, #e75480) 0 6px, var(--cyan, #00b8d4) 6px 12px);
+  background-size: 17px 17px; animation: tl-stripes .8s linear infinite; box-shadow: 0 0 8px var(--rose, #e75480); }
+@keyframes tl-stripes { to { background-position: 17px 0; } }
+.tl-lane.is-running .tl-track { box-shadow: 0 0 0 1px var(--rose, #e75480), 0 0 12px rgba(231, 84, 128, .35);
+  animation: tl-glow 2s ease-in-out infinite; }
+@keyframes tl-glow { 50% { box-shadow: 0 0 0 1px var(--rose, #e75480), 0 0 4px rgba(231, 84, 128, .15); } }
+.tl-name .tl-live { color: var(--rose-deep, #b03060); font-weight: 600; }
+/* Where a running one should finish, and planned runs: outlines, as wide as it usually takes. */
+.tl-expect { position: absolute; top: .25rem; bottom: .25rem; border: 2px dashed var(--rose, #e75480); border-left: 0;
+  border-radius: 0 3px 3px 0; pointer-events: auto; }
+.tl-slot { position: absolute; top: .35rem; bottom: .35rem; min-width: 3px; border: 1px solid var(--rose-deep, #b03060);
+  border-radius: 3px; background: var(--petal-soft, rgba(231, 84, 128, .15)); }
+.tl-now { position: absolute; top: -.15rem; bottom: -.15rem; width: 2px; background: var(--cyan, #00b8d4);
+  box-shadow: 0 0 6px var(--cyan, #00b8d4); pointer-events: none; }
+.tl-now-tag { position: absolute; top: 0; transform: translateX(-50%); padding: 0 .3rem; border-radius: 4px; white-space: nowrap;
+  color: var(--ink); background: var(--cyan, #00b8d4); }
+.tl-table td.tl-live { color: var(--rose-deep); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .tl-track > .tl-run.is-running, .tl-lane.is-running .tl-track { animation: none; } }
+.tl-expect { min-width: 6px; }                                                /* even a few seconds left shows */
+@media (max-width: 760px) {                                                   /* a phone: names above their tracks */
+  .tl-lane { grid-template-columns: minmax(0, 1fr); gap: .1rem; }
+  .tl-ruler > span:first-child { display: none; }
+  .tl-table { display: block; overflow-x: auto; }
+}
 /* The raw-output modal: the run's steps, live, then its report. */
 .automator-live { width: min(60rem, calc(100vw - 2rem)); }
 .automator-trace { list-style: none; padding: 0; margin: .5rem 0; max-height: 55vh; overflow: auto;

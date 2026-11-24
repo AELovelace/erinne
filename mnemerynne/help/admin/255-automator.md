@@ -19,7 +19,7 @@ Every change is logged in Recent changes (`settings.automations*`, `automations.
 
 ## Runners
 
-- **Erynne:** the agent's usual model (balancer nodes, then `MNEMERYNNE_LLM_URL`) with the owner's access and the tools they picked. If they picked none, every tool that only reads is used. Tools that change something (files, mail drafts, API actions) are offered only when the automation **may propose changes**, and even then they only make proposals. The owner applies them from Automator's **Approvals** tab, unless they turned on **Approve its proposals automatically** for that automation. Then the run applies its own proposals as the owner when it ends, before delivering, with the same checks as Apply (agent group or Agents folder; the API operation still allowed to them). Proposals with an admin approver are never auto-approved; they wait in Access → Approvals as usual. Each auto-approval is in the access log as `proposal.apply` ("auto-approved by Automator, run N"), and the proposal's decision note says so.
+- **Erynne:** the agent's usual model (balancer nodes, then `MNEMERYNNE_LLM_URL`) with the owner's access and the tools they picked. If they picked none, every tool that only reads is used. Tools that change something (files, mail drafts, API actions) are offered only when the automation **may propose changes**, and even then they only make proposals. The owner applies them from the **Proposals** page (/proposals), unless they turned on **Approve its proposals automatically** for that automation. Then the run applies its own proposals as the owner when it ends, before delivering, with the same checks as Apply (agent group or Agents folder; the API operation still allowed to them). Proposals with an admin approver are never auto-approved; they wait in Access → Approvals as usual. Each auto-approval is in the access log as `proposal.apply` ("auto-approved by Automator, run N"), and the proposal's decision note says so.
 - **Claude (your key):** the same, driven by Claude under the owner's saved key (*Claude in chat*). Only for people in the Claude group.
 - **A Claude routine:** for work done on claude.ai.
   1. The owner makes a routine at claude.ai/code/routines with the Mnemerynne connector and an **API trigger**, and pastes the trigger's address and token into the automation. The token is stored encrypted with `MNEMERYNNE_SECRET_KEY`.
@@ -60,6 +60,10 @@ A cancelled run ends as `cancelled`, never `failed`: its error says who cancelle
 - **waiting** (a Claude routine): nothing of Mnemerynne's is running, and Mnemerynne can't stop a session on claude.ai. The run is marked cancelled, it drops off `list_automation_tasks`, and a report that arrives later is refused: `report_automation_run` tells Claude the run was cancelled and to stop. Open the run's *Claude's session* link to stop the session itself on claude.ai if it's still working.
 
 A run that has already ended can't be cancelled (the API answers 409). Nothing that arrives after a cancel (the model's answer, a routine's report, a failure) changes the run: it stays `cancelled`. Cancelling doesn't pause the automation; its next scheduled run goes ahead.
+
+## Timeline and run timing
+
+Each run records `scheduled_for` (the time the scheduler claimed it for; empty for Run now and `run_automation`) and `delivered_at` (when its last delivery finished; empty when nothing was sent). The **Timeline** tab and `GET /api/automations/timeline?start=<ISO>&hours=24` (1–72 hours) measure a run from `scheduled_for`, else `started_at`, until `delivered_at`, else `finished_at`. So a run that starts late because the scheduler's 30-second tick or a full queue (two runs at once) held it shows that wait too. "Usually takes" averages the last 20 runs that ended `done` or `quiet`. Runs from before automations.db migration 0006 have neither field and are measured from `started_at` to `finished_at`.
 
 ## Limits
 

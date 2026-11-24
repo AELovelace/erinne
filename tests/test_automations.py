@@ -147,6 +147,59 @@ def test_who_may_use_it_and_what_an_automation_may_be(conn, settings, people, di
     assert not auto.may_use(conn, settings, boss, directory)
 
 
+# ---------------------------------------------------------------- timeline
+def test_run_length_is_from_scheduled_start_to_last_message(conn, settings, people, directory, automations_conn):
+    runs = automations_conn
+    alice = users.get_user(conn, "alice")
+    a = auto.create(runs, settings, alice, directory, {"name": "Digest", "prompt": "Digest",
+                                                        "schedule": {"every": "day", "at": "07:30"}})
+    row = auto.get(runs, a)
+    # Scheduled for 07:30, started 07:30:20 (the scheduler's tick), finished 07:33, last message out 07:34.
+    timed = auto.start_run(runs, row, "schedule", scheduled_for="2026-11-24 07:30:00")
+    runs.execute("UPDATE automation_runs SET status = 'done', started_at = '2026-11-24 07:30:20', "
+                 "finished_at = '2026-11-24 07:33:00', delivered_at = '2026-11-24 07:34:00' WHERE id = ?", (timed,))
+    # Run now (no schedule): from its start; quiet (nothing sent): until it finished.
+    quiet = auto.start_run(runs, row, "manual")
+    runs.execute("UPDATE automation_runs SET status = 'quiet', started_at = '2026-11-24 09:00:00', "
+                 "finished_at = '2026-11-24 09:02:00' WHERE id = ?", (quiet,))
+    failed = auto.start_run(runs, row, "manual")                        # failures don't count toward the average
+    runs.execute("UPDATE automation_runs SET status = 'failed', started_at = '2026-11-24 10:00:00', "
+                 "finished_at = '2026-11-24 11:00:00' WHERE id = ?", (failed,))
+    assert auto.run_stats(runs, a) == {"avg_seconds": 180.0, "max_seconds": 240.0, "measured": 2}
+    going = auto.start_run(runs, row, "manual")                         # still running: no end yet
+    runs.execute("UPDATE automation_runs SET started_at = '2026-11-24 12:00:00' WHERE id = ?", (going,))
+    day = auto.timeline(runs, people["alice"], _at("2026-11-24 00:00"), _at("2026-11-25 00:00"))
+    lane = day["automations"][0]
+    assert [(r["run_id"], r["start"], r["end"]) for r in lane["runs"][:2]] == [
+        (timed, "2026-11-24T07:30:00Z", "2026-11-24T07:34:00Z"), (quiet, "2026-11-24T09:00:00Z", "2026-11-24T09:02:00Z")]
+    assert lane["runs"][-1]["run_id"] == going and lane["runs"][-1]["running"] and lane["runs"][-1]["end"] is None
+    assert lane["avg_seconds"] == 180.0 and day["sample"] == auto.TIMELINE_SAMPLE
+
+
+def test_planned_slots_follow_the_schedule_from_its_next_run(conn, settings, people, directory, automations_conn):
+    runs = automations_conn
+    alice = users.get_user(conn, "alice")
+    a = auto.create(runs, settings, alice, directory, {"name": "Check", "prompt": "Check",
+                                                        "schedule": {"every": "hours", "n": 4}})
+    runs.execute("UPDATE automations SET next_run_at = '2026-11-24 02:00:00' WHERE id = ?", (a,))
+    times = auto.planned(auto.get(runs, a), _at("2026-11-24 00:00"), _at("2026-11-25 00:00"))
+    assert [t.strftime("%H:%M") for t in times] == ["02:00", "06:00", "10:00", "14:00", "18:00", "22:00"]
+    runs.execute("UPDATE automations SET enabled = 0 WHERE id = ?", (a,))
+    assert auto.planned(auto.get(runs, a), _at("2026-11-24 00:00"), _at("2026-11-25 00:00")) == []   # paused: none
+
+
+def test_the_timeline_tab_replaces_approvals(settings, conn, people, directory):
+    with _web(settings, "alice", directory) as c:
+        assert c.post("/api/automations", json={"name": "Brief", "prompt": "Brief me",
+                                                "schedule": {"every": "day", "at": "07:30"}}).status_code == 201
+        page = c.get("/automations").text
+        assert 'data-tab="timeline"' in page and 'data-tab="approvals"' not in page and 'href="/proposals"' in page
+        day = c.get("/api/automations/timeline", params={"start": "2026-11-24T08:00:00.000Z", "hours": 24}).json()
+        assert day["start"] == "2026-11-24T08:00:00Z" and day["end"] == "2026-11-25T08:00:00Z"
+        assert day["automations"][0]["name"] == "Brief" and day["automations"][0]["measured"] == 0
+        assert c.get("/api/automations/timeline", params={"start": "soon"}).status_code == 422
+
+
 # ------------------------------------------------------------ prompt files
 def test_a_prompt_file_gives_its_first_fenced_block_or_all_of_it():
     explained = "# Morning job\n\nWhat this does.\n\n```text\nBrief me from the file.\n```\n\n```\nnot this one\n```\n"

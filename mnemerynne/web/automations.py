@@ -100,6 +100,22 @@ async def list_automations(request: Request, user=Depends(_on), conn: sqlite3.Co
             "claude": (await request.app.state.agent.ready(user["id"], claude=True)) != "off"}
 
 
+@router.get("/api/automations/timeline")
+def timeline(start: str = "", hours: int = 24, user=Depends(_on), conn: sqlite3.Connection = Depends(get_db)):
+    """The Timeline tab: a window of `hours` from `start` (ISO; the browser sends its own midnight, so the day is
+    the person's), with each automation's runs there, its planned times and how long it usually takes."""
+    from datetime import datetime, timezone
+
+    try:
+        begin = datetime.fromisoformat(start) if start else auto.now() - timedelta(hours=2)
+    except ValueError:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "start is an ISO date and time.") from None
+    if begin.tzinfo is None:
+        begin = begin.replace(tzinfo=timezone.utc)                     # no zone given: UTC
+    hours = min(max(hours, 1), 72)                                     # a day, give or take; never a month of slots
+    return auto.timeline(conn, user["id"], begin, begin + timedelta(hours=hours))
+
+
 @router.get("/api/automations/prompt-files")
 def prompt_files(q: str = "", user=Depends(_on), conn: sqlite3.Connection = Depends(get_db)):
     """The editor's prompt file search: .md and .txt files this person can read whose name holds `q`."""

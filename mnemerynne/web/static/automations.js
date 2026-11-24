@@ -73,6 +73,61 @@
     return button("Cancel", "link small danger", function () { cancelRun(runId, name, after); });
   }
 
+  /* A run's proposals live on the Proposals page (/proposals, the flower menu): a link there, to the first one. */
+  function proposalsLink(ids, cls) {
+    const link = el("a", cls, ids.length + (ids.length === 1 ? " proposal" : " proposals") + " → Proposals");
+    link.href = "/proposals#p" + ids[0];                               // proposals.html highlights #p<id>
+    return link;
+  }
+
+  function fmtDuration(seconds) {                                     // 45s · 4m 12s · 1h 05m
+    if (seconds === null || seconds === undefined) return "—";
+    const s = Math.round(seconds);
+    if (s < 60) return s + "s";
+    if (s < 3600) return Math.floor(s / 60) + "m " + String(s % 60).padStart(2, "0") + "s";
+    return Math.floor(s / 3600) + "h " + String(Math.floor(s / 60) % 60).padStart(2, "0") + "m";
+  }
+
+  function fmtClock(date) {                                           // this browser's time of day, e.g. 07:30
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+
+  // --------------------------------------------------------------- sorting
+  /* The list (and the Timeline's lanes) by name, or by the time of day they run: daily ones by their clock time,
+     then the every-so-often ones, most frequent first. The pick is remembered in this browser. */
+  const SORT_KEY = "erynne.automatorSort";
+  function loadSort() { try { return localStorage.getItem(SORT_KEY) || "name"; } catch (e) { return "name"; } }
+  function saveSort(v) { try { localStorage.setItem(SORT_KEY, v); } catch (e) { /* still sorts this page */ } }
+  state.sort = loadSort();
+
+  function clockMinutes(a) {                                          // minutes after midnight it runs
+    const s = a.schedule || {};
+    if (s.every === "day" && s.at) { const p = s.at.split(":"); return parseInt(p[0], 10) * 60 + parseInt(p[1], 10); }
+    return 24 * 60 + (s.n || 0);                                      // every N minutes: after the daily ones
+  }
+
+  function sorted(list) {                                             // a sorted copy; the server sends A–Z
+    const byName = function (x, y) { return x.name.localeCompare(y.name, undefined, { sensitivity: "base" }); };
+    const copy = list.slice();
+    if (state.sort === "time") copy.sort(function (x, y) { return clockMinutes(x) - clockMinutes(y) || byName(x, y); });
+    else copy.sort(byName);
+    return copy;
+  }
+
+  function sortPicker() {                                             // "Sort: A–Z | Time of day", on both tabs
+    const s = select(state.sort, [["name", "A–Z"], ["time", "Time of day"]]);
+    s.setAttribute("aria-label", "Sort automations");
+    s.addEventListener("change", function () {
+      state.sort = s.value;
+      saveSort(s.value);
+      renderList();                                                   // one choice: the list and the Timeline
+      if (state.timeline) renderTimeline($("auto-timeline"), state.timeline);
+    });
+    const label = el("label", "small automator-sort");
+    label.append(document.createTextNode("Sort "), s);
+    return label;
+  }
+
   // ------------------------------------------------------------- the list
   function renderList() {
     const box = $("auto-list");
@@ -83,8 +138,9 @@
         "place to begin."));
       return;
     }
+    box.appendChild(sortPicker());                                    // redraws the list (and Timeline) in the new order
     const ul = el("ul", "automator-list");
-    list.forEach(function (a) {
+    sorted(list).forEach(function (a) {
       const li = el("li", "glass automator-card" + (a.id === state.selected ? " active" : ""));
       const head = el("div", "ax-bar");
       head.appendChild(el("strong", null, a.name));
@@ -374,10 +430,7 @@
     if (FINAL.indexOf(r.status) < 0) {                                // still going: offer to stop it
       box.append(document.createTextNode(" "), cancelButton(r.run_id, r.name, function () { load(r.automation_id); }));
     }
-    if (r.proposals && r.proposals.length) {
-      box.appendChild(button(r.proposals.length + (r.proposals.length === 1 ? " proposal" : " proposals") + " → Approvals",
-                             "link small", function () { showTab("approvals"); }));
-    }
+    if (r.proposals && r.proposals.length) box.appendChild(proposalsLink(r.proposals, "small"));
     if (r.error) box.appendChild(el("p", "error small", r.error));
     if (r.claude_session_url) {
       const link = el("a", "small", "Claude's session");
@@ -467,6 +520,7 @@
     try { state.data = await api("GET", "/api/automations"); }
     catch (err) { showError(err.message); return; }
     if (select !== undefined) state.selected = select;
+    showRunning(state.data.automations.filter(function (a) { return a.running; }).length);   // the Timeline tab's badge
     renderList();
     renderDetail();
   }
@@ -561,10 +615,7 @@
         body.innerHTML = r.html;   // rendered server-side from Markdown, raw HTML escaped
         result.appendChild(body);
       }
-      if (r.proposals && r.proposals.length) {
-        result.appendChild(button("See its " + r.proposals.length + (r.proposals.length === 1 ? " proposal" : " proposals") +
-                                  " on Approvals", "small", function () { dlg.close(); showTab("approvals"); }));
-      }
+      if (r.proposals && r.proposals.length) result.appendChild(proposalsLink(r.proposals, "small"));
       if (onEnd) onEnd();
     }
 
@@ -595,54 +646,196 @@
     });
     document.querySelectorAll("#automator [data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== name; });
     $("auto-new").hidden = name !== "automations";
-    if (name === "approvals") loadApprovals();
+    clearInterval(state.timelineTimer);                               // only the open Timeline refreshes itself
+    if (name === "timeline") {
+      loadTimeline();
+      state.timelineTimer = setInterval(function () { if (!document.hidden) loadTimeline(); }, 15000);
+    }
   }
 
-  async function loadApprovals() {
-    const box = $("auto-approvals");
-    let data;
-    try { data = await api("GET", "/api/automations/approvals"); }
-    catch (err) { box.replaceChildren(el("p", "error", err.message)); return; }
-    showPending(data.pending);
-    box.replaceChildren();
-    if (!data.approvals.length) { box.appendChild(el("p", "muted", "Nothing proposed lately.")); return; }
-    let lastRun = null;
-    data.approvals.forEach(function (item) {
-      if (item.run_id !== lastRun) {                                  // one heading per run
-        lastRun = item.run_id;
-        const h = el("div", "ax-bar automator-approval-head");
-        h.append(el("strong", null, item.automation),
-                 el("span", "small muted", "run " + item.run_id + " · " + item.run_started_at +
-                    (item.auto_approve ? " · approves its own" : "")),
-                 button("Raw output", "link small", function () { liveRun(item.run_id, item.automation); }));
-        box.appendChild(h);
-      }
-      const card = window.ErynneAgent.proposal(item.proposal);        // the chat's own card: Apply / Dismiss
-      card.id = "p" + item.proposal.id;
-      box.appendChild(card);
-    });
-  }
-
-  function showPending(n) {                                           // the count on the Approvals tab
-    const badge = $("auto-pending");
-    badge.textContent = n ? String(n) : "";
+  function showRunning(n) {                                           // how many are running, on the Timeline tab
+    const badge = $("auto-running");
+    badge.textContent = n ? n + " running" : "";
     badge.hidden = !n;
+  }
+
+  // ------------------------------------------------------------ the timeline
+  /* A day of runs, one lane per automation, from this browser's midnight: what ran (solid, coloured by how it
+     ended), what's running (striped, up to the "now" line, then dashed to when it usually finishes) and what's
+     planned (a slot as wide as its usual run). Each run's length is from when it was scheduled (or started, for
+     Run now) until its last message went out. Hover for times; click a run for its raw output. */
+  state.day = 0;                                                      // days from today: -1 yesterday, 1 tomorrow
+
+  function dayStart() {                                               // this browser's midnight, state.day days on
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + state.day);
+    return d;
+  }
+
+  async function loadTimeline() {
+    const box = $("auto-timeline");
+    let data;
+    try { data = await api("GET", "/api/automations/timeline?hours=24&start=" + encodeURIComponent(dayStart().toISOString())); }
+    catch (err) { box.replaceChildren(el("p", "error", err.message)); return; }
+    state.timeline = data;
+    renderTimeline(box, data);
+  }
+
+  function renderTimeline(box, data) {
+    const t0 = Date.parse(data.start), t1 = Date.parse(data.end), now = Date.parse(data.now);
+    const span = t1 - t0;
+    const pct = function (t) { return Math.min(100, Math.max(0, (t - t0) / span * 100)); };   // a time's place on a track
+    const place = function (node, from, to) {                         // stretch a node across [from, to]
+      node.style.left = pct(from) + "%";
+      node.style.width = Math.max(0, pct(to) - pct(from)) + "%";
+      return node;
+    };
+    box.replaceChildren();
+
+    // The day picker and the sort, then the key.
+    const head = el("div", "ax-bar tl-head");
+    const label = el("strong", null, (state.day === 0 ? "Today" : state.day === -1 ? "Yesterday" : state.day === 1 ? "Tomorrow" : "") +
+      " " + new Date(t0).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" }));
+    head.append(button("‹", "small", function () { state.day -= 1; loadTimeline(); }), label,
+                button("›", "small", function () { state.day += 1; loadTimeline(); }));
+    if (state.day !== 0) head.appendChild(button("Today", "link small", function () { state.day = 0; loadTimeline(); }));
+    head.appendChild(sortPicker());
+    box.appendChild(head);
+    const key = el("p", "small muted tl-key");
+    [["tl-run is-done", "ran"], ["tl-run is-failed", "failed"], ["tl-run is-running", "running now"],
+     ["tl-expect", "should finish by"], ["tl-slot", "scheduled (as wide as it usually takes)"]].forEach(function (k) {
+      key.append(el("span", "tl-swatch " + k[0]), document.createTextNode(k[1] + "  "));
+    });
+    box.appendChild(key);
+    if (!data.automations.length) { box.appendChild(el("p", "muted", "No automations yet.")); showRunning(0); return; }
+
+    // The hour ruler, every 3 hours.
+    const grid = el("div", "tl");
+    const ruler = el("div", "tl-lane tl-ruler");
+    const marks = el("div", "tl-track");
+    for (let h = 0; h <= 24; h += 3) {
+      const tick = el("span", "tl-hour small muted", fmtClock(new Date(t0 + h * 3600000)));
+      tick.style.left = (h / 24 * 100) + "%";
+      marks.appendChild(tick);
+    }
+    if (now >= t0 && now <= t1) {
+      const tag = el("span", "tl-now-tag small", "now " + fmtClock(new Date(now)));
+      tag.style.left = pct(now) + "%";
+      marks.appendChild(tag);
+    }
+    ruler.append(el("span"), marks);
+    grid.appendChild(ruler);
+
+    let running = 0;
+    sorted(data.automations).forEach(function (a) {
+      const going = a.runs.find(function (r) { return r.running; });  // one that's running right now, if any
+      const lane = el("div", "tl-lane" + (a.enabled ? "" : " is-paused") + (going ? " is-running" : ""));
+      const name = button("", "link tl-name", function () { showTab("automations"); open(a.id); });
+      let sub = (a.enabled ? a.when : "paused") + (a.avg_seconds !== null ? " · ~" + fmtDuration(a.avg_seconds) : "");
+      if (going) {                                                    // say it in words too: a 2-minute bar is a sliver
+        const left = a.avg_seconds !== null ? a.avg_seconds - going.seconds : null;
+        sub = "● Running " + fmtDuration(going.seconds) + (left === null ? "" : left > 0 ? " · ~" + fmtDuration(left) + " left"
+                                                                                       : " · over its usual " + fmtDuration(a.avg_seconds));
+      }
+      name.append(el("span", null, a.name), el("span", "small " + (going ? "tl-live" : "muted"), sub));
+      const track = el("div", "tl-track");
+      for (let h = 3; h < 24; h += 3) {                               // faint hour lines
+        const line = el("span", "tl-gridline");
+        line.style.left = (h / 24 * 100) + "%";
+        track.appendChild(line);
+      }
+      const avg = a.avg_seconds !== null ? a.avg_seconds * 1000 : null;
+
+      a.runs.forEach(function (r) {                                   // what happened, and what's happening
+        const start = Date.parse(r.start);
+        const bar = el("button", "tl-run is-" + (r.running ? "running" : r.status));
+        bar.type = "button";
+        bar.addEventListener("click", function () { liveRun(r.run_id, a.name); });
+        if (r.running) {
+          running += 1;
+          place(bar, start, now);
+          bar.title = a.name + ": running since " + fmtClock(new Date(start)) + " (" + fmtDuration(r.seconds) + ")" +
+            (avg === null ? "" : start + avg > now ? "; usually " + fmtDuration(a.avg_seconds) + ", so about " +
+              fmtDuration((start + avg - now) / 1000) + " left" : "; longer than usual (" + fmtDuration(a.avg_seconds) + ")");
+          if (avg !== null && start + avg > now) {                    // where it should end
+            const expect = place(el("span", "tl-expect"), now, start + avg);
+            expect.title = "Usually done by " + fmtClock(new Date(start + avg));
+            track.appendChild(expect);
+          }
+        } else {
+          place(bar, start, Date.parse(r.end));
+          bar.title = a.name + ": " + (STATUS[r.status] || r.status) + ", " + fmtClock(new Date(start)) + "–" +
+            fmtClock(new Date(Date.parse(r.end))) + " (" + fmtDuration(r.seconds) + ")" + (r.trigger !== "schedule" ? ", " + r.trigger : "");
+        }
+        track.appendChild(bar);
+      });
+
+      a.planned.forEach(function (when) {                             // what's coming, as wide as it usually takes
+        const at = Date.parse(when);
+        const slot = place(el("span", "tl-slot"), at, at + (avg || 0));
+        slot.title = a.name + ": scheduled " + fmtClock(new Date(at)) + (avg === null ? " (no finished runs to time yet)"
+          : ", usually takes " + fmtDuration(a.avg_seconds) + ", so done about " + fmtClock(new Date(at + avg)));
+        track.appendChild(slot);
+      });
+
+      if (now >= t0 && now <= t1) {                                   // the "now" line through every lane
+        const line = el("span", "tl-now");
+        line.style.left = pct(now) + "%";
+        track.appendChild(line);
+      }
+      lane.append(name, track);
+      grid.appendChild(lane);
+    });
+    box.appendChild(grid);
+    if (state.day === 0) showRunning(running);                        // today's view knows what's going right now
+
+    // The same, in words: what each is doing now, and how long it takes.
+    const table = el("table", "admin-table tl-table");
+    const thead = el("tr");
+    ["Automation", "Schedule", "Now", "Usually takes", "Longest", "Timed runs"].forEach(function (h) { thead.appendChild(el("th", null, h)); });
+    table.appendChild(thead);
+    sorted(data.automations).forEach(function (a) {
+      const tr = el("tr");
+      const going = a.runs.find(function (r) { return r.running; });
+      let nowText;
+      if (going) {
+        const left = a.avg_seconds !== null ? a.avg_seconds - going.seconds : null;
+        nowText = "Running for " + fmtDuration(going.seconds) + (left === null ? "" : left > 0 ? ", about " + fmtDuration(left) + " left" : ", longer than usual");
+      } else if (!a.enabled) {
+        nowText = "Paused" + (a.paused_reason ? ": " + a.paused_reason : "");
+      } else if (a.next_run_at) {
+        const next = new Date(Date.parse(a.next_run_at));
+        nowText = "Next " + (next.toDateString() === new Date(now).toDateString() ? "" : next.toLocaleDateString([], { weekday: "short" }) + " ") + fmtClock(next);
+      } else {
+        nowText = "—";
+      }
+      [a.name, a.enabled ? a.when : "paused", nowText, fmtDuration(a.avg_seconds), fmtDuration(a.max_seconds),
+       a.measured ? a.measured + " of the last " + data.sample : "none yet"].forEach(function (v, i) {
+        tr.appendChild(el("td", i === 2 && going ? "tl-live" : null, v));
+      });
+      table.appendChild(tr);
+    });
+    box.appendChild(table);
+    box.appendChild(el("p", "small muted", "A run's time is from when it was scheduled (or started, for Run now) until " +
+      "its last message went out. “Usually takes” averages its last " + data.sample + " runs that finished well."));
   }
 
   document.querySelectorAll("#automator [role=tab]").forEach(function (t) {
     t.addEventListener("click", function () {
       showTab(t.dataset.tab);
-      location.hash = t.dataset.tab === "approvals" ? "approvals" : (state.selected ? "a=" + state.selected : "");
+      location.hash = t.dataset.tab === "timeline" ? "timeline" : (state.selected ? "a=" + state.selected : "");
     });
   });
-  api("GET", "/api/automations/approvals").then(function (d) { showPending(d.pending); }).catch(function () {});
 
   $("auto-new").addEventListener("click", function () { open("new"); });
   const hash = location.hash.slice(1);
   const wanted = /^a=(\d+)$/.exec(hash), run = /^run=(\d+)$/.exec(hash);
-  if (hash === "approvals") {
+  if (hash === "approvals") {                                         // an old link to the removed Approvals tab
+    location.replace("/proposals");
+  } else if (hash === "timeline") {
     load();
-    showTab("approvals");
+    showTab("timeline");
   } else if (run) {
     api("GET", "/api/automations/runs/" + run[1]).then(function (r) {
       state.run = r.run_id;

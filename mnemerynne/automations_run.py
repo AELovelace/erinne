@@ -387,7 +387,8 @@ class Scheduler:
                     if reason:
                         auto.pause(conn, row["id"], reason)
                         continue
-                    started.append(auto.start_run(conn, row, "schedule"))
+                    started.append(auto.start_run(conn, row, "schedule",
+                                                  scheduled_for=row["next_run_at"]))   # when it was due (Timeline)
             return started, reported
         finally:
             conn.close()
@@ -569,7 +570,7 @@ class Scheduler:
         return text
 
     def _keep_proposals(self, run_id: int, ids: list[int]) -> None:
-        """The proposals a run made, on its row (the Approvals tab, auto-approval). Skipped where the runs table
+        """The proposals a run made, on its row (the run's links to them, auto-approval, /api/automations/approvals). Skipped where the runs table
         is still core's (no such column)."""
         conn = connect(self.settings)
         try:
@@ -657,7 +658,7 @@ class Scheduler:
             except Exception as exc:                       # never let it stop the delivery
                 log.exception("Auto-approving run %s's proposals failed", run_id)
                 approved = [{"ok": False, "error": f"Auto-approval failed: {type(exc).__name__}; "
-                                                   "the proposals wait on the Approvals tab."}]
+                                                   "the proposals wait on the Proposals page."}]
             for a in approved:
                 trace.add("approval", **a)
             if quiet:
@@ -764,6 +765,8 @@ class Scheduler:
         try:
             with db.transaction(conn):
                 conn.execute("UPDATE automation_runs SET delivered = ? WHERE id = ?", (json.dumps(done), run_id))
+                if done and auto.has_column(conn, "automation_runs", "delivered_at"):   # the last message is out
+                    conn.execute("UPDATE automation_runs SET delivered_at = datetime('now') WHERE id = ?", (run_id,))
                 failed = [d for d in done if not d["ok"]]
                 if failed and not deliver.get("inbox"):
                     auto.tell(conn, user["id"], f"Your automation “{row['name']}” ran, but couldn't be "
