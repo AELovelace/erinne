@@ -12,4 +12,11 @@
 {%- else -%}
 <span class="blossom" aria-hidden="true">🌸</span>
 {%- endif -%}
-{{ product_name if product_name is defined else assistant_name }}
+{%- set brand_text = product_name if product_name is defined else assistant_name -%}
+{#- brand_glitch (set by _nav.html for the menu button): the name carries a copy of itself in data-text, which
+    erynne.css .brand-glitch flashes in cyan and red now and then, like mnemerynne.io's title. -#}
+{%- if brand_glitch is defined and brand_glitch -%}
+<span class="brand-glitch" data-text="{{ brand_text }}">{{ brand_text }}</span>
+{%- else -%}
+{{ brand_text }}
+{%- endif -%}
