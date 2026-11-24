@@ -68,7 +68,7 @@ Each run records `scheduled_for` (the time the scheduler claimed it for; empty f
 ## Limits
 
 - 20 automations a person;
-- at most every 15 minutes;
+- at most every 15 minutes (with **Only between**, at least once a day; the window is in the automation's time zone and keeps its wall-clock hours across daylight saving);
 - two runs at a time across the server;
 - 5 minutes per Erynne or Claude-key run.
 

@@ -102,8 +102,9 @@
 
   function clockMinutes(a) {                                          // minutes after midnight it runs
     const s = a.schedule || {};
-    if (s.every === "day" && s.at) { const p = s.at.split(":"); return parseInt(p[0], 10) * 60 + parseInt(p[1], 10); }
-    return 24 * 60 + (s.n || 0);                                      // every N minutes: after the daily ones
+    const clock = s.every === "day" ? s.at : s.between ? s.between[0] : null;   // daily: its time; a window: its start
+    if (clock) { const p = clock.split(":"); return parseInt(p[0], 10) * 60 + parseInt(p[1], 10); }
+    return 24 * 60 + (s.n || 0);                                      // all-day every N minutes: after the rest
   }
 
   function sorted(list) {                                             // a sorted copy; the server sends A–Z
@@ -186,7 +187,26 @@
     }
     const daily = el("div"), often = el("div");
     daily.append(field("At", at), dayRow);
-    often.append(field("Every", every));
+    // "Every so often", optionally only in a window of the day on chosen days: every hour, 08:00 to 17:00, Mon to
+    // Fri is business hours. It runs on the window's own beat (08:00, 09:00, … 17:00); an end earlier than the
+    // start runs overnight.
+    const win = schedule.between || null;
+    const only = check("Only between", !!win);
+    const from = input(win ? win[0] : "08:00", "time"), to = input(win ? win[1] : "17:00", "time");
+    const winDays = DAYS.map(function (d, i) {                        // business hours: weekdays ticked to start
+      return check(d.charAt(0).toUpperCase() + d.slice(1), win ? (!schedule.days || schedule.days.indexOf(d) >= 0) : i < 5);
+    });
+    const winDayRow = el("div", "automator-days");
+    winDays.forEach(function (d) { winDayRow.appendChild(d.label); });
+    const winTimes = el("div", "automator-window-times");
+    winTimes.append(field("From", from), field("To", to));
+    const winBox = el("div", "automator-window");
+    winBox.append(winTimes, winDayRow, el("span", "muted small", "Runs at the start time, then every interval up to " +
+      "and including the end time, on the ticked days. An end earlier than the start runs overnight."));
+    function showWindow() { winBox.hidden = !only.box.checked; }
+    only.box.addEventListener("change", showWindow);
+    often.append(field("Every", every), only.label, winBox);
+    showWindow();
     function show() { daily.hidden = kind.value !== "day"; often.hidden = kind.value === "day"; }
     kind.addEventListener("change", show);
     wrap.append(field("When", kind), daily, often);
@@ -197,7 +217,12 @@
         if (kind.value === "day") {
           return { every: "day", at: at.value, days: DAYS.filter(function (d, i) { return days[i].box.checked; }) };
         }
-        return { every: "minutes", n: parseInt(every.value, 10) };
+        const out = { every: "minutes", n: parseInt(every.value, 10) };
+        if (only.box.checked) {                                       // the window, and the days it opens on
+          out.between = [from.value, to.value];
+          out.days = DAYS.filter(function (d, i) { return winDays[i].box.checked; });
+        }
+        return out;
       }
     };
   }

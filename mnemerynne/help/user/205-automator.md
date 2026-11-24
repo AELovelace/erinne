@@ -14,6 +14,7 @@ On a big screen, the **Width** buttons on the right of the top bar make the page
   - Anyone who can edit the file can change what the automation does, so keep prompt files in a folder only the right people can edit.
   - If the file is deleted, or you lose access to it, the run fails and your Inbox says why. The automation's card shows the file as gone; pick another, or switch back to **Write it here**. What you typed in the box is kept when you switch, so switching back loses nothing.
 - **When:** at a time on chosen days, or every so often (at most every 15 minutes), in your time zone.
+  - **Every so often → Only between** keeps it to a window of the day, on the days you tick. For example, **every hour, from 08:00 to 17:00, Mon–Fri** runs at 08:00, 09:00 … 17:00 on weekdays and not at all at weekends. It runs at the start time, then every interval up to and including the end time. An end earlier than the start runs overnight (22:00 to 02:00). Without **Only between**, it runs every interval around the clock, counted from its last run.
 - **Who runs it:**
   - **Erynne**, with the tools you tick. Leave them all unticked for every tool that only reads.
   - **Claude (your key)**, if you use Claude in chat, under your saved key.

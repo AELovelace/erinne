@@ -98,7 +98,11 @@ def zone(name: str) -> tzinfo:
 def check_schedule(schedule: dict) -> dict:
     """The schedule in one of two shapes:
     {"every": "day", "at": "07:30", "days": ["mon", ...]}  (no days: every day; "week" = one day)
-    {"every": "minutes" | "hours", "n": N}                 (at least MIN_MINUTES apart)."""
+    {"every": "minutes" | "hours", "n": N}                 (at least MIN_MINUTES apart)
+    The second may add "between": ["08:00", "18:00"]: only in that window of the day (its time zone), on the
+    window's own beat (08:00, 08:00 + N, … up to 18:00 itself), and with it "days" (the days the window opens
+    on; none: every day), so "every hour, 08:00 to 17:00, Mon to Fri" is business hours. A window whose end is
+    earlier than its start runs overnight (22:00 to 06:00 the next morning)."""
     if not isinstance(schedule, dict):
         raise AutomationError("Give a schedule.")
     every = str(schedule.get("every", "")).lower()
@@ -121,7 +125,30 @@ def check_schedule(schedule: dict) -> dict:
         minutes = n * 60 if every == "hours" else n
         if minutes < MIN_MINUTES or minutes > 7 * 24 * 60:
             raise AutomationError(f"Run it at most every {MIN_MINUTES} minutes, and at least once a week.")
-        return {"every": "minutes", "n": minutes}
+        out = {"every": "minutes", "n": minutes}
+        between = schedule.get("between")
+        if between:                                      # only in a window of the day
+            if isinstance(between, dict):                # {"from": "08:00", "to": "18:00"} reads the same
+                between = [between.get("from"), between.get("to")]
+            if not isinstance(between, (list, tuple)) or len(between) != 2:
+                raise AutomationError("Give the window as two times, e.g. between 08:00 and 18:00.")
+            times = []
+            for t in between:
+                m = _TIME.match(str(t or "").strip())
+                if not m:
+                    raise AutomationError("Give the window's times as HH:MM, e.g. between 08:00 and 18:00.")
+                times.append(f"{int(m.group(1)):02d}:{m.group(2)}")
+            if times[0] == times[1]:
+                raise AutomationError("The window's start and end are the same; leave “Only between” off to run "
+                                      "all day.")
+            if minutes > 24 * 60:
+                raise AutomationError("A window of the day needs it to run at least once a day.")
+            out["between"] = times
+            days = [str(d).lower()[:3] for d in (schedule.get("days") or [])]   # business hours: mon to fri
+            if any(d not in DAYS for d in days):
+                raise AutomationError("Days are mon, tue, wed, thu, fri, sat and sun.")
+            out["days"] = [d for d in DAYS if d in days] or list(DAYS)   # the days its window opens on
+        return out
     raise AutomationError("A schedule runs every day at a time, or every so many minutes or hours.")
 
 
@@ -132,13 +159,54 @@ def describe(schedule: dict, tz: str) -> str:
                 else "weekends" if days == ["sat", "sun"] else ", ".join(d.capitalize() for d in days))
         return f"{when} at {schedule['at']} ({tz})"
     n = schedule["n"]
-    return f"every {n // 60} hour{'s' if n // 60 != 1 else ''}" if n % 60 == 0 else f"every {n} minutes"
+    every = (("every hour" if n == 60 else f"every {n // 60} hours") if n % 60 == 0
+             else f"every {n} minutes")
+    if schedule.get("between"):                # "every hour between 08:00 and 17:00, weekdays (America/Los_Angeles)"
+        return (f"{every} between {schedule['between'][0]} and {schedule['between'][1]}"
+                f"{_days_text(schedule.get('days') or list(DAYS), ', ')} ({tz})")
+    return every
+
+
+def _days_text(days: list[str], lead: str) -> str:
+    """"" for every day, else the lead and "weekdays", "weekends" or "Mon, Wed"."""
+    if len(days) == 7:
+        return ""
+    return lead + ("weekdays" if days == list(DAYS[:5]) else "weekends" if days == ["sat", "sun"]
+                   else ", ".join(d.capitalize() for d in days))
+
+
+def _windowed(schedule: dict, tz: str, after: datetime) -> datetime:
+    """The next run of an every-N-minutes schedule with a window ("between"): the first of the window's
+    times (its start, start + N, … up to its end) strictly after `after`, in UTC. Wall-clock times, so the
+    window keeps its hours across a DST change."""
+    place = zone(tz)
+    step = timedelta(minutes=schedule["n"])
+    (h0, m0), (h1, m1) = ((int(x) for x in t.split(":")) for t in schedule["between"])
+    days = schedule.get("days") or list(DAYS)
+    first = after.astimezone(place).date() - timedelta(days=1)   # yesterday's window may run past midnight
+    for offset in range(0, 10):                                  # a week ahead, and then some
+        day = first + timedelta(days=offset)
+        if DAYS[day.weekday()] not in days:
+            continue                                             # its window doesn't open today (a weekend)
+        opens = datetime.combine(day, dtime(h0, m0))                       # naive local wall time
+        closes = datetime.combine(day, dtime(h1, m1))
+        if closes <= opens:
+            closes += timedelta(days=1)                                    # overnight: ends the next morning
+        slot = opens
+        while slot <= closes:
+            at = slot.replace(tzinfo=place).astimezone(timezone.utc)
+            if at > after:
+                return at.replace(microsecond=0)
+            slot += step
+    raise AutomationError("That schedule never runs.")
 
 
 def next_run(schedule: dict, tz: str, after: datetime) -> datetime:
     """The first time strictly after `after` (aware, any zone) that the schedule runs, in UTC."""
     after = after.astimezone(timezone.utc)
     if schedule["every"] == "minutes":
+        if schedule.get("between"):
+            return _windowed(schedule, tz, after)
         return (after + timedelta(minutes=schedule["n"])).replace(microsecond=0)
     place = zone(tz)
     hour, minute = (int(x) for x in schedule["at"].split(":"))

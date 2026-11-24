@@ -103,6 +103,41 @@ def test_schedules_follow_the_clock_and_the_days():
         auto.zone("Mars/Olympus")
 
 
+def test_every_so_often_can_keep_to_business_hours():
+    hourly = auto.check_schedule({"every": "hours", "n": 1, "between": ["8:00", "17:00"],
+                                  "days": ["mon", "tue", "wed", "thu", "fri"]})
+    assert hourly == {"every": "minutes", "n": 60, "between": ["08:00", "17:00"],
+                      "days": ["mon", "tue", "wed", "thu", "fri"]}
+    assert auto.describe(hourly, "UTC") == "every hour between 08:00 and 17:00, weekdays (UTC)"
+    # Tuesday 2026-11-24: before opening → 08:00; mid-morning → the next hour on the window's beat; after 17:00
+    # → Wednesday 08:00; 17:00 itself still runs.
+    assert auto.next_run(hourly, "UTC", _at("2026-11-24 06:10")) == _at("2026-11-24 08:00")
+    assert auto.next_run(hourly, "UTC", _at("2026-11-24 10:20")) == _at("2026-11-24 11:00")
+    assert auto.next_run(hourly, "UTC", _at("2026-11-24 16:30")) == _at("2026-11-24 17:00")
+    assert auto.next_run(hourly, "UTC", _at("2026-11-24 17:00")) == _at("2026-11-25 08:00")
+    # Friday evening → Monday morning: the weekend is skipped.
+    assert auto.next_run(hourly, "UTC", _at("2026-11-27 17:30")) == _at("2026-11-30 08:00")
+    # The Timeline's planned slots for that Tuesday: ten, 08:00 to 17:00.
+    row = {"enabled": 1, "next_run_at": "2026-11-24 08:00:00", "schedule": json.dumps(hourly), "tz": "UTC"}
+    assert [t.strftime("%H") for t in auto.planned(row, _at("2026-11-24 00:00"), _at("2026-11-25 00:00"))] == \
+        ["08", "09", "10", "11", "12", "13", "14", "15", "16", "17"]
+    # Overnight, every 90 minutes from 22:00 to 02:00, every day.
+    night = auto.check_schedule({"every": "minutes", "n": 90, "between": ["22:00", "02:00"]})
+    assert night["days"] == list(auto.DAYS) and auto.describe(night, "UTC") == "every 90 minutes between 22:00 and 02:00 (UTC)"
+    assert auto.next_run(night, "UTC", _at("2026-11-24 23:45")) == _at("2026-11-25 01:00")
+    assert auto.next_run(night, "UTC", _at("2026-11-25 01:00")) == _at("2026-11-25 22:00")
+    # Without a window it's as before: every N from now.
+    assert auto.next_run({"every": "minutes", "n": 60}, "UTC", _at("2026-11-24 10:20")) == _at("2026-11-24 11:20")
+    if _has_zones():                                                    # the window keeps its wall-clock hours
+        la = dict(hourly)
+        assert auto.next_run(la, "America/Los_Angeles", _at("2026-11-24 10:00")) == _at("2026-11-24 16:00")   # 08:00 PST
+    for bad in ({"every": "hours", "n": 1, "between": ["08:00", "08:00"]}, {"every": "hours", "n": 1, "between": ["8am", "5pm"]},
+                {"every": "hours", "n": 1, "between": ["08:00"]}, {"every": "hours", "n": 48, "between": ["08:00", "17:00"]},
+                {"every": "hours", "n": 1, "between": ["08:00", "17:00"], "days": ["xyz"]}):
+        with pytest.raises(auto.AutomationError):
+            auto.check_schedule(bad)
+
+
 def test_a_due_automation_is_claimed_once_and_long_missed_runs_are_skipped(conn, settings, people, directory, automations_conn):
     runs = automations_conn                     # automations.db (Phase 9)
     alice = users.get_user(conn, "alice")

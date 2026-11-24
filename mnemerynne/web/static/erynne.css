@@ -1297,6 +1297,10 @@ select { font: inherit; color: var(--ink); }
 .automator-file-results { list-style: none; margin: 0; padding: 0; display: grid; gap: .15rem;
   max-height: 14rem; overflow-y: auto; }                                     /* 20 matches at most, scrolled */
 .automator-file-results:empty { display: none; }
+/* "Every so often" → "Only between": the two times side by side, the days under them. */
+.automator-window { display: grid; gap: .35rem; margin-left: 1.6rem; }
+.automator-window-times { display: flex; flex-wrap: wrap; gap: .8rem; }
+.automator-window-times .api-field { flex: 0 1 9rem; }
 .automator-sort { display: inline-flex; align-items: center; gap: .4rem; margin: 0 0 .6rem; }
 .automator-sort select { width: auto; margin: 0; padding: .1rem .4rem; }
 
