@@ -7,15 +7,15 @@ Everything works on a phone: Ask, Files, the Wiki, Rooms, Media and the rest. Th
 Open Erynne in Chrome on Android and choose **⋮ → Install app** (or **Add to Home screen → Install**). It then opens like an app, without the browser's address bar, and appears in the **Share** menu of other apps such as YouTube.
 
 - Press and hold its icon for shortcuts to **Media**, **Screens** and **Files**.
-- In a phone's browser, **☰** has **Install Erynne** and **Install TV Remote** at the bottom, one for each app. Install either or both. Once you're in the installed Erynne app, only **Install TV Remote** is left: it copies a link to paste into your browser, because apps install from there.
+- In a phone's browser, the **🌸 menu** (tap the flower and name, top left) has **Install Erynne** and **Install TV Remote** at the bottom, one for each app. Install either or both. Once you're in the installed Erynne app, only **Install TV Remote** is left: it copies a link to paste into your browser, because apps install from there.
 - On an iPhone, **Share → Add to Home Screen** in Safari installs it too. iPhones don't let web apps appear in the Share menu, so copy the link and paste it in **Media → Screens** instead.
 
 The installed app can receive notifications. Lumi uses them for reminders: switch them on in **Media → Games → Lumi Pet → Settings → Reminders** (or in Lumi's Garden's Settings). Notifications need the secure (https) address, so install the app from the public address rather than a local one.
 
 ## Finding your way around
 
-- The tabs sit in a strip under the top bar; swipe it sideways to reach the rest.
-- **☰** at the top right holds your name, **Help** and **Sign out**.
+- Tap the **🌸 flower and name** at the top left: the menu drops down with every page (Ask, Files, Wiki, Proposals…), your name, **Help** and **Sign out**. Tap it again, or anywhere else, to close it.
+- The middle of the top bar names the page you're on. A number on the flower counts proposals waiting for you.
 - **✉** is Messages, as on a desktop.
 
 ## Ask

@@ -6,17 +6,20 @@ The product behind her is called **Mnemerynne**. You will see that name on the s
 
 ## The tabs
 
+Tap or click the **🌸 flower and name** at the top left for the menu of tabs; the middle of the top bar names the one you're on.
+
 | Tab | What it is for |
 |---|---|
 | **Ask** | Ask questions in plain language and get cited answers. See [Asking questions](ask.md). |
 | **Files** | Your own File box and the libraries shared with you: upload, organise, preview, restore earlier versions. See [The Files tab](files.md). |
 | **Wiki** | Your organisation's wiki: pages anyone with access can read, and people with write access can edit in the browser. See [The organisation wiki](wiki.md). |
 | **Remote** | Web pages on the organisation's own network, opened through Erynne in a small browser window. Only shown when an admin listed one for you. See [The Remote tab](remote.md). |
+| **Proposals** | What Claude or Erynne asked to do and is waiting for you to apply or dismiss. A number on the flower and the tab counts the ones waiting. See [Tools and proposals](tools-and-proposals.md). |
 | **✉ (top right)** | Notes from colleagues, what Erynne tells you (a proposal decided, a comment on your file) and announcements; with Rooms on, the Inbox in Rooms. See [Messages and announcements](messages-and-announcements.md). |
 | **Preferences** | Your account, theme, password, signed-in browsers, memories, Microsoft 365 and Claude. See [Preferences](preferences.md). |
 | **Access** | Only admins see this: libraries, people, groups and server settings. |
 
-Top right you will find **Help** (this wiki, opens in a new tab) and **Sign out**.
+At the bottom of the 🌸 menu you will find **Help** (this wiki, opens in a new tab) and **Sign out**.
 
 ## What Erynne can and cannot do
 

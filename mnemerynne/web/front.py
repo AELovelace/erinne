@@ -183,7 +183,12 @@ def make_templates(app: FastAPI) -> Jinja2Templates:
                 unread_rooms = rooms_mod.unread_summary(rooms_conn, user, app.state.directory)
             finally:
                 rooms_pool.put(rooms_conn)
+            # Proposals tab badge: the person's own proposals still waiting (the same list /proposals shows first).
+            nav_proposals = conn.execute("SELECT COUNT(*) FROM agent_proposals WHERE user_id = ? AND status = 'pending' "
+                                         "AND (expires_at IS NULL OR expires_at > datetime('now'))",   # not ones past their time
+                                         (user_id,)).fetchone()[0]
             return out | {"nav_unread": messages_mod.unread_count(conn, user_id) + unread_rooms["mentions"] + unread_rooms["dms"],
+                    "nav_proposals": nav_proposals,
                     "has_rooms": rooms_mod.enabled(conn), "has_media": media_mod.enabled(conn) and media_mod.may_use(conn, user, app.state.directory),
                     "has_screens": media_mod.enabled(conn) and media_screens.may_use(conn, user, app.state.directory),
                     "message_max_chars": messages_mod.MAX_CHARS,

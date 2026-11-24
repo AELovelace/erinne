@@ -1,6 +1,6 @@
 /* The top bar on every page: measures how much of the screen the bar and the announcement cards
    take (--chrome, which the full-height pages subtract from the viewport, phone or not), runs the
-   ☰ menu on phones (the tabs, the username, Help and Sign out), and closes the
+   flower menu (the brand button: the tabs, the username, Help and Sign out; the Help page's ☰ too), and closes the
    collapsible side lists (details.ax-side) on narrow screens. Nothing here uses innerHTML. */
 (function () {
   "use strict";
@@ -33,7 +33,7 @@
   window.addEventListener("load", measure);
   if (notices) new MutationObserver(measure).observe(notices, { attributes: true, attributeFilter: ["hidden"], childList: true });
 
-  // ☰: the tabs, the username, Help and Sign out, in a menu on phones (inline on a desktop).
+  // The flower menu (_nav.html: 🌸 + name opens it, on every screen size), and the Help page's ☰ (phones).
   const menuButton = document.getElementById("nav-menu");
   const more = document.getElementById("nav-more");
   if (menuButton && more) {
@@ -48,7 +48,11 @@
     document.addEventListener("click", function (e) {
       if (more.classList.contains("open") && !more.contains(e.target)) setOpen(false);
     });
-    document.addEventListener("keydown", function (e) { if (e.key === "Escape") setOpen(false); });
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape" || !more.classList.contains("open")) return;
+      setOpen(false);
+      menuButton.focus();                                // back on the flower, so the keyboard isn't lost
+    });
     narrow.addEventListener("change", function () { setOpen(false); });
   }
 

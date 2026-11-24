@@ -14,33 +14,49 @@
 </header>
 <div class="notices" id="notices" aria-live="polite" hidden></div>
 {%- else %}
-<header class="topbar main-bar">
-  <a class="brand" href="/">{% include "_brand.html" %}</a>
-  {#- On a phone the bar is one row (brand, ✉, ☰) and everything in .nav-more, the tabs too, is the ☰ menu
-      (nav.js); on a desktop .nav-more is display: contents, so it all sits inline (the tabs after the brand). -#}
-  {%- if has_rooms %}
-  <a class="notify-button" id="notify-button" href="/rooms#inbox" title="Messages">✉<span class="badge unread" id="nav-unread" {% if not nav_unread %}hidden{% endif %}>{{ nav_unread or '' }}</span></a>
-  {%- else %}
-  <button type="button" class="notify-button" id="notify-button" aria-haspopup="dialog" aria-controls="msg-modal" title="Messages">✉<span class="badge unread" id="nav-unread" {% if not nav_unread %}hidden{% endif %}>{{ nav_unread or '' }}</span></button>
-  {%- endif %}
-  <button type="button" class="nav-menu" id="nav-menu" aria-haspopup="menu" aria-controls="nav-more" aria-expanded="false" title="Menu">☰</button>
+{#- The pages, in menu order: (active key, address, label, shown). The bar shows only the current one's label
+    in the middle; all of them are in the flower menu (nav.js opens it from the brand). -#}
+{%- set nav_tabs = [
+  ('chat', '/', 'Ask', true),
+  ('files', '/files', 'Files', true),
+  ('wiki', '/wiki', 'Wiki', true),
+  ('media', '/media', 'Media', has_media),
+  ('remote', '/remote', 'Remote', has_remote),
+  ('rooms', '/rooms', 'Rooms', has_rooms),
+  ('automations', '/automations', 'Automator', has_automations),
+  ('proposals', '/proposals', 'Proposals', true),
+  ('scratchpad', '/scratchpad', 'Scratchpad', true),
+  ('preferences', '/preferences', 'Preferences', true),
+  ('admin', '/admin/libraries', 'Access', is_admin),
+] %}
+{%- set ns = namespace(current='') %}
+{%- for key, href, label, shown in nav_tabs if shown and key == active %}{% set ns.current = label %}{% endfor %}
+<header class="topbar main-bar flower-bar">
+  {#- The brand is the menu button: 🌸 (or the logo) and the name, then ▾. The badge counts proposals waiting,
+      so they show with the menu closed. The menu itself (.nav-more) hangs under it on every screen size. -#}
+  <button type="button" class="brand nav-menu" id="nav-menu" aria-haspopup="menu" aria-controls="nav-more" aria-expanded="false" title="Pages and account">
+    <span class="brand-name">{% include "_brand.html" %}</span><span class="nav-caret" aria-hidden="true">▾</span>
+    {%- if nav_proposals %}<span class="badge unread" title="{{ nav_proposals }} proposals waiting for you">{{ nav_proposals }}</span>{% endif %}
+  </button>
+  {% if ns.current %}<strong class="nav-title">{{ ns.current }}</strong>{% endif %}
+  <div class="bar-right">
+    {#- A screen box has no browser buttons (the small bar's, in base.html, gives way to this bar). -#}
+    {% if kiosk_back or (tv is defined and tv and tv.box) %}<a class="help-link kiosk-back" href="/media/screen" data-kiosk-back>📺 Back to TV</a>{% endif %}
+    {% if tv is defined and tv and tv.box %}<span class="tv-history"><button type="button" data-tv-go="back" title="Back (Backspace)">‹</button><button type="button" data-tv-go="forward" title="Forward">›</button></span>{% endif %}
+    {%- if has_rooms %}
+    <a class="notify-button" id="notify-button" href="/rooms#inbox" title="Messages">✉<span class="badge unread" id="nav-unread" {% if not nav_unread %}hidden{% endif %}>{{ nav_unread or '' }}</span></a>
+    {%- else %}
+    <button type="button" class="notify-button" id="notify-button" aria-haspopup="dialog" aria-controls="msg-modal" title="Messages">✉<span class="badge unread" id="nav-unread" {% if not nav_unread %}hidden{% endif %}>{{ nav_unread or '' }}</span></button>
+    {%- endif %}
+  </div>
   <div class="nav-more" id="nav-more">
     <span class="muted nav-who">{{ user.username }}{% if is_admin %} · admin{% endif %}</span>
     <nav class="tabs" aria-label="Pages">
-      <a href="/" {% if active == 'chat' %}aria-current="page"{% endif %}>Ask</a>
-      <a href="/files" {% if active == 'files' %}aria-current="page"{% endif %}>Files</a>
-      <a href="/wiki" {% if active == 'wiki' %}aria-current="page"{% endif %}>Wiki</a>
-      {% if has_media %}<a href="/media" {% if active == 'media' %}aria-current="page"{% endif %}>Media</a>{% endif %}
-      {% if has_remote %}<a href="/remote" {% if active == 'remote' %}aria-current="page"{% endif %}>Remote</a>{% endif %}
-      {% if has_rooms %}<a href="/rooms" {% if active == 'rooms' %}aria-current="page"{% endif %}>Rooms</a>{% endif %}
-      {% if has_automations %}<a href="/automations" {% if active == 'automations' %}aria-current="page"{% endif %}>Automator</a>{% endif %}
-      <a href="/scratchpad" {% if active == 'scratchpad' %}aria-current="page"{% endif %}>Scratchpad</a>
-      <a href="/preferences" {% if active == 'preferences' %}aria-current="page"{% endif %}>Preferences</a>
-      {% if is_admin %}<a href="/admin/libraries" {% if active == 'admin' %}aria-current="page"{% endif %}>Access</a>{% endif %}
+      {%- for key, href, label, shown in nav_tabs if shown %}
+      <a href="{{ href }}" {% if active == key %}aria-current="page"{% endif %}>{{ label }}
+        {%- if key == 'proposals' and nav_proposals %} <span class="badge unread" title="{{ nav_proposals }} waiting for you">{{ nav_proposals }}</span>{% endif %}</a>
+      {%- endfor %}
     </nav>
-    {% if kiosk_back %}<a class="help-link kiosk-back" href="/media/screen" data-kiosk-back>📺 Back to TV</a>{% endif %}
-    {#- A screen box has no browser buttons (the small bar's, in base.html, gives way to this bar). -#}
-    {% if tv is defined and tv and tv.box %}{% if not kiosk_back %}<a class="help-link kiosk-back" href="/media/screen" data-kiosk-back>📺 Back to TV</a>{% endif %}<span class="tv-history"><button type="button" data-tv-go="back" title="Back (Backspace)">‹</button><button type="button" data-tv-go="forward" title="Forward">›</button></span>{% endif %}
     <a class="help-link" href="/help" target="_blank" rel="noopener">Help</a>
     <form method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
     {#- Phones only (erynne.css): each app installs separately. install.js shows what suits a browser tab or an installed app. -#}

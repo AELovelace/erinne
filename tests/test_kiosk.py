@@ -184,7 +184,7 @@ def test_a_box_gets_the_small_bar_and_its_underscan_on_every_page(client, conn, 
     assert tv.post("/login", data={"username": "boss", "password": "password123"},
                    follow_redirects=False).status_code == 303
     page = tv.get("/files").text                                              # signed in: the full bar has them
-    assert 'class="topbar main-bar"' in page and page.count('data-tv-go="forward"') == 2   # the bar's and the strip's
+    assert 'class="topbar main-bar flower-bar"' in page and page.count('data-tv-go="forward"') == 2   # the bar's and the strip's
     assert "screen_link.js" in page
 
 

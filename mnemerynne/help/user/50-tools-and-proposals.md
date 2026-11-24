@@ -28,7 +28,7 @@ Each card says who asked ("Claude for you", or Erynne), carries the same one-sen
 
 ## Changes waiting for you
 
-Claude (through the connector) proposes the same way, but its cards aren't in a chat here. It hands you a link to **Changes waiting for you** (`/proposals`), where every pending card from Claude and Erynne is listed. Open it from the link Claude gives you; nothing is applied until you press the button there.
+Claude (through the connector) proposes the same way, but its cards aren't in a chat here. It hands you a link to **Changes waiting for you** (`/proposals`), where every pending card from Claude and Erynne is listed. Open it from the link Claude gives you, or from **Proposals** in the top bar, whose badge counts the ones still waiting for you. Nothing is applied until you press the button there.
 
 ## Some proposals wait for an admin
 

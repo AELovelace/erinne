@@ -45,7 +45,9 @@ def test_the_pages_carry_the_phone_controls(client, conn):
     _login(client)
     base = client.get("/").text
     assert 'content="width=device-width, initial-scale=1, viewport-fit=cover"' in base and "nav.js" in base
-    assert 'class="topbar main-bar"' in base and 'id="nav-menu"' in base and 'id="nav-more"' in base
+    assert 'class="topbar main-bar flower-bar"' in base and 'id="nav-menu"' in base and 'id="nav-more"' in base
+    # The flower menu: the brand is the button, the bar's middle names the page you're on.
+    assert '<button type="button" class="brand nav-menu" id="nav-menu"' in base and '<strong class="nav-title">Ask</strong>' in base
     assert 'id="chat-history-toggle"' in base and 'id="chat-new"' in base and 'id="chat-history"' in base
     # The ☰ menu holds what the desktop bar shows inline, in the same order (Help before Sign out).
     assert base.index('id="nav-more"') < base.index('href="/help"') < base.index("Sign out")
