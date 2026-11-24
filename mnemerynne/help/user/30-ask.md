@@ -2,6 +2,8 @@
 
 The **Ask** tab is a chat with Erynne. Type a question the way you would ask a colleague ("How do I run the night audit?", "What's the pet policy at Portland?") and press **Ask** or Enter.
 
+> **Erynne is experimental.** She still makes lots of mistakes, so every chat opens with a warning not to trust an answer on its own: open the cited pages and check before you act on anything. For much better answers, we highly recommend Claude with your own **Anthropic API key**: if you're in the Claude group, add the key in [Preferences](preferences.md) and tick **🌐 Use External API** under the question box ([Claude](claude.md)). If you're not, ask an admin to add you.
+
 ## What you get back
 
 An answer streams in as it is written, followed by **Sources**: the documents it came from. Every claim in the answer carries a small numbered link; click it to open the document at that exact place (see [Scopes and citations](scopes-and-citations.md)).

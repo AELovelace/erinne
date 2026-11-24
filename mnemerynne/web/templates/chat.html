@@ -14,6 +14,21 @@
       <button type="button" class="tool" id="chat-new">＋ New</button>
     </div>
     <div id="thread" aria-live="polite">
+      {#- At the top of every chat (chat.js copies this card into each new or reopened chat): Erynne is
+          still experimental, so nobody should take an answer on trust. -#}
+      <div class="chat-disclaimer" role="note">
+        <strong>⚠️ {{ assistant_name }} is experimental.</strong>
+        She still makes lots of mistakes, so don't trust an answer on its own: open the cited pages and check
+        before you act on it.
+        {#- The strong suggestion: Claude through the person's own Anthropic API key answers far better. -#}
+        {% if claude and claude_key %}
+        <span class="chat-disclaimer-tip">We highly recommend ticking <strong>🌐 Use External API</strong> below: your Anthropic key gives much better answers.</span>
+        {% elif claude %}
+        <span class="chat-disclaimer-tip">We highly recommend <a href="/preferences#claude-key">adding your Anthropic API key</a>: answers through Claude are much better.</span>
+        {% else %}
+        <span class="chat-disclaimer-tip">We highly recommend using an Anthropic API key for much better answers. Ask an admin to add you to the Claude group, then add your key in Preferences.</span>
+        {% endif %}
+      </div>
       <div class="welcome">
         <h1>Ask {{ assistant_name }}</h1>
         {% if has_files %}

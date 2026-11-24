@@ -98,6 +98,10 @@ def _inbox_for_claude(conn, world, on):
 def test_only_the_claude_group_with_a_key_gets_claude(client, claude, conn, settings, world):
     _login(client, "bob")
     assert 'id="use-claude"' not in client.get("/").text and "claude_chat.js" not in client.get("/preferences").text
+    # Every chat opens with the "experimental" warning, and it points everyone at an Anthropic key.
+    page = client.get("/").text
+    assert 'class="chat-disclaimer"' in page and "is experimental." in page
+    assert "Ask an admin to add you to the Claude group" in page                # not in the group: how to get there
     assert client.put("/api/me/claude", json={"key": KEY}).status_code == 403
     events = _ask(client, "How do I run the night audit?")
     route = next(e for e in events if e["type"] == "route")
@@ -108,12 +112,14 @@ def test_only_the_claude_group_with_a_key_gets_claude(client, claude, conn, sett
     _login(client, "alice")
     page = client.get("/").text
     assert 'id="use-claude"' not in page and 'href="/preferences#claude-key"' in page   # no key yet
+    assert ">adding your Anthropic API key</a>" in page                          # the warning says to add one
     events = _ask(client, "How do I run the night audit?")
     assert next(e for e in events if e["type"] == "route")["fallback"].startswith("add your API key")
     assert claude.calls == []
 
     _with_key(conn, settings, world)
     assert 'id="use-claude"' in client.get("/").text
+    assert "We highly recommend ticking" in client.get("/").text                 # with a key: use it
     claude.turns(ToolTurn("Hello from Claude."))
     final = _final(_ask(client, "How do I run the night audit?"))
     assert final["route"] == "agent" and final["answer"] == "Hello from Claude."

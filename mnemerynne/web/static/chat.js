@@ -258,6 +258,12 @@
     return box;
   }
 
+  // The "experimental" warning card (chat.html renders the first one): a copy heads every chat.
+  const disclaimerCard = thread.querySelector(".chat-disclaimer");
+  function disclaimer() {
+    return disclaimerCard ? disclaimerCard.cloneNode(true) : document.createTextNode("");   // a fresh copy each time
+  }
+
   function addQuestion(text, where) {
     const welcome = thread.querySelector(".welcome");
     if (welcome) welcome.remove();
@@ -454,7 +460,7 @@
     if (!r.ok) return;
     const data = await r.json();
     conversationId = id;
-    thread.replaceChildren();
+    thread.replaceChildren(disclaimer());                // an old chat gets the warning on top too
     resetTokens();
     data.messages.forEach(function (m) {
       if (m.role === "user") { thread.appendChild(el("div", "msg user", m.content)); return; }
@@ -481,7 +487,7 @@
   function newChat() {
     conversationId = null;
     resetTokens();
-    thread.replaceChildren(el("div", "welcome muted", "Ask a question about your documents."));
+    thread.replaceChildren(disclaimer(), el("div", "welcome muted", "Ask a question about your documents."));   // warning first
     loadConversations();
     if (!coarse) input.focus();   // on a phone that would pop the keyboard up over the page
   }

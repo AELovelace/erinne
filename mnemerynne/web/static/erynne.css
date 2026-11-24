@@ -1522,3 +1522,9 @@ select { font: inherit; color: var(--ink); }
   .topbar.flower-bar .nav-title { font-size: 1.05rem; }
   .topbar.flower-bar .nav-more { left: .5rem; right: .5rem; }                              /* full width on a phone */
 }
+
+/* Ask: the "experimental" warning at the top of every chat (chat.html, chat.js). */
+.chat-disclaimer { margin: 0 0 1rem; padding: .7rem 1rem; border: 1px solid var(--line); border-left: 4px solid var(--rose);
+  border-radius: 10px; background: var(--petal-soft); color: var(--ink); font-size: .9rem; line-height: 1.45; }
+.chat-disclaimer strong { color: var(--rose-deep); margin-right: .25rem; }
+.chat-disclaimer-tip { display: block; margin-top: .4rem; }   /* the Anthropic key suggestion, on its own line */
