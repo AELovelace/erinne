@@ -147,6 +147,65 @@ def test_who_may_use_it_and_what_an_automation_may_be(conn, settings, people, di
     assert not auto.may_use(conn, settings, boss, directory)
 
 
+# ------------------------------------------------------------ prompt files
+def test_a_prompt_file_gives_its_first_fenced_block_or_all_of_it():
+    explained = "# Morning job\n\nWhat this does.\n\n```text\nBrief me from the file.\n```\n\n```\nnot this one\n```\n"
+    assert auto.prompt_from_text(explained) == "Brief me from the file."             # the first block only
+    assert auto.prompt_from_text("﻿Just do the thing.\n") == "Just do the thing."  # no block: all of it
+
+
+def test_an_automation_can_follow_a_prompt_file_read_fresh_each_run(settings, conn, people, directory):
+    import io
+    from mnemerynne import permissions
+    from mnemerynne.ingest import store
+
+    def add(owner, name, text):                       # a file in that person's own File box
+        got = store.receive(io.BytesIO(text.encode()), name, settings)
+        return store.add_file(conn, settings, got, permissions.private_collection_id(conn, people[owner]),
+                              people[owner])[0]
+
+    mine = add("alice", "morning-prompt.md", "Explains the job.\n\n```\nBrief me from the file.\n```\n")
+    theirs = add("bob", "bobs-prompt.md", "Bob's own instructions.")
+    pdfish = add("alice", "morning-notes.csv", "a,b\n1,2\n")
+    llm = AgentLLM()
+    llm.turns(ToolTurn("From the file [1]."))
+    with _web(settings, "alice", directory, agent_llm=llm) as c:
+        # The editor's search: her own text files only (not Bob's, not a .csv).
+        found = c.get("/api/automations/prompt-files", params={"q": "prompt"}).json()["files"]
+        assert [f["id"] for f in found] == [mine]
+        assert c.get("/api/automations/prompt-files", params={"q": "morning"}).json()["files"][0]["id"] == mine
+        base = {"name": "From file", "prompt": "", "schedule": {"every": "day", "at": "07:30"}}
+        for bad in (theirs, pdfish, 999999):                                # can't read it, not text, gone
+            assert c.post("/api/automations", json={**base, "prompt_file_id": bad}).status_code == 422
+        assert c.post("/api/automations", json=base).status_code == 422     # neither a prompt nor a file
+        made = c.post("/api/automations", json={**base, "prompt_file_id": mine})
+        assert made.status_code == 201, made.text
+        a = made.json()
+        assert a["prompt_file"] == {"id": mine, "name": "morning-prompt.md", "link": f"/files/{mine}/view",
+                                    "missing": False}
+        run_id = c.post(f"/api/automations/{a['id']}/run").json()["run_id"]
+        run = _wait(c, run_id)
+        assert run["status"] == "done", run
+        prompt = llm.calls[0][0][-1]["content"]
+        assert "Brief me from the file." in prompt and "Explains the job" not in prompt   # the block, not the notes
+        steps = _trace_done(c, run_id)["trace"]                             # the raw output names file and version
+        assert any(str(s.get("text", "")).startswith(f"Prompt: file {mine} “morning-prompt.md”, version ") for s in steps)
+        # Claude sees which file it follows.
+        tools = Tools(settings, lambda: FakeEmbedder(), lambda: directory)
+        reader = api_tokens.verify(conn, api_tokens.create(conn, people["alice"], "r")[1])
+        assert tools.list_automations(conn, reader)[0]["automations"][0]["prompt_file"]["id"] == mine
+        # The file goes: the next run fails, saying so; the page shows it as gone.
+        conn.execute("UPDATE files SET deleted_at = datetime('now') WHERE id = ?", (mine,))
+        run_id = c.post(f"/api/automations/{a['id']}/run").json()["run_id"]
+        run = _wait(c, run_id)
+        assert run["status"] == "failed" and "prompt file" in run["error"]
+        assert c.get("/api/automations").json()["automations"][0]["prompt_file"]["missing"] is True
+        # Back to typing it: the box can't be empty then.
+        assert c.patch(f"/api/automations/{a['id']}", json={"prompt_file_id": 0}).status_code == 422
+        back = c.patch(f"/api/automations/{a['id']}", json={"prompt_file_id": 0, "prompt": "Brief me"})
+        assert back.status_code == 200 and back.json()["prompt_file"] is None
+
+
 # -------------------------------------------------------------------- runs
 def test_erynne_runs_it_with_the_tools_it_picked_and_the_answer_reaches_the_inbox(settings, conn, people, directory):
     llm = AgentLLM()

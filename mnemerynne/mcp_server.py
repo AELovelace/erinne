@@ -1394,8 +1394,11 @@ class Tools:
         for row in automations.for_user(conn, caller.user_id):
             v = automations.view(conn, row)
             out.append({k: v[k] for k in ("id", "name", "when", "runner", "enabled", "next_run_at", "last_run",
-                                          "paused_reason")} | {"prompt": v["prompt"][:500]})
-        return {"automations": out, "link": f"{self.base}/automations"}, []
+                                          "paused_reason")} | {"prompt": v["prompt"][:500]}
+                       | ({"prompt_file": v["prompt_file"]} if v["prompt_file"] else {}))   # it follows this file
+        return {"automations": out, "link": f"{self.base}/automations",
+                "note": "An automation with a prompt_file follows that file (its first fenced code block, else all "
+                        "of it), read fresh each run: edit the file to change what it does."}, []
 
     def run_automation(self, conn, caller: Caller, automation: int | str) -> tuple[dict, list[int]]:
         self._automator_user(conn, caller)
@@ -1438,11 +1441,18 @@ class Tools:
     def list_automation_tasks(self, conn, caller: Caller) -> tuple[dict, list[int]]:
         """Runs waiting for Claude (a routine was started for them): what to do, and the run_id to report."""
         self._automator_user(conn, caller)
-        rows = conn.execute("SELECT r.id, r.started_at, a.name, a.prompt FROM automation_runs r JOIN automations a "
-                            "ON a.id = r.automation_id WHERE a.owner_id = ? AND r.status = 'waiting' ORDER BY r.id",
-                            (caller.user_id,)).fetchall()
-        return {"tasks": [{"run_id": r["id"], "automation": r["name"], "started_at": r["started_at"] + " UTC",
-                           "task": r["prompt"]} for r in rows]}, []
+        rows = conn.execute("SELECT r.id AS run_id, r.started_at AS run_started, a.* FROM automation_runs r "
+                            "JOIN automations a ON a.id = r.automation_id WHERE a.owner_id = ? AND r.status = 'waiting' "
+                            "ORDER BY r.id", (caller.user_id,)).fetchall()
+        tasks = []
+        for r in rows:
+            try:
+                task, _ = automations.prompt_for_run(self.settings, r)   # the typed prompt, or its prompt file now
+            except automations.AutomationError as exc:
+                task = f"(Its prompt file can't be read: {exc})"
+            tasks.append({"run_id": r["run_id"], "automation": r["name"], "started_at": r["run_started"] + " UTC",
+                          "task": task})
+        return {"tasks": tasks}, []
 
     def report_automation_run(self, conn, caller: Caller, run_id: int, text: str,
                               status: str = "done") -> tuple[dict, list[int]]:

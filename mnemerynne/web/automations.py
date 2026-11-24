@@ -100,6 +100,18 @@ async def list_automations(request: Request, user=Depends(_on), conn: sqlite3.Co
             "claude": (await request.app.state.agent.ready(user["id"], claude=True)) != "off"}
 
 
+@router.get("/api/automations/prompt-files")
+def prompt_files(q: str = "", user=Depends(_on), conn: sqlite3.Connection = Depends(get_db)):
+    """The editor's prompt file search: .md and .txt files this person can read whose name holds `q`."""
+    from mnemerynne import editing, fs, permissions
+
+    found = fs.search_names(conn, fs.Access.of(conn, user["id"]), q[:200], limit=60, forgiving=True)["files"]
+    libraries = {r["id"]: permissions.PRIVATE_LABEL if r["kind"] == "private" else r["name"]   # "My files" for one's own
+                 for r in conn.execute("SELECT id, kind, name FROM collections")}
+    return {"files": [{"id": f["id"], "name": f["display_name"], "library": libraries.get(f["collection_id"], "")}
+                      for f in found if editing.format_of(f["display_name"]) == "text"][:20]}   # text files only
+
+
 @router.post("/api/automations", status_code=status.HTTP_201_CREATED)
 async def create_automation(request: Request, user=Depends(_on), conn: sqlite3.Connection = Depends(get_automations_db)):
     body = await request.json()

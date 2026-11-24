@@ -92,6 +92,11 @@
       li.appendChild(head);
       li.appendChild(el("p", "small", a.enabled ? "Runs " + a.when + (a.next_run_at ? "; next " + a.next_run_at : "")
                                                 : "Paused" + (a.paused_reason ? ": " + a.paused_reason : "")));
+      if (a.prompt_file) {                                            // its instructions live in a file
+        li.appendChild(el("p", "small" + (a.prompt_file.missing ? " error" : " muted"), a.prompt_file.missing
+          ? "Its prompt file (file " + a.prompt_file.id + ") is gone"
+          : "Follows " + a.prompt_file.name));
+      }
       if (a.last_run) li.appendChild(el("p", "small muted", "Last run " + a.last_run.started_at + " UTC: " +
                                                               (STATUS[a.last_run.status] || a.last_run.status)));
       const actions = el("div", "ax-bar");
@@ -163,10 +168,81 @@
     return { node: wrap, value: function () { return boxes.filter(function (b) { return b[1].checked; }).map(function (b) { return b[0]; }); } };
   }
 
+  /* "What to do": typed into the box, or a prompt file (a .md or .txt in Mnemerynne) read fresh on every run.
+     The box keeps its text either way, so switching back loses nothing. value() gives the API's two fields. */
+  function promptEditor(a) {
+    const wrap = el("div", "automator-prompt");
+    const from = select(a.prompt_file ? "file" : "text", [["text", "Write it here"], ["file", "Use a prompt file"]]);
+    const prompt = input(a.prompt, "textarea");
+    prompt.rows = 6;
+    const typed = field("What to do", prompt, "Write it as a request: Erynne does it with your access and answers " +
+      "with a report. If there's nothing to report she can say so, and nothing is sent.");
+    let fileId = a.prompt_file ? a.prompt_file.id : null;             // the picked file, null until one is
+    const chosen = el("p", "small automator-file");                    // which file it follows now
+    const search = input("", "search");
+    search.placeholder = "Search your files by name…";
+    const results = el("ul", "automator-file-results");                // the matches, as buttons
+    const fileBox = el("div", "automator-file-box");
+    fileBox.append(el("span", "small", "Prompt file"), chosen, search, results,
+      el("span", "muted small", "A .md or .txt file you can read. Every run reads it fresh, so editing the file " +
+        "changes what this does (Versions on the file keeps the history). If it has a fenced code block, the first " +
+        "one is the instructions and the rest of the file can explain them; otherwise the whole file is."));
+
+    function showChosen(file) {                                        // the picked file's name, linked to open it
+      chosen.replaceChildren();
+      if (!file) { chosen.appendChild(el("span", "muted", "None picked yet: search below.")); return; }
+      if (file.missing) { chosen.appendChild(el("span", "error", "File " + file.id + " is gone: pick another.")); return; }
+      const link = el("a", null, file.name);
+      link.href = file.link || "/files/" + file.id + "/view";
+      link.target = "_blank";                                          // opens beside the editor
+      chosen.append(document.createTextNode("Follows "), link, el("span", "muted", " (file " + file.id + ")"));
+    }
+
+    let timer = null;
+    search.addEventListener("input", function () {                     // look up names as they type, gently
+      clearTimeout(timer);
+      timer = setTimeout(async function () {
+        const q = search.value.trim();
+        results.replaceChildren();
+        if (q.length < 2) return;                                      // a letter matches everything
+        let data;
+        try { data = await api("GET", "/api/automations/prompt-files?q=" + encodeURIComponent(q)); }
+        catch (err) { results.appendChild(el("li", "error small", err.message)); return; }
+        if (!data.files.length) { results.appendChild(el("li", "muted small", "No .md or .txt files by that name.")); return; }
+        data.files.forEach(function (f) {
+          const li = el("li");
+          li.appendChild(button(f.name, "link small", function () {    // pick it
+            fileId = f.id;
+            showChosen({ id: f.id, name: f.name, missing: false });
+            results.replaceChildren();
+            search.value = "";
+          }));
+          li.appendChild(el("span", "muted small", " · " + f.library));
+          results.appendChild(li);
+        });
+      }, 250);
+    });
+
+    function show() { typed.hidden = from.value !== "text"; fileBox.hidden = from.value !== "file"; }
+    from.addEventListener("change", show);
+    showChosen(a.prompt_file);
+    wrap.append(field("Instructions", from), typed, fileBox);
+    show();
+    return {
+      node: wrap,
+      value: function () {                                             // 0 = no file: the box's text is used
+        return { prompt: prompt.value, prompt_file_id: from.value === "file" ? fileId : 0 };
+      },
+      problem: function () {                                           // said before saving, so nothing half-saves
+        return from.value === "file" && !fileId ? "Pick a prompt file, or switch back to writing it here." : "";
+      }
+    };
+  }
+
   function editor(a) {
     const form = el("form", "api-form");
-    const name = input(a.name), prompt = input(a.prompt, "textarea");
-    prompt.rows = 6;
+    const name = input(a.name);
+    const instructions = promptEditor(a);
     const runner = select(a.runner, Object.keys(RUNNERS).filter(function (k) {
       return k === "erynne" || state.data.claude;
     }).map(function (k) { return [k, RUNNERS[k]]; }));
@@ -225,9 +301,7 @@
       showRoom();                                                     // the hint and the share box follow the runner
     }
     runner.addEventListener("change", showRunner);
-    form.append(field("Name", name), field("What to do", prompt, "Write it as a request: Erynne does it with your " +
-      "access and answers with a report. If there's nothing to report she can say so, and nothing is sent."),
-      schedule.node, field("Time zone", tz), field("Who runs it", runner), routine, tools.node, propose.label,
+    form.append(field("Name", name), instructions.node, schedule.node, field("Time zone", tz), field("Who runs it", runner), routine, tools.node, propose.label,
       autoApprove.label, sendTo, enabled.label);
     showRunner();
     showApprove();
@@ -238,7 +312,8 @@
     form.addEventListener("submit", async function (e) {
       e.preventDefault();
       showError("");
-      const body = { name: name.value, prompt: prompt.value, schedule: schedule.value(), tz: tz.value,
+      if (instructions.problem()) { showError(instructions.problem()); return; }
+      const body = { name: name.value, ...instructions.value(), schedule: schedule.value(), tz: tz.value,
                      runner: runner.value, tools: tools.value(), may_propose: propose.box.checked,
                      auto_approve: propose.box.checked && autoApprove.box.checked,
                      enabled: enabled.box.checked,

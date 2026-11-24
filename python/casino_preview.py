@@ -15,6 +15,21 @@ from mnemerynne.config import Settings
 from mnemerynne.web.app import Services, create_app
 
 
+def _automator(conn, settings, alice_id):
+    """Turn Automator on for Domain Users and give alice a sample prompt file (a .md with notes around a fenced
+    block), so the editor's "Use a prompt file" can be tried in the browser."""
+    import io
+    from mnemerynne import automations, permissions
+    from mnemerynne.ingest import store
+
+    automations.set_enabled(conn, True)                                  # off by default on a new box
+    automations.set_group(conn, "Domain Users")                          # everyone in the preview may use it
+    sample = ("# Morning briefing prompt\n\nThe automation follows the block below; these notes are for people.\n\n"
+              "```\nBrief me for the day: unread notes, announcements and anything urgent.\n```\n")
+    got = store.receive(io.BytesIO(sample.encode()), "morning-briefing-prompt.md", settings)
+    store.add_file(conn, settings, got, permissions.private_collection_id(conn, alice_id), alice_id)
+
+
 def main():
     """Seed disposable users and Media access, then serve only on the loopback interface."""
     with TemporaryDirectory(prefix="casino-preview-") as directory:
@@ -30,6 +45,8 @@ def main():
             uids.append(uid)
         media.set_enabled(conn, True)
         media.save_settings(conn, settings, {"media_group": "Domain Users", "screens_group": "Domain Users", "radio_directory_url": ""})
+        if "automator" in sys.argv[2:]:                                   # `casino_preview.py PORT automator`: Automator on
+            _automator(conn, settings, uids[0])                           # for everyone, with a prompt file in alice's box
         conn.close()
         app = create_app(settings, Services(llm=None, embedder=FakeEmbedder(), directory=people))
         if os.environ.get("PREVIEW_COINS"):                               # Lumi City's check (LUMI_CITY_ONLY): plots cost more than a new purse holds,

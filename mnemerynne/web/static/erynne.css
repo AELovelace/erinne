@@ -1291,6 +1291,12 @@ select { font: inherit; color: var(--ink); }
 /* Automator's tabs, the auto-approve switch under "May propose", and the Approvals tab's run headings. */
 .automator > .ax-tabs { margin: .4rem 0 .8rem; }
 .automator-sub { margin-left: 1.6rem; }
+/* "Instructions" (automations.js promptEditor): the box, or a prompt file picked by searching names. */
+.automator-file-box { display: grid; gap: .35rem; }
+.automator-file { margin: 0; overflow-wrap: anywhere; }                       /* a long file name wraps */
+.automator-file-results { list-style: none; margin: 0; padding: 0; display: grid; gap: .15rem;
+  max-height: 14rem; overflow-y: auto; }                                     /* 20 matches at most, scrolled */
+.automator-file-results:empty { display: none; }
 .automator-approval-head { margin-top: 1rem; gap: .6rem; align-items: baseline; flex-wrap: wrap; }
 /* The raw-output modal: the run's steps, live, then its report. */
 .automator-live { width: min(60rem, calc(100vw - 2rem)); }

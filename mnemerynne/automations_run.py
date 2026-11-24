@@ -17,6 +17,8 @@ the change they're about commits (automations.tell).
   it may read.
 - claude_routine: the routine's API trigger is fired with the prompt and the run's id; the run waits
   until Claude calls report_automation_run (or ROUTINE_WAIT passes).
+- The prompt is the typed one, or a prompt file read fresh at the start of each run as the owner
+  (automations.prompt_for_run); its raw output says which file and version it followed.
 
 Delivery: the owner's Inbox (a note linking to the run), a room, a draft in their Outlook, webhooks.
 An answer of just automations.QUIET is not delivered (a health check with nothing wrong).
@@ -517,7 +519,8 @@ class Scheduler:
 
     async def _answer(self, row, user, trace: Trace) -> tuple[str, list[dict], str]:
         deliver = json.loads(row["deliver"])
-        prompt = TASK_PREAMBLE.format(name=row["name"], user=user["username"]) + row["prompt"]
+        task = await self._instructions(row, trace)        # the typed prompt, or the prompt file read now
+        prompt = TASK_PREAMBLE.format(name=row["name"], user=user["username"]) + task
         trace.add("prompt", text=prompt)                   # exactly what the model is asked
         if deliver.get("room_id") and row["runner"] == "erynne":
             if self.rooms_erynne is None:
@@ -553,6 +556,17 @@ class Scheduler:
         if events["proposals"]:
             await asyncio.to_thread(self._keep_proposals, trace.run_id, events["proposals"])
         return out["answer"]["text"], events.get("sources", []), out.get("model") or ""
+
+    async def _instructions(self, row, trace: Trace) -> str:
+        """What this run is asked to do: the typed prompt, or its prompt file read fresh as the owner (so an edit
+        to the file counts from the next run). A file that can't be read fails the run, saying why."""
+        try:
+            text, source = await asyncio.to_thread(auto.prompt_for_run, self.settings, row)   # file reads can block
+        except auto.AutomationError as exc:
+            raise RunFailed(str(exc)) from None
+        if source:
+            trace.add("info", text=source)                 # which file and version this run followed
+        return text
 
     def _keep_proposals(self, run_id: int, ids: list[int]) -> None:
         """The proposals a run made, on its row (the Approvals tab, auto-approval). Skipped where the runs table
@@ -680,7 +694,8 @@ class Scheduler:
         token = apis.decrypt_secret(self.settings, row["routine_token_enc"])
         if not token:
             raise RunFailed("The routine's token can't be read; save it again.")
-        text = ROUTINE_TEXT.format(name=row["name"], user=user["username"], run_id=run_id, prompt=row["prompt"])
+        task = await self._instructions(row, trace)        # the typed prompt, or the prompt file read now
+        text = ROUTINE_TEXT.format(name=row["name"], user=user["username"], run_id=run_id, prompt=task)
         trace.add("prompt", text=text)                     # exactly what the routine is sent (never its token)
         headers = {"authorization": f"Bearer {token}", "anthropic-version": ROUTINE_VERSION,
                    "content-type": "application/json"}

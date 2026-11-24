@@ -8,7 +8,11 @@ On a big screen, the **Width** buttons on the right of the top bar make the page
 
 **New automation** opens an empty one; **Start from a template** fills it in with a Morning briefing, a Security digest or an API health check, for you to adjust.
 
-- **What to do:** write it as a request, as you'd ask in Ask. If there may be nothing worth saying (a health check), ask for exactly `NOTHING_TO_REPORT` then, and nothing is sent.
+- **Instructions:** either **Write it here** or **Use a prompt file**.
+  - **Write it here:** type into **What to do** as a request, as you'd ask in Ask. If there may be nothing worth saying (a health check), ask for exactly `NOTHING_TO_REPORT` then, and nothing is sent.
+  - **Use a prompt file:** search for a `.md` or `.txt` file you can read and pick it. Every run reads the file fresh, so editing the file changes what the automation does from its next run, and **Versions** on the file is its history (restore an older one to undo). If the file has a fenced code block (a block between two ```` ``` ```` lines), the first block is the instructions and the rest of the file can explain them to people. Otherwise the whole file is the instructions. The file can hold up to 60,000 characters of instructions.
+  - Anyone who can edit the file can change what the automation does, so keep prompt files in a folder only the right people can edit.
+  - If the file is deleted, or you lose access to it, the run fails and your Inbox says why. The automation's card shows the file as gone; pick another, or switch back to **Write it here**. What you typed in the box is kept when you switch, so switching back loses nothing.
 - **When:** at a time on chosen days, or every so often (at most every 15 minutes), in your time zone.
 - **Who runs it:**
   - **Erynne**, with the tools you tick. Leave them all unticked for every tool that only reads.
@@ -27,7 +31,7 @@ On a big screen, the **Width** buttons on the right of the top bar make the page
 Each automation lists its runs; open one to read the answer with its sources. **Run now** runs it straight away and opens a window that shows the run as it happens. If a run fails, your Inbox says why.
 
 **Raw output** (beside each run, and in the window Run now opens) shows every step the run took, numbered and timed:
-- when it started and exactly what the model was asked;
+- when it started and exactly what the model was asked (with a prompt file, also which file and version it followed);
 - what the model said between steps;
 - each tool it called, with the arguments it sent and, under **raw**, the result that came back (long ones are cut short);
 - what it proposed, what was auto-approved, where the answer went, and any error.
@@ -43,7 +47,7 @@ The **Approvals** tab lists what your automations proposed, grouped by run: the 
 ## Through Claude
 
 With Claude connected:
-- `list_automations` shows yours;
+- `list_automations` shows yours, and the prompt file each one follows;
 - `run_automation` starts one;
 - `get_automation_run` reads an answer;
 - `cancel_automation_run` stops a run that's still going.

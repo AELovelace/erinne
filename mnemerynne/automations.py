@@ -1,6 +1,6 @@
 """Automator: jobs a person schedules (a morning briefing, a security digest, an API health check).
 
-An automation is a prompt, a schedule and a runner:
+An automation is a prompt (typed in, or a .md/.txt prompt file read fresh each run), a schedule and a runner:
 - erynne: Erynne's agent, with the owner's own access and the tools they picked;
 - claude_key: the same tools driven by Claude under the owner's saved key (claude_chat);
 - claude_routine: a Claude routine on claude.ai is started (its API trigger) and works through the
@@ -34,6 +34,8 @@ DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 MAX_PER_PERSON = 20
 MIN_MINUTES = 15
 MAX_PROMPT = 8000
+MAX_PROMPT_FILE = 60_000                 # characters of instructions taken from a prompt file (a routine gets 65,000)
+_FENCE = re.compile(r"^(`{3,}|~{3,})[^\n]*\n(.*?)\n\1[ \t]*$", re.M | re.S)   # a fenced code block, first to last fence
 MISSED_GRACE = timedelta(hours=1)        # a run missed by less (the server was down) still runs once
 ROUTINE_WAIT = timedelta(hours=2)        # a routine's report must arrive within this
 QUIET = "NOTHING_TO_REPORT"              # an answer of just this: nothing delivered
@@ -251,6 +253,21 @@ def check(conn: sqlite3.Connection, settings: Settings, user: sqlite3.Row, direc
         return key in body and body[key] is not None
 
     out: dict = {}
+    has_file = current is not None and "prompt_file_id" in current.keys()          # the column (automations.db 0005)
+    if given("prompt_file_id"):                       # the instructions come from a file (0 / "" = the typed prompt)
+        raw = body["prompt_file_id"]
+        if raw in (0, "0", "", False):
+            out["prompt_file_id"] = None                                  # back to the "What to do" box
+        else:
+            try:
+                file_id = int(raw)
+            except (TypeError, ValueError):
+                raise AutomationError("Pick the prompt file from the list.") from None
+            load_prompt_file(conn, settings, user["id"], file_id)         # readable by them, text, has instructions
+            out["prompt_file_id"] = file_id
+    file_id = out["prompt_file_id"] if "prompt_file_id" in out else (current["prompt_file_id"] if has_file else None)
+    if "prompt_file_id" in out and out["prompt_file_id"] is None and not has_file:
+        del out["prompt_file_id"]                     # "no file" on a new one: nothing to write (and core lacks it)
     if given("name") or current is None:
         name = str(body.get("name") or "").strip()
         if not name or len(name) > 80:
@@ -262,9 +279,11 @@ def check(conn: sqlite3.Connection, settings: Settings, user: sqlite3.Row, direc
         out["name"] = name
     if given("prompt") or current is None:
         prompt = str(body.get("prompt") or "").strip()
-        if not prompt or len(prompt) > MAX_PROMPT:
+        if len(prompt) > MAX_PROMPT:
             raise AutomationError(f"Say what to do (up to {MAX_PROMPT} characters).")
-        out["prompt"] = prompt
+        out["prompt"] = prompt                        # kept even with a prompt file: switching back loses nothing
+    if not file_id and not out.get("prompt", current["prompt"] if current is not None else ""):
+        raise AutomationError(f"Say what to do (up to {MAX_PROMPT} characters), or pick a prompt file.")
     if given("tz") or current is None:
         tz = str(body.get("tz") or settings.timezone or "UTC").strip()
         zone(tz)
@@ -405,7 +424,63 @@ def view(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
             "enabled": bool(row["enabled"]), "paused_reason": row["paused_reason"],
             "next_run_at": row["next_run_at"] + " UTC" if row["next_run_at"] else None,
             "last_run": dict(last) if last else None,
-            "running": bool(last and last["status"] in ACTIVE)}          # the page offers Cancel while it's going
+            "running": bool(last and last["status"] in ACTIVE),         # the page offers Cancel while it's going
+            "prompt_file": prompt_file_view(conn, row)}                  # None: the typed prompt is used
+
+
+# ------------------------------------------------------------ prompt files
+def prompt_from_text(text: str) -> str:
+    """The instructions in a prompt file's text: its first fenced code block when it has one (so the file can
+    explain itself around the block, like the IT-OPS prompt files), else the whole text."""
+    text = text.lstrip("﻿")                                         # a byte-order mark from Notepad
+    block = _FENCE.search(text)
+    return (block.group(2) if block else text).strip()
+
+
+def load_prompt_file(conn: sqlite3.Connection, settings: Settings, user_id: int, file_id: int) -> tuple[str, str, str]:
+    """Read a prompt file as its automation's owner: (its name, its version's first 8 characters, the
+    instructions). Raises AutomationError when it's gone, they can't read it, it isn't .md/.txt, or it's empty.
+    `conn` reads core's files (core's own connection, or a feature's with core attached)."""
+    from mnemerynne import editing
+
+    try:
+        loaded = editing.load(conn, settings, user_id, file_id, via="erynne")   # the owner's own access
+    except editing.EditError:
+        raise AutomationError(f"The prompt file (file {file_id}) is gone, or you can't read it any more.") from None
+    name = loaded.row["display_name"]
+    if loaded.fmt != "text":
+        raise AutomationError(f"“{name}” can't be a prompt file: use a .md or .txt file.")
+    text = prompt_from_text(loaded.data.decode("utf-8", errors="replace"))
+    if not text:
+        raise AutomationError(f"“{name}” is empty, so there's nothing to do.")
+    if len(text) > MAX_PROMPT_FILE:
+        raise AutomationError(f"“{name}” holds {len(text):,} characters of instructions; the most is {MAX_PROMPT_FILE:,}.")
+    return name, loaded.version[:8], text
+
+
+def prompt_for_run(settings: Settings, row: sqlite3.Row) -> tuple[str, str]:
+    """What a run is asked to do, and a line for its raw output saying where that came from ("" = the typed
+    prompt). A prompt file is read fresh each run, from core; AutomationError when it can't be."""
+    file_id = row["prompt_file_id"] if "prompt_file_id" in row.keys() else None
+    if not file_id:
+        return row["prompt"], ""
+    core = db.connect(settings.db_path)
+    try:
+        name, version, text = load_prompt_file(core, settings, row["owner_id"], file_id)
+    finally:
+        core.close()
+    return text, f"Prompt: file {file_id} “{name}”, version {version}"
+
+
+def prompt_file_view(conn: sqlite3.Connection, row: sqlite3.Row) -> dict | None:
+    """The prompt file for the page and Claude: its id, name and link; missing when it's been deleted since."""
+    file_id = row["prompt_file_id"] if "prompt_file_id" in row.keys() else None
+    if not file_id:
+        return None
+    found = conn.execute("SELECT display_name, deleted_at FROM files WHERE id = ?", (file_id,)).fetchone()
+    if found is None or found["deleted_at"] is not None:
+        return {"id": file_id, "name": None, "missing": True}
+    return {"id": file_id, "name": found["display_name"], "link": f"/files/{file_id}/view", "missing": False}
 
 
 # -------------------------------------------------------------------- runs
