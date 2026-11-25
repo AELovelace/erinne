@@ -14,6 +14,10 @@ actions template, each with its own scoped token, lean `{total, rows}` answers
 and a `reason` on every action that the project's audit log keeps. Mnemerynne
 also loads those two files as its built-in **Fleetboard** presets
 (`mnemerynne/fleetboard_presets.py`), so they are never uploaded by hand.
+[unifi-network.json](unifi-network.json) and [opnsense.json](opnsense.json) are built in the
+same way (`mnemerynne/network_presets.py`): read-only templates for a vendor API, with a
+`.example` address, `shape.keep` to leave out fields that mustn't reach the AI (guest device
+names, URL-alias credentials) and the host name check off for a pinned self-signed certificate.
 (The built-in Atera preset includes the same actions since 1.0.1, so one *Atera*
 entry covers reading and changes; the template remains the way to give the
 changes their own credential and group.)

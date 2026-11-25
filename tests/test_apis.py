@@ -574,7 +574,7 @@ def test_chat_explains_an_api_failure(settings, conn, directory):
 
 
 @pytest.mark.parametrize("name", ["fleetboard.json", "fleetboard-actions.json", "atera-read-write.json",
-                                  "unifi-site-manager.json"])
+                                  "unifi-site-manager.json", "unifi-network.json", "opnsense.json"])
 def test_the_shipped_api_templates_are_valid(name):
     """Every template in api-templates/ passes the same checks an admin's upload does."""
     from pathlib import Path
@@ -586,6 +586,33 @@ def test_the_shipped_api_templates_are_valid(name):
         assert actions and all(any(p["name"] == "reason" for p in o["params"]) for o in actions)
     if name == "fleetboard.json":                                # the read template has no actions at all
         assert not any(o["action"] for o in t["operations"])
+
+
+def test_network_presets_are_built_in_and_read_only(admin_client):
+    """UniFi Network and OPNsense come built in from api-templates/, read-only, with placeholder addresses."""
+    listed = {p["key"]: p for p in admin_client.get("/api/admin/apis").json()["presets"]}
+    assert listed["unifi-network"]["name"] == "UniFi Network"
+    assert listed["opnsense"]["name"] == "OPNsense"
+    for key in ("unifi-network", "opnsense"):
+        assert ".example" in listed[key]["base_url"]                          # never a site's real address
+        made = admin_client.post("/api/admin/apis", json={"preset": key}).json()
+        detail = admin_client.get(f"/api/admin/apis/{made['id']}").json()
+        assert detail["operations"] and not any(o["action"] for o in detail["operations"])  # nothing can change
+
+
+def test_network_presets_keep_secrets_and_guest_names_out():
+    """OPNsense aliases drop URL-alias credentials; UniFi clients drop names (guests' devices)."""
+    by_key = {p["key"]: p for p in apis.PRESETS}
+    aliases = next(o for o in by_key["opnsense"]["operations"] if o["name"] == "Aliases")
+    row = {"name": "feed", "type": "urltable", "content": "https://x", "username": "u", "password": "p"}
+    shaped = apis.apply_shape({"rows": [row], "total": 1}, aliases["shape"])
+    assert shaped["rows"] == [{"name": "feed", "type": "urltable", "content": "https://x"}]
+    clients = next(o for o in by_key["unifi-network"]["operations"] if o["name"] == "Clients")
+    client = {"type": "WIRELESS", "id": "c1", "name": "Guest's iPhone", "ipAddress": "10.0.0.5",
+              "macAddress": "aa:bb:cc:dd:ee:ff", "access": {"type": "GUEST"}}
+    shaped = apis.apply_shape({"data": [client], "totalCount": 1}, clients["shape"])
+    assert "Guest's iPhone" not in str(shaped) and shaped["totalCount"] == 1
+    assert shaped["data"][0]["access.type"] == "GUEST"
 
 
 def test_fleetboard_is_a_built_in_preset_pair(admin_client):

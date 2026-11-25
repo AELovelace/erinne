@@ -26,16 +26,17 @@ TEMPLATES = Path(__file__).resolve().parent.parent / "api-templates"
 FILES = (("fleetboard", "fleetboard.json"), ("fleetboard-changes", "fleetboard-actions.json"))
 
 
-def load(parse_template) -> list[dict]:
-    """The Fleetboard presets, each a parsed template with its preset key added.
+def load(parse_template, files=FILES, label: str = "Fleetboard") -> list[dict]:
+    """The Fleetboard presets (or the (key, file) pairs in `files`, e.g. network_presets.FILES),
+    each a parsed template with its preset key added. `label` only names them in the log.
     parse_template is apis.parse_template (passed in, since apis imports this module)."""
     out = []
-    for key, name in FILES:
+    for key, name in files:
         path = TEMPLATES / name
         try:
             preset = parse_template(path.read_text(encoding="utf-8"))   # the same checks an upload gets
         except Exception as exc:                                         # missing file, bad JSON, refused field
-            log.warning("Fleetboard preset %s not loaded from %s: %s", key, path, exc)
+            log.warning("%s preset %s not loaded from %s: %s", label, key, path, exc)
             continue
         out.append({"key": key, **preset})
     return out

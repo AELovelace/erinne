@@ -1,0 +1,116 @@
+{
+  "format": "mnemerynne-api-template",
+  "name": "OPNsense",
+  "description": "An OPNsense firewall's own REST API: system and firmware status, gateways, interfaces and their traffic, firewall rules, port forwards, aliases, services, the IDS (Suricata) engine, the ARP table and the latest firewall log lines. Read-only: Mnemerynne only sends the fixed GET requests below, so nothing here can change the firewall.\n\n**Setup**\n\n1. On the firewall, make a user just for this (System → Access → Users, e.g. `mnemerynne`) with only the privileges these calls need (the dashboard, ARP table, firewall log, firewall rules, port forwards, aliases, interface/gateway/service status, intrusion detection and firmware pages; the names differ a little between versions). OPNsense privileges are per page and most also allow changes, so the read-only part is Mnemerynne's fixed GETs: keep the user's list short anyway. Then **+ API key** on that user: OPNsense downloads a small file with `key=` and `secret=` once.\n2. Change the address to the firewall's: `https://<firewall IP>/api` (keep the `/api`).\n3. Credential: **basic**, the **key** as the user name and the **secret** as the password. Don't paste them anywhere else.\n4. OPNsense uses a self-signed certificate: **trust (pin) it** on this page. Its name is the firewall's host name, not its IP, so the host name check is off in this template; the pinned certificate is still checked on every call.\n5. Set the AD group to IT and test **System information** first.\n\n**One firewall per entry.** For a second firewall, add this preset again under another name and address.\n\n**Claude:** the answers hold internal addresses, MAC addresses and rule text (network detail, no guest data). Turn Claude's switch on only if that may go to Anthropic.\n\n**Left out on purpose:** anything that changes the firewall (rules, apply, reboot, firmware updates), the full package list (*core/firmware/info*, over 300 KB) and the IDS alert search (it needs a POST with a search body; use Wazuh for Suricata alerts).",
+  "base_url": "https://opnsense.example/api",
+  "auth_type": "basic",
+  "tls_check_hostname": false,
+  "operations": [
+    {
+      "name": "System information",
+      "description": "The firewall's host name and versions (OPNsense, FreeBSD, OpenSSL).",
+      "path": "/diagnostics/system/system_information",
+      "cache_seconds": 300,
+      "example_questions": ["What version is the firewall on?", "Which OPNsense version does the camera firewall run?", "What's the firewall's host name?"]
+    },
+    {
+      "name": "Uptime and load",
+      "description": "Uptime, current time, when it last booted, when its configuration last changed, and the load average.",
+      "path": "/diagnostics/system/system_time",
+      "cache_seconds": 60,
+      "example_questions": ["When did the firewall last reboot?", "How long has the firewall been up?", "When was the firewall's configuration last changed?", "Is the firewall busy?"]
+    },
+    {
+      "name": "Memory",
+      "description": "Total and used memory (in MB in the *_frmt fields) and the ZFS ARC size.",
+      "path": "/diagnostics/system/system_resources",
+      "cache_seconds": 60,
+      "example_questions": ["How much memory is the firewall using?", "Is the firewall short on RAM?"]
+    },
+    {
+      "name": "Firmware status",
+      "description": "The firmware version and whether updates are waiting (from the firewall's last update check; this doesn't start a new check).",
+      "path": "/core/firmware/status",
+      "cache_seconds": 300,
+      "example_questions": ["Does the firewall have updates waiting?", "Is OPNsense up to date?", "Which firmware is the firewall on?"]
+    },
+    {
+      "name": "Gateways",
+      "description": "Each gateway (WAN uplink) with its address, status (Online / Offline), packet loss and delay.",
+      "path": "/routes/gateway/status",
+      "cache_seconds": 60,
+      "example_questions": ["Is the firewall's internet up?", "Is the WAN gateway online?", "Is there packet loss on the firewall's uplink?"]
+    },
+    {
+      "name": "Interfaces",
+      "description": "Each interface (WAN, LAN, VLANs): its name, device, up or down, IPv4/IPv6 addresses, MAC, link speed, MTU and VLAN tag.",
+      "path": "/interfaces/overview/interfaces_info",
+      "cache_seconds": 120,
+      "shape": {"keep": ["description", "identifier", "device", "status", "enabled", "addr4", "addr6", "macaddr", "media", "mtu", "vlan_tag", "gateways"]},
+      "example_questions": ["What interfaces does the firewall have?", "What's the firewall's LAN address?", "Is the LAN interface up?", "What speed is the WAN link?"]
+    },
+    {
+      "name": "Interface traffic",
+      "description": "Packet and byte counters, errors and collisions per interface since boot.",
+      "path": "/diagnostics/interface/get_interface_statistics",
+      "cache_seconds": 60,
+      "example_questions": ["Are there errors on the firewall's interfaces?", "How much traffic has gone through the WAN?", "Is the LAN port dropping packets?"]
+    },
+    {
+      "name": "Firewall rules",
+      "description": "Every filter rule in order: enabled or not, pass/block/reject, direction, interface, protocol, source, destination, ports, description, logging, and whether it's an automatic (built-in) rule.",
+      "path": "/firewall/filter/search_rule",
+      "cache_seconds": 120,
+      "shape": {"keep": ["sort_order", "uuid", "enabled", "action", "direction", "interface", "ipprotocol", "protocol", "source_not", "source_net", "source_port", "destination_not", "destination_net", "destination_port", "description", "log", "quick", "is_automatic"]},
+      "example_questions": ["What firewall rules are there?", "Is there an allow-all rule on the WAN?", "Which rules are disabled?", "What does the firewall allow from the LAN?", "Which rules log their traffic?"]
+    },
+    {
+      "name": "Port forwards",
+      "description": "Port forwards (destination NAT): enabled or not, interface, protocol, source, destination and port, where it forwards to (target and local port), and the description.",
+      "path": "/firewall/d_nat/search_rule",
+      "cache_seconds": 120,
+      "example_questions": ["What ports are forwarded on the firewall?", "Which port forwards are open to the internet?", "Where does port 8000 forward to?", "Are any port forwards from any source?"]
+    },
+    {
+      "name": "Aliases",
+      "description": "Firewall aliases (named host, network and port lists): name, type, content, description, how many entries are loaded and when it last updated. Credentials of URL aliases are left out.",
+      "path": "/firewall/alias/search_item",
+      "cache_seconds": 300,
+      "shape": {"keep": ["name", "type", "enabled", "content", "description", "current_items", "last_updated"]},
+      "example_questions": ["What firewall aliases are there?", "Which hosts are in the NVR alias?", "What's in the bogons alias?"]
+    },
+    {
+      "name": "Services",
+      "description": "The firewall's services and whether each is running.",
+      "path": "/core/service/search",
+      "cache_seconds": 60,
+      "example_questions": ["Which services are running on the firewall?", "Is Unbound running?", "Has any firewall service stopped?"]
+    },
+    {
+      "name": "IDS status",
+      "description": "Whether the intrusion detection engine (Suricata) is running.",
+      "path": "/ids/service/status",
+      "cache_seconds": 60,
+      "example_questions": ["Is Suricata running on the firewall?", "Is the IDS up?"]
+    },
+    {
+      "name": "ARP table",
+      "description": "The devices the firewall has seen on its networks: IP, MAC, interface, maker (from the MAC) and whether the entry has expired.",
+      "path": "/diagnostics/interface/get_arp",
+      "cache_seconds": 60,
+      "shape": {"keep": ["ip", "mac", "intf", "manufacturer", "hostname", "expired", "permanent", "type"]},
+      "example_questions": ["Which devices are on the camera network?", "What has IP 192.168.50.91?", "How many Lorex devices does the firewall see?", "What's the MAC of the NVR?"]
+    },
+    {
+      "name": "Firewall log",
+      "description": "The latest firewall log lines, newest first: time, pass or block, interface, direction, source and destination with ports, protocol and the rule's label.",
+      "path": "/diagnostics/firewall/log",
+      "cache_seconds": 30,
+      "params": [
+        {"name": "limit", "type": "int", "min": 1, "max": 500, "default": 100, "help": "How many lines (newest first)"}
+      ],
+      "shape": {"keep": ["__timestamp__", "action", "interface", "dir", "src", "srcport", "dst", "dstport", "protoname", "label", "rid"], "rename": {"__timestamp__": "time"}},
+      "example_questions": ["What has the firewall blocked recently?", "Show the latest firewall log.", "Is anything trying to reach the cameras from outside?", "What traffic did the firewall pass in the last few minutes?"]
+    }
+  ]
+}

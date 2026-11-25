@@ -6,7 +6,7 @@ Erynne can answer live questions from internal systems: "did every hotel send it
 
 Pick a starting point in the box above the list and press **Add**:
 
-- **Presets**: Wazuh (the indexer: alerts with server-side filters, timeline, noise report, agent silence, vulnerabilities, packages, index health and retention), Wazuh manager (agents, versions, configuration with secrets redacted, SCA, FIM, logs, API users, open ports), Wazuh manager actions (active response, restart, upgrade, groups; proposals only), Atera (tickets, statuses, customers, alerts), and Fleetboard and Fleetboard (changes) (server load, disks, forecasts and history; see *Fleetboard* below). See [Wazuh](wazuh.md) for the users and roles each needs. Picking a preset asks for the address, since built-in presets carry example ones.
+- **Presets**: Wazuh (the indexer: alerts with server-side filters, timeline, noise report, agent silence, vulnerabilities, packages, index health and retention), Wazuh manager (agents, versions, configuration with secrets redacted, SCA, FIM, logs, API users, open ports), Wazuh manager actions (active response, restart, upgrade, groups; proposals only), Atera (tickets, statuses, customers, alerts), Fleetboard and Fleetboard (changes) (server load, disks, forecasts and history; see *Fleetboard* below), and UniFi Network and OPNsense (one console or firewall each, read-only; see *UniFi Network and OPNsense* below). See [Wazuh](wazuh.md) for the users and roles each needs. Picking a preset asks for the address, since built-in presets carry example ones.
 - **Uploaded templates**: a JSON file a project hands you, describing its operations. **Upload template…** adds it to the list; re-uploading a file with the same name replaces it. The format is documented in `api-templates/api-package-guide.md` in the repository.
 - **Blank**: define operations by hand.
 
@@ -69,6 +69,15 @@ Fleetboard (the server-load dashboard on this box, also a Remote app) has a serv
 - **Claude**: the answers hold host names, addresses, OS versions and client hashes, no personal data about people. Turn *Claude can query this* on if that inventory may go to Anthropic.
 
 Fleetboard's own `docs/API.md` lists every route and field.
+
+## UniFi Network and OPNsense
+
+Two read-only built-in presets for the network, read at start from `api-templates/unifi-network.json` and `opnsense.json` with the same checks as an upload (**Update preset operations** brings an entry up to date after those files change). Each entry talks to **one** console or firewall: for another, add the preset again under a new name and address. Both carry a `.example` address, so set the real one. Each template's description has the full setup.
+
+- **UniFi Network** (the console's own Integration API; *UniFi Site Manager* is the cloud one): Application info, Sites, Devices, Device, Device statistics (CPU, memory, uplink, TX retries), Clients. Address `https://<console IP>/proxy/network/integration`, credential an API key from *UniFi Network → Settings → Control Plane → Integrations* (sent as `X-API-KEY`). **Clients leaves out names**, since on a hotel network they're often guests' own devices. Hotspot vouchers aren't included (guest access codes).
+- **OPNsense**: System information, Uptime and load, Memory, Firmware status, Gateways, Interfaces, Interface traffic, Firewall rules, Port forwards, Aliases (credentials of URL aliases left out), Services, IDS status, ARP table, Firewall log. Address `https://<firewall IP>/api`, credential **basic** with the API key as the user name and the secret as the password, from a user made just for this (System → Access → Users → + API key). OPNsense privileges mostly allow changes too, so the read-only part is Mnemerynne's fixed GETs.
+- **Certificates**: both have self-signed certificates whose name isn't the IP, so the templates turn the host name check off. **Trust (pin) the certificate** on the API: it's still checked on every call.
+- **Group** IT. **Claude**: the answers hold internal addresses, MAC addresses and rule text (no guest data); turn *Claude can query this* on only if that may go to Anthropic.
 
 **Batches.** Claude can propose several actions as one proposal (`propose_batch`, at most `MNEMERYNNE_PROPOSAL_BATCH_MAX` = 25): one card, one link, a tick box per change. If any item needs an admin's approval the whole batch goes to Approvals.
 

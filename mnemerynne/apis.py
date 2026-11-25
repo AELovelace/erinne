@@ -38,7 +38,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 import numpy as np
 
-from mnemerynne import fleetboard_presets, wazuh_presets
+from mnemerynne import fleetboard_presets, network_presets, wazuh_presets
 from mnemerynne.config import Settings
 
 TIMEOUT = 20.0
@@ -1356,6 +1356,8 @@ def parse_template(text: str) -> dict:
 
 # Fleetboard and Fleetboard (changes): built in, read from api-templates/ through the same checks as an upload.
 PRESETS.extend(fleetboard_presets.load(parse_template))
+# UniFi Network and OPNsense: the same, from api-templates/unifi-network.json and opnsense.json (network_presets.py).
+PRESETS.extend(network_presets.load(parse_template))
 
 
 def uploaded_templates(conn: sqlite3.Connection) -> list[dict]:
