@@ -65,7 +65,7 @@ The app can open several servers, for example work and home. Use **⚙ → Add a
 
 ## Updates
 
-When a newer version is ready, a bar at the top of the window says so. **Update now** downloads it, checks it, installs it and opens the app again. **Later** skips that version. You can also check from **⚙ → Check for updates**.
+When a newer version is published, a bar at the top of the window says so (the app checks when it starts and once a day). **Update now** downloads it, checks it, installs it and opens the app again. **Later** skips that version. You can also check from **⚙ → Check for updates**.
 
 ## Signing out
 

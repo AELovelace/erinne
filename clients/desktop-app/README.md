@@ -18,7 +18,8 @@ A native Windows app for Mnemerynne (Erynne):
 - **Several servers** (work and home). Each one is a profile with its own window, cookies, sign-in, drive, name and icon.
 - **Sign-in** with the site's normal login (OAuth + PKCE, scope `desktop`), kept with DPAPI. Tabs are signed in
   again silently when the site's day-long session runs out.
-- **Updates ask first.** A banner offers a newer build. The app downloads it, checks its SHA-256 and installs it.
+- **Updates ask first, from GitHub releases.** A banner offers a newer release; the app downloads it, checks its
+  SHA-256 and installs it.
 - **Tray icon**, and it starts with Windows (the drive needs the app running).
 
 People's help page: `mnemerynne/help/user/225-desktop-app.md`. Admins: `mnemerynne/help/admin/285-desktop-app.md`.
@@ -47,6 +48,7 @@ src/Mnemerynne.Core/             no Windows dependencies, unit tested
   OAuthPkce.cs                   the sign-in's PKCE and the loopback redirect it catches
   ServerApi.cs                   every call to the server (tokens, refresh rotation, tickets, drive API)
   Updates.cs                     version compare, download hash check
+  GitHubReleases.cs              the update feed: the newest checkable desktop-v* release on GitHub
   Drive/DriveNames.cs            identities ("f:123"), Windows-safe names, conflict names, junk files
   Drive/DriveState.cs            drive.db: server id <-> path, versions, listed folders, feed cursors
   Drive/ChangeApplier.cs         applies the server's change feed to the placeholders (never loses local work)
@@ -68,6 +70,7 @@ src/Mnemerynne.Desktop/          the WPF app
 tests/Mnemerynne.Core.Tests/     xUnit
 packaging/installer.iss          Inno Setup, per user
 ps/build-windows.ps1             tests, publish, installer, SHA-256
+ps/publish-release.ps1           GitHub release desktop-v<version> with the installer and SHA256SUMS
 python/make_icon.py              the app icon from the site's own icon
 ```
 
@@ -145,11 +148,25 @@ Where things live, per Windows user:
 | The drive | `%USERPROFILE%\<server's name>` (e.g. `C:\Users\Edith\Mnemerynne`) |
 | Log (no tokens, no file contents) | `%LOCALAPPDATA%\Mnemerynne\desktop.log` (about 1 MB, one old copy) |
 
-## Publishing a build
+## Publishing a release (updates come from GitHub)
 
-Copy the installer into `<MNEMERYNNE_DATA_DIR>/desktop-app/` on the server. `GET /api/desktop/info` then announces
-the newest one (by the version in its name) with its SHA-256. Preferences → Desktop app offers it, and running apps
-offer it as an update within a day.
+Installed apps update from this repo's **GitHub releases** (`GitHubReleases.cs`). At start, once a day and from
+⚙ → Check for updates, they read `api.github.com/repos/AELovelace/erinne/releases` (public, no token). They offer the
+newest published release tagged `desktop-v<version>` whose installer `Mnemerynne-Desktop-Setup-<version>.exe` has a
+known SHA-256 (GitHub's own record of the upload, or a `SHA256SUMS` file in the release). Drafts and pre-releases are
+ignored, and a release that can't be checked is never offered. A fork can point `"UpdateRepo"` in profiles.json
+elsewhere.
+
+To release:
+
+1. Raise `<Version>` in `Directory.Build.props` (a version is released once).
+2. Build: `powershell -ExecutionPolicy Bypass -File ps\build-windows.ps1`
+3. Publish: `powershell -ExecutionPolicy Bypass -File ps\publish-release.ps1 -Notes "What changed"` (needs `gh`,
+   signed in). It writes `dist\SHA256SUMS` and creates the release `desktop-v<version>` on `main` with both files.
+   `-Draft` makes a draft to look over first: apps don't see drafts until it's published on GitHub.
+
+Optional: copy the installer into `<MNEMERYNNE_DATA_DIR>/desktop-app/` on the server too, so Preferences → Desktop
+app offers it for download to people who haven't installed the app yet.
 
 ## Uninstalling
 

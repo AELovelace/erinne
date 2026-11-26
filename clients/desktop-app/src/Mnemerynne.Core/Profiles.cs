@@ -28,6 +28,7 @@ public sealed class ProfileStore
     public string? Default { get; set; }               // Id of the profile the app opens with
     public bool StartWithWindows { get; set; } = true;  // HKCU Run (Settings); on, since the drive needs the app running
     public string? SkippedVersion { get; set; }         // "Later" on an update: don't ask again for this version
+    public string? UpdateRepo { get; set; }             // GitHub "owner/name" to update from (empty: GitHubReleases.DefaultRepo)
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 

@@ -25,7 +25,7 @@ public partial class MainWindow : Window
 
     private enum BannerKind { None, SignIn, Update }
     private BannerKind _banner;
-    private ServerInfo? _update;                          // the newer build the banner offers
+    private AppRelease? _update;                          // the newer GitHub release the banner offers
     private readonly ResourceDictionary _theme = ThemeColors.Defaults();   // the app's colours, from the site's theme
 
     public MainWindow(ProfileSession session)
@@ -514,12 +514,12 @@ public partial class MainWindow : Window
         if (kind == BannerKind.SignIn)
             await App.SignInAsync(Session, this);
         else if (kind == BannerKind.Update && _update is not null)
-            await Updater.InstallAsync(Session, _update, this);
+            await Updater.InstallAsync(_update, this);
     }
 
     private void OnBannerLater(object sender, RoutedEventArgs e)
     {
-        if (_banner == BannerKind.Update && _update?.Latest is { } v)
+        if (_banner == BannerKind.Update && _update?.Version is { } v)
         {
             App.Store.SkippedVersion = v;                  // "Later": not asked again for this version
             App.Store.Save();
@@ -527,14 +527,14 @@ public partial class MainWindow : Window
         HideBanner();
     }
 
-    /// <summary>Ask the server for a newer build (ask first: Doll's choice). Daily on its own, or from the menu.</summary>
+    /// <summary>Look for a newer release on GitHub (ask first: Doll's choice). At start, daily, or from ⚙ → Check for updates.</summary>
     public async Task CheckForUpdateAsync(bool manual)
     {
-        var info = await Updater.CheckAsync(Session, manual ? null : App.Store.SkippedVersion);
+        var info = await Updater.CheckAsync(manual ? null : App.Store.SkippedVersion);
         if (info is not null)
         {
             _update = info;
-            ShowBanner(BannerKind.Update, $"Version {info.Latest} of the app is ready (you have {AppVersion.Current}).", "Update now");
+            ShowBanner(BannerKind.Update, $"Version {info.Version} of the app is ready (you have {AppVersion.Current}).", "Update now");
         }
         else if (manual)
         {
