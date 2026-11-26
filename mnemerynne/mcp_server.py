@@ -1954,15 +1954,11 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
     @server.tool(annotations=_READ_ONLY)
     async def open_file(ctx: Context, file_id: int, start: int = 1, limit: int | None = None,
                         sheet: str | None = None, cells: str | None = None,
-                        find: str | int | float | None = None) -> dict:
+                        find: str | int | None = None) -> dict:
         """Open a .txt, .md, .docx or .xlsx file to read it whole or edit it. Returns its `version`
         (pass it to the edit tool) and whether you may edit it here. Text: numbered lines from `start`
         (`limit` lines). Word: paragraphs (p1, p2, …) and tables (t1, cells t1.r2.c3) from block `start`.
-        Excel: the sheets, and the cells of `sheet` (default the first) in `cells` (e.g. "A1:H50"), at
-        most 2000 at a time; formulas come as {"formula", "value"}, dates as {"date"}, plus `merged`
-        ranges. `find` (Excel): instead of a window, every cell matching it (numbers exactly, text by
-        "contains", any case) on `sheet` or all sheets, each with the rest of its row: use it to locate
-        a row (an extension, a name) before editing."""
+        Excel: cells of `sheet` in `cells` ("A1:H50"), or `find` (4916): matching cells with their rows."""
         return await call(ctx, "open_file", {"file_id": file_id, "start": start, "limit": limit, "sheet": sheet,
                                              "cells": cells, "find": find}, tools.open_file)
 
@@ -1988,29 +1984,11 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
 
     @server.tool(annotations=_EDITS)
     async def edit_spreadsheet(ctx: Context, file_id: int, version: str, operations: list[dict]) -> dict:
-        """Change an Excel (.xlsx) file opened with open_file, cell by cell. Only the cells you name
-        change: formatting, widths, pictures, charts, validation and other sheets stay as they are, and a
-        cell keeps its style when its value changes. All operations run in order on the opened version
-        (all or nothing); the result lists every changed cell (`diff`: old → new). Ops ("sheet" defaults
-        to the first sheet):
-        {"op": "set_cells", "sheet"?, "cells": {"B4": 129.5, "C4": "=B4*1.1", "D4": "text", "E4": null},
-          "like"?: "B3"}  (null empties a cell; `like` copies another cell's look onto new cells)
-        {"op": "set_range", "sheet"?, "start": "J30", "values": [["Gold", 4615], ["Silver", 4613]]}
-        {"op": "clear_cells", "sheet"?, "range": "E17:G17"}  (values go, formatting stays)
-        {"op": "set_by_key", "sheet"?, "key_column": "C", "key": 4916, "set": {"B": "Jane Doe"},
-          "within"?: "A1:C43"}  (updates the one row whose column C is 4916; refused if 0 or 2+ rows
-          match, so add `within` for side-by-side blocks)
-        {"op": "append_rows", "sheet"?, "rows": [["a", 1]], "columns"?: "J:K"}  (under the last used
-          row, of those columns if given, styled like it)
-        {"op": "insert_rows" | "delete_rows", "sheet"?, "row": 5, "count"?: 2}  (inserted rows copy the
-          row above's look; formulas, merges, names and pictures move with them)
-        {"op": "insert_columns" | "delete_columns", "sheet"?, "column": "D", "count"?: 1}
-        {"op": "add_sheet", "name": "..."}, {"op": "rename_sheet", "sheet": "...", "name": "..."}
-          (formulas that name the sheet are updated)
-        Values: numbers as numbers (4916, not "4916"), true/false, text, "=formula", null; or
-        {"text": "0123"} to keep digits as text, {"date": "2026-11-26"}. Merged cells take their value
-        in the top-left cell. Protected sheets and password-protected files are refused. Workflow:
-        open_file (with `find` to locate the row) → edit_spreadsheet with its version → check `diff`."""
+        """Change an .xlsx opened with open_file; only named cells change. Ops ("sheet"?: first):
+        set_cells {"cells": {"B4": 12.5, "C4": "=B4*2", "E4": null}}, set_range {"start": "J30",
+        "values": [[…]]}, clear_cells {"range"}, set_by_key {"key_column": "C", "key": 4916, "set": {"B": "Jo"},
+        "within"?}, append_rows {"rows", "columns"?: "J:K"}, insert_rows/delete_rows {"row", "count"?},
+        insert_columns/delete_columns {"column"}, add_sheet/rename_sheet {"sheet"?, "name"}. Returns `diff`."""
         return await call(ctx, "edit_spreadsheet", {"file_id": file_id, "version": version,
                                                     "operations": operations}, tools.edit_spreadsheet)
 
