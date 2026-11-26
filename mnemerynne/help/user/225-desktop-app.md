@@ -1,0 +1,73 @@
+# Desktop app
+
+The **desktop app** is a Windows program that shows this site in its own window with **tabs**, the way a browser does, so you can keep Ask, Files, a wiki page, Rooms and Media open side by side and switch between them. It also puts the libraries you pick into **File Explorer** as a drive, like OneDrive or Box: files download when you open them, and what you save goes back to the site.
+
+It's for people in the group an admin picked. If you're in it, **Preferences → Desktop app** shows the download.
+
+## Setting it up
+
+1. On **Preferences → Desktop app**, download the Windows installer and run it. It doesn't need admin rights.
+2. The first time it opens, it asks which server to use. The work one is filled in; press **Add**.
+3. A sign-in window opens. Sign in as usual and choose **Allow**. The page says what the app may do.
+4. **Settings** opens: tick the libraries to show in File Explorer, then **Save**.
+
+The app starts when you sign in to Windows, and keeps running from the icon next to the clock. Closing the window keeps it running there; right-click the icon and choose **Quit** to stop it.
+
+## Tabs
+
+Like Edge, the tabs sit in the window's top bar, with the server menu, back / forward / reload, the drive's status and the window's own buttons on the same row. There's no address bar: get around with the site's 🌸 menu, as in a browser.
+
+- **New tab**: **＋** or **Ctrl+T**. **Close**: **✕**, a middle-click on the tab, or **Ctrl+W**. **Reopen the last closed tab**: **Ctrl+Shift+T**.
+- **Switch**: click a tab, **Ctrl+Tab** / **Ctrl+Shift+Tab**, or **Ctrl+1** … **Ctrl+8** (**Ctrl+9** is the last tab).
+- **Back / forward / reload**: the arrows, **Alt+←** / **Alt+→**, **F5**.
+- **Reorder**: drag a tab along the strip.
+- Links to this site that would open a new browser tab (Help, **Open** in Files, a wiki page's **Edit**, links in chat) open as a new app tab. **Ctrl+click** or middle-click a link to open it in a new tab yourself.
+- Links to **other sites** open in your normal browser.
+- Your tabs come back when you start the app again.
+
+The app keeps you signed in: when the site's own sign-in runs out (after a day), the app signs the tab in again by itself.
+
+Downloads go to your Downloads folder, with the usual download list. Uploading works as in a browser, by dragging in or with the buttons. Notifications from Rooms show as Windows notifications while the app runs.
+
+## The drive in File Explorer
+
+The libraries you ticked show under the site's name in File Explorer's left-hand list, in a folder such as `C:\Users\<you>\Mnemerynne`, one folder per library.
+
+- **Files download when you open them.** Until then they take almost no space and show a cloud icon. Once opened they show a green tick.
+- **Keep a copy on this computer**: right-click → **Always keep on this device**. **Free up space** goes back to cloud-only.
+- **Saving** a file (in Word, Excel, Notepad…) sends it back. The old content is kept as an earlier [version](versions.md).
+- **New files and folders** you make or copy in are added to the site. If the name is taken, the site adds a number, like `plan (1).txt`.
+- **Renaming and moving** inside the drive does the same on the site, including moving between two of your libraries.
+- **Deleting** sends it to the site's [recycle bin](recycle-bin.md), so a mistake can be undone there.
+- **Changes made on the site** (by you in a browser, by colleagues, or by Claude) reach your computer within about a minute.
+- You can only do what you could do in [Files](files.md). A read-only library stays read-only, and the drive never shows you more than Files does.
+
+**If a file changes in both places**, nothing is lost. Your copy is kept beside it as `Name (YOUR-PC conflict 2026-11-25).docx` and added to the site as a separate file. Compare the two and keep what you want.
+
+Some things the drive doesn't do:
+
+- Moving a file **out** of the drive (to your Desktop, say) is refused. Copy it out instead.
+- A library's own top folder can't be renamed or deleted from Explorer. Untick the library in **Settings** to take it off this computer; that doesn't touch the site.
+- SharePoint libraries aren't on the drive. They open in SharePoint, as in Files.
+- Lock and temporary files (`~$Budget.xlsx`, `.tmp`, `desktop.ini`) are never sent.
+
+**Pause sync** (tray icon or Settings) stops everything going up or coming down until you resume. While it's paused, deleting and renaming on the drive is refused, so nothing gets out of step.
+
+## More than one server
+
+The app can open several servers, for example work and home. Use the server menu at the top left (the name with ▾) → **Add a server…**. Each one gets its own window, tabs, sign-in and drive, with its own name and icon.
+
+## Updates
+
+When a newer version is ready, a bar at the top of the window says so. **Update now** downloads it, checks it, installs it and opens the app again. **Later** skips that version. You can also check from the server menu → **Check for updates**.
+
+## Signing out
+
+Server menu → **Sign out**. The drive leaves File Explorer; files you already downloaded stay in the folder as ordinary files. To sign a computer out from somewhere else (a lost laptop, say), use **Preferences → Desktop app**, which lists every computer signed in, with **Sign out**.
+
+## Troubleshooting
+
+- **A page won't open** ("WebView2 Runtime"): install the Microsoft Edge WebView2 Runtime from Microsoft's site. Windows 11 already has it.
+- **The drive says "Signed out"**: server menu → **Sign in…**.
+- **The drive says "Offline: retrying"**: the site can't be reached. It catches up by itself when it's back.
+- **Something else**: server menu → **About** shows where the app's log is. Send that file to an admin; it holds no passwords and no file contents.

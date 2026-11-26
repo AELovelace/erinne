@@ -10,6 +10,7 @@
   const inApp = window.matchMedia("(display-mode: standalone)").matches   // running as an installed app
     || window.matchMedia("(display-mode: fullscreen)").matches            // the same, with no status bar
     || window.navigator.standalone === true;                              // how iPhones say it
+  const inDesktop = navigator.userAgent.indexOf("MnemerynneDesktop/") !== -1;   // the Windows desktop app (clients/desktop-app)
   const iPhone = /iPad|iPhone|iPod/.test(navigator.userAgent)
     || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);   // iPads call themselves Macs
   const REMOTE_PAGE = "/media/panel#install";              // the Remote's page, showing its install button
@@ -69,6 +70,7 @@
   function start() {   // puts the right buttons on show for this page and mode
     const b = box();
     if (!showsHere(b)) return;                             // nothing to offer on this page
+    if (inDesktop) return;                                 // the desktop app is installed already: no buttons
     const here = b.querySelector('[data-install="this"]');
     const remote = b.querySelector('[data-install="remote"]');
     if (inApp && !remote) return;                          // the installed Remote: nothing else to offer

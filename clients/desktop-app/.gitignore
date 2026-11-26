@@ -1,0 +1,8 @@
+# Build output (ps\build-windows.ps1): never committed
+bin/
+obj/
+publish/
+dist/
+*.user
+.vs/
+TestResults/

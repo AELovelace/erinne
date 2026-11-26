@@ -34,6 +34,7 @@ _HERE = Path(__file__).parent
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 # Called by Claude's servers with OAuth credentials, never with the session cookie.
 _OAUTH_API = {"/oauth/token", "/oauth/register", "/oauth/revoke"}
+DESKTOP_UA = "MnemerynneDesktop/"   # what the desktop app adds to its user agent (web/desktop.py)
 
 
 def _safe_return(after: str) -> bool:
@@ -166,7 +167,10 @@ def make_templates(app: FastAPI) -> Jinja2Templates:
         looks = theme_pages.looks_for(app)
         cookie = request.cookies.get(theme_mod.THEME_COOKIE)
         out = {"look": looks.resolve(None, cookie), "brand": looks.brand,
-               "product_name": looks.brand.get("name") or ASSISTANT_NAME}
+               "product_name": looks.brand.get("name") or ASSISTANT_NAME,
+               # Inside the desktop app (clients/desktop-app adds "MnemerynneDesktop/<version>" to its user agent):
+               # no "Install this" button, it's installed already.
+               "in_desktop_app": DESKTOP_UA in request.headers.get("user-agent", "")}
         if not user_id and not request.cookies.get(media_screens.COOKIE):
             return out
         conn = app.state.db_pool.get()

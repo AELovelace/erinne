@@ -61,6 +61,7 @@ WEB_ROUTERS = (
     "mnemerynne.web.admin_notices:router", "mnemerynne.web.remote:router", "mnemerynne.web.admin_remote:router",
     "mnemerynne.web.sync:router", "mnemerynne.web.sync:admin_router",   # the desktop backup app (sync.py)
     "mnemerynne.web.games:router",                # Media → Games: the built-in games (games.py)
+    "mnemerynne.web.desktop:router",              # the desktop app: tabs, sign-in tickets, Explorer drive
 )
 
 

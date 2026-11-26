@@ -976,6 +976,45 @@
     catch (e) { $("dev-settings").replaceChildren(el("p", "error", e.message)); }
   }
 
+  // ------------------------------------------------------------ desktop app
+  // The Windows desktop app (web/desktop.py): tabs plus the File Explorer drive. Hand-installed and privileged,
+  // so only one group's members may download it and sign it in; no group = off for everyone.
+  function renderDesktop(data) {
+    const box = $("desktop-settings");
+    box.replaceChildren();
+    fillDatalist("domain-groups", data.groups);
+    box.appendChild(el("p", "muted", "Members of this " + (data.domain || "domain") + " group may download the desktop " +
+      "app (Preferences → Desktop app) and sign it in: the site in tabs, plus a File Explorer drive that opens, adds, " +
+      "changes, renames, moves and bins files in the libraries they pick, with exactly the rights they have in Files. " +
+      "Leave it empty to switch the app off; signed-in apps stop working at once."));
+    if (!data.directory) box.appendChild(el("p", "error", "No AD domain is configured on the server (MNEMERYNNE_AD_DOMAIN), so nobody can be in the group."));
+    const form = el("form", "ax-new");
+    const input = el("input");
+    input.type = "text";
+    input.value = data.group || "";
+    input.placeholder = "No group: the desktop app is off";
+    input.setAttribute("list", "domain-groups");
+    input.setAttribute("aria-label", "Desktop app group");
+    const save = el("button", "small", "Save");
+    save.type = "submit";
+    form.append(input, save);
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      try { renderDesktop(await api("PUT", "/api/admin/settings/desktop-app", { group: input.value.trim() })); }  // saves, then redraws
+      catch (err) { showError(err.message); }
+    });
+    box.appendChild(form);
+    box.appendChild(el("p", "muted small", data.enabled
+      ? "On for: " + (data.members.length ? data.members.join(", ") : "nobody yet (no linked account in that group).")
+      : "Off."));
+  }
+
+  async function loadDesktop() {                       // fills the Desktop app section when the page opens
+    try { renderDesktop(await api("GET", "/api/admin/settings/desktop-app")); }
+    catch (e) { $("desktop-settings").replaceChildren(el("p", "error", e.message)); }
+  }
+
   // --------------------------------------------- mail and calendar for Claude
   function renderClaudeMail(data) {
     const box = $("claude-mail-settings");
@@ -2280,7 +2319,7 @@
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
     if (tab === "settings" && !updatesLoaded) {
-      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeMail(); loadClaudeLinks(); loadChatGPT(); loadExperimental(); loadRooms(); loadAutomations(); loadMedia(); loadBackups(); loadDev();
+      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeMail(); loadClaudeLinks(); loadChatGPT(); loadExperimental(); loadRooms(); loadAutomations(); loadMedia(); loadBackups(); loadDesktop(); loadDev();
       if (window.ErynneM365) window.ErynneM365.load();   // admin_m365.js
       if (window.ErynneTheme) window.ErynneTheme.load();   // admin_theme.js
     }

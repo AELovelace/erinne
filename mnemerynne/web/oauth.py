@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
-from mnemerynne import oauth, permissions, sync
+from mnemerynne import desktop, oauth, permissions, sync
 from mnemerynne.db import transaction
 from mnemerynne.web.admin import _log
 from mnemerynne.web.deps import _session_user, admin_user, api_user, get_db
@@ -89,10 +89,22 @@ def authorize(request: Request, conn: sqlite3.Connection = Depends(get_db)):
         request.session["after_login"] = str(request.url.path) + "?" + str(request.url.query)
         return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
     nonce = secrets.token_urlsafe(24)
-    scope = "sync" if params.get("scope") == "sync" else "mcp"
+    scope = params.get("scope") if params.get("scope") in ("sync", "desktop") else "mcp"
     request.session["oauth_consent"] = {"nonce": nonce, "user_id": user["id"], "client_id": row["client_id"],
                                         "redirect_uri": redirect_uri, "challenge": params["code_challenge"],
                                         "state": params.get("state"), "scope": scope}
+    if scope == "desktop":
+        # The desktop app (desktop.py): only an app on the person's own computer, only for the Desktop app group.
+        if oauth.kind(json.loads(row["redirect_uris"])) != "local":
+            request.session.pop("oauth_consent", None)
+            return _page(request, "oauth_consent.html", 400, user=None,
+                         error="Only the desktop app on your own computer can ask for that.")
+        if not desktop.allowed(conn, user, request.app.state.directory):
+            request.session.pop("oauth_consent", None)
+            return _page(request, "oauth_consent.html", 403, user=None,
+                         error="The desktop app isn't open for you; ask an admin.")
+        return _page(request, "oauth_consent.html", user=user, nonce=nonce, scope=scope, name=row["name"],
+                     host=urlsplit(redirect_uri).hostname, error=None)
     if scope == "sync":
         # The desktop backup app (sync.py): only an app on the person's own computer, and only for people who may.
         if oauth.kind(json.loads(row["redirect_uris"])) != "local":

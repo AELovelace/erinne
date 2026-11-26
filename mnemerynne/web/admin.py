@@ -15,8 +15,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import (accounts, api_tokens, db, diagnostics, fs, group_refs, m365_mail, messages, permissions, share,
-                        updates, users)
+from mnemerynne import (accounts, api_tokens, db, desktop, diagnostics, fs, group_refs, m365_mail, messages,
+                        permissions, share, updates, users)
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
 from mnemerynne.ingest import store
@@ -541,6 +541,23 @@ async def set_diagnostics(body: OptionalGroupBody, request: Request, user=Depend
         diagnostics.set_group(conn, value)
         _log(conn, user, "settings.diagnostics", group_refs.label(conn, value) or "(off)", f"was {old or '(off)'}")
     return await _group_status(request, conn, diagnostics.group(conn))
+
+
+@router.get("/api/admin/settings/desktop-app")
+async def get_desktop_app(request: Request, user=Depends(admin_api_user), conn: sqlite3.Connection = Depends(get_db)):
+    """The desktop app (desktop.py): the group whose members may download it and sign it in."""
+    return await _group_status(request, conn, desktop.group(conn))
+
+
+@router.put("/api/admin/settings/desktop-app")
+async def set_desktop_app(body: OptionalGroupBody, request: Request, user=Depends(admin_api_user),
+                          conn: sqlite3.Connection = Depends(get_db)):
+    value = await _resolve_group(request, conn, body.group)
+    with transaction(conn):
+        old = group_refs.label(conn, desktop.group(conn))
+        desktop.set_group(conn, value)
+        _log(conn, user, "settings.desktop_app", group_refs.label(conn, value) or "(off)", f"was {old or '(off)'}")
+    return await _group_status(request, conn, desktop.group(conn))
 
 
 @router.get("/api/admin/settings/claude-mail")

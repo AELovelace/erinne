@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The File Explorer drive: Windows' Cloud Files API (cldapi.dll), the same one OneDrive uses.
+       The Windows 10 2004 (19041) target brings the WinRT sync-root registration (Windows.Storage.Provider). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Mnemerynne.Core\Mnemerynne.Core.csproj" />
+  </ItemGroup>
+</Project>

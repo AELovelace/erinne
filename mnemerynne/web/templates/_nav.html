@@ -67,7 +67,8 @@
     <a class="help-link" href="/help" target="_blank" rel="noopener">Help</a>
     <form method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
     {#- Phones only (erynne.css): each app installs separately. install.js shows what suits a browser tab or an installed app. -#}
-    {% if not (tv is defined and tv) %}
+    {#- Not on a TV, and not inside the desktop app (front.py in_desktop_app): both are installed already. -#}
+    {% if not (tv is defined and tv) and not in_desktop_app %}
     <div class="nav-install" id="install-box" hidden>
       <button type="button" data-install="this">Install {{ product_name }}</button>
       {% if has_screens %}<button type="button" data-install="remote">Install TV Remote</button>{% endif %}

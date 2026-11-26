@@ -452,6 +452,77 @@ def replace_content(conn: sqlite3.Connection, settings: Settings, file_id: int, 
     return new_sha
 
 
+def _hash_file(path: Path) -> str:
+    """A file's SHA-256, read in 1 MB blocks (never whole: drive saves can be gigabytes)."""
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def replace_from_path(conn: sqlite3.Connection, settings: Settings, file_id: int, src: Path, new_sha: str, *,
+                      expected: str | None, actor_id: int, via: str, summary: str,
+                      token_id: int | None = None, edited_via: str | None = None) -> str:
+    """replace_content for content already on disk (`src`, hashed by the caller as `new_sha`), for big files from
+    the desktop drive: nothing is read whole, and there's no edit_max_bytes cap (the upload limits applied when it
+    came in). The old content is kept as a version. `src` is consumed either way. Callers check permission first.
+    Returns the new version (its SHA-256)."""
+    row = conn.execute("SELECT * FROM files WHERE id = ?", (file_id,)).fetchone()
+    on_share = share.is_share(conn, row["collection_id"])
+    staged: Path | None = None
+    kept: str | None = None
+    try:
+        try:
+            path = store.content_path(conn, settings, file_id)
+            current_sha = _hash_file(path)            # what's really there now (the share can change under us)
+        except share.ShareUnavailable as exc:
+            raise EditConflict(str(exc)) from None
+        if expected is not None and current_sha != expected:
+            raise EditConflict(f"“{row['display_name']}” changed since it was opened (someone else saved it).")
+        if on_share and any(lock.exists() for lock in _lock_files(path)):
+            raise EditConflict(f"“{row['display_name']}” is open in Word or Excel by someone right now. "
+                               f"Try again once they've closed it.")
+        if new_sha == current_sha:
+            return current_sha                         # nothing changed: no version, no new blob
+        ext = PurePosixPath(row["display_name"]).suffix.lower()
+        kept = keep_version_file(settings, file_id, path, ext)      # the old content, copied in blocks
+        if on_share:
+            staged = share.stage(src, path.parent)    # a hidden file beside it, so the final rename is one filesystem
+        kind, mime, size, note = store.inspect(staged or src, row["display_name"], settings)
+        with transaction(conn):
+            conn.execute("INSERT INTO file_versions(file_id, sha256, size, rel_path, created_by, via, token_id, summary) "
+                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                         (file_id, current_sha, path.stat().st_size, kept, actor_id, via, token_id, summary[:2000]))
+            if on_share:
+                conn.execute("INSERT OR IGNORE INTO blobs(sha256, kind, mime, size, rel_path) VALUES (?, ?, ?, ?, ?)",
+                             (new_sha, kind, mime, size, store.blob_rel_path(new_sha, kind)))
+            else:
+                store.store(conn, settings, store.Received(new_sha, kind, size, src, row["display_name"], mime, note))
+            kind = conn.execute("SELECT kind FROM blobs WHERE sha256 = ?", (new_sha,)).fetchone()["kind"]
+            status = "stored" if kind == "other" else "queued"
+            conn.execute("UPDATE files SET blob_sha256 = ?, status = ?, error = NULL, progress = NULL, notes = ?, "
+                         "updated_at = datetime('now'), edited_via = ? WHERE id = ?",
+                         (new_sha, status, note, edited_via, file_id))
+            if status == "queued":
+                jobs.enqueue(conn, "ingest", file_id)
+            share._drop_unused_blob(conn, settings, row["blob_sha256"])
+            if on_share:
+                try:                                   # last: if it fails, the transaction rolls back
+                    os.replace(staged, path)
+                except OSError as exc:
+                    raise EditError(str(share._fail("save the file", exc))) from exc
+                share.record_stat(conn, file_id, path)
+        kept = None                                    # it's recorded now: keep it
+        return new_sha
+    finally:
+        src.unlink(missing_ok=True)                    # consumed (store() moved it, or it's no longer needed)
+        if staged is not None:
+            staged.unlink(missing_ok=True)             # gone already if the rename worked
+        if kept is not None:
+            version_path(settings, kept).unlink(missing_ok=True)   # refused or failed: no stray version file
+
+
 def save(conn: sqlite3.Connection, settings: Settings, caller, file_id: int, data: bytes, *,
          expected: str, summary: str, via: str = "claude") -> str:
     """The assistant's change to a file, after the permission check."""

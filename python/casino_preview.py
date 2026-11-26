@@ -66,6 +66,20 @@ def _sample_runs(conn, settings, alice_id):
     conn.execute("UPDATE automations SET last_run_id = ? WHERE id = ?", (going, made["Security digest"]))   # as start_run does
 
 
+def _desktop(conn, settings, alice_id):
+    """The desktop app (clients/desktop-app) against this preview: everyone may sign it in, and alice's File box has
+    a folder and a file for the Explorer drive to show. `casino_preview.py PORT desktop`."""
+    import io
+    from mnemerynne import desktop, fs, permissions
+    from mnemerynne.ingest import store
+
+    desktop.set_group(conn, "Domain Users")                              # the Desktop app group (off on a new box)
+    box = permissions.private_collection_id(conn, alice_id)
+    folder = fs.create_folder(conn, fs.Access.of(conn, alice_id), box, None, "Reports")
+    got = store.receive(io.BytesIO(b"Hello from the drive!" + bytes([10])), "hello.txt", settings)
+    store.add_file(conn, settings, got, box, alice_id, folder_id=folder)
+
+
 def main():
     """Seed disposable users and Media access, then serve only on the loopback interface."""
     with TemporaryDirectory(prefix="casino-preview-") as directory:
@@ -83,6 +97,8 @@ def main():
         media.save_settings(conn, settings, {"media_group": "Domain Users", "screens_group": "Domain Users", "radio_directory_url": ""})
         if "automator" in sys.argv[2:]:                                   # `casino_preview.py PORT automator`: Automator on
             _automator(conn, settings, uids[0])                           # for everyone, with a prompt file in alice's box
+        if "desktop" in sys.argv[2:]:                                     # `casino_preview.py PORT desktop`: the desktop app
+            _desktop(conn, settings, uids[0])
         conn.close()
         app = create_app(settings, Services(llm=None, embedder=FakeEmbedder(), directory=people))
         if os.environ.get("PREVIEW_COINS"):                               # Lumi City's check (LUMI_CITY_ONLY): plots cost more than a new purse holds,

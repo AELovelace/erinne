@@ -83,6 +83,16 @@
   <p id="backups-note" aria-live="polite" hidden></p>
   {%- endif %}
 
+  {%- if desktop_app %}
+  {#- The desktop app (desktop.js, web/desktop.py): only for people in the Desktop app group. -#}
+  <h2 class="admin-section" id="desktop-app">Desktop app</h2>
+  <p class="muted small">{{ product_name }} for Windows: this site in tabs, side by side like a browser, and a drive in
+    File Explorer for the libraries you pick (files download when you open them; saving keeps the old one as a version).
+    See Help → Desktop app.</p>
+  <div id="desktop-box" aria-live="polite"><p class="muted small">Loading…</p></div>
+  <p id="desktop-note" aria-live="polite" hidden></p>
+  {%- endif %}
+
   <h2 class="admin-section" id="memories">What {{ assistant_name }} remembers about you</h2>
   {% if memory_mode == 'off' %}
   <p class="muted small">Memory is turned off on this server.</p>
@@ -194,6 +204,7 @@
 <script src="{{ static('settings.js') }}"></script>
 <script src="{{ static('m365.js') }}"></script>
 {% if backups %}<script src="{{ static('backups.js') }}"></script>{% endif %}
+{% if desktop_app %}<script src="{{ static('desktop.js') }}"></script>{% endif %}
 <script src="{{ static('connect.js') }}"></script>
 <script src="{{ static('claude_connect.js') }}"></script>
 {% if claude_chat %}<script src="{{ static('claude_chat.js') }}"></script>{% endif %}
