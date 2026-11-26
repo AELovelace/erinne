@@ -303,8 +303,10 @@ def compact_sheet(out: dict) -> dict:
         number = re.sub(r"^[A-Z]+", "", next(iter(row)))
         parts = []
         for ref, value in row.items():
-            if isinstance(value, dict):   # a formula and its last value
+            if isinstance(value, dict) and "formula" in value:   # a formula and its last value
                 value = f"{value.get('value')} ({value.get('formula')})"
+            elif isinstance(value, dict):                          # {"date": …} or {"error": …}
+                value = value.get("date", value.get("error"))
             parts.append(f"{re.sub(r'[0-9]+$', '', ref)}={value}")
         lines.append(f"row {number}: " + " | ".join(parts))
     return {**{k: v for k, v in out.items() if k != "cells"}, "cells": "\n".join(lines)}

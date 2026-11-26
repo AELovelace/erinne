@@ -2,6 +2,7 @@
 
 import io
 import json
+import zipfile
 from urllib.parse import unquote
 
 import docx
@@ -341,8 +342,8 @@ def test_xlsx_view_and_edits(conn, settings, world, tools):
         (139, "Notes", "=B2*1.1", "Suite", 249)
     assert wb.sheetnames == ["Rates", "Summary"] and wb.calculation.fullCalcOnLoad
 
-    with pytest.raises(editing.EditError, match="has formulas"):
-        editing_formats.xlsx_apply(_xlsx_bytes(), [{"op": "insert_rows", "row": 2}])
+    inserted = editing_formats.xlsx_apply(_xlsx_bytes(), [{"op": "insert_rows", "row": 2}]).data   # formulas move
+    assert openpyxl.load_workbook(io.BytesIO(inserted))["Rates"]["B5"].value == "=SUM(B3:B4)"
     plain = editing_formats.xlsx_apply(_xlsx_bytes(formulas=False), [{"op": "delete_rows", "row": 2}]).data
     assert openpyxl.load_workbook(io.BytesIO(plain))["Rates"]["A2"].value == "Queen"
     renamed = openpyxl.Workbook()
@@ -350,20 +351,21 @@ def test_xlsx_view_and_edits(conn, settings, world, tools):
     renamed.create_sheet("Totals")["A1"] = "=Rates!B2*2"
     out = io.BytesIO()
     renamed.save(out)
-    with pytest.raises(editing.EditError, match="formulas refer to 'Rates'"):
-        editing_formats.xlsx_apply(out.getvalue(), [{"op": "rename_sheet", "sheet": "Rates", "name": "Prices"}])
+    done = editing_formats.xlsx_apply(out.getvalue(), [{"op": "rename_sheet", "sheet": "Rates", "name": "Prices"}])
+    assert openpyxl.load_workbook(io.BytesIO(done.data))["Totals"]["A1"].value == "=Prices!B2*2"
 
 
-def test_workbooks_that_would_be_damaged_are_refused(conn, settings, world, tools):
+def test_workbooks_with_charts_are_edited_without_touching_the_chart(conn, settings, world, tools):
     alice = _caller(conn, world["alice"])
     agents = editing.agents_folder(conn, world["alice"])
-    file_id = _add(conn, settings, world["inbox"], "chart.xlsx", _xlsx_bytes(chart=True), folder=agents)
+    before = _xlsx_bytes(chart=True)
+    file_id = _add(conn, settings, world["inbox"], "chart.xlsx", before, folder=agents)
     view = tools.open_file(conn, alice, file_id)[0]
-    assert not view["editable"] and "charts" in view["note"]
-    before = _bytes(conn, settings, file_id)
-    with pytest.raises(editing.EditError, match="charts"):
-        tools.edit_spreadsheet(conn, alice, file_id, view["version"], [{"op": "set_cells", "cells": {"B2": 1}}])
-    assert _bytes(conn, settings, file_id) == before
+    assert view["editable"]
+    tools.edit_spreadsheet(conn, alice, file_id, view["version"], [{"op": "set_cells", "cells": {"A2": "Twin"}}])
+    after = zipfile.ZipFile(io.BytesIO(_bytes(conn, settings, file_id)))
+    original = zipfile.ZipFile(io.BytesIO(before))
+    assert after.read("xl/charts/chart1.xml") == original.read("xl/charts/chart1.xml")   # same bytes
 
 
 # ------------------------------------------------------------- housekeeping

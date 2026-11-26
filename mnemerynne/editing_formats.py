@@ -8,21 +8,19 @@ docx: body paragraphs (p1, p2, ...) and tables (t1, cells t1.r2.c3) in
   replacing text works on the runs, so bold, italics and links around it
   survive. Ids are those of the version that was opened: within one call every
   operation refers to that numbering, inserts and deletes included.
-xlsx: sheets and cells (Rates!B4) with values and formulas. openpyxl drops
-  charts, pivot tables, pictures and some other parts when it saves, so a
-  workbook containing any of them is refused instead of being damaged.
-  Inserting or deleting rows doesn't update formulas that point past them, so
-  it's refused in workbooks with formulas; renaming a sheet other formulas
-  name is refused too. Excel recalculates every formula when it next opens.
+xlsx: sheets and cells (Rates!B4) with values and formulas, edited by
+  patching the workbook's XML in place (xlsx_patch.py): only the parts a change
+  needs are rewritten, so pictures, charts, styles, widths, validation and
+  other sheets stay exactly as they were. Inserting or deleting rows/columns
+  moves the formulas, names, merges, rules and anchors that point past them.
+  Excel recalculates every formula when it next opens.
 """
 
 from __future__ import annotations
 
 import copy
-import datetime as dt
 import io
 import re
-import zipfile
 from dataclasses import dataclass
 
 from mnemerynne.editing import EditError
@@ -36,6 +34,7 @@ MAX_SHEET_CELLS = 2000
 class Result:
     data: bytes
     changes: list[str]
+    diff: list[dict] | None = None   # spreadsheets: [{"sheet", "cell", "old", "new"}, ...]
 
 
 def _need(op: dict, *keys: str):
@@ -346,162 +345,17 @@ def docx_new(paragraphs: list) -> bytes:
 
 
 # --------------------------------------------------------------------- xlsx
-# Parts openpyxl would lose or damage when it saves.
-_UNSAFE_PARTS = [
-    (re.compile(r"xl/charts/"), "charts"),
-    (re.compile(r"xl/pivot(Tables|Cache)/"), "pivot tables"),
-    (re.compile(r"xl/drawings/drawing\d+\.xml$"), "pictures, shapes or charts"),
-    (re.compile(r"xl/media/"), "pictures"),
-    (re.compile(r"xl/slicers?|xl/slicerCaches/"), "slicers"),
-    (re.compile(r"xl/vbaProject"), "macros"),
-    (re.compile(r"xl/threadedComments/"), "threaded comments"),
-    (re.compile(r"xl/ctrlProps/|xl/activeX/"), "form controls"),
-    (re.compile(r"xl/richData/"), "pictures in cells"),
-]
-
-
-def _unsafe(data: bytes) -> list[str]:
-    try:
-        names = zipfile.ZipFile(io.BytesIO(data)).namelist()
-    except zipfile.BadZipFile:
-        raise EditError("This doesn't look like a valid .xlsx file.") from None
-    return sorted({label for pattern, label in _UNSAFE_PARTS for n in names if pattern.match(n)})
-
-
-def _workbook(data: bytes, values: bool = False):
-    import openpyxl
-    try:
-        return openpyxl.load_workbook(io.BytesIO(data), data_only=values)
-    except Exception as exc:   # openpyxl raises many kinds for broken files
-        raise EditError(f"Couldn't read the workbook: {exc}") from None
-
-
-def _plain(value):
-    if isinstance(value, (dt.datetime, dt.date, dt.time)):
-        return value.isoformat()
-    return value
-
-
-def _sheet(wb, name):
-    if name is None:
-        return wb.worksheets[0]
-    if name not in wb.sheetnames:
-        raise EditError(f"There's no sheet {name!r}; the sheets are {', '.join(wb.sheetnames)}.")
-    return wb[name]
-
-
-def xlsx_view(data: bytes, sheet: str | None = None, cells: str | None = None) -> dict:
-    from openpyxl.utils import get_column_letter, range_boundaries
-
-    wb, cached = _workbook(data), _workbook(data, values=True)
-    ws = _sheet(wb, sheet)
-    if cells:
-        try:
-            min_col, min_row, max_col, max_row = range_boundaries(cells.split("!")[-1])
-        except ValueError:
-            raise EditError(f"Name cells like A1:F40, not {cells!r}.") from None
-    else:
-        min_col, min_row = 1, 1
-        max_col = min(ws.max_column, 26)
-        max_row = min(ws.max_row, max(1, MAX_SHEET_CELLS // max(max_col, 1)))
-    if (max_col - min_col + 1) * (max_row - min_row + 1) > MAX_SHEET_CELLS:
-        raise EditError(f"Ask for at most {MAX_SHEET_CELLS} cells at a time (e.g. A1:J200).")
-    rows = []
-    for r in range(min_row, max_row + 1):
-        row = {}
-        for c in range(min_col, max_col + 1):
-            ref = f"{get_column_letter(c)}{r}"
-            value = ws[ref].value
-            if value is None:
-                continue
-            if isinstance(value, str) and value.startswith("="):
-                row[ref] = {"formula": value, "value": _plain(cached[ws.title][ref].value)}
-            else:
-                row[ref] = _plain(value)
-        if row:
-            rows.append(row)
-    unsafe = _unsafe(data)
-    return {"format": "xlsx", "sheets": [{"name": s.title, "rows": s.max_row, "columns": s.max_column}
-                                         for s in wb.worksheets],
-            "sheet": ws.title, "range": f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row}",
-            "cells": rows,
-            "editable": not unsafe,
-            "note": (f"Can't be edited here: it contains {', '.join(unsafe)}, which saving would damage."
-                     if unsafe else "Formulas show with their last calculated value; Excel recalculates on open.")}
-
-
-def _has_formulas(wb) -> bool:
-    return any(isinstance(c.value, str) and c.value.startswith("=")
-               for ws in wb.worksheets for row in ws.iter_rows() for c in row)
-
-
-def _cell_value(value):
-    if isinstance(value, (int, float, bool)) or value is None:
-        return value
-    return str(value)
+def xlsx_view(data: bytes, sheet: str | None = None, cells: str | None = None, find=None) -> dict:
+    """What open_file shows of a workbook (see xlsx_patch.view)."""
+    from mnemerynne import xlsx_patch
+    return xlsx_patch.view(data, sheet, cells, find, MAX_SHEET_CELLS)
 
 
 def xlsx_apply(data: bytes, ops: list[dict], max_ops: int = 50, max_cells: int = 200_000) -> Result:
-    unsafe = _unsafe(data)
-    if unsafe:
-        raise EditError(f"This workbook contains {', '.join(unsafe)}; saving it here would lose them, "
-                        f"so it can't be edited by Claude. Make the change in Excel.")
-    ops = _count(ops, max_ops)
-    wb = _workbook(data)
-    if sum(ws.max_row * ws.max_column for ws in wb.worksheets) > max_cells:
-        raise EditError(f"This workbook is too large to edit here (over {max_cells:,} cells).")
-    changes = []
-    for n, op in enumerate(ops, 1):
-        kind = op.get("op")
-        if kind == "set_cells":
-            values = op.get("cells")
-            if not isinstance(values, dict) or not values:
-                raise EditError(f"Operation {n}: `cells` maps cell names to values, e.g. {{\"B4\": 12.5}}.")
-            ws = _sheet(wb, op.get("sheet"))
-            for ref, value in values.items():
-                if not re.fullmatch(r"[A-Za-z]{1,3}[1-9]\d{0,6}", str(ref)):
-                    raise EditError(f"Operation {n}: {ref!r} isn't a cell name like B4.")
-                ws[str(ref).upper()] = _cell_value(value)
-            changes.append(f"{ws.title}: set {', '.join(list(values)[:8])}{'…' if len(values) > 8 else ''}")
-        elif kind == "append_rows":
-            rows = op.get("rows")
-            if not isinstance(rows, list) or not all(isinstance(r, list) for r in rows):
-                raise EditError(f"Operation {n}: `rows` is a list of rows, each a list of values.")
-            ws = _sheet(wb, op.get("sheet"))
-            for row in rows:
-                ws.append([_cell_value(v) for v in row])
-            changes.append(f"{ws.title}: added {len(rows)} row(s) at the end")
-        elif kind in ("insert_rows", "delete_rows"):
-            ws = _sheet(wb, op.get("sheet"))
-            if _has_formulas(wb):
-                raise EditError(f"Operation {n}: this workbook has formulas, and {kind} here wouldn't update the "
-                                f"ones that point past the change. Use append_rows or set_cells, or do it in Excel.")
-            (row,) = _need(op, "row")
-            count = max(1, int(op.get("count") or 1))
-            (ws.insert_rows if kind == "insert_rows" else ws.delete_rows)(int(row), count)
-            changes.append(f"{ws.title}: {'inserted' if kind == 'insert_rows' else 'deleted'} {count} row(s) at {row}")
-        elif kind == "add_sheet":
-            (name,) = _need(op, "name")
-            if name in wb.sheetnames:
-                raise EditError(f"Operation {n}: there's already a sheet called {name!r}.")
-            wb.create_sheet(str(name))
-            changes.append(f"added sheet {name!r}")
-        elif kind == "rename_sheet":
-            old, new = _need(op, "sheet", "name")
-            ws = _sheet(wb, old)
-            mentions = re.compile(rf"(?:'{re.escape(old)}'|\b{re.escape(old)})!")
-            if any(isinstance(c.value, str) and c.value.startswith("=") and mentions.search(c.value)
-                   for s in wb.worksheets for r in s.iter_rows() for c in r):
-                raise EditError(f"Operation {n}: formulas refer to {old!r}, and renaming here wouldn't update them.")
-            ws.title = str(new)
-            changes.append(f"renamed sheet {old!r} to {new!r}")
-        else:
-            raise EditError(f"Operation {n}: unknown op {kind!r}. Use set_cells, append_rows, insert_rows, "
-                            f"delete_rows, add_sheet or rename_sheet.")
-    wb.calculation.fullCalcOnLoad = True   # cached results of changed formulas are stale until Excel recalculates
-    out = io.BytesIO()
-    wb.save(out)
-    return Result(out.getvalue(), changes)
+    """Run edit_spreadsheet operations; the result carries a cell-by-cell diff."""
+    from mnemerynne import xlsx_patch
+    applied = xlsx_patch.apply(data, _count(ops, max_ops), max_cells)
+    return Result(applied.data, applied.changes or ["no cells changed"], applied.diff)
 
 
 def xlsx_new(rows: list, sheet: str | None = None) -> bytes:

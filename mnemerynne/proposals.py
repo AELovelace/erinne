@@ -123,9 +123,11 @@ def _store(conn: sqlite3.Connection, settings: Settings, caller, *, kind: str, d
 
 
 def propose_edit(conn: sqlite3.Connection, settings: Settings, caller, loaded: editing.Loaded, data: bytes,
-                 changes: list[str]) -> int:
-    """A change to an existing file (permission already checked by the tool)."""
-    diff = text_diff(loaded.data, data, loaded.row["display_name"]) if loaded.fmt == "text" else ""
+                 changes: list[str], diff: str | None = None) -> int:
+    """A change to an existing file (permission already checked by the tool). `diff` is shown on
+    the card; text files get a unified diff, spreadsheets pass their cell-by-cell one."""
+    if diff is None:
+        diff = text_diff(loaded.data, data, loaded.row["display_name"]) if loaded.fmt == "text" else ""
     return _store(conn, settings, caller, kind="edit", data=data, name=loaded.row["display_name"],
                   collection_id=loaded.row["collection_id"], folder_id=loaded.row["folder_id"],
                   file_id=loaded.row["id"], base=loaded.version, changes=changes, diff=diff)

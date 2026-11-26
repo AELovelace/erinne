@@ -39,7 +39,7 @@ from starlette.types import Receive, Scope, Send
 
 from mnemerynne import (identity, call_logs, diagnostics, messages, notices, rooms, accounts, activity, api_tokens, apis, automations,
                         automations_run, briefings, claude_links, comments, db, editing, editing_formats,
-                        fs, m365_mail, permissions, proposals, retrieval, scratchpad, sharepoint)
+                        fs, m365_mail, permissions, proposals, retrieval, scratchpad, sharepoint, xlsx_patch)
 from mnemerynne.api_tokens import Caller
 from mnemerynne.config import Settings
 from mnemerynne.ingest import store
@@ -61,7 +61,10 @@ log = logging.getLogger("mnemerynne.mcp")
 #        open directions first; write_scratchpad takes reply_to and for_agent.
 # 1.9.0: cancel_automation_run stops a run that's still going (it ends "cancelled"); report_automation_run refuses
 #        a cancelled run's report and says to stop.
-MCP_VERSION = "1.9.0"
+# 1.10.0: cell-level spreadsheet editing: edit_spreadsheet patches the workbook in place (pictures, charts and
+#        styles survive) with set_range, clear_cells, set_by_key, insert/delete columns, rows/columns that move
+#        formulas, rename_sheet that updates them, and a `diff` of changed cells; open_file takes `find`.
+MCP_VERSION = "1.10.0"
 
 PAGE_WIDTH_PX = 1200     # rendered page width: small print stays legible, JPEG stays ~100-300 KB
 PAGE_MAX_PX = 2000       # cap on either side, for unusually long or wide pages
@@ -816,14 +819,14 @@ class Tools:
         return (permissions.PRIVATE_LABEL if coll["kind"] == "private" else coll["name"]) + (f" / {path}" if path else "")
 
     def open_file(self, conn, caller: Caller, file_id: int, start: int = 1, limit: int | None = None,
-                  sheet: str | None = None, cells: str | None = None) -> tuple[dict, list[int]]:
+                  sheet: str | None = None, cells: str | None = None, find=None) -> tuple[dict, list[int]]:
         loaded = editing.load(conn, self.settings, caller.user_id, file_id, via=self.mode)
         if loaded.fmt == "text":
             view = editing_formats.text_view(loaded.data, start, limit or 400)
         elif loaded.fmt == "docx":
             view = editing_formats.docx_view(loaded.data, start, limit or 200)
         else:
-            view = editing_formats.xlsx_view(loaded.data, sheet, cells)
+            view = editing_formats.xlsx_view(loaded.data, sheet, cells, find)   # cells, or the matches of `find`
         try:
             editing.check_edit(conn, caller.user_id, caller.can_edit, loaded.row["collection_id"],
                                loaded.row["folder_id"], via=self.mode, file_id=file_id)
@@ -845,14 +848,17 @@ class Tools:
             raise editing.EditConflict(f"“{loaded.row['display_name']}” changed since that version was opened. "
                                        f"Open it again and redo the change on the new version.")
         result = apply(loaded.data)
+        diff = {"diff": result.diff} if result.diff is not None else {}   # spreadsheets: cell by cell
         if self.propose:
-            proposal = proposals.propose_edit(conn, self.settings, caller, loaded, result.data, result.changes)
+            proposal = proposals.propose_edit(
+                conn, self.settings, caller, loaded, result.data, result.changes,
+                diff=xlsx_patch.diff_text(result.diff, result.changes) if result.diff is not None else None)
             return {"proposal": proposal, "file_id": file_id, "file": loaded.row["display_name"],
-                    "changes": result.changes, "status": "proposed", "note": _PROPOSED}, [file_id]
+                    "changes": result.changes, **diff, "status": "proposed", "note": _PROPOSED}, [file_id]
         new_version = editing.save(conn, self.settings, caller, file_id, result.data, expected=version,
                                    summary="; ".join(result.changes))
         return {"file_id": file_id, "file": loaded.row["display_name"], "version": new_version,
-                "changes": result.changes, "link": _file_link(self.base, file_id, loaded.row["kind"]),
+                "changes": result.changes, **diff, "link": _file_link(self.base, file_id, loaded.row["kind"]),
                 "note": "The previous version is kept; the person can restore it from Files (Versions)."}, [file_id]
 
     def edit_text(self, conn, caller: Caller, file_id: int, version: str, edits: list[dict] | None = None,
@@ -1947,13 +1953,18 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
 
     @server.tool(annotations=_READ_ONLY)
     async def open_file(ctx: Context, file_id: int, start: int = 1, limit: int | None = None,
-                        sheet: str | None = None, cells: str | None = None) -> dict:
+                        sheet: str | None = None, cells: str | None = None,
+                        find: str | int | float | None = None) -> dict:
         """Open a .txt, .md, .docx or .xlsx file to read it whole or edit it. Returns its `version`
         (pass it to the edit tool) and whether you may edit it here. Text: numbered lines from `start`
         (`limit` lines). Word: paragraphs (p1, p2, …) and tables (t1, cells t1.r2.c3) from block `start`.
-        Excel: the sheets, and the cells of `sheet` (default the first) in `cells` (e.g. "A1:H50")."""
+        Excel: the sheets, and the cells of `sheet` (default the first) in `cells` (e.g. "A1:H50"), at
+        most 2000 at a time; formulas come as {"formula", "value"}, dates as {"date"}, plus `merged`
+        ranges. `find` (Excel): instead of a window, every cell matching it (numbers exactly, text by
+        "contains", any case) on `sheet` or all sheets, each with the rest of its row: use it to locate
+        a row (an extension, a name) before editing."""
         return await call(ctx, "open_file", {"file_id": file_id, "start": start, "limit": limit, "sheet": sheet,
-                                             "cells": cells}, tools.open_file)
+                                             "cells": cells, "find": find}, tools.open_file)
 
     @server.tool(annotations=_EDITS)
     async def edit_text(ctx: Context, file_id: int, version: str, edits: list[dict] | None = None,
@@ -1977,12 +1988,29 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
 
     @server.tool(annotations=_EDITS)
     async def edit_spreadsheet(ctx: Context, file_id: int, version: str, operations: list[dict]) -> dict:
-        """Change an Excel (.xlsx) file opened with open_file. Operations:
-        {"op": "set_cells", "sheet"?: "Rates", "cells": {"B4": 129.5, "C4": "=B4*1.1", "D4": "text"}},
-        {"op": "append_rows", "sheet"?: "...", "rows": [["a", 1], ["b", 2]]},
-        {"op": "insert_rows" | "delete_rows", "sheet"?: "...", "row": 5, "count"?: 2} (not in workbooks
-        with formulas), {"op": "add_sheet", "name": "..."}, {"op": "rename_sheet", "sheet": "...", "name": "..."}.
-        Send numbers as numbers. Workbooks with charts, pivot tables or pictures can't be edited here."""
+        """Change an Excel (.xlsx) file opened with open_file, cell by cell. Only the cells you name
+        change: formatting, widths, pictures, charts, validation and other sheets stay as they are, and a
+        cell keeps its style when its value changes. All operations run in order on the opened version
+        (all or nothing); the result lists every changed cell (`diff`: old → new). Ops ("sheet" defaults
+        to the first sheet):
+        {"op": "set_cells", "sheet"?, "cells": {"B4": 129.5, "C4": "=B4*1.1", "D4": "text", "E4": null},
+          "like"?: "B3"}  (null empties a cell; `like` copies another cell's look onto new cells)
+        {"op": "set_range", "sheet"?, "start": "J30", "values": [["Gold", 4615], ["Silver", 4613]]}
+        {"op": "clear_cells", "sheet"?, "range": "E17:G17"}  (values go, formatting stays)
+        {"op": "set_by_key", "sheet"?, "key_column": "C", "key": 4916, "set": {"B": "Jane Doe"},
+          "within"?: "A1:C43"}  (updates the one row whose column C is 4916; refused if 0 or 2+ rows
+          match, so add `within` for side-by-side blocks)
+        {"op": "append_rows", "sheet"?, "rows": [["a", 1]], "columns"?: "J:K"}  (under the last used
+          row, of those columns if given, styled like it)
+        {"op": "insert_rows" | "delete_rows", "sheet"?, "row": 5, "count"?: 2}  (inserted rows copy the
+          row above's look; formulas, merges, names and pictures move with them)
+        {"op": "insert_columns" | "delete_columns", "sheet"?, "column": "D", "count"?: 1}
+        {"op": "add_sheet", "name": "..."}, {"op": "rename_sheet", "sheet": "...", "name": "..."}
+          (formulas that name the sheet are updated)
+        Values: numbers as numbers (4916, not "4916"), true/false, text, "=formula", null; or
+        {"text": "0123"} to keep digits as text, {"date": "2026-11-26"}. Merged cells take their value
+        in the top-left cell. Protected sheets and password-protected files are refused. Workflow:
+        open_file (with `find` to locate the row) → edit_spreadsheet with its version → check `diff`."""
         return await call(ctx, "edit_spreadsheet", {"file_id": file_id, "version": version,
                                                     "operations": operations}, tools.edit_spreadsheet)
 
