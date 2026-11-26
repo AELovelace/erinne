@@ -15,8 +15,16 @@ $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path -Parent $PSScriptRoot)        # clients\desktop-app
 
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw "The GitHub CLI isn't installed: winget install GitHub.cli" }
-gh auth status 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "The GitHub CLI isn't signed in: gh auth login" }
+
+# Asks gh a yes/no question: true when it exits 0. Its error text is expected (e.g. "release not found"), and Windows
+# PowerShell 5.1 would treat that stderr as a failure under 'Stop', so it's silenced here.
+function Test-Gh([string[]]$GhArgs) {
+    $ErrorActionPreference = 'Continue'
+    & gh @GhArgs *> $null
+    return $LASTEXITCODE -eq 0
+}
+
+if (-not (Test-Gh @("auth", "status"))) { throw "The GitHub CLI isn't signed in: gh auth login" }
 
 $version = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version
 $name = "Mnemerynne-Desktop-Setup-$version.exe"
@@ -25,8 +33,7 @@ if (-not (Test-Path $setup)) { throw "$setup isn't built yet: run ps\build-windo
 $tag = "desktop-v$version"
 
 # A release is made once per version: stop before anything is uploaded if this one exists.
-gh release view $tag --repo $Repo 2>$null | Out-Null
-if ($LASTEXITCODE -eq 0) { throw "$tag is already released on $Repo. Raise <Version> in Directory.Build.props and build again." }
+if (Test-Gh @("release", "view", $tag, "--repo", $Repo)) { throw "$tag is already released on $Repo. Raise <Version> in Directory.Build.props and build again." }
 
 # The checksum file (two spaces between hash and name, as sha256sum writes it).
 $sha = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
@@ -42,4 +49,4 @@ if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
 
 Write-Output "Released $tag on $Repo"
 Write-Output "Installer SHA-256: $sha"
-Write-Output "Installed apps see it at their next check (start, daily, or ⚙ → Check for updates)."
+Write-Output "Installed apps see it at their next check (at start, daily, or from the gear menu: Check for updates)."
