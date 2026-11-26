@@ -37,6 +37,7 @@ You can upload only where you can change files: your File box, and libraries or 
 | **New folder** | A folder here. |
 | **Open** | Preview the file in a new tab, or open the folder. |
 | **Edit** | Text and Markdown files you can change: the browser editor ([The organisation wiki](wiki.md#the-editor)). The page view (Open) has an **Edit** button too, left of Download, for the same files. |
+| **Open in editor** / **View formatted** | Word, Excel and PowerPoint files, when your admin has turned the Office editor on: the document with its real formatting, editable when you may change it ([Previews](previews.md#the-office-editor-word-excel-powerpoint)). In the right-click menu and the details pane. |
 | **Download** | One file downloads as it is. Several files, or a folder, come down as **one zip** with the folders inside kept as they are. See [Downloading folders and many files](#downloading-folders-and-many-files). |
 | **Rename** | Rename a file or folder (a file keeps its extension). Names must suit Windows too: no `\ / : * ? " < > \|`, no trailing dot or space. |
 | **Move to…** / **Copy to…** | Pick a destination in any location you can write to. A copy of a file keeps its search index. |

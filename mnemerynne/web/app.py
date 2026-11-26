@@ -24,6 +24,7 @@ from mnemerynne.media import screens as media_screens, transcode as media_transc
 from mnemerynne import accounts, assistant_db, automations_run
 from mnemerynne import games   # the built-in games' registry: Lumi's three apps each get a manifest (lumi_manifest)
 from mnemerynne import health
+from mnemerynne import office as office_mod   # the ONLYOFFICE editor (Files' Open in editor)
 from mnemerynne.automations_run import Scheduler
 from mnemerynne.answer import ASSISTANT_NAME
 from mnemerynne.auth import LoginThrottle
@@ -62,6 +63,7 @@ WEB_ROUTERS = (
     "mnemerynne.web.sync:router", "mnemerynne.web.sync:admin_router",   # the desktop backup app (sync.py)
     "mnemerynne.web.games:router",                # Media → Games: the built-in games (games.py)
     "mnemerynne.web.desktop:router",              # the desktop app: tabs, sign-in tickets, Explorer drive
+    "mnemerynne.web.office:router",               # the ONLYOFFICE editor: Word/Excel/PowerPoint in the browser
 )
 
 
@@ -466,7 +468,8 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     @app.get("/files", response_class=HTMLResponse)
     def files_page(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db)):
         # The file manager loads everything through the /api routes.
-        return _page(request, "files.html", user, conn, active="files", trash_days=settings.trash_days)
+        return _page(request, "files.html", user, conn, active="files", trash_days=settings.trash_days,
+                     office=office_mod.allowed(conn, settings, user, app.state.directory))   # Open in editor buttons
 
     @app.get("/api/me")
     def me(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)):

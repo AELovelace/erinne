@@ -1533,3 +1533,13 @@ select { font: inherit; color: var(--ink); }
    pages menu, back/forward and the tabs, so this site's top bar is hidden. It stays in the page (display: none) so
    the app can read the menu from it; nav.js then measures it as 0, so full-height pages take the whole window. */
 html[data-desktop-app] .topbar.main-bar { display: none; }
+
+/* ------------------------------------------------------------- the Office editor (office.html, office.js) */
+/* The page is exactly the space under the flower bar: a thin bar with the name, then the Document Server's iframe. */
+.office-page { display: flex; flex-direction: column; height: var(--page-h); position: relative; }
+.office-bar { display: flex; align-items: center; gap: .8rem; padding: .35rem .9rem; flex-wrap: wrap; }
+.office-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50vw; }
+.office-frame { flex: 1; min-height: 0; }                     /* takes the rest; the iframe is 100% of it */
+.office-frame > div, .office-frame iframe { width: 100%; height: 100%; border: 0; display: block; }
+.office-error { position: absolute; top: 4rem; left: 50%; transform: translateX(-50%); max-width: 36rem;
+  padding: 1rem 1.2rem; }

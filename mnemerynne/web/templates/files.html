@@ -2,7 +2,7 @@
 {% block title %}Files · {{ product_name }}{% endblock %}
 {% block body %}
 {% include "_nav.html" %}
-<main class="fm" id="fm" data-trash-days="{{ trash_days }}">
+<main class="fm" id="fm" data-trash-days="{{ trash_days }}"{% if office %} data-office="1"{% endif %}>
   <aside class="fm-side glass" id="fm-side" aria-label="Locations">
     <ul class="tree" id="tree" role="tree"></ul>
   </aside>

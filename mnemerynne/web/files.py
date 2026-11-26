@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from itsdangerous import BadData, URLSafeTimedSerializer
 from pydantic import BaseModel, Field
 
-from mnemerynne import api_tokens, comments, db, downloads, editing, fs, jobs, permissions, share
+from mnemerynne import api_tokens, comments, db, downloads, editing, fs, jobs, office, permissions, share
 from mnemerynne.config import Settings
 from mnemerynne.ingest import markdown, store
 from mnemerynne.ingest import parts as upload_parts
@@ -93,7 +93,18 @@ def _file_json(row: sqlite3.Row, access: fs.Access) -> dict:
         # proposal that alice applied (Versions can undo it)
         "edited_via": row["edited_via"] if "edited_via" in row.keys() else None,
         "web_url": row["web_url"] if "web_url" in row.keys() else None,   # SharePoint files: "Open in SharePoint"
+        # Word/Excel/PowerPoint: "edit" or "view" in the ONLYOFFICE editor (/office/{id}, web/office.py). Files shows
+        # the button only when the editor is on for this person (files.html data-office).
+        "office": _office_mode(row, access),
     }
+
+
+def _office_mode(row: sqlite3.Row, access: fs.Access) -> str | None:
+    """'edit' (an editable Office file they may change), 'view' (any other Office file), or None."""
+    found = office.kind_of(row["display_name"])
+    if found is None or row["deleted_at"] is not None:
+        return None
+    return "edit" if found[1] and access.can_write_file(row) else "view"
 
 
 def _folder_json(row: sqlite3.Row) -> dict:
@@ -795,8 +806,13 @@ def view_markdown(request: Request, file_id: int, user=Depends(page_user),
         html = _text_view(conn, settings, row)
     else:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No text view for this kind of file")
+    # Open in editor / View formatted: Office files, when the ONLYOFFICE editor is on for this person.
+    office_url = office_mode = None
+    if office.kind_of(row["display_name"]) and office.allowed(conn, settings, user, request.app.state.directory):
+        office_url, office_mode = f"/office/{file_id}", _office_mode(row, access)
     response = request.app.state.templates.TemplateResponse(
-        request, "file_view.html", {"file": row, "content": html, "edit_url": edit_url, "version": version})
+        request, "file_view.html", {"file": row, "content": html, "edit_url": edit_url, "version": version,
+                                    "office_url": office_url, "office_mode": office_mode})
     # The view runs no scripts, except tasks.js (our own file) where the boxes can be ticked; the
     # Markdown's own HTML is escaped by the renderer either way, and inline scripts stay blocked.
     response.headers["Content-Security-Policy"] = _VIEW_CSP_TASKS if version else _view_csp_width(request)

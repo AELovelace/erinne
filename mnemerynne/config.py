@@ -161,6 +161,22 @@ class Settings(BaseSettings):
     edit_max_operations: int = 50
     version_days: int = 30
     version_keep: int = 20             # per file, newest first
+
+    # ONLYOFFICE Docs (mnemerynne/office.py): view and edit Word/Excel/PowerPoint in the browser. Off until both the
+    # URL and the secret are set (deploy/linux/onlyoffice-setup.sh sets them) AND an admin turns it on in Settings.
+    onlyoffice_url: str = ""           # the Document Server as browsers reach it, e.g. https://erynne.example.org/onlyoffice/
+    onlyoffice_jwt_secret: str = ""    # shared with the container's JWT_SECRET; signs everything both ways
+    # How the Document Server's container reaches Mnemerynne for downloads and save callbacks. Empty: public_url
+    # (the container goes through the edge, which lets /api/office/ds/ in only from podman's network).
+    onlyoffice_app_url: str = ""
+    # How the app reaches the Document Server itself (Settings' Test connection). Empty: onlyoffice_url.
+    onlyoffice_internal_url: str = ""
+    onlyoffice_max_bytes: int = 50 * 1024 * 1024   # bigger files are refused (the editor gets slow and memory-hungry)
+    # Where the container's requests may come from (comma-separated CIDRs): loopback and podman's networks.
+    onlyoffice_allowed_ips: str = "127.0.0.0/8,::1/128,10.88.0.0/16,10.89.0.0/16,169.254.0.0/16"
+    # Hosts the edited file may be fetched from in a save callback (comma-separated; empty = the hosts of
+    # onlyoffice_internal_url and onlyoffice_url). Stops a forged callback making us fetch other addresses.
+    onlyoffice_fetch_hosts: str = ""
     # Proposals (mnemerynne/proposals.py): a change Claude or Erynne proposed that nobody applies,
     # dismisses or withdraws within this many days expires (nothing changes). A batch
     # (propose_batch) holds at most proposal_batch_max API actions under one approval.

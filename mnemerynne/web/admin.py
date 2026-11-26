@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from mnemerynne import (accounts, api_tokens, db, desktop, diagnostics, fs, group_refs, m365_mail, messages,
+from mnemerynne import (accounts, api_tokens, db, desktop, diagnostics, fs, group_refs, m365_mail, messages, office,
                         permissions, share, updates, users)
 from mnemerynne.config import Settings
 from mnemerynne.db import transaction
@@ -541,6 +541,72 @@ async def set_diagnostics(body: OptionalGroupBody, request: Request, user=Depend
         diagnostics.set_group(conn, value)
         _log(conn, user, "settings.diagnostics", group_refs.label(conn, value) or "(off)", f"was {old or '(off)'}")
     return await _group_status(request, conn, diagnostics.group(conn))
+
+
+class OfficeBody(BaseModel):
+    on: bool = False
+    group: str = Field("", max_length=2000)   # group_refs text; empty = everyone who can reach the file
+
+
+async def _office_status(request: Request, conn: sqlite3.Connection, settings: Settings) -> dict:
+    """The ONLYOFFICE editor (office.py): set up on the server?, switched on?, for whom, and who has what open."""
+    out = await _group_status(request, conn, office.group(conn))
+    out.update({"configured": office.configured(settings), "on": office.is_on(conn),
+                "url": settings.onlyoffice_url, "max_mb": settings.onlyoffice_max_bytes // (1024 * 1024),
+                "sessions": office.open_sessions(conn)})
+    return out
+
+
+@router.get("/api/admin/settings/office")
+async def get_office(request: Request, user=Depends(admin_api_user), conn: sqlite3.Connection = Depends(get_db),
+                     settings: Settings = Depends(get_settings)):
+    return await _office_status(request, conn, settings)
+
+
+@router.put("/api/admin/settings/office")
+async def set_office(body: OfficeBody, request: Request, user=Depends(admin_api_user),
+                     conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
+    if body.on and not office.configured(settings):
+        raise HTTPException(status.HTTP_409_CONFLICT, "The Document Server isn't set up on this server yet "
+                            "(MNEMERYNNE_ONLYOFFICE_URL and _JWT_SECRET; deploy/linux/onlyoffice-setup.sh install).")
+    value = await _resolve_group(request, conn, body.group)
+    with transaction(conn):
+        office.set_on(conn, body.on)
+        office.set_group(conn, value)
+        _log(conn, user, "settings.office", ("on" if body.on else "off") + (f" for {group_refs.label(conn, value)}"
+                                                                         if value else ""))
+    return await _office_status(request, conn, settings)
+
+
+@router.post("/api/admin/settings/office/test")
+async def test_office(user=Depends(admin_api_user), settings: Settings = Depends(get_settings)):
+    """Ask the Document Server's /healthcheck (on the address this server uses), so an admin sees it's up."""
+    import httpx
+
+    if not office.configured(settings):
+        return {"ok": False, "detail": "Not set up on this server yet."}
+    url = office.internal_url(settings) + "healthcheck"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url)
+        ok = resp.status_code == 200 and resp.text.strip().lower() == "true"
+        return {"ok": ok, "detail": f"{url} answered {resp.status_code}: {resp.text.strip()[:100]}"}
+    except httpx.HTTPError as exc:
+        return {"ok": False, "detail": f"Couldn't reach {url}: {exc.__class__.__name__}"}
+
+
+class OfficeReleaseBody(BaseModel):
+    file_id: int
+
+
+@router.post("/api/admin/settings/office/release")
+async def release_office(body: OfficeReleaseBody, request: Request, user=Depends(admin_api_user),
+                         conn: sqlite3.Connection = Depends(get_db), settings: Settings = Depends(get_settings)):
+    """Drop a stuck editing session: Claude and others may save again; the editors' next save becomes a copy."""
+    with transaction(conn):
+        office.end_session(conn, body.file_id)
+        _log(conn, user, "settings.office_release", f"file {body.file_id}")
+    return await _office_status(request, conn, settings)
 
 
 @router.get("/api/admin/settings/desktop-app")

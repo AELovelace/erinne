@@ -64,6 +64,41 @@ class EditConflict(EditError):
 
 ASSISTANTS = {"claude": "Claude", "erynne": "Erynne"}
 
+# A file open in the ONLYOFFICE editor (office.py, table office_sessions) is locked against every other writer, like
+# a ~$ lock on the share, while the Document Server has said someone has it open within this many hours.
+OFFICE_LOCK_HOURS = 12
+
+
+def _office_lock(conn: sqlite3.Connection, row: sqlite3.Row, via: str) -> None:
+    """Refuse a save while people have the file open in the Office editor (their next save would otherwise land on
+    top of this one, or this one on theirs). The editor's own saves pass; a restore ends the session instead, so the
+    editor's later save becomes a copy (office.save_edit) and nothing is lost."""
+    if via == "onlyoffice":
+        return                                                                 # the editor saving its own session
+    found = conn.execute("SELECT users_json FROM office_sessions WHERE file_id = ? AND users_json != '[]' "
+                         "AND last_status_at > datetime('now', ?)",
+                         (row["id"], f"-{OFFICE_LOCK_HOURS} hours")).fetchone()
+    if found is None:
+        return                                                                 # nobody has it open: carry on
+    if via == "restore":
+        conn.execute("DELETE FROM office_sessions WHERE file_id = ?", (row["id"],))   # restore wins; editors get a copy
+        return
+    ids = [str(u) for u in _json_list(found["users_json"])]
+    names = [r["username"] for r in (conn.execute("SELECT username FROM users WHERE id = ?", (int(u),)).fetchone()
+                                     for u in ids if u.isdigit()) if r is not None]
+    who = ", ".join(names) or "someone"
+    raise EditConflict(f"“{row['display_name']}” is open in the Office editor by {who} right now. "
+                       f"Try again once they've closed it (their changes save when the last person closes it).")
+
+
+def _json_list(text: str | None) -> list:
+    import json
+    try:
+        value = json.loads(text or "[]")
+    except ValueError:
+        return []
+    return value if isinstance(value, list) else []
+
 
 def ai_access(conn: sqlite3.Connection, user_id: int, via: str = "claude") -> fs.Access:
     """What the assistant may read for this person: Claude only what is shared
@@ -395,6 +430,7 @@ def replace_content(conn: sqlite3.Connection, settings: Settings, file_id: int, 
     if on_share and any(lock.exists() for lock in _lock_files(path)):
         raise EditConflict(f"“{row['display_name']}” is open in Word or Excel by someone right now. "
                            f"Try again once they've closed it.")
+    _office_lock(conn, row, via)                                               # open in the browser Office editor?
     if len(data) > settings.edit_max_bytes:
         raise EditError(f"The result would be over {settings.edit_max_bytes // (1024 * 1024)} MB.")
     new_sha = sha256(data)
@@ -483,6 +519,7 @@ def replace_from_path(conn: sqlite3.Connection, settings: Settings, file_id: int
         if on_share and any(lock.exists() for lock in _lock_files(path)):
             raise EditConflict(f"“{row['display_name']}” is open in Word or Excel by someone right now. "
                                f"Try again once they've closed it.")
+        _office_lock(conn, row, via)                                           # open in the browser Office editor?
         if new_sha == current_sha:
             return current_sha                         # nothing changed: no version, no new blob
         ext = PurePosixPath(row["display_name"]).suffix.lower()
@@ -676,7 +713,8 @@ def versions(conn: sqlite3.Connection, file_id: int) -> list[dict]:
         "SELECT v.id, v.sha256, v.size, v.created_at, v.via, v.summary, u.username AS by FROM file_versions v "
         "LEFT JOIN users u ON u.id = v.created_by WHERE v.file_id = ? ORDER BY v.id DESC", (file_id,)).fetchall()
     return [{"id": r["id"], "version": r["sha256"], "size": r["size"], "replaced_at": r["created_at"],
-             "replaced_by": {"claude": "Claude for ", "erynne": "Erynne for ", "web": "", "sync": "the backup app for "}.get(r["via"], "restore by ")
+             "replaced_by": {"claude": "Claude for ", "erynne": "Erynne for ", "web": "", "sync": "the backup app for ",
+                             "drive": "the desktop drive for ", "onlyoffice": "the Office editor for "}.get(r["via"], "restore by ")
                             + (r["by"] or "a deleted user"),
              "change": r["summary"]} for r in rows]
 

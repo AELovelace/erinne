@@ -1382,6 +1382,78 @@ echo fs.inotify.max_user_watches=262144 | sudo tee /etc/sysctl.d/90-mnemerynne-i
 sudo sysctl --system && sudo systemctl restart mnemerynne-web
 ```
 
+### ONLYOFFICE (Office files in the browser)
+
+ONLYOFFICE Docs Community opens `.docx`, `.xlsx` and `.pptx` files from Files in an editor in the
+browser, and saves them back as a new version. It runs on the box as a container in rootful podman
+(a quadlet), behind the edge nginx, so it needs the setup in "nginx holds HTTPS on this box" first.
+
+**RAM.** The document server needs about 4 GB free (the container is capped at `--memory=4g`). The
+Mnemerynne box has 20 GB since its upgrade, which leaves room next to the app and the models. As a
+safety check, `install` warns, and asks at a terminal, when a box has under 12 GB.
+
+**Free edition limit:** at most **20 people editing at once** across the whole box (viewing doesn't
+count). The 21st person gets the file read-only.
+
+| What | Where | Port |
+|---|---|---|
+| The container (`mnemerynne-onlyoffice.service`) | `127.0.0.1` only | **8090** (its own 80 inside) |
+| Browsers | `https://YOUR-HOSTNAME/onlyoffice/` through the edge | 443 |
+| The container calling the app | `https://YOUR-HOSTNAME/api/office/ds/` through the edge | 443 |
+
+```sh
+sudo bash /opt/mnemerynne/deploy/linux/onlyoffice-setup.sh install          # first time: several minutes
+sudo bash /opt/mnemerynne/deploy/linux/onlyoffice-setup.sh status
+sudo bash /opt/mnemerynne/deploy/linux/onlyoffice-setup.sh update 9.4.0.1   # another image tag
+sudo bash /opt/mnemerynne/deploy/linux/onlyoffice-setup.sh off              # stop and unhook (keeps /srv/onlyoffice)
+```
+
+Then turn the editor on in **Admin** (the app's ONLYOFFICE switch).
+
+`install`, step by step:
+
+1. Installs `podman` if missing, and reads the hostname from `MNEMERYNNE_PUBLIC_URL`.
+2. Makes a secret with `openssl rand -hex 32` (never printed; a second `install` keeps the first one)
+   and writes `/etc/mnemerynne/onlyoffice.env` (mode 0600): `JWT_ENABLED=true`, `JWT_SECRET`,
+   `JWT_HEADER=Authorization`, `ALLOW_PRIVATE_IP_ADDRESS=true`. `onlyoffice/onlyoffice.env.example`
+   shows the shape.
+3. Sets, in `/etc/mnemerynne/mnemerynne.env` (and front-door.sh's saved copy, if there is one):
+   `MNEMERYNNE_ONLYOFFICE_URL=https://YOUR-HOSTNAME/onlyoffice/`, `MNEMERYNNE_ONLYOFFICE_JWT_SECRET`
+   (the same secret) and `MNEMERYNNE_ONLYOFFICE_INTERNAL_URL=http://127.0.0.1:8090/`.
+   `MNEMERYNNE_ONLYOFFICE_APP_URL` stays empty, which means the public URL.
+4. Pulls the pinned image (`onlyoffice/mnemerynne-onlyoffice.container`, `Image=`), installs the quadlet
+   as `/etc/containers/systemd/mnemerynne-onlyoffice.container` with the hostname filled in, and starts
+   it. It waits (up to 15 minutes) for `curl -s 127.0.0.1:8090/healthcheck` to say `true`.
+5. Installs `nginx-onlyoffice.conf` as `/etc/nginx/mnemerynne-edge.d/onlyoffice.conf`, labels port 8090
+   for nginx under SELinux, runs `nginx -t` and reloads nginx (a failed check removes the snippet again).
+6. Restarts `mnemerynne-web` and `mnemerynne@files` if they're running.
+
+`update <tag>` pulls the new tag, re-pins `Image=` in the installed quadlet and restarts it. Bump
+`Image=` in the repo's copy too, so a fresh install gets the same version. `off` stops the container,
+removes the quadlet and the nginx snippet, blanks the three settings and restarts the app. It keeps
+`/srv/onlyoffice` (data, logs, lib, fonts, db) and `onlyoffice.env`; `podman rmi` frees the image.
+
+**How the pieces reach each other:**
+
+- **The app → the container:** `http://127.0.0.1:8090/` (`MNEMERYNNE_ONLYOFFICE_INTERNAL_URL`).
+  The container publishes `127.0.0.1:8090:80`, so nothing off the box reaches it directly.
+- **Browsers → the container:** `https://YOUR-HOSTNAME/onlyoffice/`. The edge strips `/onlyoffice` and
+  sends `X-Forwarded-Host: YOUR-HOSTNAME/onlyoffice` (ONLYOFFICE's virtual-path pattern, so its own links
+  keep the prefix) with websockets for co-editing. Every request first goes through
+  `auth_request /_office_auth`, which asks the app's `/api/office/ds-auth` (204 signed in, 401 not)
+  through the front door with the person's cookie. Signed-out visitors never reach ONLYOFFICE.
+- **The container → the app:** `https://YOUR-HOSTNAME/api/office/ds/` (the file download and the save
+  callback), through the edge. `AddHost=YOUR-HOSTNAME:host-gateway` in the quadlet makes the hostname
+  point at the box itself inside the container, so it doesn't depend on the router's hairpin NAT. Those
+  requests reach the edge from podman's bridge, `10.88.0.0/16`, and the edge allows that path only from
+  there and from the box itself. The app checks the JWT and the address as well.
+- **LAN only:** `/onlyoffice/healthcheck`, `/onlyoffice/info`, `ConvertService.ashx`,
+  `CommandService.ashx` and `coauthoring/` answer only from the LAN ranges, like `/healthz/full`.
+
+If `/onlyoffice/` answers 502, check `sudo ausearch -m avc -ts recent` (SELinux and port 8090) and
+`journalctl -u mnemerynne-onlyoffice`. If saving fails, the container can't reach the app: check from
+inside with `sudo podman exec mnemerynne-onlyoffice curl -sI https://YOUR-HOSTNAME/healthz`.
+
 ## Moving an Erinne install to Mnemerynne
 
 A box set up before the rename (user `erinne`, `/opt/erinne`, `erinne-*`

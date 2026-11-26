@@ -80,6 +80,23 @@ def _desktop(conn, settings, alice_id):
     store.add_file(conn, settings, got, box, alice_id, folder_id=folder)
 
 
+def _office(conn, settings, alice_id):
+    """The ONLYOFFICE editor's buttons and page (web/office.py) with no Document Server: the editor is switched on
+    against a dead address, so the page shows its "isn't answering" box. alice's File box gets a .docx (editable)
+    and an .xls (view-only). `casino_preview.py PORT office`."""
+    import io
+    from mnemerynne import office, permissions
+    from mnemerynne.ingest import store
+
+    settings.onlyoffice_url = "http://127.0.0.1:9/onlyoffice/"           # nothing listens there: api.js won't load
+    settings.onlyoffice_jwt_secret = "preview-only-onlyoffice-secret"
+    office.set_on(conn, True)                                            # Access → Settings → Office editor: On
+    box = permissions.private_collection_id(conn, alice_id)
+    for name in ("Budget letter.docx", "Old sheet.xls"):                 # fake bytes: only the buttons matter here
+        got = store.receive(io.BytesIO(b"PK" + bytes([3, 4]) + b" preview " + name.encode()), name, settings)
+        store.add_file(conn, settings, got, box, alice_id)
+
+
 def main():
     """Seed disposable users and Media access, then serve only on the loopback interface."""
     with TemporaryDirectory(prefix="casino-preview-") as directory:
@@ -99,6 +116,8 @@ def main():
             _automator(conn, settings, uids[0])                           # for everyone, with a prompt file in alice's box
         if "desktop" in sys.argv[2:]:                                     # `casino_preview.py PORT desktop`: the desktop app
             _desktop(conn, settings, uids[0])
+        if "office" in sys.argv[2:]:                                      # `casino_preview.py PORT office`: the Office editor
+            _office(conn, settings, uids[0])
         conn.close()
         app = create_app(settings, Services(llm=None, embedder=FakeEmbedder(), directory=people))
         if os.environ.get("PREVIEW_COINS"):                               # Lumi City's check (LUMI_CITY_ONLY): plots cost more than a new purse holds,

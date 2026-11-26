@@ -1,13 +1,13 @@
 # Versions and restoring
 
-Every change made to a file **through Erynne or Claude**, in the **browser editor**, or by the [desktop backup app](desktop-backup.md) keeps the previous content as a version (the backup app skips this for files over 2 GB). Uploading a new copy of a file over SMB or replacing it by upload does not create a version; use the recycle bin and re-upload for that.
+Every change made to a file **through Erynne or Claude**, in the **browser editor**, in the **Office editor** ([Previews](previews.md#the-office-editor-word-excel-powerpoint)), from the **desktop drive**, or by the [desktop backup app](desktop-backup.md) keeps the previous content as a version (the backup app skips this for files over 2 GB). Uploading a new copy of a file over SMB or replacing it by upload does not create a version; use the recycle bin and re-upload for that.
 
 ## Where to find them
 
 In [Files](files.md), select the file and open the **details pane** (the ⓘ button). Under **Versions** you see each earlier version, newest first:
 
 - when it was replaced;
-- by whom: "Claude for alice" (Claude working for Alice), "Erynne for alice" (a proposal Alice applied), just a username (someone saving in the browser editor), "the backup app for alice" (Mnemerynne Backup sending a changed file), or "restore by alice";
+- by whom: "Claude for alice" (Claude working for Alice), "Erynne for alice" (a proposal Alice applied), just a username (someone saving in the browser editor), "the backup app for alice" (Mnemerynne Backup sending a changed file), "the Office editor for alice" (saved from the Word/Excel/PowerPoint editor; the change names everyone who edited), "the desktop drive for alice", or "restore by alice";
 - what changed, in the words of whoever changed it;
 - **Download**, to look at that version without touching the file;
 - **Restore**, if you can change files in that folder.
@@ -25,3 +25,5 @@ Versions are kept for **30 days** and at most **20 per file** (admins can change
 ## Conflicts
 
 If you save a file in the editor that someone else saved in the meantime, the save is refused and you are offered a choice: load their version (your text is copied to the clipboard) or save yours over it. Either way the other person's text stays under Versions. See [The organisation wiki](wiki.md#when-two-people-edit-the-same-page).
+
+The **Office editor** never asks: while a file is open there, nobody else can change it, and if it changed anyway (a restore, or Word on the file share) the editor's save becomes a separate file called *Name (editor copy, yourname date)* and you get a message saying where. Restoring a version while people have the file open in the Office editor ends their session the same way.

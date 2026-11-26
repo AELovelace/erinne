@@ -92,6 +92,20 @@ Also in the database (Access → Settings): the **admin group** (default `Domain
 | `SCRATCHPAD_CLAIM_MINUTES` | 120 | A claim on a scratchpad note lapses after this, so a session that stopped doesn't block the next. |
 | `ANNOUNCEMENT_DAYS` | 90 | Expired announcements are deleted this long after their expiry. |
 
+## Office editor (ONLYOFFICE)
+
+All empty by default, which keeps the editor off. `deploy/linux/onlyoffice-setup.sh install` fills them in; see [Office editor](onlyoffice.md).
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `ONLYOFFICE_URL` | (empty) | The Document Server as browsers reach it, e.g. `https://erynne.example.org/onlyoffice/`. |
+| `ONLYOFFICE_JWT_SECRET` | (empty) | Shared with the container's `JWT_SECRET`; signs the editor config, the downloads and the save callbacks. |
+| `ONLYOFFICE_INTERNAL_URL` | `ONLYOFFICE_URL` | How this server reaches the Document Server (Test connection, fetching edited files), e.g. `http://127.0.0.1:8090/`. |
+| `ONLYOFFICE_APP_URL` | `PUBLIC_URL` | How the container reaches Mnemerynne for downloads and callbacks. |
+| `ONLYOFFICE_MAX_BYTES` | 50 MB | Bigger files don't open in the editor. |
+| `ONLYOFFICE_ALLOWED_IPS` | loopback, podman's 10.88/16 and 10.89/16 | Where the container's download and callback requests may come from. |
+| `ONLYOFFICE_FETCH_HOSTS` | the hosts of the two URLs above | Hosts an edited file may be fetched from (a forged callback can't point us elsewhere). |
+
 ## Backups and retention
 
 | Setting | Default | Meaning |

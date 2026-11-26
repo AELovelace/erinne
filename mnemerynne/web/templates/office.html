@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ name }} · {{ "Edit" if mode == "edit" else "View" }} · {{ product_name }}{% endblock %}
+{% block body %}
+{% include "_nav.html" %}
+{#- The Document Server's editor fills everything under the flower bar (nav.js keeps --page-h right). office.js
+    fetches the signed config and starts DocsAPI.DocEditor in #oo-frame; the script comes from the edge's
+    /onlyoffice/ on this same host, so the desktop app keeps it in its tab. -#}
+<main class="office-page" id="office" data-file-id="{{ file_id }}" data-mode="{{ mode }}" data-back="{{ back }}">
+  <div class="office-bar">
+    <strong class="office-name">{{ name }}</strong>
+    <span class="muted small">{{ "Editing: changes save as a new version" if mode == "edit" else "Read only" }}</span>
+    <span id="office-status" class="small muted push-right" aria-live="polite">Loading the editor…</span>
+    <a class="small" href="/files/{{ file_id }}/raw">Download</a>
+    <a class="small" href="{{ back }}">Back to Files</a>
+  </div>
+  <div class="office-frame"><div id="oo-frame"></div></div>
+  <div class="office-error glass" id="office-error" role="alert" hidden></div>
+</main>
+<script src="{{ api_js }}" defer></script>
+<script src="{{ static('office.js') }}" defer></script>
+{% endblock %}

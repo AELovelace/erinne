@@ -33,6 +33,8 @@ Like Edge, everything is on one row at the top: the site's name, back / forward 
 
 The app keeps you signed in: when the site's own sign-in runs out (after a day), the app signs the tab in again by itself.
 
+**Word, Excel and PowerPoint** files open in the Office editor inside an app tab (when your admin has it on), exactly as in the browser; see [Previews](previews.md#the-office-editor-word-excel-powerpoint). Editing a file from the **drive** in your own Word or Excel instead is fine too, except while someone has it open in the Office editor: then the drive's save waits until they close it.
+
 Downloads go to your Downloads folder, with the usual download list. Uploading works as in a browser, by dragging in or with the buttons. Notifications from Rooms show as Windows notifications while the app runs.
 
 ## The drive in File Explorer

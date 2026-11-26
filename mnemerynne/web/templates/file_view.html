@@ -14,7 +14,9 @@
   <span class="bar-side bar-right">
     {#- Edit: a text or Markdown file this person may change opens in the split editor (web/editor.py). -#}
     {% if edit_url %}<a class="push-right" href="{{ edit_url }}">Edit</a>{% endif %}
-    <a {% if not edit_url %}class="push-right" {% endif %}href="/files/{{ file.id }}/raw">Download</a>
+    {#- Word/Excel/PowerPoint with the ONLYOFFICE editor on: the real formatting (web/office.py). -#}
+    {% if office_url %}<a {% if not edit_url %}class="push-right" {% endif %}href="{{ office_url }}">{{ "Open in editor" if office_mode == "edit" else "View formatted" }}</a>{% endif %}
+    <a {% if not edit_url and not office_url %}class="push-right" {% endif %}href="/files/{{ file.id }}/raw">Download</a>
     <span id="task-status" class="small muted" aria-live="polite"></span>
   </span>
 </header>

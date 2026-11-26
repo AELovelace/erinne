@@ -705,6 +705,13 @@
     else window.location.href = item.download_url;
   }
 
+  // "Open in editor" / "View formatted" for an Office file when the ONLYOFFICE editor is on for this person
+  // (files.html data-office, web/office.py); null for anything else.
+  function officeLabel(item) {
+    if (!item || item.type !== "file" || !item.office || !document.getElementById("fm").dataset.office) return null;
+    return item.office === "edit" ? "Open in editor" : "View formatted";
+  }
+
   function refs(items) { return items.map(function (i) { return { type: i.type, id: i.id }; }); }
 
   /* Tick everything listed here, or untick it all when it's already all ticked. On a touch screen it also
@@ -747,6 +754,7 @@
         case "new-folder": await newFolder(); break;
         case "open": if (items[0]) openItem(items[0]); break;
         case "edit": if (items[0] && items[0].edit_url) window.open(items[0].edit_url, "_blank"); break;
+        case "office": if (officeLabel(items[0])) window.open("/office/" + items[0].id, "_blank"); break;   // ONLYOFFICE
         case "download": await download(items); break;
         case "download-here": await downloadZip({ place: { collection_id: state.cid, folder_id: state.fid } }); break;
         case "select-all": selectAll(); break;
@@ -1162,11 +1170,13 @@
     } else if (state.mode === "shared") {
       add("Open", "open", items.length === 1);
       if (items.length === 1 && items[0].edit_url) add("Edit", "edit");
+      if (items.length === 1 && officeLabel(items[0])) add(officeLabel(items[0]), "office");   // Word/Excel/PowerPoint
       add(items.length === 1 && items[0].type === "file" ? "Download" : "Download as zip", "download", items.length > 0);
       add("Properties…", "properties", items.length === 1);
     } else if (items.length) {
       add("Open", "open", items.length === 1);
       if (items.length === 1 && items[0].edit_url) add("Edit", "edit");
+      if (items.length === 1 && officeLabel(items[0])) add(officeLabel(items[0]), "office");   // Word/Excel/PowerPoint
       add(items.length === 1 && items[0].type === "file" ? "Download" : "Download as zip", "download");
       if (items.length === 1 && items[0].type === "file" && items[0].status === "failed" && write) add("Retry indexing", "retry");
       if (state.mode === "browse" && state.canReembed) add("Re-embed", "reembed");
@@ -1291,6 +1301,11 @@
       const edit = el("a", "button-like", "Edit");
       edit.href = full.edit_url; edit.target = "_blank";
       actions.appendChild(edit);
+    }
+    if (officeLabel(full)) {                                   // the ONLYOFFICE editor, with the real formatting
+      const oo = el("a", "button-like", officeLabel(full));
+      oo.href = "/office/" + full.id; oo.target = "_blank";
+      actions.appendChild(oo);
     }
     const dl0 = el("a", "button-like soft", "Download");
     dl0.href = full.download_url;

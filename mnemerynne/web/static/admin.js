@@ -1015,6 +1015,84 @@
     catch (e) { $("desktop-settings").replaceChildren(el("p", "error", e.message)); }
   }
 
+  // ------------------------------------------------------------ office editor
+  // The ONLYOFFICE editor (web/office.py): Word, Excel and PowerPoint in the browser with their real formatting.
+  // Needs the Document Server set up on the box (deploy/linux/onlyoffice-setup.sh), then this switch.
+  function renderOffice(data) {
+    const box = $("office-settings");                  // the section on Access → Settings
+    box.replaceChildren();
+    fillDatalist("domain-groups", data.groups);
+    box.appendChild(el("p", "muted", "Opens Word, Excel and PowerPoint files in the browser (and the desktop app) " +
+      "with their real formatting. People who may change a file edit it, together if several open it at once; " +
+      "everyone else gets a read-only view. Every save is a new version under Versions, and while a file is open " +
+      "in the editor Claude and the drive can't change it. The free Community edition allows 20 people editing at " +
+      "the same time. Files over " + data.max_mb + " MB aren't opened."));
+    if (!data.configured) {                            // env not set: say how, and stop
+      box.appendChild(el("p", "error", "The Document Server isn't set up on this server: run " +
+        "deploy/linux/onlyoffice-setup.sh install on the box (it sets MNEMERYNNE_ONLYOFFICE_URL and _JWT_SECRET)."));
+      return;
+    }
+    const form = el("form", "ax-new");
+    const label = el("label", "small");
+    const on = el("input");
+    on.type = "checkbox";
+    on.checked = !!data.on;
+    label.append(on, " On");
+    const input = el("input");
+    input.type = "text";
+    input.value = data.group || "";
+    input.placeholder = "No group: everyone";
+    input.setAttribute("list", "domain-groups");
+    input.setAttribute("aria-label", "Office editor group");
+    const save = el("button", "small", "Save");
+    save.type = "submit";
+    const test = el("button", "small soft", "Test connection");
+    test.type = "button";
+    form.append(label, input, save, test);
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      showError("");
+      try { renderOffice(await api("PUT", "/api/admin/settings/office", { on: on.checked, group: input.value.trim() })); }
+      catch (err) { showError(err.message); }
+    });
+    const result = el("p", "muted small");             // Test connection's answer
+    test.addEventListener("click", async function () {
+      result.textContent = "Asking the Document Server…";
+      try {
+        const r = await api("POST", "/api/admin/settings/office/test", {});
+        result.textContent = (r.ok ? "✅ " : "❌ ") + r.detail;
+      } catch (err) { result.textContent = "❌ " + err.message; }
+    });
+    box.append(form, result);
+    box.appendChild(el("p", "muted small", data.on
+      ? "On for: " + (data.enabled ? (data.members.length ? data.members.join(", ") : "nobody yet (no linked account in that group).") : "everyone.")
+      + " Document Server: " + data.url
+      : "Off: Office files show their text only."));
+    if (data.sessions && data.sessions.length) {       // files open in the editor right now
+      box.appendChild(el("p", "small", "Open in the editor now:"));
+      const list = el("ul", "small");
+      data.sessions.forEach(function (sess) {
+        const li = el("li", null, sess.name + " — " + (sess.editing.length ? sess.editing.join(", ") : "opening") +
+          " (since " + sess.opened_at + " UTC) ");
+        const release = el("button", "link small", "Release");
+        release.type = "button";
+        release.title = "Unlock it for Claude and the drive; the editors' next save becomes a copy";
+        release.addEventListener("click", async function () {
+          try { renderOffice(await api("POST", "/api/admin/settings/office/release", { file_id: sess.file_id })); }
+          catch (err) { showError(err.message); }
+        });
+        li.appendChild(release);
+        list.appendChild(li);
+      });
+      box.appendChild(list);
+    }
+  }
+
+  async function loadOffice() {                        // fills the Office editor section when the page opens
+    try { renderOffice(await api("GET", "/api/admin/settings/office")); }
+    catch (e) { $("office-settings").replaceChildren(el("p", "error", e.message)); }
+  }
+
   // --------------------------------------------- mail and calendar for Claude
   function renderClaudeMail(data) {
     const box = $("claude-mail-settings");
@@ -2319,7 +2397,7 @@
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
     if (tab === "settings" && !updatesLoaded) {
-      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeMail(); loadClaudeLinks(); loadChatGPT(); loadExperimental(); loadRooms(); loadAutomations(); loadMedia(); loadBackups(); loadDesktop(); loadDev();
+      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeMail(); loadClaudeLinks(); loadChatGPT(); loadExperimental(); loadRooms(); loadAutomations(); loadMedia(); loadBackups(); loadDesktop(); loadOffice(); loadDev();
       if (window.ErynneM365) window.ErynneM365.load();   // admin_m365.js
       if (window.ErynneTheme) window.ErynneTheme.load();   // admin_theme.js
     }

@@ -1,0 +1,42 @@
+# ONLYOFFICE Docs Community: Office files viewed and edited in the browser (README "ONLYOFFICE").
+# A podman quadlet: onlyoffice-setup.sh installs it as /etc/containers/systemd/mnemerynne-onlyoffice.container,
+# with @HOST@ replaced by the hostname in MNEMERYNNE_PUBLIC_URL, and systemd turns it into
+# mnemerynne-onlyoffice.service. Don't copy it by hand: the script also writes the secret it reads.
+#
+# Who talks to whom:
+#   app on the host  -> http://127.0.0.1:8090/              (MNEMERYNNE_ONLYOFFICE_INTERNAL_URL)
+#   browsers         -> https://@HOST@/onlyoffice/          (the edge nginx, nginx-onlyoffice.conf)
+#   the container    -> https://@HOST@/api/office/ds/...    (downloads the file, posts the save callback)
+
+[Unit]
+Description=ONLYOFFICE Docs for Mnemerynne
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=mnemerynne-onlyoffice
+# Pinned, never :latest. `onlyoffice-setup.sh update <tag>` changes this line in the installed copy.
+Image=docker.io/onlyoffice/documentserver:9.4.0.1
+# Loopback only: nothing off the box reaches the container except through the edge nginx.
+PublishPort=127.0.0.1:8090:80
+# The public hostname resolves to the host itself inside the container, so callbacks don't need hairpin NAT.
+AddHost=@HOST@:host-gateway
+# JWT_ENABLED, JWT_SECRET, JWT_HEADER, ALLOW_PRIVATE_IP_ADDRESS (mode 0600, written by onlyoffice-setup.sh).
+EnvironmentFile=/etc/mnemerynne/onlyoffice.env
+# Everything that should outlive the container; :Z relabels the folders for SELinux (private to this container).
+Volume=/srv/onlyoffice/data:/var/www/onlyoffice/Data:Z
+Volume=/srv/onlyoffice/logs:/var/log/onlyoffice:Z
+Volume=/srv/onlyoffice/lib:/var/lib/onlyoffice:Z
+Volume=/srv/onlyoffice/fonts:/usr/share/fonts/truetype/custom:Z
+# Its own small database of open editing sessions: kept so an update or restart doesn't drop unsaved changes.
+Volume=/srv/onlyoffice/db:/var/lib/postgresql:Z
+# A hard ceiling so a runaway converter can't starve the app (it idles near 2 GB, peaks near 4 GB).
+PodmanArgs=--memory=4g
+
+[Service]
+Restart=always
+# The first start unpacks fonts and builds caches: give it time before systemd calls it failed.
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target
