@@ -189,3 +189,52 @@ public class CurrentVersionTests
     public void The_version_shows_as_written_without_the_commit() =>
         Assert.Matches(@"^\d+\.\d+\.\d+$", AppVersion.Current);   // e.g. "0.2.1" or "0.2.02", never "0.2.1+a1de155…"
 }
+
+/// <summary>Tab groups and tab widths (2026-11-26).</summary>
+public class TabGroupTests
+{
+    [Fact]
+    public void Groups_sit_between_ungrouped_places_and_ungrouped_files()
+    {
+        var tabs = new (TabKind, int?)[]
+        {
+            (TabKind.Document, null),   // 0: an ungrouped file: last
+            (TabKind.Document, 1),      // 1: in the second group
+            (TabKind.Place, null),      // 2: an ungrouped place: first
+            (TabKind.Document, 0),      // 3: in the first group
+            (TabKind.Place, 1),         // 4: a place in the second group: with its group, not with the places
+        };
+        Assert.Equal([2, 3, 1, 4, 0], TabKinds.Ordered(tabs));
+    }
+
+    [Fact]
+    public void Files_get_the_normal_width_and_places_the_compact_one()
+    {
+        Assert.Equal((100.0, 200.0), TabWidths.Fit(2000, 3, 2));
+        var (place, doc) = TabWidths.Fit(500, 3, 2);          // a bit short: the files give way, places stay readable
+        Assert.Equal(100.0, place);
+        Assert.True(doc is < 200 and >= 90);
+        Assert.True(3 * (place + 2) + 2 * (doc + 2) <= 500.001);
+        var (tight, minDoc) = TabWidths.Fit(400, 3, 2);       // files at their minimum: now the places shrink too
+        Assert.Equal(90.0, minDoc);
+        Assert.True(tight < 100 && 3 * (tight + 2) + 2 * (minDoc + 2) <= 400.001);
+        Assert.Equal((64.0, 90.0), TabWidths.Fit(100, 10, 10));   // never below the minimums (then the strip scrolls)
+    }
+
+    [Fact]
+    public void Groups_round_trip_and_unknown_groups_are_dropped()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "tabs.json");
+        var server = new Uri("https://erynne.eternalhotels.com");
+        new TabSession
+        {
+            Tabs = [new SavedTab("https://erynne.eternalhotels.com/files/1/view", "a.md", "g1"),
+                    new SavedTab("https://erynne.eternalhotels.com/files/2/view", "b.md", "gone")],
+            Groups = [new SavedGroup("g1", "Budget", "#FF2E97", Collapsed: true)],
+        }.Save(path);
+        var back = TabSession.Load(path, server);
+        Assert.Equal("g1", back.Tabs[0].Group);
+        Assert.Null(back.Tabs[1].Group);                       // its group isn't there: it's just a tab again
+        Assert.True(Assert.Single(back.Groups).Collapsed);
+    }
+}

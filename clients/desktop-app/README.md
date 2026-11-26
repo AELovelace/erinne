@@ -5,7 +5,10 @@ A native Windows app for Mnemerynne (Erynne):
 - **Tabs.** The site in its own window, with browser-style tabs (Ctrl+T, Ctrl+W, Ctrl+Shift+T, Ctrl+Tab, Ctrl+1..9,
   Alt+←/→, F5, middle-click, drag to reorder). Tabs come back after a restart. Links to the server open as app tabs;
   other sites open in the system browser. Tabs **sort themselves** (`TabKinds.cs`): the site's places first, then
-  opened things (file views, the editor, wiki pages, Help), in one row: 100 px each, shrinking to 64 px to fit.
+  opened things (file views, the editor, wiki pages, Help), in one row. Places are 100 px with the flower; opened
+  things are 200 px without it; opened things shrink first (to 90), then places (to 64) (`TabWidths`).
+- **Tab groups**, like Firefox (`MainWindow.Groups.cs`, `TabGroup.cs`): named, coloured, foldable; grouped tabs sit
+  between the places and the ungrouped opened things (`TabKinds.Ordered`), saved in tabs.json.
   The site's name glitches like the site's brand (cyan and red copies every 7 s; off when Windows' animations are).
 - **One top row, like Edge** (WindowChrome): the site's name (the **pages menu**, read live from the site's own hidden
   top bar, with badges), back/forward/reload, the tabs, the drive's status, **⚙** (servers, settings, drive, sign-in,

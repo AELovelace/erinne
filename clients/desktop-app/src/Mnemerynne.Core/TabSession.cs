@@ -3,13 +3,17 @@ using System.Text.Json;
 namespace Mnemerynne.Core;
 
 /// <summary>One saved tab: where it was. The title comes back from the page when it loads.</summary>
-public sealed record SavedTab(string Url, string? Title = null);
+public sealed record SavedTab(string Url, string? Title = null, string? Group = null);   // Group: a SavedGroup's Id
+
+/// <summary>A tab group (like Firefox's): its name, colour (#rrggbb) and whether it's folded away.</summary>
+public sealed record SavedGroup(string Id, string Name, string Color, bool Collapsed = false);
 
 /// <summary>A profile's open tabs, in order, and which one was showing: written to tabs.json, read at start.</summary>
 public sealed class TabSession
 {
     public List<SavedTab> Tabs { get; set; } = [];
     public int Active { get; set; }
+    public List<SavedGroup> Groups { get; set; } = [];   // in strip order
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
@@ -27,6 +31,9 @@ public sealed class TabSession
                     // Only the server's own pages come back (a broken or edited file can't open anything else).
                     got.Tabs = got.Tabs.Where(t => Uri.TryCreate(t.Url, UriKind.Absolute, out var u) && router.IsServer(u))
                                        .ToList();
+                    got.Groups ??= [];
+                    var known = got.Groups.Select(g => g.Id).ToHashSet();
+                    got.Tabs = got.Tabs.Select(t => t.Group is null || known.Contains(t.Group) ? t : t with { Group = null }).ToList();
                     if (got.Tabs.Count > 0)
                     {
                         got.Active = Math.Clamp(got.Active, 0, got.Tabs.Count - 1);

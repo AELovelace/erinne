@@ -21,12 +21,23 @@ Like Edge, everything is on one row at the top: the site's name, back / forward 
 - **⚙** (right of the drive's status) has the app's own things: which servers you have, **Add a server…**, **Settings…**, opening the drive, **Sign in / Sign out**, **Check for updates**, **About** and **Quit**.
 - The menus and the top row take their colours from the site's theme, so they change with it.
 
-**Tabs sort themselves**: the site's places (Ask, Files, Automator, Wiki…) come first, and opened things (a Markdown file, a spreadsheet, a PDF, the editor, a wiki page, Help) come after them, in the same row. A tab moves on its own when you open a file in it, or go back to a place. Tabs start compact (half the old width) and get narrower as you open more, as in a browser. Like the site's own, the name at the top left glitches now and then (not when Windows' animations are turned off). Tab names leave off the site's name ("Files", not "Files · Mnemerynne").
+**Tabs sort themselves**: the site's places (Ask, Files, Automator, Wiki…) come first, and opened things (a Markdown file, a spreadsheet, a PDF, the editor, a wiki page, Help) come after them, in the same row. A tab moves on its own when you open a file in it, or go back to a place. Place tabs are compact and wear the 🌸 (they're where you work); opened things get a normal-width tab with no flower. As you open more, the opened things narrow first, then the places, as in a browser. Like the site's own, the name at the top left glitches now and then (not when Windows' animations are turned off). Tab names leave off the site's name ("Files", not "Files · Mnemerynne").
 
 - **New tab**: **＋** or **Ctrl+T**. **Close**: **✕**, a middle-click on the tab, or **Ctrl+W**. **Reopen the last closed tab**: **Ctrl+Shift+T**.
 - **Switch**: click a tab, **Ctrl+Tab** / **Ctrl+Shift+Tab**, or **Ctrl+1** … **Ctrl+8** (**Ctrl+9** is the last tab).
 - **Back / forward / reload**: the arrows, **Alt+←** / **Alt+→**, **F5**.
 - **Reorder**: drag a tab along the strip (places among places, opened things among opened things).
+
+### Tab groups
+
+Like Firefox, tabs can be gathered into named, coloured groups, for example everything for one budget or report:
+
+- **Start one**: right-click a tab → **New group with this tab**, and give it a name. Each new group takes the next colour.
+- **Add or take out a tab**: right-click it → **Add to “Budget”** or **Remove from “Budget”**, or drag it onto a group's label.
+- **Fold a group away**: click its label. Its tabs hide (they keep their place and stay open) and the label shows how many there are, e.g. **Budget · 3**. Click again to bring them back. The tab you're on stays visible even in a folded group.
+- **Right-click a label** for **Rename…**, **Colour**, **Ungroup** (the tabs stay open) and **Close group** (closes its tabs; Ctrl+Shift+T brings them back one at a time).
+- A tab a grouped page opens (a file from Files, say) joins the same group.
+- Groups sit together between the places and the ungrouped opened things, and come back with your tabs when the app restarts.
 - Links to this site that would open a new browser tab (Help, **Open** in Files, a wiki page's **Edit**, links in chat) open as a new app tab. **Ctrl+click** or middle-click a link to open it in a new tab yourself.
 - Links to **other sites** open in your normal browser.
 - Your tabs come back when you start the app again.

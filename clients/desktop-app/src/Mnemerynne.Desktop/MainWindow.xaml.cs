@@ -34,7 +34,7 @@ public partial class MainWindow : Window
         Session = session;
         InitializeComponent();
         Resources.MergedDictionaries.Add(_theme);          // every DynamicResource colour in MainWindow.xaml comes from here
-        TabStrip.ItemsSource = _tabs;
+        TabStrip.ItemsSource = _strip;                     // tabs and group labels (MainWindow.Groups.cs)
         Session.Changed += () => Dispatcher.Invoke(RefreshChrome);   // drive status, signed in or out
         Loaded += async (_, _) => await OnLoadedAsync();
         Loaded += (_, _) => _ = GlitchLoopAsync();          // the name glitches now and then, like the site's
@@ -45,7 +45,7 @@ public partial class MainWindow : Window
         RefreshChrome();
         var saved = TabSession.Load(SessionFile, Session.Profile.ServerUri);   // last time's tabs, or the start page
         foreach (var t in saved.Tabs)
-            await AddTabAsync(t.Url, t.Title, activate: false);
+            await AddTabAsync(t.Url, t.Title, activate: false, group: RestoreGroup(saved, t.Group));
         Select(saved.Active);
         if (!Session.Api.SignedIn)
             ShowBanner(BannerKind.SignIn, $"Sign the app in to {Session.Profile.Name} to keep your tabs signed in and use the drive in File Explorer.", "Sign in");
@@ -54,9 +54,14 @@ public partial class MainWindow : Window
 
     // =========================================================================================== tabs
     /// <summary>Open a tab (at the end, or just after the showing one when a page asked for it).</summary>
-    public async Task AddTabAsync(string url, string? title = null, bool activate = true, bool besideActive = false)
+    public async Task AddTabAsync(string url, string? title = null, bool activate = true, bool besideActive = false,
+                                  TabGroup? group = null)
     {
-        var tab = new BrowserTab(Session, url, u => _ = AddTabAsync(u, activate: true, besideActive: true), title);
+        var opener = Current;                              // a page opening a tab: the new one joins the opener's group
+        var tab = new BrowserTab(Session, url, u => _ = AddTabAsync(u, activate: true, besideActive: true), title)
+        {
+            Group = group ?? (besideActive ? opener?.Group : null),
+        };
         tab.NavigationChanged += () => { if (_active >= 0 && _tabs[_active] == tab) RefreshToolbar(); SaveSession(); };
         tab.PageLoaded += () => { if (IsShowing(tab)) _ = RefreshFromPageAsync(); };   // its theme and menu
         tab.PropertyChanged += (_, e) =>
@@ -102,6 +107,7 @@ public partial class MainWindow : Window
             _tabs[i].View.Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;
         }
         var tab = _tabs[index];
+        RebuildStrip();                                    // a tab in a folded group shows while it's the one showing
         Title = tab.Title;                                 // the page's name only (no server name), like its tab
         RefreshToolbar();
         _ = RefreshFromPageAsync();
@@ -134,7 +140,8 @@ public partial class MainWindow : Window
     {
         try
         {
-            new TabSession { Tabs = _tabs.Select(t => t.Save()).ToList(), Active = Math.Max(_active, 0) }.Save(SessionFile);
+            new TabSession { Tabs = _tabs.Select(t => t.Save()).ToList(), Active = Math.Max(_active, 0),
+                             Groups = _groups.Select(g => g.Save()).ToList() }.Save(SessionFile);
         }
         catch (IOException e)
         {
@@ -186,36 +193,6 @@ public partial class MainWindow : Window
 
     /// <summary>The tabs take what room there is (scrolling sideways past that), leaving + and a bit of drag space.</summary>
     private void OnTabAreaSized(object sender, SizeChangedEventArgs e) => FitStrips(e.NewSize.Width);
-
-    private const double TabWidest = 100, TabNarrowest = 64, TabGap = 2;   // half-width tabs (Doll), and their margins
-
-    /// <summary>
-    /// Fit the tabs in the row, as a browser does: they share what's left after + and a bit of drag space, shrinking
-    /// (down to 90 px) before any has to scroll out of sight.
-    /// </summary>
-    private void FitStrips(double width)
-    {
-        if (width <= 0)
-            return;
-        var room = Math.Max(120, width - 48 - 40);                       // 48: the + button, 40: room to drag the window
-        TabStrip.Tag = Math.Clamp(room / Math.Max(1, _tabs.Count) - TabGap, TabNarrowest, TabWidest);   // each tab's Width
-        StripScroller.MaxWidth = room;
-    }
-
-    /// <summary>
-    /// Keep the tabs sorted (TabKinds): the site's places first, then opened things, each kind in its own order. The
-    /// showing tab stays showing wherever it moves.
-    /// </summary>
-    private void Regroup()
-    {
-        var showing = Current;
-        var order = TabKinds.Grouped(_tabs.Select(t => t.Kind).ToList()).Select(i => _tabs[i]).ToList();
-        for (var i = 0; i < order.Count; i++)
-            if (!ReferenceEquals(_tabs[i], order[i]))
-                _tabs.Move(_tabs.IndexOf(order[i]), i);
-        _active = showing is null ? -1 : _tabs.IndexOf(showing);
-        Dispatcher.BeginInvoke(() => FitStrips(TabArea.ActualWidth));   // a tab more or less: widths change
-    }
 
     // ====================================================================================== keyboard
     private void OnKeyDown(object sender, KeyEventArgs e)
@@ -297,8 +274,8 @@ public partial class MainWindow : Window
         var over = (e.OriginalSource as FrameworkElement)?.DataContext as BrowserTab;
         var from = _tabs.IndexOf(tab);
         var to = over is null ? _tabs.Count - 1 : _tabs.IndexOf(over);
-        if (from < 0 || to < 0 || from == to || (over is not null && over.Kind != tab.Kind))
-            return;                                        // a tab moves within its own group only
+        if (from < 0 || to < 0 || from == to || (over is not null && TabKinds.Block(SortKey(over)) != TabKinds.Block(SortKey(tab))))
+            return;                                        // a tab moves within its own block (kind and group) only
         _active = TabMath.AfterMove(from, to, _active);
         _tabs.Move(from, to);
         Regroup();

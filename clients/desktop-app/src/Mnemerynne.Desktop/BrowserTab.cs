@@ -31,11 +31,25 @@ public sealed class BrowserTab : INotifyPropertyChanged
     public ImageSource? Icon { get => _icon; private set => Set(ref _icon, value); }
     public bool Loading { get => _loading; private set => Set(ref _loading, value); }
     private bool _active;
-    public bool Active { get => _active; set => Set(ref _active, value); }
+    public bool Active { get => _active; set => Set(ref _active, value); }   // the showing tab (the strip highlights it)
 
     private TabKind _kind;
-    /// <summary>Which strip it's in: the site's places on the left, opened things on the right (TabKinds.cs).</summary>
-    public TabKind Kind => _kind;   // the showing tab (the strip highlights it)
+    /// <summary>A place (Ask, Files…) or an opened thing (a file, the editor, a wiki page, Help): TabKinds.cs.</summary>
+    public TabKind Kind => _kind;
+
+    /// <summary>
+    /// An opened thing: its tab is full width and has no flower (Doll: the flower marks the places where you
+    /// work, so it stays on every other tab).
+    /// </summary>
+    public bool IsDocument => _kind == TabKind.Document;
+
+    private TabGroup? _group;
+    /// <summary>The tab group it's in (like Firefox's), or none.</summary>
+    public TabGroup? Group { get => _group; set => Set(ref _group, value); }
+
+    private double _tabWidth = TabWidths.Place;
+    /// <summary>Its width in the strip (MainWindow.FitStrips: places compact, opened things normal, both shrinking).</summary>
+    public double TabWidth { get => _tabWidth; set => Set(ref _tabWidth, value); }
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public event Action? NavigationChanged;               // back/forward need redrawing
@@ -77,6 +91,7 @@ public sealed class BrowserTab : INotifyPropertyChanged
             {
                 _kind = kind;
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Kind)));   // the window moves it
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsDocument)));   // its flower and width
             }
         };
         web.Navigate(_startUrl);
@@ -214,7 +229,7 @@ public sealed class BrowserTab : INotifyPropertyChanged
         }
     }
 
-    public SavedTab Save() => new(Url, Title);
+    public SavedTab Save() => new(Url, Title, Group?.Id);
 
     public void Close()
     {
