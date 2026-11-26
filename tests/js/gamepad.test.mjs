@@ -132,3 +132,51 @@ test("an unplugged pad stops walking", () => {
   state.pads = []; poller.poll(16);
   assert.deepEqual(walks, [["pad:1", 1, 0], ["pad:1", 0, 0]]);
 });
+
+// A Mayflash MAGIC-S PRO in Switch mode, as Firefox on Windows reported it (python/pad_probe.py, 2026-11-25):
+// mapping "", buttons Y B A X L R ZL ZR - + LS RS Home Capture, and the D-pad a hat on axis 9 (1.286 at rest).
+function magic(pressed, hat) {
+  const buttons = Array.from({ length: 14 }, (_, n) => ({ pressed: pressed.includes(n), touched: pressed.includes(n), value: pressed.includes(n) ? 1 : 0 }));
+  return { id: "20d6-a710-Controller", index: 0, connected: true, mapping: "", buttons,
+    axes: [0.004, 0.004, 0.004, 0, 0, 0.004, 0, 0, 0, hat === undefined ? 1.286 : hat] };
+}
+const held = (p) => p.buttons.map((b, i) => (b.pressed ? i : -1)).filter((i) => i >= 0);
+
+test("the MAGIC-S PRO's buttons come out by place, as a standard pad", () => {
+  // raw (what the probe saw) -> standard: B 1 -> 0, A 2 -> 1, Y 0 -> 2, X 3 -> 3, L/R 4/5, Select 8, Start 9, Home 12 -> 16
+  for (const [raw, std] of [[1, 0], [2, 1], [0, 2], [3, 3], [4, 4], [5, 5], [8, 8], [9, 9], [12, 16]]) {
+    const out = P.remap(magic([raw]));
+    assert.equal(out.mapping, "standard");
+    assert.deepEqual(held(out), [std], `raw ${raw}`);
+  }
+  assert.deepEqual(P.remap(magic([])).axes, [0.004, 0.004, 0.004, 0.004]);   // left stick, then the right (Z, Rz)
+});
+
+test("its hat is the D-pad: the probe's four directions, diagonals, and let go", () => {
+  for (const [v, std] of [[-1, [12]], [0.143, [13]], [0.714, [14]], [-0.429, [15]], [-0.714, [12, 15]], [1, [12, 14]], [1.286, []]]) {
+    assert.deepEqual(held(P.remap(magic([], v))), std, `hat ${v}`);
+  }
+});
+
+test("standard pads and pads it doesn't know are left as they come; ids from either browser", () => {
+  const std = { ...magic([1]), mapping: "standard" };
+  assert.equal(P.remap(std), std);
+  const other = { ...magic([1]), id: "dead-beef-Something" };
+  assert.equal(P.remap(other), other);
+  assert.equal(P.padKind("20d6-a710-MAGIC-S PRO"), "20d6:a710");
+  assert.equal(P.padKind("MAGIC-S PRO (Vendor: 20d6 Product: a710)"), "20d6:a710");   // Chrome
+  assert.equal(P.padKind("f0d-c1-HORIPAD S"), "0f0d:00c1");                         // Firefox drops leading zeros
+});
+
+test("wrapping getGamepads hands every reader the standard copy, once", () => {
+  const nav = { getGamepads: () => [magic([2], 0.143), null] };
+  assert.equal(P.install(nav), true);
+  assert.equal(P.install(nav), false);                                              // never wrapped twice
+  const [first, empty] = nav.getGamepads();
+  assert.equal(empty, null);
+  assert.deepEqual(held(first), [1, 13]);                                           // A (right) and D-pad down
+  const said = [];                                                                  // the menus' poller: the right button is back (by place), and down
+  const poller = P.create(() => nav.getGamepads(), (action) => said.push(action));
+  poller.poll(0);
+  assert.deepEqual(said.sort(), ["back", "down"]);
+});

@@ -366,6 +366,8 @@ A TV run by a Mnemerynne TV box can pair **Xbox One (Bluetooth) and PlayStation 
 
 Only game controllers show up or pair there: never a keyboard, a mouse or a phone. The next time you turn the controller on (its middle button), it connects by itself. **Forget** (press it twice) unpairs one. The box needs Bluetooth: if it has none, the page says so, and a small USB Bluetooth adapter adds it. An Xbox controller that won't connect may need its firmware updated once, from an Xbox or the Xbox Accessories app on Windows.
 
+**Plugged-in controllers and adapters:** a USB controller, or an adapter for an older pad (like a **Super Nintendo pad on a Mayflash MAGIC-S PRO**), works when it's plugged into the box, with no pairing. Its buttons go **by place**: the bottom button is OK (a SNES pad's **B**), the right one is back (**A**), and the D-pad moves. A Mayflash MAGIC-S PRO in **Switch mode**, and PowerA and HORIPAD Switch pads, are set up by the box itself. If you've just updated the box, unplug the pad and plug it back in once. If another adapter's buttons come out in the wrong places, try its **X-input** (Xbox 360) mode.
+
 **On the TV,** a controller works like the box's own keyboard:
 
 | Button | What it does |

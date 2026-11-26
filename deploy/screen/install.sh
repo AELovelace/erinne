@@ -57,6 +57,8 @@ WIFI_UNIT=$ROOT/etc/systemd/system/mnemerynne-screen-wifi.service
 WIFI_DNS=$ROOT/etc/NetworkManager/dnsmasq-shared.d/mnemerynne-screen.conf
 BT_CONF=$ROOT/etc/bluetooth/main.conf          # BlueZ's settings: a few set for Bluetooth LE Xbox pads
 BT_RESTART=0                                    # 1 when BT_CONF changed: bluetoothd reads it only at start
+PAD_HWDB=$ROOT/etc/udev/hwdb.d/70-mnemerynne-pads.hwdb   # odd USB controllers' buttons renumbered (render_pad_hwdb)
+PAD_HWDB_NEW=0                                  # 1 when PAD_HWDB changed: udev's database is rebuilt
 HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 WIFI_SOURCE=$HERE/wifi-setup.py
 SOURCE_DIR=$ROOT/opt/mnemerynne-screen          # the box's own copy of the repository (the updater's)
@@ -541,6 +543,40 @@ render_bluetooth_conf() {
         }'
 }
 
+# Switch-style wired controllers (the Mayflash MAGIC-S PRO in Switch mode is 20d6:a710, as PowerA's pads; HORIPAD
+# 0f0d:00c1). Their HID buttons are Y B A X L R ZL ZR - + LS RS Home Capture, and Linux's hid-generic numbers a
+# gamepad's buttons from BTN_SOUTH in that order: Y became "south", A the unused BTN_C, Start BTN_TR2. Firefox maps an
+# evdev pad by what each code means, so the TV page got Y for the bottom button and no A at all. This renumbers each
+# HID button (scancode 0x9000n = button n) to the code for where it sits, so Firefox hands out the standard layout:
+# bottom (B) 0, right (A) 1, left (Y) 2, top (X) 3. The right stick (Z, Rz; a SNES pad has none) rests at 128 and
+# Firefox reads those axes as the triggers: from 128 up, so resting is "not pressed". Values are evdev codes in hex.
+render_pad_hwdb() {
+    cat <<'EOF'
+# The Mnemerynne screen (deploy/screen/install.sh, render_pad_hwdb): Switch-style wired controllers' buttons, by place.
+evdev:input:b0003v20D6pA710*
+evdev:input:b0003v20D6pA711*
+evdev:input:b0003v0F0Dp00C1*
+ KEYBOARD_KEY_90001=0x134
+ KEYBOARD_KEY_90002=0x130
+ KEYBOARD_KEY_90003=0x131
+ KEYBOARD_KEY_90004=0x133
+ KEYBOARD_KEY_90005=0x136
+ KEYBOARD_KEY_90006=0x137
+ KEYBOARD_KEY_90007=0x138
+ KEYBOARD_KEY_90008=0x139
+ KEYBOARD_KEY_90009=0x13a
+ KEYBOARD_KEY_9000a=0x13b
+ KEYBOARD_KEY_9000b=0x13d
+ KEYBOARD_KEY_9000c=0x13e
+ KEYBOARD_KEY_9000d=0x13c
+ KEYBOARD_KEY_9000e=0x132
+ EVDEV_ABS_02=128:255
+ EVDEV_ABS_05=128:255
+EOF
+}
+# (Y=btn_west 0x134, B=btn_south 0x130, A=btn_east 0x131, X=btn_north 0x133, L/R=btn_tl/tr, ZL/ZR=btn_tl2/tr2,
+#  -/+ = btn_select/start, LS/RS=btn_thumbl/thumbr, Home=btn_mode, Capture=btn_c (nothing reads it).)
+
 render_dnf_automatic() {
     cat <<'EOF'
 # The Mnemerynne screen (deploy/screen/install.sh): install updates nightly, rebooting when one needs it.
@@ -606,6 +642,11 @@ write_files() {
     if [[ $bt_new != "$bt_old" ]]; then
         printf '%s\n' "$bt_new" | put 0644 "$BT_CONF"
         BT_RESTART=1
+    fi
+    # Odd USB controllers' buttons, by place (render_pad_hwdb); udev's database is rebuilt only if it changed.
+    if [[ $(render_pad_hwdb) != "$(cat -- "$PAD_HWDB" 2>/dev/null || true)" ]]; then
+        render_pad_hwdb | put 0644 "$PAD_HWDB"
+        PAD_HWDB_NEW=1
     fi
     if [[ $WIFI_SETUP == 1 ]]; then
         render_wifi_dns | put 0644 "$WIFI_DNS"
@@ -694,6 +735,10 @@ enable_service() {
     if [[ $BT_RESTART == 1 ]]; then
         sys restorecon "$BT_CONF"
         sys systemctl restart bluetooth.service          # bluetoothd reads main.conf only when it starts
+    fi
+    if [[ $PAD_HWDB_NEW == 1 ]]; then
+        sys systemd-hwdb update                          # udev reads hwdb.d only through its compiled database
+        sys udevadm trigger --subsystem-match=input --action=change   # a controller already plugged in gets it now
     fi
     sys systemctl enable mnemerynne-screen-wifi.service
     sys systemctl restart mnemerynne-screen-wifi.service
@@ -785,6 +830,11 @@ check() {
         ok "Bluetooth, $(timeout "$LIMIT" bluetoothctl devices Paired 2>/dev/null | grep -c '^Device') paired (🎮 Controllers on the TV)"
     else
         note "no Bluetooth adapter (or Bluetooth isn't running): game controllers need one (a small USB Bluetooth adapter works)"
+    fi
+    if [[ $(render_pad_hwdb) == "$(cat -- "$PAD_HWDB" 2>/dev/null || true)" ]]; then
+        ok "Switch-style USB controllers (Mayflash MAGIC-S PRO, PowerA, HORIPAD) play by place"
+    else
+        bad "Switch-style USB controllers would play with their buttons mixed up: run install.sh again"
     fi
     if [[ -d $SOURCE_DIR/.git ]]; then
         ok "release $(git -C "$SOURCE_DIR" describe --tags --always --match 'screen-v*' HEAD 2>/dev/null) ($SOURCE_DIR)"

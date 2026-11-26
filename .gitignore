@@ -30,3 +30,4 @@ clients/claude-desktop/ca.pem
 clients/desktop-sync/dist/mnemerynne-backup
 clients/desktop-sync/packaging/build/
 clients/desktop-sync/.build-venv/
+python/pad_probe_log.jsonl

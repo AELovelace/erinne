@@ -59,15 +59,6 @@ class FakeBluetoothctl:
             for address in self.nearby:
                 self.devices[address]["RSSI"] = "-52"      # heard advertising in this scan
             return 0, "Discovery started\n", ""
-        if cmd == "pair":
-            if not self.pair_ok:
-                return 1, "", "Failed to pair: org.bluez.Error.AuthenticationFailed"
-            if self.pair_silent:
-                return 0, "", ""
-            self.devices[rest[1]]["Paired"] = "yes"
-            if self.pair_connects:
-                self.devices[rest[1]]["Connected"] = "yes"
-            return 0, "Pairing successful\n", ""
         if cmd == "trust":
             return 0, "trust succeeded\n", ""
         if cmd == "connect":
@@ -77,6 +68,35 @@ class FakeBluetoothctl:
             self.devices.pop(rest[1], None)
             return 0, "Device has been removed\n", ""
         raise AssertionError(args)
+
+    def pair(self, address):
+        """`pair` inside the interactive session: what BlueZ answers, given this world."""
+        if not self.pair_ok:
+            return f"Attempting to pair with {address}\nFailed to pair: org.bluez.Error.AuthenticationFailed\n"
+        if self.pair_silent:
+            return ""                                  # nothing heard back before the step ran out
+        self.devices[address]["Paired"] = "yes"
+        if self.pair_connects:
+            self.devices[address]["Connected"] = "yes"
+        return f"Attempting to pair with {address}\n[CHG] Device {address} Paired: yes\nPairing successful\n"
+
+    def interact(self, args, script, timeout=60):
+        """An interactive bluetoothctl (run_interactive), recorded flat: [bluetoothctl, session, agent,
+        NoInputNoOutput, default-agent, pair, AA:..]. As in BlueZ, pairing fails without a default agent set up."""
+        assert args == ["bluetoothctl"]
+        lines = [line for line, _ in script]
+        self.calls.append(["bluetoothctl", "session", *[w for line in lines for w in line.split()]])
+        out, agent = "", False
+        for line in lines:
+            if line == "agent NoInputNoOutput":
+                out += "Agent registered\n"
+            elif line == "default-agent":
+                agent = "Agent registered" in out
+                out += "Default agent request successful\n" if agent else "No agent is registered\n"
+            elif line.startswith("pair "):
+                out += self.pair(line.split()[1]) if agent else \
+                    "Failed to pair: org.bluez.Error.AuthenticationFailed\n"   # BlueZ's confirm step, nobody to ask
+        return 0, out, ""
 
 
 class FakeServer:
@@ -96,7 +116,7 @@ class FakeServer:
 def pads(box):
     nm, clock, setup, events = box
     bt, server = FakeBluetoothctl(), FakeServer()
-    c = ws.Controllers(setup, ws.Bluetooth(run=bt, spawn=lambda fn: fn(), sleep=lambda s: None), http=server, clock=clock,
+    c = ws.Controllers(setup, ws.Bluetooth(run=bt, interact=bt.interact, spawn=lambda fn: fn(), sleep=lambda s: None), http=server, clock=clock,
                        thread=lambda fn: fn())   # threads run inline, and nothing really waits
     return c, bt, server, clock, setup
 
@@ -150,7 +170,8 @@ def test_find_pair_and_forget(pads):
     assert bt.devices[SONY]["Paired"] == "yes" and bt.devices[SONY]["Connected"] == "yes"
     assert ["bluetoothctl", "trust", SONY] in bt.calls
     pair_call = next(call for call in bt.calls if "pair" in call)
-    assert pair_call[1:3] == ["--agent", "NoInputNoOutput"]                   # no PIN: Just Works
+    # no PIN (Just Works), inside one bluetoothctl whose agent is the default: one-shot `--agent` registers none
+    assert pair_call[1:5] == ["session", "agent", "NoInputNoOutput", "default-agent"]
     c.forget(token, SONY)
     assert SONY not in bt.devices
 
@@ -193,7 +214,7 @@ def test_pairing_scans_alongside_like_doll_os(pads):
     bt.devices.update({SONY: dict(bt.nearby[SONY])})                         # listed by an earlier Find, not heard now
     bt.pair_connects = True
     c.pair(token, SONY)
-    names = [next(a for a in call[1:] if not a.startswith("-") and not a.isdigit() and a != "NoInputNoOutput")
+    names = ["pair" if "pair" in call else next(a for a in call[1:] if not a.startswith("-") and not a.isdigit())
              for call in bt.calls]
     assert names.index("scan") < names.index("pair")                          # the scan runs first and alongside
     assert bt.devices[SONY]["Paired"] == "yes" and bt.devices[SONY]["Connected"] == "yes"
@@ -318,3 +339,44 @@ def test_the_tv_page_asks_across_origins_and_nobody_else(pads, box):
 def test_the_box_pages_take_a_controller():
     for page in (ws.START_PAGE, ws.WIFI_PAGE, ws.SETTINGS_PAGE):
         assert page.count(ws.PAD_SCRIPT) == 1 and page.rstrip().endswith("</body></html>")
+
+
+def test_run_interactive_keeps_input_open_and_answers_the_agent(tmp_path):
+    """run_interactive against a real program shaped like bluetoothctl: it drops a pairing if its input ends early
+    (bluetoothctl quits at end of input), and asks the agent's "(yes/no)" with no newline. The pairing finishes
+    only because stdin stays open and the question is answered yes."""
+    import sys
+    prog = tmp_path / "fakectl.py"
+    prog.write_text(r"""import sys
+out = sys.stdout
+while True:
+    cmd = sys.stdin.readline().split()          # bluetoothctl quits at end of input, whatever it was doing
+    if not cmd:
+        break
+    if cmd[0] == 'agent': out.write('\x1b[0;94mAgent registered\x1b[0m\n')
+    elif cmd[0] == 'default-agent': out.write('Default agent request successful\n')
+    elif cmd[0] == 'pair':
+        out.write('Attempting to pair with ' + cmd[1] + '\n[agent] Authorize service 1812 (yes/no): '); out.flush()
+        answer = sys.stdin.readline().strip()
+        out.write(('Pairing successful' if answer == 'yes' else 'Failed to pair: org.bluez.Error.Rejected') + '\n')
+    elif cmd[0] == 'quit': break
+    out.flush()
+""", encoding="utf-8")
+    code, out, _ = ws.run_interactive([sys.executable, "-u", str(prog)], [
+        ("agent NoInputNoOutput", r"Agent registered"),
+        ("default-agent", r"Default agent request"),
+        ("pair AA:BB:CC:00:00:02", r"Pairing successful|Failed to pair"),
+    ], timeout=20)
+    assert code == 0 and "Pairing successful" in out
+    assert "\x1b" not in out                                                  # colours stripped
+
+
+def test_pairing_without_an_agent_is_what_failed():
+    """The bug behind AuthenticationFailed on every chipset: the old one-shot `bluetoothctl --agent X pair` set up
+    no agent. The fake fails a pair with no default agent, as BlueZ does; the box's pairing always sets one up."""
+    bt = FakeBluetoothctl()
+    bt.devices.update(bt.nearby)
+    _, out, _ = bt.interact(["bluetoothctl"], [("pair " + SONY, "")])
+    assert "AuthenticationFailed" in out                                      # no agent: refused
+    said = ws.Bluetooth(run=bt, interact=bt.interact, spawn=lambda fn: None, sleep=lambda s: None).agent_pair(SONY)
+    assert said.startswith("Attempting to pair") and said.endswith("Pairing successful")

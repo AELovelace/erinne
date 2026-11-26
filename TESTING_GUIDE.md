@@ -336,7 +336,7 @@ Every dungeon place now has a decor set: one piece for each of the 15 house spot
   - couch turns' `/tv/player`: a TV guest's OK names her and her Lumi, while a stale or forged proof, a non-OK press, or a browser that isn't a TV is refused.
 - **Node:**
   - `tests/js/lumi_launch.test.mjs` replays the same file and re-plays the bot's goes. It checks the rules use no `Math.sin`/`sqrt`/random, and tests the needle, the power bar, puffs and stardust, every course piece, bouncing, and the launch's time limit.
-  - `tests/js/gamepad.test.mjs` covers the gamepad helper with a pretend `getGamepads`: the button map, held directions repeating while OK doesn't, the stick, two pads, an unplugged pad letting go, and a browser without the API.
+  - `tests/js/gamepad.test.mjs` covers the gamepad helper with a pretend `getGamepads`: the button map, held directions repeating while OK doesn't, the stick, two pads, an unplugged pad letting go, and a browser without the API. It also covers the odd-controller remap from real probe readings (a Mayflash MAGIC-S PRO in Switch mode: buttons by place, the hat as the D-pad, ids from Firefox and Chrome, and `navigator.getGamepads` wrapped once). `python python/pad_probe.py` measures another adapter in a real browser.
   - `tests/js/lumi_town.test.mjs` checks the Arcade's five cabinets stand snug, clear of the panels.
 - **After any rules change, run `node tests/js/lumi_launch_bot.mjs` to re-record**, then both suites. After changing the angles' range, run `python python/make_lumi_launch_tables.py`.
 - **Chrome:** `tests/lumi-launch-browser.mjs` (`LUMI_LAUNCH_ONLY=1 node tests/connected-browser.mjs`; it also runs last in the full suite). It:

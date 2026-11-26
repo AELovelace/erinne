@@ -238,6 +238,15 @@ from [xpadneo's troubleshooting guide](https://github.com/atar-axis/xpadneo/blob
 `ControllerMode = dual`, and `[LE]` connection intervals 7-9 with latency 0 (the pad's 100 Hz reports, no lag). It counts as paired only when BlueZ says so:
 `bluetoothctl pair --timeout` exits 0 having printed nothing when it gives up, which 0.4.0 took for a pairing.
 
+**The agent (0.4.8).** Up to 0.4.7 every LE pad still failed with `AuthenticationFailed`, on a CSR clone and on a good
+chipset alike. The cause was ours: the pairing ran `bluetoothctl --agent NoInputNoOutput pair <pad>` as a one-shot
+command, and bluetoothctl registers no agent in one-shot mode (client/main.c skips it when a command is given).
+Bluetooth LE Secure Connections "Just Works" pairing always asks user space to confirm, and with no agent anywhere
+BlueZ's `device_confirm_passkey` fails ("No agent available") before it gets to its own auto-accept, so the pad hears
+a refusal. Since 0.4.8 each attempt runs inside one interactive bluetoothctl (`run_interactive` in the helper):
+`agent NoInputNoOutput`, `default-agent`, then `pair`, with its input kept open until BlueZ answers (bluetoothctl
+quits at end of input and drops a pairing in progress). Any `(yes/no)` question from the agent is answered yes.
+
 A paired controller is the box's own input, like its keyboard: the D-pad moves, A presses, B goes back, Start plays
 and pauses, the Xbox / PS button goes home. It also works on the start page and in Kiosk settings. In Retro and Lumi
 Launch the game reads it directly.
@@ -245,11 +254,22 @@ Launch the game reads it directly.
 The drivers are the kernel's own (`hid-playstation` for the DualSense, `hid-microsoft` for Xbox over Bluetooth).
 - An Xbox controller that won't connect usually needs a firmware update once, from an Xbox or the Xbox Accessories
   app on Windows.
-- A Bluetooth LE Xbox pad that always fails with `(BlueZ: AuthenticationFailed)`, even with `privacy` in
-  `sudo btmgmt info`'s current settings, usually means the box's adapter can't do LE pairing. The cheap "CSR"
-  dongles (`lsusb`: `0a12:0001`) are mostly clones like that. Use a Realtek RTL8761B dongle, or an **xb2pc**
+- A Bluetooth LE Xbox pad that still fails with `(BlueZ: AuthenticationFailed)` on 0.4.8 or later (earlier releases
+  failed that way on every adapter: see *The agent* above) may be on an adapter that can't do LE pairing. The cheap
+  "CSR" dongles (`lsusb`: `0a12:0001`) are mostly clones like that. Use a Realtek RTL8761B dongle, or an **xb2pc**
   (an ESP32-S3 sketch that pairs the pad itself and plugs in as a USB gamepad, laid out like a wired Xbox 360 pad).
   A pad on an xb2pc doesn't appear in 🔗 Controllers, since the box only sees a USB gamepad.
+- **USB controllers and adapters** plugged into the box work too, as the box's own input and in Retro. One whose
+  buttons come out in the wrong places needs its layout known. **Switch-style wired pads** (a **Mayflash MAGIC-S
+  PRO** in Switch mode, `lsusb` `20d6:a710`; PowerA `20d6:a711`; HORIPAD `0f0d:00c1`) are known. Linux's
+  hid-generic numbered their buttons Y B A X ... from "south", so the TV saw Y as the bottom button and no A at all.
+  `install.sh` writes `/etc/udev/hwdb.d/70-mnemerynne-pads.hwdb`, which gives each button the code for where it sits
+  (B bottom, A right, Y left, X top, - Select, + Start) and rebuilds udev's database when it changes. `--check` says
+  whether it's in place. **Unplug the pad and plug it back in** (or restart the box) afterwards: Firefox reads a
+  controller's buttons when it first sees it. The same pads in a browser on a PC are put right by the pages
+  themselves (`games/gamepad.js`). Another adapter: `python python/pad_probe.py` on a PC shows how the browser
+  numbers it, and `python python/hid_caps.py <vid> <pid>` (Windows) lists what it declares. Or switch the adapter
+  to its **X-input** (Xbox 360) mode, which every browser knows.
 - **No Bluetooth adapter** (many 3rd-generation NUCs): the page says so; a small USB Bluetooth adapter adds one.
 - Over SSH: `bluetoothctl devices Paired` lists them, and `journalctl -u mnemerynne-screen-wifi -b` shows why a
   pairing failed.

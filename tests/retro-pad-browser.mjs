@@ -46,7 +46,12 @@ try {
     const buttons = Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 }));
     window.testPad = { id: "xb2pc Xbox pad", index: 0, connected: true, mapping: "standard", timestamp: 0,
       axes: [0, 0, 0, 0], buttons };
-    navigator.getGamepads = () => [window.testPad, null, null, null];
+    // And a pad the browser doesn't map, as Firefox gave Doll's Mayflash MAGIC-S PRO in Switch mode (python/pad_probe.py,
+    // 2026-11-25): mapping "", buttons Y B A X L R ZL ZR - + LS RS Home Capture, the D-pad a hat on axis 9 (1.286 = let go).
+    window.magicPad = { id: "20d6-a710-MAGIC-S PRO", index: 1, connected: true, mapping: "", timestamp: 0,
+      axes: [0, 0, 0, 0, 0, 0, 0, 0, 0, 1.286],
+      buttons: Array.from({ length: 14 }, () => ({ pressed: false, touched: false, value: 0 })) };
+    navigator.getGamepads = () => [window.testPad, window.magicPad, null, null];
   });
   await page.goto(base + "/login");
   await page.evaluate(async () => { // the real session sign-in
@@ -119,8 +124,32 @@ try {
   await page.waitForFunction(() => (window.EJS_emulator_for_tests.gamepadSelection || [])[0] === "xb2pc Xbox pad_0",
     { timeout: 5000 });
   assert.deepEqual(await tap(1), [8], "and the right button is A again after a reload");
+
+  // The MAGIC-S PRO (games/gamepad.js makes it standard): player 2, its raw A (2) is the NES's A, its raw B (1) the
+  // NES's B, raw + (9) is Start, and its hat is the D-pad (down = EmulatorJS input 5, left = 6).
+  await page.waitForFunction(() => (window.EJS_emulator_for_tests.gamepadSelection || [])[1] === "20d6-a710-MAGIC-S PRO_1",
+    { timeout: 5000 }).catch(() => {});
+  const seats2 = await page.evaluate(() => window.EJS_emulator_for_tests.gamepadSelection);
+  assert.equal(seats2[1], "20d6-a710-MAGIC-S PRO_1", "the MAGIC-S PRO is player 2: " + JSON.stringify(seats2));
+  const magic = async (change) => page.evaluate(async c => {
+    const emu = window.EJS_emulator_for_tests, calls = [], pad = window.magicPad;
+    const real = emu.gameManager.simulateInput.bind(emu.gameManager);
+    emu.gameManager.simulateInput = (player, input, value) => { calls.push([player, input, value]); return real(player, input, value); };
+    if (c.button !== undefined) pad.buttons[c.button] = { pressed: true, touched: true, value: 1 }; else pad.axes[9] = c.hat;
+    await new Promise(r => setTimeout(r, 200));
+    if (c.button !== undefined) pad.buttons[c.button] = { pressed: false, touched: false, value: 0 }; else pad.axes[9] = 1.286;
+    await new Promise(r => setTimeout(r, 200));
+    emu.gameManager.simulateInput = real;
+    return calls.filter(x => x[2] === 1).map(x => [x[0], x[1]]);
+  }, change);
+  assert.deepEqual(await magic({ button: 2 }), [[1, 8]], "the MAGIC-S PRO's A is player 2's A");
+  assert.deepEqual(await magic({ button: 1 }), [[1, 0]], "its B is player 2's B");
+  assert.deepEqual(await magic({ button: 9 }), [[1, 3]], "its + is Start");
+  assert.deepEqual(await magic({ hat: 0.143 }), [[1, 5]], "its hat down is the D-pad's down");
+  assert.deepEqual(await magic({ hat: 0.714 }), [[1, 6]], "its hat left is the D-pad's left");
   assert.deepEqual(errors, [], "no page errors");
-  console.log("ok: a controller connected before the game loaded plays as player 1, Nintendo buttons by place");
+  console.log("ok: a controller connected before the game loaded plays as player 1, Nintendo buttons by place;"
+    + " a Mayflash MAGIC-S PRO in Switch mode plays as player 2, by place, with its hat as the D-pad");
 } catch (err) {
   console.error(err);
   process.exitCode = 1;

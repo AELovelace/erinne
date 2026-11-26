@@ -318,6 +318,23 @@ def test_bluez_is_set_up_for_bluetooth_le_xbox_pads(tmp_path):
     assert conf.count("Privacy = device") == 1 and conf.count("# Mnemerynne screen") == 2
 
 
+def test_switch_style_usb_pads_are_renumbered_by_place(tmp_path):
+    """Doll's Mayflash MAGIC-S PRO (Switch mode, 20d6:a710) played Y as the bottom button and had no A on the TV:
+    hid-generic numbers its HID buttons Y B A X ... from BTN_SOUTH. install.sh writes a udev hwdb entry giving each
+    HID button (scancode 0x9000n) the evdev code for where it sits, and rebuilds udev's database only when it changed."""
+    root = _root(tmp_path)
+    out = run("https://erynne.example.com", "--no-packages", root=root).stdout
+    hwdb = (root / "etc" / "udev" / "hwdb.d" / "70-mnemerynne-pads.hwdb").read_text()
+    assert "evdev:input:b0003v20D6pA710*" in hwdb
+    keys = dict(line.strip().split("=") for line in hwdb.splitlines() if line.startswith(" KEYBOARD_KEY_"))
+    assert keys["KEYBOARD_KEY_90002"] == "0x130" and keys["KEYBOARD_KEY_90003"] == "0x131"   # B bottom, A right
+    assert keys["KEYBOARD_KEY_90001"] == "0x134" and keys["KEYBOARD_KEY_90004"] == "0x133"   # Y left, X top
+    assert keys["KEYBOARD_KEY_9000a"] == "0x13b" and len(set(keys.values())) == len(keys)    # + is Start; no two alike
+    assert "systemd-hwdb update" in out and "udevadm trigger" in out
+    out = run("--keep-options", "--no-packages", root=root).stdout                               # again: no change
+    assert "systemd-hwdb update" not in out
+
+
 def _git(cwd, *args):
     return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=True).stdout.strip()
 

@@ -79,7 +79,7 @@ Any letter case works. A PlayStation BIOS also helps `.cue` and `.pbp` games: wi
 
 Press a game, then **▶ Start**, or **▶ Continue** to carry on from your last visit.
 
-- **Controls:** a keyboard, or any game controller the browser sees, such as an Xbox, PlayStation or Switch pad. The emulator's **🎮** button, at the bottom of the game, shows and changes the keys for that console. On a phone, buttons appear on the screen.
+- **Controls:** a keyboard, or any game controller the browser sees, such as an Xbox, PlayStation or Switch pad, or a Super Nintendo pad on a Mayflash MAGIC-S PRO (in Switch mode its buttons and D-pad are put the right way round for you). The emulator's **🎮** button, at the bottom of the game, shows and changes the keys for that console. On a phone, buttons appear on the screen.
 - **⛶** fills the screen.
 - The emulator's own bar at the bottom has pause, restart, volume, settings and cheats.
 

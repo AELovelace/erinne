@@ -487,6 +487,69 @@ def run_cmd(args: list[str], timeout: int = 60) -> tuple[int, str, str]:
         return 1, "", str(exc)
 
 
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x01|\x02|\r")   # bluetoothctl's colours and readline's markers
+
+
+def run_interactive(args: list[str], script: list[tuple[str, str]], timeout: int = 60) -> tuple[int, str, str]:
+    """Drive an interactive program (bluetoothctl) through `script`: each (line, until) sends the line, then waits
+    until its output since that line matches the regex `until` (or the step's share of `timeout` runs out). Any
+    "(yes/no)" question it asks on the way is answered yes. Stdin stays open throughout, because bluetoothctl
+    quits at end of input and drops whatever it was doing. Returns (0, all output without colours, "")."""
+    try:
+        p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
+    except OSError as exc:
+        return 1, "", str(exc)
+    chunks: list[bytes] = []
+    lock = threading.Lock()
+
+    def read() -> None:                                       # the program's output, as it comes (prompts have no newline)
+        while True:
+            try:
+                data = os.read(p.stdout.fileno(), 4096)
+            except OSError:
+                return
+            if not data:
+                return
+            with lock:
+                chunks.append(data)
+
+    def text() -> str:
+        with lock:
+            return ANSI_RE.sub("", b"".join(chunks).decode("utf-8", "replace"))
+
+    def send(line: str) -> None:
+        try:
+            p.stdin.write((line + "\n").encode())
+            p.stdin.flush()
+        except OSError:
+            pass
+
+    threading.Thread(target=read, daemon=True).start()
+    deadline = time.monotonic() + timeout
+    answered = 0
+    try:
+        for line, until in script:
+            start = len(text())
+            send(line)
+            while time.monotonic() < deadline and p.poll() is None:
+                out = text()
+                asked = out.count("(yes/no)")
+                while answered < asked:                       # an agent question (Authorize service, Confirm passkey)
+                    send("yes")
+                    answered += 1
+                if re.search(until, out[start:]):
+                    break
+                time.sleep(0.1)
+    finally:
+        send("quit")
+        try:
+            p.stdin.close()
+            p.wait(timeout=3)
+        except (OSError, subprocess.TimeoutExpired):
+            p.kill()
+    return 0, text(), ""
+
+
 def set_conf_value(path: str, key: str, value: str) -> None:
     """One KEY=value line of the settings file changed (or added), the rest kept; written atomically."""
     try:
@@ -1032,8 +1095,9 @@ def pad_kind(name: str) -> str:
 class Bluetooth:
     """BlueZ through bluetoothctl (no D-Bus bindings on the box: stdlib only). `run` is injectable for tests."""
 
-    def __init__(self, run=None, *, spawn=None, sleep=time.sleep) -> None:
+    def __init__(self, run=None, *, interact=None, spawn=None, sleep=time.sleep) -> None:
         self.run = run or run_cmd
+        self.interact = interact or run_interactive      # bluetoothctl kept open, for pairing with an agent
         self.spawn = spawn or (lambda fn: threading.Thread(target=fn, daemon=True).start())   # the scan beside a pair
         self.sleep = sleep
 
@@ -1070,7 +1134,12 @@ class Bluetooth:
         is scanning and the pad is advertising in pairing mode. "Find controllers" has stopped by the time Pair is
         pressed, and an LE pad that isn't being heard can't be reached: `bluetoothctl pair` just waits, and when its
         --timeout runs out it exits 0 having printed nothing. So a scan runs beside the pairing, Pair waits until the
-        pad is heard (or BT_SEE_SECONDS), and success is only what BlueZ itself then says: Paired, and Connected."""
+        pad is heard (or BT_SEE_SECONDS), and success is only what BlueZ itself then says: Paired, and Connected.
+
+        The pairing itself runs inside one interactive bluetoothctl with its agent registered as the default
+        (agent_pair). `bluetoothctl --agent X pair` registers no agent: client/main.c skips it in one-shot mode. With
+        no agent, BlueZ's device_confirm_passkey fails ("No agent available") on the confirm step the kernel asks for
+        in Bluetooth LE Secure Connections Just Works, and the pad sees AuthenticationFailed, on any chipset."""
         window = BT_SEE_SECONDS + BT_PAIR_TRIES * (BT_PAIR_SECONDS + 5) + 20     # the whole pairing, scanned
         self.spawn(lambda: self.ctl("--timeout", str(window), "scan", "on", timeout=window + 10))
         heard = False
@@ -1082,9 +1151,7 @@ class Bluetooth:
         # The journal line (and pair_problem's input) says how far it got: "not heard;" first if it never was.
         log = [] if heard else [f"not heard in {BT_SEE_SECONDS} s"]
         for _ in range(BT_PAIR_TRIES):
-            code, out, err = self.ctl("--agent", "NoInputNoOutput", "--timeout", str(BT_PAIR_SECONDS), "pair", address,
-                                      timeout=BT_PAIR_SECONDS + 10)
-            log.append("pair: " + ((out + err).strip() or f"no answer in {BT_PAIR_SECONDS} s"))
+            log.append("pair: " + (self.agent_pair(address) or f"no answer in {BT_PAIR_SECONDS} s"))
             if self.info(address).get("Paired") == "yes":
                 break
             self.sleep(2)
@@ -1096,6 +1163,20 @@ class Bluetooth:
             if self.info(address).get("Connected") != "yes":
                 return False, "paired; connect: " + ((out + err).strip() or "no answer in 15 s")
         return True, ""
+
+    def agent_pair(self, address: str) -> str:
+        """One pairing attempt in an interactive bluetoothctl: register a NoInputNoOutput agent (game controllers use
+        Just Works, no PIN), make it the default so BlueZ's confirm step finds it, then pair and wait for BlueZ's
+        answer. Returns what bluetoothctl said about the pairing (its "pair" line on), or "" if it said nothing."""
+        _, out, err = self.interact(["bluetoothctl"], [
+            ("agent NoInputNoOutput", r"Agent registered|already registered|registration enabled"),
+            ("default-agent", r"Default agent request|No agent is registered"),
+            (f"pair {address}", r"Pairing successful|Failed to pair|not available"),
+        ], timeout=BT_PAIR_SECONDS + 10)
+        text = out + err
+        at = text.find("Attempting to pair")                  # the agent's chatter before it is noise
+        said = text[at:] if at >= 0 else ("" if "Failed" not in text and "not available" not in text else text)
+        return said.strip()[-600:]
 
     def remove(self, address: str) -> None:
         self.ctl("remove", address, timeout=10)
