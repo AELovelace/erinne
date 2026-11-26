@@ -4,6 +4,83 @@
              ShutdownMode="OnExplicitShutdown">
     <!-- No StartupUri: App.xaml.cs decides what opens (a server's window, the "add a server" dialog, or only the
          tray when Windows starts it with background). ShutdownMode: closing windows hides them to the tray;
-         only Quit ends the app. -->
-    <Application.Resources/>
+         only Quit ends the app.
+
+         The menus' look (the pages menu on the server's name, the ⚙ menu): Erynne's, drawn here instead of
+         Windows' grey one. Every colour is a DynamicResource (Strip, Ink, Muted, Accent, MenuBg, MenuBorder,
+         MenuHover, GlowColor, MenuFont, MenuRadius) that ThemeColors.cs fills from the site's own theme (its CSS
+         variables), so the menus follow whichever theme the page wears. -->
+    <Application.Resources>
+        <!-- The menu itself: a dark glass panel with the theme's border and a soft glow in its colour. -->
+        <Style x:Key="ErynneMenu" TargetType="ContextMenu">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="HasDropShadow" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContextMenu">
+                        <Border Margin="10" Padding="5" Background="{DynamicResource MenuBg}"
+                                BorderBrush="{DynamicResource MenuBorder}" BorderThickness="1"
+                                CornerRadius="{DynamicResource MenuRadius}">
+                            <Border.Effect>
+                                <DropShadowEffect Color="{DynamicResource GlowColor}" BlurRadius="22" ShadowDepth="0" Opacity="0.55"/>
+                            </Border.Effect>
+                            <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- One line of the menu. The current page (IsChecked) gets an accent bar on the left and accent text;
+             the line under the mouse gets the theme's hover tint; disabled lines are muted (headings, "signed in as"). -->
+        <Style x:Key="ErynneItem" TargetType="MenuItem">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Foreground" Value="{DynamicResource Ink}"/>
+            <Setter Property="FontFamily" Value="{DynamicResource MenuFont}"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="{DynamicResource MenuRadius}"
+                                Padding="10,7,14,7" MinWidth="220">
+                            <DockPanel>
+                                <Border x:Name="Mark" DockPanel.Dock="Left" Width="3" Margin="0,1,10,1"
+                                        Background="Transparent" CornerRadius="2"/>
+                                <TextBlock DockPanel.Dock="Right" Text="{TemplateBinding InputGestureText}" Margin="28,0,0,0"
+                                           Foreground="{DynamicResource Muted}" FontSize="12" VerticalAlignment="Center"/>
+                                <ContentPresenter ContentSource="Header" RecognizesAccessKey="False" VerticalAlignment="Center"/>
+                            </DockPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource MenuHover}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Mark" Property="Background" Value="{DynamicResource Accent}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{DynamicResource Muted}"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- A thin line between groups, in the theme's border colour. -->
+        <Style x:Key="ErynneSeparator" TargetType="Separator">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Separator">
+                        <Border Height="1" Margin="8,5" Background="{DynamicResource MenuBorder}" Opacity="0.6"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Application.Resources>
 </Application>

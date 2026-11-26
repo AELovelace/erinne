@@ -153,3 +153,28 @@ public class ShellTests
         Assert.Contains("Deny", denied);
     }
 }
+
+/// <summary>Tabs sort themselves: the site's places on the left, opened things on the right.</summary>
+public class TabKindTests
+{
+    [Theory]
+    [InlineData("https://erynne.eternalhotels.com/", TabKind.Place)]
+    [InlineData("https://erynne.eternalhotels.com/files#c=3&f=12", TabKind.Place)]
+    [InlineData("https://erynne.eternalhotels.com/automations", TabKind.Place)]
+    [InlineData("https://erynne.eternalhotels.com/wiki", TabKind.Place)]
+    [InlineData("https://erynne.eternalhotels.com/files/7391/view", TabKind.Document)]     // a Markdown file
+    [InlineData("https://erynne.eternalhotels.com/files/7538/inline", TabKind.Document)]   // a spreadsheet's preview
+    [InlineData("https://erynne.eternalhotels.com/files/12/pdf", TabKind.Document)]
+    [InlineData("https://erynne.eternalhotels.com/edit/7391", TabKind.Document)]
+    [InlineData("https://erynne.eternalhotels.com/wiki/7370", TabKind.Document)]           // a wiki page
+    [InlineData("https://erynne.eternalhotels.com/help/user/desktop-app", TabKind.Document)]
+    [InlineData("https://erynne.eternalhotels.com/files/zip/abc", TabKind.Place)]          // not one file
+    public void Tabs_know_which_side_they_belong_on(string url, TabKind kind) => Assert.Equal(kind, TabKinds.KindOf(url));
+
+    [Fact]
+    public void Grouping_keeps_each_groups_own_order()
+    {
+        var kinds = new[] { TabKind.Document, TabKind.Place, TabKind.Document, TabKind.Place };
+        Assert.Equal([1, 3, 0, 2], TabKinds.Grouped(kinds));
+    }
+}

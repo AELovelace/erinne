@@ -17,7 +17,7 @@ namespace Mnemerynne.Desktop;
 public partial class MainWindow : Window
 {
     public ProfileSession Session { get; }
-    private readonly ObservableCollection<BrowserTab> _tabs = [];
+    private readonly ObservableCollection<BrowserTab> _tabs = [];   // every tab, in strip order: places, then opened things
     private readonly ClosedTabs _closed = new();
     private int _active = -1;
     private string SessionFile => Path.Combine(Session.Folder, "tabs.json");
@@ -26,11 +26,13 @@ public partial class MainWindow : Window
     private enum BannerKind { None, SignIn, Update }
     private BannerKind _banner;
     private ServerInfo? _update;                          // the newer build the banner offers
+    private readonly ResourceDictionary _theme = ThemeColors.Defaults();   // the app's colours, from the site's theme
 
     public MainWindow(ProfileSession session)
     {
         Session = session;
         InitializeComponent();
+        Resources.MergedDictionaries.Add(_theme);          // every DynamicResource colour in MainWindow.xaml comes from here
         TabStrip.ItemsSource = _tabs;
         Session.Changed += () => Dispatcher.Invoke(RefreshChrome);   // drive status, signed in or out
         Loaded += async (_, _) => await OnLoadedAsync();
@@ -54,15 +56,23 @@ public partial class MainWindow : Window
     {
         var tab = new BrowserTab(Session, url, u => _ = AddTabAsync(u, activate: true, besideActive: true), title);
         tab.NavigationChanged += () => { if (_active >= 0 && _tabs[_active] == tab) RefreshToolbar(); SaveSession(); };
-        tab.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(BrowserTab.Title) && IsShowing(tab)) Title = $"{tab.Title} · {Session.Profile.Name}"; };
+        tab.PageLoaded += () => { if (IsShowing(tab)) _ = RefreshFromPageAsync(); };   // its theme and menu
+        tab.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(BrowserTab.Title) && IsShowing(tab))
+                Title = tab.Title;
+            if (e.PropertyName == nameof(BrowserTab.Kind))
+                Regroup();                                 // it opened a file (or went back to a place): other side
+        };
         var index = besideActive && _active >= 0 ? _active + 1 : _tabs.Count;
         _tabs.Insert(index, tab);
         if (_active >= index)
             _active++;                                     // the showing tab moved one to the right
         tab.View.Visibility = Visibility.Collapsed;
         PagesHost.Children.Add(tab.View);
+        Regroup();                                         // into its group (this may move it)
         if (activate)
-            Select(index);
+            Select(_tabs.IndexOf(tab));
         try
         {
             await tab.StartAsync();
@@ -90,8 +100,9 @@ public partial class MainWindow : Window
             _tabs[i].View.Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;
         }
         var tab = _tabs[index];
-        Title = $"{tab.Title} · {Session.Profile.Name}";
+        Title = tab.Title;                                 // the page's name only (no server name), like its tab
         RefreshToolbar();
+        _ = RefreshFromPageAsync();
         tab.View.Focus();
         SaveSession();
     }
@@ -106,6 +117,7 @@ public partial class MainWindow : Window
         _tabs.RemoveAt(index);
         PagesHost.Children.Remove(tab.View);
         tab.Close();
+        Regroup();
         if (next < 0)
         {
             _active = -1;
@@ -171,8 +183,37 @@ public partial class MainWindow : Window
     }
 
     /// <summary>The tabs take what room there is (scrolling sideways past that), leaving + and a bit of drag space.</summary>
-    private void OnTabAreaSized(object sender, SizeChangedEventArgs e) =>
-        StripScroller.MaxWidth = Math.Max(120, e.NewSize.Width - 48 - 60);
+    private void OnTabAreaSized(object sender, SizeChangedEventArgs e) => FitStrips(e.NewSize.Width);
+
+    private const double TabWidest = 200, TabNarrowest = 90, TabGap = 2;   // a tab's width range, and its margins
+
+    /// <summary>
+    /// Fit the tabs in the row, as a browser does: they share what's left after + and a bit of drag space, shrinking
+    /// (down to 90 px) before any has to scroll out of sight.
+    /// </summary>
+    private void FitStrips(double width)
+    {
+        if (width <= 0)
+            return;
+        var room = Math.Max(120, width - 48 - 40);                       // 48: the + button, 40: room to drag the window
+        TabStrip.Tag = Math.Clamp(room / Math.Max(1, _tabs.Count) - TabGap, TabNarrowest, TabWidest);   // each tab's Width
+        StripScroller.MaxWidth = room;
+    }
+
+    /// <summary>
+    /// Keep the tabs sorted (TabKinds): the site's places first, then opened things, each kind in its own order. The
+    /// showing tab stays showing wherever it moves.
+    /// </summary>
+    private void Regroup()
+    {
+        var showing = Current;
+        var order = TabKinds.Grouped(_tabs.Select(t => t.Kind).ToList()).Select(i => _tabs[i]).ToList();
+        for (var i = 0; i < order.Count; i++)
+            if (!ReferenceEquals(_tabs[i], order[i]))
+                _tabs.Move(_tabs.IndexOf(order[i]), i);
+        _active = showing is null ? -1 : _tabs.IndexOf(showing);
+        Dispatcher.BeginInvoke(() => FitStrips(TabArea.ActualWidth));   // a tab more or less: widths change
+    }
 
     // ====================================================================================== keyboard
     private void OnKeyDown(object sender, KeyEventArgs e)
@@ -254,10 +295,11 @@ public partial class MainWindow : Window
         var over = (e.OriginalSource as FrameworkElement)?.DataContext as BrowserTab;
         var from = _tabs.IndexOf(tab);
         var to = over is null ? _tabs.Count - 1 : _tabs.IndexOf(over);
-        if (from < 0 || to < 0 || from == to)
-            return;
+        if (from < 0 || to < 0 || from == to || (over is not null && over.Kind != tab.Kind))
+            return;                                        // a tab moves within its own group only
         _active = TabMath.AfterMove(from, to, _active);
         _tabs.Move(from, to);
+        Regroup();
         SaveSession();
     }
 
@@ -268,39 +310,162 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    // ==================================================================== the server menu and drive
-    /// <summary>The server button's menu: other servers, settings, the drive, sign-in, updates, quit.</summary>
-    private void OnServerMenu(object sender, RoutedEventArgs e)
+    // ============================================================ the two menus: pages and ⚙
+    /// <summary>One line of the pages menu, as the site's own (hidden) flower menu has it.</summary>
+    private sealed record NavLink(string Href, string Label, bool Current, string Badge);
+
+    /// <summary>What the pages menu shows: the site's links, Messages (and its unread count), Help.</summary>
+    private sealed record NavInfo(List<NavLink> Tabs, string? Help, string? MessagesHref, bool MessagesButton, string Unread);
+
+    /// <summary>
+    /// Runs in the showing tab: reads the site's own pages menu (_nav.html #nav-more, hidden in the app by
+    /// erynne.css), so the app's menu always has exactly the pages this person has, with live badges.
+    /// </summary>
+    private const string NavScript = """
+        (() => {
+          const q = s => document.querySelector(s);
+          const more = q('#nav-more');
+          if (!more) return null;
+          const tabs = [...more.querySelectorAll('nav.tabs a')].map(a => ({
+            href: a.href,
+            label: [...a.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim(),
+            current: a.getAttribute('aria-current') === 'page',
+            badge: (a.querySelector('.badge')?.textContent || '').trim() }));
+          const notify = q('#notify-button');
+          const unread = q('#nav-unread');
+          return JSON.stringify({ tabs, help: more.querySelector('.help-link')?.href || null,
+            messagesHref: notify && notify.tagName === 'A' ? notify.href : null,
+            messagesButton: !!notify && notify.tagName === 'BUTTON',
+            unread: unread && !unread.hidden ? unread.textContent.trim() : '' });
+        })()
+        """;
+
+    private NavInfo? _nav;                                 // the last menu read from a page (kept for pages without one)
+
+    /// <summary>The page's own JSON is camelCase (messagesButton), unlike the server's API (snake_case).</summary>
+    private static readonly System.Text.Json.JsonSerializerOptions PageJson = new() { PropertyNameCaseInsensitive = true };
+
+    /// <summary>The page's theme and menu, read again after the showing tab loads a page (or another tab shows).</summary>
+    private async Task RefreshFromPageAsync()
     {
-        var menu = new ContextMenu();
-        foreach (var p in App.Store.Profiles)
+        if (Current is not { } tab)
+            return;
+        if (await tab.RunScriptAsync(ThemeColors.Script) is { } theme)
+            ThemeColors.Apply(_theme, theme);              // the app wears the page's theme
+        if (await tab.RunScriptAsync(NavScript) is { } navJson)
         {
-            var item = new MenuItem { Header = $"{p.Name} — {p.ServerUri.Host}", IsChecked = p.Id == Session.Profile.Id };
-            item.Click += (_, _) => App.OpenWindow(p);     // that server's window (opened, or brought forward)
-            menu.Items.Add(item);
+            try
+            {
+                var got = System.Text.Json.JsonSerializer.Deserialize<NavInfo>(navJson, PageJson);   // the page's camelCase names
+                if (got is { Tabs.Count: > 0 })
+                    _nav = got;
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // not the menu we know: keep the last one
+            }
         }
-        Add(menu, "Add a server…", () => App.AddServer(this));
-        menu.Items.Add(new Separator());
-        if (Session.Drive is not null)
-            Add(menu, "Open the drive in File Explorer", () => Shell.Open(Session.Drive.Folder));
-        Add(menu, "Settings…", () => App.ShowSettings(Session, this));
-        Add(menu, Session.Api.SignedIn ? $"Sign out{(Session.Profile.Username is { } u ? $" ({u})" : "")}" : "Sign in…",
-            async () => { if (Session.Api.SignedIn) await App.SignOutAsync(Session, this); else await App.SignInAsync(Session, this); });
-        Add(menu, "Check for updates", () => _ = CheckForUpdateAsync(manual: true));
-        Add(menu, $"About (version {AppVersion.Current})", () =>
-            MessageBox.Show(this, $"Mnemerynne Desktop {AppVersion.Current}\n{Session.Profile.ServerUri}\n\nLog: {Path.Combine(ProfileStore.Root, "desktop.log")}",
-                            "About", MessageBoxButton.OK, MessageBoxImage.Information));
-        menu.Items.Add(new Separator());
-        Add(menu, "Quit", () => _ = App.QuitAsync());
-        menu.PlacementTarget = (UIElement)sender;
+        // The badge on the name: unread messages plus proposals waiting (the site's flower showed these).
+        var count = (int.TryParse(_nav?.Unread, out var u) ? u : 0)
+                    + (_nav?.Tabs.Sum(t => int.TryParse(t.Badge, out var b) ? b : 0) ?? 0);
+        NavBadge.Visibility = count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        NavBadgeText.Text = count > 99 ? "99+" : count.ToString();
+    }
+
+    /// <summary>A menu in Erynne's look (App.xaml), using this window's theme colours.</summary>
+    private ContextMenu NewMenu(UIElement under)
+    {
+        var menu = new ContextMenu { Style = (Style)FindResource("ErynneMenu"), PlacementTarget = under,
+                                     Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+        menu.Resources.MergedDictionaries.Add(_theme);    // a menu is a pop-up of its own: give it the colours
+        return menu;
+    }
+
+    /// <summary>One line in a menu; with no click it's a quiet heading ("Signed in as …").</summary>
+    private MenuItem Item(ContextMenu menu, object header, Action? click, bool current = false, string? gesture = null)
+    {
+        var item = new MenuItem { Header = header, Style = (Style)FindResource("ErynneItem"), IsChecked = current,
+                                  InputGestureText = gesture ?? "", IsEnabled = click is not null };
+        if (click is not null)
+            item.Click += (_, _) => click();
+        menu.Items.Add(item);
+        return item;
+    }
+
+    private void Line(ContextMenu menu) => menu.Items.Add(new Separator { Style = (Style)FindResource("ErynneSeparator") });
+
+    /// <summary>A page's name with its count beside it (Proposals 2, Messages 5), the count in the accent colour.</summary>
+    private static object WithBadge(string label, string badge)
+    {
+        if (string.IsNullOrWhiteSpace(badge))
+            return label;
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        row.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center });
+        var pill = new Border { CornerRadius = new CornerRadius(8), Padding = new Thickness(6, 0, 6, 0), Margin = new Thickness(8, 0, 0, 0),
+                                VerticalAlignment = VerticalAlignment.Center };
+        pill.SetResourceReference(Border.BackgroundProperty, "Accent");
+        var text = new TextBlock { Text = badge, FontSize = 11, FontWeight = FontWeights.Bold };
+        text.SetResourceReference(TextBlock.ForegroundProperty, "Strip");
+        pill.Child = text;
+        row.Children.Add(pill);
+        return row;
+    }
+
+    /// <summary>
+    /// The server's name: the pages menu, and only that. A click goes there in this tab; Ctrl+click opens it in a
+    /// new tab, as with a link.
+    /// </summary>
+    private async void OnPagesMenu(object sender, RoutedEventArgs e)
+    {
+        await RefreshFromPageAsync();                      // live: badges and the current page
+        var menu = NewMenu((UIElement)sender);
+        var server = Session.Profile.ServerUri;
+        var links = _nav?.Tabs ?? [new(server.ToString(), "Ask", false, ""), new(new Uri(server, "/files").ToString(), "Files", false, ""),
+                                   new(new Uri(server, "/wiki").ToString(), "Wiki", false, ""),
+                                   new(new Uri(server, "/preferences").ToString(), "Preferences", false, "")];
+        foreach (var link in links)
+            Item(menu, WithBadge(link.Label, link.Badge), () => Go(link.Href), current: link.Current);
+        Line(menu);
+        if (_nav?.MessagesHref is { } inbox)
+            Item(menu, WithBadge("Messages", _nav.Unread), () => Go(inbox));
+        else if (_nav?.MessagesButton == true)
+            Item(menu, WithBadge("Messages", _nav.Unread),
+                 () => _ = Current?.RunScriptAsync("document.getElementById('notify-button').click()"));   // the site's pop-up
+        Item(menu, "Help", () => _ = AddTabAsync(_nav?.Help ?? new Uri(server, "/help").ToString()), gesture: "new tab");
         menu.IsOpen = true;
 
-        static void Add(ContextMenu m, string header, Action click)
+        void Go(string href)
         {
-            var item = new MenuItem { Header = header };
-            item.Click += (_, _) => click();
-            m.Items.Add(item);
+            if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+                _ = AddTabAsync(href);                      // Ctrl: a new tab, like Ctrl+clicking a link
+            else
+                Current?.Navigate(href);
         }
+    }
+
+    /// <summary>⚙ (right of the drive's status): servers, adding one, the drive, settings, sign-in, updates, quit.</summary>
+    private void OnSystemMenu(object sender, RoutedEventArgs e)
+    {
+        var menu = NewMenu((UIElement)sender);
+        menu.HorizontalOffset = -190;                      // opens towards the window, not off its right edge
+        Item(menu, Session.Api.SignedIn ? $"Signed in as {Session.Profile.Username ?? "you"}" : "Not signed in", null);
+        Line(menu);
+        foreach (var p in App.Store.Profiles)
+            Item(menu, $"{p.Name}  ·  {p.ServerUri.Host}", () => App.OpenWindow(p), current: p.Id == Session.Profile.Id);
+        Item(menu, "Add a server…", () => App.AddServer(this));
+        Line(menu);
+        if (Session.Drive is not null)
+            Item(menu, "Open the drive in File Explorer", () => Shell.Open(Session.Drive.Folder));
+        Item(menu, "Settings…", () => App.ShowSettings(Session, this));
+        Item(menu, Session.Api.SignedIn ? "Sign out" : "Sign in…",
+             async () => { if (Session.Api.SignedIn) await App.SignOutAsync(Session, this); else await App.SignInAsync(Session, this); });
+        Item(menu, "Check for updates", () => _ = CheckForUpdateAsync(manual: true));
+        Item(menu, $"About (version {AppVersion.Current})", () =>
+            MessageBox.Show(this, $"Mnemerynne Desktop {AppVersion.Current}\n{Session.Profile.ServerUri}\n\nLog: {Path.Combine(ProfileStore.Root, "desktop.log")}",
+                            "About", MessageBoxButton.OK, MessageBoxImage.Information));
+        Line(menu);
+        Item(menu, "Quit", () => _ = App.QuitAsync());
+        menu.IsOpen = true;
     }
 
     private void OnDriveButton(object sender, RoutedEventArgs e)

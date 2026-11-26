@@ -31,16 +31,22 @@ public sealed class BrowserTab : INotifyPropertyChanged
     public ImageSource? Icon { get => _icon; private set => Set(ref _icon, value); }
     public bool Loading { get => _loading; private set => Set(ref _loading, value); }
     private bool _active;
-    public bool Active { get => _active; set => Set(ref _active, value); }   // the showing tab (the strip highlights it)
+    public bool Active { get => _active; set => Set(ref _active, value); }
+
+    private TabKind _kind;
+    /// <summary>Which strip it's in: the site's places on the left, opened things on the right (TabKinds.cs).</summary>
+    public TabKind Kind => _kind;   // the showing tab (the strip highlights it)
 
     public event PropertyChangedEventHandler? PropertyChanged;
-    public event Action? NavigationChanged;               // back/forward/address need redrawing
+    public event Action? NavigationChanged;               // back/forward need redrawing
+    public event Action? PageLoaded;                      // a page finished loading: the window re-reads its theme and menu
 
     public BrowserTab(ProfileSession session, string url, Action<string> openTab, string? title = null)
     {
         _session = session;
         _openTab = openTab;
         _startUrl = url;
+        _kind = TabKinds.KindOf(url);                    // where it starts; it moves if it navigates
         if (title is not null)
             _title = title;
     }
@@ -60,10 +66,19 @@ public sealed class BrowserTab : INotifyPropertyChanged
         web.NewWindowRequested += OnNewWindow;
         web.NavigationStarting += OnNavigationStarting;
         web.NavigationCompleted += OnNavigationCompleted;
-        web.DocumentTitleChanged += (_, _) => Title = string.IsNullOrWhiteSpace(web.DocumentTitle) ? Url : web.DocumentTitle;
+        web.DocumentTitleChanged += (_, _) => Title = ShortTitle(web.DocumentTitle);
         web.FaviconChanged += async (_, _) => await LoadIconAsync(web);
         web.HistoryChanged += (_, _) => NavigationChanged?.Invoke();
-        web.SourceChanged += (_, _) => NavigationChanged?.Invoke();
+        web.SourceChanged += (_, _) =>
+        {
+            NavigationChanged?.Invoke();
+            var kind = TabKinds.KindOf(Url);
+            if (kind != _kind)
+            {
+                _kind = kind;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Kind)));   // the window moves it
+            }
+        };
         web.Navigate(_startUrl);
     }
 
@@ -113,6 +128,7 @@ public sealed class BrowserTab : INotifyPropertyChanged
     private async void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
     {
         Loading = false;
+        PageLoaded?.Invoke();
         NavigationChanged?.Invoke();
         // Landed on the sign-in page (the day-long web session ran out): sign the tab in with the app's token.
         if (View.Source is { } here && _session.Links.IsServer(here) && here.AbsolutePath == "/login"
@@ -161,6 +177,42 @@ public sealed class BrowserTab : INotifyPropertyChanged
     public void Forward() => View.CoreWebView2?.GoForward();
     public void Reload() => View.CoreWebView2?.Reload();
     public void Navigate(string url) => View.CoreWebView2?.Navigate(url);
+
+    /// <summary>
+    /// The page's title without the server's name at the end: "Ask · Eternal Hotels MCP" shows as "Ask" (the app
+    /// is the server's own window, so the name only took room). Titles from elsewhere are left as they are.
+    /// </summary>
+    private string ShortTitle(string title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return Url;
+        foreach (var name in new[] { _session.Profile.Name, "Mnemerynne", "Erynne" })
+        {
+            var suffix = " · " + name;
+            if (title.Length > suffix.Length && title.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                return title[..^suffix.Length];
+        }
+        return title;
+    }
+
+    /// <summary>
+    /// Run a script in the page; its answer is a string (scripts here return JSON.stringify(...)), or null when
+    /// there's no page yet, the script failed, or it returned nothing.
+    /// </summary>
+    public async Task<string?> RunScriptAsync(string script)
+    {
+        if (View.CoreWebView2 is null)
+            return null;
+        try
+        {
+            var raw = await View.CoreWebView2.ExecuteScriptAsync(script);   // the answer, JSON-encoded once more
+            return System.Text.Json.JsonSerializer.Deserialize<string?>(raw);
+        }
+        catch (Exception e) when (e is System.Text.Json.JsonException or InvalidOperationException or System.Runtime.InteropServices.COMException)
+        {
+            return null;                                   // a page mid-load, or a script that returned something else
+        }
+    }
 
     public SavedTab Save() => new(Url, Title);
 

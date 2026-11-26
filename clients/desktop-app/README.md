@@ -4,9 +4,14 @@ A native Windows app for Mnemerynne (Erynne):
 
 - **Tabs.** The site in its own window, with browser-style tabs (Ctrl+T, Ctrl+W, Ctrl+Shift+T, Ctrl+Tab, Ctrl+1..9,
   Alt+←/→, F5, middle-click, drag to reorder). Tabs come back after a restart. Links to the server open as app tabs;
-  other sites open in the system browser. Like Edge, the tabs *are* the title bar: one row with the server menu,
-  back/forward/reload, the tabs, the drive's status and the window's own buttons (WindowChrome), and no address bar
-  (Doll's call: the site's 🌸 menu is the way around).
+  other sites open in the system browser. Tabs **sort themselves** (`TabKinds.cs`): the site's places first, then
+  opened things (file views, the editor, wiki pages, Help), in one row, shrinking to fit.
+- **One top row, like Edge** (WindowChrome): the site's name (the **pages menu**, read live from the site's own hidden
+  top bar, with badges), back/forward/reload, the tabs, the drive's status, **⚙** (servers, settings, drive, sign-in,
+  updates, quit) and the window's buttons. No address bar. The site hides its own top bar when it sees the app
+  (`html[data-desktop-app]`), and tab names drop the site's name.
+- **Themed.** The top row and the menus take their colours and font from the site's theme (`ThemeColors.cs` reads
+  its CSS variables), with Erynne-styled menus (`App.xaml`).
 - **A drive in File Explorer**, like OneDrive or Box. The libraries people tick appear as folders, files download when
   opened, and saves, new files, renames, moves and deletes go back to the server. It uses Windows' **Cloud Files API**
   (`cldapi.dll`), the same one OneDrive uses.
@@ -37,6 +42,7 @@ Directory.Build.props            the version (one place): installer name, About,
 src/Mnemerynne.Core/             no Windows dependencies, unit tested
   LinkRouter.cs                  which links stay in the tab, open a new tab, or go to the browser
   TabSession.cs                  tabs.json, closed tabs, keyboard tab maths
+  TabKinds.cs                    places vs opened things, and the sorted tab order
   Profiles.cs                    profiles.json (servers), server address clean-up
   OAuthPkce.cs                   the sign-in's PKCE and the loopback redirect it catches
   ServerApi.cs                   every call to the server (tokens, refresh rotation, tickets, drive API)
@@ -51,7 +57,8 @@ src/Mnemerynne.Drive/            the Cloud Files provider (Windows only)
   DriveService.cs                Explorer's callbacks, the local watcher, uploads, the change-feed loop
 src/Mnemerynne.Desktop/          the WPF app
   App.xaml.cs                    single instance, tray, windows, sign-in, quit, --background, --unregister-drive
-  MainWindow.xaml(.cs)           the one top row (tabs + window buttons), banner, shortcuts, drag to reorder
+  MainWindow.xaml(.cs)           the one top row: pages menu, ⚙ menu, sorted tabs, window buttons; banner, shortcuts
+  ThemeColors.cs                 the app's colours from the site's theme (CSS variables)
   BrowserTab.cs                  one WebView2 tab: links, silent re-sign-in, title and icon
   ProfileSession.cs              per-server WebView2 environment, API client, drive
   Dialogs.cs                     sign-in window, Add a server

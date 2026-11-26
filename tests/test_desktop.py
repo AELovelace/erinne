@@ -174,6 +174,8 @@ def test_the_page_knows_it_is_in_the_app(client, conn, directory):
     assert 'id="install-box"' in client.get("/files").text
     inside = client.get("/files", headers={"User-Agent": "Mozilla/5.0 Edg/131.0 MnemerynneDesktop/0.1.0"}).text
     assert 'id="install-box"' not in inside
+    assert "data-desktop-app" in inside and "data-desktop-app" not in client.get("/files").text   # bar hidden (erynne.css)
+    assert 'id="nav-more"' in inside                    # the menu stays in the page, for the app to read
 
 
 # ---------------------------------------------------------------- the drive

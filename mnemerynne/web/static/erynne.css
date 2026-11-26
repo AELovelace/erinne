@@ -1528,3 +1528,8 @@ select { font: inherit; color: var(--ink); }
   border-radius: 10px; background: var(--petal-soft); color: var(--ink); font-size: .9rem; line-height: 1.45; }
 .chat-disclaimer strong { color: var(--rose-deep); margin-right: .25rem; }
 .chat-disclaimer-tip { display: block; margin-top: .4rem; }   /* the Anthropic key suggestion, on its own line */
+
+/* Inside the Windows desktop app (base.html data-desktop-app, clients/desktop-app): the app's own top row has the
+   pages menu, back/forward and the tabs, so this site's top bar is hidden. It stays in the page (display: none) so
+   the app can read the menu from it; nav.js then measures it as 0, so full-height pages take the whole window. */
+html[data-desktop-app] .topbar.main-bar { display: none; }
