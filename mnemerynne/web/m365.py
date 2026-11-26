@@ -49,8 +49,8 @@ def link(request: Request, tenant: int | None = None, user=Depends(page_user),
 @router.get("/auth/microsoft/callback")
 async def callback(request: Request, user=Depends(page_user), conn: sqlite3.Connection = Depends(get_db)):
     params = request.query_params
-    if params.get("admin_consent"):   # a tenant admin just granted consent
-        return RedirectResponse("/admin/libraries#tab=settings", status_code=status.HTTP_303_SEE_OTHER)
+    if params.get("admin_consent"):   # a tenant admin just granted consent: back to Settings → Microsoft 365
+        return RedirectResponse("/admin/libraries#tab=settings&section=m365", status_code=status.HTTP_303_SEE_OTHER)
     if params.get("error"):
         request.session.pop("m365_link", None)
         reason = (params.get("error_description") or params["error"]).splitlines()[0][:200]

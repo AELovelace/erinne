@@ -1570,7 +1570,7 @@ class Tools:
         them, and they need a usable linked Microsoft 365 account. Ids are opaque tokens (stateless)."""
         if not m365_mail.claude_enabled(conn):
             raise Refused("Mail and calendar are off for Claude: an admin names the group that gets them under "
-                          "Access → Connectors → Mail and calendar for Claude.", "not_allowed")
+                          "Access → Settings → Claude, ChatGPT and the connector → Mail and calendar for Claude.", "not_allowed")
         user = self._user(conn, caller)
         if not m365_mail.claude_allowed(conn, user, self.get_directory()):
             raise Refused("Only people in the mail group may reach their mail and calendar from Claude (Access → "
@@ -2255,7 +2255,7 @@ def build_server(settings: Settings, get_embedder: Callable[[], Any],
     async def search_mail(ctx: Context, query: str, sender: str | None = None, since: str | None = None,
                           count: int = 10, account: str | None = None, mailbox: str | None = None) -> dict:
         """Search the person's email for messages about something (only for people in the mail group an admin
-        names under Access → Connectors → Mail and calendar for Claude, with a linked Microsoft 365 account;
+        names under Access → Settings → Claude, ChatGPT and the connector → Mail and calendar for Claude, with a linked Microsoft 365 account;
         [not_allowed] otherwise). Each message comes with its `id` (for read_mail and draft_reply), sender,
         date, a preview, `citation` and `link`. `sender`: a name or address; `since`: YYYY-MM-DD; `count`:
         up to 20; `account`: which linked organisation when the person has several (a refusal names them);

@@ -4,7 +4,7 @@ itself; Doll chose to pay for it anyway, with these guard rails instead of a rep
 - Pressing Run asks for a ticket, which records when the server saw the run start. One ticket per person at a time.
 - At game over the page sends the ticket with its distance and kills. A ticket pays once and is then gone.
 - A claim faster than StickBob can run, or with more kills than could fit in the time, pays nothing.
-- An admin can cap what one person earns from it a day (Settings → Entertainment → Media → Games). 0, the default, is no cap.
+- An admin can cap what one person earns from it a day (Settings → Media and entertainment → Media → Games). 0, the default, is no cap.
 
 Someone could still script a believable claim. The cap is the knob if that ever happens; coins have no cash value.
 """

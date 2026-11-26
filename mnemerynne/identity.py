@@ -2,7 +2,7 @@
 
 Someone with the work box and the home box both connected to Claude (or
 ChatGPT) sees two connectors that introduce themselves the same way. The
-brand name under Access → Settings → Themes → Branding is the identity: the
+brand name under Access → Settings → Branding and themes → Branding is the identity: the
 person reads it on the sign-in page, and the connector carries the same word
 in its title, its instructions, the `instance` field of listing results and
 the `about` tool. Without a brand name the host of MNEMERYNNE_PUBLIC_URL

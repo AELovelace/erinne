@@ -5,7 +5,7 @@ sudo mnemerynne-admin check-updates     # what's new on GitHub and what an updat
 sudo mnemerynne-admin update            # asks first; --yes to skip the question
 ```
 
-**Access → Settings → Updates** shows the same: whether a newer version exists, how many commits, whether it includes a database update (a backup is taken first) or changes service files (they restart), and how the last update went. The page can never start an update; that stays with a person at a shell.
+**Access → Settings → General → Updates** shows the same: whether a newer version exists, how many commits, whether it includes a database update (a backup is taken first) or changes service files (they restart), and how the last update went. The page can never start an update; that stays with a person at a shell.
 
 ## What `update` does
 

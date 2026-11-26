@@ -2,7 +2,7 @@
 
 Doll's redesign (2026-11-15): the library's first page shows each console's top 50 of the household's own games
 by popularity, and RetroAchievements is the source. Its Web API (https://api-docs.retroachievements.org/) is
-asked with an admin's Web API key (Settings → Entertainment → Media; the `y` parameter), gently: the docs ask for
+asked with an admin's Web API key (Settings → Media and entertainment → Media; the `y` parameter), gently: the docs ask for
 aggressive caching and give no numbers, so this asks little and keeps everything (migrations/media/0003_retro_
 popularity.sql).
 
@@ -128,7 +128,7 @@ def _titles(title: str) -> list[str]:
 def _get(client: httpx.Client, key: str, endpoint: str, **params) -> object:
     resp = client.get(API + endpoint, params={"y": key, **params})
     if resp.status_code in (401, 403):
-        raise Refused("RetroAchievements didn't accept the Web API key (Settings → Entertainment → Media)")
+        raise Refused("RetroAchievements didn't accept the Web API key (Settings → Media and entertainment → Media)")
     if resp.status_code == 429:
         raise Refused("RetroAchievements asked us to slow down; trying again on a later pass")
     resp.raise_for_status()

@@ -2,7 +2,7 @@
 
 ## Development diagnostics
 
-For your own Claude: name a domain (or Entra) group under **Access → Settings → Development**, and the connector's `diagnose` tool, for the connections of people in that group only, returns raw internals: the three tool-call logs with each failure's error (`calls`, with `failed_only`, `tool`, `since_minutes`), what retrieval scored for a question as you (`search`: every candidate's fused score, keyword and vector ranks, cosine distance, which were chosen, and the not-found gate's decision with its thresholds), a file's indexing state with its jobs and errors (`file`), one passage as indexed (`chunk`), the ingestion queue (`jobs`), the server's last few hundred log lines (`log`) and the effective settings without secrets (`config`). Admins in the group see everything; anyone else sees only their own calls under `calls`, and `file` and `chunk` answer only for files they may read themselves (anything else reads as not found). Nothing it returns changes anything. Clear the group when done (no group, no diagnostics); the change is in Recent changes.
+For your own Claude: name a domain (or Entra) group under **Access → Settings → Experimental and development → Development diagnostics**, and the connector's `diagnose` tool, for the connections of people in that group only, returns raw internals: the three tool-call logs with each failure's error (`calls`, with `failed_only`, `tool`, `since_minutes`), what retrieval scored for a question as you (`search`: every candidate's fused score, keyword and vector ranks, cosine distance, which were chosen, and the not-found gate's decision with its thresholds), a file's indexing state with its jobs and errors (`file`), one passage as indexed (`chunk`), the ingestion queue (`jobs`), the server's last few hundred log lines (`log`) and the effective settings without secrets (`config`). Admins in the group see everything; anyone else sees only their own calls under `calls`, and `file` and `chunk` answer only for files they may read themselves (anything else reads as not found). Nothing it returns changes anything. Clear the group when done (no group, no diagnostics); the change is in Recent changes.
 
 ## Where to look first
 
@@ -23,7 +23,7 @@ Access → Recent changes for who changed what; Claude activity for Claude; the 
 
 ## Answers
 
-- **"Model server down" / errors on every question**: the generator isn't answering. `journalctl -u mnemerynne-generator`; check VRAM with `nvtop`; with balancer nodes, Access → Settings → Balancer nodes shows which node is out.
+- **"Model server down" / errors on every question**: the generator isn't answering. `journalctl -u mnemerynne-generator`; check VRAM with `nvtop`; with balancer nodes, Access → Settings → AI and models → Balancer nodes shows which node is out.
 - **Replies cut off while thinking**: the log says a reply "hit the …-token limit … thinking". Raise `MNEMERYNNE_LLM_REASONING_TOKENS`, or use the no-think template on the node.
 - **Memories and follow-ups broken on a node**: the node runs LFM2.5 with its own thinking template; it needs `lfm2-no-think.jinja` ([Balancer nodes](balancer.md)).
 - **"Not found" for things that are there**: the file isn't Ready (Files → Properties), the person can't read it (Who can see what), or the thresholds are off after an embedder change (`eval-retrieval --no-gate`, then `VECTOR_MAX_DISTANCE`).

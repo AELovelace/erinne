@@ -4,7 +4,7 @@ The **Wiki** tab shows one library of Markdown pages as a page tree with each pa
 
 ## Which library
 
-By default, **the library called `Wiki`**. An admin can pick any other library on **Access → Settings → This box → Organisation wiki**; choose "The library called Wiki" to go back to the name rule. Until a library exists, the tab tells users it isn't set up yet, and tells admins how to make one.
+By default, **the library called `Wiki`**. An admin can pick any other library on **Access → Settings → Files and documents → Organisation wiki**; choose "The library called Wiki" to go back to the name rule. Until a library exists, the tab tells users it isn't set up yet, and tells admins how to make one.
 
 ## On the file share (recommended)
 

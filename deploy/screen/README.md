@@ -77,7 +77,7 @@ Run it again at any time, for example with a new address. It rewrites its files 
 
 ## 3. Pair it
 
-1. **Turn on screens:** an admin sets **Settings → Entertainment → Media → Who may use screens**, if that isn't already done.
+1. **Turn on screens:** an admin sets **Settings → Media and entertainment → Media → Who may use screens**, if that isn't already done.
 2. **Open Pair a TV:** on your phone, open Media → **Screens → Pair a TV**, or scan the QR code on the TV.
 3. **Enter the code:** type the code if you didn't scan, name the screen, for example *Living room*, and press **Pair**.
 
@@ -285,10 +285,10 @@ The drivers are the kernel's own (`hid-playstation` for the DualSense, `hid-micr
 | An update didn't finish | **Kiosk settings → Updates** shows its last lines; `journalctl -u mnemerynne-screen-update` the rest. **Roll back** returns to the release before. |
 | Stuck on **Updating the screen…** | `systemctl status mnemerynne-screen-update` shows the step it's on. If it's in the check at the end (everything else is done), `sudo systemctl stop mnemerynne-screen-update`, or reboot the box. 0.4.0's check waited forever on `bluetoothctl` on boxes where Bluetooth isn't running; 0.4.1 has time limits on it. |
 | Forgot the kiosk PIN | Approve from an admin's phone instead, then set a new one. Or over SSH: `sudo rm /etc/mnemerynne-screen.pin`. |
-| A 404 page | Media is off, or the screens group isn't set (Settings → Entertainment → Media). |
+| A 404 page | Media is off, or the screens group isn't set (Settings → Media and entertainment → Media). |
 | No sound | Is the TV's input on this box, and is its volume up? `sudo bash install.sh --check` says whether sound goes to HDMI. `--audio auto` leaves the choice to PipeWire. |
 | Retro games run slow | The player's bar says **Running slowly (N fps), drawing on …**. `llvmpipe` means no GPU at all (Firefox draws in software). An `NV…` name means nouveau. Either way `--check` shows which GPU the TV is on. A 4th-gen Core i5/i7 runs GBA, SNES and PS1 at full speed once the Intel graphics draws. |
-| Stutters on films | The GPU isn't decoding (see `--check`), or the server is transcoding something heavy. Admin → Settings → Entertainment → Media shows running transcodes. |
+| Stutters on films | The GPU isn't decoding (see `--check`), or the server is transcoding something heavy. Admin → Settings → Media and entertainment → Media shows running transcodes. |
 
 To use the box for something else: `sudo bash install.sh --uninstall`, and remove the screen under Media → Screens.
 

@@ -14,7 +14,7 @@
   const main = $("mc");
   const content = $("mc-content");
   const isAdmin = main.dataset.admin === "1";
-  const folder = main.dataset.folder || "Media";   // the Media folder on the share (Settings → Entertainment → Media)
+  const folder = main.dataset.folder || "Media";   // the Media folder on the share (Settings → Media and entertainment → Media)
   const screenId = main.dataset.screenId ? Number(main.dataset.screenId) : null;   // this browser is a screen (the TV)
   /* The Mnemerynne screen box (deploy/screen) opens this page as ?kiosk=1 from its own start page
      (http://127.0.0.1:9187/, which also sets up Wi-Fi); remembered, since later loads come without it. */
@@ -821,7 +821,7 @@
     const me = await api("GET", "/api/media/soundcloud/profile" + (scScreen ? "?" + scScreen : ""));
     if (!me.configured) {
       setHead("SoundCloud", []);
-      return [empty("An admin adds SoundCloud's key in Settings → Entertainment → Media.", "SoundCloud isn't set up yet.")];
+      return [empty("An admin adds SoundCloud's key in Settings → Media and entertainment → Media.", "SoundCloud isn't set up yet.")];
     }
     if (!me.user || arg === "change") {
       setHead("SoundCloud", me.user ? [button("‹ Back", "", function () { go("soundcloud"); })] : []);
@@ -903,7 +903,7 @@
     setHead("Live TV");
     const data = await api("GET", "/api/media/live");
     if (!data.streams.length) {
-      return [empty(isAdmin ? "No live streams yet. Add RTMP, HLS or YouTube sources in Access → Settings → Entertainment → Media."
+      return [empty(isAdmin ? "No live streams yet. Add RTMP, HLS or YouTube sources in Access → Settings → Media and entertainment → Media."
                             : "No live streams have been set up.")];
     }
     return [shelf(null, data.streams.map(function (s) {
@@ -924,7 +924,7 @@
     const out = [];
     if (data.problem) out.push(el("p", "mc-note", data.problem));
     if (!data.stations.length) {
-      out.push(empty(isAdmin ? "No stations. Set the SGCRelay station list or add stations in Access → Settings → Entertainment → Media."
+      out.push(empty(isAdmin ? "No stations. Set the SGCRelay station list or add stations in Access → Settings → Media and entertainment → Media."
                              : "No radio stations have been set up."));
       return out;
     }

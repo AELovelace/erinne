@@ -16,16 +16,34 @@ def test_library_admin(client, conn):
     _login(client, "boss")
     page = client.get("/admin/libraries").text
     assert "Who can see what" in page
-    # The Settings tab is one tab panel holding two cards: this box's settings, then connectors.
+    # The Settings tab is one tab panel: one column of section cards, no two-column split any more.
     assert page.count('data-panel="settings"') == 1 and 'class="ax-settings" data-panel="settings"' in page
-    local, connectors = page.index('id="ax-local-title"'), page.index('id="ax-connectors-title"')
-    assert local < page.index('id="admin-group"') < page.index('id="agent-settings"') \
-        < page.index('id="balancer-settings"') < page.index('id="updates"') < connectors
-    assert connectors < page.index('id="m365-settings"') < page.index('id="claude-settings"') \
-        < page.index('id="claude-mail-settings"') < page.index('id="claude-links-settings"')
-    for block in ("admin-group", "agent-settings", "balancer-settings", "updates", "m365-settings",
-                  "claude-settings", "claude-mail-settings", "claude-links-settings", "domain-groups"):
-        assert page.count(f'id="{block}"') == 1, block
+    assert 'class="ax-split"' not in page and "ax-wide" not in page
+    # Each section, in order, with the blocks admin.js fills inside it (ids unchanged, so saves still work).
+    sections = [
+        ("general", "General", ["admin-group", "updates"]),
+        ("themes", "Branding and themes", ["theme-settings"]),
+        ("ai", "AI and models", ["agent-settings", "balancer-settings"]),
+        ("claude", "Claude, ChatGPT and the connector",
+         ["claude-settings", "claude-mail-settings", "claude-links-settings", "chatgpt-settings"]),
+        ("m365", "Microsoft 365", ["m365-settings"]),
+        ("files", "Files and documents", ["wiki-settings", "office-settings", "backups-settings", "desktop-settings"]),
+        ("rooms", "Rooms", ["rooms-settings"]),
+        ("automator", "Automator", ["automations-settings"]),
+        ("media", "Media and entertainment", ["media-settings", "media-playback-settings", "media-sources-settings"]),
+        ("experimental", "Experimental and development", ["experimental-settings", "dev-settings"]),
+    ]
+    starts = [page.index(f'<section class="inbox admin set-sec" id="set-{key}"') for key, _, _ in sections]
+    assert starts == sorted(starts)                                    # the sections come in this order
+    for i, (key, title, blocks) in enumerate(sections):
+        end = starts[i + 1] if i + 1 < len(starts) else page.index("</main>")
+        assert f'id="set-{key}-title">{title}' in page[starts[i]:end], key   # its heading
+        for block in blocks:                                           # its blocks sit inside it, once each
+            assert page.count(f'id="{block}"') == 1, block
+            assert starts[i] < page.index(f'id="{block}"') < end, block
+        # The contents list at the top links to it (a deep link: #tab=settings&section=KEY).
+        assert f'href="#tab=settings&amp;section={key}" data-section="{key}">{title}</a>' in page, key
+    assert page.count('id="domain-groups"') == 1 and 'id="set-filter"' in page   # the shared datalist, the filter box
     lib = client.post("/api/admin/libraries", json={"name": "Brand Standards"}).json()["id"]
     assert client.post("/api/admin/libraries", json={"name": "brand standards"}).status_code == 409
     assert lib in permissions.writable_collection_ids(conn, boss)  # the creator can fill it

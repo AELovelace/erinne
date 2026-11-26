@@ -118,6 +118,8 @@ def main():
             _desktop(conn, settings, uids[0])
         if "office" in sys.argv[2:]:                                      # `casino_preview.py PORT office`: the Office editor
             _office(conn, settings, uids[0])
+        if "admin" in sys.argv[2:]:                                       # `casino_preview.py PORT admin`: alice is an admin,
+            users.set_role(conn, "alice", "admin")                        # so Access (and its Settings tab) can be checked
         conn.close()
         app = create_app(settings, Services(llm=None, embedder=FakeEmbedder(), directory=people))
         if os.environ.get("PREVIEW_COINS"):                               # Lumi City's check (LUMI_CITY_ONLY): plots cost more than a new purse holds,

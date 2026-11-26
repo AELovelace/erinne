@@ -1,4 +1,4 @@
-/* Access → Settings → Themes (web/theme.py, mnemerynne/theme.py): the themes as cards (on, pickable,
+/* Access → Settings → Branding and themes (web/theme.py, mnemerynne/theme.py): the themes as cards (on, pickable,
    edit, copy, download, reset or delete), new themes from a base or a theme pack, the default and the
    enforced theme, the organisation's branding; and the editor: scene, palettes, gradients, shape and
    type, effects and custom CSS, previewed on this very page as you go. Nothing here uses innerHTML. */

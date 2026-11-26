@@ -6,7 +6,7 @@ People in one group get Erynne with the same tools Claude has: she searches, rea
 
 1. **Create the group** on the domain controller (for example `Erynne Agents`) and add people. They need their Mnemerynne user linked to their domain account. Admins aren't included automatically.
 2. **The model.** The agent uses the same model path as answers: the [balancer nodes](balancer.md), least busy first, then `MNEMERYNNE_LLM_URL` when none answers. Those servers need tool support: llama-server with `--jinja`, or a chat template file. With LFM2.5, the no-think template (`lfm2-no-think.jinja`) is required, or every JSON call fails while the model thinks.
-3. **Access → Settings → Erynne agent**: pick the group and save. The status line says whether a model answers and by which route. Below it are the limits: timeout per call, tool steps per question, tokens, and whether the model may think first.
+3. **Access → Settings → AI and models → Erynne agent**: pick the group and save. The status line says whether a model answers and by which route. Below it are the limits: timeout per call, tool steps per question, tokens, and whether the model may think first.
 
 ## How she behaves
 
@@ -23,7 +23,7 @@ Every tool call is logged in `agent_calls` (kept `MNEMERYNNE_AGENT_CALLS_DAYS`, 
 
 ## Mail and calendar
 
-Only for the agent group, and only through a linked Microsoft account: search and read mail, see the calendar, search SharePoint live, draft emails and replies. **Save to Drafts** puts a draft in Outlook; nothing is ever sent, moved or deleted, and there is no code to do it. Mail text goes to Claude through the connector only for the separate group named under Access → Connectors → Mail and calendar for Claude, and for people who tick *Use External API* in chat, under their own key. See [Microsoft 365](microsoft-365.md#mail-and-calendar).
+Only for the agent group, and only through a linked Microsoft account: search and read mail, see the calendar, search SharePoint live, draft emails and replies. **Save to Drafts** puts a draft in Outlook; nothing is ever sent, moved or deleted, and there is no code to do it. Mail text goes to Claude through the connector only for the separate group named under Access → Settings → Claude, ChatGPT and the connector → Mail and calendar for Claude, and for people who tick *Use External API* in chat, under their own key. See [Microsoft 365](microsoft-365.md#mail-and-calendar).
 
 ## Evaluating the agent
 

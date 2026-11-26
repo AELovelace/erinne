@@ -48,39 +48,57 @@ The access log: every change made on this page, password changes, Claude switch 
 
 ## Settings
 
-Two columns.
+One column of sections, one card each, in this order. The **contents list** at the top jumps to a section (on a phone it's the folding **Sections** list), and **Find a setting** hides every setting whose name and text don't hold what you type (try `backup`, `ChatGPT` or `transcoding`); clear the box to see everything again. Each setting saves on its own, as before.
 
-**This box**
+**General**
 
 - **Administrators**: the domain group whose members are admins (default `Domain Admins`); one or more groups separated by `;`, AD or Entra.
-- **Erynne agent**: the group that gets Erynne's tools, the model status, and the limits (timeout, tool steps, tokens, thinking). See [The Erynne agent](erynne-agent.md).
-- **Balancer nodes**: addresses and key of the boxes that run the answer model, with live status. See [Balancer nodes](balancer.md).
-- **Organisation wiki**: which library the Wiki tab shows. See [Setting up the wiki](wiki-setup.md).
-- **Rooms**: the switch for the Rooms tab. See [Rooms](rooms.md).
-- **Desktop backup**: the switch, who may back up, the app's builds on offer, and every backed-up folder. See [Desktop backup](desktop-backup.md).
-- **Automator** (alpha): scheduled jobs and their limits. See [Automator](automator.md).
 - **Updates**: whether a newer version is on GitHub, what it changes (database update, service files), and how the last update went. The page can't start an update; see [Updating](updating.md).
 
-**Connectors**
-
-- **Microsoft 365**: tenants, consent, SharePoint libraries, shared mailboxes. See [Microsoft 365](microsoft-365.md).
-- **Claude in chat**: the group that may use its own Anthropic API key in chat. See [Claude in chat](claude-in-chat.md).
-- **Mail and calendar for Claude**: the group whose members' Claude gets mail and calendar tools through the connector (empty = off). See [Microsoft 365](microsoft-365.md#mail-and-calendar).
-- **Links Claude can open**: whether Claude gets short-lived text links and for how long. See [Claude](claude.md#links-claude-can-open).
-
-**Entertainment** (full width, under the columns)
-
-- **Media**: on or off, the Media folder on the share, the catalog's counts, and who may use Media and screens.
-- **Playback and artwork**: transcoding (and **Test transcoding**), artwork lookups and the TMDB key, reading the files again, and what's playing now.
-- **Live TV and radio**: SGCRelay's station list, and your own HLS, RTMP, YouTube and radio sources. See [Media](media.md).
-
-**Themes** (full width, between Entertainment and Experimental)
+**Branding and themes**
 
 - The looks the box can wear: Sakura, Neon, Corporate, Sad Girls Club and your own, with the default, who gets what, theme packs and the organisation's branding. See [Themes](themes.md).
 
-**Experimental** (full width, at the bottom)
+**AI and models**
+
+- **Erynne agent**: the group that gets Erynne's tools, the model status, and the limits (timeout, tool steps, tokens, thinking). See [The Erynne agent](erynne-agent.md).
+- **Balancer nodes**: addresses and key of the boxes that run the answer model, with live status. See [Balancer nodes](balancer.md).
+
+**Claude, ChatGPT and the connector**
+
+- **Claude in chat**: the group that may use its own Anthropic API key in chat. See [Claude in chat](claude-in-chat.md).
+- **Mail and calendar for Claude**: the group whose members' Claude gets mail and calendar tools through the connector (empty = off). See [Microsoft 365](microsoft-365.md#mail-and-calendar).
+- **Links Claude can open**: whether Claude gets short-lived text links and for how long. See [Claude](claude.md#links-claude-can-open).
+- **ChatGPT**: whether people may connect ChatGPT to the same connector (it sees what Claude sees).
+
+**Microsoft 365**
+
+- Tenants, consent, SharePoint libraries, shared mailboxes. See [Microsoft 365](microsoft-365.md).
+
+**Files and documents**
+
+- **Organisation wiki**: which library the Wiki tab shows. See [Setting up the wiki](wiki-setup.md).
+- **Office editor (ONLYOFFICE)**: Word, Excel and PowerPoint in the browser, the files open right now, and **Release**. See [Office editor](onlyoffice.md).
+- **Desktop backup**: the switch, who may back up, the app's builds on offer, and every backed-up folder. See [Desktop backup](desktop-backup.md).
+- **Desktop app**: the group that may download the Windows desktop app and sign it in. See [Desktop app](desktop-app.md).
+
+**Rooms**
+
+- The switch for the Rooms tab. See [Rooms](rooms.md).
+
+**Automator** (alpha)
+
+- Scheduled jobs and their limits. See [Automator](automator.md).
+
+**Media and entertainment**
+
+- **Media**: on or off, the Media folder on the share, the catalog's counts, who may use Media and screens, and the games' daily coin limits.
+- **Playback and artwork**: transcoding (and **Test transcoding**), artwork lookups and the TMDB key, reading the files again, and what's playing now.
+- **Live TV and radio**: SGCRelay's station list, and your own HLS, RTMP, YouTube and radio sources. See [Media](media.md).
+
+**Experimental and development** (at the bottom)
 
 - **Experimental features**: the group that gets features still being tried out.
 - **Development diagnostics**: the group whose members' Claude may pull raw diagnostics with the `diagnose` tool; empty = off ([Troubleshooting](troubleshooting.md#development-diagnostics)).
 
-The address bar keeps the tab (`#tab=settings`), so links to a tab can be shared with other admins.
+The address bar keeps the tab (`#tab=settings`) and the section you jumped to (`#tab=settings&section=claude`), so links to a tab or a section can be shared with other admins. The section keys are `general`, `themes`, `ai`, `claude`, `m365`, `files`, `rooms`, `automator`, `media` and `experimental`.

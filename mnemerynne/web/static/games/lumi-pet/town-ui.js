@@ -115,7 +115,7 @@
       return street(way.id).map(function (p) {
         const hint = p.id === "tavern" && ctx.away ? "Lumi is out exploring: find her in the Lantern & Paw" : p.hint;
         const row = { key: "place-" + p.id, icon: p.icon, name: p.name, hint: hint };
-        if (p.retro && !ctx.retro) row.note = "The Retro café is closed: an admin opens it by turning Retro on (Settings → Entertainment → Media → Retro).";
+        if (p.retro && !ctx.retro) row.note = "The Retro café is closed: an admin opens it by turning Retro on (Settings → Media and entertainment → Media → Retro).";
         else row.local = function () { ctx.go({ enter: p.id }); };
         return row;
       }).concat([

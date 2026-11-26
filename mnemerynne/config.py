@@ -200,7 +200,7 @@ class Settings(BaseSettings):
     automation_run_days: int = 90
     coin_ledger_days: int = 365                           # the games' coin history; balances are kept regardless
 
-    # Media centre (mnemerynne/media/), off until an admin turns it on (Settings → Entertainment → Media). ffmpeg and
+    # Media centre (mnemerynne/media/), off until an admin turns it on (Settings → Media and entertainment → Media). ffmpeg and
     # ffprobe from RPM Fusion (Fedora's ffmpeg-free can't decode or encode H.264/HEVC). Artwork, picture
     # thumbnails and transcoding sessions go under media_cache_dir (default <data_dir>/media-cache).
     # media_vaapi_device: the render node of the card that transcodes with VAAPI (the RX 580); empty

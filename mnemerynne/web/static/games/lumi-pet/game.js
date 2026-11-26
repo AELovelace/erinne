@@ -287,7 +287,7 @@
       if (TI.parse(id)) { enterInside(id); return; }                     // the lobbies, the office, the Arcade, the Casino, the Market, the field
       if (id === "tavern") { townOpen("lumi-dungeons", "tavern", exploring() ? "Lumi's friends are waiting at the Lantern & Paw! 🍺" : "Into the Lantern & Paw! 🍺"); return; }
       if (id === "garden") { townOpen("lumi-garden", "garden", "Through the gate into the Stardust Garden! 🌸"); return; }
-      if (id === "cafe") { if (RETRO_ON) townOpen("retro", "cafe", "Into the Retro café! 🕹☕"); else say("The Retro café is closed: an admin opens it by turning Retro on (Settings → Entertainment → Media → Retro)."); return; }
+      if (id === "cafe") { if (RETRO_ON) townOpen("retro", "cafe", "Into the Retro café! 🕹☕"); else say("The Retro café is closed: an admin opens it by turning Retro on (Settings → Media and entertainment → Media → Retro)."); return; }
       return;
     }
     if (t.kind === "lot") {

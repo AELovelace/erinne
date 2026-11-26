@@ -105,7 +105,7 @@ class ThemeBody(BaseModel):
 @router.put("/api/me/theme")
 def set_theme(body: ThemeBody, request: Request, response: Response, user=Depends(api_user),
               conn: sqlite3.Connection = Depends(get_db)):
-    """Pick one of the themes an admin turned on (Settings → Themes). With one theme enforced there
+    """Pick one of the themes an admin turned on (Settings → Branding and themes). With one theme enforced there
     is nothing to pick."""
     from mnemerynne.web.theme import looks_for
 

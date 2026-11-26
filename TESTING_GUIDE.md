@@ -128,7 +128,7 @@ By hand, on a computer with a mouse:
    Wall jump: jump at a wall, and while in the air against it press away from it: StickBob stops and holds on for about a fifth of a second. Jump during that and he kicks up and away. Pushing into the wall and jumping must do nothing. Away, jump, back, away, jump… climbs one wall. The GameMaker game works the same way (`PlayerCharacter.gml`, `WALLJUMP_` macros).
 4. Click outside the game or press P: it pauses, and no key stays stuck when you come back.
 5. Fall in a pit: the score panel appears, with "+N coins" (1 per 10 m plus 1 per kill), and the Coins count at the top right goes up by that. Your best distance is still there after a reload.
-6. As an admin, set **Settings → Entertainment → Media → Games → StickBob Runner coins a day** to a small number, such as 5. Play two runs: the second says today's limit is reached. Set it back to 0 (no limit). The same section has a box each for Prism Drop, Lumi Launch and Lumi-Soft; all four start at 0 (`tests/test_coins.py` checks the list, the defaults and the refusals).
+6. As an admin, set **Settings → Media and entertainment → Media → Games → StickBob Runner coins a day** to a small number, such as 5. Play two runs: the second says today's limit is reached. Set it back to 0 (no limit). The same section has a box each for Prism Drop, Lumi Launch and Lumi-Soft; all four start at 0 (`tests/test_coins.py` checks the list, the defaults and the refusals).
 
 `tests/test_runner.py` covers the coins: a run pays once, a claim faster than StickBob can run pays nothing, a new run drops the old ticket, the cap (off by default) and its checks.
 
@@ -374,7 +374,7 @@ Yarn Pop and Lumi Conga are the arcade's Breakout and Snake (slugs `breakout` an
 
 ## Rescan media
 
-`tests/test_media.py::test_rescan_media_asks_the_worker_to_scan_now` covers the button's API and the worker picking it up. On the NAS, with the worker running: copy a new film into the Media folder, press **Settings → Entertainment → Media → Rescan media**, and check that the note reads **Scanned.** and the film count goes up within a few seconds. Half-typed text in the other Media settings must survive it.
+`tests/test_media.py::test_rescan_media_asks_the_worker_to_scan_now` covers the button's API and the worker picking it up. On the NAS, with the worker running: copy a new film into the Media folder, press **Settings → Media and entertainment → Media → Rescan media**, and check that the note reads **Scanned.** and the film count goes up within a few seconds. Half-typed text in the other Media settings must survive it.
 
 ## Phone remote mode
 

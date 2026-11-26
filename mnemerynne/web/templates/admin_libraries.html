@@ -204,70 +204,160 @@
     <div id="log" class="table-wrap"></div>
   </section>
 
+  {#- Access → Settings: one column of cards, one card per section (2026-11-26). The block ids inside are what
+      admin.js, admin_m365.js and admin_theme.js fill, so they never change; only the sections around them do.
+      Each section is <section id="set-KEY"> with an <h2 id="set-KEY-title">: the contents list at the top jumps
+      to them (#tab=settings&section=KEY), and the filter box hides the blocks (.set-item) that don't match. -#}
   <div class="ax-settings" data-panel="settings" role="tabpanel" hidden>
-  <div class="ax-split">
-    <section class="inbox admin" aria-labelledby="ax-local-title">
-      <h2 class="ax-split-title" id="ax-local-title">This box</h2>
-      <h2 class="ax-h">Administrators</h2>
-      <div id="admin-group" aria-live="polite"><p class="muted">Loading…</p></div>
+    <details class="ax-side set-toc glass" id="set-toc" open>
+      <summary>Sections</summary>
+      <nav aria-label="Settings sections">
+        <ul class="set-toc-list">
+          <li><a href="#tab=settings&amp;section=general" data-section="general">General</a></li>
+          <li><a href="#tab=settings&amp;section=themes" data-section="themes">Branding and themes</a></li>
+          <li><a href="#tab=settings&amp;section=ai" data-section="ai">AI and models</a></li>
+          <li><a href="#tab=settings&amp;section=claude" data-section="claude">Claude, ChatGPT and the connector</a></li>
+          <li><a href="#tab=settings&amp;section=m365" data-section="m365">Microsoft 365</a></li>
+          <li><a href="#tab=settings&amp;section=files" data-section="files">Files and documents</a></li>
+          <li><a href="#tab=settings&amp;section=rooms" data-section="rooms">Rooms</a></li>
+          <li><a href="#tab=settings&amp;section=automator" data-section="automator">Automator</a></li>
+          <li><a href="#tab=settings&amp;section=media" data-section="media">Media and entertainment</a></li>
+          <li><a href="#tab=settings&amp;section=experimental" data-section="experimental">Experimental and development</a></li>
+        </ul>
+      </nav>
+      <label class="set-filter">
+        <span class="small muted">Find a setting</span>
+        <input type="search" id="set-filter" placeholder="e.g. backup, ChatGPT, transcoding" autocomplete="off">
+      </label>
+      <p class="small muted set-filter-none" id="set-filter-none" hidden>No setting matches that.</p>
+    </details>
+
+    <section class="inbox admin set-sec" id="set-general" aria-labelledby="set-general-title">
+      <h2 class="ax-split-title" id="set-general-title">General</h2>
+      <div class="set-item">
+        <h3 class="ax-h">Administrators</h3>
+        <div id="admin-group" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
       <datalist id="domain-groups"></datalist>
-      <h2 class="ax-h">Erynne agent</h2>
-      <div id="agent-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-      <h2 class="ax-h">Balancer nodes</h2>
-      <div id="balancer-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-      <h2 class="ax-h">Organisation wiki</h2>
-      <div id="wiki-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-      <h2 class="ax-h">Rooms</h2>
-      <div id="rooms-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      <div class="set-item">
+        <h3 class="ax-h">Updates</h3>
+        <div id="updates" aria-live="polite"><p class="muted">Checking…</p></div>
+      </div>
+    </section>
+
+    {#- Themes (admin_theme.js): the looks, theme packs and the organisation's branding. -#}
+    <section class="inbox admin set-sec" id="set-themes" aria-labelledby="set-themes-title">
+      <h2 class="ax-split-title" id="set-themes-title">Branding and themes</h2>
+      <div class="set-item" data-keywords="theme themes branding logo colours colors look pack">
+        <div id="theme-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
+    </section>
+
+    <section class="inbox admin set-sec" id="set-ai" aria-labelledby="set-ai-title">
+      <h2 class="ax-split-title" id="set-ai-title">AI and models</h2>
+      <div class="set-item">
+        <h3 class="ax-h">Erynne agent</h3>
+        <div id="agent-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
+      <div class="set-item">
+        <h3 class="ax-h">Balancer nodes</h3>
+        <div id="balancer-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
+    </section>
+
+    <section class="inbox admin set-sec" id="set-claude" aria-labelledby="set-claude-title">
+      <h2 class="ax-split-title" id="set-claude-title">Claude, ChatGPT and the connector</h2>
+      <div class="set-item">
+        <h3 class="ax-h">Claude in chat</h3>
+        <div id="claude-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
+      <div class="set-item">
+        <h3 class="ax-h">Mail and calendar for Claude</h3>
+        <div id="claude-mail-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
+      <div class="set-item">
+        <h3 class="ax-h">Links Claude can open</h3>
+        <div id="claude-links-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
+      <div class="set-item">
+        <h3 class="ax-h">ChatGPT</h3>
+        <div id="chatgpt-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
+    </section>
+
+    {#- Microsoft 365 (admin_m365.js): tenants, consent, SharePoint libraries, shared mailboxes. -#}
+    <section class="inbox admin set-sec" id="set-m365" aria-labelledby="set-m365-title">
+      <h2 class="ax-split-title" id="set-m365-title">Microsoft 365</h2>
+      <div class="set-item" data-keywords="microsoft 365 m365 tenant entra sharepoint mailbox outlook">
+        <div id="m365-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
+    </section>
+
+    {#- Files and documents: the wiki's library, the ONLYOFFICE editor, and the two Windows apps. -#}
+    <section class="inbox admin set-sec" id="set-files" aria-labelledby="set-files-title">
+      <h2 class="ax-split-title" id="set-files-title">Files and documents</h2>
+      <div class="set-item">
+        <h3 class="ax-h">Organisation wiki</h3>
+        <div id="wiki-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
+      <div class="set-item">
+        <h3 class="ax-h">Office editor (ONLYOFFICE)</h3>
+        <div id="office-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
       {#- Desktop backup (admin.js renderBackups, sync.py): the switch, who may back up, and who does. -#}
-      <h2 class="ax-h">Desktop backup</h2>
-      <div id="backups-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-      <h2 class="ax-h">Automator <span class="badge small">alpha</span></h2>
-      <div id="automations-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-      <h2 class="ax-h">Updates</h2>
-      <div id="updates" aria-live="polite"><p class="muted">Checking…</p></div>
+      <div class="set-item">
+        <h3 class="ax-h">Desktop backup</h3>
+        <div id="backups-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
+      <div class="set-item">
+        <h3 class="ax-h">Desktop app</h3>
+        <div id="desktop-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
     </section>
-    <section class="inbox admin" aria-labelledby="ax-connectors-title">
-      <h2 class="ax-split-title" id="ax-connectors-title">Connectors</h2>
-      <h2 class="ax-h">Microsoft 365</h2>
-      <div id="m365-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-      <h2 class="ax-h">Claude in chat</h2>
-      <div id="claude-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-      <h2 class="ax-h">Mail and calendar for Claude</h2>
-      <div id="claude-mail-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-      <h2 class="ax-h">Links Claude can open</h2>
-      <div id="claude-links-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-      <h2 class="ax-h">ChatGPT</h2>
-      <div id="chatgpt-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+
+    <section class="inbox admin set-sec" id="set-rooms" aria-labelledby="set-rooms-title">
+      <h2 class="ax-split-title" id="set-rooms-title">Rooms</h2>
+      <div class="set-item" data-keywords="rooms chat channels">
+        <div id="rooms-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
     </section>
-  </div>
-    {#- Entertainment (admin.js renderMedia): full width under the two columns, above Themes. Media is split into
-        what it is and who may use it, playback, and live sources. Games are built in (mnemerynne/games.py) and
-        follow Media's group; their one setting, StickBob Runner's daily coins, sits under Playback and artwork. -#}
-    <section class="inbox admin ax-wide" aria-labelledby="ax-entertainment-title">
-      <h2 class="ax-split-title" id="ax-entertainment-title">Entertainment</h2>
-      <h2 class="ax-h">Media</h2>
-      <div id="media-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-      <h2 class="ax-h">Playback and artwork</h2>
-      <div id="media-playback-settings" aria-live="polite"></div>
-      <h2 class="ax-h">Live TV and radio</h2>
-      <div id="media-sources-settings" aria-live="polite"></div>
+
+    <section class="inbox admin set-sec" id="set-automator" aria-labelledby="set-automator-title">
+      <h2 class="ax-split-title" id="set-automator-title">Automator <span class="badge small">alpha</span></h2>
+      <div class="set-item" data-keywords="automator automations scheduled jobs routines">
+        <div id="automations-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
     </section>
-    {#- Themes (admin_theme.js): full width under Entertainment, above Experimental. -#}
-    <section class="inbox admin ax-wide" aria-labelledby="ax-themes-title">
-      <h2 class="ax-split-title" id="ax-themes-title">Themes</h2>
-      <div id="theme-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+
+    {#- Media and entertainment (admin.js renderMedia): what Media is and who may use it, playback, and live
+        sources. Games are built in (mnemerynne/games.py) and follow Media's group; their daily coin limits sit
+        under Media → Games. -#}
+    <section class="inbox admin set-sec" id="set-media" aria-labelledby="set-media-title">
+      <h2 class="ax-split-title" id="set-media-title">Media and entertainment</h2>
+      <div class="set-item">
+        <h3 class="ax-h">Media</h3>
+        <div id="media-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
+      <div class="set-item">
+        <h3 class="ax-h">Playback and artwork</h3>
+        <div id="media-playback-settings" aria-live="polite"></div>
+      </div>
+      <div class="set-item">
+        <h3 class="ax-h">Live TV and radio</h3>
+        <div id="media-sources-settings" aria-live="polite"></div>
+      </div>
     </section>
-    <section class="inbox admin ax-wide" aria-labelledby="ax-experimental-title">
-      <h2 class="ax-split-title" id="ax-experimental-title">Experimental</h2>
-      <h2 class="ax-h">Experimental features</h2>
-      <div id="experimental-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-      <h2 class="ax-h">Desktop app</h2>
-      <div id="desktop-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-      <h2 class="ax-h">Office editor (ONLYOFFICE)</h2>
-      <div id="office-settings" aria-live="polite"><p class="muted">Loading…</p></div>
-      <h2 class="ax-h">Development diagnostics</h2>
-      <div id="dev-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+
+    <section class="inbox admin set-sec" id="set-experimental" aria-labelledby="set-experimental-title">
+      <h2 class="ax-split-title" id="set-experimental-title">Experimental and development</h2>
+      <div class="set-item">
+        <h3 class="ax-h">Experimental features</h3>
+        <div id="experimental-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
+      <div class="set-item">
+        <h3 class="ax-h">Development diagnostics</h3>
+        <div id="dev-settings" aria-live="polite"><p class="muted">Loading…</p></div>
+      </div>
     </section>
   </div>
 </main>

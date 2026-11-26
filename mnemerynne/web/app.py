@@ -314,7 +314,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         Public: browsers fetch it without the session cookie."""
         looks = theme_pages.looks_for(app)
         brand = looks.brand
-        if brand.get("mark"):   # the organisation's mark (Settings → Themes → Branding)
+        if brand.get("mark"):   # the organisation's mark (Settings → Branding and themes → Branding)
             v = brand["mark_version"]
             icons = [{"src": f"/theme/brand/{name}?v={v}", "sizes": size, "type": "image/png", "purpose": purpose}
                      for name, size, purpose in (("mark-192.png", "192x192", "any"), ("mark-512.png", "512x512", "any"),

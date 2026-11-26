@@ -5,7 +5,7 @@ People install **Mnemerynne Backup** (Windows or Linux) and pick folders on thei
 ## Turning it on
 
 1. **The backup host.** Laptops send through `MNEMERYNNE_BACKUP_URL` (e.g. `https://bkp.beepsquad.wtf`), a host of its own whose proxy takes big uploads: the reverse proxy at 10.1.1.20 runs `deploy/linux/nginx-bkp.conf`, and the box's Caddy gets `Caddyfile-mnemerynne-backup`. On that host only `/api/sync/*` and `/oauth/token|revoke` answer. Steps: deploy README, section 5m. Without it the app uses the main address and its upload limit.
-2. **Access → Settings → Desktop backup.** Switch it on and name the group (AD or Entra, separated by `;`) whose members may back up. The check runs on every request, so someone taken out of the group stops at once; switching Backups off stops every app.
+2. **Access → Settings → Files and documents → Desktop backup.** Switch it on and name the group (AD or Entra, separated by `;`) whose members may back up. The check runs on every request, so someone taken out of the group stops at once; switching Backups off stops every app.
 3. **The app.** Build it (`clients/desktop-sync/packaging/README.md`) and copy the installer (`Mnemerynne-Backup-Setup-<version>.exe`) and AppImage (`Mnemerynne_Backup-<version>-x86_64.AppImage`) into `<data dir>/backup-client/`. Preferences → Backups offers the newest of each, and running apps see a new version within a day.
 
 ## How it behaves
@@ -18,7 +18,7 @@ People install **Mnemerynne Backup** (Windows or Linux) and pick folders on thei
 
 ## Checking
 
-- Access → Settings → Desktop backup lists every backed-up folder: whose, which computer, files, size and the last sync.
+- Access → Settings → Files and documents → Desktop backup lists every backed-up folder: whose, which computer, files, size and the last sync.
 - `sudo mnemerynne-admin sync-status [USER]` prints the same.
 - On a laptop: `mnemerynne-backup status` and `mnemerynne-backup sync -v` show what the last pass did and every skipped file with its reason; the app's log is `backup.log` in `%LOCALAPPDATA%\Mnemerynne Backup` or `~/.local/state/mnemerynne-backup`.
 

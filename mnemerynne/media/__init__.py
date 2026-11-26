@@ -1,12 +1,12 @@
 """Media: a Kodi-style media centre over the share's Media library.
 
-Off until an admin turns it on (Settings → Entertainment → Media, meta 'media_enabled'). Turning it on makes the
+Off until an admin turns it on (Settings → Media and entertainment → Media, meta 'media_enabled'). Turning it on makes the
 folder Media on the share with Music, Movies, TV and Pictures inside (or adopts a Media folder that is
 already there); the worker then catalogs what people put in them (catalog.py), and the Media page
 plays it, straight from the share when the browser can, through ffmpeg when it can't
 (transcode.py). Live streams pulled by URL and internet radio (live.py) sit beside the library.
 
-Who may use Media at all is a group (Settings → Entertainment → Media; nobody until one is set). Within it, who sees
+Who may use Media at all is a group (Settings → Media and entertainment → Media; nobody until one is set). Within it, who sees
 what follows the share's own permissions on the Media folders, like any share library. Off, the page and its API answer as if they didn't exist;
 the folders, the files and the catalog are kept for when it's back.
 """
@@ -51,7 +51,7 @@ SIGNAGE_LIBRARY_KEY = "signage_library_id"
 
 HWACCELS = ("auto", "vaapi", "nvenc", "software")
 DEFAULT_RADIO_DIRECTORY = "https://sadgirlsclub.wtf/rr/healthz"
-# folder: the top-level folder on the share that is the Media library (Settings → Entertainment → Media → Media folder).
+# folder: the top-level folder on the share that is the Media library (Settings → Media and entertainment → Media → Media folder).
 # media_group: who may use Media at all; screens_group: who may pair screens and cast to them (group_refs
 # values, AD or Entra groups). Empty: nobody (may_use, screens.may_use).
 # signage_folder: the top-level share folder whose pictures, clips and PDFs signage playlists draw on;
@@ -65,7 +65,7 @@ DEFAULTS = {"folder": LIBRARY_NAME, "hwaccel": "auto", "max_transcodes": 2, "onl
             # games live in this top-level share folder, a folder per console.
             "retro_enabled": False, "retro_folder": "Games"}
 GROUP_SETTINGS = ("media_group", "screens_group")
-# Every game whose coins have a daily limit, by its setting (Settings → Entertainment → Media → Games): the setting's
+# Every game whose coins have a daily limit, by its setting (Settings → Media and entertainment → Media → Games): the setting's
 # name -> the game's, for refusals. The rest pay once per win (coins.prize) and have no daily limit at all.
 DAILY_CAPS = {"runner_daily_cap": "StickBob Runner", "lumisoft_daily_cap": "Lumi-Soft",
               "prism_daily_cap": "Prism Drop", "launch_daily_cap": "Lumi Launch"}
@@ -103,7 +103,7 @@ def set_enabled(conn: sqlite3.Connection, on: bool) -> None:
 
 
 def may_use(conn: sqlite3.Connection, user, directory) -> bool:
-    """In the Media group (Settings → Entertainment → Media → Who may use Media)? No group set: nobody. Checked live, so
+    """In the Media group (Settings → Media and entertainment → Media → Who may use Media)? No group set: nobody. Checked live, so
     leaving the group closes Media (and that person's screens) at once."""
     return user is not None and group_refs.in_any(conn, user, directory, load_settings(conn)["media_group"])
 
@@ -220,7 +220,7 @@ def _meta_library(conn: sqlite3.Connection, key: str, setting: str) -> sqlite3.R
 
 
 def library(conn: sqlite3.Connection) -> sqlite3.Row | None:
-    """The Media library (Settings → Entertainment → Media → Media folder)."""
+    """The Media library (Settings → Media and entertainment → Media → Media folder)."""
     return _meta_library(conn, LIBRARY_KEY, "folder")
 
 

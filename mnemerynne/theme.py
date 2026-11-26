@@ -683,7 +683,7 @@ def export_pack(settings: Settings, theme: dict) -> dict:
 def import_pack(conn: sqlite3.Connection, settings: Settings, user_id: int | None, data: Any,
                 *, name: str | None = None) -> dict:
     if not isinstance(data, dict) or data.get("format") != PACK_FORMAT:
-        raise ThemeError("That isn't a Mnemerynne theme pack (a .theme.json downloaded from Settings → Themes).")
+        raise ThemeError("That isn't a Mnemerynne theme pack (a .theme.json downloaded from Settings → Branding and themes).")
     base = data.get("base")
     if base not in BASES:
         raise ThemeError(f"The pack's base is one of {', '.join(BASES)}.")
@@ -838,7 +838,7 @@ def css(theme: dict, settings: Settings | None = None, *, version: int | None = 
         if dark:
             out.append(f"@media (prefers-color-scheme: dark) {{\n  {sel} {{\n    " + "\n    ".join(dark) + "\n  }\n}")
     if config.get("custom_css"):
-        out.append("/* Custom CSS from Settings → Themes */")
+        out.append("/* Custom CSS from Settings → Branding and themes */")
         out.append(config["custom_css"].strip())
     return "\n".join(out) + "\n"
 

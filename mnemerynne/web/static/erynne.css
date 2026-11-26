@@ -943,20 +943,24 @@ select { font: inherit; color: var(--ink); }
 .ax { display: grid; grid-template-columns: 18rem minmax(0, 1fr); gap: .9rem; flex: 1; min-height: 0; }
 .ax[hidden], .ax-page .inbox[hidden] { display: none; }
 .ax-page .inbox { width: 100%; margin: 0 auto; overflow: auto; }
-/* Access → Settings: this box's settings on the left, connectors on the right, like the Settings page. */
-.ax-split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; flex: 1; min-height: 0;
-  align-items: start; }
-.ax-split[hidden] { display: none; }
-/* Settings: the two columns, then Experimental full width; the panel scrolls as one, and Experimental
-   sits at the bottom of the panel even when the columns are short. */
+/* Access → Settings (2026-11-26): one column of full-width cards, one per section, under a contents list that
+   stays at the top while the panel scrolls. The panel scrolls as one; on a phone the page scrolls instead. */
 .ax-settings { display: flex; flex-direction: column; gap: .9rem; flex: 1; min-height: 0; overflow: auto; }
 .ax-settings[hidden] { display: none; }
-.ax-settings > .ax-split { flex: none; min-height: 0; overflow: visible; }
-.ax-settings > .ax-wide { flex: none; width: 100%; max-width: none; margin: 0; }
-.ax-settings > .ax-wide:last-child { margin-top: auto; }   /* Experimental stays at the bottom; Entertainment, then Themes, sit under the columns */
-.ax-split > .inbox { max-width: none; max-height: none; }
-.ax-split-title { margin: 0; font-size: 1.3rem; }
-.ax-split .ax-split-title + .ax-h { margin-top: 1rem; }
+.ax-settings > .inbox { flex: none; width: 100%; max-width: none; max-height: none; margin: 0; }   /* a wide table scrolls in its card */
+.ax-split-title { margin: 0; font-size: 1.3rem; }   /* a section's (or a Signage card's) big heading */
+.set-sec { scroll-margin-top: var(--set-toc-h, 0px); }   /* a jump lands below the sticky contents list */
+.set-sec[hidden], .set-item[hidden] { display: none; }   /* the filter box hides what doesn't match */
+.set-sec .ax-split-title + .set-item > .ax-h { margin-top: 1rem; }   /* the first heading sits closer to the title */
+.set-toc { position: sticky; top: 0; z-index: 3; flex: none; padding: .6rem .9rem; }   /* contents + filter */
+.set-toc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .3rem; }
+.set-toc-list a { display: inline-block; padding: .25rem .75rem; border-radius: 999px; color: var(--muted);
+  font-size: .9rem; font-weight: 500; text-decoration: none; }
+.set-toc-list a:hover, .set-toc-list a[aria-current="true"] { color: var(--rose-deep); background: var(--petal-soft); }
+.set-toc-list li[hidden] { display: none; }   /* a section the filter emptied drops out of the list too */
+.set-filter { display: flex; align-items: center; gap: .6rem; margin: .55rem 0 0; }
+.set-filter input { flex: 1; min-width: 0; max-width: 24rem; padding: .3rem .6rem; }
+.set-filter-none { margin: .4rem 0 0; }
 .ax-tree { overflow: auto; padding: .6rem .3rem; }
 .ax-pane { overflow: auto; padding: 1.1rem 1.4rem; }
 .ax-pane h2 { margin: 0; font-size: 1.25rem; }
@@ -993,8 +997,12 @@ select { font: inherit; color: var(--ink); }
 .ax-side > summary { display: none; }
 @media (max-width: 800px) {
   .ax-page { height: auto; }
-  .ax, .ax-split { grid-template-columns: minmax(0, 1fr); }
+  .ax { grid-template-columns: minmax(0, 1fr); }
   .ax-settings { overflow: visible; }
+  .set-toc { position: static; padding: .3rem .6rem; }   /* a phone: a folding "Sections" list, not a sticky bar */
+  .set-toc[open] { padding-bottom: .7rem; }
+  .set-filter { flex-direction: column; align-items: stretch; gap: .2rem; }
+  .set-filter input { max-width: none; }
   .ax-tree { max-height: 40vh; }
   .ax-side > summary { display: block; cursor: pointer; padding: .35rem .5rem; font-weight: 600; color: var(--rose-deep); }
   .ax-side:not([open]) { overflow: hidden; }

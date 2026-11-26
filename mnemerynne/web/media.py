@@ -1,5 +1,5 @@
 """Media: the page, its API, file and session streaming, the radio proxy, casting to screens, and
-Settings → Entertainment → Media (mnemerynne/media/).
+Settings → Media and entertainment → Media (mnemerynne/media/).
 
 Every library route takes the signed-in person, or for a paired screen (the TV) its owner
 (media_user), and serves only files they can read on the share (media.browse.View). While Media is
@@ -41,7 +41,7 @@ log = logging.getLogger("mnemerynne.media")
 
 def _media_on(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> None:
     """Every Media route but the admin settings: not there at all while Media is turned off, nor for
-    anyone outside the Media group (Settings → Entertainment → Media). Without a person or screen, the route's own
+    anyone outside the Media group (Settings → Media and entertainment → Media). Without a person or screen, the route's own
     sign-in check answers."""
     if not media.enabled(conn):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
@@ -81,15 +81,15 @@ def screen_device(request: Request, conn: sqlite3.Connection = Depends(get_db)) 
 
 
 def screens_user(request: Request, user=Depends(api_user), conn: sqlite3.Connection = Depends(get_db)) -> sqlite3.Row:
-    """The signed-in person, if they are in the screens group (Settings → Entertainment → Media)."""
+    """The signed-in person, if they are in the screens group (Settings → Media and entertainment → Media)."""
     if not screens.may_use(conn, user, request.app.state.directory):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Screens are only for members of the group an admin "
-                                                       "chose (Settings → Entertainment → Media).")
+                                                       "chose (Settings → Media and entertainment → Media).")
     return user
 
 
 router = APIRouter(dependencies=[Depends(_media_on)])
-admin_router = APIRouter()   # Settings → Entertainment → Media: reachable when it's off, to turn it on
+admin_router = APIRouter()   # Settings → Media and entertainment → Media: reachable when it's off, to turn it on
 share_router = APIRouter()   # the Share menu target (manifest): answers even with Media off
 
 # Browsers want these names for <video>/<audio>; mimetypes doesn't know all of them everywhere.

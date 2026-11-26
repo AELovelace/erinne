@@ -5,7 +5,7 @@ Members of one group may tick **🌐 Use External API** under the question box o
 ## Setting it up
 
 1. `MNEMERYNNE_SECRET_KEY` must be set: keys are stored encrypted with it.
-2. **Access → Settings → Claude in chat**: pick the group (AD or Entra, `;`-separated) and save. The section lists the members and whether each has saved a key. Leave the group empty to turn the feature off; people who already saved a key can still remove it.
+2. **Access → Settings → Claude, ChatGPT and the connector → Claude in chat**: pick the group (AD or Entra, `;`-separated) and save. The section lists the members and whether each has saved a key. Leave the group empty to turn the feature off; people who already saved a key can still remove it.
 3. Each member pastes their key on **Preferences → Claude in chat** and picks a model (Claude Opus 5.5 by default, or Sonnet or Haiku). The key is checked with Anthropic when saved and never shown again.
 
 ## What Claude reaches there

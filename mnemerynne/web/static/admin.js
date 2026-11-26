@@ -2397,9 +2397,13 @@
     document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
     // Only contact GitHub when someone opens Settings.
     if (tab === "settings" && !updatesLoaded) {
-      loadUpdates(false); loadAdminGroup(); loadBalancer(); loadWikiLibrary(); loadAgent(); loadClaude(); loadClaudeMail(); loadClaudeLinks(); loadChatGPT(); loadExperimental(); loadRooms(); loadAutomations(); loadMedia(); loadBackups(); loadDesktop(); loadOffice(); loadDev();
-      if (window.ErynneM365) window.ErynneM365.load();   // admin_m365.js
-      if (window.ErynneTheme) window.ErynneTheme.load();   // admin_theme.js
+      // Every block loads at once; settingsLoaded settles when all have drawn (a deep link jumps after that).
+      settingsLoaded = Promise.allSettled([
+        loadUpdates(false), loadAdminGroup(), loadBalancer(), loadWikiLibrary(), loadAgent(), loadClaude(),
+        loadClaudeMail(), loadClaudeLinks(), loadChatGPT(), loadExperimental(), loadRooms(), loadAutomations(),
+        loadMedia(), loadBackups(), loadDesktop(), loadOffice(), loadDev(),
+        window.ErynneM365 ? window.ErynneM365.load() : null,     // admin_m365.js
+        window.ErynneTheme ? window.ErynneTheme.load() : null]);  // admin_theme.js
     }
     if (tab === "accounts") loadAccounts();
     if (tab === "apis" && window.ErynneApis) window.ErynneApis.load();   // admin_apis.js
@@ -2411,6 +2415,7 @@
 
   function writeHash() {
     const parts = ["tab=" + state.tab];
+    if (state.tab === "settings" && state.section) parts.push("section=" + state.section);   // Settings → a section
     const sel = state.selected;
     if (sel && sel.kind === "library") parts.push("lib=" + sel.id);
     if (sel && sel.kind === "folder") parts.push("lib=" + sel.lib, "folder=" + sel.id);
@@ -2420,9 +2425,82 @@
   function readHash() {
     const params = new URLSearchParams(location.hash.slice(1));
     const lib = Number(params.get("lib")), folder = Number(params.get("folder"));
-    return { tab: params.get("tab") || "files",
+    return { tab: params.get("tab") || "files", section: params.get("section") || "",
              sel: folder && lib ? { kind: "folder", id: folder, lib: lib } : lib ? { kind: "library", id: lib } : null };
   }
+
+  // ------------------------------------------------------- settings: sections and the filter box
+  // Settings is one column of sections (<section id="set-KEY">). The contents list at the top jumps to one
+  // (and the address bar keeps it: #tab=settings&section=KEY), and the filter box hides every block (.set-item)
+  // whose heading and text don't hold what was typed. Nothing here touches a setting: layout only.
+  let settingsLoaded = Promise.resolve();   // set by showTab: settles once every Settings block has drawn
+
+  function jumpToSection(key, smooth) {
+    const sec = $("set-" + key);
+    if (!sec || sec.hidden) return;                    // unknown key, or the filter hid it
+    state.section = key;
+    const toc = $("set-toc"), panel = toc.parentElement;
+    const sticky = getComputedStyle(toc).position === "sticky";
+    panel.style.setProperty("--set-toc-h", sticky ? (toc.offsetHeight + 12) + "px" : "0px");   // land below the bar
+    sec.scrollIntoView({ block: "start", behavior: smooth ? "smooth" : "auto" });
+    markSection(key);
+  }
+
+  function markSection(key) {                          // the contents list shows where you are
+    document.querySelectorAll(".set-toc-list a").forEach(function (a) {
+      if (a.dataset.section === key) a.setAttribute("aria-current", "true");
+      else a.removeAttribute("aria-current");
+    });
+  }
+
+  document.querySelectorAll(".set-toc-list a").forEach(function (a) {
+    a.addEventListener("click", function (e) {
+      e.preventDefault();                              // no hash jump: the hash holds tab=…, not an element id
+      if (narrowScreen()) $("set-toc").open = false;   // a phone folds the list away first, so the jump lands right
+      jumpToSection(a.dataset.section, true);
+      writeHash();
+    });
+  });
+
+  function narrowScreen() { return window.matchMedia("(max-width: 800px)").matches; }
+
+  // A deep link (#tab=settings&section=KEY) opens before the blocks above it have loaded and grown, so it
+  // marks the section at once and jumps when they've all drawn, unless the person has scrolled by then.
+  function settleOn(key) {
+    markSection(key);
+    state.section = key;
+    let moved = false;
+    const stop = function () { moved = true; };
+    ["wheel", "touchstart", "keydown"].forEach(function (t) {
+      window.addEventListener(t, stop, { once: true, passive: true });
+    });
+    settingsLoaded.then(function () {
+      requestAnimationFrame(function () { if (!moved) jumpToSection(key, false); });   // after the last draw
+    });
+  }
+
+  function filterSettings(text) {
+    const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = 0;
+    document.querySelectorAll(".set-sec").forEach(function (sec) {
+      const title = sec.querySelector(".ax-split-title").textContent.toLowerCase();
+      let any = false;
+      sec.querySelectorAll(".set-item").forEach(function (item) {
+        // What's searched: the section's title, the block's heading and text, and its data-keywords.
+        const hay = (title + " " + item.textContent + " " + (item.dataset.keywords || "")).toLowerCase();
+        const hit = words.every(function (w) { return hay.includes(w); });
+        item.hidden = !hit;
+        if (hit) any = true;
+      });
+      sec.hidden = !any;                               // a section with nothing left goes too
+      const link = document.querySelector('.set-toc-list a[data-section="' + sec.id.slice(4) + '"]');
+      if (link) link.parentElement.hidden = !any;      // and so does its entry in the contents list
+      if (any) shown++;
+    });
+    $("set-filter-none").hidden = shown > 0;           // say so when nothing matches
+  }
+
+  $("set-filter").addEventListener("input", function () { filterSettings(this.value); });
 
   document.querySelectorAll("[data-tab]").forEach(function (b) {
     b.addEventListener("click", function () { showTab(b.dataset.tab); writeHash(); });
@@ -2479,6 +2557,7 @@
 
   const start = readHash();
   showTab(start.tab);
+  if (start.tab === "settings" && start.section) settleOn(start.section);   // a settings deep link
   state.selected = start.sel;
   load();
 })();

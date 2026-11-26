@@ -1,6 +1,6 @@
 """Retro: console games from the share, played in the browser (EmulatorJS), with saves kept per person.
 
-The Games folder (Settings → Entertainment → Media → Retro) is a share library of its own, like Signage, with a
+The Games folder (Settings → Media and entertainment → Media → Retro) is a share library of its own, like Signage, with a
 folder per console (NES, SNES, Genesis, Game Boy, Game Boy Color, GBA, PS1). Its ROMs are ordinary share files, so who
 sees which game follows the share's permissions exactly as in Files. Nothing is catalogued: the share scan already
 lists every file with its content's sha256, and the shelves are read from that.
@@ -100,7 +100,7 @@ def enabled(conn: sqlite3.Connection) -> bool:
 
 
 def library(conn: sqlite3.Connection) -> sqlite3.Row | None:
-    """The Games folder's library (Settings → Entertainment → Media → Retro)."""
+    """The Games folder's library (Settings → Media and entertainment → Media → Retro)."""
     return media._meta_library(conn, LIBRARY_KEY, "retro_folder")
 
 

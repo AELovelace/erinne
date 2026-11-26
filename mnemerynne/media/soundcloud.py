@@ -1,7 +1,7 @@
 """SoundCloud in Media: a profile's tracks, albums, playlists, likes and reposts, search, and stations built from a
 track's related tracks, all read with the server's API key.
 
-The key (Settings → Entertainment → Media) and its token stay on the server. A track's audio is signed for by the
+The key (Settings → Media and entertainment → Media) and its token stay on the server. A track's audio is signed for by the
 server when it is played, then the browser streams it straight from SoundCloud's CDN: the signed links need no
 credentials and allow any origin (checked against the real API).
 
@@ -97,7 +97,7 @@ class SoundCloudError(Exception):
 
 def _bad_key() -> SoundCloudError:
     return SoundCloudError(503, "SoundCloud refused this server's key. An admin should check it in Settings → "
-                                "Entertainment → Media.")
+                                "Media and entertainment → Media.")
 
 
 def _no_answer() -> SoundCloudError:
@@ -162,7 +162,7 @@ def credentials(conn: sqlite3.Connection, settings: Settings) -> tuple[str, str]
 def need_credentials(conn: sqlite3.Connection, settings: Settings) -> tuple[str, str]:
     found = credentials(conn, settings)
     if found is None:
-        raise SoundCloudError(503, "SoundCloud isn't set up yet. An admin adds the key in Settings → Entertainment → Media.")
+        raise SoundCloudError(503, "SoundCloud isn't set up yet. An admin adds the key in Settings → Media and entertainment → Media.")
     return found
 
 

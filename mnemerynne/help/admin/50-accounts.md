@@ -24,7 +24,7 @@ You can't deactivate yourself, and can't drop your own admin role unless the dom
 
 Admin rights also come from:
 
-- **The admin domain group** (Access → Settings → Administrators, default `Domain Admins`): members of that AD or Entra group, through their linked account.
+- **The admin domain group** (Access → Settings → General → Administrators, default `Domain Admins`): members of that AD or Entra group, through their linked account.
 - **Bootstrap usernames** in `MNEMERYNNE_ADMIN_USERS`.
 
 And they only count from **admin networks** when `MNEMERYNNE_ADMIN_NETWORKS` is set: an admin on a phone off the VPN is an ordinary user. Preferences shows each person which of these makes them an admin.

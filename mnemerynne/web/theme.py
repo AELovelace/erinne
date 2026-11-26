@@ -1,5 +1,5 @@
 """Themes (mnemerynne/theme.py): the public stylesheet and files every page loads (/theme/…), and the
-admin's side of Settings → Themes (/api/admin/themes, /api/admin/brand). Pages read app.state.looks,
+admin's side of Settings → Branding and themes (/api/admin/themes, /api/admin/brand). Pages read app.state.looks,
 loaded once and rebuilt after every write here, so rendering never touches the database for a theme."""
 
 from __future__ import annotations

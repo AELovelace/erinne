@@ -32,7 +32,7 @@ The script:
 
 If opening a file in the editor shows `{"detail":"Not Found"}`, those routes are missing: run `sudo bash /opt/mnemerynne/deploy/linux/front-door.sh services` (or `routes` once the box has it).
 
-Then go to **Access → Settings → Office editor**:
+Then go to **Access → Settings → Files and documents → Office editor**:
 1. Press **Test connection**. You should see ✅ and `answered 200: true`.
 2. Tick **On** and press **Save**.
 3. Optionally, name a group (AD or Entra, `;`-separated) to limit who sees the editor. Empty means everyone, each person within their own rights on each file.
@@ -71,7 +71,7 @@ Mnemerynne ──http──▶ 127.0.0.1:8090/cache/files/…  (fetching the edi
 
 ## Looking after it
 
-- **Settings → Office editor** lists files open right now and who has them. **Release** drops a stuck session (say, the Document Server was restarted mid-edit). Claude and the drive may then save again, and the editors' next save becomes a copy.
+- **Settings → Files and documents → Office editor** lists files open right now and who has them. **Release** drops a stuck session (say, the Document Server was restarted mid-edit). Claude and the drive may then save again, and the editors' next save becomes a copy.
 - Logs:
   - `journalctl -u mnemerynne-web | grep onlyoffice` for each callback's outcome;
   - `journalctl -u mnemerynne-onlyoffice` for the container;
@@ -82,7 +82,7 @@ Mnemerynne ──http──▶ 127.0.0.1:8090/cache/files/…  (fetching the edi
 ## Testing it on the box (walkthrough)
 
 1. `systemctl status mnemerynne-onlyoffice` is active, and `curl -s 127.0.0.1:8090/healthcheck` prints `true`.
-2. In **Access → Settings → Office editor**, **Test connection** shows ✅. Tick **On** and save.
+2. In **Access → Settings → Files and documents → Office editor**, **Test connection** shows ✅. Tick **On** and save.
 3. **Edit and save.** Upload a .docx to a library you can change.
    - Right-click it → **Open in editor**. The formatted document opens under the flower bar.
    - Type something and press **Ctrl+S**.

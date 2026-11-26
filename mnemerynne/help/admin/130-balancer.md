@@ -5,7 +5,7 @@ The answer model can run on one or more **mnemerynne-balancer** boxes (each spre
 ## Setting it up
 
 1. **On each node**, download and start Erynne's model on its control page (`http://<node>:9180`): LFM2.5 2.6B Q8 for the stock model; a fine-tuned GGUF must be on Hugging Face for the node to download it. The node's LFM2.5 entries start with the no-think chat template and `--reasoning-format deepseek`, so memories and follow-ups work from a node; a fine-tuned LFM2.5 added from Hugging Face needs `"chat_template": "lfm2-no-think.jinja"` in its entry in the node's `data/custom-models.json`. Note the node's API key (`BALANCER_API_KEY`); every node needs the same key.
-2. **Access → Settings → Balancer nodes**: the addresses separated by commas (`http://10.0.5.20:9180, http://10.0.5.21:9180`) and the key, then Save. Each node is checked with the key first; if one doesn't answer or rejects the key, nothing is saved and the message says which. The key is stored encrypted (needs `MNEMERYNNE_SECRET_KEY`) and never shown again.
+2. **Access → Settings → AI and models → Balancer nodes**: the addresses separated by commas (`http://10.0.5.20:9180, http://10.0.5.21:9180`) and the key, then Save. Each node is checked with the key first; if one doesn't answer or rejects the key, nothing is saved and the message says which. The key is stored encrypted (needs `MNEMERYNNE_SECRET_KEY`) and never shown again.
 
 ## How it behaves
 

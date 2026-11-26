@@ -272,10 +272,11 @@ def test_corporate_branding_and_enforcing(settings, conn, people):
         assert c.put("/api/me/theme", json={"theme": "sakura"}).status_code == 422
 
 
-def test_the_settings_page_has_themes_between_the_columns_and_experimental(settings, conn, people):
+def test_the_settings_page_has_a_branding_and_themes_section(settings, conn, people):
     with TestClient(_app(settings)) as c:
         _login(c, "boss")
         page = c.get("/admin/libraries").text
-        assert page.index('id="ax-connectors-title"') < page.index('id="ax-themes-title"') < page.index('id="theme-settings"') \
-            < page.index('id="ax-experimental-title"')
+        # Themes are their own section (Branding and themes), second after General, before AI and models.
+        assert page.index('id="set-general-title"') < page.index('id="set-themes-title"') \
+            < page.index('id="theme-settings"') < page.index('id="set-ai-title"')
         assert "admin_theme.js" in page

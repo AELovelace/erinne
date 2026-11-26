@@ -4,7 +4,7 @@ People in one group can install the **desktop app** (Windows). It shows the site
 
 ## Turning it on
 
-1. **Access → Settings → Desktop app.** Name the group (AD or Entra, separated by `;`) whose members may download the app and sign it in. It's checked on every request, so someone taken out of the group stops at once. Leave it empty to switch the app off for everyone; signed-in apps stop working immediately.
+1. **Access → Settings → Files and documents → Desktop app.** Name the group (AD or Entra, separated by `;`) whose members may download the app and sign it in. It's checked on every request, so someone taken out of the group stops at once. Leave it empty to switch the app off for everyone; signed-in apps stop working immediately.
 2. **The installer.** New versions are published as **GitHub releases** of the repo (`desktop-v<version>`, made by `clients/desktop-app/ps/publish-release.ps1`). Installed apps check there (they ask before updating), and check each download's SHA-256 before running it. To offer the app on **Preferences → Desktop app** to people who haven't installed it yet, also copy `Mnemerynne-Desktop-Setup-<version>.exe` into `<data dir>/desktop-app/` (the server announces its SHA-256 too).
 
 Nothing else is needed on the server. The drive uses the main address, so its uploads are held to the front door's limit (`client_max_body_size 510m` on the edge) and to `MNEMERYNNE_MAX_FILE_BYTES` (500 MB).

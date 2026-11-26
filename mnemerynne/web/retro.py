@@ -51,7 +51,7 @@ def player_csp(request: Request) -> str:
 
 
 def _retro_on(conn: sqlite3.Connection = Depends(get_db)) -> None:
-    """Not there at all until an admin turns Retro on (Settings → Entertainment → Media → Retro)."""
+    """Not there at all until an admin turns Retro on (Settings → Media and entertainment → Media → Retro)."""
     if not retro.enabled(conn):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
 

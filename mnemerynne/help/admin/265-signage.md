@@ -1,6 +1,6 @@
 # Signage
 
-**Access → Signage** turns the screens paired under Media (TVs, kiosk boxes) into digital signage: playlists of pictures, clips, PDFs, text, web pages and announcements, scheduled per screen or screen group, with each screen's state in view. It needs Media on (Settings → Entertainment → Media), which also makes the **Signage** folder on the share.
+**Access → Signage** turns the screens paired under Media (TVs, kiosk boxes) into digital signage: playlists of pictures, clips, PDFs, text, web pages and announcements, scheduled per screen or screen group, with each screen's state in view. It needs Media on (Settings → Media and entertainment → Media), which also makes the **Signage** folder on the share.
 
 ## The content browser
 

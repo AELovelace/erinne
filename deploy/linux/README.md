@@ -920,7 +920,7 @@ DNS.
 
 ## 5k. Media (films, TV shows, music, pictures, live TV and radio)
 
-Media is off until an admin turns it on in **Access → Settings → Entertainment → Media**. It needs the
+Media is off until an admin turns it on in **Access → Settings → Media and entertainment → Media**. It needs the
 share (5d): turning it on makes `Media\Music`, `Media\Movies`, `Media\TV` and
 `Media\Pictures` there, and the worker catalogs what people put in them after each share
 scan. In `TV`, each folder is one show, with its seasons in folders inside it
@@ -941,7 +941,7 @@ ffmpeg -hide_banner -encoders | grep -E 'h264_(vaapi|nvenc)'
 sudo systemctl daemon-reload && sudo systemctl restart mnemerynne-web   # SupplementaryGroups=render video
 ```
 
-Then **Settings → Entertainment → Media → Test transcoding** encodes two seconds with each backend and
+Then **Settings → Media and entertainment → Media → Test transcoding** encodes two seconds with each backend and
 says which work. *Automatic* uses the RX 580 (VAAPI) first, then the GTX 1050 Ti
 (NVENC), then the CPU. Both cards encode on dedicated hardware beside the models they
 run; set `MNEMERYNNE_MEDIA_VAAPI_DEVICE` if the wrong render node is picked.

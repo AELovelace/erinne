@@ -13,7 +13,7 @@ whether they can open it). Message ids are long; the model gets short ones
 
 Claude through the connector gets the same mail and calendar tools (not the
 live SharePoint search) only for people in the group an admin names on
-Access → Connectors → Mail and calendar for Claude (meta 'claude_mail_group',
+Access → Settings → Claude, ChatGPT and the connector → Mail and calendar for Claude (meta 'claude_mail_group',
 a group_refs reference; empty = off). The connector is stateless, so there a
 Context is `opaque`: message ids are self-describing tokens (`encode_ref`)
 instead of m1, m2, and every token is checked against the person's own linked

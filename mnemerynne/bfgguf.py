@@ -1,6 +1,6 @@
 """BFGguf: a much bigger model, tried by an experimental group before anyone else.
 
-Members of the experimental group (Access → Settings → Experimental, meta
+Members of the experimental group (Access → Settings → Experimental and development, meta
 'experimental_group') get a BFGguf toggle in chat. A question asked with it
 is answered entirely by the BFGguf: the follow-up rewrite, the cited answer,
 small talk, API parameters and Erynne's tool loop (graph.run_turn sets
