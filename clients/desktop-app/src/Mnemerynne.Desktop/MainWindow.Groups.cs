@@ -77,9 +77,11 @@ public partial class MainWindow
         var room = Math.Max(120, width - 48 - 40);                       // 48: the + button, 40: room to drag the window
         var shown = _strip.OfType<BrowserTab>().ToList();
         var labels = _strip.OfType<TabGroup>().Sum(g => 30 + g.Label.Length * 7.5);   // about how wide the labels are
-        var (place, doc) = TabWidths.Fit(room - labels, shown.Count(t => !t.IsDocument), shown.Count(t => t.IsDocument));
+        var full = shown.Where(t => t.Group is not { Collapsed: true }).ToList();   // a folded group's tab is half, set below
+        var (place, doc) = TabWidths.Fit(room - labels - shown.Count(t => t.Group is { Collapsed: true }) * 60,
+                                         full.Count(t => !t.IsDocument), full.Count(t => t.IsDocument));
         foreach (var t in _tabs)
-            t.TabWidth = t.IsDocument ? doc : place;
+            t.TabWidth = (t.IsDocument ? doc : place) * (t.Group is { Collapsed: true } ? 0.5 : 1);   // a folded group's tab: half (Doll)
         StripScroller.MaxWidth = room;
     }
 
@@ -138,16 +140,6 @@ public partial class MainWindow
                 CloseTab(_tabs.IndexOf(t));                      // closed tabs can still come back with Ctrl+Shift+T
         });
         menu.IsOpen = true;
-    }
-
-    /// <summary>A tab dropped on a group's label joins that group.</summary>
-    private void OnGroupDrop(object sender, DragEventArgs e)
-    {
-        if (GroupOf(sender) is { } g && e.Data.GetData(typeof(BrowserTab)) is BrowserTab tab)
-        {
-            MoveToGroup(tab, g);
-            e.Handled = true;                                    // not also a reorder on the strip
-        }
     }
 
     /// <summary>A coloured dot before a menu line, so each group is easy to tell apart.</summary>

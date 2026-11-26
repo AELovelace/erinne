@@ -202,6 +202,12 @@ public partial class MainWindow : Window
         var shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
         var alt = Keyboard.Modifiers.HasFlag(ModifierKeys.Alt);
         var handled = true;
+        if (_dragging && key == Key.Escape)
+        {
+            FinishDrag(drop: false);                       // Esc: the dragged tab goes back where it was
+            e.Handled = true;
+            return;
+        }
         if (ctrl && key == Key.T && shift)
         {
             if (_closed.Pop() is { } back)
@@ -219,68 +225,7 @@ public partial class MainWindow : Window
         e.Handled = handled;
     }
 
-    // ===================================================================== mouse: select, close, drag
-    private Point _dragStart;
-    private BrowserTab? _dragTab;
-
-    private static BrowserTab? TabOf(object sender) => (sender as FrameworkElement)?.DataContext as BrowserTab;
-
-    private void OnTabMouseDown(object sender, MouseButtonEventArgs e)
-    {
-        if (TabOf(sender) is { } tab)
-        {
-            Select(_tabs.IndexOf(tab));
-            _dragStart = e.GetPosition(this);
-            _dragTab = tab;
-        }
-    }
-
-    private void OnTabMouseMove(object sender, MouseEventArgs e)
-    {
-        if (_dragTab is null || e.LeftButton != MouseButtonState.Pressed)
-            return;
-        var moved = e.GetPosition(this) - _dragStart;
-        if (Math.Abs(moved.X) < SystemParameters.MinimumHorizontalDragDistance)
-            return;
-        var tab = _dragTab;
-        _dragTab = null;
-        DragDrop.DoDragDrop((DependencyObject)sender, tab, DragDropEffects.Move);   // OnTabDrop finishes it
-    }
-
-    private void OnTabMouseUp(object sender, MouseButtonEventArgs e)
-    {
-        _dragTab = null;
-        if (e.ChangedButton == MouseButton.Middle && TabOf(sender) is { } tab)
-            CloseTab(_tabs.IndexOf(tab));                  // middle-click closes, as in a browser
-    }
-
-    private void OnTabClose(object sender, RoutedEventArgs e)
-    {
-        if (TabOf(sender) is { } tab)
-            CloseTab(_tabs.IndexOf(tab));
-        e.Handled = true;
-    }
-
-    private void OnTabDragOver(object sender, DragEventArgs e)
-    {
-        e.Effects = e.Data.GetDataPresent(typeof(BrowserTab)) ? DragDropEffects.Move : DragDropEffects.None;
-        e.Handled = true;
-    }
-
-    private void OnTabDrop(object sender, DragEventArgs e)
-    {
-        if (e.Data.GetData(typeof(BrowserTab)) is not BrowserTab tab)
-            return;
-        var over = (e.OriginalSource as FrameworkElement)?.DataContext as BrowserTab;
-        var from = _tabs.IndexOf(tab);
-        var to = over is null ? _tabs.Count - 1 : _tabs.IndexOf(over);
-        if (from < 0 || to < 0 || from == to || (over is not null && TabKinds.Block(SortKey(over)) != TabKinds.Block(SortKey(tab))))
-            return;                                        // a tab moves within its own block (kind and group) only
-        _active = TabMath.AfterMove(from, to, _active);
-        _tabs.Move(from, to);
-        Regroup();
-        SaveSession();
-    }
+    // Mouse on the tabs (select, close, drag): MainWindow.Drag.cs.
 
     private void OnStripWheel(object sender, MouseWheelEventArgs e)
     {

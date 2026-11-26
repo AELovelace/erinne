@@ -49,7 +49,21 @@ public sealed class BrowserTab : INotifyPropertyChanged
 
     private double _tabWidth = TabWidths.Place;
     /// <summary>Its width in the strip (MainWindow.FitStrips: places compact, opened things normal, both shrinking).</summary>
-    public double TabWidth { get => _tabWidth; set => Set(ref _tabWidth, value); }
+    public double TabWidth
+    {
+        get => _tabWidth;
+        set
+        {
+            Set(ref _tabWidth, value);
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Compact)));
+        }
+    }
+
+    /// <summary>
+    /// Too narrow for icon, name and ✕ together (a folded group's half-width tab): it shows just its flower, or for a
+    /// file just its name. The tooltip still has the full name, and middle-click still closes it.
+    /// </summary>
+    public bool Compact => _tabWidth < 70;
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public event Action? NavigationChanged;               // back/forward need redrawing

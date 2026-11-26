@@ -9,6 +9,8 @@ A native Windows app for Mnemerynne (Erynne):
   things are 200 px without it; opened things shrink first (to 90), then places (to 64) (`TabWidths`).
 - **Tab groups**, like Firefox (`MainWindow.Groups.cs`, `TabGroup.cs`): named, coloured, foldable; grouped tabs sit
   between the places and the ungrouped opened things (`TabKinds.Ordered`), saved in tabs.json.
+- **Live tab dragging** (`MainWindow.Drag.cs`): the tab lifts and follows the mouse, a line shows where it lands (own
+  block only), group labels light up as drop targets, Esc cancels. A folded group's showing tab is half width.
   The site's name glitches like the site's brand (cyan and red copies every 7 s; off when Windows' animations are).
 - **One top row, like Edge** (WindowChrome): the site's name (the **pages menu**, read live from the site's own hidden
   top bar, with badges), back/forward/reload, the tabs, the drive's status, **⚙** (servers, settings, drive, sign-in,

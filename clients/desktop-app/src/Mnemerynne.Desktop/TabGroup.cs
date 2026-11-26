@@ -44,6 +44,10 @@ public sealed class TabGroup : INotifyPropertyChanged
     /// <summary>Folded away: its tabs are hidden in the strip (they keep running), except the showing one.</summary>
     public bool Collapsed { get => _collapsed; set { _collapsed = value; Changed(); Changed(nameof(Label)); } }
 
+    private bool _dropTarget;
+    /// <summary>A dragged tab is over its label: the label lights up (MainWindow.Drag.cs).</summary>
+    public bool DropTarget { get => _dropTarget; set { _dropTarget = value; Changed(); } }
+
     /// <summary>How many tabs it has (the label shows it while folded).</summary>
     public int Count { get => _count; set { _count = value; Changed(); Changed(nameof(Label)); } }
 

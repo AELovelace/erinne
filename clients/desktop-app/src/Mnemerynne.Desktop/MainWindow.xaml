@@ -60,12 +60,12 @@
                     MouseLeftButtonDown="OnTabMouseDown" MouseMove="OnTabMouseMove" MouseUp="OnTabMouseUp"
                     MouseRightButtonUp="OnTabRightClick">
                 <Grid>
-                    <DockPanel Margin="10,0,4,0">
+                    <DockPanel x:Name="Row" Margin="10,0,4,0">
                         <Image x:Name="Flower" DockPanel.Dock="Left" Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,8,0"
                                VerticalAlignment="Center"/>
-                        <Button DockPanel.Dock="Right" Style="{StaticResource Flat}" Content="✕" AutomationProperties.Name="Close tab"
-                                FontSize="10" Padding="5,2" Click="OnTabClose" ToolTip="Close tab (Ctrl+W)"/>
-                        <TextBlock Text="{Binding Title}" Foreground="{DynamicResource Ink}" VerticalAlignment="Center"
+                        <Button x:Name="CloseButton" DockPanel.Dock="Right" Style="{StaticResource Flat}" Content="✕"
+                                AutomationProperties.Name="Close tab" FontSize="10" Padding="5,2" Click="OnTabClose" ToolTip="Close tab (Ctrl+W)"/>
+                        <TextBlock x:Name="TitleText" Text="{Binding Title}" Foreground="{DynamicResource Ink}" VerticalAlignment="Center"
                                    TextTrimming="CharacterEllipsis"/>
                     </DockPanel>
                     <!-- the group's colour along the bottom (none when it's in no group) -->
@@ -83,20 +83,44 @@
                 <DataTrigger Binding="{Binding IsDocument}" Value="True">
                     <Setter TargetName="Flower" Property="Visibility" Value="Collapsed"/>
                 </DataTrigger>
+                <!-- Too narrow for everything (a folded group's half-width tab): just the flower, centred; for a file,
+                     just its name. The tooltip keeps the full name; middle-click still closes it. -->
+                <DataTrigger Binding="{Binding Compact}" Value="True">
+                    <Setter TargetName="CloseButton" Property="Visibility" Value="Collapsed"/>
+                    <Setter TargetName="Row" Property="Margin" Value="4,0"/>
+                    <Setter TargetName="Flower" Property="Margin" Value="0"/>
+                    <Setter TargetName="Flower" Property="HorizontalAlignment" Value="Center"/>
+                    <Setter TargetName="Flower" Property="DockPanel.Dock" Value="Top"/>
+                </DataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding Compact}" Value="True"/>
+                        <Condition Binding="{Binding IsDocument}" Value="False"/>
+                    </MultiDataTrigger.Conditions>
+                    <Setter TargetName="TitleText" Property="Visibility" Value="Collapsed"/>
+                </MultiDataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
 
         <!-- A tab group's label, before its tabs: the name in the group's colour (with the tab count while folded).
-             Click folds or unfolds the group; right-click has Rename, Colour, Ungroup, Close group; drop a tab on it to
-             add the tab to the group. -->
+             Click folds or unfolds the group; right-click has Rename, Colour, Ungroup, Close group; drag a tab onto it
+             to add the tab to the group (it lights up). -->
         <DataTemplate DataType="{x:Type local:TabGroup}">
             <Border x:Name="Chip" Height="24" Margin="6,9,3,1" Padding="9,0" CornerRadius="7" Cursor="Hand"
                     Background="{Binding Tint}" BorderBrush="{Binding Brush}" BorderThickness="1"
-                    ToolTip="Click to fold or unfold; right-click for more" AllowDrop="True" Drop="OnGroupDrop"
+                    ToolTip="Click to fold or unfold; right-click for more"
                     MouseLeftButtonUp="OnGroupClick" MouseRightButtonUp="OnGroupRightClick">
                 <TextBlock Text="{Binding Label}" Foreground="{Binding Brush}" FontWeight="SemiBold" FontSize="12.5"
                            VerticalAlignment="Center" FontFamily="{DynamicResource MenuFont}"/>
             </Border>
+            <DataTemplate.Triggers>
+                <!-- A dragged tab is over it: lit up, "let go to add it here". -->
+                <DataTrigger Binding="{Binding DropTarget}" Value="True">
+                    <Setter TargetName="Chip" Property="BorderThickness" Value="2"/>
+                    <Setter TargetName="Chip" Property="Background" Value="{Binding Brush}"/>
+                    <Setter TargetName="Chip" Property="TextElement.Foreground" Value="Black"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
         </DataTemplate>
 
         <!-- The window's own buttons (minimise, maximise, close): square, full height, like Windows' own. -->
@@ -214,8 +238,14 @@
                 </Grid.ColumnDefinitions>
                 <ScrollViewer x:Name="StripScroller" Grid.Column="0" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled"
                               PreviewMouseWheel="OnStripWheel" WindowChrome.IsHitTestVisibleInChrome="True">
-                    <ItemsControl x:Name="TabStrip" AllowDrop="True" Drop="OnTabDrop" DragOver="OnTabDragOver"
-                                  ItemsPanel="{StaticResource TabRow}"/>
+                    <Grid>
+                        <ItemsControl x:Name="TabStrip" ItemsPanel="{StaticResource TabRow}"/>
+                        <!-- While a tab is dragged: the bright line where it will land (MainWindow.Drag.cs). -->
+                        <Canvas IsHitTestVisible="False">
+                            <Rectangle x:Name="DropLine" Width="3" Height="30" Canvas.Top="6" RadiusX="1.5" RadiusY="1.5"
+                                       Fill="{DynamicResource Accent}" Visibility="Collapsed"/>
+                        </Canvas>
+                    </Grid>
                 </ScrollViewer>
                 <Button Grid.Column="1" Style="{StaticResource Flat}" Content="＋" AutomationProperties.Name="New tab" Margin="4,4,0,4" Click="OnNewTab" ToolTip="New tab (Ctrl+T)"/>
             </Grid>

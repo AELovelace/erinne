@@ -26,15 +26,15 @@ Like Edge, everything is on one row at the top: the site's name, back / forward 
 - **New tab**: **＋** or **Ctrl+T**. **Close**: **✕**, a middle-click on the tab, or **Ctrl+W**. **Reopen the last closed tab**: **Ctrl+Shift+T**.
 - **Switch**: click a tab, **Ctrl+Tab** / **Ctrl+Shift+Tab**, or **Ctrl+1** … **Ctrl+8** (**Ctrl+9** is the last tab).
 - **Back / forward / reload**: the arrows, **Alt+←** / **Alt+→**, **F5**.
-- **Reorder**: drag a tab along the strip (places among places, opened things among opened things).
+- **Reorder**: drag a tab along the strip. It lifts and follows the mouse, and a bright line shows where it will land: places among places, a group's tabs within their group, opened things among opened things. Press **Esc** while dragging to put it back.
 
 ### Tab groups
 
 Like Firefox, tabs can be gathered into named, coloured groups, for example everything for one budget or report:
 
 - **Start one**: right-click a tab → **New group with this tab**, and give it a name. Each new group takes the next colour.
-- **Add or take out a tab**: right-click it → **Add to “Budget”** or **Remove from “Budget”**, or drag it onto a group's label.
-- **Fold a group away**: click its label. Its tabs hide (they keep their place and stay open) and the label shows how many there are, e.g. **Budget · 3**. Click again to bring them back. The tab you're on stays visible even in a folded group.
+- **Add or take out a tab**: right-click it → **Add to “Budget”** or **Remove from “Budget”**, or drag it onto a group's label (the label lights up; let go to add it).
+- **Fold a group away**: click its label. Its tabs hide (they keep their place and stay open) and the label shows how many there are, e.g. **Budget · 3**. Click again to bring them back. The tab you're on stays visible even in a folded group, at half width (just its flower, for a place).
 - **Right-click a label** for **Rename…**, **Colour**, **Ungroup** (the tabs stay open) and **Close group** (closes its tabs; Ctrl+Shift+T brings them back one at a time).
 - A tab a grouped page opens (a file from Files, say) joins the same group.
 - Groups sit together between the places and the ungrouped opened things, and come back with your tabs when the app restarts.
