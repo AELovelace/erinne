@@ -31,7 +31,8 @@ public partial class MainWindow
     {
         if (TabOf(sender) is not { } tab)
             return;
-        Select(_tabs.IndexOf(tab));                       // a click shows it straight away
+        Select(_tabs.IndexOf(tab), focusPage: false);     // a click shows it straight away; the page gets focus on
+                                                          // the button's release, so it can't take the mouse from a drag
         _pressed = tab;
         _pressedBox = (FrameworkElement)sender;
         _pressedAt = e.GetPosition(this);
@@ -58,6 +59,8 @@ public partial class MainWindow
             e.Handled = true;
             return;
         }
+        if (e.ChangedButton == MouseButton.Left && _pressed is { } clicked)
+            clicked.View.Focus();                         // a plain click: typing goes to the page now
         _pressed = null;
         if (e.ChangedButton == MouseButton.Middle && TabOf(sender) is { } tab)
             CloseTab(_tabs.IndexOf(tab));                 // middle-click closes, as in a browser
@@ -81,9 +84,7 @@ public partial class MainWindow
             _pressedBox = now;
         _dragging = true;
         _grab = _pressedAt.X - _pressedBox!.TranslatePoint(new Point(0, 0), this).X;
-        _pressedBox.CaptureMouse();
-        _pressedBox.LostMouseCapture += OnDragCaptureLost;
-        _pressedBox.RenderTransform = new TranslateTransform();
+        _pressedBox.RenderTransform = new TranslateTransform();   // set up before taking the mouse (see below)
         _pressedBox.Opacity = 0.85;
         _pressedBox.Effect = new DropShadowEffect
         {
@@ -92,13 +93,20 @@ public partial class MainWindow
         };
         if (VisualTreeHelper.GetParent(_pressedBox) is UIElement holder)
             Panel.SetZIndex(holder, 10);                  // drawn over its neighbours while it moves
+        // Last: taking the mouse makes WPF send a mouse-move straight away, into FollowMouse, before this method
+        // would carry on (that early move used to find no offset yet, fail, and leave the tab un-lifted: Doll saw it
+        // on the showing tab).
+        _pressedBox.LostMouseCapture += OnDragCaptureLost;
+        _pressedBox.CaptureMouse();
     }
 
     /// <summary>Move the lifted tab under the mouse and work out where it would land.</summary>
     private void FollowMouse(double mouseX)
     {
         var slot = Holder(_pressed!)?.TranslatePoint(new Point(0, 0), TabStrip).X ?? 0;
-        ((TranslateTransform)_pressedBox!.RenderTransform).X = mouseX - _grab - slot;   // the tab stays under the mouse
+        if (_pressedBox?.RenderTransform is not TranslateTransform move)
+            return;                                       // not lifted (yet): nothing to move
+        move.X = mouseX - _grab - slot;                   // the tab stays under the mouse
 
         _dropBefore = null;
         _dropAtEnd = false;
@@ -162,6 +170,8 @@ public partial class MainWindow
             if (VisualTreeHelper.GetParent(box) is UIElement holder)
                 Panel.SetZIndex(holder, 0);
         }
+        if (tab is not null)
+            Dispatcher.BeginInvoke(() => tab.View.Focus(), System.Windows.Threading.DispatcherPriority.Input);   // after the drop
         if (!drop || tab is null)
             return;
         if (_dropGroup is { } group)

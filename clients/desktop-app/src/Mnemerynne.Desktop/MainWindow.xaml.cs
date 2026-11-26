@@ -96,7 +96,9 @@ public partial class MainWindow : Window
     private bool IsShowing(BrowserTab tab) => _active >= 0 && _active < _tabs.Count && _tabs[_active] == tab;
 
     /// <summary>Show one tab; hide the others (they keep running, as browser tabs do).</summary>
-    private void Select(int index)
+    /// <summary>Show tab <paramref name="index"/>. <paramref name="focusPage"/> false leaves keyboard focus where it is
+    /// (a press on a tab: the page taking focus would take the mouse back from a drag that's starting).</summary>
+    private void Select(int index, bool focusPage = true)
     {
         if (index < 0 || index >= _tabs.Count)
             return;
@@ -111,7 +113,8 @@ public partial class MainWindow : Window
         Title = tab.Title;                                 // the page's name only (no server name), like its tab
         RefreshToolbar();
         _ = RefreshFromPageAsync();
-        tab.View.Focus();
+        if (focusPage)
+            tab.View.Focus();                              // typing goes to the page
         SaveSession();
     }
 
