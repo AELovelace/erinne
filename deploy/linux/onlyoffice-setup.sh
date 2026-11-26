@@ -6,9 +6,14 @@
 #   sudo bash /opt/mnemerynne/deploy/linux/onlyoffice-setup.sh status         is it up, healthy, and wired in
 #
 # The container runs in rootful podman as a quadlet (onlyoffice/mnemerynne-onlyoffice.container), published on
-# 127.0.0.1:8090 only. Browsers reach it at https://<host>/onlyoffice/ through the edge nginx (nginx-onlyoffice.conf),
-# and it reaches the app back at https://<host>/api/office/ds/ through the same edge. It needs the edge nginx
-# (README "nginx holds HTTPS on this box") and about 4 GB of free RAM (the box has 20 GB since its upgrade).
+# 127.0.0.1:8090 only. It needs about 4 GB of free RAM and one of the two nginx layouts (it says which it found):
+#   edge   nginx holds HTTPS on this box (README "nginx holds HTTPS on this box"): browsers reach the editor at
+#          https://<host>/onlyoffice/ through the edge (nginx-onlyoffice.conf), and the container calls the app back
+#          at https://<host>/api/office/ds/ through the same edge.
+#   front  another machine holds HTTPS and sends to nginx as the front door here (README "nginx in front of the app
+#          processes"): the front door carries /onlyoffice/ (front-door.sh writes it, MNEMERYNNE_ONLYOFFICE_LAYOUT=
+#          front), and the container calls the front door's own LAN address directly, never the outside proxy.
+#          That proxy must pass /onlyoffice/ with websockets: help admin/295 has the checklist.
 # The secret is generated here and never printed: it lands in two root-only files and nowhere else.
 set -euo pipefail
 
@@ -22,7 +27,9 @@ QUADLET_DST=/etc/containers/systemd/$UNIT.container
 SNIPPET_SRC=$HERE/nginx-onlyoffice.conf
 SNIPPET_DIR=/etc/nginx/mnemerynne-edge.d                 # the edge includes *.conf from here inside its 443 block
 SNIPPET_DST=$SNIPPET_DIR/onlyoffice.conf
-EDGE_CONF=/etc/nginx/conf.d/mnemerynne-edge.conf         # without the edge there's nothing to hang /onlyoffice/ on
+EDGE_CONF=/etc/nginx/conf.d/mnemerynne-edge.conf         # the edge layout: nginx holds HTTPS here
+FRONT_CONF=/etc/nginx/conf.d/mnemerynne-front.conf       # the front door (front-door.sh), behind another proxy or the edge
+FRONT_DOOR=$HERE/front-door.sh                           # writes the front door's config, ONLYOFFICE's locations included
 DATA=/srv/onlyoffice                                     # everything the container keeps (never removed by this script)
 PORT=8090                                                # PublishPort=127.0.0.1:8090:80
 INTERNAL_URL=http://127.0.0.1:$PORT/
@@ -144,13 +151,48 @@ installed_image() {  # the Image= line of the installed quadlet
     sed -n 's/^Image=//p' "$QUADLET_DST" 2>/dev/null | tail -n 1
 }
 
+layout() {  # edge (nginx holds HTTPS here), front (the front door behind another proxy) or none
+    if [[ -f $EDGE_CONF ]]; then echo edge
+    elif [[ -f $FRONT_CONF && -f $SAVED ]]; then echo front     # front-door.sh "on": it keeps the saved .env
+    else echo none
+    fi
+}
+
+front_address() {  # where the container reaches the front door: the address the outside proxy sends to
+    local host port
+    host=$(env_value MNEMERYNNE_HOST "" "$SAVED"); port=$(env_value MNEMERYNNE_PORT 38200 "$SAVED")
+    if [[ -z $host || $host == 0.0.0.0 || $host == "::" ]]; then   # every address: the box's first one will do
+        host=$(hostname -I 2>/dev/null | awk '{print $1}')
+    fi
+    [[ -n $host ]] || die "can't tell the front door's address (MNEMERYNNE_HOST in $SAVED)."
+    [[ $host == *:* ]] && host="[$host]"                   # an IPv6 address goes in brackets in a URL
+    printf '%s:%s' "$host" "$port"
+}
+
+container_reaches() {  # can the container reach URL $1? (the app's /healthz answers 200)
+    local code
+    code=$(podman exec "$UNIT" curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$1" 2>/dev/null || true)
+    [[ $code == 200 ]]
+}
+
+rewrite_front() {  # the front door's config again from the registry (ONLYOFFICE's locations follow the .env)
+    bash "$FRONT_DOOR" routes
+}
+
 # ------------------------------------------------------------------ install
 oo_install() {
     step "Checks"
     [[ -f $QUADLET_SRC && -f $SNIPPET_SRC ]] || die "missing $QUADLET_SRC or $SNIPPET_SRC: run it from the repo's deploy/linux."
     [[ -f $ENV_FILE ]] || die "no $ENV_FILE: set the app up first (setup.sh)."
-    [[ -f $EDGE_CONF ]] || die "no $EDGE_CONF: ONLYOFFICE hangs off the edge nginx (README \"nginx holds HTTPS on this box\")."
-    local host
+    local host lay app_url=""
+    lay=$(layout)
+    case $lay in
+        edge) note "layout: edge (nginx holds HTTPS on this box, $EDGE_CONF)" ;;
+        front) app_url="http://$(front_address)/"
+               note "layout: front door behind another reverse proxy ($FRONT_CONF)"
+               note "the container calls the app at $app_url" ;;
+        *) die "neither $EDGE_CONF (nginx holds HTTPS here) nor the front door ($FRONT_CONF, with $SAVED) is set up. Set one up first (README \"nginx holds HTTPS on this box\" or \"nginx in front of the app processes\": sudo bash $FRONT_DOOR on)." ;;
+    esac
     host=$(public_host)
     note "public host: $host"
     ram_check
@@ -183,7 +225,10 @@ oo_install() {
     set_app_env MNEMERYNNE_ONLYOFFICE_URL "https://$host/onlyoffice/"      # where browsers load the editor from
     set_app_env MNEMERYNNE_ONLYOFFICE_JWT_SECRET "$secret"                  # the same secret, so both sides sign alike
     set_app_env MNEMERYNNE_ONLYOFFICE_INTERNAL_URL "$INTERNAL_URL"          # how the app itself reaches the container
-    if [[ -z $(env_value MNEMERYNNE_ONLYOFFICE_APP_URL "") ]]; then
+    set_app_env MNEMERYNNE_ONLYOFFICE_LAYOUT "$lay"     # front-door.sh adds ONLYOFFICE's locations for "front"
+    if [[ $lay == front ]]; then
+        set_app_env MNEMERYNNE_ONLYOFFICE_APP_URL "$app_url"   # the front door's own address: not the outside proxy
+    elif [[ -z $(env_value MNEMERYNNE_ONLYOFFICE_APP_URL "") ]]; then
         set_app_env MNEMERYNNE_ONLYOFFICE_APP_URL ""     # empty: the container calls back on MNEMERYNNE_PUBLIC_URL
     else
         note "keeping MNEMERYNNE_ONLYOFFICE_APP_URL=$(env_value MNEMERYNNE_ONLYOFFICE_APP_URL "") (set by hand)"
@@ -202,7 +247,11 @@ oo_install() {
     note "pulling $image (about 1 GB the first time)"
     podman pull "$image"                                 # now, so the unit's start isn't a long silent download
     install -d -m 755 "$(dirname "$QUADLET_DST")"
-    sed -e "s/@HOST@/$host/g" -e "s#^Image=.*#Image=$image#" "$QUADLET_SRC" > "$QUADLET_DST"   # host and tag filled in
+    if [[ $lay == edge ]]; then                          # host and tag filled in
+        sed -e "s/@HOST@/$host/g" -e "s#^Image=.*#Image=$image#" "$QUADLET_SRC" > "$QUADLET_DST"
+    else                                                 # front: no AddHost, the public name isn't this box here
+        sed -e "s/@HOST@/$host/g" -e "s#^Image=.*#Image=$image#" -e '/^AddHost=/d' "$QUADLET_SRC" > "$QUADLET_DST"
+    fi
     chmod 644 "$QUADLET_DST"
     systemctl daemon-reload                              # the quadlet generator writes $UNIT.service from it
     systemctl cat "$UNIT.service" >/dev/null 2>&1 \
@@ -212,20 +261,36 @@ oo_install() {
 
     step "nginx"
     selinux_port
-    install -d -m 755 "$SNIPPET_DIR"
-    install -m 644 "$SNIPPET_SRC" "$SNIPPET_DST"
-    have restorecon && restorecon -R "$SNIPPET_DIR" || true   # nginx may read it under SELinux
-    nginx_apply "$SNIPPET_DST"
+    if [[ $lay == edge ]]; then
+        install -d -m 755 "$SNIPPET_DIR"
+        install -m 644 "$SNIPPET_SRC" "$SNIPPET_DST"
+        have restorecon && restorecon -R "$SNIPPET_DIR" || true   # nginx may read it under SELinux
+        nginx_apply "$SNIPPET_DST"
+    fi
+    if [[ -f $FRONT_CONF ]]; then                        # the front door: /office/ to the files service (and, for
+        note "rewriting the front door's routes"         # "front", /onlyoffice/ and /api/office/ds/ as well)
+        if ! rewrite_front; then
+            [[ $lay == front ]] && die "the front door's config wasn't rewritten (above); the old one still serves."
+            warn "the routes weren't rewritten: run sudo bash $FRONT_DOOR routes"
+        fi
+    fi
 
     step "App"
     app_restart
-    if [[ -f /etc/nginx/conf.d/mnemerynne-front.conf ]]; then   # the front door: /office/ goes to the files service
-        note "rewriting the front door's routes (/office/, /api/office/ to the files service)"
-        bash "$HERE/front-door.sh" routes || warn "the routes weren't rewritten: run sudo bash $HERE/front-door.sh routes"
+    if [[ $lay == front ]]; then                         # the container calls the front door: can it get there?
+        if container_reaches "${app_url}healthz"; then
+            note "the container reaches the app at $app_url"
+        else
+            warn "the container can't reach ${app_url}healthz, so saves will fail. Check the firewall lets podman's"
+            warn "network (10.88.0.0/16) reach $(front_address), e.g. sudo firewall-cmd --list-all"
+        fi
     fi
 
     step "Done"
     note "Editor: https://$host/onlyoffice/ (signed-in people only). Turn it on in Admin, then open a .docx."
+    if [[ $lay == front ]]; then                         # (an if: a false && as the last line would fail install)
+        note "The reverse proxy in front must pass /onlyoffice/ with websockets: see help admin/295."
+    fi
     note "The free edition allows 20 people editing at once."
 }
 
@@ -254,6 +319,16 @@ oo_off() {
     systemctl daemon-reload                              # the generated unit goes with the quadlet
     note "stopped; $QUADLET_DST removed"
 
+    local was
+    was=$(env_value MNEMERYNNE_ONLYOFFICE_LAYOUT "")
+    step "App settings"
+    set_app_env MNEMERYNNE_ONLYOFFICE_URL ""             # blank: the app shows no Office editor
+    set_app_env MNEMERYNNE_ONLYOFFICE_JWT_SECRET ""
+    set_app_env MNEMERYNNE_ONLYOFFICE_INTERNAL_URL ""
+    set_app_env MNEMERYNNE_ONLYOFFICE_LAYOUT ""          # the front door drops ONLYOFFICE's locations
+    [[ $was == front ]] && set_app_env MNEMERYNNE_ONLYOFFICE_APP_URL ""   # install set it to the front door's address
+    note "the ONLYOFFICE settings blanked in $ENV_FILE"
+
     step "nginx"
     if [[ -f $SNIPPET_DST ]]; then
         rm -f "$SNIPPET_DST"
@@ -261,12 +336,9 @@ oo_off() {
     else
         note "no $SNIPPET_DST"
     fi
-
-    step "App settings"
-    set_app_env MNEMERYNNE_ONLYOFFICE_URL ""             # blank: the app shows no Office editor
-    set_app_env MNEMERYNNE_ONLYOFFICE_JWT_SECRET ""
-    set_app_env MNEMERYNNE_ONLYOFFICE_INTERNAL_URL ""
-    note "the three ONLYOFFICE settings blanked in $ENV_FILE"
+    if [[ $was == front && -f $FRONT_CONF ]]; then
+        rewrite_front || warn "the front door still has /onlyoffice/: run sudo bash $FRONT_DOOR routes"
+    fi
 
     step "App"
     app_restart
@@ -289,7 +361,9 @@ oo_status() {
     echo "healthcheck (127.0.0.1:$PORT): $(healthy && echo true || echo 'no answer')"
     have podman && podman ps --filter "name=$UNIT" --format '  {{.Names}}  {{.Status}}  {{.Image}}' 2>/dev/null || true
     have podman && podman stats --no-stream --format '  memory: {{.MemUsage}}' "$UNIT" 2>/dev/null || true
+    echo "layout here: $(layout)   (set up for: $(env_value MNEMERYNNE_ONLYOFFICE_LAYOUT '(none)'))"
     echo "nginx snippet: $([[ -f $SNIPPET_DST ]] && echo "$SNIPPET_DST" || echo 'not installed')"
+    [[ -f $FRONT_CONF ]] && echo "front door has /onlyoffice/: $(grep -q 'location /onlyoffice/' "$FRONT_CONF" && echo yes || echo no)"
     echo "$OO_ENV: $([[ -f $OO_ENV ]] && stat -c 'mode %a, owner %U' "$OO_ENV" || echo 'missing')"
     echo "MNEMERYNNE_ONLYOFFICE_URL: $(env_value MNEMERYNNE_ONLYOFFICE_URL '(blank: off)')"
     echo "MNEMERYNNE_ONLYOFFICE_INTERNAL_URL: $(env_value MNEMERYNNE_ONLYOFFICE_INTERNAL_URL '(blank)')"

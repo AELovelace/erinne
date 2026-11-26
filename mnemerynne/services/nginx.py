@@ -12,6 +12,11 @@ With --accel (Phase 1, `front-door.sh accel on`), nginx also serves /static/ fro
 the app (X-Accel-Redirect, mnemerynne/web/sendfile.py): one internal location per folder the app's settings name
 (sendfile.roots) and per header set, plus a probe address per folder that only the box itself may ask for.
 --roots prints those folders ("key path" per line) for front-door.sh's permission checks.
+
+With --office (ONLYOFFICE on a box behind another reverse proxy, MNEMERYNNE_ONLYOFFICE_LAYOUT=front, set by
+onlyoffice-setup.sh), the front door also carries what the edge's nginx-onlyoffice.conf carries on an edge box:
+/onlyoffice/ to the container for signed-in people, its admin paths for this box only, and /api/office/ds/ for
+the container only (it calls the front door's own address directly, never through the reverse proxy).
 """
 
 from __future__ import annotations
@@ -75,6 +80,16 @@ CSP = {
 PERMISSIONS = "camera=(), microphone=(), geolocation=(), payment=()"
 PROBE = ".mnemerynne-accel-probe"                      # front-door.sh writes it, asks nginx for it, removes it
 STAMP_PATH = "/_front-door/stamp"                      # which config nginx is serving: front-door.sh asks
+OFFICE_UPSTREAM = "127.0.0.1:8090"                     # the ONLYOFFICE container (PublishPort=127.0.0.1:8090:80)
+OFFICE_FROM = ("10.88.0.0/16", "127.0.0.1", "::1")     # who may call /api/office/ds/: podman's bridge and this box
+
+OFFICE_HEADER = """
+# ONLYOFFICE builds its links from the scheme it's told: the reverse proxy's, or https if it sent none.
+map $http_x_forwarded_proto $front_office_proto {
+    ''      https;
+    default $http_x_forwarded_proto;
+}
+"""
 
 
 def _box_only(probe_from: str) -> list[str]:
@@ -159,15 +174,68 @@ def _stamp_location(stamp: str, probe_from: str) -> list[str]:
             "    }", ""]
 
 
+def _office_locations(upstream: str) -> list[str]:
+    """ONLYOFFICE through the front door (the edge layout has these in nginx-onlyoffice.conf instead). Everything
+    from the internet arrives here from the reverse proxy's LAN address, so "the LAN only" means nothing: the
+    admin paths are this box's alone (nothing the reverse proxy sent, which always carries X-Forwarded-For), and
+    /api/office/ds/ only answers the container, which calls this address directly. `upstream`: the process that
+    serves /api/office/ here (the files service, or the web app)."""
+    passed = ["        proxy_set_header Host $host;",
+              "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;"]
+    return [
+        "    # ONLYOFFICE's admin and server-to-server paths: this box only (a regex, so it wins over /onlyoffice/).",
+        r"    location ~ ^/onlyoffice/(healthcheck|info(/|$)|coauthoring/|.*(ConvertService|CommandService)\.ashx) {",
+        "        if ($http_x_forwarded_for) { return 404; }   # came through the reverse proxy: not this box",
+        "        allow 127.0.0.1;",
+        "        allow ::1;",
+        "        deny all;",
+        "        rewrite ^/onlyoffice/(.*)$ /$1 break;        # drop the prefix (a regex location can't in proxy_pass)",
+        f"        proxy_pass http://{OFFICE_UPSTREAM};",
+        *passed,
+        "        proxy_set_header X-Forwarded-Host $host/onlyoffice;",
+        "        proxy_set_header X-Forwarded-Proto $front_office_proto;",
+        "    }", "",
+        "    # The editor: scripts, fonts and the co-editing websocket, for signed-in people only.",
+        "    location /onlyoffice/ {",
+        "        auth_request /_office_auth;                  # the app says 204 (signed in) or 401",
+        f"        proxy_pass http://{OFFICE_UPSTREAM}/;      # trailing slash: /onlyoffice/x reaches it as /x",
+        *passed,
+        "        proxy_set_header X-Forwarded-Host $host/onlyoffice;   # its links keep the /onlyoffice/ prefix",
+        "        proxy_set_header X-Forwarded-Proto $front_office_proto;",
+        "        proxy_set_header Upgrade $http_upgrade;",
+        "        proxy_set_header Connection $front_connection_upgrade;",
+        "        client_max_body_size 100m;                   # pasted images and uploads inside the editor",
+        "    }", "",
+        "    # The sign-in check behind auth_request: the cookie only, never the body.",
+        "    location = /_office_auth {",
+        "        internal;                                    # from a browser: 404",
+        f"        proxy_pass http://{upstream}/api/office/ds-auth;",
+        "        proxy_pass_request_body off;",
+        '        proxy_set_header Content-Length "";',
+        *passed,
+        "        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;",
+        '        proxy_set_header Connection "";',
+        "    }", "",
+        "    # The container fetching a file and posting its save callback: podman's bridge and this box only (the",
+        "    # reverse proxy's address isn't on the list). The app checks its JWT, our URL token and the address too.",
+        "    location /api/office/ds/ {",
+        *(f"        allow {a};" for a in OFFICE_FROM),
+        "        deny all;",
+        f"        proxy_pass http://{upstream};",
+        "    }", ""]
+
+
 def render(listen: str, web: str = "127.0.0.1:38210", accel: dict[str, Path] | None = None,
-           running: list[str] | None = None, stamp: str | None = None) -> str:
+           running: list[str] | None = None, stamp: str | None = None, office: bool = False) -> str:
     """The whole nginx config: one upstream per service and the web app, one location per service path, and with
     `accel` (folder key -> path, web/sendfile.roots) nginx's own file locations. `running`: only these services get
     their paths (front-door.sh passes the ones whose units are enabled); the rest stay with the web app. `stamp`:
-    what nginx answers at STAMP_PATH, so front-door.sh can tell this config is the one being served."""
+    what nginx answers at STAMP_PATH, so front-door.sh can tell this config is the one being served. `office`: the
+    ONLYOFFICE locations (a box behind another reverse proxy; an edge box has them in its own snippet)."""
     services = [s for s in registry.SERVICES.values() if running is None or s.name in running]
     probe_from = listen.rsplit(":", 1)[0].strip("[]")              # the box's own address, as nginx sees it
-    lines = [HEADER + (ACCEL_HEADER if accel else "") + (_box_geo(probe_from) if stamp else "")]
+    lines = [HEADER + (ACCEL_HEADER if accel else "") + (OFFICE_HEADER if office else "")
+             + (_box_geo(probe_from) if stamp else "")]
     lines.append(f"upstream {_upstream('web')} {{ server {web}; keepalive 32; }}")
     for s in services:
         lines.append(f"upstream {_upstream(s.name)} {{ server 127.0.0.1:{s.port}; keepalive {16 * s.processes()}; }}"
@@ -182,6 +250,8 @@ def render(listen: str, web: str = "127.0.0.1:38210", accel: dict[str, Path] | N
         lines += _stamp_location(stamp, probe_from)
     if accel:
         lines += _accel_locations(accel, probe_from)
+    if office:                                     # /api/office/ goes to whichever process serves it here
+        lines += _office_locations(_upstream(next((s.name for s in services if "/api/office/" in s.paths), "web")))
     for s in services:
         for path in s.paths:
             lines += [f"    # {s.name}: {s.serves}", f"    location {path} {{",
@@ -244,6 +314,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--env-file", help="The service's .env (MNEMERYNNE_DATA_DIR, SHARE_ROOT...); - for stdin")
     parser.add_argument("--services", help="Comma-separated: only these services get their paths (default: all)")
     parser.add_argument("--stamp", help=f"What nginx answers at {STAMP_PATH} (front-door.sh's check)")
+    parser.add_argument("--office", action="store_true",
+                        help="ONLYOFFICE's locations (a box behind another reverse proxy: onlyoffice-setup.sh)")
     args = parser.parse_args(argv)
     if args.roots:
         for key, path in accel_roots(args.env_file).items():
@@ -253,7 +325,7 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("--listen is required")
     accel = accel_roots(args.env_file) if args.accel else None
     running = None if args.services is None else [n for n in args.services.split(",") if n]
-    sys.stdout.write(render(args.listen, args.web, accel, running, args.stamp))
+    sys.stdout.write(render(args.listen, args.web, accel, running, args.stamp, args.office))
 
 
 if __name__ == "__main__":

@@ -95,15 +95,21 @@ up() {                                      # wait for a health answer from $1 (
 }
 
 accel_set() { case "$(env_get MNEMERYNNE_ACCEL)" in 1|true|True|TRUE|yes|on) return 0 ;; esac; return 1; }
+office_args() {                             # --office when ONLYOFFICE hangs off this front door (onlyoffice-setup.sh)
+    if [ "$(env_get MNEMERYNNE_ONLYOFFICE_LAYOUT)" = front ] && [ -n "$(env_get MNEMERYNNE_ONLYOFFICE_URL)" ]; then
+        echo --office
+    fi
+}
 gen_conf() {                                # print the config for listen address $1; $2 = accel | plain
-    local running                           # only services that run get their paths; the rest stay with the web app
+    local running office                    # only services that run get their paths; the rest stay with the web app
     running=$(enabled_services)
+    office=$(office_args)                   # ONLYOFFICE's locations, on a box behind another reverse proxy
     if [ "$2" = accel ]; then
         app_py -m mnemerynne.services.nginx --listen "$1" --web "127.0.0.1:$WEB_PORT" --accel --env-file - \
-            --services "$running" --stamp "$STAMP" < "$ENV"
+            --services "$running" --stamp "$STAMP" $office < "$ENV"
     else
         app_py -m mnemerynne.services.nginx --listen "$1" --web "127.0.0.1:$WEB_PORT" --services "$running" \
-            --stamp "$STAMP"
+            --stamp "$STAMP" $office
     fi
 }
 conf_stamp() { sed -n 's/^ *return 200 "\([A-Za-z0-9-]*\)";$/\1/p' "$CONF" 2>/dev/null | head -1; }  # the file's

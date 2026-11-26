@@ -1391,7 +1391,19 @@ sudo sysctl --system && sudo systemctl restart mnemerynne-web
 
 ONLYOFFICE Docs Community opens `.docx`, `.xlsx` and `.pptx` files from Files in an editor in the
 browser, and saves them back as a new version. It runs on the box as a container in rootful podman
-(a quadlet), behind the edge nginx, so it needs the setup in "nginx holds HTTPS on this box" first.
+(a quadlet), behind nginx in one of two layouts, and `install` says which it found:
+
+- **edge:** nginx holds HTTPS on this box ("nginx holds HTTPS on this box"). The rest of this section
+  describes it.
+- **front:** another machine holds HTTPS and sends to nginx as the front door here ("nginx in front of the
+  app processes", `front-door.sh on`). `install` sets `MNEMERYNNE_ONLYOFFICE_LAYOUT=front`, and
+  `front-door.sh` then writes `/onlyoffice/`, `/_office_auth` and `/api/office/ds/` into the front door
+  (`services/nginx.py --office`). ONLYOFFICE's admin paths answer only this box (nothing carrying
+  `X-Forwarded-For`), because behind a proxy on the LAN every request looks like the LAN.
+  `MNEMERYNNE_ONLYOFFICE_APP_URL` is set to the front door's own address (`http://<LAN address>:38200/`),
+  so the container calls the app directly from podman's bridge, and the quadlet has no `AddHost`. The
+  proxy in front must pass `/onlyoffice/` with websockets, hour-long timeouts, 100 MB bodies, the public
+  `Host` and `X-Forwarded-Proto: https`; block `/api/office/ds/` there too (help admin/295 has the list).
 
 **RAM.** The document server needs about 4 GB free (the container is capped at `--memory=4g`). The
 Mnemerynne box has 20 GB since its upgrade, which leaves room next to the app and the models. As a

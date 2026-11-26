@@ -392,3 +392,58 @@ def test_bare_page_paths_reach_the_web_app_instead_of_an_nginx_redirect():
         part = conf[conf.index(f"location = {page} {{"):]
         assert part[part.index("proxy_pass http://") + 18:part.index(";")] == "mnemerynne_web", page
     assert "location = /api/media {" in conf and "location = / {" not in conf   # only slashed paths, never the root
+
+
+# --- ONLYOFFICE through the front door (a box behind another reverse proxy, MN-24) -----------------------------
+
+def test_the_front_door_has_no_onlyoffice_unless_asked():
+    conf = nginx.render("192.168.1.5:38200")
+    assert "/onlyoffice/" not in conf and "/api/office/ds/" not in conf and "$front_office_proto" not in conf
+
+
+def test_onlyoffice_through_the_front_door():
+    """The editor for signed-in people, its admin paths for this box only, /api/office/ds/ for the container only."""
+    conf = nginx.render("192.168.1.5:38200", office=True)
+    assert "map $http_x_forwarded_proto $front_office_proto" in conf            # its own map, not the edge's
+    editor = conf[conf.index("location /onlyoffice/ {"):]
+    editor = editor[:editor.index("    }")]
+    assert "auth_request /_office_auth;" in editor
+    assert "proxy_pass http://127.0.0.1:8090/;" in editor
+    assert "proxy_set_header X-Forwarded-Host $host/onlyoffice;" in editor
+    assert "proxy_set_header Connection $front_connection_upgrade;" in editor    # websockets (co-editing)
+    assert "$edge_connection_upgrade" not in conf
+    admin = conf[conf.index("location ~ ^/onlyoffice/(healthcheck"):]
+    admin = admin[:admin.index("    }")]
+    assert "if ($http_x_forwarded_for) { return 404; }" in admin                # the reverse proxy always sends it
+    assert "allow 127.0.0.1;" in admin and "deny all;" in admin and "10.0.0.0/8" not in admin
+    assert re.search(r"CommandService\)\\.ashx\) \{", admin)                    # one backslash in nginx's regex
+    auth = conf[conf.index("location = /_office_auth {"):]
+    assert "internal;" in auth[:200] and "proxy_pass http://mnemerynne_files/api/office/ds-auth;" in auth
+    ds = conf[conf.index("location /api/office/ds/ {"):]
+    ds = ds[:ds.index("    }")]
+    assert "allow 10.88.0.0/16;" in ds and "deny all;" in ds and "proxy_pass http://mnemerynne_files;" in ds
+    assert conf.index("location /api/office/ds/ {") < conf.index("location /api/office/ {")
+
+
+def test_onlyoffice_goes_to_the_web_app_when_the_files_service_is_off():
+    conf = nginx.render("192.168.1.5:38200", running=[], office=True)
+    assert "proxy_pass http://mnemerynne_web/api/office/ds-auth;" in conf
+    ds = conf[conf.index("location /api/office/ds/ {"):]
+    assert "proxy_pass http://mnemerynne_web;" in ds[:400]
+
+
+@pytest.mark.parametrize("layout,url,expected", [
+    ("front", "https://erynne.example/onlyoffice/", "--office"),
+    ("edge", "https://erynne.example/onlyoffice/", ""),     # the edge has its own snippet
+    ("front", "", ""),                                       # switched off (onlyoffice-setup.sh off)
+])
+def test_front_door_asks_for_onlyoffice_only_on_a_front_layout(tmp_path, layout, url, expected):
+    env = _env(tmp_path, MNEMERYNNE_ONLYOFFICE_LAYOUT=layout, MNEMERYNNE_ONLYOFFICE_URL=url)
+    result = _run("front-door.sh", '''
+ENV=$1; STAMP=s
+enabled_services() { echo files; }
+app_py() { echo "$@"; }                                    # the generator's arguments
+gen_conf 192.168.1.5:38200 plain
+''', _posix(env))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().endswith("--stamp s" + (" --office" if expected else ""))

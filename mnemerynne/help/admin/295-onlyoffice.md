@@ -13,6 +13,9 @@ When it's off, Office files show their extracted text as before.
 - **Memory:** about 4 GB for the container (capped at 4 GB). The box has 20 GB since its upgrade (2026-11-26), so there's room beside the llama servers. The setup script warns below 12 GB.
 - **Disk:** about 3 GB for the image, plus its cache under `/srv/onlyoffice`.
 - **Port:** 8090 on loopback only (`127.0.0.1:8090`). It's never opened in the firewall.
+- **nginx, in one of two layouts.** The setup script says which one it found, and refuses a box with neither:
+  - **edge:** nginx holds HTTPS on this box (*nginx holds HTTPS on this box* in the deploy README). That's the Mnemerynne box.
+  - **front:** another machine holds HTTPS and sends to nginx as the front door here (`front-door.sh on`).
 
 ## Installing
 
@@ -27,8 +30,21 @@ The script:
 2. Makes a random JWT secret (never printed) and writes `/etc/mnemerynne/onlyoffice.env` (0600).
 3. Adds `MNEMERYNNE_ONLYOFFICE_URL`, `_JWT_SECRET` and `_INTERNAL_URL` to `/etc/mnemerynne/mnemerynne.env`.
 4. Installs the quadlet `mnemerynne-onlyoffice` (image pinned to one version) and starts it, then waits for `http://127.0.0.1:8090/healthcheck` to say `true`. The first start takes a few minutes.
-5. Installs `/etc/nginx/mnemerynne-edge.d/onlyoffice.conf`, checks nginx and reloads it.
-6. Restarts the web app and the files service. With nginx as the front door, it also rewrites the front door's routes (`front-door.sh routes`), so `/office/` and `/api/office/` reach the files service.
+5. Wires nginx up for the layout:
+   - **edge:** installs `/etc/nginx/mnemerynne-edge.d/onlyoffice.conf`, checks nginx and reloads it;
+   - **front:** sets `MNEMERYNNE_ONLYOFFICE_LAYOUT=front` and rewrites the front door (`front-door.sh routes`), which then carries `/onlyoffice/`, its sign-in check and `/api/office/ds/`. The container calls the front door's own LAN address (`MNEMERYNNE_ONLYOFFICE_APP_URL`), never the proxy in front, so the quadlet has no `AddHost` line.
+
+   With a front door in either layout, the routes are rewritten too, so `/office/` and `/api/office/` reach the files service.
+6. Restarts the web app and the files service. On **front**, it then checks the container can reach the app, and warns if the firewall stops it.
+
+**The reverse proxy in front** (the other machine; not ours to script) needs, for `/onlyoffice/`:
+- websockets passed on (`Upgrade` and `Connection` headers), for co-editing;
+- a read and send timeout of an hour (3600 s), since an editing session stays open;
+- bodies up to 100 MB (pasted images, uploads inside the editor);
+- `Host` kept as the public name, since ONLYOFFICE builds its links from it;
+- `X-Forwarded-Proto: https` sent on.
+
+As a second layer, block `/api/office/ds/` there: only the container calls it, and it never comes through that proxy.
 
 If opening a file in the editor shows `{"detail":"Not Found"}`, those routes are missing: run `sudo bash /opt/mnemerynne/deploy/linux/front-door.sh services` (or `routes` once the box has it).
 
@@ -37,9 +53,9 @@ Then go to **Access → Settings → Files and documents → Office editor**:
 2. Tick **On** and press **Save**.
 3. Optionally, name a group (AD or Entra, `;`-separated) to limit who sees the editor. Empty means everyone, each person within their own rights on each file.
 
-Turning it off: untick **On** to hide it at once, or run `sudo deploy/linux/onlyoffice-setup.sh off` to stop the container and remove the nginx snippet and env lines. `/srv/onlyoffice` is kept.
+Turning it off: untick **On** to hide it at once, or run `sudo deploy/linux/onlyoffice-setup.sh off` to stop the container and remove the nginx snippet (or, on **front**, the front door's ONLYOFFICE locations) and env lines. `/srv/onlyoffice` is kept.
 
-`mnemerynne-admin update` keeps the nginx side current: it refreshes the edge snippet when the repo's copy changes (`nginx -t` first, the old one back if refused) and rewrites the front door's routes when the service registry changes.
+`mnemerynne-admin update` keeps the nginx side current in both layouts: it refreshes the edge snippet when the repo's copy changes (`nginx -t` first, the old one back if refused), and rewrites the front door (ONLYOFFICE's locations included on **front**) when the service registry or `services/nginx.py` changes.
 
 Updating the Document Server: `sudo deploy/linux/onlyoffice-setup.sh update <tag>`. `mnemerynne-admin update` never touches the container; its version only changes when you run this.
 
@@ -93,7 +109,7 @@ Mnemerynne ──http──▶ 127.0.0.1:8090/cache/files/…  (fetching the edi
    - Ask Claude to change a cell with `edit_spreadsheet`. It's refused with *"open in the Office editor by …"*.
    - Close the editor, ask again, and it works.
 7. **Conflict copy.** Open a file in the editor, then **Restore** an older version of it from Versions. Type in the editor and close it. An *"(editor copy, …)"* file appears beside it, with a message in your inbox.
-8. **From outside the LAN** (a phone on cellular):
+8. **From outside the LAN** (a phone on cellular; on **front**, that goes through the proxy in front):
    - `https://<host>/api/office/ds/file/1` → 403;
    - `https://<host>/onlyoffice/healthcheck` → 403;
    - `https://<host>/onlyoffice/web-apps/apps/api/documents/api.js` without signing in → 401.
