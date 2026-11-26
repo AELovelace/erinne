@@ -2,7 +2,7 @@
   <!-- Shared by every project in the desktop app. The version lives here only: the installer name
        (Mnemerynne-Desktop-Setup-<version>.exe), the About box, the user agent and the update check all read it. -->
   <PropertyGroup>
-    <Version>0.2.1</Version>
+    <Version>0.2.02</Version>
     <Company>Sad Girls Club</Company>
     <Product>Mnemerynne Desktop</Product>
     <Copyright>Sad Girls Club</Copyright>

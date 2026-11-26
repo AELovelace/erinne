@@ -21,7 +21,7 @@ Like Edge, everything is on one row at the top: the site's name, back / forward 
 - **⚙** (right of the drive's status) has the app's own things: which servers you have, **Add a server…**, **Settings…**, opening the drive, **Sign in / Sign out**, **Check for updates**, **About** and **Quit**.
 - The menus and the top row take their colours from the site's theme, so they change with it.
 
-**Tabs sort themselves**: the site's places (Ask, Files, Automator, Wiki…) come first, and opened things (a Markdown file, a spreadsheet, a PDF, the editor, a wiki page, Help) come after them, in the same row. A tab moves on its own when you open a file in it, or go back to a place. Tabs get narrower as you open more, as in a browser. Tab names leave off the site's name ("Files", not "Files · Mnemerynne").
+**Tabs sort themselves**: the site's places (Ask, Files, Automator, Wiki…) come first, and opened things (a Markdown file, a spreadsheet, a PDF, the editor, a wiki page, Help) come after them, in the same row. A tab moves on its own when you open a file in it, or go back to a place. Tabs start compact (half the old width) and get narrower as you open more, as in a browser. Like the site's own, the name at the top left glitches now and then (not when Windows' animations are turned off). Tab names leave off the site's name ("Files", not "Files · Mnemerynne").
 
 - **New tab**: **＋** or **Ctrl+T**. **Close**: **✕**, a middle-click on the tab, or **Ctrl+W**. **Reopen the last closed tab**: **Ctrl+Shift+T**.
 - **Switch**: click a tab, **Ctrl+Tab** / **Ctrl+Shift+Tab**, or **Ctrl+1** … **Ctrl+8** (**Ctrl+9** is the last tab).

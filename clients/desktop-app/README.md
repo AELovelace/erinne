@@ -5,7 +5,8 @@ A native Windows app for Mnemerynne (Erynne):
 - **Tabs.** The site in its own window, with browser-style tabs (Ctrl+T, Ctrl+W, Ctrl+Shift+T, Ctrl+Tab, Ctrl+1..9,
   Alt+←/→, F5, middle-click, drag to reorder). Tabs come back after a restart. Links to the server open as app tabs;
   other sites open in the system browser. Tabs **sort themselves** (`TabKinds.cs`): the site's places first, then
-  opened things (file views, the editor, wiki pages, Help), in one row, shrinking to fit.
+  opened things (file views, the editor, wiki pages, Help), in one row: 100 px each, shrinking to 64 px to fit.
+  The site's name glitches like the site's brand (cyan and red copies every 7 s; off when Windows' animations are).
 - **One top row, like Edge** (WindowChrome): the site's name (the **pages menu**, read live from the site's own hidden
   top bar, with badges), back/forward/reload, the tabs, the drive's status, **⚙** (servers, settings, drive, sign-in,
   updates, quit) and the window's buttons. No address bar. The site hides its own top bar when it sees the app
@@ -159,7 +160,9 @@ elsewhere.
 
 To release:
 
-1. Raise `<Version>` in `Directory.Build.props` (a version is released once).
+1. Raise `<Version>` in `Directory.Build.props` (a version is released once). From 2026-11-26 the patch number has two
+   digits (Doll): `0.2.02`, `0.2.03` … (`0.2.01` would be the same number as the released `0.2.1`, so the series
+   starts at `0.2.02`). Versions compare as numbers, and the app shows the text as written.
 2. Build: `powershell -ExecutionPolicy Bypass -File ps\build-windows.ps1`
 3. Publish: `powershell -ExecutionPolicy Bypass -File ps\publish-release.ps1 -Notes "What changed"` (needs `gh`,
    signed in). It writes `dist\SHA256SUMS` and creates the release `desktop-v<version>` on `main` with both files.

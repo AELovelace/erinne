@@ -54,7 +54,7 @@
                         Background="Transparent" Cursor="Hand" ToolTip="{Binding Title}"
                         MouseLeftButtonDown="OnTabMouseDown" MouseMove="OnTabMouseMove" MouseUp="OnTabMouseUp">
                     <DockPanel Margin="10,0,4,0">
-                        <Image DockPanel.Dock="Left" Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,8,0"/>
+                        <Image DockPanel.Dock="Left" Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,8,0" VerticalAlignment="Center"/>
                         <Button DockPanel.Dock="Right" Style="{StaticResource Flat}" Content="✕" AutomationProperties.Name="Close tab" FontSize="10"
                                 Padding="5,2" Click="OnTabClose" ToolTip="Close tab (Ctrl+W)"/>
                         <TextBlock Text="{Binding Title}" Foreground="{DynamicResource Ink}" VerticalAlignment="Center"
@@ -129,9 +129,22 @@
             <Button x:Name="PagesButton" DockPanel.Dock="Left" Style="{StaticResource Flat}" Margin="6,4,2,4" Click="OnPagesMenu"
                     ToolTip="Pages" AutomationProperties.Name="Pages">
                 <StackPanel Orientation="Horizontal">
-                    <Image x:Name="ServerIcon" Width="18" Height="18" Margin="0,0,6,0"/>
-                    <TextBlock x:Name="ServerName" Text="Mnemerynne" FontWeight="SemiBold" FontFamily="{DynamicResource MenuFont}"/>
-                    <TextBlock Text=" ▾" Foreground="{DynamicResource Muted}"/>
+                    <Image x:Name="ServerIcon" Width="18" Height="18" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                    <!-- The name, centred on the flower's middle (NameNudge: the font sits a little low in its box), with
+                         the site's glitch (erynne.css .brand-glitch): a cyan and a red copy that flash in now and then,
+                         sliced and nudged sideways (MainWindow.xaml.cs, GlitchAsync). -->
+                    <Grid x:Name="NameHost" VerticalAlignment="Center">
+                        <TextBlock x:Name="ServerName" Text="Mnemerynne" FontWeight="SemiBold" FontFamily="{DynamicResource MenuFont}"/>
+                        <TextBlock x:Name="GlitchCyan" FontWeight="SemiBold"
+                                   FontFamily="{DynamicResource MenuFont}" Foreground="#00F0FF" Opacity="0" IsHitTestVisible="False">
+                            <TextBlock.RenderTransform><TranslateTransform/></TextBlock.RenderTransform>
+                        </TextBlock>
+                        <TextBlock x:Name="GlitchRed" FontWeight="SemiBold"
+                                   FontFamily="{DynamicResource MenuFont}" Foreground="#FF1450" Opacity="0" IsHitTestVisible="False">
+                            <TextBlock.RenderTransform><TranslateTransform/></TextBlock.RenderTransform>
+                        </TextBlock>
+                    </Grid>
+                    <TextBlock Text=" ▾" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"/>
                     <Border x:Name="NavBadge" Visibility="Collapsed" Background="{DynamicResource Accent}" CornerRadius="8"
                             Padding="6,0" Margin="6,0,0,0" VerticalAlignment="Center">
                         <TextBlock x:Name="NavBadgeText" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource Strip}"/>
@@ -173,7 +186,7 @@
                 </Grid.ColumnDefinitions>
                 <ScrollViewer x:Name="StripScroller" Grid.Column="0" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled"
                               PreviewMouseWheel="OnStripWheel" WindowChrome.IsHitTestVisibleInChrome="True">
-                    <ItemsControl x:Name="TabStrip" Tag="200.0" AllowDrop="True" Drop="OnTabDrop" DragOver="OnTabDragOver"
+                    <ItemsControl x:Name="TabStrip" Tag="100.0" AllowDrop="True" Drop="OnTabDrop" DragOver="OnTabDragOver"
                                   ItemTemplate="{StaticResource TabTemplate}" ItemsPanel="{StaticResource TabRow}"/>
                 </ScrollViewer>
                 <Button Grid.Column="1" Style="{StaticResource Flat}" Content="＋" AutomationProperties.Name="New tab" Margin="4,4,0,4" Click="OnNewTab" ToolTip="New tab (Ctrl+T)"/>

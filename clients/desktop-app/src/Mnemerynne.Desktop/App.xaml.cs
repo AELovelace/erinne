@@ -29,8 +29,10 @@ public partial class App : Application
     private bool _toldAboutTray;
     private Timer? _updateTimer;
 
-    private const string MutexName = @"Local\MnemerynneDesktop";
-    private const string WakeName = @"Local\MnemerynneDesktop.Show";
+    // One copy per Windows user. A trial run (MNEMERYNNE_DESKTOP_HOME) gets its own names, so it runs beside the
+    // installed app instead of just bringing that one forward.
+    private static string MutexName => DevMode ? @"Local\MnemerynneDesktop.Dev" : @"Local\MnemerynneDesktop";
+    private static string WakeName => MutexName + ".Show";
 
     protected override async void OnStartup(StartupEventArgs e)
     {

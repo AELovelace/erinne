@@ -34,6 +34,9 @@ SolidCompression=yes
 CloseApplications=yes
 RestartApplications=no
 WizardStyle=modern
+; Tell Windows' shell its icons may have changed when installing ends (SHChangeNotify ASSOCCHANGED). An update keeps
+; the same exe path, and without this Explorer, the taskbar and Start keep the old icon from their cache.
+ChangesAssociations=yes
 
 [Files]
 Source: "..\publish\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion

@@ -4,6 +4,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Mnemerynne.Core;
 
@@ -36,6 +37,7 @@ public partial class MainWindow : Window
         TabStrip.ItemsSource = _tabs;
         Session.Changed += () => Dispatcher.Invoke(RefreshChrome);   // drive status, signed in or out
         Loaded += async (_, _) => await OnLoadedAsync();
+        Loaded += (_, _) => _ = GlitchLoopAsync();          // the name glitches now and then, like the site's
     }
 
     private async Task OnLoadedAsync()
@@ -185,7 +187,7 @@ public partial class MainWindow : Window
     /// <summary>The tabs take what room there is (scrolling sideways past that), leaving + and a bit of drag space.</summary>
     private void OnTabAreaSized(object sender, SizeChangedEventArgs e) => FitStrips(e.NewSize.Width);
 
-    private const double TabWidest = 200, TabNarrowest = 90, TabGap = 2;   // a tab's width range, and its margins
+    private const double TabWidest = 100, TabNarrowest = 64, TabGap = 2;   // half-width tabs (Doll), and their margins
 
     /// <summary>
     /// Fit the tabs in the row, as a browser does: they share what's left after + and a bit of drag space, shrinking
@@ -310,6 +312,87 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    // ====================================================== the name on the flower's centre line
+    /// <summary>
+    /// Doll's experiment (2026-11-26): line the name up with the flower by its capital letters, leaving out the tails
+    /// that hang below (the "y" in "Erynne"). A TextBlock centres its whole line box, which counts room for those
+    /// tails, so the letters sit high. This reads the font's own numbers (where the baseline is, how tall capitals
+    /// are) and moves the name so the capitals' middle meets the flower's middle, whatever font the theme picks.
+    /// </summary>
+    private void CentreNameOnCaps()
+    {
+        var size = ServerName.FontSize;
+        var family = ServerName.FontFamily;
+        var typeface = new Typeface(family, ServerName.FontStyle, ServerName.FontWeight, ServerName.FontStretch);
+        if (!typeface.TryGetGlyphTypeface(out var glyphs))
+            return;                                        // no metrics for this font: leave it as laid out
+        var lineHeight = family.LineSpacing * size;        // the TextBlock's height: the font's line box
+        var baseline = family.Baseline * size;             // where the letters stand, from the top of that box
+        var capsMiddle = baseline - glyphs.CapsHeight * size / 2;   // the middle of a capital ("E"), from the top
+        var shift = lineHeight / 2 - capsMiddle;           // > 0: the capitals sit high, so move the name down
+        NameHost.RenderTransform = new TranslateTransform(0, Math.Round(shift * 2) / 2);   // half-pixel steps stay crisp
+    }
+
+    // ============================================================== the name's glitch
+    // Like the site's brand (erynne.css .brand-glitch): every 7 s a cyan copy of the name flashes through three
+    // frames (a top slice nudged left, a bottom slice nudged right, a thin middle band), then a red copy runs the same
+    // frames backwards, so the two cross. Each frame shows for 140 ms (2% of 7 s, as the CSS keyframes do).
+    // Off when Windows' "Show animations" is off (the site turns it off for prefers-reduced-motion).
+
+    /// <summary>One glitch frame: how far the copy is nudged, which band of it shows (top/bottom insets), how strongly.</summary>
+    private readonly record struct GlitchFrame(double X, double Y, double Top, double Bottom, double Opacity);
+
+    private static readonly GlitchFrame[] GlitchFrames =
+    [
+        new(-4, 1, 0.10, 0.55, 0.8),                       // 92%: top slice, left
+        new(4, -2, 0.60, 0.08, 0.8),                       // 94%: bottom slice, right
+        new(-2, 0, 0.35, 0.35, 0.6),                       // 96%: thin middle band
+    ];
+
+    private async Task GlitchLoopAsync()
+    {
+        try
+        {
+            await GlitchForeverAsync();
+        }
+        catch (Exception e)
+        {
+            Log.Write($"name glitch stopped: {e}");        // a fire-and-forget task: say why, or it fails silently
+        }
+    }
+
+    private async Task GlitchForeverAsync()
+    {
+        while (IsLoaded)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(7));
+            if (!SystemParameters.ClientAreaAnimation || !IsVisible || WindowState == WindowState.Minimized)
+                continue;                                  // no animations wanted, or nobody's looking
+            await PlayGlitchAsync(GlitchCyan, GlitchFrames);
+            await Task.Delay(TimeSpan.FromMilliseconds(280));
+            await PlayGlitchAsync(GlitchRed, GlitchFrames.Reverse());   // reversed: they cross
+        }
+    }
+
+    /// <summary>Show one copy of the name through the frames, 140 ms each, then hide it again.</summary>
+    private async Task PlayGlitchAsync(TextBlock copy, IEnumerable<GlitchFrame> frames)
+    {
+        var move = (TranslateTransform)copy.RenderTransform;
+        copy.Text = ServerName.Text;                       // the name as it is now (it follows the site's branding)
+        foreach (var f in frames)
+        {
+            var w = Math.Max(1, ServerName.ActualWidth);
+            var h = Math.Max(1, ServerName.ActualHeight);
+            copy.Clip = new RectangleGeometry(new Rect(-8, h * f.Top, w + 16, Math.Max(1, h * (1 - f.Top - f.Bottom))));   // clip-path: inset(top 0 bottom 0)
+            move.X = f.X;
+            move.Y = f.Y;
+            copy.Opacity = f.Opacity;
+            await Task.Delay(TimeSpan.FromMilliseconds(140));
+        }
+        copy.Opacity = 0;                                  // hidden between glitches
+        move.X = move.Y = 0;
+    }
+
     // ============================================================ the two menus: pages and ⚙
     /// <summary>One line of the pages menu, as the site's own (hidden) flower menu has it.</summary>
     private sealed record NavLink(string Href, string Label, bool Current, string Badge);
@@ -352,6 +435,7 @@ public partial class MainWindow : Window
             return;
         if (await tab.RunScriptAsync(ThemeColors.Script) is { } theme)
             ThemeColors.Apply(_theme, theme);              // the app wears the page's theme
+            _ = Dispatcher.BeginInvoke(CentreNameOnCaps, System.Windows.Threading.DispatcherPriority.Loaded);   // its font may have changed
         if (await tab.RunScriptAsync(NavScript) is { } navJson)
         {
             try
@@ -480,6 +564,7 @@ public partial class MainWindow : Window
     public void RefreshChrome()
     {
         ServerName.Text = Session.Profile.Name;
+        CentreNameOnCaps();
         if (Session.Profile.IconUrl is { } icon && ServerIcon.Source is null)
         {
             try { ServerIcon.Source = new BitmapImage(new Uri(icon)); }

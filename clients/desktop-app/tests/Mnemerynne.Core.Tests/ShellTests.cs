@@ -124,6 +124,9 @@ public class ShellTests
     [InlineData("1.0.0", "1.0.1", false)]
     [InlineData(null, "0.1.0", false)]
     [InlineData("v2", "0.1.0", false)]                       // not a version: never "newer"
+    [InlineData("0.2.02", "0.2.1", true)]                    // Doll's two-digit patches (from 2026-11-26)
+    [InlineData("0.2.01", "0.2.1", false)]                   // the same number as 0.2.1: never offered over it
+    [InlineData("0.2.10", "0.2.09", true)]
     public void Versions_compare_as_numbers(string? candidate, string installed, bool newer) =>
         Assert.Equal(newer, AppVersion.IsNewer(candidate, installed));
 
@@ -177,4 +180,12 @@ public class TabKindTests
         var kinds = new[] { TabKind.Document, TabKind.Place, TabKind.Document, TabKind.Place };
         Assert.Equal([1, 3, 0, 2], TabKinds.Grouped(kinds));
     }
+}
+
+/// <summary>The app's own version, as written in Directory.Build.props.</summary>
+public class CurrentVersionTests
+{
+    [Fact]
+    public void The_version_shows_as_written_without_the_commit() =>
+        Assert.Matches(@"^\d+\.\d+\.\d+$", AppVersion.Current);   // e.g. "0.2.1" or "0.2.02", never "0.2.1+a1de155…"
 }
