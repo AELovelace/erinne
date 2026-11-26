@@ -873,8 +873,13 @@ def call(conn: sqlite3.Connection, settings: Settings, op_id: int, params: dict 
             result.error = f"{api['name']} didn't answer within {int(TIMEOUT)} seconds"
         except (httpx.HTTPError, ssl.SSLError, OSError) as exc:
             message = str(exc)
-            result.error = ("couldn't verify the API's certificate; check the trusted certificate on the APIs page"
-                            if "CERTIFICATE" in message.upper() else f"couldn't reach {api['name']}: {message[:200]}")
+            if "MISMATCH" in message.upper():                      # cert is trusted, but its name isn't the address
+                result.error = ("the certificate's name doesn't match the API's address (e.g. a server reached by IP); "
+                                "untick “Check the name in the certificate” on the APIs page, next to the pinned certificate")
+            elif "CERTIFICATE" in message.upper():                 # not trusted at all: wrong or missing pin
+                result.error = "couldn't verify the API's certificate; check the trusted certificate on the APIs page"
+            else:                                                  # refused, DNS, reset…
+                result.error = f"couldn't reach {api['name']}: {message[:200]}"
         finally:
             if turn is not None:
                 turn.release()

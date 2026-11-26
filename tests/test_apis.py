@@ -654,3 +654,22 @@ def test_a_pinned_certificate_is_not_held_to_strict_mode():
     ctx = apis._ssl({"ca_pem": _SELF_SIGNED_PEM, "tls_check_hostname": 0})
     assert not ctx.verify_flags & getattr(ssl, "VERIFY_X509_STRICT", 0)
     assert ctx.check_hostname is False
+
+
+@pytest.mark.parametrize("message, expected", [
+    # trusted cert, wrong name (pinned server reached by IP with the name check on): say which box to untick
+    ("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: IP address mismatch, certificate is not valid "
+     "for '172.27.22.25'.", "untick “Check the name in the certificate”"),
+    # not trusted at all: the pin is wrong or missing
+    ("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate",
+     "couldn't verify the API's certificate"),
+    # nothing listening
+    ("[Errno 111] Connection refused", "couldn't reach Hotel Stats: [Errno 111] Connection refused"),
+])
+def test_connection_failures_say_what_to_fix(conn, settings, message, expected):
+    _, op_id = _api(conn, settings)
+
+    def fail(request):                                              # the TLS/socket error httpx would raise
+        raise httpx.ConnectError(message, request=request)
+    _upstream(fail)
+    assert expected in apis.call(conn, settings, op_id, {}, user_id=None, via="test").error

@@ -13,7 +13,7 @@ Pick a starting point in the box above the list and press **Add**:
 Then, on the API's page:
 
 1. **Credential**: pasted once, stored encrypted with a key derived from `MNEMERYNNE_SECRET_KEY`, never shown again. Use dedicated **read-only** credentials (a Wazuh user with a read-only role, an Atera token limited to tickets). If the secret key ever changes, every credential must be entered again.
-2. **Certificate**: for self-signed servers press *Fetch from server*, compare the SHA-256 fingerprint with the real one, and save it; only that certificate is then trusted. For servers reached by IP, untick *Check the name in the certificate*.
+2. **Certificate**: for self-signed servers press *Fetch from server*, compare the SHA-256 fingerprint with the real one, and save it; only that certificate is then trusted. For servers reached by IP, untick *Check the name in the certificate*. (If a call says *the certificate's name doesn't match the API's address*, that box is still ticked: the pin is fine.)
 3. **Who**: one AD or Entra group (or several, `;`-separated). People outside it never see the API, in chat or from Claude.
 4. **Claude can query this**: off by default. On means whatever Claude asks goes to the API and the response goes to Anthropic; read the template's description for whether the data is safe to send.
 5. **One at a time**: for servers that answer only one request at a time (429 while another runs); calls are then queued.

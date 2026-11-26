@@ -310,7 +310,7 @@
     }
 
     const pem = input(d.ca_pem, { multiline: true, rows: 4, placeholder: "-----BEGIN CERTIFICATE----- (only for servers with a self-signed or internal certificate)" });
-    const hostname = checkbox("Check the name in the certificate", d.tls_check_hostname);
+    const hostname = checkbox("Check the name in the certificate (untick for a server reached by IP)", d.tls_check_hostname);
     const fingerprint = el("p", "small mono");
     s.append(field("Trusted certificate", pem, "When set, only this certificate is trusted for this API."), hostname,
              fingerprint,
