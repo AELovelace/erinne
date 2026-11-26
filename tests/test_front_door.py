@@ -212,6 +212,38 @@ services
     assert "Kept the existing" in result.stdout
 
 
+def test_routes_rewrites_nginx_for_the_saved_address_and_restarts_nothing(tmp_path):
+    """`routes` (update.sh runs it when the registry changes): a service's new path, like /office/, reaches it."""
+    (tmp_path / "saved").mkdir()
+    _env(tmp_path / "saved", MNEMERYNNE_HOST="127.0.0.1", MNEMERYNNE_PORT="38200")
+    conf = tmp_path / "front.conf"
+    conf.write_text("the old routes\n")
+    log = tmp_path / "log"
+    result = _run("front-door.sh", SYSTEMCTL_LOG + '''
+LOG=$1; SAVED=$2; CONF=$3; ACTIVE="nginx"
+app_py() { echo "listen $4 web $6"; }                                  # the generator, echoing its listen address
+curl() { case "$*" in *_front-door/stamp*) printf %s "$STAMP" ;; esac; } # nginx serves the config just written
+nginx() { echo "nginx $*" >> "$LOG"; }
+routes
+''', *(_posix(p) for p in (log, tmp_path / "saved" / "mnemerynne.env", conf)))
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert conf.read_text() == "listen 127.0.0.1:38200 web 127.0.0.1:38210\n"
+    asked = log.read_text().splitlines()
+    assert "nginx -t" in asked and "systemctl reload nginx" in asked
+    assert not [a for a in asked if a.startswith("systemctl restart")]           # no app process restarts
+
+
+def test_routes_with_the_front_door_off_changes_nothing(tmp_path):
+    result = _run("front-door.sh", '''
+SAVED=$1.none; CONF=$1
+nginx() { echo "nginx touched" >&2; return 1; }
+routes
+''', _posix(tmp_path / "front.conf"))
+    assert result.returncode == 0, result.stderr
+    assert "front door is off" in result.stdout
+    assert not (tmp_path / "front.conf").exists()
+
+
 def test_a_bad_nginx_config_puts_the_old_one_back(tmp_path):
     conf = tmp_path / "front.conf"
     conf.write_text("the one that worked\n")

@@ -321,3 +321,39 @@ service_units
     result = subprocess.run([bash, "-c", script, "_", str(updater)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert result.stdout.split() == ["mnemerynne-games", "mnemerynne@sync.service"]   # not the one turned off
+
+
+@pytest.mark.parametrize("nginx_ok", [True, False])
+def test_update_refreshes_an_edge_snippet_and_puts_it_back_if_nginx_refuses(update_shell, tmp_path, nginx_ok):
+    """The ONLYOFFICE edge snippet: the repo's copy replaces the box's, checked with nginx -t, then reloaded;
+    if nginx refuses it, the box's old copy is back and nothing reloads."""
+    (tmp_path / "new.conf").write_text("location /onlyoffice/ { new; }\n")
+    (tmp_path / "live.conf").write_text("location /onlyoffice/ { old; }\n")
+    result = update_shell('''
+nginx() { echo "nginx $*" >> log; ''' + ("return 0" if nginx_ok else "return 1") + '''; }
+systemctl() { echo "systemctl $*" >> log; }
+restorecon() { :; }
+refresh_snippet new.conf live.conf
+''')
+    assert result.returncode == (0 if nginx_ok else 1), result.stdout + result.stderr
+    asked = (tmp_path / "log").read_text().splitlines()
+    assert "nginx -t" in asked
+    if nginx_ok:
+        assert (tmp_path / "live.conf").read_text() == "location /onlyoffice/ { new; }\n"
+        assert "systemctl reload nginx" in asked
+    else:
+        assert (tmp_path / "live.conf").read_text() == "location /onlyoffice/ { old; }\n"
+        assert "systemctl reload nginx" not in asked
+
+
+def test_update_leaves_a_current_edge_snippet_alone(update_shell, tmp_path):
+    (tmp_path / "new.conf").write_text("same\n")
+    (tmp_path / "live.conf").write_text("same\n")
+    result = update_shell('''
+nginx() { echo "nginx touched" >> log; }
+systemctl() { echo "systemctl touched" >> log; }
+refresh_snippet new.conf live.conf
+''')
+    assert result.returncode == 0, result.stderr
+    assert "already current" in result.stdout
+    assert not (tmp_path / "log").exists()

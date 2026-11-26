@@ -4,6 +4,7 @@
 #   sudo bash /opt/mnemerynne/deploy/linux/front-door.sh off       give the address back to the web app
 #   sudo bash /opt/mnemerynne/deploy/linux/front-door.sh services  run every service as mnemerynne@<name>
 #   sudo bash /opt/mnemerynne/deploy/linux/front-door.sh accel on|off   nginx sends /static/ and file bytes itself
+#   sudo bash /opt/mnemerynne/deploy/linux/front-door.sh routes    rewrite the routes from the registry (no restarts)
 #   sudo bash /opt/mnemerynne/deploy/linux/front-door.sh status    what listens where, and who answers
 #
 # "on" keeps the address and port the web app has now (MNEMERYNNE_HOST/PORT: where the reverse proxy sends to),
@@ -350,6 +351,15 @@ status() {
     done
 }
 
+routes() {                                  # the registry's paths again: a service gained a path (update.sh calls this)
+    if [ ! -f "$SAVED" ]; then echo "The front door is off: the web app answers every path, nothing to rewrite."; return 0; fi
+    local listen
+    listen=$(front_listen)
+    write_conf "$listen" || exit 1                                  # checked with nginx -t; the old one stays if refused
+    nginx_live "$listen" || exit 1                                  # reloaded, and serving the new stamp
+    echo "nginx on $listen: routes rewritten from the registry."
+}
+
 front_listen() {                            # where nginx listens: the address in the .env saved by "on"
     echo "$(env_get MNEMERYNNE_HOST "$SAVED"):$(env_get MNEMERYNNE_PORT "$SAVED")"
 }
@@ -486,6 +496,7 @@ main() {
         on) front_on ;;
         off) off ;;
         services) services ;;
+        routes) routes ;;
         accel)
             case "${2:-}" in
                 on) accel_on ;;
@@ -493,7 +504,7 @@ main() {
                 *) echo "Usage: sudo bash $0 accel on|off" >&2; exit 2 ;;
             esac ;;
         status) status ;;
-        *) echo "Usage: sudo bash $0 on|off|services|accel on|off|status" >&2; exit 2 ;;
+        *) echo "Usage: sudo bash $0 on|off|services|routes|accel on|off|status" >&2; exit 2 ;;
     esac
 }
 

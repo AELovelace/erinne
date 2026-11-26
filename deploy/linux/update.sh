@@ -19,6 +19,8 @@ main() {
     local ENV_FILE=${MNEMERYNNE_ENV_FILE:-/etc/mnemerynne/mnemerynne.env}
     local UNIT_DIR=${MNEMERYNNE_UNIT_DIR:-/etc/systemd/system}
     local WRAPPER=${MNEMERYNNE_WRAPPER:-/usr/local/bin/mnemerynne-admin}
+    local FRONT_CONF=${MNEMERYNNE_FRONT_CONF:-/etc/nginx/conf.d/mnemerynne-front.conf}   # nginx's front door, when on
+    local EDGE_D=${MNEMERYNNE_EDGE_D:-/etc/nginx/mnemerynne-edge.d}   # the edge's per-box snippets (ONLYOFFICE's)
     local SERVICE_USER=mnemerynne
     local REMOTE=origin
 
@@ -77,12 +79,14 @@ main() {
     fi
 
     # ---------------------------------------------------------- what's new
-    local changed migrations units deps admin_changed
+    local changed migrations units deps admin_changed routes_changed edge_changed
     changed=$(git_ diff --name-only "$current" "$target")
     migrations=$(grep -E '^mnemerynne/migrations/[0-9]+_.*\.sql$' <<<"$changed" || true)
     units=$(grep -E '^deploy/linux/[^/]+\.(service|timer)$' <<<"$changed" || true)
     deps=$(grep -E '^(uv\.lock|pyproject\.toml)$' <<<"$changed" || true)
     admin_changed=$(grep -E '^deploy/linux/mnemerynne-admin$' <<<"$changed" || true)
+    routes_changed=$(grep -E '^mnemerynne/services/(registry|nginx)\.py$' <<<"$changed" || true)   # a service's paths
+    edge_changed=$(grep -E '^deploy/linux/nginx-onlyoffice\.conf$' <<<"$changed" || true)   # an edge snippet
 
     echo
     echo "$(git_ rev-list --count "$current..$target") update(s) available: $(git_ log -1 --format=%h HEAD) -> $(git_ log -1 --format=%h "$target")"
@@ -92,6 +96,8 @@ main() {
     [ -n "$units" ] && echo "  * Service files change: $(tr '\n' ' ' <<<"$units")(installed; those services restart)"
     [ -n "$deps" ] && echo "  * Python packages change (uv sync)"
     [ -n "$admin_changed" ] && echo "  * The mnemerynne-admin command itself changes"
+    [ -n "$routes_changed" ] && [ -f "$FRONT_CONF" ] && echo "  * The front door's routes are rewritten from the service registry"
+    [ -n "$edge_changed" ] && [ -f "$EDGE_D/onlyoffice.conf" ] && echo "  * The edge's ONLYOFFICE paths are refreshed (nginx -t, then reload)"
     echo "  * mnemerynne-web and mnemerynne-worker restart"
 
     if [ "$mode" = check-updates ]; then
@@ -189,6 +195,18 @@ main() {
         systemctl restart "$unit"
     done
     trap - ERR
+    # A service gained (or lost) a path: nginx's front door sends it to the right process from now on. Without
+    # this the web app gets it, and it has dropped that service's routes, so it answers 404 (/office/, 2026-11-26).
+    # The ONLYOFFICE edge snippet (onlyoffice-setup.sh installed it): the repo's copy, if the update changed it.
+    # Boxes without ONLYOFFICE never get it; switching it on stays onlyoffice-setup.sh's job.
+    if [ -n "$edge_changed" ] && [ -f "$EDGE_D/onlyoffice.conf" ]; then
+        step "Refreshing the edge's ONLYOFFICE paths"
+        refresh_snippet "$APP/deploy/linux/nginx-onlyoffice.conf" "$EDGE_D/onlyoffice.conf"             || echo "  The old ONLYOFFICE paths still serve. Look with: sudo nginx -t" >&2
+    fi
+    if [ -n "$routes_changed" ] && [ -f "$FRONT_CONF" ]; then
+        step "Rewriting the front door's routes from the service registry"
+        bash "$APP/deploy/linux/front-door.sh" routes             || echo "  The routes weren't rewritten (the old ones still serve). Run: sudo bash $APP/deploy/linux/front-door.sh routes" >&2
+    fi
 
     write_status ok "$current" "$target" ""
     step "Updated to $(git_ log -1 --format='%h (%cd) %s' --date=short HEAD)"
@@ -196,6 +214,23 @@ main() {
 }
 
 # ---------------------------------------------------------------- helpers
+refresh_snippet() {  # SRC DEST: an nginx snippet replaced by the repo's copy, nginx -t, reload; refused → the old one back
+    local src=$1 dest=$2 old
+    cmp -s "$src" "$dest" && { echo "  $dest is already current."; return 0; }
+    old=$(mktemp)
+    cp -a "$dest" "$old"                                            # the one that worked
+    install -m 644 "$src" "$dest"
+    command -v restorecon >/dev/null && restorecon "$dest" 2>/dev/null || true   # SELinux label for nginx
+    if ! nginx -t; then                                             # nginx refuses it: put the old one back
+        cp -a "$old" "$dest"; rm -f "$old"
+        echo "  nginx refused the new $dest; the old one is back." >&2
+        return 1
+    fi
+    rm -f "$old"
+    systemctl reload nginx
+    echo "  $dest refreshed; nginx reloaded."
+}
+
 step() { printf '\n== %s\n' "$*"; }
 die() { printf 'mnemerynne-admin: %s\n' "$*" >&2; exit 1; }
 

@@ -1113,8 +1113,13 @@ itself, so neither that proxy nor a firewall between them changes: `/api/sync/` 
 ```sh
 sudo bash /opt/mnemerynne/deploy/linux/front-door.sh on        # nginx takes MNEMERYNNE_HOST:PORT
 sudo bash /opt/mnemerynne/deploy/linux/front-door.sh status    # who listens where, and who answers
+sudo bash /opt/mnemerynne/deploy/linux/front-door.sh routes    # rewrite the routes from the registry, no restarts
 sudo bash /opt/mnemerynne/deploy/linux/front-door.sh off       # the web app gets its address back
 ```
+
+`mnemerynne-admin update` runs `routes` itself when an update changes the service registry
+(`mnemerynne/services/registry.py` or `services/nginx.py`). Without that, a service's new path (say `/office/`)
+reaches the web app, which has dropped that service's routes, and the browser gets `{"detail":"Not Found"}`.
 
 The config it writes comes from the service registry (`mnemerynne/services/registry.py`), not from a
 file here: `python -m mnemerynne.services.nginx --listen 192.168.1.5:38200` prints it, with one

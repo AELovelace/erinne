@@ -28,7 +28,9 @@ The script:
 3. Adds `MNEMERYNNE_ONLYOFFICE_URL`, `_JWT_SECRET` and `_INTERNAL_URL` to `/etc/mnemerynne/mnemerynne.env`.
 4. Installs the quadlet `mnemerynne-onlyoffice` (image pinned to one version) and starts it, then waits for `http://127.0.0.1:8090/healthcheck` to say `true`. The first start takes a few minutes.
 5. Installs `/etc/nginx/mnemerynne-edge.d/onlyoffice.conf`, checks nginx and reloads it.
-6. Restarts the web app.
+6. Restarts the web app and the files service. With nginx as the front door, it also rewrites the front door's routes (`front-door.sh routes`), so `/office/` and `/api/office/` reach the files service.
+
+If opening a file in the editor shows `{"detail":"Not Found"}`, those routes are missing: run `sudo bash /opt/mnemerynne/deploy/linux/front-door.sh services` (or `routes` once the box has it).
 
 Then go to **Access → Settings → Office editor**:
 1. Press **Test connection**. You should see ✅ and `answered 200: true`.
@@ -36,6 +38,8 @@ Then go to **Access → Settings → Office editor**:
 3. Optionally, name a group (AD or Entra, `;`-separated) to limit who sees the editor. Empty means everyone, each person within their own rights on each file.
 
 Turning it off: untick **On** to hide it at once, or run `sudo deploy/linux/onlyoffice-setup.sh off` to stop the container and remove the nginx snippet and env lines. `/srv/onlyoffice` is kept.
+
+`mnemerynne-admin update` keeps the nginx side current: it refreshes the edge snippet when the repo's copy changes (`nginx -t` first, the old one back if refused) and rewrites the front door's routes when the service registry changes.
 
 Updating the Document Server: `sudo deploy/linux/onlyoffice-setup.sh update <tag>`. `mnemerynne-admin update` never touches the container; its version only changes when you run this.
 

@@ -219,6 +219,10 @@ oo_install() {
 
     step "App"
     app_restart
+    if [[ -f /etc/nginx/conf.d/mnemerynne-front.conf ]]; then   # the front door: /office/ goes to the files service
+        note "rewriting the front door's routes (/office/, /api/office/ to the files service)"
+        bash "$HERE/front-door.sh" routes || warn "the routes weren't rewritten: run sudo bash $HERE/front-door.sh routes"
+    fi
 
     step "Done"
     note "Editor: https://$host/onlyoffice/ (signed-in people only). Turn it on in Admin, then open a .docx."
