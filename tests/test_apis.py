@@ -632,3 +632,25 @@ def test_fleetboard_is_a_built_in_preset_pair(admin_client):
     # An upload can't take the built-in name any more.
     assert admin_client.post("/api/admin/apis/templates",
                              json={"template": _template(name="Fleetboard")}).status_code == 409
+
+
+# A self-signed test certificate with no basicConstraints, like UniFi OS Server's (key thrown away).
+_SELF_SIGNED_PEM = """-----BEGIN CERTIFICATE-----
+MIIBWjCCAQCgAwIBAgIUcOcYOHJyWkIEGyaI2Uh4oXwMY+owCgYIKoZIzj0EAwIw
+FTETMBEGA1UEAwwKdW5pZmkudGVzdDAeFw0yNjExMjYxODM5MDFaFw0zNjExMjMx
+ODM5MDFaMBUxEzARBgNVBAMMCnVuaWZpLnRlc3QwWTATBgcqhkjOPQIBBggqhkjO
+PQMBBwNCAAQTyGQIDXlHKVh3YKRx1j6FcD5WEmsGWPkY4cmYyUt/ICrK+KiBqtAB
+lqgk87ZilAi3NDHN9Pc8hbYyo9X+2IjHoy4wLDALBgNVHQ8EBAMCAoQwHQYDVR0O
+BBYEFLjxNOfvUtWKla6ohCNLeJD8PlEjMAoGCCqGSM49BAMCA0gAMEUCIHdwGlIC
+Fd9CYcKZgwKVPnJ1VUyzzNwaxnBTzpCIWWK2AiEAoA3xFgKX10WHwUHLf+Dhu9GW
+AHEReHorc0gUzSOA0yM=
+-----END CERTIFICATE-----
+"""
+
+def test_a_pinned_certificate_is_not_held_to_strict_mode():
+    """A pinned self-signed certificate without basicConstraints (UniFi OS Server) must still load:
+    Python 3.13+ strict mode would refuse it as an invalid CA."""
+    import ssl
+    ctx = apis._ssl({"ca_pem": _SELF_SIGNED_PEM, "tls_check_hostname": 0})
+    assert not ctx.verify_flags & getattr(ssl, "VERIFY_X509_STRICT", 0)
+    assert ctx.check_hostname is False

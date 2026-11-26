@@ -690,6 +690,10 @@ def _ssl(api) -> ssl.SSLContext | bool:
     if not api["ca_pem"].strip():
         return True
     ctx = ssl.create_default_context(cadata=api["ca_pem"])
+    # Python 3.13+ turns on X.509 strict mode, which refuses a pinned self-signed certificate
+    # without basicConstraints (UniFi OS Server, many appliances: "invalid CA certificate").
+    # The pinned certificate is the only one trusted, so its RFC 5280 tidiness adds nothing here.
+    ctx.verify_flags &= ~getattr(ssl, "VERIFY_X509_STRICT", 0)
     if not api["tls_check_hostname"]:
         # Only the pinned certificate is trusted, so the name it carries
         # matters less (e.g. a server reached by IP).
